@@ -7,6 +7,7 @@ export interface Camera {
     fov: number;
     nearPlane: number;
     farPlane: number;
+    readonly worldMatrixVersion: number;
     getViewMatrix(): Mat4;
     getProjectionMatrix(aspectRatio: number): Mat4;
     getViewProjectionMatrix(aspectRatio: number): Mat4;

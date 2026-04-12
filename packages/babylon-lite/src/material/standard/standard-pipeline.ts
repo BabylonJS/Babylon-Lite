@@ -76,6 +76,11 @@ export function registerPcfShadowBgl(config: ShadowBglConfig): void {
     _pcfBglConfig = config;
 }
 
+/** Get the registered PCF shadow BGL config (if any). */
+export function getPcfShadowBglConfig(): ShadowBglConfig | null {
+    return _pcfBglConfig;
+}
+
 /** Derived: mesh needs UV attribute (any texture present). */
 export const NEEDS_UV = HAS_DIFFUSE_TEXTURE | HAS_EMISSIVE_TEXTURE | HAS_BUMP_TEXTURE | HAS_SPECULAR_TEXTURE | HAS_AMBIENT_TEXTURE | HAS_LIGHTMAP_TEXTURE | HAS_OPACITY_TEXTURE;
 

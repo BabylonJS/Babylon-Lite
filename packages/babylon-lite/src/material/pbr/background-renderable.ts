@@ -134,9 +134,9 @@ export function computeSceneSize(
         // Procedural: worldMatrix translation = accumulated position (incl. parent chain).
         // Matches BJS getWorldExtends() for non-rotated/non-scaled meshes.
         const w = m.worldMatrix;
-        const tx = w[12],
-            ty = w[13],
-            tz = w[14];
+        const tx = w[12]!,
+            ty = w[13]!,
+            tz = w[14]!;
         const wMinX = m.boundMin[0]! + tx;
         const wMinY = m.boundMin[1]! + ty;
         const wMinZ = m.boundMin[2]! + tz;

@@ -297,7 +297,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     // Scene UBO dirty tracking
     let _lastCamVersion = -1;
     let _lastAspect = -1;
-    let _lastFog: typeof scene.fog = undefined;
+    let _lastFog: typeof scene.fog = null;
 
     // Scene uniform updater — writes shared scene UBO once + refreshes light UBOs
     const updater: SceneUniformUpdater = {
