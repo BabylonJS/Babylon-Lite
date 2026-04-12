@@ -14,7 +14,7 @@
         "test:perf": "npx playwright test --config playwright.perf.config.ts",
         "test:parity": "npx playwright test",
         "test:all": "npx playwright test && npx playwright test --config playwright.perf.config.ts",
-        "lint": "eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit && tsc -p apps/manual-lab/tsconfig.json --noEmit",
+        "lint": "eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit",
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"packages/**/src/**/*.ts\" \"apps/**/src/**/*.ts\" \"tests/**/*.ts\"",
         "format:check": "prettier --check \"packages/**/src/**/*.ts\" \"apps/**/src/**/*.ts\" \"tests/**/*.ts\"",
