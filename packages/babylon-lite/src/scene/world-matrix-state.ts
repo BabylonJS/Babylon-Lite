@@ -49,6 +49,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
 
         markLocalDirty(): void {
             _localVersion++;
+            _worldVersion++;
             _cachedWorld = null;
         },
 
