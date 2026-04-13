@@ -57,6 +57,7 @@ import {
     PBR_HAS_CLEARCOAT,
     PBR_HAS_SHEEN,
     PBR_HAS_USE_ALPHA_ONLY_MR,
+    PBR_HAS_ANISOTROPY,
 } from "./pbr-flags.js";
 import type { PbrPipelineVariant } from "./pbr-pipeline.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -129,7 +130,7 @@ export async function buildPbrRenderables(
     // ── Dynamically import fragment creators based on scene capabilities ──
 
     // IBL fragment
-    let _createIblFragment: ((hasNormalMap: boolean) => ShaderFragment) | null = null;
+    let _createIblFragment: ((hasNormalMap: boolean, anisoBentNormalCode?: string) => ShaderFragment) | null = null;
     if (hasEnv) {
         const mod = await import("./fragments/ibl-fragment.js");
         _createIblFragment = mod.createIblFragment;
@@ -147,7 +148,7 @@ export async function buildPbrRenderables(
         const [shadowMod, lightsUboMod, wgslMod] = await Promise.all([
             import("./fragments/pbr-shadow-fragment.js"),
             import("../../render/lights-ubo.js"),
-            import("./pbr-multilight-wgsl.js"),
+            import("./fragments/multilight-wgsl.js"),
         ]);
         _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
         _writeLightsUBO = lightsUboMod.writeLightsUBO;
@@ -181,6 +182,12 @@ export async function buildPbrRenderables(
     if (hasSheen) {
         const mod = await import("./fragments/sheen-fragment.js");
         _createSheenFragment = mod.createSheenFragment;
+    }
+
+    const hasAnyAnisotropy = meshes.some((m) => !!(m.material as PbrMaterialProps).anisotropy?.isEnabled);
+    let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
+    if (hasAnyAnisotropy) {
+        _anisoExt = await import("./fragments/anisotropy-fragment.js");
     }
 
     const needsEmissiveColor = meshes.some((m) => !!(m.material as PbrMaterialProps).emissiveColor);
@@ -240,6 +247,7 @@ export async function buildPbrRenderables(
         const hasShadow = has(PBR_HAS_RECEIVE_SHADOWS);
         const hasCC = has(PBR_HAS_CLEARCOAT);
         const hasSh = has(PBR_HAS_SHEEN);
+        const hasAniso = has(PBR_HAS_ANISOTROPY);
         const hasEmCol = has(PBR_HAS_EMISSIVE_COLOR);
         const hasEmTex = has(PBR_HAS_EMISSIVE);
         const hasTI = has(PBR_HAS_THIN_INSTANCES);
@@ -265,6 +273,10 @@ export async function buildPbrRenderables(
             hasIbl,
             hasClearcoat: hasCC,
             hasSheen: hasSh,
+            hasAnisotropy: hasAniso,
+            anisoBrdfFunctions: hasAniso && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
+            anisoTBBlock: hasAniso && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal) : "",
+            anisoDirectDG: hasAniso && _anisoExt ? _anisoExt.ANISO_DIRECT_DG : "",
         });
 
         const frags: ShaderFragment[] = [];
@@ -287,7 +299,8 @@ export async function buildPbrRenderables(
             frags.push(_createSheenFragment(has(PBR_HAS_SHEEN_TEXTURE), hasIbl));
         }
         if (hasIbl && _createIblFragment) {
-            frags.push(_createIblFragment(hasNormal || hasCotangent));
+            const anisoBentCode = hasAniso && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "";
+            frags.push(_createIblFragment(hasNormal || hasCotangent, anisoBentCode));
         }
         if (hasShadow && _createPbrShadowFragment) {
             const slots = shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
@@ -405,6 +418,9 @@ export async function buildPbrRenderables(
         }
         if (mat.gammaAlbedo) {
             features |= PBR_HAS_GAMMA_ALBEDO;
+        }
+        if (mat.anisotropy?.isEnabled) {
+            features |= PBR_HAS_ANISOTROPY;
         }
         if (mesh.thinInstances) {
             features |= PBR_HAS_THIN_INSTANCES;
@@ -720,6 +736,16 @@ function createMeshUBO(device: GPUDevice, world: Mat4, material: PbrMaterialProp
         data[off + 3] = sh.intensity ?? 1.0;
         data[off + 4] = sh.roughness ?? 0.0;
         data[off + 5] = sh.texture ? 1.0 : 0.0;
+    }
+
+    // Anisotropy
+    if (material.anisotropy?.isEnabled && composed.meshUboSpec.offsets.has("anisotropyParams")) {
+        const aniso = material.anisotropy;
+        const off = composed.meshUboSpec.offsets.get("anisotropyParams")! / 4;
+        const dir = aniso.direction ?? [1, 0];
+        data[off] = aniso.intensity ?? 1.0;
+        data[off + 1] = dir[0]!;
+        data[off + 2] = dir[1]!;
     }
 
     const buf = device.createBuffer({

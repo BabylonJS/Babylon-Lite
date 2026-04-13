@@ -28,6 +28,7 @@ export const PBR_HAS_SHEEN = 1 << 22;
 export const PBR_HAS_SHEEN_TEXTURE = 1 << 23;
 export const PBR_HAS_RECEIVE_SHADOWS = 1 << 24;
 export const PBR_HAS_GAMMA_ALBEDO = 1 << 25;
+export const PBR_HAS_ANISOTROPY = 1 << 26;
 
 let _lightExt: PbrLightExtension | null = null;
 /** @internal */ export function _setPbrLightExtension(ext: PbrLightExtension): void {

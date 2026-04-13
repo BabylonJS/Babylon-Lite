@@ -118,7 +118,7 @@
         "slug": "scene12-shader-balls",
         "name": "Scene 12 \u2014 PBR Shader Balls",
         "maxMad": 0.025,
-        "maxRawKB": 96,
+        "maxRawKB": 97,
         "maxGzipKB": 37,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
         "tags": ["pbr", "gltf"]
@@ -222,5 +222,15 @@
         "maxGzipKB": 37,
         "description": "Scene 4 variant with PBR ground material. Tests PBR multi-light shadow receiving (ESM + PCF).",
         "tags": ["pbr", "shadow", "procedural", "multilight"]
+    },
+    {
+        "id": 23,
+        "slug": "scene23-anisotropy",
+        "name": "Scene 23 \u2014 PBR Anisotropy",
+        "maxMad": 0.5,
+        "maxRawKB": 80,
+        "maxGzipKB": 30,
+        "description": "PBR metallic sphere with anisotropic reflections. DDS environment, no direct light.",
+        "tags": ["pbr", "env"]
     }
 ]

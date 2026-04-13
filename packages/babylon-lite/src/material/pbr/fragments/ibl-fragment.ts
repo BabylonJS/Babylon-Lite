@@ -29,9 +29,13 @@ return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
 }
 `;
 
-function makeIblCalculation(hasNormalMap: boolean): string {
+function makeIblCalculation(hasNormalMap: boolean, anisoBentNormalCode: string = ""): string {
     const ehoLine = hasNormalMap ? `let eho = environmentHorizonOcclusion(-V, N, N_geom);` : `let eho = 1.0;`;
-    return `let R_raw = reflect(-V, N);
+
+    // When anisotropy bent normal code is provided, use it; otherwise standard reflection
+    const reflectionDir = anisoBentNormalCode ? anisoBentNormalCode : `let R_raw = reflect(-V, N);`;
+
+    return `${reflectionDir}
 let R = rotateY(R_raw, scene.envRotationY);
 let N_env = rotateY(N, scene.envRotationY);
 let brdf = textureSample(brdfLUT, brdfSampler_, vec2<f32>(NdotV, roughness));
@@ -60,8 +64,9 @@ color = finalIrradiance + finalRadianceScaled + finalSpecularScaled + directDiff
 /**
  * Create an IBL/environment fragment.
  * @param hasNormalMap Whether the material uses a normal map (enables horizon occlusion).
+ * @param anisoBentNormalCode WGSL code for anisotropic bent normal (empty string = standard reflection).
  */
-export function createIblFragment(hasNormalMap: boolean): ShaderFragment {
+export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: string = ""): ShaderFragment {
     return {
         id: "ibl",
 
@@ -78,7 +83,7 @@ export function createIblFragment(hasNormalMap: boolean): ShaderFragment {
         helperFunctions: IBL_HELPERS,
 
         fragmentSlots: {
-            AI: makeIblCalculation(hasNormalMap),
+            AI: makeIblCalculation(hasNormalMap, anisoBentNormalCode),
             BA: `luminanceOverAlpha += dot(finalRadianceScaled, vec3<f32>(0.2126, 0.7152, 0.0722));`,
         },
     };

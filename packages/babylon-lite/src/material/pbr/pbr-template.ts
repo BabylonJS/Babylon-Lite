@@ -54,7 +54,7 @@ export interface PbrTemplateConfig {
      *  Overrides `light`. Used for scenes with shadow generators. */
     readonly hasMultiLight?: boolean;
     /** Pre-built WGSL for multi-light (structs + computePbrLight). Passed from
-     *  dynamically imported pbr-multilight-wgsl.ts to keep it out of non-shadow bundles. */
+     *  dynamically imported fragments/multilight-wgsl.ts to keep it out of non-shadow bundles. */
     readonly multiLightWGSL?: string;
     /** Pre-built WGSL for the multi-light direct lighting loop body. */
     readonly multiLightLoop?: string;
@@ -90,6 +90,14 @@ export interface PbrTemplateConfig {
     readonly hasClearcoat?: boolean;
     /** Has sheen layer */
     readonly hasSheen?: boolean;
+    /** Has anisotropy layer */
+    readonly hasAnisotropy?: boolean;
+    /** Anisotropy WGSL: BRDF helper functions (dynamically imported). */
+    readonly anisoBrdfFunctions?: string;
+    /** Anisotropy WGSL: T/B computation block (dynamically imported). */
+    readonly anisoTBBlock?: string;
+    /** Anisotropy WGSL: direct lighting D/G replacement (dynamically imported). */
+    readonly anisoDirectDG?: string;
 }
 
 /**
@@ -118,6 +126,10 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         hasIbl = false,
         hasClearcoat = false,
         hasSheen = false,
+        hasAnisotropy = false,
+        anisoBrdfFunctions = "",
+        anisoTBBlock = "",
+        anisoDirectDG = "",
     } = config;
     const hasNormal = normalMode === "tangent";
     const hasCotangentNormal = normalMode === "cotangent";
@@ -179,6 +191,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
                   { name: "sheenParams2", type: "vec4<f32>" as const },
               ]
             : []),
+        ...(hasAnisotropy ? [{ name: "anisotropyParams", type: "vec4<f32>" as const }] : []),
     ];
 
     // ── Helper: texture + sampler binding pair ────────────────────
@@ -314,6 +327,9 @@ var N = normalize(cotangentFrame * normalize(normalMapSample));`;
 var N = N_geom;`;
     }
 
+    // Anisotropy: tangent/bitangent frame (passed in from dynamic import, empty if not used)
+    const anisotropyTBBlock = hasAnisotropy ? anisoTBBlock : "";
+
     // Base color decoding
     const baseColorDecode = hasGammaAlbedo
         ? `var baseColor = pow(baseColorSample.rgb, vec3<f32>(2.2));
@@ -367,14 +383,17 @@ let surfaceAlbedo = baseColor * (1.0 - dielectricF0) * (1.0 - metallic);`;
         directLightBlock = multiLightLoop;
     } else if (light) {
         const geomAA = hasSpecularAA || hasAnyNormal ? light.geometricAACode : "";
+        const dgBlock = hasAnisotropy
+            ? anisoDirectDG
+            : `let D = distributionGGX(NdotH, directAlphaG);
+let G = geometrySmithGGX(NdotL, NdotV, directAlphaG);`;
         directLightBlock = `var directAlphaG = alphaG;
 ${light.lightVectorCode}
 let H = normalize(V + L);
 let NdotH = clamp(dot(N, H), 0.0000001, 1.0);
 let VdotH = saturate(dot(V, H));
 ${geomAA}
-let D = distributionGGX(NdotH, directAlphaG);
-let G = geometrySmithGGX(NdotL, NdotV, directAlphaG);
+${dgBlock}
 let coloredFresnel = fresnelSchlick(VdotH, colorF0, colorF90);
 let lightColor = scene.lightDiffuseColor * scene.lightIntensity;
 ${light.directDiffuseCode}
@@ -409,6 +428,8 @@ return vec4<f32>(color, finalAlpha);`
 
     const multiLightDecls = hasMultiLight ? multiLightWGSL : "";
 
+    const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
+
     const fragmentTemplate = `/*SU*/
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
@@ -417,6 +438,7 @@ return vec4<f32>(color, finalAlpha);`
 /*FB*/
 /*FI*/
 ${BRDF_FUNCTIONS}
+${anisoBrdfBlock}
 ${multiLightDecls}
 ${doubleSidedEntry}
 /*SV*/
@@ -429,6 +451,7 @@ ${emissiveDefault}
 /*AT*/
 ${normalBlock}
 ${doubleSidedFlip}
+${anisotropyTBBlock}
 /*AC*/
 let V = normalize(scene.cameraPosition - input.worldPos);
 let NdotVUnclamped = dot(N, V);

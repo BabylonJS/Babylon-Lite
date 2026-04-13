@@ -67,6 +67,9 @@ export interface PbrMaterialProps {
      *  When false (default), assumes the texture already provides linear values
      *  (e.g. rgba8unorm-srgb format or glTF sRGB textures). */
     gammaAlbedo?: boolean;
+    /** Anisotropy layer configuration. When set with isEnabled=true, stretches specular
+     *  highlights along a preferred direction. Tree-shakable — only bundled when used. */
+    anisotropy?: AnisotropyProps;
 }
 
 /** @internal Extended PbrMaterialProps with internal build group. */
@@ -98,6 +101,17 @@ export interface SheenProps {
     intensity?: number;
     /** Optional sheen tint texture (modulates sheen color). Loaded via loadTexture2D(). */
     texture?: Texture2D;
+}
+
+/** Anisotropy layer properties. Maps to BJS PBRMaterial.anisotropy sub-object.
+ *  Stretches specular reflections along the tangent direction. */
+export interface AnisotropyProps {
+    /** Whether anisotropy is active. Default false. */
+    isEnabled: boolean;
+    /** Anisotropy strength (0=isotropic, 1=fully anisotropic). Default 1.0. */
+    intensity?: number;
+    /** Anisotropy direction in tangent space (u, v). Default [1, 0]. */
+    direction?: [number, number];
 }
 
 /** Create a PbrMaterialProps with optional overrides. */
