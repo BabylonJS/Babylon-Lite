@@ -18,7 +18,7 @@ The Loaders module provides six asset loading pipelines:
 
 1. **glTF Loader** — Parses `.glb` (binary glTF 2.0) files, extracts mesh geometry (positions, normals, tangents, UVs, indices), resolves the node hierarchy to compute world matrices with RH→LH conversion, extracts PBR metallic-roughness material data (textures + factors), uploads everything to GPU buffers and textures with mipmaps.
 
-2. **Environment Loader (.env)** — Parses Babylon.js `.env` files, decodes RGBD-encoded specular cubemap faces to `rgba16float`, generates a CPU-computed BRDF integration LUT (split-sum), extracts spherical harmonics irradiance coefficients, and uploads everything to GPU textures.
+2. **Environment Loader (.env)** — Parses Babylon.js `.env` files, decodes RGBD-encoded specular cubemap faces to `rgba16float`, decodes a pre-baked BRDF integration LUT from an RGBD-encoded PNG via GPU compute, extracts spherical harmonics irradiance coefficients, and uploads everything to GPU textures.
 
 3. **DDS Environment Loader** — Loads pre-filtered DDS cubemap environments (rgba16float). Uploads all mip levels directly, computes spherical harmonics from mip 0 face data, and decodes a pre-baked BRDF LUT from a PNG via GPU compute.
 
@@ -59,11 +59,14 @@ export interface GltfMaterialData {
   emissiveImage: ImageBitmap | null;
 }
 
-/** Load a .glb file, parse it, upload to GPU. Returns Mesh[] with GPU data in _gpu field. */
-export async function loadGltf(scene: SceneContext, url: string): Promise<Mesh[]>;
+/** Parsed mesh hierarchy result. */
+export type GltfResult = Mesh[] & { root: TransformNode };
+
+/** Load a .glb file, parse it, upload to GPU. Returns Mesh[] with a .root TransformNode. */
+export async function loadGltf(scene: SceneContext, url: string): Promise<GltfResult>;
 ```
 
-> **Note**: The `GpuMesh` interface has been **removed**. Meshes are now the standard `Mesh` type with GPU data stored in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`.
+> **Note**: `loadGltf` returns `GltfResult` — a `Mesh[]` array extended with a `.root: TransformNode` property giving access to the full scene hierarchy. The `GpuMesh` interface has been **removed**. Meshes are now the standard `Mesh` type with GPU data stored in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`.
 
 ### `load-env.ts`
 
@@ -85,7 +88,18 @@ export interface EnvironmentTextures {
 }
 
 /** Load a Babylon.js .env file, upload cubemap + BRDF LUT to GPU. */
-export async function loadEnvironment(scene: SceneContext, url: string): Promise<EnvironmentTextures>;
+export async function loadEnvironment(
+  scene: SceneContext,
+  url: string,
+  options: {
+    brdfUrl: string;           // Required: URL of pre-baked BRDF LUT PNG (RGBD-encoded)
+    groundTextureUrl?: string; // Optional: URL of ground texture
+    skipSkybox?: boolean;      // Default: false — skip skybox renderable
+    skipGround?: boolean;      // Default: false — skip ground plane
+    skyboxUrl?: string;        // Override skybox texture URL
+    skyboxSize?: number;       // Default: 1000 — skybox cube half-size
+  },
+): Promise<EnvironmentTextures>;
 ```
 
 ## Internal Architecture
@@ -238,7 +252,7 @@ uploadCubemapRGBD(device, images, width, mipCount)
   ↓
 GPUTexture (rgba16float cubemap)
   ↓
-generateBrdfLut(device) → 256×256 rgba16float BRDF LUT
+fetch(options.brdfUrl) + decodeBrdfPng(device, png) → 256×256 rgba16float BRDF LUT (GPU compute)
   ↓
 polynomialToPreScaledHarmonics(irradianceSH) → pre-scaled SH for shader
   ↓
@@ -289,7 +303,9 @@ Handles denormalized numbers, overflow (→ infinity), and NaN.
 
 ### BRDF LUT Generation
 
-CPU-computed split-sum integration (256×256, `rgba16float`):
+> **Note on `.env` loader**: The `.env` (`loadEnvironment`) path no longer CPU-computes the BRDF LUT. It instead decodes a pre-baked BRDF LUT from an RGBD-encoded PNG provided via `options.brdfUrl`, using GPU compute in `brdf-rgbd-decode.ts`. The CPU algorithm below applies to the **HDR loader** (`hdr-ibl-pipeline.ts`) only.
+
+GPU compute split-sum integration (256×256, `rgba16float`, HDR path):
 
 For each texel `(x, y)`:
 ```
@@ -391,10 +407,10 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `loadGltf(scene, url)` | `BABYLON.SceneLoader.Append(url, scene)` |
 | `Mesh` (with `_gpu` field) | Internal mesh representation |
 | `RH_TO_LH_ROOT` | Root node rotation `[0,1,0,0]` + scale `[1,1,-1]` |
-| `loadEnvironment(scene, url)` | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
+| `loadEnvironment(scene, url, { brdfUrl })` | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
 | `.env` file format | Babylon-proprietary environment file |
 | RGBD decode | `FromRGBD` shader in Babylon |
-| `generateBrdfLut()` (CPU, in load-env.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime) |
+| `generateBrdfLut()` (GPU compute, RGBD PNG decode, in brdf-rgbd-decode.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime) |
 | `polynomialToPreScaledHarmonics()` | `SphericalHarmonics.FromPolynomial()` + `preScaleForRendering()` |
 | `uploadCubemapRGBD()` | Internal cubemap processing in `HDRCubeTexture` |
 | Staging buffer RGBD decode | Avoids Canvas 2D premultiplication issue |

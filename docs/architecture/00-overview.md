@@ -86,7 +86,7 @@ babylon-lite/
 │   │   │   └── free-camera-controls.ts # attachFreeControl() for WASD/arrow
 │   │   ├── light/
 │   │   │   ├── light-base.ts      # Shared light base
-│   │   │   ├── types.ts           # LightBase type, SceneAnyLight union
+│   │   │   ├── types.ts           # LightBase type, LightBaseInternal, PbrLightExtension
 │   │   │   ├── light-matrix.ts    # Light view-projection for shadows
 │   │   │   ├── hemispheric.ts     # createHemisphericLight()
 │   │   │   ├── hemispheric-pbr.ts # Hemispheric light PBR variant
@@ -243,43 +243,56 @@ createSceneContext(engine: Engine): SceneContext
 createDefaultCamera(scene: SceneContext): ArcRotateCamera
 removeFromScene(scene: SceneContext, entity: Mesh | ...): void
 
-// Camera
-createArcRotateCamera(scene: SceneContext, options?: {...}): ArcRotateCamera
+// Camera — pure data, no scene param
+createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera
 attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement): void
-createFreeCamera(scene: SceneContext, options?: {...}): FreeCamera
+createFreeCamera(position: Vec3, target: Vec3): FreeCamera
 attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement): void
 
 // Loaders
 loadGltf(scene: SceneContext, url: string): Promise<GltfResult>
-loadEnvironment(scene: SceneContext, url: string): Promise<EnvironmentTextures>
-loadHdrEnvironment(scene: SceneContext, url: string): Promise<EnvironmentTextures>
-loadBabylon(scene: SceneContext, url: string): Promise<Mesh[]>
-loadTexture2D(device: GPUDevice, url: string, options?: Texture2DOptions): Promise<Texture2D>
-loadSkybox(scene: SceneContext, baseUrl: string, extension?: string): Promise<void>
+loadEnvironment(scene: SceneContext, url: string, options: {
+    brdfUrl: string;
+    groundTextureUrl?: string;
+    skipSkybox?: boolean;
+    skipGround?: boolean;
+    skyboxUrl?: string;
+    skyboxSize?: number;
+}): Promise<EnvironmentTextures>
+loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures>
+loadBabylon(scene: SceneContext, url: string, opts?: LoadBabylonOptions): Promise<void>
+loadTexture2D(engine: Engine, url: string, options?: Texture2DOptions): Promise<Texture2D>
+loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size?: number): Promise<void>
 
 // Texture factories
-createSolidTexture2D(device: GPUDevice, r: number, g: number, b: number, a?: number): Texture2D
+createSolidTexture2D(engine: Engine, r: number, g: number, b: number, a?: number): Texture2D
 
 // Lights
 createHemisphericLight(direction?: [number,number,number], intensity?: number): HemisphericLight
-createPointLight(position: [number,number,number], options?: {...}): PointLight
-createDirectionalLight(direction: [number,number,number], options?: {...}): DirectionalLight
-createSpotLight(position: [number,number,number], direction: [number,number,number], options?: {...}): SpotLight
+createPointLight(position: [number,number,number], intensity?: number): PointLight
+createDirectionalLight(direction: [number,number,number], intensity?: number): DirectionalLight
+createSpotLight(
+    position: [number,number,number],
+    direction: [number,number,number],
+    angle: number,
+    exponent: number,
+    intensity?: number,
+): SpotLight
 
 // Mesh factories
 createSphere(engine: Engine, options?: SphereOptions): Mesh
-createBox(engine: Engine, options?: {...}): Mesh
+createBox(engine: Engine, size?: number): Mesh
 createTorus(engine: Engine, options?: TorusOptions): Mesh
 createGround(engine: Engine, options?: GroundOptions): Mesh
-createGroundFromHeightMap(scene: SceneContext, url: string, options?: GroundOptions): Promise<Mesh>
+createGroundFromHeightMap(engine: Engine, url: string, options: GroundOptions): Promise<Mesh>
 
 // Materials
 createStandardMaterial(): StandardMaterialProps
 createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMaterialProps
 
-// Shadows
-createShadowGenerator(scene: SceneContext, light: DirectionalLight, config?: ShadowGeneratorConfig): ShadowGenerator
-createPcfShadowGenerator(scene: SceneContext, light: DirectionalLight | SpotLight, config?: PcfShadowGeneratorConfig): ShadowGenerator
+// Shadows — note: takes engine + casterMeshes[], not scene
+createShadowGenerator(engine: Engine, light: DirectionalLight, casterMeshes: Mesh[], config?: ShadowGeneratorConfig): ShadowGenerator
+createPcfShadowGenerator(engine: Engine, light: SpotLight, casterMeshes: Mesh[], config?: PcfShadowGeneratorConfig): ShadowGenerator
 
 // Animation
 createAnimationController(skeleton, scene): AnimationController
@@ -315,136 +328,318 @@ getPickedUV(info: PickingInfo): [number, number]
 ### Types
 
 ```typescript
+// ─── Engine ──────────────────────────────────────────────────────────
+// Note: GPU internals (device, context, format) are @internal and not exposed.
 interface Engine {
-  readonly device: GPUDevice;
-  readonly context: GPUCanvasContext;
-  readonly format: GPUTextureFormat;
   readonly canvas: HTMLCanvasElement;
-  readonly msaaSamples: number;
+  readonly msaaSamples: number;       // always 4
+  drawCallCount: number;              // GPU draw calls in last rendered frame
   start(scene: SceneContext): Promise<void>;
   stop(): void;
   resize(): void;
+  dispose(): void;
 }
 
+// ─── Scene ───────────────────────────────────────────────────────────
 interface SceneContext {
   readonly engine: Engine;
   clearColor: GPUColorDict;
   camera: ArcRotateCamera | FreeCamera | null;
-  lights: HemisphericLight[];
+  lights: LightBase[];               // All light types (HemisphericLight, PointLight, etc.)
   meshes: Mesh[];
   animationGroups: AnimationGroup[];
   fog: FogConfig | null;
   shadowGenerators: ShadowGenerator[];
   imageProcessing: ImageProcessingConfig;
   environmentPrimaryColor?: [number, number, number];
+  envRotationY?: number;             // Environment cubemap Y rotation in radians
+  fixedDeltaMs: number;              // Fixed delta for deterministic animation (0 = real time)
+
+  add(entity: Mesh | LightBase | ShadowGenerator | TransformNode): void;
+  onBeforeRender(cb: (deltaMs: number) => void): void;
+  dispose(): void;
 
   // Internal renderable lists
   _renderables: Renderable[];
+  _opaqueRenderables: Renderable[];
+  _transparentRenderables: Renderable[];
   _prePasses: PrePassRenderable[];
   _uniformUpdaters: SceneUniformUpdater[];
-  _deferredBuilders: (() => void | Promise<void>)[];
   _fixedDeltaMs: number;
   _beforeRender: ((deltaMs: number) => void)[];
-  add(entity: Mesh | SceneAnyLight | ShadowGenerator): void;
+  _deferredBuilders: (() => void | Promise<void>)[];
 }
 
+// ─── Cameras ─────────────────────────────────────────────────────────
 interface ArcRotateCamera {
   alpha: number;              // Horizontal rotation (azimuth)
-  beta: number;               // Vertical angle from top pole
+  beta: number;               // Vertical angle from top pole (0=top, π=bottom)
   radius: number;             // Distance from target
-  target: Vec3;               // Look-at point
+  target: Vec3;               // Look-at point (ObservableVec3 at runtime)
   fov: number;                // Vertical FOV in radians
-  minZ: number;               // Near clip plane
-  maxZ: number;               // Far clip plane
+  nearPlane: number;          // Near clip plane
+  farPlane: number;           // Far clip plane
+  inertia: number;            // Rotation + zoom inertia (0=instant, 0.9=default)
+  panningInertia: number;     // Panning inertia
+  inertialAlphaOffset: number;
+  inertialBetaOffset: number;
+  inertialRadiusOffset: number;
+  inertialPanningX: number;
+  inertialPanningY: number;
   getViewMatrix(): Mat4;
-  getProjectionMatrix(aspect: number): Mat4;
-  getViewProjectionMatrix(aspect: number): Mat4;
+  getProjectionMatrix(aspectRatio: number): Mat4;
+  getViewProjectionMatrix(aspectRatio: number): Mat4;
   getPosition(): Vec3;
 }
 
 interface FreeCamera {
-  position: ObservableVec3;   // Camera world position
-  rotation: ObservableQuat;   // Camera orientation
+  position: ObservableVec3;     // Camera world position
+  target: ObservableVec3;       // Look-at target
+  speed: number;                // Movement speed (default 2.0, matches BJS)
+  angularSensitivity: number;   // Mouse rotation sensitivity (default 2000)
+  inertia: number;              // Damping factor (0=instant, 0.9=default)
   fov: number;
-  minZ: number;
-  maxZ: number;
+  nearPlane: number;
+  farPlane: number;
   getViewMatrix(): Mat4;
-  getProjectionMatrix(aspect: number): Mat4;
-  getViewProjectionMatrix(aspect: number): Mat4;
+  getProjectionMatrix(aspectRatio: number): Mat4;
+  getViewProjectionMatrix(aspectRatio: number): Mat4;
   getPosition(): Vec3;
 }
 
-interface Camera { /* Union of ArcRotateCamera | FreeCamera */ }
+interface Camera { /* Union: ArcRotateCamera | FreeCamera */ }
 
-interface HemisphericLight {
-  direction: [number, number, number];
+// ─── Lights ──────────────────────────────────────────────────────────
+interface LightBase {
+  readonly lightType: string;
+  intensity: number;
+  excludedMeshIds?: ReadonlySet<string>;
+  includedOnlyMeshIds?: ReadonlySet<string>;
+  shadowGenerator?: ShadowGenerator;
+  parent: IWorldMatrixProvider | null;
+  readonly worldMatrix: Mat4;
+  readonly worldMatrixVersion: number;
+}
+
+interface HemisphericLight extends LightBase {
+  readonly lightType: "hemispheric";
+  direction: ObservableVec3;
   intensity: number;
   diffuseColor: [number, number, number];
   groundColor: [number, number, number];
 }
 
-type LightBase = { intensity: number; diffuseColor: [number, number, number]; }
-interface PointLight extends LightBase { position: [number, number, number]; range: number; }
-interface DirectionalLight extends LightBase { direction: [number, number, number]; }
-interface SpotLight extends LightBase { position: [number, number, number]; direction: [number, number, number]; angle: number; exponent: number; }
+interface PointLight extends LightBase {
+  readonly lightType: "point";
+  position: ObservableVec3;
+  diffuse: [number, number, number];
+  specular: [number, number, number];
+  intensity: number;
+  range: number;
+}
 
+interface DirectionalLight extends LightBase {
+  readonly lightType: "directional";
+  direction: ObservableVec3;
+  position: ObservableVec3;
+  diffuse: [number, number, number];
+  specular: [number, number, number];
+  intensity: number;
+}
+
+interface SpotLight extends LightBase {
+  readonly lightType: "spot";
+  position: ObservableVec3;
+  direction: ObservableVec3;
+  angle: number;
+  exponent: number;
+  diffuse: [number, number, number];
+  specular: [number, number, number];
+  intensity: number;
+  range: number;
+}
+
+// ─── Materials ───────────────────────────────────────────────────────
 interface PbrMaterialProps {
   baseColorTexture?: Texture2D;
   normalTexture?: Texture2D;
-  ormTexture?: Texture2D;        // R=occ, G=rough, B=metal
+  ormTexture?: Texture2D;                               // R=occ, G=rough, B=metal
   emissiveTexture?: Texture2D;
+  emissiveColor?: [number, number, number];             // Linear RGB emissive (no texture)
+  specGlossTexture?: Texture2D;                         // KHR_materials_pbrSpecularGlossiness
+  doubleSided?: boolean;
+  alpha?: number;                                        // Overall material alpha (default 1.0)
+  alphaBlend?: boolean;                                  // Enable alpha blending (glTF BLEND)
+  environmentIntensity?: number;                         // IBL contribution scale (default 1.0)
+  directIntensity?: number;                              // Direct light contribution scale (default 1.0)
+  reflectance?: number;                                  // Dielectric F0 (default 0.04)
+  occlusionStrength?: number;                            // AO strength from ORM R channel (default 1.0)
+  metallicF0Factor?: number;                             // Dielectric F0 scale (default 1.0)
+  metallicReflectanceColor?: [number, number, number];  // Tints dielectric reflectance (default [1,1,1])
+  metallicReflectanceTexture?: Texture2D;               // RGB=reflectance tint, A=F0 scalar
+  reflectanceTexture?: Texture2D;                       // RGB=reflectance tint only
+  useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
+  enableSpecularAA?: boolean;                            // Specular anti-aliasing on IBL alphaG
+  gammaAlbedo?: boolean;                                 // Apply pow(2.2) sRGB→linear in shader
   clearCoat?: ClearCoatProps;
-  readonly _buildGroup: MeshGroupBuilder;
+  sheen?: SheenProps;
 }
 
-interface ClearCoatProps { intensity: number; roughness: number; normalTexture?: Texture2D; }
+interface ClearCoatProps {
+  isEnabled?: boolean;
+  intensity?: number;
+  roughness?: number;
+  indexOfRefraction?: number;  // Default 1.5
+}
 
-interface StandardMaterialProps { diffuseColor?: [number,number,number]; fog?: FogConfig; }
-interface FogConfig { mode: 'linear' | 'exp' | 'exp2'; density: number; start: number; end: number; color: [number,number,number]; }
+interface SheenProps {
+  isEnabled: boolean;
+  color?: [number, number, number];
+  roughness?: number;
+  intensity?: number;
+  texture?: Texture2D;         // Sheen tint texture (modulates color)
+}
 
-interface ImageProcessingConfig { exposure: number; contrast: number; }
+interface StandardMaterialProps {
+  diffuseColor: [number, number, number];
+  alpha: number;
+  specularColor: [number, number, number];
+  specularPower: number;
+  emissiveColor: [number, number, number];
+  ambientColor: [number, number, number];
+  diffuseTexture: Texture2D | null;
+  diffuseCoordIndex: 0 | 1;
+  emissiveTexture: Texture2D | null;
+  bumpTexture: Texture2D | null;
+  bumpLevel: number;
+  specularTexture: Texture2D | null;
+  specularCoordIndex: 0 | 1;
+  ambientTexture: Texture2D | null;
+  ambientTexLevel: number;
+  ambientCoordIndex: 0 | 1;
+  lightmapTexture: Texture2D | null;
+  lightmapLevel: number;
+  lightmapCoordIndex: 0 | 1;
+  opacityTexture: Texture2D | null;
+  opacityLevel: number;
+  opacityFromRGB: boolean;
+  alphaCutOff: number;
+  reflectionTexture: Texture2D | null;
+  reflectionLevel: number;
+  reflectionCoordMode: 1 | 2;
+  uvScale: [number, number];
+  backFaceCulling: boolean;
+  disableLighting: boolean;
+}
 
-interface Mesh { boundMin: Vec3; boundMax: Vec3; name?: string; }
+interface FogConfig {
+  mode: 0 | 1 | 2 | 3;  // 0=off, 1=exp, 2=exp2, 3=linear (matches BJS Scene.FOGMODE_*)
+  density: number;
+  start: number;
+  end: number;
+  color: [number, number, number];
+}
+
+interface ImageProcessingConfig { exposure: number; contrast: number; toneMappingEnabled: boolean; }
+
+// ─── Mesh ────────────────────────────────────────────────────────────
+interface Mesh {
+  boundMin?: Vec3;
+  boundMax?: Vec3;
+  name?: string;
+  material: StandardMaterialProps | PbrMaterialProps | null;
+  receiveShadows: boolean;
+}
 interface MeshGPU { /* internal GPU state */ }
 
-interface Texture2D { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler; }
-interface Texture2DOptions { srgb?: boolean; invertY?: boolean; mipmap?: boolean; }
-
-interface ShadowGenerator { readonly shadowMap: GPUTexture; readonly config: ShadowGeneratorConfig; }
-interface ShadowGeneratorConfig { mapSize?: number; bias?: number; darkness?: number; }
-interface PcfShadowGeneratorConfig { mapSize?: number; bias?: number; darkness?: number; filterSize?: number; }
-
-interface GltfResult { meshes: Mesh[]; animationData?: GltfAnimationData; }
-
-interface EnvironmentTextures {
-  specularCube: GPUTexture;     specularCubeView: GPUTextureView;
-  brdfLut: GPUTexture;          brdfLutView: GPUTextureView;
-  cubeSampler: GPUSampler;      brdfSampler: GPUSampler;
-  irradianceSH: Float32Array;   // 27 floats (9 vec3 SH coefficients)
+// ─── Textures ────────────────────────────────────────────────────────
+interface Texture2D { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler; width: number; height: number; }
+interface Texture2DOptions {
+  mipMaps?: boolean;         // Generate mipmaps (default true)
+  addressModeU?: GPUAddressMode;  // Default 'repeat'
+  addressModeV?: GPUAddressMode;  // Default 'repeat'
+  minFilter?: GPUFilterMode;      // Default 'linear'
+  magFilter?: GPUFilterMode;      // Default 'linear'
+  invertY?: boolean;         // Flip Y axis (default true, matches BJS)
+  srgb?: boolean;            // Use rgba8unorm-srgb format (default false)
 }
 
+// ─── Shadows ─────────────────────────────────────────────────────────
+interface ShadowGenerator {
+  shadowType: 'esm' | 'pcf';
+  light: LightBase;
+  config: Required<ShadowGeneratorConfig>;
+}
+interface ShadowGeneratorConfig {
+  mapSize?: number;           // Shadow map size (default 1024)
+  depthScale?: number;        // ESM depth exponent scale (default 50)
+  bias?: number;              // Shadow bias (default 0.00005)
+  blurScale?: number;         // Gaussian blur downscale factor (default 2)
+  darkness?: number;          // Shadow darkness 0–1 (default 0 = full black)
+  frustumEdgeFalloff?: number;
+  orthoMinZ?: number;         // Ortho projection near Z (default 1)
+  orthoMaxZ?: number;         // Ortho projection far Z (default 10000)
+}
+interface PcfShadowGeneratorConfig {
+  mapSize?: number;           // Shadow map size (default 512)
+  bias?: number;
+  darkness?: number;
+  normalBias?: number;
+  near?: number;              // Near plane for shadow projection
+  far?: number;               // Far plane for shadow projection
+}
+
+// ─── Loaders ─────────────────────────────────────────────────────────
+// GltfResult: a Mesh array augmented with a root TransformNode for hierarchy access
+type GltfResult = Mesh[] & { root: TransformNode };
+
+interface EnvironmentTextures {
+  specularCube: GPUTexture;       specularCubeView: GPUTextureView;
+  brdfLut: GPUTexture;            brdfLutView: GPUTextureView;
+  cubeSampler: GPUSampler;        brdfSampler: GPUSampler;
+  irradianceSH: Float32Array;     // 27 floats (9 vec3 SH coefficients)
+  sphericalHarmonics: {           // Pre-scaled SH bands for shader (L00…L22)
+    l00: Float32Array; l1_1: Float32Array; l10: Float32Array; l11: Float32Array;
+    l2_2: Float32Array; l2_1: Float32Array; l20: Float32Array; l21: Float32Array; l22: Float32Array;
+  };
+  lodGenerationScale: number;     // LOD scale for specular IBL sampling (default 0.8)
+}
+
+interface HdrLoadOptions {
+  faceSize?: number;           // Cubemap face size in pixels (default 256)
+  useCubemapSkybox?: boolean;  // Render HDR cubemap as skybox background
+  skipGround?: boolean;        // Skip the background ground plane
+  skyboxSize?: number;         // Skybox mesh size (matches BJS skyboxSize)
+}
+
+// ─── Animation ───────────────────────────────────────────────────────
 interface AnimationController { update(deltaMs: number): void; }
 interface AnimationGroup { name: string; play(loop?: boolean): void; stop(): void; }
 interface AnimationClip { /* keyframe data */ }
 interface GltfAnimationData { /* parsed glTF animation channels */ }
 
+// ─── Hierarchy ───────────────────────────────────────────────────────
 interface TransformNode { name: string; position: ObservableVec3; rotation: ObservableQuat; scaling: ObservableVec3; }
 interface IWorldMatrixProvider { getWorldMatrix(): Mat4; }
-interface IParentable extends IWorldMatrixProvider { /* parentable entity */ }
+interface IParentable extends IWorldMatrixProvider { parent: IWorldMatrixProvider | null; }
 
+// ─── Thin Instances ──────────────────────────────────────────────────
 interface ThinInstanceData { matrices: Mat4[]; colors?: Float32Array; }
 
+// ─── Math ────────────────────────────────────────────────────────────
 class ObservableVec3 { x: number; y: number; z: number; }
 class ObservableQuat { x: number; y: number; z: number; w: number; }
 
+// ─── Picking ─────────────────────────────────────────────────────────
 interface GpuPicker { pick(x: number, y: number): Promise<PickingInfo | null>; }
 interface PickingInfo { mesh: Mesh; faceId: number; worldPosition: Vec3; }
 
-// Low-level (advanced/custom rendering)
+// ─── Low-level (advanced/custom rendering) ───────────────────────────
 interface Renderable { order: number; draw(pass: GPURenderPassEncoder, engine: Engine): void; }
 interface PrePassRenderable { execute(encoder: GPUCommandEncoder, engine: Engine): void; }
 interface SceneUniformUpdater { update(engine: Engine): void; }
 
+// ─── Mesh factory options ────────────────────────────────────────────
 interface SphereOptions { diameter?: number; segments?: number; }
 interface TorusOptions { diameter?: number; thickness?: number; tessellation?: number; }
 interface GroundOptions { width?: number; height?: number; subdivisions?: number; }
@@ -507,7 +702,7 @@ drive the render loop.
 
 **Init sequence**:
 1. `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })`
-2. `adapter.requestDevice()` — no special features required for Phase 1
+2. `adapter.requestDevice({ requiredFeatures })` — optionally enables `float32-filterable` if supported
 3. `canvas.getContext('webgpu')` → configure with `alphaMode: 'opaque'`
 4. Create 4x MSAA color + depth render targets
 
@@ -531,7 +726,7 @@ await run deferred builders → sort renderables → requestAnimationFrame → r
    - Stencil: clearValue: 0, loadOp: 'clear', storeOp: 'store'
 5. Set viewport (0, 0, width, height, 0, 1)
 6. Update uniforms: iterate `scene._uniformUpdaters` → `update(engine)`
-7. Draw calls: iterate `scene._renderables` (sorted by order) → `draw(pass, engine)`
+7. Draw calls: iterate `scene._opaqueRenderables` (sorted by order) then `scene._transparentRenderables` (sorted back-to-front) → `draw(pass, engine)`
 8. End pass, submit
 
 **Resize**: checks `canvas.clientWidth * devicePixelRatio`, destroys and recreates MSAA/depth textures if changed.
@@ -542,25 +737,27 @@ A flat data struct with renderable arrays. No hierarchy. No callbacks.
 
 ```typescript
 {
-  engine,                     // readonly ref to Engine
+  engine,                        // readonly ref to Engine
   clearColor: {r:0.2, g:0.2, b:0.3, a:1.0},
-  camera: null,               // set by caller
-  lights: [],                 // HemisphericLight[]
-  meshes: [],                 // Mesh[] — all meshes (standard + PBR)
-  animationGroups: [],        // AnimationGroup[] — glTF animation groups
-  fog: null,                  // FogConfig | null
-  shadowGenerators: [],       // ShadowGenerator[]
-  imageProcessing: { exposure: 0.8, contrast: 1.2 },
-  _renderables: [],           // Renderable[] — draw entities
-  _prePasses: [],             // PrePassRenderable[] — shadow passes etc.
-  _uniformUpdaters: [],       // SceneUniformUpdater[] — per-frame UBO updates
-  _deferredBuilders: [],      // (() => void | Promise<void>)[] — run once at engine.start()
-  _fixedDeltaMs: 0,           // fixed delta for animation (0 = use real time)
-  _beforeRender: [],          // ((deltaMs: number) => void)[] — per-frame callbacks
+  camera: null,                  // set by caller
+  lights: [],                    // LightBase[] — all light types
+  meshes: [],                    // Mesh[] — all meshes (standard + PBR)
+  animationGroups: [],           // AnimationGroup[] — glTF animation groups
+  fog: null,                     // FogConfig | null
+  shadowGenerators: [],          // ShadowGenerator[]
+  imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
+  _renderables: [],              // Renderable[] — all renderables (combined)
+  _opaqueRenderables: [],        // Renderable[] — sorted by order
+  _transparentRenderables: [],   // Renderable[] — sorted back-to-front each frame
+  _prePasses: [],                // PrePassRenderable[] — shadow passes etc.
+  _uniformUpdaters: [],          // SceneUniformUpdater[] — per-frame UBO updates
+  _deferredBuilders: [],         // (() => void | Promise<void>)[] — run once at engine.start()
+  _fixedDeltaMs: 0,              // fixed delta for animation (0 = use real time)
+  _beforeRender: [],             // ((deltaMs: number) => void)[] — per-frame callbacks
 }
 ```
 
-**Registration**: `scene.add(entity)` routes by type — `Mesh`, `SceneAnyLight`, or `ShadowGenerator`.
+**Registration**: `scene.add(entity)` routes by type — `Mesh`, `LightBase`, `ShadowGenerator`, or `TransformNode` (which recursively adds all contained meshes).
 **Deferred builders**: run once at `engine.start()` to create pipelines/bind groups.
 
 ### 3.4 Camera (`camera/arc-rotate.ts`)
@@ -583,15 +780,15 @@ position = target + Vector3(
 4. `radius = length(worldSize) * 1.5`
 5. `alpha = -π/2`, `beta = π/2` (matching Babylon's `createDefaultCameraOrLight`)
 6. `fov = 0.8` (Babylon default)
-7. `minZ = 0.1`, `maxZ = 1000`
+7. `nearPlane = 0.1`, `farPlane = 1000`
 
 The playground then overrides: `camera.alpha = 1.77538207638442`
 
 ### 3.5 Light (`light/hemispheric.ts`)
 
 Plain data factory. Returns `HemisphericLight` with:
-- `direction: [0, 1, 0]` (up)
-- `intensity: 0.7`
+- `direction: ObservableVec3(0, 1, 0)` (up)
+- `intensity: 1.0`
 - `diffuseColor: [1, 1, 1]` (sky/top)
 - `groundColor: [0, 0, 0]` (bottom)
 

@@ -33,6 +33,9 @@ export interface Texture2DOptions {
   magFilter?: GPUFilterMode;
   /** Flip Y axis during upload. Default true (matches Babylon.js convention). */
   invertY?: boolean;
+  /** Use sRGB format (rgba8unorm-srgb). Enables hardware sRGB→linear on sample.
+   *  Use for color/albedo textures in PBR workflows. Default false. */
+  srgb?: boolean;
 }
 ```
 
@@ -40,7 +43,7 @@ export interface Texture2DOptions {
 
 ```typescript
 export async function loadTexture2D(
-  device: GPUDevice,
+  engine: Engine,
   url: string,
   opts?: Texture2DOptions,
 ): Promise<Texture2D>;
@@ -48,7 +51,7 @@ export async function loadTexture2D(
 
 ### Imports
 
-None — this module is self-contained with no explicit imports.
+Imports `Engine` from the engine module (to access `GPUDevice` internally), plus `acquireTexture`/`getOrCreateSampler` from the resource pool.
 
 ---
 
@@ -64,13 +67,14 @@ None — this module is self-contained with no explicit imports.
 | `minFilter`    | `'linear'`  | `GPUFilterMode` |
 | `magFilter`    | `'linear'`  | `GPUFilterMode` |
 | `invertY`      | `true`      | `boolean`       |
+| `srgb`         | `false`     | `boolean`       |
 
 ### Texture Creation Parameters
 
 ```typescript
 device.createTexture({
   size: { width, height },           // from ImageBitmap dimensions
-  format: 'rgba8unorm',
+  format: srgb ? 'rgba8unorm-srgb' : 'rgba8unorm',
   mipLevelCount: mipMaps
     ? Math.floor(Math.log2(Math.max(width, height))) + 1
     : 1,

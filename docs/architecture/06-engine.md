@@ -8,13 +8,14 @@ The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adap
 ## Public API Surface
 
 ```typescript
-/** Handle to the WebGPU engine — device, swapchain, MSAA, render loop. */
+/** Handle to the WebGPU engine — public API surface.
+ *  GPU internals (device, context, format) are @internal (EngineInternal) — not user-facing. */
 export interface Engine {
-  readonly device: GPUDevice;
-  readonly context: GPUCanvasContext;
-  readonly format: GPUTextureFormat;
   readonly canvas: HTMLCanvasElement;
   readonly msaaSamples: number;           // always 4
+
+  /** GPU draw calls executed in the last rendered frame. */
+  drawCallCount: number;
 
   /** Start the render loop for the given scene. Resolves after the first frame renders. */
   start(scene: SceneContext): Promise<void>;
@@ -22,6 +23,8 @@ export interface Engine {
   stop(): void;
   /** Resize render targets to match canvas size. */
   resize(): void;
+  /** Release all engine-owned GPU resources (render targets, device). */
+  dispose(): void;
 }
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
@@ -31,6 +34,13 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<Engine>;
 ### Internal Types (not exported)
 
 ```typescript
+/** @internal — GPU internals accessible only to renderable/loader code. */
+interface EngineInternal extends Engine {
+  readonly device: GPUDevice;
+  readonly context: GPUCanvasContext;
+  readonly format: GPUTextureFormat;
+}
+
 interface RenderTargets {
   msaaTexture: GPUTexture;
   msaaView: GPUTextureView;
@@ -46,7 +56,7 @@ interface RenderTargets {
 ### Initialization Sequence (`createEngine`)
 
 1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
-2. **Device request**: `adapter.requestDevice()` — default limits/features.
+2. **Device request**: `adapter.requestDevice({ requiredFeatures })` — optionally enables `float32-filterable` if supported.
 3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
 4. **Swap chain configure**: `context.configure({ device, format, alphaMode: 'opaque' })` where `format = navigator.gpu.getPreferredCanvasFormat()`.
 5. **MSAA**: Hard-coded to `msaaSamples = 4`.

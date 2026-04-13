@@ -8,9 +8,6 @@ The Scene module defines `SceneContext` — the central, flat data container for
 ## Public API Surface
 
 ```typescript
-/** Union of all supported light types. */
-export type SceneAnyLight = HemisphericLight | DirectionalLight | PointLight;
-
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
   exposure: number;
@@ -22,8 +19,8 @@ export interface ImageProcessingConfig {
 export interface SceneContext {
   readonly engine: Engine;
   clearColor: GPUColorDict;
-  camera: ArcRotateCamera | null;
-  lights: SceneAnyLight[];
+  camera: ArcRotateCamera | FreeCamera | null;
+  lights: LightBase[];           // All light types (HemisphericLight, DirectionalLight, PointLight, SpotLight)
   imageProcessing: ImageProcessingConfig;
 
   /** All meshes (standard, PBR, or any future material type). */
@@ -38,12 +35,20 @@ export interface SceneContext {
   /** Background material primaryColor (linear RGB). */
   environmentPrimaryColor?: [number, number, number];
 
+  /** Environment cubemap Y rotation in radians. */
+  envRotationY?: number;
+
+  /** Fixed timestep for animation ticks (ms, 0 = use real rAF delta). */
+  fixedDeltaMs: number;
+
   /** Internal renderable lists — populated by material builders. */
   _renderables: Renderable[];
+  _opaqueRenderables: Renderable[];
+  _transparentRenderables: Renderable[];
   _prePasses: PrePassRenderable[];
   _uniformUpdaters: SceneUniformUpdater[];
 
-  /** Fixed timestep for animation ticks (ms). */
+  /** Fixed timestep alias (internal). */
   _fixedDeltaMs: number;
 
   /** Per-frame callbacks invoked before rendering. */
@@ -56,7 +61,13 @@ export interface SceneContext {
   _build(): Promise<void>;
 
   /** Add an entity to the scene. Auto-routes by type. */
-  add(entity: Mesh | SceneAnyLight | ShadowGenerator): void;
+  add(entity: Mesh | LightBase | ShadowGenerator | TransformNode): void;
+
+  /** Register a callback to run before each rendered frame. */
+  onBeforeRender(cb: (deltaMs: number) => void): void;
+
+  /** Release all GPU resources owned by this scene. */
+  dispose(): void;
 }
 
 /** Create an empty scene context bound to the given engine. */
@@ -77,13 +88,15 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera;
 | `engine` | passed in | Immutable reference to Engine |
 | `clearColor` | `{ r: 0.2, g: 0.2, b: 0.3, a: 1.0 }` | Render pass clear color |
 | `camera` | `null` | Set later by `createDefaultCamera` |
-| `lights` | `[]` | Hemispheric/directional/point lights |
+| `lights` | `[]` | All light types (LightBase[]) |
 | `meshes` | `[]` | All meshes (standard, PBR, etc.) |
 | `animationGroups` | `[]` | Animation groups from glTF clips |
 | `fog` | `null` | Fog configuration (null = disabled) |
 | `shadowGenerators` | `[]` | Shadow generators |
 | `imageProcessing` | `{ exposure: 1.0, contrast: 1.0, toneMappingEnabled: false }` | Image processing params |
-| `_renderables` | `[]` | Draw-call entities (sorted by `order` at start) |
+| `_renderables` | `[]` | All renderables (combined list) |
+| `_opaqueRenderables` | `[]` | Opaque renderables sorted by `order` |
+| `_transparentRenderables` | `[]` | Transparent renderables sorted back-to-front per frame |
 | `_prePasses` | `[]` | Pre-pass entities (shadow depth, compute) |
 | `_uniformUpdaters` | `[]` | Per-frame UBO updaters |
 | `_fixedDeltaMs` | `0` | Fixed timestep for animation (ms) |
@@ -111,23 +124,30 @@ No child objects reference the scene. The engine iterates the renderable arrays 
 `add(entity)` inspects the entity and routes it to the correct collection:
 
 ```typescript
-add(entity: Mesh | SceneAnyLight | ShadowGenerator) {
-  if ('renderShadowMap' in entity) {
-    // ShadowGenerator → shadowGenerators + _prePasses
-    this.shadowGenerators.push(entity);
-    this._prePasses.push({ execute: entity.renderShadowMap });
-  } else if ('_gpu' in entity && 'material' in entity) {
+add(entity: Mesh | LightBase | ShadowGenerator | TransformNode) {
+  if (isTransformNode(entity)) {
+    // TransformNode: collect all meshes from hierarchy and add each
+    const meshes = collectMeshes(entity, entity.parent ?? undefined);
+    for (const m of meshes) { ctx.add(m); }
+    return;
+  }
+  if ('_gpu' in entity && 'material' in entity) {
     // Mesh → meshes + register material builder (deduped by builder identity)
     this.meshes.push(entity);
-    const builder = entity.material._buildGroup;
+    installMaterialSetter(this, entity);
+    const builder = entity.material?._buildGroup;
     if (builder && !_groups.has(builder)) {
       _groups.set(builder, []);
-      this._deferredBuilders.push(() => builder(this, _groups.get(builder)!));
+      this._deferredBuilders.push(async () => {
+        const result = await builder(this, _groups.get(builder)!);
+        this._renderables.push(...result.renderables);
+        this._uniformUpdaters.push(result.updater);
+      });
     }
     _groups.get(builder)?.push(entity);
   } else {
     // Light → lights
-    this.lights.push(entity);
+    this.lights.push(entity as LightBase);
   }
 }
 ```
