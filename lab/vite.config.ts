@@ -10,7 +10,7 @@ function serveReferenceImages(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = (req.url ?? '').split('?')[0]; // strip query string
         if (url.startsWith('/reference/')) {
-          const filePath = resolve(__dirname, '../..', url.slice(1));
+          const filePath = resolve(__dirname, '..', url.slice(1));
           if (existsSync(filePath)) {
             res.setHeader('Content-Type', 'image/png');
             res.setHeader('Cache-Control', 'no-cache');
@@ -19,7 +19,7 @@ function serveReferenceImages(): Plugin {
           }
         }
         if (url === '/scene-config.json') {
-          const filePath = resolve(__dirname, '../../scene-config.json');
+          const filePath = resolve(__dirname, '../scene-config.json');
           if (existsSync(filePath)) {
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Cache-Control', 'no-cache');
