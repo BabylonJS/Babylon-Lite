@@ -1,1 +1,0 @@
-function t(e){return{id:"std-specular",bindings:[{name:"specularTex",type:{kind:"texture",textureType:"texture_2d<f32>"},visibility:2},{name:"specularSampler",type:{kind:"sampler",samplerType:"sampler"},visibility:2}],fragmentSlots:{AT:`specularColor=textureSample(specularTex,specularSampler,${e?"input.vUV2":"input.vUV"}).rgb;`}}}export{t as createStdSpecularFragment};

@@ -1,3 +1,0 @@
-import{bo as e}from"./bjs-scene9.js";const o="backgroundUboDeclaration",r=`uniform vPrimaryColor: vec4f;uniform vPrimaryColorShadow: vec4f;uniform vDiffuseInfos : vec2f;uniform diffuseMatrix : mat4x4f;uniform fFovMultiplier: f32;uniform pointSize: f32;uniform shadowLevel: f32;uniform alpha: f32;uniform vBackgroundCenter: vec3f;uniform vReflectionControl: vec4f;uniform projectedGroundInfos: vec2f;uniform vReflectionInfos : vec2f;uniform reflectionMatrix : mat4x4f;uniform vReflectionMicrosurfaceInfos : vec3f;
-#include<sceneUboDeclaration>
-`;e.IncludesShadersStoreWGSL[o]||(e.IncludesShadersStoreWGSL[o]=r);

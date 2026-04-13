@@ -1,1 +1,0 @@
-function e(){}export{e as registerDirectionalPbrLight};

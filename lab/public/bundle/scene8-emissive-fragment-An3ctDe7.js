@@ -1,1 +1,0 @@
-function i(e){return{id:"emissive-color",fragmentSlots:{AT:e?"let emissive=mesh.emissiveColor*textureSample(emissiveTexture,emissiveSampler,input.uv).rgb;":"let emissive=mesh.emissiveColor;"}}}export{i as createEmissiveColorFragment};

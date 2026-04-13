@@ -1,1 +1,0 @@
-import{F as o}from"./bjs-scene7-flowGraphCachedOperationBlock-CNz394lq.js";class p extends o{constructor(a,e,t,r,s){super(e,s),this._operation=t,this._className=r,this.a=this.registerDataInput("a",a)}_doOperation(a){return this._operation(this.a.getValue(a))}getClassName(){return this._className}}export{p as F};
