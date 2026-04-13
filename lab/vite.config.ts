@@ -37,8 +37,9 @@ export default defineConfig({
   plugins: [serveReferenceImages()],
   optimizeDeps: {
     // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
-    // Exclude from Vite's dep optimizer to preserve all side effects.
-    exclude: ['@babylonjs/core', '@babylonjs/loaders'],
+    // babylon-lite uses ?raw WGSL imports that esbuild can't handle.
+    // Exclude both from Vite's dep optimizer.
+    exclude: ['@babylonjs/core', '@babylonjs/loaders', 'babylon-lite'],
   },
   resolve: {
     // Ensure @babylonjs/core resolves to a single instance (loaders registers
