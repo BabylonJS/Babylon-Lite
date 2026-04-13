@@ -266,7 +266,8 @@ function elapsed(startMs: number): string {
 
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
-    rmSync(outDir, { recursive: true, force: true });
+    // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
+    // Each scene is updated atomically (new files written, stale old chunks removed).
     mkdirSync(outDir, { recursive: true });
 
     // ── 1. Build all scenes ──────────────────────────────────────────────
@@ -329,13 +330,23 @@ export async function buildBundleScenes(): Promise<void> {
             },
         });
 
-        // Move files from sceneN/ subdir to parent so bundle-sceneN.html can load /bundle/sceneN.js
+        // Atomically replace this scene's files in outDir:
+        // 1. Write all new files (overwriting existing ones).
+        // 2. Remove any stale old chunk files that didn't appear in the new build.
         const jsFiles = getAllJsFiles(sceneOutDir);
+        const newNames = new Set<string>();
         for (const f of jsFiles) {
             const name = f.substring(sceneOutDir.length + 1).replace(/\\/g, "/");
+            newNames.add(name);
             const dest = resolve(outDir, name);
             mkdirSync(dirname(dest), { recursive: true });
             writeFileSync(dest, readFileSync(f));
+        }
+        // Remove stale files from a previous build of this scene (chunk hash may differ).
+        for (const existing of readdirSync(outDir)) {
+            if ((existing === `${scene}.js` || existing.startsWith(`${scene}-`)) && !newNames.has(existing)) {
+                rmSync(resolve(outDir, existing));
+            }
         }
         rmSync(sceneOutDir, { recursive: true, force: true });
     }
