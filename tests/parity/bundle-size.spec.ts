@@ -26,17 +26,6 @@ const SCENES = allScenes.filter((s) => s.maxRawKB != null && s.maxGzipKB != null
 
 for (const scene of SCENES) {
     test(`${scene.name} bundle ≤ ${scene.maxRawKB} KB raw, ≤ ${scene.maxGzipKB} KB gzip`, async ({ page }) => {
-        // Check if WebGPU is actually functional (requires secure context)
-        await page.goto(`/bundle-scene${scene.id}.html`);
-        const hasWebGPU = await page.evaluate(async () => {
-            if (!navigator.gpu) {
-                return false;
-            }
-            const adapter = await navigator.gpu.requestAdapter();
-            return !!adapter;
-        });
-        test.skip(!hasWebGPU, "WebGPU not available — requires GPU hardware");
-
         const jsPayloads: { url: string; body: Buffer }[] = [];
 
         // Intercept every JS response served from /bundle/

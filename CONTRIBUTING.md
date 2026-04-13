@@ -190,12 +190,9 @@ Plumbing tests validate engine internals (dispose, material-swap, etc.) using Pl
 
 1. Create a test page in `apps/manual-lab/` (HTML + TS)
 2. Create the spec in `tests/plumbing/`
-3. **Always add a WebGPU skip guard** for CI compatibility:
-   ```typescript
-   const hasWebGPU = await page.evaluate(() => !!navigator.gpu);
-   test.skip(!hasWebGPU, "WebGPU not available — requires GPU hardware");
-   ```
-4. Run: `npx playwright test tests/plumbing/my-test.spec.ts`
+3. Run: `npx playwright test tests/plumbing/my-test.spec.ts`
+
+> **Note:** CI uses Chrome's SwiftShader Vulkan backend for WebGPU — no real GPU needed.
 
 ## Adding Unit Tests
 

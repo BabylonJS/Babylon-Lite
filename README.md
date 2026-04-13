@@ -82,12 +82,9 @@ For GPU integration tests (dispose, material-swap, lifecycle):
 1. Create a test page: `apps/manual-lab/my-test.html` + `apps/manual-lab/src/my-test.ts`
 2. Add the HTML entry to `apps/manual-lab/vite.config.ts` (auto-detected if in root)
 3. Create `tests/plumbing/my-test.spec.ts`
-4. **Always add a WebGPU skip guard** at the top of each test:
-   ```typescript
-   const hasWebGPU = await page.evaluate(() => !!navigator.gpu);
-   test.skip(!hasWebGPU, "WebGPU not available — requires GPU hardware");
-   ```
-5. Run locally: `npx playwright test tests/plumbing/my-test.spec.ts`
+4. Run: `npx playwright test tests/plumbing/my-test.spec.ts`
+
+> CI uses Chrome's SwiftShader Vulkan backend — WebGPU works without a real GPU.
 
 ### Scene Parity Tests (Playwright + WebGPU)
 
@@ -108,12 +105,10 @@ For pixel-diff visual regression tests against Babylon.js golden references:
 | Workflow | Trigger | What it runs |
 |---|---|---|
 | **Lint** | PR → master | ESLint + `tsc --noEmit` |
-| **Unit** | PR → master | Vitest + plumbing tests (skipped if no GPU) |
-| **Bundle Size** | manual | Runtime KB ceiling checks |
+| **Unit** | PR → master | Vitest + plumbing tests |
+| **Bundle Size** | PR → master | Runtime KB ceiling checks |
 | **Parity** | manual | Scene pixel-diff vs golden refs |
 | **Perf** | manual | RAF performance benchmarks |
-
-> **Note:** Plumbing tests auto-skip on CI runners without WebGPU. They run fully on local machines with GPU support.
 
 ## Troubleshooting
 
