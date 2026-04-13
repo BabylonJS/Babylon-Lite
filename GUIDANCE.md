@@ -186,7 +186,7 @@ async function main(): Promise<void> {
     3. Re-read the scene spec (`files/scene1-spec.md` in session state)
 - These instructions are immutable. They always take priority.
 
-### 8. Code Quality: ESLint + Prettier (Mandatory)
+### 6. Code Quality: ESLint + Prettier (Mandatory)
 
 - **All code you write must pass ESLint and Prettier before being considered done.**
 - ESLint config: `eslint.config.mjs` (flat config). Prettier config: `.prettierrc`.
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
     - `pnpm run format:check` — verify Prettier formatting without changing files.
 - **After every code change, run `pnpm run lint:fix` to auto-format, then verify with `pnpm run lint`.**
 
-### 9. Bundle Size Analysis (analyze-bundle)
+### 7. Bundle Size Analysis (analyze-bundle)
 
 - **`pnpm run analyze-bundle <sceneN>`** — builds a single scene with `rollup-plugin-visualizer` and prints a per-chunk, per-module size breakdown (rendered bytes + gzip).
 - Script: `scripts/analyze-bundle.ts`. Also writes an interactive treemap to `/tmp/<scene>-bundle-stats.html`.
