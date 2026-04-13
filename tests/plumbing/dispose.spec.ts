@@ -2,12 +2,18 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Dispose", () => {
     test("scene.dispose() + engine.dispose() release GPU resources without errors", async ({ page }) => {
-        await page.goto("/dispose-test.html");
-
-        // Skip if WebGPU is not available (CI without GPU)
-        const hasWebGPU = await page.evaluate(() => !!navigator.gpu);
+        // Check if WebGPU is actually functional (not just present)
+        await page.goto("about:blank");
+        const hasWebGPU = await page.evaluate(async () => {
+            if (!navigator.gpu) {
+                return false;
+            }
+            const adapter = await navigator.gpu.requestAdapter();
+            return !!adapter;
+        });
         test.skip(!hasWebGPU, "WebGPU not available — requires GPU hardware");
 
+        await page.goto("/dispose-test.html");
         await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
 
         // Verify both cycles completed

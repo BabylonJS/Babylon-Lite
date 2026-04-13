@@ -14,11 +14,18 @@ function getCenterPixel(pngPath: string): [number, number, number] {
 
 test.describe("Material Swap", () => {
     test("mesh.material = newMat changes rendering on next frame", async ({ page }) => {
-        await page.goto("/material-swap-test.html");
-
-        // Skip if WebGPU is not available (CI without GPU)
-        const hasWebGPU = await page.evaluate(() => !!navigator.gpu);
+        // Check if WebGPU is actually functional (not just present)
+        await page.goto("about:blank");
+        const hasWebGPU = await page.evaluate(async () => {
+            if (!navigator.gpu) {
+                return false;
+            }
+            const adapter = await navigator.gpu.requestAdapter();
+            return !!adapter;
+        });
         test.skip(!hasWebGPU, "WebGPU not available — requires GPU hardware");
+
+        await page.goto("/material-swap-test.html");
 
         // Wait for red phase
         await page.waitForFunction(() => (window as any).phase === "red", { timeout: 10_000 });
