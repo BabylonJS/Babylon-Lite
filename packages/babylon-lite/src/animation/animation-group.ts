@@ -1,11 +1,11 @@
 // AnimationGroup — user-facing handle for a single animation clip.
-// Stored on scene.animationGroups[]. Provides play/pause/stop + frame access.
+// Stored on scene.animationGroups[]. Pure state interface.
 
 import type { GltfAnimationData } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
-/** User-facing animation group — one per glTF animation clip. */
+/** User-facing animation group — one per glTF animation clip. Pure state. */
 export interface AnimationGroup {
     /** Name of this animation (from glTF). */
     readonly name: string;
@@ -19,18 +19,52 @@ export interface AnimationGroup {
     speedRatio: number;
     /** Whether animation loops (default true). */
     loopAnimation: boolean;
-    /** Start playing. */
-    play(): void;
-    /** Pause playback. */
-    pause(): void;
-    /** Stop playback and reset to frame 0. */
-    stop(): void;
-    /** Seek to a specific frame (at 60 fps, matching BJS convention) and pause. */
-    goToFrame(frame: number): void;
-    /** Advance animation by deltaMs. Called by the engine each frame. */
-    _tick(deltaMs: number, device: GPUDevice): void;
     /** Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;
+    /** @internal Whether stop() was called (suppresses _tick). */
+    _stopped: boolean;
+}
+
+/** Start playing an animation group. */
+export function playAnimation(group: AnimationGroup): void {
+    if (group._ctrl) {
+        group._ctrl.playing = true;
+    }
+    group._stopped = false;
+}
+
+/** Pause playback of an animation group. */
+export function pauseAnimation(group: AnimationGroup): void {
+    if (group._ctrl) {
+        group._ctrl.playing = false;
+    }
+}
+
+/** Stop playback and reset to frame 0. */
+export function stopAnimation(group: AnimationGroup): void {
+    if (group._ctrl) {
+        group._ctrl.playing = false;
+        group._ctrl.time = 0;
+    }
+    group._stopped = true;
+}
+
+/** Seek to a specific frame (at 60 fps, matching BJS convention) and pause. */
+export function goToFrame(group: AnimationGroup, frame: number): void {
+    if (group._ctrl) {
+        group._ctrl.time = frame / 60;
+        group._ctrl.playing = false;
+    }
+}
+
+/** @internal Advance animation by deltaMs. Called by the engine each frame. */
+export function tickAnimation(group: AnimationGroup, deltaMs: number, device: GPUDevice): void {
+    if (group._stopped) {
+        return;
+    }
+    if (group._ctrl) {
+        group._ctrl.tick(deltaMs, device);
+    }
 }
 
 /** Create AnimationGroup(s) from parsed glTF animation data.
@@ -40,11 +74,7 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
         return [];
     }
 
-    // The skeleton controller handles all clips internally, but currently only
-    // evaluates clips[0]. We create one AnimationGroup per clip and share the
-    // underlying skeleton update infrastructure.
     return animData.clips.map((clip, clipIndex) => {
-        // Create a per-clip animation data slice (same nodes/skeletons, single clip)
         const clipAnimData: GltfAnimationData = {
             clips: [clip],
             nodes: animData.nodes,
@@ -54,7 +84,6 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
         const ctrl: AnimationController = createAnimationController(clipAnimData);
         // Auto-play by default (matches Babylon.js behavior)
         ctrl.playing = true;
-        let stopped = false;
 
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
@@ -85,31 +114,8 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
                 ctrl.loop = v;
             },
 
-            play() {
-                ctrl.playing = true;
-                stopped = false;
-            },
-            pause() {
-                ctrl.playing = false;
-            },
-            stop() {
-                ctrl.playing = false;
-                ctrl.time = 0;
-                stopped = true;
-            },
-            goToFrame(frame: number) {
-                ctrl.time = frame / 60;
-                ctrl.playing = false;
-            },
-
             _ctrl: ctrl,
-
-            _tick(deltaMs: number, device: GPUDevice) {
-                if (stopped) {
-                    return;
-                }
-                ctrl.tick(deltaMs, device);
-            },
+            _stopped: false,
         };
         return group;
     });

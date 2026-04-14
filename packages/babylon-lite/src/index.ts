@@ -50,7 +50,7 @@ export { createPcfShadowGenerator } from "./shadow/pcf-shadow-generator.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
-export { createAnimationGroups } from "./animation/animation-group.js";
+export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { mat4Translation, mat4Identity, mat4Scale, mat4Compose } from "./math/mat4.js";

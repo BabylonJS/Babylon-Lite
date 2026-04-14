@@ -1,4 +1,4 @@
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl, goToFrame, pauseAnimation } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
         if (!isNaN(seekTimeParam) && seekTimeParam > 0 && frameCount === 10 && !seekDone) {
             const seekFrame = seekTimeParam * 60;
             for (const g of scene.animationGroups) {
-                g.goToFrame(seekFrame);
+                goToFrame(g, seekFrame);
             }
             seekDone = true;
             canvas.dataset.animationFrozen = "true";
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
         // Frame-count freeze mode
         if (shouldFreeze && !seekDone && frameCount === 300) {
             for (const g of scene.animationGroups) {
-                g.pause();
+                pauseAnimation(g);
             }
             canvas.dataset.animationFrozen = "true";
         }

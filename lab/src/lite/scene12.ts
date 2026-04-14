@@ -10,6 +10,7 @@ import { onBeforeRender, addToScene, startEngine,
     loadTexture2D,
     createPbrMaterial,
     createSolidTexture2D,
+    goToFrame,
 } from "babylon-lite";
 import type { TransformNode } from "babylon-lite";
 
@@ -125,7 +126,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
         if (!isNaN(seekTimeParam) && seekTimeParam > 0 && frameCount === 10 && !seekDone) {
             const seekFrame = seekTimeParam * 60;
             for (const g of scene.animationGroups) {
-                g.goToFrame(seekFrame);
+                goToFrame(g, seekFrame);
             }
             seekDone = true;
             canvas.dataset.animationFrozen = "true";
