@@ -1,7 +1,7 @@
 // Scene 8: HDR Glass Sphere — matches Babylon #19JGPR#13
 // PBR glass sphere with HDR environment, alpha transparency, and custom exposure/contrast.
 
-import {
+import { addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 
     // Point light at (0, 40, 0) — matches playground
     const light = createPointLight({ x: 0, y: 40, z: 0 });
-    scene.add(light);
+    addToScene(scene, light);
 
     // HDR environment — loads room.hdr panorama, creates cubemap + prefiltered IBL
     await loadHdrEnvironment(scene, "https://playground.babylonjs.com/textures/room.hdr", {
@@ -52,9 +52,9 @@ async function main(): Promise<void> {
         directIntensity: 0.0,
         reflectance: 0.2,
     });
-    scene.add(sphere);
+    addToScene(scene, sphere);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

@@ -1,7 +1,7 @@
 // Scene 23: PBR Anisotropy — metallic sphere with anisotropic reflections
 // Based on playground #FEEK7G#1175
 
-import {
+import { addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     // Sphere: 128 segments, diameter 2
     const sphere = createSphere(engine, { segments: 128, diameter: 2 });
     sphere.material = material;
-    scene.add(sphere);
+    addToScene(scene, sphere);
 
     // Environment (IBL only, no direct light)
     await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     // updates are supported (requires device.queue.writeBuffer to mesh UBO).
     // Playground animation: a += 0.01; intensity = cos(a) * 0.5 + 0.5;
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

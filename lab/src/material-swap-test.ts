@@ -1,7 +1,7 @@
 /** Material swap test — creates a sphere, renders it red, swaps to green,
  *  reports colors back to the test runner via window globals. */
 
-import { createEngine, createSceneContext, createDefaultCamera, createSphere, createStandardMaterial, createHemisphericLight } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, createSphere, createStandardMaterial, createHemisphericLight } from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 (window as any).testResult = "pending";
@@ -12,17 +12,17 @@ async function run() {
     const scene = createSceneContext(engine);
 
     const light = createHemisphericLight([0, 1, 0], 1.0);
-    scene.add(light);
+    addToScene(scene, light);
 
     const sphere = createSphere(engine, { diameter: 2, segments: 16 });
     const redMat = createStandardMaterial();
     redMat.diffuseColor = [1, 0, 0];
     redMat.emissiveColor = [0.5, 0, 0];
     sphere.material = redMat;
-    scene.add(sphere);
+    addToScene(scene, sphere);
 
     createDefaultCamera(scene);
-    await engine.start(scene);
+    await startEngine(engine, scene);
 
     // Wait a few frames for red to be visible
     await new Promise((r) => setTimeout(r, 200));
@@ -40,7 +40,7 @@ async function run() {
             // Poll via onBeforeRender until the rebuild module is loaded
             // (_rebuildSingle exists) and the swap queue is fully drained.
             let signaled = false;
-            scene.onBeforeRender(() => {
+            onBeforeRender(scene, () => {
                 if (signaled) {
                     return;
                 }

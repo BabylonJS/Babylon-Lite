@@ -4,7 +4,7 @@
  *  feature set, which provides WGSL source, BGL descriptors, vertex layouts,
  *  and UBO specs. Scene UBO updated once per frame. */
 
-import type { Engine, EngineInternal } from "../../engine/engine.js";
+import type { EngineContext, EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -13,6 +13,8 @@ import type { LightBaseInternal } from "../../light/types.js";
 import type { PbrMaterialProps, SheenProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
+
+import { getViewProjectionMatrix, getCameraPosition } from "../../camera/camera.js";
 import type { Mat4 } from "../../math/types.js";
 import type { Renderable, SceneUniformUpdater } from "../../render/renderable.js";
 import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types.js";
@@ -107,7 +109,7 @@ export async function buildPbrRenderables(
     meshes: Mesh[],
     envTextures: EnvironmentTextures | undefined
 ): Promise<{ renderables: Renderable[]; updater: SceneUniformUpdater; _sceneBGL: GPUBindGroupLayout; _sceneBG: GPUBindGroup }> {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
     const hasEnv = !!envTextures;
     const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf"; gen: ShadowGenerator }[] = [];
@@ -601,7 +603,7 @@ export async function buildPbrRenderables(
     let _lastEnvRotY = -Infinity;
 
     const updater: SceneUniformUpdater = {
-        update(engine: Engine) {
+        update(engine: EngineContext) {
             const cam = scene.camera;
             if (!cam) {
                 return;
@@ -629,8 +631,8 @@ export async function buildPbrRenderables(
                 _lastContrast = contrast;
                 _lastEnvRotY = envRotY;
 
-                const viewProj = cam.getViewProjectionMatrix(aspect);
-                const camPos = cam.getPosition();
+                const viewProj = getViewProjectionMatrix(cam, aspect);
+                const camPos = getCameraPosition(cam);
 
                 const data = sceneUniformData;
                 data.fill(0);

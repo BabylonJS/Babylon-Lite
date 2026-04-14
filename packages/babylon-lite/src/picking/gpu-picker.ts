@@ -2,11 +2,12 @@ import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { MeshInternal } from "../mesh/mesh.js";
 import type { PickingInfo } from "./picking-info.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
 import { mat4Invert } from "../math/mat4.js";
 import { getPickingPipeline, getPickingTIPipeline, getPickingSceneBGL, getPickingMeshBGL, getPickingTIMeshBGL } from "./picking-pipeline.js";
+import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 
 /** GPU-based picker that renders mesh IDs to an offscreen texture. */
 export interface GpuPicker {
@@ -29,7 +30,7 @@ interface PickRenderTargets {
 
 /** Create a GPU picker bound to the given scene. */
 export function createGpuPicker(scene: SceneContext): GpuPicker {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
     const canvas = engine.canvas;
 
@@ -105,7 +106,7 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
 
             const rt = ensureTargets(w, h);
             const aspect = w / h;
-            const vp = camera.getViewProjectionMatrix(aspect);
+            const vp = getViewProjectionMatrix(camera, aspect);
 
             // ── Assign pick IDs ──────────────────────────────────
             type PickEntry = { mesh: Mesh; thinInstanceIndex: number };
@@ -286,7 +287,7 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
                 const worldZ = wz * invW;
                 info.pickedPoint = [worldX, worldY, worldZ];
 
-                const camPos = camera.getPosition();
+                const camPos = getCameraPosition(camera);
                 const dx = worldX - camPos.x;
                 const dy = worldY - camPos.y;
                 const dz = worldZ - camPos.z;

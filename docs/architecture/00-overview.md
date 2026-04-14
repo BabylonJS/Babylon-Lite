@@ -250,7 +250,7 @@ createFreeCamera(position: Vec3, target: Vec3): FreeCamera
 attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement): void
 
 // Loaders — note: loadGltf and loadBabylon take Engine, not SceneContext
-loadGltf(engine: Engine, url: string): Promise<LoaderResult>
+loadGltf(engine: Engine, url: string): Promise<AssetContainer>
 loadEnvironment(scene: SceneContext, url: string, options: {
     brdfUrl: string;
     groundTextureUrl?: string;
@@ -260,7 +260,7 @@ loadEnvironment(scene: SceneContext, url: string, options: {
     skyboxSize?: number;
 }): Promise<EnvironmentTextures>
 loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures>
-loadBabylon(engine: Engine, url: string, opts?: LoadBabylonOptions): Promise<LoaderResult>
+loadBabylon(engine: Engine, url: string, opts?: LoadBabylonOptions): Promise<AssetContainer>
 loadTexture2D(engine: Engine, url: string, options?: Texture2DOptions): Promise<Texture2D>
 loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size?: number): Promise<void>
 
@@ -330,14 +330,10 @@ getPickedUV(info: PickingInfo): [number, number]
 ```typescript
 // ─── Engine ──────────────────────────────────────────────────────────
 // Note: GPU internals (device, context, format) are @internal and not exposed.
-interface Engine {
+interface EngineContext {
   readonly canvas: HTMLCanvasElement;
   readonly msaaSamples: number;       // always 4
   drawCallCount: number;              // GPU draw calls in last rendered frame
-  start(scene: SceneContext): Promise<void>;
-  stop(): void;
-  resize(): void;
-  dispose(): void;
 }
 
 // ─── Scene ───────────────────────────────────────────────────────────
@@ -354,10 +350,6 @@ interface SceneContext {
   environmentPrimaryColor?: [number, number, number];
   envRotationY?: number;             // Environment cubemap Y rotation in radians
   fixedDeltaMs: number;              // Fixed delta for deterministic animation (0 = real time)
-
-  add(entity: Mesh | LightBase | ShadowGenerator | TransformNode | LoaderResult): void;
-  onBeforeRender(cb: (deltaMs: number) => void): void;
-  dispose(): void;
 
   // Internal renderable lists
   _renderables: Renderable[];
@@ -591,11 +583,11 @@ interface PcfShadowGeneratorConfig {
 
 // ─── Loaders ─────────────────────────────────────────────────────────
 // Unified result returned by both loadGltf() and loadBabylon()
-interface LoaderResult {
+interface AssetContainer {
   // glTF: [root TransformNode]. .babylon: flat [...meshes, ...lights]
   entities: Array<Mesh | TransformNode | LightBase>;
-  animationGroups?: AnimationGroup[];  // auto-ticked by scene.add()
-  clearColor?: GPUColorDict;           // applied to scene.clearColor by scene.add()
+  animationGroups?: AnimationGroup[];  // auto-ticked by addToScene()
+  clearColor?: GPUColorDict;           // applied to scene.clearColor by addToScene()
 }
 
 interface EnvironmentTextures {
@@ -716,7 +708,7 @@ drive the render loop.
 - Depth target: `depth24plus-stencil8`, `sampleCount = 4`
 - Resolved to swapchain texture each frame
 
-**Render loop** (`engine.start(scene)` — async, returns `Promise<void>`):
+**Render loop** (`startEngine(engine, scene)` — async, returns `Promise<void>`):
 ```
 await run deferred builders → sort renderables → requestAnimationFrame → resize() → renderFrame() → requestAnimationFrame ...
 ```
@@ -756,14 +748,14 @@ A flat data struct with renderable arrays. No hierarchy. No callbacks.
   _transparentRenderables: [],   // Renderable[] — sorted back-to-front each frame
   _prePasses: [],                // PrePassRenderable[] — shadow passes etc.
   _uniformUpdaters: [],          // SceneUniformUpdater[] — per-frame UBO updates
-  _deferredBuilders: [],         // (() => void | Promise<void>)[] — run once at engine.start()
+  _deferredBuilders: [],         // (() => void | Promise<void>)[] — run once at startEngine()
   _fixedDeltaMs: 0,              // fixed delta for animation (0 = use real time)
   _beforeRender: [],             // ((deltaMs: number) => void)[] — per-frame callbacks
 }
 ```
 
-**Registration**: `scene.add(entity)` routes by type — `Mesh`, `LightBase`, `ShadowGenerator`, or `TransformNode` (which recursively adds all contained meshes).
-**Deferred builders**: run once at `engine.start()` to create pipelines/bind groups.
+**Registration**: `addToScene(scene, entity)` routes by type — `Mesh`, `LightBase`, `ShadowGenerator`, or `TransformNode` (which recursively adds all contained meshes).
+**Deferred builders**: run once at `startEngine()` to create pipelines/bind groups.
 
 ### 3.4 Camera (`camera/arc-rotate.ts`)
 
@@ -832,7 +824,7 @@ interface SceneUniformUpdater { update(engine): void; }
 
 **Draw order**: skybox (0) → opaque (100) → transparent (200).
 
-**Deferred building**: Entities register builders on `scene._deferredBuilders`. These run once at `engine.start()` to create GPU resources.
+**Deferred building**: Entities register builders on `scene._deferredBuilders`. These run once at `startEngine()` to create GPU resources.
 
 ### 3.8 glTF Loader (`loader-gltf/load-gltf.ts`)
 
@@ -1064,7 +1056,7 @@ main.ts (e.g. scene1.ts)
   ├─→ createHemisphericLight()       → Returns plain HemisphericLight data
   │     scene.lights.push(light)
   │
-  └─→ engine.start(scene)            → Runs deferred builders (creates pipelines + renderables)
+  └─→ startEngine(engine, scene)            → Runs deferred builders (creates pipelines + renderables)
         Sorts renderables by order     → begins requestAnimationFrame loop
         Each frame:
           _prePasses → execute(encoder)    // shadow depth passes
@@ -1089,8 +1081,8 @@ main.ts (e.g. scene1.ts)
 | `new ArcRotateCamera(...)` | `createDefaultCamera(scene)` | Auto-frames, returns data |
 | `PBRMaterial` | `getOrCreatePbrPipeline()` + composer | Feature-flag pipelines |
 | `StandardMaterial` | `getOrCreatePipeline()` + composer | Feature-flag pipelines |
-| `scene._prepareFrame()` | `engine.start()` runs deferred builders | Lazy pipeline creation |
-| `engine.runRenderLoop(...)` | `engine.start(scene)` | Single scene |
+| `scene._prepareFrame()` | `startEngine()` runs deferred builders | Lazy pipeline creation |
+| `engine.runRenderLoop(...)` | `startEngine(engine, scene)` | Single scene |
 
 ---
 

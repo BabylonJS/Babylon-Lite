@@ -40,7 +40,7 @@ standard-renderable.ts (buildStandardMeshRenderables):
 
 ## `_buildGroup` Pattern
 
-`standard-material.ts` defines `standardGroupBuilder` (not exported), a `MeshGroupBuilder` function that dynamically imports `standard-renderable.js` and the needed fragment modules. This function is set as the `_buildGroup` field on every standard material created by `createStandardMaterial()`. At `engine.start()`, `scene.ts` groups meshes by builder identity so that all standard-material meshes are batched together for a single `buildStandardMeshRenderables()` call.
+`standard-material.ts` defines `standardGroupBuilder` (not exported), a `MeshGroupBuilder` function that dynamically imports `standard-renderable.js` and the needed fragment modules. This function is set as the `_buildGroup` field on every standard material created by `createStandardMaterial()`. At `startEngine()`, `scene.ts` groups meshes by builder identity so that all standard-material meshes are batched together for a single `buildStandardMeshRenderables()` call.
 
 `standardGroupBuilder` detects which features are needed across all meshes and conditionally imports only the required fragment modules, plus `thin-instance-gpu.ts` when thin instances are present. This ensures zero bundle-size impact for unused features. It also installs `_loadRebuildSingle = () => import("./standard-single-rebuild.js")` for hot material swapping.
 
@@ -605,13 +605,13 @@ if fogMode > 0: color.rgb = mix(fogColor, color.rgb, fogCoeff)
 
 ```
 scene.meshes.push(mesh)            → mesh registered for deferred building
-engine.start(scene)                → runs deferred builders (async)
+startEngine(engine, scene)                → runs deferred builders (async)
   standardGroupBuilder()           → detects features, dynamically imports fragment modules
   buildStandardMeshRenderables()   → groups meshes by features, composes shaders
     composeStandardShader()        → createStandardTemplate() + composeShader(template, fragments)
     getOrCreatePipeline()          → cached pipeline + scene UBO
     createDynamicMeshGPU()         → per-mesh UBOs + bind groups
-  scene.add(renderables, updater)  → registered with scene
+  → renderables + updater registered by buildScene
   render loop begins
     updater.update(engine)         → writes scene UBOs + refreshes light UBOs each frame
     renderable.draw(pass, engine)  → dispatches draw calls per group

@@ -2,7 +2,7 @@
 // Matches BJS playground: cloth mesh with PBR sheen material.
 // Static model, no animation.
 
-import {
+import { addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
         }),
         loadTexture2D(engine, "https://playground.babylonjs.com/textures/fire.png", { invertY: false }),
     ]);
-    scene.add(gltfResult);
+    addToScene(scene, gltfResult);
 
     // BJS scene uses createDefaultSkybox (NOT createDefaultEnvironment),
     // so no image processing is applied. Override the defaults set by loadEnvironment.
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
         m.material = sheenMat;
     }
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

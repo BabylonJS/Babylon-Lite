@@ -57,25 +57,25 @@ Shadows               → shadow-renderable.ts          → PrePassRenderable
 
 `standardGroupBuilder` and `pbrGroupBuilder` are `MeshGroupBuilder` functions. They are set on the material props at creation time (e.g. `createStandardMaterial()` sets `_buildGroup: standardGroupBuilder`).
 
-### Registration via `scene.add()`
+### Registration via `addToScene()`
 
-Entities are registered with the scene via `scene.add()`. The method accepts meshes, lights, or shadow generators — no raw renderables:
+Entities are registered with the scene via `addToScene()`. The function accepts meshes, lights, or shadow generators — no raw renderables:
 
 ```typescript
-scene.add(mesh);       // pushes to meshes[], registers _buildGroup once per builder type
-scene.add(light);      // pushes to lights[]
-scene.add(shadowGen);  // pushes to shadowGenerators[] + _prePasses[]
+addToScene(scene, mesh);       // pushes to meshes[], registers _buildGroup once per builder type
+addToScene(scene, light);      // pushes to lights[]
+addToScene(scene, shadowGen);  // pushes to shadowGenerators[] + _prePasses[]
 ```
 
-When a mesh is added, `scene.add()` reads `mesh.material._buildGroup` and groups meshes by builder function. A single deferred builder is registered per unique `MeshGroupBuilder`. The old `scene.add(renderables, updater)` signature is gone.
+When a mesh is added, `addToScene()` reads `mesh.material._buildGroup` and groups meshes by builder function. A single deferred builder is registered per unique `MeshGroupBuilder`. The old `scene.add(renderables, updater)` signature is gone.
 
 ### Deferred Building Pattern
 
-Entities register deferred builders when added to the scene. These builders run once at `engine.start()` before the first frame:
+Entities register deferred builders when added to the scene. These builders run once at `startEngine()` before the first frame:
 
 ```
-mesh added via scene.add(mesh) → material._buildGroup registered once per builder type
-engine.start(scene):
+mesh added via addToScene(scene, mesh) → material._buildGroup registered once per builder type
+startEngine(engine, scene):
   1. Run all deferred builders (materials dynamically import their renderable modules)
   2. Sort renderables by order
   3. Begin render loop

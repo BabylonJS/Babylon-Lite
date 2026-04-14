@@ -1,5 +1,5 @@
 /** High-level Mesh — position/rotation/scaling + material + GPU geometry.
- *  Plain data (no scene reference). The scene collects meshes via scene.add(). */
+ *  Plain data (no scene reference). The scene collects meshes via addToScene(). */
 
 import { mat4Compose, mat4Identity } from "../math/mat4.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";

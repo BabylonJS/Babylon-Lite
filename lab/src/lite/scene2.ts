@@ -1,6 +1,6 @@
 // Scene 2: Sphere + DirectionalLight — matches Babylon #20OAV9#1
 
-import { createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSphere, createStandardMaterial, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSphere, createStandardMaterial, attachControl } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -16,13 +16,13 @@ async function main(): Promise<void> {
     const light = createDirectionalLight([0, -1, 0]);
     light.diffuse = [1, 0, 0];
     light.specular = [0, 1, 0];
-    scene.add(light);
+    addToScene(scene, light);
 
     const sphere = createSphere(engine);
     sphere.material = createStandardMaterial();
-    scene.add(sphere);
+    addToScene(scene, sphere);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

@@ -1,6 +1,6 @@
 # Porting from Babylon.js to Babylon Lite
 
-This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side by side. Babylon Lite uses **factory functions** instead of constructors, **plain data** instead of class instances, and explicit `scene.add()` instead of auto-registration.
+This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side by side. Babylon Lite uses **factory functions** instead of constructors, **plain data** instead of class instances, and explicit `addToScene()` instead of auto-registration.
 
 ---
 
@@ -10,7 +10,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 |---|---|
 | `new WebGPUEngine(canvas); await engine.initAsync()` | `const engine = await createEngine(canvas)` |
 | `new Scene(engine)` | `createSceneContext(engine)` |
-| `engine.runRenderLoop(() => scene.render())` | `await engine.start(scene)` |
+| `engine.runRenderLoop(() => scene.render())` | `await startEngine(engine, scene)` |
 | `new ArcRotateCamera("cam", α, β, r, target, scene)` | `createArcRotateCamera(α, β, r, target)` |
 | `scene.createDefaultCamera(true, true, true)` | `createDefaultCamera(scene)` |
 | `camera.attachControl(canvas, true)` | `attachControl(camera, canvas, scene)` |
@@ -33,7 +33,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `new Color3(r, g, b)` | `[r, g, b]` |
 | `Matrix.Identity()` | `mat4Identity()` |
 | `mesh.dispose()` | `removeFromScene(scene, mesh)` |
-| `scene.onBeforeRenderObservable.add(fn)` | `scene.onBeforeRender(fn)` |
+| `scene.onBeforeRenderObservable.add(fn)` | `onBeforeRender(scene, fn)` |
 
 ---
 
@@ -41,7 +41,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 
 ### 1. No Scene in Constructors
 
-BJS objects take `scene` in their constructor and auto-register. Lite objects are plain data — you create them, then `scene.add()` them explicitly.
+BJS objects take `scene` in their constructor and auto-register. Lite objects are plain data — you create them, then `addToScene()` them explicitly.
 
 ```typescript
 // ❌ Babylon.js
@@ -49,12 +49,12 @@ const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
 
 // ✅ Babylon Lite
 const light = createHemisphericLight([0, 1, 0], 1.0);
-scene.add(light);
+addToScene(scene, light);
 ```
 
 ### 2. Engine & Render Loop
 
-BJS uses `runRenderLoop` with a callback. Lite uses a single `engine.start(scene)` that returns a promise resolving after the first frame.
+BJS uses `runRenderLoop` with a callback. Lite uses a single `startEngine(engine, scene)` that returns a promise resolving after the first frame.
 
 ```typescript
 // ❌ Babylon.js
@@ -68,7 +68,7 @@ engine.runRenderLoop(() => scene.render());
 const engine = await createEngine(canvas);
 const scene = createSceneContext(engine);
 // ... setup ...
-await engine.start(scene);
+await startEngine(engine, scene);
 ```
 
 ### 3. Plain Data, Not Classes
@@ -102,7 +102,7 @@ attachControl(camera, canvas, scene);
 
 ### 5. Loaders Auto-Add to Scene
 
-`loadGltf()` and `loadEnvironment()` add entities to the scene internally — no need to call `scene.add()` for their results.
+`loadGltf()` and `loadEnvironment()` add entities to the scene internally — no need to call `addToScene()` for their results.
 
 ```typescript
 // ❌ Babylon.js
@@ -168,7 +168,7 @@ const matrices = new Float32Array(count * 16);
 // ... fill directly (column-major 4x4) ...
 setThinInstances(mesh, matrices, count);
 setThinInstanceColors(mesh, colors);
-scene.add(mesh);
+addToScene(scene, mesh);
 ```
 
 ### 8. Mesh Factories Take Engine, Not Scene
@@ -183,7 +183,7 @@ sphere.material = new StandardMaterial("mat", scene);
 // ✅ Babylon Lite
 const sphere = createSphere(engine);
 sphere.material = createStandardMaterial();
-scene.add(sphere);
+addToScene(scene, sphere);
 ```
 
 ### 9. Removing & Disposing Entities
@@ -201,8 +201,8 @@ removeFromScene(scene, sphere);
 For full teardown:
 ```typescript
 // ✅ Babylon Lite — tear down everything
-scene.dispose();   // releases all meshes, renderables, disposables
-engine.dispose();  // destroys GPU device, render targets, swapchain
+disposeScene(scene);   // releases all meshes, renderables, disposables
+disposeEngine(engine);  // destroys GPU device, render targets, swapchain
 ```
 
 ---
@@ -243,9 +243,9 @@ await loadEnvironment(scene, envUrl, {
 
 const cam = createDefaultCamera(scene);
 attachControl(cam, canvas, scene);
-scene.add(createHemisphericLight([0, 1, 0], 1.0));
+addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
-await engine.start(scene);
+await startEngine(engine, scene);
 ```
 
 ---
@@ -254,10 +254,10 @@ await engine.start(scene);
 
 | Gotcha | Details |
 |---|---|
-| **No auto-add** | Meshes, lights, and transform nodes must be explicitly added with `scene.add()`. Exception: `loadGltf()` and `loadEnvironment()` add internally. |
+| **No auto-add** | Meshes, lights, and transform nodes must be explicitly added with `addToScene()`. Exception: `loadGltf()` and `loadEnvironment()` add internally. |
 | **No `new` keyword** | Everything is created via factory functions, not constructors. |
 | **Assign camera explicitly** | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually. |
 | **Materials are optional** | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`. |
 | **WebGPU only** | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable. |
-| **No `dispose()` on meshes** | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `scene.dispose()` + `engine.dispose()` to tear down everything. |
+| **No `dispose()` on meshes** | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything. |
 | **Tree-shakable imports** | Import only what you use. Unused features are stripped from the bundle. |

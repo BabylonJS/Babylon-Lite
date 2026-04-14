@@ -2,7 +2,7 @@
  *  Loads a cube texture and registers a skybox for the auto-builder. */
 
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { loadCubeTexture } from "../texture/cube-texture.js";
 import { createBoxData } from "../mesh/create-box.js";
 
@@ -26,7 +26,7 @@ export interface SkyboxData {
  *  @param size    - Box size (default 100, matches Babylon)
  */
 export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size = 100): Promise<void> {
-    const device = (scene.engine as EngineInternal).device;
+    const device = (scene.engine as EngineContextInternal).device;
 
     const cubeTex = await loadCubeTexture(device, baseUrl, ext);
 
@@ -52,7 +52,7 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
     };
     (scene as SceneContextInternal)._skybox = skyboxData;
 
-    // Register deferred builder — skybox renderable built at engine.start() time.
+    // Register deferred builder — skybox renderable built at startEngine() time.
     // Must run AFTER the standard mesh builder (which stashes _standardSceneUBO).
     // If the UBO isn't ready yet (parallel execution), re-enqueue for the next pass.
     (scene as SceneContextInternal)._deferredBuilders.push(async () => {

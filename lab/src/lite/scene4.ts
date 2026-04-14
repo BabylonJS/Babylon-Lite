@@ -1,6 +1,6 @@
 // Scene 4: Shadows — matches Babylon #IIZ9UU
 
-import {
+import { onBeforeRender, addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -30,20 +30,20 @@ async function main(): Promise<void> {
 
     const light = createDirectionalLight([-1, -2, -1]);
     light.position.set(20, 40, 20);
-    scene.add(light);
+    addToScene(scene, light);
 
     // Torus at (30, 30, 0) — shadow caster
     const torus = createTorus(engine, { diameter: 4, thickness: 2, tessellation: 30 });
     torus.material = createStandardMaterial();
     torus.position.set(30, 30, 0);
-    scene.add(torus);
+    addToScene(scene, torus);
 
     // Sphere at light position — emissive yellow
     const sphere = createSphere(engine, { segments: 10, diameter: 2 });
     sphere.material = createStandardMaterial();
     sphere.position.set(20, 40, 20);
     sphere.material.emissiveColor = [1, 1, 0];
-    scene.add(sphere);
+    addToScene(scene, sphere);
 
     // Ground from heightmap — receives shadows
     const ground = await createGroundFromHeightMap(engine, "https://playground.babylonjs.com/textures/heightMap.png", {
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     ground.material.diffuseTexture = await loadTexture2D(engine, "https://playground.babylonjs.com/textures/ground.jpg");
     ground.material.uvScale = [6, 6];
     ground.receiveShadows = true;
-    scene.add(ground);
+    addToScene(scene, ground);
 
     // Shadow generator — torus casts shadows (directional light, ESM blur)
     light.shadowGenerator = createShadowGenerator(engine, light, [torus], {
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     // Second light: SpotLight with PCF shadows (tests multi-light shadow support)
     const spot = createSpotLight([48.8, 50, 6.8], [-18.8, -20, -6.8], 1.5, 12);
     spot.intensity = 0.8;
-    scene.add(spot);
+    addToScene(scene, spot);
 
     spot.shadowGenerator = createPcfShadowGenerator(engine, spot, [torus], {
         mapSize: 512,
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     spotSphere.material = createStandardMaterial();
     spotSphere.material.emissiveColor = [0, 0.5, 1];
     spotSphere.material.disableLighting = true;
-    scene.add(spotSphere);
+    addToScene(scene, spotSphere);
 
     // --- Interactive: toggle torus rotation ---
     let rotatingTorus = false;
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     const spotOrbitRadius = 20;
     const spotCenterX = 30; // orbit around torus X
     const spotY = 50;
-    scene.onBeforeRender(() => {
+    onBeforeRender(scene, () => {
         if (rotatingTorus) {
             torus.rotation.x += 0.01;
             torus.rotation.y += 0.02;
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
     });
     document.body.appendChild(btnOrbit);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

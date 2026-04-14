@@ -3,8 +3,8 @@
  *  Separated from standard-renderable.ts so that scenes which never swap
  *  materials don't pay for this code in their bundle. */
 
-import type { Engine } from "../../engine/engine.js";
-import type { EngineInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
@@ -12,6 +12,7 @@ import type { Renderable } from "../../render/renderable.js";
 import { updateSceneUniforms, collectStdBoundTextures } from "./standard-material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
+import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../../camera/camera.js";
 import {
     computeFeatures,
     getOrCreatePipeline,
@@ -29,7 +30,7 @@ import {
 /** Build a single Renderable for one mesh with a standard material.
  *  Used by the material-swap rebuild path. */
 export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): Renderable {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
     const mat = mesh.material as StandardMaterialProps;
     const features = computeFeatures(mat, mesh.receiveShadows);
@@ -81,14 +82,14 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
     if (!(scene as SceneContextInternal)._standardSceneUBO) {
         (scene as SceneContextInternal)._standardSceneUBO = variant.sceneUBO;
         (scene as SceneContextInternal)._uniformUpdaters.push({
-            update(engine: Engine) {
+            update(engine: EngineContext) {
                 if (!scene.camera) {
                     return;
                 }
                 const aspect = engine.canvas.width / engine.canvas.height;
-                const viewProj = scene.camera.getViewProjectionMatrix(aspect);
-                const viewMat = scene.camera.getViewMatrix();
-                const camPos = scene.camera.getPosition();
+                const viewProj = getViewProjectionMatrix(scene.camera, aspect);
+                const viewMat = getViewMatrix(scene.camera);
+                const camPos = getCameraPosition(scene.camera);
                 updateSceneUniforms(device, variant.sceneUBO, viewProj as Float32Array, viewMat as Float32Array, [camPos.x, camPos.y, camPos.z], scene.fog ?? undefined);
             },
         });

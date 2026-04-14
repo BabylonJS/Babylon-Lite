@@ -5,7 +5,7 @@
  *  (skybox = order 0, ground = order 200 for transparency). */
 
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineInternal } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
@@ -32,7 +32,7 @@ export async function buildBackgroundRenderables(
     options?: BackgroundRenderableOptions,
     groundImagePromise?: Promise<ImageBitmap>
 ): Promise<Renderable[]> {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 

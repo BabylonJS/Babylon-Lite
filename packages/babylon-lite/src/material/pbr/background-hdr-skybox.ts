@@ -4,7 +4,7 @@
  *  Tree-shaken away from scenes that use the default solid-color skybox. */
 
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineInternal } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Renderable } from "../../render/renderable.js";
 import { createSkyboxBuffers, buildSkyboxWorldMatrix, createCubemapSkyboxMaterial } from "./background-material.js";
@@ -23,7 +23,7 @@ export function buildHdrSkyboxRenderable(
     sceneBindGroup: GPUBindGroup,
     skyboxSize?: number
 ): Renderable {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
 
     const { skyHalfSize, rootPosition } = computeSkyboxGeometry(scene, skyboxSize);

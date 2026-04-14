@@ -59,16 +59,16 @@ export interface SceneContext {
 
   /** Run all deferred builders and prepare the scene for rendering. */
   _build(): Promise<void>;
-
-  /** Add an entity or loader result to the scene. Auto-routes by type. */
-  add(entity: Mesh | LightBase | ShadowGenerator | TransformNode | LoaderResult): void;
-
-  /** Register a callback to run before each rendered frame. */
-  onBeforeRender(cb: (deltaMs: number) => void): void;
-
-  /** Release all GPU resources owned by this scene. */
-  dispose(): void;
 }
+
+/** Add an entity or asset container to the scene. Auto-routes by type. */
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenerator | TransformNode | AssetContainer): void;
+
+/** Register a callback to run before each rendered frame. */
+export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void;
+
+/** Release all GPU resources owned by this scene. */
+export function disposeScene(scene: SceneContext): void;
 
 /** Create an empty scene context bound to the given engine. */
 export function createSceneContext(engine: Engine): SceneContext;
@@ -119,16 +119,16 @@ Engine ← SceneContext → Camera
 
 No child objects reference the scene. The engine iterates the renderable arrays as opaque contracts.
 
-### `scene.add()` — Entity Routing
+### `addToScene()` — Entity Routing
 
-`add(entity)` inspects the entity and routes it to the correct collection:
+`addToScene(scene, entity)` inspects the entity and routes it to the correct collection:
 
 ```typescript
-add(entity: Mesh | LightBase | ShadowGenerator | TransformNode | LoaderResult) {
-  // LoaderResult — from loadGltf() or loadBabylon()
+function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenerator | TransformNode | AssetContainer) {
+  // AssetContainer — from loadGltf() or loadBabylon()
   if ('entities' in entity) {
-    const result = entity as LoaderResult;
-    for (const e of result.entities) ctx.add(e);  // recurse into individual entities
+    const result = entity as AssetContainer;
+    for (const e of result.entities) addToScene(scene, e);  // recurse into individual entities
     if (result.clearColor) ctx.clearColor = result.clearColor;
     if (result.animationGroups?.length) {
       const device = (ctx.engine as EngineInternal).device;
@@ -165,7 +165,7 @@ add(entity: Mesh | LightBase | ShadowGenerator | TransformNode | LoaderResult) {
 }
 ```
 
-The `LoaderResult` branch is checked first (via `'entities' in entity`). For `glTF` results, `entities` contains a single root `TransformNode` — the TransformNode branch then calls `collectMeshes` to pull all child meshes into the scene. For `.babylon` results, `entities` is flat `[...meshes, ...lights]`, dispatched directly.
+The `AssetContainer` branch is checked first (via `'entities' in entity`). For `glTF` results, `entities` contains a single root `TransformNode` — the TransformNode branch then calls `collectMeshes` to pull all child meshes into the scene. For `.babylon` results, `entities` is flat `[...meshes, ...lights]`, dispatched directly.
 
 The scene never branches on material type (PBR vs standard). Materials self-describe their builder via `material._buildGroup`, and the scene groups meshes by builder identity using an internal `Map<MeshGroupBuilder, Mesh[]>`. Each unique builder is registered as a deferred builder exactly once.
 
@@ -173,12 +173,12 @@ The scene never branches on material type (PBR vs standard). Materials self-desc
 
 Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to create GPU pipelines, bind groups, and renderables for a batch of meshes sharing that material type. The flow:
 
-1. `scene.add(mesh)` groups the mesh by its `material._buildGroup` identity.
+1. `addToScene(scene, mesh)` groups the mesh by its `material._buildGroup` identity.
 2. If this is the first mesh for a given builder, a deferred builder is registered.
-3. At `_build()` time (called by `engine.start()`), each deferred builder runs once with the full batch of meshes for that group.
+3. At `buildScene(scene)` time (called by `startEngine()`), each deferred builder runs once with the full batch of meshes for that group.
 4. Builders return `{ renderables, updater }` which are pushed onto `_renderables` and `_uniformUpdaters`.
 
-`_build()` is async — deferred builders may return `Promise<void>` for GPU resource creation.
+`buildScene(scene)` is async — deferred builders may return `Promise<void>` for GPU resource creation.
 
 This decouples scene setup from GPU resource creation, ensures all assets are loaded before pipelines are built, and keeps scene.ts entirely material-agnostic.
 
@@ -216,7 +216,7 @@ Algorithm:
 | `scene.lights` | `scene.lights` |
 | `scene.meshes` | `scene.meshes` |
 | `scene.animationGroups` | `scene.animationGroups` |
-| `scene.add(entity)` | `scene.addMesh()` / `scene.addLight()` (depending on entity type) |
+| `addToScene(scene, entity)` | `scene.addMesh()` / `scene.addLight()` (depending on entity type) |
 | `scene._renderables` | `scene._renderingManager._renderingGroups` |
 | `scene._prePasses` | `scene.onBeforeRenderObservable` handlers |
 | `scene._beforeRender` | `scene.onBeforeRenderObservable` |
@@ -236,14 +236,14 @@ Algorithm:
 | Test | Description |
 |---|---|
 | `createSceneContext returns valid defaults` | Verify all fields match documented defaults |
-| `scene.add routes mesh` | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
-| `scene.add routes light` | Add light → appears in `lights` |
-| `scene.add routes shadow generator` | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses` |
-| `scene.add deduplicates builders` | Two meshes with same `_buildGroup` → one deferred builder |
+| `addToScene routes mesh` | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
+| `addToScene routes light` | Add light → appears in `lights` |
+| `addToScene routes shadow generator` | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses` |
+| `addToScene deduplicates builders` | Two meshes with same `_buildGroup` → one deferred builder |
 | `createDefaultCamera with meshes` | Provide meshes with known bounds, verify radius = diag*1.5 |
 | `createDefaultCamera with no meshes` | radius=1, center=(0,0,0) |
-| `deferred builders run at _build()` | Register builder → verify called by `_build()` |
-| `_build() awaits async builders` | Register async builder → verify awaited |
+| `deferred builders run at buildScene()` | Register builder → verify called by `buildScene()` |
+| `buildScene() awaits async builders` | Register async builder → verify awaited |
 
 ## File Manifest
 

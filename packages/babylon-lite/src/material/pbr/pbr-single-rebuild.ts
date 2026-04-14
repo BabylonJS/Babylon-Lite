@@ -4,7 +4,7 @@
  *  (the common case) don't pay for this code in their bundle. */
 
 import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
-import type { EngineInternal } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
 import type { PbrMaterialProps, SheenProps } from "./pbr-material.js";
@@ -31,7 +31,7 @@ import { _createPbrMeshUBO, _createPbrMaterialUBO } from "./pbr-renderable.js";
 /** Build a single Renderable for one mesh after a PBR material swap.
  *  Reuses the existing scene bind group and extensions from the initial build. */
 export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Renderable {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
     const mat = mesh.material as PbrMaterialProps;
     const envTextures = (scene as SceneContextInternal)._envTextures;

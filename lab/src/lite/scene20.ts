@@ -1,7 +1,7 @@
 // Scene 20: PBR Emissive Spheres Grid — 2500 spheres with random emissive colors
 // Based on playground #6HWS9M#85 (without performancePriority)
 
-import {
+import { onBeforeRender, addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     attachControl(cam, canvas, scene);
 
     // Light
-    scene.add(createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     const random = seededRandom(42);
 
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 
     // Add all meshes to scene
     for (const m of meshes) {
-        scene.add(m);
+        addToScene(scene, m);
     }
 
     // Environment AFTER spheres (so background sizing matches BJS createDefaultEnvironment)
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     const seekTimeParam = parseFloat(params.get("seekTime") || "");
     let frozen = false;
 
-    scene.onBeforeRender((_delta: number) => {
+    onBeforeRender(scene, (_delta: number) => {
         if (frozen) {
             return;
         }
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
         }
     });
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

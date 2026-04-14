@@ -3,7 +3,7 @@
 //   diffuseColor = specularColor = gold, glossiness = 0.4
 //   → metallic = 1.0, roughness = 0.6, baseColor = gold
 
-import { createEngine, createSceneContext, createArcRotateCamera, createPbrMaterial, createSphere, createSolidTexture2D, loadEnvironment, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPbrMaterial, createSphere, createSolidTexture2D, loadEnvironment, attachControl } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -36,9 +36,9 @@ async function main(): Promise<void> {
     // Sphere: segments=16, diameter=2 — assign PBR material
     const sphere = createSphere(engine, { segments: 16, diameter: 2 });
     sphere.material = material;
-    scene.add(sphere);
+    addToScene(scene, sphere);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

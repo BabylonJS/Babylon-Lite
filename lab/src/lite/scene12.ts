@@ -1,4 +1,4 @@
-import {
+import { onBeforeRender, addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -26,7 +26,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
 
     // Directional light — direction points FROM light (BJS convention)
     const light = createDirectionalLight([0.45, -0.34, -0.83]);
-    scene.add(light);
+    addToScene(scene, light);
 
     // Environment — Studio Softbox with rotationY=1.9
     await loadEnvironment(scene, "/textures/Studio_Softbox_2Umbrellas_cube_specular.env", {
@@ -38,7 +38,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
 
     // Load shader ball mesh — auto-added as middle row
     const result = await loadGltf(engine, "https://assets.babylonjs.com/meshes/Demos/pbr_mr_specular/shaderBall_rotation.glb");
-    scene.add(result);
+    addToScene(scene, result);
     const root = result.entities[0] as TransformNode;
 
     // Load reflectance textures (no mipmaps — textures are small)
@@ -104,13 +104,13 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     const upper = cloneTransformNode(root);
     upper.position.y = 3;
     setMaterial(upper, matUpper);
-    scene.add(upper);
+    addToScene(scene, upper);
 
     // Lower row: clone + offset Y
     const lower = cloneTransformNode(root);
     lower.position.y = -3;
     setMaterial(lower, matLower);
-    scene.add(lower);
+    addToScene(scene, lower);
 
     // Fixed timestep for deterministic animation (matches BJS useConstantAnimationDeltaTime)
     scene.fixedDeltaMs = 16.0;
@@ -120,7 +120,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     const seekTimeParam = parseFloat(params.get("seekTime") || "");
     let frameCount = 0;
     let seekDone = false;
-    scene.onBeforeRender(() => {
+    onBeforeRender(scene, () => {
         frameCount++;
         if (!isNaN(seekTimeParam) && seekTimeParam > 0 && frameCount === 10 && !seekDone) {
             const seekFrame = seekTimeParam * 60;
@@ -132,7 +132,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
         }
     });
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

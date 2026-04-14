@@ -8,8 +8,8 @@
  */
 
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
-import type { Engine } from "../engine/engine.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 
 export interface Texture2D {
     texture: GPUTexture;
@@ -46,8 +46,8 @@ export function clearTexture2DCache(device: GPUDevice): void {
     _tex2dCache.delete(device);
 }
 
-export function loadTexture2D(engine: Engine, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
-    const device = (engine as EngineInternal).device;
+export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
+    const device = (engine as EngineContextInternal).device;
     let dc = _tex2dCache.get(device);
     if (!dc) {
         dc = new Map();

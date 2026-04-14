@@ -1,7 +1,7 @@
 // Scene 16: Thin Instances — 64K colored cubes
 // Matches BJS playground #V1JE4Z#1
 
-import { createEngine, createSceneContext, createArcRotateCamera, createBox, createStandardMaterial, setThinInstances, setThinInstanceColors, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createBox, createStandardMaterial, setThinInstances, setThinInstanceColors, attachControl } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -57,9 +57,9 @@ async function main(): Promise<void> {
 
     setThinInstances(box, matricesData, instanceCount);
     setThinInstanceColors(box, colorData);
-    scene.add(box);
+    addToScene(scene, box);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

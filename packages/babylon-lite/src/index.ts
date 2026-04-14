@@ -2,8 +2,8 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine } from "./engine/engine.js";
-export { createSceneContext, createDefaultCamera, removeFromScene } from "./scene/scene.js";
+export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine } from "./engine/engine.js";
+export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene } from "./scene/scene.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -31,7 +31,7 @@ export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
-export type { LoaderResult } from "./loader-results.js";
+export type { AssetContainer } from "./asset-container.js";
 // ─── Hierarchy ───────────────────────────────────────────────────────
 export type { IWorldMatrixProvider, IParentable } from "./scene/parentable.js";
 export { setParent } from "./scene/set-parent.js";
@@ -60,10 +60,11 @@ export { addThinInstance, removeThinInstance, setThinInstanceMatrix, setThinInst
 export type { ThinInstanceData } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
-export type { Engine } from "./engine/engine.js";
+export type { EngineContext } from "./engine/engine.js";
 export type { SceneContext, ImageProcessingConfig } from "./scene/scene.js";
 export type { ArcRotateCamera } from "./camera/arc-rotate.js";
 export type { Camera } from "./camera/camera.js";
+export { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix, getCameraPosition } from "./camera/camera.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";

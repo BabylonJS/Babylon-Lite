@@ -17,8 +17,8 @@
 
 import type { SpotLight } from "../light/spot-light.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { Engine } from "../engine/engine.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { buildCasters, syncCasterMatrices, drawCasters, shadowMatrixChanged, writeShadowUboFields } from "./shadow-base.js";
 import depthVertSrc from "../../shaders/shadow-pcf-depth.vertex.wgsl?raw";
@@ -174,8 +174,8 @@ function computeSpotLightMatrix(light: SpotLight, near: number, far: number): { 
     return { viewProj, near, far };
 }
 
-export function createPcfShadowGenerator(engine: Engine, light: SpotLight, casterMeshes: Mesh[], cfg: PcfShadowGeneratorConfig = {}): ShadowGenerator {
-    const device = (engine as EngineInternal).device;
+export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight, casterMeshes: Mesh[], cfg: PcfShadowGeneratorConfig = {}): ShadowGenerator {
+    const device = (engine as EngineContextInternal).device;
     ensurePcfRegistered();
     const mapSize = cfg.mapSize ?? 512;
     const bias = cfg.bias ?? 0.00005;

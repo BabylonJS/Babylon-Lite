@@ -10,9 +10,9 @@
  * - Parent-child hierarchy via parentId
  */
 
-import type { Engine } from "../engine/engine.js";
-import type { EngineInternal } from "../engine/engine.js";
-import type { LoaderResult } from "../loader-results.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
+import type { AssetContainer } from "../asset-container.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { TransformNode } from "../scene/transform-node.js";
@@ -138,15 +138,15 @@ export interface LoadBabylonOptions {
 }
 
 /**
- * Load a .babylon scene file and return a LoaderResult.
- * Pass the result to scene.add() to populate the scene.
+ * Load a .babylon scene file and return a AssetContainer.
+ * Pass the result to addToScene() to populate the scene.
  *
  * @param engine - The engine (provides GPU device)
  * @param url - URL to the .babylon file
  * @param opts - Optional loader configuration
  */
-export async function loadBabylon(engine: Engine, url: string, opts: LoadBabylonOptions = {}): Promise<LoaderResult> {
-    const device = (engine as EngineInternal).device;
+export async function loadBabylon(engine: EngineContext, url: string, opts: LoadBabylonOptions = {}): Promise<AssetContainer> {
+    const device = (engine as EngineContextInternal).device;
     const baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
 
     const response = await fetch(url);
@@ -498,8 +498,8 @@ export async function loadBabylon(engine: Engine, url: string, opts: LoadBabylon
         }
     }
 
-    // Return LoaderResult — scene.add() handles entity registration, clearColor, and cleanup.
-    // Only root entities (not children of any other node) are included; scene.add() recurses.
+    // Return AssetContainer — addToScene() handles entity registration, clearColor, and cleanup.
+    // Only root entities (not children of any other node) are included; addToScene() recurses.
     const rootMeshes = allMeshes.filter((m) => !childNodeIds.has(m.id!));
     const rootTransformNodes: TransformNode[] = [];
     for (const [id, node] of nodeMap) {

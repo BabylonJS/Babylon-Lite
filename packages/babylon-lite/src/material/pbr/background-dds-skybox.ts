@@ -2,7 +2,7 @@
  *  Loads backgroundSkybox.dds and renders it with BJS image processing. */
 
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineInternal } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
 import { computeSkyboxGeometry } from "./background-renderable.js";
@@ -22,7 +22,7 @@ export async function buildDdsSkyboxRenderable(
     skyboxTextureUrl?: string,
     skyboxSize?: number
 ): Promise<Renderable> {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
 
     const { skyHalfSize, rootPosition } = computeSkyboxGeometry(scene, skyboxSize);

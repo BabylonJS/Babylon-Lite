@@ -1,7 +1,7 @@
 // Scene 18: Spotlight Hard Shadows (PCF) — FreeCamera + SpotLight + PCF Shadow Generator
 // Demonstrates new FreeCamera type and PCF shadow mapping for spot lights.
 
-import {
+import { addToScene, startEngine,
     createEngine,
     createSceneContext,
     createFreeCamera,
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     groundMat.emissiveColor = [0.2, 0.2, 0.2];
     ground.material = groundMat;
     ground.receiveShadows = true;
-    scene.add(ground);
+    addToScene(scene, ground);
 
     // Box — size 5 at (0, 5, 0), red diffuse, dark red specular
     const box = createBox(engine, 5);
@@ -44,11 +44,11 @@ async function main(): Promise<void> {
     boxMat.diffuseColor = [1.0, 0, 0];
     boxMat.specularColor = [0.5, 0, 0];
     box.material = boxMat;
-    scene.add(box);
+    addToScene(scene, box);
 
     // SpotLight at (0, 20, -10) pointing (0, -1, 0.3), angle=1.2, exponent=24
     const light = createSpotLight([0, 20, -10], [0, -1, 0.3], 1.2, 24);
-    scene.add(light);
+    addToScene(scene, light);
 
     // PCF Shadow Generator — box casts shadow onto ground
     light.shadowGenerator = createPcfShadowGenerator(engine, light, [box], {
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
         far: cam.farPlane,
     });
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

@@ -2,12 +2,12 @@
  *  Avoids loading an image — just writes 4 bytes to a tiny GPU texture. */
 
 import type { Texture2D } from "./texture-2d.js";
-import type { Engine } from "../engine/engine.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 
-export function createSolidTexture2D(engine: Engine, r: number, g: number, b: number, a: number = 1.0): Texture2D {
-    const device = (engine as EngineInternal).device;
+export function createSolidTexture2D(engine: EngineContext, r: number, g: number, b: number, a: number = 1.0): Texture2D {
+    const device = (engine as EngineContextInternal).device;
     const texture = device.createTexture({
         size: { width: 1, height: 1 },
         format: "rgba8unorm",

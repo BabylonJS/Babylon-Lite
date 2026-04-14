@@ -1,4 +1,4 @@
-import { createEngine, createSceneContext, createArcRotateCamera, attachControl, loadBabylon } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, loadBabylon } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -6,7 +6,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.add(await loadBabylon(engine, "https://www.babylonjs.com/Scenes/Sponza/Sponza.babylon"));
+    addToScene(scene, await loadBabylon(engine, "https://www.babylonjs.com/Scenes/Sponza/Sponza.babylon"));
 
     // Arc-rotate camera: same params used in BJS reference for parity
     scene.camera = createArcRotateCamera(
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     scene.camera.farPlane = 10000;
     attachControl(scene.camera, canvas, scene);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

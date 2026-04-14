@@ -6,7 +6,7 @@
  *  Renderables are created lazily by scene.build() before the first frame.
  *  Materials own their shaders and pipelines (pillar 4c). */
 
-import type { Engine } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 
 /** Something that draws itself into a render pass. */
@@ -30,20 +30,20 @@ export interface Renderable {
     /** Update dirty UBOs (world matrices) before draw. Called once per frame. */
     updateUBOs?(): void;
     /** Issue draw commands into the given render pass. Returns the number of GPU draw calls issued. */
-    draw(pass: GPURenderPassEncoder, engine: Engine): number;
+    draw(pass: GPURenderPassEncoder, engine: EngineContext): number;
 }
 
 /** Something that runs before the main render pass (shadow maps, compute, etc.). */
 export interface PrePassRenderable {
     /** Execute pre-pass work (e.g., render shadow depth map + blur). Returns the number of GPU draw calls issued. */
-    execute(encoder: GPUCommandEncoder, engine: Engine): number;
+    execute(encoder: GPUCommandEncoder, engine: EngineContext): number;
 }
 
 /** Updatable scene uniforms — called once per frame before any draw calls.
  *  Multiple renderables may share a scene UBO; only one updater is needed per UBO. */
 export interface SceneUniformUpdater {
     /** Write per-frame camera/light/fog data to the scene UBO. */
-    update(engine: Engine): void;
+    update(engine: EngineContext): void;
 }
 
 /** Build result from a mesh group builder. */

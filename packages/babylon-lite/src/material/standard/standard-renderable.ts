@@ -3,8 +3,8 @@
  *  Uses the dynamic pipeline system: each mesh's material features produce a
  *  pipeline key, and meshes are grouped by key to minimise state changes. */
 
-import type { Engine } from "../../engine/engine.js";
-import type { EngineInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
@@ -13,6 +13,7 @@ import type { LightBase } from "../../light/types.js";
 import { updateSceneUniforms, collectStdBoundTextures } from "./standard-material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import type { PbrMaterialProps } from "../pbr/pbr-material.js";
+import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../../camera/camera.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import {
     computeFeatures,
@@ -77,7 +78,7 @@ export interface StdFragmentFactories {
 /** Build Renderable(s) + a SceneUniformUpdater for a set of standard meshes.
  *  Groups meshes by feature bitmask to minimise pipeline state changes. */
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): { renderables: Renderable[]; updater: SceneUniformUpdater } {
-    const engine = scene.engine as EngineInternal;
+    const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
 
     // Collect per-light shadow info
@@ -301,7 +302,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
     // Scene uniform updater — writes shared scene UBO once + refreshes light UBOs
     const updater: SceneUniformUpdater = {
-        update(engine: Engine) {
+        update(engine: EngineContext) {
             if (!scene.camera || !sharedSceneUBO) {
                 return;
             }
@@ -312,9 +313,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 _lastCamVersion = camVer;
                 _lastAspect = aspect;
                 _lastFog = scene.fog;
-                const viewProj = scene.camera.getViewProjectionMatrix(aspect);
-                const viewMat = scene.camera.getViewMatrix();
-                const camPos = scene.camera.getPosition();
+                const viewProj = getViewProjectionMatrix(scene.camera, aspect);
+                const viewMat = getViewMatrix(scene.camera);
+                const camPos = getCameraPosition(scene.camera);
                 updateSceneUniforms(device, sharedSceneUBO, viewProj as Float32Array, viewMat as Float32Array, [camPos.x, camPos.y, camPos.z], scene.fog ?? undefined);
             }
             // Refresh light UBOs only when light state has changed

@@ -1,8 +1,8 @@
 import type { Mat4 } from "../math/types.js";
-import type { Engine } from "../engine/engine.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
-import type { LoaderResult } from "../loader-results.js";
+import type { AssetContainer } from "../asset-container.js";
 import { createTransformNode } from "../scene/transform-node.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
@@ -66,10 +66,10 @@ export interface GltfSkinData {
  * Registers a deferred PBR renderable builder.
  * Automatically parses glTF animations if present.
  *
- * Returns a LoaderResult. Pass it to scene.add() which adds the hierarchy,
+ * Returns a AssetContainer. Pass it to addToScene() which adds the hierarchy,
  * registers animation ticks, and applies any scene-level settings.
  */
-export async function loadGltf(engine: Engine, url: string): Promise<LoaderResult> {
+export async function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer> {
     const isGlb = url.toLowerCase().endsWith(".glb");
     let json: any;
     let binChunk: DataView;
@@ -102,7 +102,7 @@ export async function loadGltf(engine: Engine, url: string): Promise<LoaderResul
     const animModulePromise = hasAnimations ? Promise.all([import("./gltf-animation.js"), import("../animation/animation-group.js")]) : null;
 
     const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache);
-    const meshes = await uploadMeshes((engine as EngineInternal).device, meshDatas);
+    const meshes = await uploadMeshes((engine as EngineContextInternal).device, meshDatas);
 
     // Build TransformNode hierarchy from glTF nodes.
     // Hierarchy meshes get their worldMatrix cleared — the tree computes it.
@@ -119,7 +119,7 @@ export async function loadGltf(engine: Engine, url: string): Promise<LoaderResul
         }
     }
 
-    // Return LoaderResult — scene.add() handles hierarchy, animation ticks, and clearColor.
+    // Return AssetContainer — addToScene() handles hierarchy, animation ticks, and clearColor.
     return { entities: [root], animationGroups };
 }
 
@@ -128,7 +128,7 @@ export async function loadGltf(engine: Engine, url: string): Promise<LoaderResul
 /** Build a TransformNode tree mirroring the glTF node hierarchy.
  *  Meshes are attached as children. Non-mesh nodes become
  *  pure TransformNodes preserving TRS for cloning/repositioning.
- *  Parent links are set by scene.add() when the tree is added to the scene. */
+ *  Parent links are set by addToScene() when the tree is added to the scene. */
 function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]): TransformNode {
     // Map nodeIndex → uploaded Mesh[]
     const nodeToMeshes = new Map<number, Mesh[]>();

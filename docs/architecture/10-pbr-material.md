@@ -402,7 +402,7 @@ Per-light shadow info UBOs, shadow textures, and shadow samplers.
 
 ## `_buildGroup` Pattern
 
-`pbr-material.ts` exports `pbrGroupBuilder`, a `MeshGroupBuilder` function that dynamically imports `pbr-renderable.js` at build time. This function is set as the `_buildGroup` field on every PBR material created by `createPbrMaterial()`. At `engine.start()`, `scene.ts` calls each mesh's `material._buildGroup`, grouping meshes by builder identity so that all PBR meshes are batched together for a single `buildPbrRenderables()` call.
+`pbr-material.ts` exports `pbrGroupBuilder`, a `MeshGroupBuilder` function that dynamically imports `pbr-renderable.js` at build time. This function is set as the `_buildGroup` field on every PBR material created by `createPbrMaterial()`. At `startEngine()`, `scene.ts` calls each mesh's `material._buildGroup`, grouping meshes by builder identity so that all PBR meshes are batched together for a single `buildPbrRenderables()` call.
 
 The builder also stashes `_buildGroup._rebuildSingle` for hot material swapping — `pbr-single-rebuild.ts` is lazily loaded to rebuild a single mesh renderable without tearing down the entire scene.
 

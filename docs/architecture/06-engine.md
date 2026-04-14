@@ -9,33 +9,33 @@ The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adap
 
 ```typescript
 /** Handle to the WebGPU engine — public API surface.
- *  GPU internals (device, context, format) are @internal (EngineInternal) — not user-facing. */
-export interface Engine {
+ *  GPU internals (device, context, format) are @internal (EngineContextInternal) — not user-facing. */
+export interface EngineContext {
   readonly canvas: HTMLCanvasElement;
   readonly msaaSamples: number;           // always 4
 
   /** GPU draw calls executed in the last rendered frame. */
   drawCallCount: number;
-
-  /** Start the render loop for the given scene. Resolves after the first frame renders. */
-  start(scene: SceneContext): Promise<void>;
-  /** Stop the render loop. */
-  stop(): void;
-  /** Resize render targets to match canvas size. */
-  resize(): void;
-  /** Release all engine-owned GPU resources (render targets, device). */
-  dispose(): void;
 }
 
+/** Start the render loop for the given scene. Resolves after the first frame renders. */
+export function startEngine(engine: EngineContext, scene: SceneContext): Promise<void>;
+/** Stop the render loop. */
+export function stopEngine(engine: EngineContext): void;
+/** Resize render targets to match canvas size. */
+export function resizeEngine(engine: EngineContext): void;
+/** Release all engine-owned GPU resources (render targets, device). */
+export function disposeEngine(engine: EngineContext): void;
+
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
-export async function createEngine(canvas: HTMLCanvasElement): Promise<Engine>;
+export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineContext>;
 ```
 
 ### Internal Types (not exported)
 
 ```typescript
 /** @internal — GPU internals accessible only to renderable/loader code. */
-interface EngineInternal extends Engine {
+interface EngineContextInternal extends EngineContext {
   readonly device: GPUDevice;
   readonly context: GPUCanvasContext;
   readonly format: GPUTextureFormat;
@@ -90,15 +90,15 @@ The bitwise OR with 0 (`| 0`) truncates to integer.
 
 ### Render Loop
 
-`start()` returns a `Promise<void>` that resolves after the first frame has been rendered:
+`startEngine(engine, scene)` returns a `Promise<void>` that resolves after the first frame has been rendered:
 
 ```
-start(scene):
+startEngine(engine, scene):
   await scene._build()          // runs all deferred builders
   sort scene._renderables by order
   return new Promise(resolve => {
     renderFn = (now) => {
-      resize();
+      resizeEngine(engine);
       deltaMs = now - prev (or scene._fixedDeltaMs if set)
       call scene._beforeRender callbacks with deltaMs
       renderFrame(engine, targets, scene);
@@ -109,7 +109,7 @@ start(scene):
     animFrameId = requestAnimationFrame(renderFn);
   })
 
-stop():
+stopEngine(engine):
   cancelAnimationFrame(animFrameId);
   animFrameId = 0; renderFn = null;
 ```
@@ -133,8 +133,8 @@ Each frame consists of:
 
 ### Deferred Builder Execution
 
-When `engine.start(scene)` is called:
-1. **Await** `scene._build()` — runs all deferred builders (creates pipelines, bind groups, renderables). This is async because builders may perform async work.
+When `startEngine(engine, scene)` is called:
+1. **Await** `buildScene(scene)` — runs all deferred builders (creates pipelines, bind groups, renderables). This is async because builders may perform async work.
 2. Sort `scene._renderables` by `order` (ascending)
 3. Begin the rAF render loop
 4. The returned Promise resolves after the first `renderFrame()` call completes
@@ -144,15 +144,15 @@ The 4× MSAA texture (`targets.msaaView`) is automatically resolved to the swap 
 ## State Machine / Lifecycle
 
 ```
-[Created] --start()--> [Building (await _build)] --> [Running (rAF loop)]
+[Created] --startEngine(engine, scene)--> [Building (await buildScene)] --> [Running (rAF loop)]
                                                           |
-                                                      resize() each frame
+                                                      resizeEngine(engine) each frame
                                                       _beforeRender(deltaMs) each frame
                                                       renderFrame() each frame
                                                           |
-                                          --stop()----> [Stopped]
+                                          --stopEngine(engine)----> [Stopped]
                                                           |
-                                          --start()----> [Building] --> [Running]
+                                          --startEngine(engine, scene)----> [Building] --> [Running]
 ```
 
 ## Babylon.js Equivalence Map
@@ -163,9 +163,9 @@ The 4× MSAA texture (`targets.msaaView`) is automatically resolved to the swap 
 | `engine.device` | `engine._device` |
 | `engine.format` | `engine._textureHelper._glslang.getPreferredFormat()` |
 | `engine.msaaSamples` (always 4) | `engine._samples` (configurable) |
-| `engine.start(scene)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
-| `engine.stop()` | `engine.stopRenderLoop()` |
-| `engine.resize()` | `engine.resize()` |
+| `startEngine(engine, scene)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
+| `stopEngine(engine)` | `engine.stopRenderLoop()` |
+| `resizeEngine(engine)` | `engine.resize()` |
 | MSAA render targets | Engine internally manages MSAA framebuffers |
 | `scene._prePasses` iteration | `scene.onBeforeRenderObservable` |
 | `scene._uniformUpdaters` iteration | Internal UBO update during frame |

@@ -153,5 +153,5 @@ void (async function () {
         }
     });
 
-    window.addEventListener("resize", () => engine.resize());
+    window.addEventListener("resize", () => resizeEngine(engine));
 })();

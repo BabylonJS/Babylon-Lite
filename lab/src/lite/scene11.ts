@@ -2,7 +2,7 @@
 // Animated shark model, rotated camera to show the side profile.
 // Only plays the "swimming" animation for deterministic parity.
 
-import { createEngine, createSceneContext, createDefaultCamera, createHemisphericLight, loadGltf, attachControl } from "babylon-lite";
+import { onBeforeRender, addToScene, stopEngine, startEngine, createEngine, createSceneContext, createDefaultCamera, createHemisphericLight, loadGltf, attachControl } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -11,12 +11,12 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.14, g: 0.14, b: 0.14, a: 1.0 };
 
-    scene.add(await loadGltf(engine, "https://models.babylonjs.com/shark.glb"));
+    addToScene(scene, await loadGltf(engine, "https://models.babylonjs.com/shark.glb"));
 
     // Only play "swimming" animation (stop circling + bite)
     for (const g of scene.animationGroups) {
         if (g.name !== "swimming") {
-            g.stop();
+            stopEngine(g);
         }
     }
 
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     cam.beta = Math.PI / 2.2; // slight elevation
     attachControl(cam, canvas, scene);
 
-    scene.add(createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     // Fixed timestep for deterministic animation (matches BJS useConstantAnimationDeltaTime)
     scene.fixedDeltaMs = 16.0;
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     const seekTimeParam = parseFloat(params.get("seekTime") || "");
     let frameCount = 0;
     let seekDone = false;
-    scene.onBeforeRender(() => {
+    onBeforeRender(scene, () => {
         frameCount++;
         canvas.dataset.frameCount = String(frameCount);
 
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
         }
     });
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

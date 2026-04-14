@@ -1,29 +1,25 @@
 import type { SceneContext } from "../scene/scene.js";
+import type { SceneContextInternal } from "../scene/scene.js";
+import { buildScene, processMaterialSwaps } from "../scene/scene.js";
+import { getCameraPosition } from "../camera/camera.js";
 
-/** Handle to the WebGPU engine — public API surface. */
-export interface Engine {
+/** Handle to the WebGPU engine — pure state, no attached methods. */
+export interface EngineContext {
     readonly canvas: HTMLCanvasElement;
     readonly msaaSamples: number;
 
     /** Number of GPU draw calls in the last rendered frame. */
     drawCallCount: number;
-
-    /** Start the render loop for the given scene.
-     *  Resolves after the first frame has been rendered. */
-    start(scene: SceneContext): Promise<void>;
-    /** Stop the render loop. */
-    stop(): void;
-    /** Resize render targets to match canvas size. */
-    resize(): void;
-    /** Release all engine-owned GPU resources (render targets, device). */
-    dispose(): void;
 }
 
 /** @internal Engine with GPU internals exposed. Not re-exported from index.ts. */
-export interface EngineInternal extends Engine {
+export interface EngineContextInternal extends EngineContext {
     readonly device: GPUDevice;
     readonly context: GPUCanvasContext;
     readonly format: GPUTextureFormat;
+    _targets: RenderTargets;
+    _animFrameId: number;
+    _renderFn: ((now: number) => void) | null;
 }
 
 interface RenderTargets {
@@ -36,7 +32,7 @@ interface RenderTargets {
 }
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
-export async function createEngine(canvas: HTMLCanvasElement): Promise<Engine> {
+export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineContext> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
@@ -56,98 +52,106 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<Engine> {
     context.configure({ device, format, alphaMode: "opaque" });
 
     const msaaSamples = 4;
-    let targets = createRenderTargets(device, canvas.width, canvas.height, format, msaaSamples);
-    let animFrameId = 0;
-    let renderFn: ((now: number) => void) | null = null;
 
-    function resize(): void {
-        const w = (canvas.clientWidth * devicePixelRatio) | 0;
-        const h = (canvas.clientHeight * devicePixelRatio) | 0;
-        if (w === targets.width && h === targets.height) {
-            return;
-        }
-        canvas.width = w;
-        canvas.height = h;
-        context!.configure({ device, format, alphaMode: "opaque" });
-        targets.msaaTexture.destroy();
-        targets.depthTexture.destroy();
-        targets = createRenderTargets(device, w, h, format, msaaSamples);
-    }
-
-    const engine: EngineInternal = {
+    const engine: EngineContextInternal = {
         device,
         context,
         format,
         canvas,
         msaaSamples,
         drawCallCount: 0,
-
-        start(scene: SceneContext): Promise<void> {
-            return new Promise<void>((resolve) => {
-                const boot = async () => {
-                    // Run deferred builders (entities register these at add/load time)
-                    await scene._build();
-                    // Split renderables into opaque and transparent
-                    for (const r of scene._renderables) {
-                        if (r.isTransparent) {
-                            scene._transparentRenderables.push(r);
-                        } else {
-                            scene._opaqueRenderables.push(r);
-                        }
-                    }
-                    // Sort opaque by render order (stable sort)
-                    scene._opaqueRenderables.sort((a, b) => a.order - b.order);
-                    // Also keep _renderables sorted for pre-passes and legacy consumers
-                    scene._renderables.sort((a, b) => a.order - b.order);
-
-                    let lastTime = 0;
-                    let firstFrame = true;
-                    renderFn = (now: number) => {
-                        // First frame: delta=0 (matches Babylon.js _localDelayOffset which
-                        // absorbs the first accumulated deltaTime, so frame 1 evaluates at t=0)
-                        const delta = firstFrame ? 0 : scene._fixedDeltaMs > 0 ? scene._fixedDeltaMs : lastTime > 0 ? now - lastTime : 16.667;
-                        lastTime = now;
-                        resize();
-                        for (const cb of scene._beforeRender) {
-                            cb(delta);
-                        }
-                        if (scene._materialSwapQueue.length > 0) {
-                            scene._processMaterialSwaps();
-                        }
-                        renderFrame(engine, targets, scene);
-                        if (firstFrame) {
-                            firstFrame = false;
-                            resolve();
-                        }
-                        animFrameId = requestAnimationFrame(renderFn!);
-                    };
-                    animFrameId = requestAnimationFrame(renderFn);
-                };
-                void boot();
-            });
-        },
-
-        stop() {
-            if (animFrameId) {
-                cancelAnimationFrame(animFrameId);
-            }
-            animFrameId = 0;
-            renderFn = null;
-        },
-
-        resize,
-
-        dispose() {
-            engine.stop();
-            targets.msaaTexture.destroy();
-            targets.depthTexture.destroy();
-            context.unconfigure();
-            // Pipeline caches auto-clear on device change (no side-effect registry needed)
-            device.destroy();
-        },
+        _targets: createRenderTargets(device, canvas.width, canvas.height, format, msaaSamples),
+        _animFrameId: 0,
+        _renderFn: null,
     };
 
     return engine;
+}
+
+/** Resize render targets to match canvas size. */
+export function resizeEngine(engine: EngineContext): void {
+    const eng = engine as EngineContextInternal;
+    const canvas = eng.canvas;
+    const w = (canvas.clientWidth * devicePixelRatio) | 0;
+    const h = (canvas.clientHeight * devicePixelRatio) | 0;
+    if (w === eng._targets.width && h === eng._targets.height) {
+        return;
+    }
+    canvas.width = w;
+    canvas.height = h;
+    eng.context.configure({ device: eng.device, format: eng.format, alphaMode: "opaque" });
+    eng._targets.msaaTexture.destroy();
+    eng._targets.depthTexture.destroy();
+    eng._targets = createRenderTargets(eng.device, w, h, eng.format, eng.msaaSamples);
+}
+
+/** Start the render loop for the given scene. Resolves after the first frame has been rendered. */
+export function startEngine(engine: EngineContext, scene: SceneContext): Promise<void> {
+    const eng = engine as EngineContextInternal;
+    const sc = scene as SceneContextInternal;
+    return new Promise<void>((resolve) => {
+        const boot = async () => {
+            // Run deferred builders (entities register these at add/load time)
+            await buildScene(scene);
+            // Split renderables into opaque and transparent
+            for (const r of sc._renderables) {
+                if (r.isTransparent) {
+                    sc._transparentRenderables.push(r);
+                } else {
+                    sc._opaqueRenderables.push(r);
+                }
+            }
+            // Sort opaque by render order (stable sort)
+            sc._opaqueRenderables.sort((a, b) => a.order - b.order);
+            // Also keep _renderables sorted for pre-passes and legacy consumers
+            sc._renderables.sort((a, b) => a.order - b.order);
+
+            let lastTime = 0;
+            let firstFrame = true;
+            eng._renderFn = (now: number) => {
+                // First frame: delta=0 (matches Babylon.js _localDelayOffset which
+                // absorbs the first accumulated deltaTime, so frame 1 evaluates at t=0)
+                const delta = firstFrame ? 0 : sc._fixedDeltaMs > 0 ? sc._fixedDeltaMs : lastTime > 0 ? now - lastTime : 16.667;
+                lastTime = now;
+                resizeEngine(engine);
+                for (const cb of sc._beforeRender) {
+                    cb(delta);
+                }
+                if (sc._materialSwapQueue.length > 0) {
+                    processMaterialSwaps(scene);
+                }
+                renderFrame(eng, eng._targets, sc);
+                if (firstFrame) {
+                    firstFrame = false;
+                    resolve();
+                }
+                eng._animFrameId = requestAnimationFrame(eng._renderFn!);
+            };
+            eng._animFrameId = requestAnimationFrame(eng._renderFn);
+        };
+        void boot();
+    });
+}
+
+/** Stop the render loop. */
+export function stopEngine(engine: EngineContext): void {
+    const eng = engine as EngineContextInternal;
+    if (eng._animFrameId) {
+        cancelAnimationFrame(eng._animFrameId);
+    }
+    eng._animFrameId = 0;
+    eng._renderFn = null;
+}
+
+/** Release all engine-owned GPU resources (render targets, device). */
+export function disposeEngine(engine: EngineContext): void {
+    const eng = engine as EngineContextInternal;
+    stopEngine(engine);
+    eng._targets.msaaTexture.destroy();
+    eng._targets.depthTexture.destroy();
+    eng.context.unconfigure();
+    // Pipeline caches auto-clear on device change (no side-effect registry needed)
+    eng.device.destroy();
 }
 
 function createRenderTargets(device: GPUDevice, width: number, height: number, format: GPUTextureFormat, sampleCount: number): RenderTargets {
@@ -173,7 +177,7 @@ function createRenderTargets(device: GPUDevice, width: number, height: number, f
     };
 }
 
-function renderFrame(engine: EngineInternal, targets: RenderTargets, scene: SceneContext): void {
+function renderFrame(engine: EngineContextInternal, targets: RenderTargets, scene: SceneContextInternal): void {
     const swapChainView = engine.context.getCurrentTexture().createView();
     const encoder = engine.device.createCommandEncoder();
 
@@ -210,7 +214,7 @@ function renderFrame(engine: EngineInternal, targets: RenderTargets, scene: Scen
     // Per-frame transparent sort by camera distance (back-to-front)
     const cam = scene.camera;
     if (scene._transparentRenderables.length > 1 && cam) {
-        const camPos = cam.getPosition();
+        const camPos = getCameraPosition(cam);
         const cx = camPos.x,
             cy = camPos.y,
             cz = camPos.z;

@@ -4,7 +4,7 @@
 // Cube 2 (Std): default standard material, 2 thin instances (green/blue), negative X scale
 // Ground: 6×6 standard material
 
-import {
+import { addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     attachControl(scene.camera, canvas, scene);
 
     // Hemispheric light
-    scene.add(createHemisphericLight([0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
 
     // Environment for PBR IBL — load DDS prefiltered cubemap (matching BJS scene)
     await loadDdsEnvironment(scene, "https://playground.babylonjs.com/textures/environment.dds", {
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
 
     const colors1 = new Float32Array([1, 1, 0, 1, 1, 0, 0, 1]); // yellow, red
     setThinInstanceColors(cube1, colors1);
-    scene.add(cube1);
+    addToScene(scene, cube1);
 
     // ── Cube 2: Standard material with thin instances ──
     const cube2 = createBox(engine);
@@ -91,14 +91,14 @@ async function main(): Promise<void> {
 
     const colors2 = new Float32Array([0, 1, 0, 1, 0, 0, 1, 1]); // green, blue
     setThinInstanceColors(cube2, colors2);
-    scene.add(cube2);
+    addToScene(scene, cube2);
 
     // ── Ground ──
     const ground = createGround(engine, { width: 6, height: 6 });
     ground.material = createStandardMaterial();
-    scene.add(ground);
+    addToScene(scene, ground);
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

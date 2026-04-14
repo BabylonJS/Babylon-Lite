@@ -2,7 +2,7 @@
 // Loads PBR_Spheres.glb with varying metallic/roughness/baseColor materials.
 // Uses default environment (environmentSpecular.env) + hemispheric light.
 
-import { createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.add(await loadGltf(engine, "https://assets.babylonjs.com/meshes/PBR_Spheres.glb"));
+    addToScene(scene, await loadGltf(engine, "https://assets.babylonjs.com/meshes/PBR_Spheres.glb"));
     await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
         groundTextureUrl: "https://assets.babylonjs.com/core/environments/backgroundGround.png",
         skipSkybox: true,
@@ -21,9 +21,9 @@ async function main(): Promise<void> {
     const cam = createDefaultCamera(scene);
     attachControl(cam, canvas, scene);
 
-    scene.add(createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

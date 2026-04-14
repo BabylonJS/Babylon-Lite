@@ -1,5 +1,5 @@
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 
@@ -54,7 +54,7 @@ export async function loadEnvironment(
         brdfUrl: string;
     }
 ): Promise<EnvironmentTextures> {
-    const device = (scene.engine as EngineInternal).device;
+    const device = (scene.engine as EngineContextInternal).device;
 
     // Fetch .env and BRDF PNG in parallel
     const envPromise = fetch(url).then((r) => r.arrayBuffer());

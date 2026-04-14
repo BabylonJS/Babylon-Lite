@@ -1,4 +1,4 @@
-import { createEngine, createSceneContext, createDefaultCamera, loadGltf, createHemisphericLight, attachControl } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadGltf, createHemisphericLight, attachControl } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -7,7 +7,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.add(await loadGltf(engine, "https://playground.babylonjs.com/scenes/Alien/Alien.gltf"));
+    addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/Alien/Alien.gltf"));
 
     const cam = createDefaultCamera(scene);
     cam.alpha = Math.PI / 2;
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
     cam.target = { x: 0, y: 0, z: 0 };
     attachControl(cam, canvas, scene);
 
-    scene.add(createHemisphericLight([0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
 
     // Fixed timestep matching Babylon.js useConstantAnimationDeltaTime (16.0ms)
     scene.fixedDeltaMs = 16.0;
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     const seekTimeParam = parseFloat(params.get("seekTime") || "");
     let frameCount = 0;
     let seekDone = false;
-    scene.onBeforeRender(() => {
+    onBeforeRender(scene, () => {
         frameCount++;
         canvas.dataset.frameCount = String(frameCount);
 
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
         }
     });
 
-    await engine.start(scene);
+    await startEngine(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

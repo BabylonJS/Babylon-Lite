@@ -4,16 +4,16 @@ import type { AnimationGroup } from "./animation/animation-group.js";
 
 /**
  * Result returned by loadGltf / loadBabylon.
- * Pass directly to scene.add() — it handles all fields automatically.
+ * Pass directly to addToScene() — it handles all fields automatically.
  *
  * - glTF: entities = [root TransformNode], animationGroups = loaded clips
  * - .babylon: entities = root SceneNodes (Mesh/TransformNode) + LightBase, clearColor from file
  */
-export interface LoaderResult {
+export interface AssetContainer {
     /** Scene entities. glTF: [root TransformNode]. .babylon: root nodes + lights. */
     entities: Array<SceneNode | LightBase>;
-    /** Animation groups from the file. scene.add() registers their per-frame tick automatically. */
+    /** Animation groups from the file. addToScene() registers their per-frame tick automatically. */
     animationGroups?: AnimationGroup[];
-    /** Scene background color declared in the file. scene.add() applies it to scene.clearColor. */
+    /** Scene background color declared in the file. addToScene() applies it to scene.clearColor. */
     clearColor?: GPUColorDict;
 }

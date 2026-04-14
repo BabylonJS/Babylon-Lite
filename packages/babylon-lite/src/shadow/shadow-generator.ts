@@ -18,8 +18,8 @@
 
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { Engine } from "../engine/engine.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { buildCasters, syncCasterMatrices, drawCasters, shadowMatrixChanged, writeShadowUboFields } from "./shadow-base.js";
 import depthVertSrc from "../../shaders/shadow-depth.vertex.wgsl?raw";
@@ -199,8 +199,8 @@ function computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: Me
     return { viewProj, near, far };
 }
 
-export function createShadowGenerator(engine: Engine, light: DirectionalLight, casterMeshes: Mesh[], cfg: ShadowGeneratorConfig = {}): ShadowGenerator {
-    const device = (engine as EngineInternal).device;
+export function createShadowGenerator(engine: EngineContext, light: DirectionalLight, casterMeshes: Mesh[], cfg: ShadowGeneratorConfig = {}): ShadowGenerator {
+    const device = (engine as EngineContextInternal).device;
     const mapSize = cfg.mapSize ?? 1024;
     const depthScale = cfg.depthScale ?? 50;
     const bias = cfg.bias ?? 0.00005;

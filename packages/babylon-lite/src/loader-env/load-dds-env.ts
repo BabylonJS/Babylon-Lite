@@ -1,5 +1,5 @@
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import type { EngineInternal } from "../engine/engine.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
@@ -214,7 +214,7 @@ function shToPolynomial(sh: Float64Array): Float32Array {
  * from mip 0 face data for irradiance lighting.
  */
 export async function loadDdsEnvironment(scene: SceneContext, url: string, options: { brdfUrl: string; skipSkybox?: boolean; skipGround?: boolean }): Promise<EnvironmentTextures> {
-    const device = (scene.engine as EngineInternal).device;
+    const device = (scene.engine as EngineContextInternal).device;
 
     // Fetch DDS and BRDF PNG in parallel
     const ddsPromise = fetch(url).then((r) => r.arrayBuffer());

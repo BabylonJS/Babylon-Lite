@@ -4,7 +4,7 @@
 // clearcoat enabled with IOR=2.0. No direct light — only IBL from DDS env +
 // default hemispheric light from createDefaultCamera equivalent.
 
-import {
+import { addToScene, startEngine,
     createEngine,
     createSceneContext,
     createArcRotateCamera,
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
     attachControl(scene.camera, canvas, scene);
 
     // Hemispheric light (BJS createDefaultCamera creates a hemi light with intensity 0.7)
-    scene.add(createHemisphericLight([0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
 
     // DDS environment for IBL
     await loadDdsEnvironment(scene, "https://playground.babylonjs.com/textures/environment.dds", {
@@ -56,8 +56,8 @@ async function main(): Promise<void> {
         },
     });
 
-    scene.add(sphere);
-    await engine.start(scene);
+    addToScene(scene, sphere);
+    await startEngine(engine, scene);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

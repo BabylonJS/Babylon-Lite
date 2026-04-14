@@ -39,8 +39,16 @@
 - **Only the scene knows its contents.** Components never reference the scene.
 - A light is plain data. A camera is plain data. A mesh is plain data. None of them hold a reference to the scene.
 - The scene holds arrays of lights, cameras, meshes. The scene is the owner.
-- Factory functions like `createHemisphericLight()` return plain data — they do NOT take a scene parameter. The caller adds the result to the scene.
+- Factory functions like `createHemisphericLight()` return plain data — they do NOT take a scene parameter. The caller adds the result to the scene via `addToScene()`.
 - This ensures zero circular dependencies, trivial serialization, and maximum tree-shakability.
+
+### 4b′. Pure State Interfaces (Critical)
+
+- **All public interfaces are pure state — no attached methods.**
+- `EngineContext`, `SceneContext`, `Camera`, `ArcRotateCamera`, `FreeCamera`, `Mesh`, `LightBase`, etc. are plain data objects.
+- Behaviour is provided by standalone functions that accept the interface as their first argument: `startEngine(engine, scene)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
+- This maximises tree-shakability: unused functions are fully eliminated. Methods on interfaces cannot be tree-shaken.
+- Internal interfaces (`SceneContextInternal`, `EngineContextInternal`) follow the same rule — no methods.
 
 ### 4d. No GPU Internals in Public API (Critical)
 
@@ -82,18 +90,18 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    await loadGltf(scene, "https://playground.babylonjs.com/scenes/BoomBox.glb");
+    addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/BoomBox.glb"));
     await loadEnvironment(scene, ".../environment.env");
 
     // Components are plain data — scene is the owner
     const light = createHemisphericLight([0, 1, 0], 0.7);
-    scene.add(light);
+    addToScene(scene, light);
 
     const camera = createDefaultCamera(scene);
     camera.alpha += Math.PI;
 
     // Materials own their renderable builders — no explicit pipeline building
-    await engine.start(scene); // resolves after first frame rendered
+    await startEngine(engine, scene); // resolves after first frame rendered
 }
 ```
 

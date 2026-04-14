@@ -1,6 +1,6 @@
 import type { FreeCamera } from "./free-camera.js";
 import type { FreeCameraInternal } from "./free-camera.js";
-import type { SceneContext } from "../scene/scene.js";
+import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
 
 /**
  * Attach keyboard + mouse controls to a FreeCamera.
@@ -154,7 +154,7 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
 
     // ─── Register / cleanup ──────────────────────────────────────────────
     if (scene) {
-        scene._beforeRender.push(update);
+        (scene as SceneContextInternal)._beforeRender.push(update);
     }
 
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -169,9 +169,9 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
 
     return () => {
         if (scene) {
-            const idx = scene._beforeRender.indexOf(update);
+            const idx = (scene as SceneContextInternal)._beforeRender.indexOf(update);
             if (idx >= 0) {
-                scene._beforeRender.splice(idx, 1);
+                (scene as SceneContextInternal)._beforeRender.splice(idx, 1);
             }
         }
         canvas.removeEventListener("pointerdown", onPointerDown);
