@@ -172,7 +172,7 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
                 _lastWorldVersion = mesh.worldMatrixVersion;
             }
         },
-        draw(pass: GPURenderPassEncoder) {
+        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder) {
             if (mesh.material !== mat) {
                 return 0;
             }

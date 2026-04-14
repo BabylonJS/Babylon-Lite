@@ -42,7 +42,7 @@ export const standardGroupBuilder: MeshGroupBuilder & { _loadRebuildSingle?: () 
     const hasOpacity = meshes.some((m) => !!(m.material as any).opacityTexture);
     const hasReflection = meshes.some((m) => !!(m.material as any).reflectionTexture);
 
-    let tiSync: ((device: GPUDevice, ti: any, pass: GPURenderPassEncoder, slot: number, hasColor: boolean) => number) | undefined;
+    let tiSync: ((device: GPUDevice, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
     let tiFragment: any;
     let bumpFragment: any;
     let shadowFragment: any;

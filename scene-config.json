@@ -37,7 +37,7 @@
         "name": "Scene 4 \u2014 Shadows",
         "maxMad": 0.025,
         "maxRawKB": 74,
-        "maxGzipKB": 26,
+        "maxGzipKB": 27,
         "description": "DirectionalLight, ESM shadow map with blur, heightmap ground, torus caster.",
         "tags": ["shadow", "procedural", "std"]
     },

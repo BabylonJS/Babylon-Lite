@@ -13,6 +13,7 @@ import { updateSceneUniforms, collectStdBoundTextures } from "./standard-materia
 import type { StandardMaterialProps } from "./standard-material.js";
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
 import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../../camera/camera.js";
+import { computeLightsVersion } from "../../render/lights-ubo.js";
 import {
     computeFeatures,
     getOrCreatePipeline,
@@ -61,6 +62,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
     });
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
+    let _lastLightsVersion = -1;
     const lightsScratch = new Float32Array(LIGHTS_UBO_SIZE / 4);
 
     const needsUV = (features & NEEDS_UV) !== 0;
@@ -84,16 +86,25 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 
     if (!(scene as SceneContextInternal)._standardSceneUBO) {
         (scene as SceneContextInternal)._standardSceneUBO = variant.sceneUBO;
+        let _lastCamVersion = -1;
+        let _lastAspect = -1;
+        let _lastFog: typeof scene.fog = null;
         (scene as SceneContextInternal)._uniformUpdaters.push({
             update(engine: EngineContext) {
                 if (!scene.camera) {
                     return;
                 }
                 const aspect = engine.canvas.width / engine.canvas.height;
-                const viewProj = getViewProjectionMatrix(scene.camera, aspect);
-                const viewMat = getViewMatrix(scene.camera);
-                const camPos = getCameraPosition(scene.camera);
-                updateSceneUniforms(device, variant.sceneUBO, viewProj as Float32Array, viewMat as Float32Array, [camPos.x, camPos.y, camPos.z], scene.fog ?? undefined);
+                const camVer = scene.camera.worldMatrixVersion;
+                if (camVer !== _lastCamVersion || aspect !== _lastAspect || scene.fog !== _lastFog) {
+                    _lastCamVersion = camVer;
+                    _lastAspect = aspect;
+                    _lastFog = scene.fog;
+                    const viewProj = getViewProjectionMatrix(scene.camera, aspect);
+                    const viewMat = getViewMatrix(scene.camera);
+                    const camPos = getCameraPosition(scene.camera);
+                    updateSceneUniforms(device, variant.sceneUBO, viewProj as Float32Array, viewMat as Float32Array, [camPos.x, camPos.y, camPos.z], scene.fog ?? undefined);
+                }
             },
         });
     }
@@ -116,10 +127,14 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
                 writeStdMaterialData(_singleStdScratch, mat, gpu.textureLevel);
                 device.queue.writeBuffer(gpu.materialUBO, 0, _singleStdScratch.buffer, 0, 96);
             }
-            // Refresh light UBO with current light state
-            refreshLightsUBO(device, lightsBuffer, filteredLights, lightsScratch);
+            // Refresh light UBO only when light state has changed
+            const lightsVer = computeLightsVersion(filteredLights);
+            if (lightsVer !== _lastLightsVersion) {
+                _lastLightsVersion = lightsVer;
+                refreshLightsUBO(device, lightsBuffer, filteredLights, lightsScratch);
+            }
         },
-        draw(pass: GPURenderPassEncoder) {
+        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder) {
             if (mesh.material !== mat) {
                 return 0;
             }

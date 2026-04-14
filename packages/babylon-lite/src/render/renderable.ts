@@ -29,8 +29,8 @@ export interface Renderable {
     _lastMaterial?: any;
     /** Update dirty UBOs (world matrices) before draw. Called once per frame. */
     updateUBOs?(): void;
-    /** Issue draw commands into the given render pass. Returns the number of GPU draw calls issued. */
-    draw(pass: GPURenderPassEncoder, engine: EngineContext): number;
+    /** Issue draw commands into the given render pass (or bundle encoder). Returns the number of GPU draw calls issued. */
+    draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext): number;
 }
 
 /** Something that runs before the main render pass (shadow maps, compute, etc.). */

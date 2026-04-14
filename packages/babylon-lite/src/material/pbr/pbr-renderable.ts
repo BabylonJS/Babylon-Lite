@@ -219,7 +219,9 @@ export async function buildPbrRenderables(
 
     const hasSomeThinInstances = meshes.some((m) => !!m.thinInstances);
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
-    let _syncThinInstanceBuffers: ((device: GPUDevice, ti: ThinInstanceData, pass: GPURenderPassEncoder, slot: number, hasColor: boolean) => number) | null = null;
+    let _syncThinInstanceBuffers:
+        | ((device: GPUDevice, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
@@ -522,7 +524,7 @@ export async function buildPbrRenderables(
     transparentPackets.sort((a, b) => a.variant.features - b.variant.features);
     const renderables: Renderable[] = [];
 
-    function drawPackets(pass: GPURenderPassEncoder, list: PbrDrawPacket[]): number {
+    function drawPackets(pass: GPURenderPassEncoder | GPURenderBundleEncoder, list: PbrDrawPacket[]): number {
         pass.setBindGroup(0, sceneBindGroup);
         let currentPipeline: GPURenderPipeline | null = null;
         for (const dp of list) {

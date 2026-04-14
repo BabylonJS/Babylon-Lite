@@ -382,13 +382,10 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
     const sharedShadowUBO = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(sharedShadowUBO, 0, shadowUboData);
 
-    // Shadow matrix early-out tracking
-    let _lastLightVer = light.worldMatrixVersion;
-    let _lastCasterVerSum = 0;
-    for (const c of casters) {
-        _lastCasterVerSum += c._mesh.worldMatrixVersion;
-    }
-    let _lastCasterCount = casters.length;
+    // Shadow matrix early-out tracking (init to -1 to force first-frame render)
+    let _lastLightVer = -1;
+    let _lastCasterVerSum = -1;
+    let _lastCasterCount = -1;
 
     const sg: ShadowGenerator = {
         shadowType: "esm" as const,
@@ -407,26 +404,27 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
     };
 
     sg.renderShadowMap = function renderShadowMap(encoder: GPUCommandEncoder): number {
-        // Only recompute light matrix when light or casters have moved
         let casterVerSum = 0;
         for (const c of casters) {
             casterVerSum += c._mesh.worldMatrixVersion;
         }
-        const lightVer = light.worldMatrixVersion;
-        if (lightVer !== _lastLightVer || casterVerSum !== _lastCasterVerSum || casters.length !== _lastCasterCount) {
-            _lastLightVer = lightVer;
-            _lastCasterVerSum = casterVerSum;
-            _lastCasterCount = casters.length;
+        const lv = light.worldMatrixVersion;
+        if (lv === _lastLightVer && casterVerSum === _lastCasterVerSum && casters.length === _lastCasterCount) {
+            return 0;
+        }
+        if (lv !== _lastLightVer || casters.length !== _lastCasterCount) {
             const updated = computeDirectionalLightMatrix(light, casterMeshes, orthoMinZ, orthoMaxZ);
             if (shadowMatrixChanged(lightMatrix, updated.viewProj)) {
                 lightMatrix.set(updated.viewProj);
                 sg._version++;
                 device.queue.writeBuffer(depthSceneUBO, 0, lightMatrix as Float32Array<ArrayBuffer>);
-                // Update shared shadow UBO for all receivers
                 writeShadowUboFields(shadowUboData, sg);
                 device.queue.writeBuffer(sharedShadowUBO, 0, shadowUboData);
             }
         }
+        _lastLightVer = lv;
+        _lastCasterVerSum = casterVerSum;
+        _lastCasterCount = casters.length;
 
         syncCasterMatrices(device, casters);
 

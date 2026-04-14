@@ -4,7 +4,7 @@
 import type { ThinInstanceData } from "./thin-instance.js";
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */
-export function syncThinInstanceBuffers(device: GPUDevice, ti: ThinInstanceData, pass: GPURenderPassEncoder, slot: number, hasColor: boolean): number {
+export function syncThinInstanceBuffers(device: GPUDevice, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean): number {
     if (ti._version !== ti._gpuVersion) {
         const byteSize = ti.count * 64;
         if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize) {

@@ -1,6 +1,7 @@
 import type { SceneContext } from "../scene/scene.js";
 import type { SceneContextInternal } from "../scene/scene.js";
 import { buildScene, processMaterialSwaps } from "../scene/scene.js";
+import type { Renderable } from "../render/renderable.js";
 
 /** Handle to the WebGPU engine — pure state, no attached methods. */
 export interface EngineContext {
@@ -19,6 +20,8 @@ export interface EngineContextInternal extends EngineContext {
     _targets: RenderTargets;
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
+    _opaqueBundle: GPURenderBundle | null;
+    _bundleVersion: number;
 }
 
 interface RenderTargets {
@@ -62,6 +65,8 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
         _targets: createRenderTargets(device, canvas.width, canvas.height, format, msaaSamples),
         _animFrameId: 0,
         _renderFn: null,
+        _opaqueBundle: null,
+        _bundleVersion: -1,
     };
 
     return engine;
@@ -176,6 +181,24 @@ function createRenderTargets(device: GPUDevice, width: number, height: number, f
     };
 }
 
+function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly Renderable[], engine: EngineContextInternal): number {
+    let lp: GPURenderPipeline | null = null;
+    let lb: GPUBindGroup | null = null;
+    let draws = 0;
+    for (const r of list) {
+        if (r._pipeline && r._pipeline !== lp) {
+            enc.setPipeline(r._pipeline);
+            lp = r._pipeline;
+        }
+        if (r._sceneBG && r._sceneBG !== lb) {
+            enc.setBindGroup(0, r._sceneBG);
+            lb = r._sceneBG;
+        }
+        draws += r.draw(enc, engine);
+    }
+    return draws;
+}
+
 function renderFrame(engine: EngineContextInternal, targets: RenderTargets, scene: SceneContextInternal): void {
     const swapChainView = engine.context.getCurrentTexture().createView();
     const encoder = engine.device.createCommandEncoder();
@@ -249,23 +272,22 @@ function renderFrame(engine: EngineContextInternal, targets: RenderTargets, scen
 
     pass.setViewport(0, 0, targets.width, targets.height, 0, 1);
 
-    let lp: GPURenderPipeline | null = null;
-    let lb: GPUBindGroup | null = null;
-    const draw = (list: typeof scene._opaqueRenderables) => {
-        for (const r of list) {
-            if (r._pipeline && r._pipeline !== lp) {
-                pass.setPipeline(r._pipeline);
-                lp = r._pipeline;
-            }
-            if (r._sceneBG && r._sceneBG !== lb) {
-                pass.setBindGroup(0, r._sceneBG);
-                lb = r._sceneBG;
-            }
-            drawCalls += r.draw(pass, engine);
-        }
-    };
-    draw(scene._opaqueRenderables);
-    draw(scene._transparentRenderables);
+    // ─── Opaque pass: use cached render bundle when renderable list is unchanged ───
+    if (engine._bundleVersion !== scene._renderableVersion || !engine._opaqueBundle) {
+        const bundleEncoder = engine.device.createRenderBundleEncoder({
+            colorFormats: [engine.format],
+            depthStencilFormat: "depth24plus-stencil8",
+            sampleCount: engine.msaaSamples,
+        });
+        drawList(bundleEncoder, scene._opaqueRenderables, engine);
+        engine._opaqueBundle = bundleEncoder.finish();
+        engine._bundleVersion = scene._renderableVersion;
+    }
+    drawCalls += scene._opaqueRenderables.length;
+    pass.executeBundles([engine._opaqueBundle]);
+
+    // ─── Transparent pass: direct-encoded (re-sorted every frame) ───
+    drawCalls += drawList(pass, scene._transparentRenderables, engine);
 
     pass.end();
     engine.device.queue.submit([encoder.finish()]);

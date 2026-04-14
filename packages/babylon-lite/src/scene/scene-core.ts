@@ -82,6 +82,8 @@ export interface SceneContextInternal extends SceneContext {
     _materialSwapQueue: Mesh[];
     /** Whether this scene has been disposed. */
     _disposed: boolean;
+    /** Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
+    _renderableVersion: number;
 
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     _skybox?: SkyboxData;
@@ -149,6 +151,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         _meshDisposables: new Map(),
         _materialSwapQueue: [],
         _disposed: false,
+        _renderableVersion: 0,
     };
     return ctx;
 }
@@ -280,6 +283,7 @@ export async function buildScene(scene: SceneContext): Promise<void> {
         (mesh as MeshInternal)._materialDirty = false;
     }
     ctx._materialSwapQueue.length = 0;
+    ctx._renderableVersion++;
 }
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
@@ -323,4 +327,5 @@ export function processMaterialSwaps(scene: SceneContext): void {
         }
     }
     q.length = 0;
+    ctx._renderableVersion++;
 }

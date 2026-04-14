@@ -63,7 +63,7 @@ interface PipelineGroup {
 }
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
-type ThinInstanceSync = (device: GPUDevice, ti: any, pass: GPURenderPassEncoder, slot: number, hasColor: boolean) => number;
+type ThinInstanceSync = (device: GPUDevice, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
 
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
@@ -260,7 +260,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                     }
                 }
             },
-            draw(pass: GPURenderPassEncoder) {
+            draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder) {
                 pass.setPipeline(variant.pipeline);
                 pass.setBindGroup(0, variant.sceneBG);
                 let draws = 0;

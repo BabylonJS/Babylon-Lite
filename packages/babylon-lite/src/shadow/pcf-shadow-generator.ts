@@ -272,8 +272,9 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
     const sharedShadowUBO = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(sharedShadowUBO, 0, shadowUboData);
 
-    // Shadow matrix early-out tracking
-    let _lastSpotLightVer = light.worldMatrixVersion;
+    // Shadow matrix early-out tracking (init to -1 to force first-frame render)
+    let _lastSpotLightVer = -1;
+    let _lastPcfCasterVerSum = -1;
 
     const sg: ShadowGenerator = {
         shadowType: "pcf" as const,
@@ -281,8 +282,19 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
         blurredTexture: depthTexture, // PCF: depth texture (not blurred)
         blurredSampler: comparisonSampler, // PCF: comparison sampler
         renderShadowMap(encoder: GPUCommandEncoder): number {
-            // Only recompute light matrix when light has moved
+            // Check if anything has changed since last render
+            let casterVerSum = 0;
+            for (const c of casters) {
+                casterVerSum += c._mesh.worldMatrixVersion;
+            }
             const lightVer = light.worldMatrixVersion;
+            const changed = lightVer !== _lastSpotLightVer || casterVerSum !== _lastPcfCasterVerSum;
+
+            if (!changed) {
+                return 0; // Nothing moved — shadow map is still valid
+            }
+
+            // Only recompute light matrix when light has moved
             if (lightVer !== _lastSpotLightVer) {
                 _lastSpotLightVer = lightVer;
                 const updated = computeSpotLightMatrix(light, near, far);
@@ -295,6 +307,7 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
                     device.queue.writeBuffer(sharedShadowUBO, 0, shadowUboData);
                 }
             }
+            _lastPcfCasterVerSum = casterVerSum;
 
             syncCasterMatrices(device, casters);
 
