@@ -28,22 +28,22 @@ export interface Renderable {
     /** Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
     /** Update dirty UBOs (world matrices) before draw. Called once per frame. */
-    updateUBOs?: () => void;
+    updateUBOs?(): void;
     /** Issue draw commands into the given render pass. Returns the number of GPU draw calls issued. */
-    draw: (pass: GPURenderPassEncoder, engine: EngineContext) => number;
+    draw(pass: GPURenderPassEncoder, engine: EngineContext): number;
 }
 
 /** Something that runs before the main render pass (shadow maps, compute, etc.). */
 export interface PrePassRenderable {
     /** Execute pre-pass work (e.g., render shadow depth map + blur). Returns the number of GPU draw calls issued. */
-    execute: (encoder: GPUCommandEncoder, engine: EngineContext) => number;
+    execute(encoder: GPUCommandEncoder, engine: EngineContext): number;
 }
 
 /** Updatable scene uniforms — called once per frame before any draw calls.
  *  Multiple renderables may share a scene UBO; only one updater is needed per UBO. */
 export interface SceneUniformUpdater {
     /** Write per-frame camera/light/fog data to the scene UBO. */
-    update: (engine: EngineContext) => void;
+    update(engine: EngineContext): void;
 }
 
 /** Build result from a mesh group builder. */

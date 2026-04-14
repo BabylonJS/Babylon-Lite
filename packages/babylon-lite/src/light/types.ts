@@ -51,13 +51,13 @@ export interface PbrLightExtension {
     /** Structured scene UBO field descriptors for the template composer. */
     readonly pbrSceneUboFields: readonly { readonly name: string; readonly type: "f32" | "vec3<f32>" | "vec4<f32>" }[];
     /** SceneUniforms struct fields for light data (WGSL). */
-    emitSceneUboFields: () => string;
+    emitSceneUboFields(): string;
     /** WGSL: compute L vector + NdotL. Assumes N, scene are in scope. */
-    emitLightVector: () => string;
+    emitLightVector(): string;
     /** WGSL: compute direct diffuse. Assumes NdotL, surfaceAlbedo, lightColor, mesh in scope. */
-    emitDirectDiffuse: () => string;
+    emitDirectDiffuse(): string;
     /** WGSL: geometric AA for specular roughness. Empty string if not needed. */
-    emitGeometricAA: () => string;
+    emitGeometricAA(): string;
     /** Write light data into PBR scene UBO float array starting at baseOffset. */
-    writeSceneUbo: (data: Float32Array, baseOffset: number, light: LightBase) => void;
+    writeSceneUbo(data: Float32Array, baseOffset: number, light: LightBase): void;
 }

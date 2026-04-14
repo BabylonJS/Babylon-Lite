@@ -48,7 +48,7 @@ function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int
 
 export interface AnimationController {
     /** Advance animation by deltaMs and update bone textures. */
-    tick: (deltaMs: number, device: GPUDevice) => void;
+    tick(deltaMs: number, device: GPUDevice): void;
     /** Current playback time in seconds. */
     time: number;
     /** True if playing. */

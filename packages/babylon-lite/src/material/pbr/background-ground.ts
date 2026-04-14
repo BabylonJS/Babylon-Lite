@@ -71,8 +71,8 @@ export async function buildGroundRenderable(
 // ─── Ground Material ────────────────────────────────────────────────────────
 
 interface GroundMaterial {
-    getPipeline: (device: GPUDevice, format: GPUTextureFormat, msaaSamples: number) => GPURenderPipeline;
-    createBindGroup: (device: GPUDevice, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler) => GPUBindGroup;
+    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler): GPUBindGroup;
 }
 
 function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundMaterial {

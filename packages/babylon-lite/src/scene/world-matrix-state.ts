@@ -13,11 +13,11 @@ import { mat4Multiply, mat4MultiplyInto } from "../math/mat4.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */
-    getWorldMatrix: () => Mat4;
+    getWorldMatrix(): Mat4;
     /** Getter — returns current version. */
-    getWorldMatrixVersion: () => number;
+    getWorldMatrixVersion(): number;
     /** Call when own TRS changes. Invalidates cache, forces recompute on next read. */
-    markLocalDirty: () => void;
+    markLocalDirty(): void;
     /** Reference to parent — set directly. */
     parent: IWorldMatrixProvider | null;
 }

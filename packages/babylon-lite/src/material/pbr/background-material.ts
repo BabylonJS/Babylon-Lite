@@ -9,8 +9,8 @@ import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.
 // ─── Skybox Material (solid clearColor output) ──────────────────────────────
 
 export interface SkyboxMaterial {
-    getPipeline: (device: GPUDevice, format: GPUTextureFormat, msaaSamples: number) => GPURenderPipeline;
-    createBindGroup: (device: GPUDevice, meshUBO: GPUBuffer, env: EnvironmentTextures) => GPUBindGroup;
+    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
 }
 
 export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): SkyboxMaterial {
@@ -107,8 +107,8 @@ export function createBuf(device: GPUDevice, data: ArrayBufferView, usage: GPUBu
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
 export interface CubemapSkyboxMaterial {
-    getPipeline: (device: GPUDevice, format: GPUTextureFormat, msaaSamples: number) => GPURenderPipeline;
-    createBindGroup: (device: GPUDevice, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler) => GPUBindGroup;
+    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
 }
 
 export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout, label: string, vertCode: string, fragCode: string): CubemapSkyboxMaterial {

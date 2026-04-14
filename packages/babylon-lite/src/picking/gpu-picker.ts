@@ -11,10 +11,10 @@ import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js"
 
 /** GPU-based picker that renders mesh IDs to an offscreen texture. */
 export interface GpuPicker {
-    pickAsync: (x: number, y: number) => Promise<PickingInfo>;
+    pickAsync(x: number, y: number): Promise<PickingInfo>;
     /** Optional hook for detailed picking (Phase 2). */
     _detailedPick: ((info: PickingInfo, ray: { origin: [number, number, number]; direction: [number, number, number]; length: number }) => void) | null;
-    dispose: () => void;
+    dispose(): void;
 }
 
 interface PickRenderTargets {

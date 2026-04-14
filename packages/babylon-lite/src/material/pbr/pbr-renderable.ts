@@ -91,9 +91,9 @@ interface PbrDrawPacket {
 /** Convert a PbrLightExtension to PbrLightConfig for the template. */
 function lightExtToConfig(ext: {
     pbrSceneUboFields: readonly { readonly name: string; readonly type: string }[];
-    emitLightVector: () => string;
-    emitDirectDiffuse: () => string;
-    emitGeometricAA: () => string;
+    emitLightVector(): string;
+    emitDirectDiffuse(): string;
+    emitGeometricAA(): string;
 }): PbrLightConfig {
     return {
         sceneUboFields: ext.pbrSceneUboFields as UboField[],

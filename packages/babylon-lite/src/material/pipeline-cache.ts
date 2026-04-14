@@ -8,16 +8,16 @@ export interface PipelineCacheEntry {
 }
 
 export interface PipelineCache<V extends PipelineCacheEntry> {
-    get: (key: string) => V | undefined;
-    set: (key: string, value: V) => void;
+    get(key: string): V | undefined;
+    set(key: string, value: V): void;
     /** Return cached entry with refCount++, or undefined on miss. */
-    getOrIncRef: (key: string) => V | undefined;
-    clear: () => void;
+    getOrIncRef(key: string): V | undefined;
+    clear(): void;
     /** Remove all entries whose refCount has reached 0. */
-    evictUnused: () => void;
+    evictUnused(): void;
     readonly device: GPUDevice | null;
     /** Returns true if device changed (cache was cleared). */
-    ensureDevice: (device: GPUDevice) => boolean;
+    ensureDevice(device: GPUDevice): boolean;
 }
 
 export function createPipelineCache<V extends PipelineCacheEntry>(): PipelineCache<V> {

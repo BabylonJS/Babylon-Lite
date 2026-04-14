@@ -18,7 +18,7 @@ export interface EulerProxy {
     x: number;
     y: number;
     z: number;
-    set: (x: number, y: number, z: number) => void;
+    set(x: number, y: number, z: number): void;
 }
 
 // ─── SceneNode ───────────────────────────────────────────────────────

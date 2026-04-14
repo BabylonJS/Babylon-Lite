@@ -12,7 +12,7 @@ export { ObservableVec3 } from "../math/observable-vec3.js";
  *  Shared across all lights created from the same createLightBase call. */
 export interface LightVersionState {
     _lightVersion: number;
-    bump: () => void;
+    bump(): void;
 }
 
 /** Create the world-matrix state + dirty callback shared by all light types.
