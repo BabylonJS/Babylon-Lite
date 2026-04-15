@@ -22,7 +22,6 @@ import { createStandardMaterial } from "../material/standard/standard-material.j
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { uploadMeshToGPU, initMeshTransform } from "../mesh/mesh.js";
 import type { MeshInternal } from "../mesh/mesh.js";
-import { createPointLight } from "../light/point-light.js";
 import { loadTexture2D } from "../texture/texture-2d.js";
 // ─── .babylon JSON Types ───────────────────────────────────────────
 
@@ -169,7 +168,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
 
     // Scene ambient color — BJS multiplies material.ambient by scene.ambientColor
     const sceneAmbient: [number, number, number] = data.ambientColor ? [data.ambientColor[0]!, data.ambientColor[1]!, data.ambientColor[2]!] : [0, 0, 0];
-
     // Build material map
     const materialMap = new Map<string, StandardMaterialProps>();
     const texturePromises: Promise<void>[] = [];
@@ -331,9 +329,10 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
         }
     }
 
-    // Lights (point lights only for now)
+    // Lights (point lights only — dynamically imported)
     const lights: LightBase[] = [];
-    if (data.lights) {
+    if (data.lights?.length) {
+        const { createPointLight } = await import("../light/point-light.js");
         for (const ld of data.lights) {
             if (ld.type === 0 && ld.position) {
                 const pl = createPointLight([ld.position[0]!, ld.position[1]!, ld.position[2]!], ld.intensity ?? 1);
@@ -355,7 +354,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 }
                 lights.push(pl);
             }
-            // TODO: type 1 (directional), type 2 (spot), type 3 (hemispheric)
         }
     }
 
