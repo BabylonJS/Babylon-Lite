@@ -1,4 +1,5 @@
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Mat4 } from "../../math/types.js";
 
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
@@ -9,8 +10,8 @@ import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.
 // ─── Skybox Material (solid clearColor output) ──────────────────────────────
 
 export interface SkyboxMaterial {
-    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
-    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
+    getPipeline(engine: EngineContextInternal, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
 }
 
 export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): SkyboxMaterial {
@@ -18,7 +19,8 @@ export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): 
     let layout: GPUBindGroupLayout | null = null;
     let _cachedDevice: GPUDevice | null = null;
 
-    function getLayout(device: GPUDevice): GPUBindGroupLayout {
+    function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
+        const device = engine.device;
         if (layout && _cachedDevice === device) {
             return layout;
         }
@@ -30,7 +32,8 @@ export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): 
     }
 
     return {
-        getPipeline(device, format, msaaSamples) {
+        getPipeline(engine, format, msaaSamples) {
+            const device = engine.device;
             if (pipeline && _cachedDevice === device) {
                 return pipeline;
             }
@@ -44,8 +47,8 @@ export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): 
             pipeline = device.createRenderPipeline(
                 createStandardPipelineDescriptor({
                     label: "skybox-pipeline",
-                    device,
-                    bgls: [sceneBindGroupLayout, getLayout(device)],
+                    engine,
+                    bgls: [sceneBindGroupLayout, getLayout(engine)],
                     vertModule,
                     fragModule,
                     vertexBuffers: SKYBOX_POS_BUFFER,
@@ -57,9 +60,10 @@ export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): 
             return pipeline;
         },
 
-        createBindGroup(device, meshUBO, _env) {
+        createBindGroup(engine, meshUBO, _env) {
+            const device = engine.device;
             return device.createBindGroup({
-                layout: getLayout(device),
+                layout: getLayout(engine),
                 entries: [{ binding: 0, resource: { buffer: meshUBO } }],
             });
         },
@@ -69,7 +73,7 @@ export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): 
 // ─── Skybox Mesh Data ───────────────────────────────────────────────────────
 
 /** Skybox box geometry (24 verts, 36 indices — matches Babylon). */
-export function createSkyboxBuffers(device: GPUDevice, S = 15): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+export function createSkyboxBuffers(engine: EngineContextInternal, S = 15): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
     // prettier-ignore
     const positions = new Float32Array([
      S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
@@ -87,13 +91,14 @@ export function createSkyboxBuffers(device: GPUDevice, S = 15): { posBuffer: GPU
   ]);
 
     return {
-        posBuffer: createBuf(device, positions, GPUBufferUsage.VERTEX),
-        idxBuffer: createBuf(device, indices, GPUBufferUsage.INDEX),
+        posBuffer: createBuf(engine, positions, GPUBufferUsage.VERTEX),
+        idxBuffer: createBuf(engine, indices, GPUBufferUsage.INDEX),
         idxCount: 36,
     };
 }
 
-export function createBuf(device: GPUDevice, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+export function createBuf(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({
         size: Math.max(data.byteLength, 4),
         usage: usage | GPUBufferUsage.COPY_DST,
@@ -111,8 +116,8 @@ export function createBuf(device: GPUDevice, data: ArrayBufferView, usage: GPUBu
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
 export interface CubemapSkyboxMaterial {
-    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
-    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
+    getPipeline(engine: EngineContextInternal, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
 }
 
 export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout, label: string, vertCode: string, fragCode: string): CubemapSkyboxMaterial {
@@ -120,7 +125,8 @@ export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLa
     let layout: GPUBindGroupLayout | null = null;
     let _cachedDevice: GPUDevice | null = null;
 
-    function getLayout(device: GPUDevice): GPUBindGroupLayout {
+    function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
+        const device = engine.device;
         if (layout && _cachedDevice === device) {
             return layout;
         }
@@ -136,7 +142,8 @@ export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLa
     }
 
     return {
-        getPipeline(device, format, msaaSamples) {
+        getPipeline(engine, format, msaaSamples) {
+            const device = engine.device;
             if (pipeline && _cachedDevice === device) {
                 return pipeline;
             }
@@ -149,8 +156,8 @@ export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLa
             pipeline = device.createRenderPipeline(
                 createStandardPipelineDescriptor({
                     label: `${label}-pipeline`,
-                    device,
-                    bgls: [sceneBindGroupLayout, getLayout(device)],
+                    engine,
+                    bgls: [sceneBindGroupLayout, getLayout(engine)],
                     vertModule,
                     fragModule,
                     vertexBuffers: SKYBOX_POS_BUFFER,
@@ -162,9 +169,10 @@ export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLa
             return pipeline;
         },
 
-        createBindGroup(device, meshUBO, cubeView, cubeSampler) {
+        createBindGroup(engine, meshUBO, cubeView, cubeSampler) {
+            const device = engine.device;
             return device.createBindGroup({
-                layout: getLayout(device),
+                layout: getLayout(engine),
                 entries: [
                     { binding: 0, resource: { buffer: meshUBO } },
                     { binding: 1, resource: cubeView },

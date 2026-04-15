@@ -92,16 +92,16 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
     }
 
     const composed = composePbr!(features);
-    const variant = getOrCreatePbrPipeline(device, engine.format, engine.msaaSamples, features, sceneBGL, composed);
+    const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, sceneBGL, composed);
     const worldMatrix = mesh.worldMatrix;
-    const meshUBO = _createPbrMeshUBO(device, worldMatrix, composed);
-    const materialUBO = _createPbrMaterialUBO(device, mat, composed);
+    const meshUBO = _createPbrMeshUBO(engine, worldMatrix, composed);
+    const materialUBO = _createPbrMaterialUBO(engine, mat, composed);
     const boneView = mesh.skeleton?.boneTexture.createView();
     const morphView = mesh.morphTargets?.texture.createView();
     // Pass shared lights UBO if available (multi-light path)
     const lightsUBO = (scene as SceneContextInternal)._pbrLightsUBO;
     const materialBindGroup = createPbrMeshBindGroup(
-        device,
+        engine,
         variant,
         meshUBO,
         materialUBO,

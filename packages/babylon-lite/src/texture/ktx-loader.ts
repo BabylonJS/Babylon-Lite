@@ -129,7 +129,8 @@ function parseKtx1(buffer: ArrayBuffer): KtxParseResult {
 
 // ── GPU upload ──────────────────────────────────────────────────────
 
-function uploadCompressed(device: GPUDevice, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
+function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
+    const device = engine.device;
     const fmt = parsed.format;
     const texture = device.createTexture({
         size: { width: parsed.width, height: parsed.height },
@@ -149,7 +150,7 @@ function uploadCompressed(device: GPUDevice, parsed: KtxParseResult, opts: Textu
     const magF = opts.magFilter ?? "linear";
     const mipF: GPUMipmapFilterMode = parsed.mips.length > 1 ? "linear" : "nearest";
     const allLinear = minF === "linear" && magF === "linear" && mipF === "linear";
-    const sampler = getOrCreateSampler(device, {
+    const sampler = getOrCreateSampler(engine, {
         addressModeU: opts.addressModeU ?? "repeat",
         addressModeV: opts.addressModeV ?? "repeat",
         minFilter: minF,
@@ -220,7 +221,7 @@ export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, s
                 throw new Error(`KTX fetch failed: ${resp.status}`);
             }
             const parsed = parseKtx1(await resp.arrayBuffer());
-            return uploadCompressed(device, parsed, opts);
+            return uploadCompressed(engine as EngineContextInternal, parsed, opts);
         } catch (e) {
             console.warn(`KTX load failed for suffix "${suffix}":`, e);
         }

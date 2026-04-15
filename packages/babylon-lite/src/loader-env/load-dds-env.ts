@@ -191,7 +191,8 @@ function computeSH(raw: Uint8Array, width: number, mipCount: number): Float32Arr
  * from mip 0 face data for irradiance lighting.
  */
 export async function loadDdsEnvironment(scene: SceneContext, url: string, options: { brdfUrl: string; skipSkybox?: boolean; skipGround?: boolean }): Promise<EnvironmentTextures> {
-    const device = (scene.engine as EngineContextInternal).device;
+    const engine = scene.engine as EngineContextInternal;
+    const device = engine.device;
 
     // Fetch DDS and BRDF PNG in parallel
     const ddsPromise = fetch(url).then((r) => r.arrayBuffer());
@@ -239,11 +240,11 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
     // ── Load BRDF LUT ────────────────────────────────────────────────────────
     const brdfImage = await brdfPromise;
     const { decodeBrdfPng } = await import("./brdf-rgbd-decode.js");
-    const brdfLut = decodeBrdfPng(device, brdfImage);
+    const brdfLut = decodeBrdfPng(engine, brdfImage);
     brdfImage.close();
 
     // ── Assemble result──────────────────────────────────────────────────────
-    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, device);
+    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
 
     (scene as SceneContextInternal)._envTextures = textures;
     (scene as SceneContextInternal)._irradianceSH = irradianceSH;

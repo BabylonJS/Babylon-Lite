@@ -23,19 +23,18 @@ export async function buildDdsSkyboxRenderable(
     skyboxSize?: number
 ): Promise<Renderable> {
     const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
 
     const { skyHalfSize, rootPosition } = computeSkyboxGeometry(scene, skyboxSize);
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 
-    const skyBufs = createSkyboxBuffers(device, skyHalfSize);
-    const { cubeView, sampler } = await loadDdsCube(device, skyboxTextureUrl ?? DEFAULT_SKY_URL);
+    const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
+    const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
     const mat = createCubemapSkyboxMaterial(sceneBindGroupLayout, "skybox-dds", WGSL_SCENE_UNIFORMS_PBR + ddsSkyboxVertSrc, WGSL_DITHER + ddsSkyboxFragSrc);
-    const ubo = createDdsMeshUBO(device, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
-    const pipeline = mat.getPipeline(device, engine.format, engine.msaaSamples);
-    const bindGroup = mat.createBindGroup(device, ubo, cubeView, sampler);
+    const ubo = createDdsMeshUBO(engine, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
+    const pipeline = mat.getPipeline(engine, engine.format, engine.msaaSamples);
+    const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 
     return {
         order: 0,
@@ -54,7 +53,8 @@ export async function buildDdsSkyboxRenderable(
 
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────
 
-function createDdsMeshUBO(device: GPUDevice, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
+function createDdsMeshUBO(engine: EngineContextInternal, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
+    const device = engine.device;
     const data = new Float32Array(SKY_DDS_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];
@@ -75,7 +75,8 @@ function createDdsMeshUBO(device: GPUDevice, world: Float32Array, primaryColor: 
 /** Load a DDS cube texture (rgba16float) and return a cube texture view + sampler.
  *  Uploads only mip 0 from the DDS file and generates remaining mipmaps on the
  *  GPU so that cube face edges blend seamlessly — matching BJS's behaviour. */
-async function loadDdsCube(device: GPUDevice, url: string): Promise<{ cubeView: GPUTextureView; sampler: GPUSampler }> {
+async function loadDdsCube(engine: EngineContextInternal, url: string): Promise<{ cubeView: GPUTextureView; sampler: GPUSampler }> {
+    const device = engine.device;
     const buf = await (await fetch(url)).arrayBuffer();
     const header = new Int32Array(buf, 0, 32);
     const width = header[3]!;
@@ -115,7 +116,7 @@ async function loadDdsCube(device: GPUDevice, url: string): Promise<{ cubeView: 
     }
 
     const cubeView = tex.createView({ dimension: "cube" });
-    const sampler = getOrCreateSampler(device, {
+    const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
         mipmapFilter: "linear",

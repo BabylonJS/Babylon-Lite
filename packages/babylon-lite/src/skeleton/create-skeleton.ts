@@ -6,10 +6,11 @@
  *  (shader/fragments/skeleton-fragment.ts) and composed at pipeline
  *  creation time — no global registration needed. */
 
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { SkeletonData } from "../animation/types.js";
 
 /** Create skeleton GPU data from parsed glTF skin.
- *  @param device   WebGPU device
+ *  @param engine   Engine context (provides GPUDevice)
  *  @param joints   Joint indices (4 per vertex, u8 or u16)
  *  @param weights  Blend weights (4 per vertex, f32)
  *  @param boneCount Number of bones (joints) in the skeleton
@@ -18,7 +19,7 @@ import type { SkeletonData } from "../animation/types.js";
  *  @param weights1 Extra blend weights for 8-bone skinning (WEIGHTS_1)
  */
 export function createSkeleton(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     joints: Uint16Array | Uint8Array,
     weights: Float32Array,
     boneCount: number,
@@ -26,6 +27,7 @@ export function createSkeleton(
     joints1?: Uint16Array | Uint8Array | null,
     weights1?: Float32Array | null
 ): SkeletonData {
+    const device = engine.device;
     // Bone texture: rgba32float, 4 texels per bone (one mat4 column each)
     const texWidth = boneCount * 4;
     const boneTexture = device.createTexture({
@@ -41,8 +43,8 @@ export function createSkeleton(
         joints32[i] = joints[i]!;
     }
 
-    const jointsBuffer = createVertexBuffer(device, joints32);
-    const weightsBuffer = createVertexBuffer(device, weights);
+    const jointsBuffer = createVertexBuffer(engine, joints32);
+    const weightsBuffer = createVertexBuffer(engine, weights);
 
     let joints1Buffer: GPUBuffer | null = null;
     let weights1Buffer: GPUBuffer | null = null;
@@ -51,14 +53,15 @@ export function createSkeleton(
         for (let i = 0; i < joints1.length; i++) {
             joints132[i] = joints1[i]!;
         }
-        joints1Buffer = createVertexBuffer(device, joints132);
-        weights1Buffer = createVertexBuffer(device, weights1);
+        joints1Buffer = createVertexBuffer(engine, joints132);
+        weights1Buffer = createVertexBuffer(engine, weights1);
     }
 
     return { boneTexture, boneCount, jointsBuffer, weightsBuffer, joints1Buffer, weights1Buffer };
 }
 
-function createVertexBuffer(device: GPUDevice, data: ArrayBufferView): GPUBuffer {
+function createVertexBuffer(engine: EngineContextInternal, data: ArrayBufferView): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({
         size: Math.max(data.byteLength, 4),
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,

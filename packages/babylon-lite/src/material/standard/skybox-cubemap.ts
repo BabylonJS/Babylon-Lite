@@ -6,6 +6,7 @@
  * Renders backfaces (no culling → sees inside of box).
  */
 
+import type { EngineContextInternal } from "../../engine/engine.js";
 import skyVertSrc from "../../../shaders/skybox-cubemap.vertex.wgsl?raw";
 import skyFragSrc from "../../../shaders/skybox-cubemap.fragment.wgsl?raw";
 import { getSceneBindGroupLayout, createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
@@ -26,7 +27,7 @@ export interface SkyboxCubeMapGPU {
  * Shares the scene UBO from StandardMaterial (same layout).
  */
 export function buildSkyboxCubeMapGPU(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     format: GPUTextureFormat,
     msaaSamples: number,
     sceneUBO: GPUBuffer,
@@ -34,7 +35,8 @@ export function buildSkyboxCubeMapGPU(
     cubeView: GPUTextureView,
     cubeSampler: GPUSampler
 ): SkyboxCubeMapGPU {
-    const sceneBindGroupLayout = getSceneBindGroupLayout(device);
+    const device = engine.device;
+    const sceneBindGroupLayout = getSceneBindGroupLayout(engine);
 
     const meshBindGroupLayout = device.createBindGroupLayout({
         label: "skybox-cm-mesh",
@@ -51,7 +53,7 @@ export function buildSkyboxCubeMapGPU(
     const pipeline = device.createRenderPipeline(
         createStandardPipelineDescriptor({
             label: "skybox-cubemap-pipeline",
-            device,
+            engine,
             bgls: [sceneBindGroupLayout, meshBindGroupLayout],
             vertModule,
             fragModule,

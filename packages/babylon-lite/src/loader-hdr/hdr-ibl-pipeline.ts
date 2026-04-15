@@ -6,12 +6,14 @@
  */
 
 import type { HdrImage } from "./hdr-parser.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?raw";
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";
 import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
 
-export function equirectToCubemapGPU(device: GPUDevice, hdr: HdrImage, faceSize: number): GPUTexture {
+export function equirectToCubemapGPU(engine: EngineContextInternal, hdr: HdrImage, faceSize: number): GPUTexture {
+    const device = engine.device;
     // Upload equirect as a 2D texture
     const equirectTex = device.createTexture({
         size: [hdr.width, hdr.height],
@@ -70,7 +72,8 @@ export function equirectToCubemapGPU(device: GPUDevice, hdr: HdrImage, faceSize:
 
 // ─── Cubemap Prefiltering (GPU Compute, Importance-Sampled GGX) ─────────────
 
-export function prefilterCubemapGPU(device: GPUDevice, srcCube: GPUTexture, faceSize: number, mipCount: number): GPUTexture {
+export function prefilterCubemapGPU(engine: EngineContextInternal, srcCube: GPUTexture, faceSize: number, mipCount: number): GPUTexture {
+    const device = engine.device;
     const dstCube = device.createTexture({
         size: { width: faceSize, height: faceSize, depthOrArrayLayers: 6 },
         mipLevelCount: mipCount,
@@ -79,7 +82,7 @@ export function prefilterCubemapGPU(device: GPUDevice, srcCube: GPUTexture, face
     });
 
     const srcCubeView = srcCube.createView({ dimension: "cube" });
-    const srcSampler = getOrCreateSampler(device, { magFilter: "linear", minFilter: "linear" });
+    const srcSampler = getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" });
 
     const pipeline = device.createComputePipeline({
         layout: "auto",
@@ -141,7 +144,8 @@ export function prefilterCubemapGPU(device: GPUDevice, srcCube: GPUTexture, face
 
 let _brdfPipeline: GPUComputePipeline | null = null;
 
-export function generateBrdfLut(device: GPUDevice): GPUTexture {
+export function generateBrdfLut(engine: EngineContextInternal): GPUTexture {
+    const device = engine.device;
     if (!_brdfPipeline) {
         _brdfPipeline = device.createComputePipeline({
             layout: "auto",

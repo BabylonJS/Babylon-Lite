@@ -24,7 +24,6 @@ export function buildHdrSkyboxRenderable(
     skyboxSize?: number
 ): Renderable {
     const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
 
     const { skyHalfSize, rootPosition } = computeSkyboxGeometry(scene, skyboxSize);
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
@@ -32,12 +31,12 @@ export function buildHdrSkyboxRenderable(
     const cc = scene.clearColor;
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 
-    const skyBufs = createSkyboxBuffers(device, skyHalfSize);
+    const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const mat = createCubemapSkyboxMaterial(sceneBindGroupLayout, "skybox-hdr", WGSL_SCENE_UNIFORMS_PBR + skyboxVertSrc, skyboxHdrFragSrc);
-    const ubo = createSkyHdrMeshUBO(device, skyboxWorld, primaryColor, [cc.r, cc.g, cc.b], scene.imageProcessing.exposure, scene.imageProcessing.contrast);
+    const ubo = createSkyHdrMeshUBO(engine, skyboxWorld, primaryColor, [cc.r, cc.g, cc.b], scene.imageProcessing.exposure, scene.imageProcessing.contrast);
 
-    const pipeline = mat.getPipeline(device, engine.format, engine.msaaSamples);
-    const bindGroup = mat.createBindGroup(device, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);
+    const pipeline = mat.getPipeline(engine, engine.format, engine.msaaSamples);
+    const bindGroup = mat.createBindGroup(engine, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);
 
     return {
         order: 0,
@@ -57,13 +56,14 @@ export function buildHdrSkyboxRenderable(
 // ─── HDR Skybox UBO ─────────────────────────────────────────────────────────────
 
 function createSkyHdrMeshUBO(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     world: Float32Array,
     primaryColor: [number, number, number],
     skyOutputColor: [number, number, number],
     exposure: number,
     contrast: number
 ): GPUBuffer {
+    const device = engine.device;
     const data = new Float32Array(SKY_HDR_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];

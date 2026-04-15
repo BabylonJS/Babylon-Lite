@@ -177,13 +177,13 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx.camera = result.camera;
         }
         if (result.animationGroups?.length) {
-            const device = (ctx.engine as EngineContextInternal).device;
+            const engine = ctx.engine as EngineContextInternal;
             const groups = result.animationGroups;
             ctx.animationGroups.push(...groups);
             ctx._beforeRender.push((deltaMs: number) => {
                 for (const g of groups) {
                     if (!g._stopped && g._ctrl) {
-                        g._ctrl.tick(deltaMs, device);
+                        g._ctrl.tick(deltaMs, engine);
                     }
                 }
             });

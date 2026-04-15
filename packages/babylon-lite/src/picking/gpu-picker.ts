@@ -53,7 +53,8 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
     };
 }
 
-function ensureTargets(device: GPUDevice, picker: GpuPicker): PickTargets1x1 {
+function ensureTargets(engine: EngineContextInternal, picker: GpuPicker): PickTargets1x1 {
+    const device = engine.device;
     if (picker._rt) {
         return picker._rt;
     }
@@ -78,10 +79,11 @@ function ensureTargets(device: GPUDevice, picker: GpuPicker): PickTargets1x1 {
     return picker._rt;
 }
 
-function ensureSceneUbo(device: GPUDevice, picker: GpuPicker): GPUBuffer {
+function ensureSceneUbo(engine: EngineContextInternal, picker: GpuPicker): GPUBuffer {
+    const device = engine.device;
     if (!picker._sceneUbo) {
         picker._sceneUbo = device.createBuffer({ label: "pick-scene-ubo", size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-        const sceneBGL = getPickingSceneBGL(device);
+        const sceneBGL = getPickingSceneBGL(engine);
         picker._sceneBG = device.createBindGroup({ label: "pick-scene-bg", layout: sceneBGL, entries: [{ binding: 0, resource: { buffer: picker._sceneUbo } }] });
     }
     return picker._sceneUbo;
@@ -128,8 +130,8 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     // ── Compute pick-zoomed VP (renders single pixel to 1×1 target) ──
     computePickVP(_pickVP, vp as Float32Array, px, py, w, h);
 
-    const rt = ensureTargets(device, picker);
-    const sceneUbo = ensureSceneUbo(device, picker);
+    const rt = ensureTargets(engine, picker);
+    const sceneUbo = ensureSceneUbo(engine, picker);
     device.queue.writeBuffer(sceneUbo, 0, _pickVP);
 
     // ── Assign pick IDs (array-based, no Map for miss case) ──────────
@@ -147,10 +149,10 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
         depthStencilAttachment: { view: rt.depthView, depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "discard" },
     });
 
-    const regularPipeline = getPickingPipeline(device);
-    const tiPipeline = getPickingTIPipeline(device);
-    const meshBGL = getPickingMeshBGL(device);
-    const tiMeshBGL = getPickingTIMeshBGL(device);
+    const regularPipeline = getPickingPipeline(engine);
+    const tiPipeline = getPickingTIPipeline(engine);
+    const meshBGL = getPickingMeshBGL(engine);
+    const tiMeshBGL = getPickingTIMeshBGL(engine);
 
     const tempBuffers: GPUBuffer[] = [];
 

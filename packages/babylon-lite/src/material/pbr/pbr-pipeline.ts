@@ -7,6 +7,7 @@
 import type { PbrMaterialProps, SheenProps } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { ComposedShader } from "../../shader/fragment-types.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
 import {
@@ -165,14 +166,15 @@ function cacheKey(features: number, format: GPUTextureFormat, msaa: number): str
 }
 
 export function getOrCreatePbrPipeline(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     format: GPUTextureFormat,
     msaaSamples: number,
     features: number,
     sceneBGL: GPUBindGroupLayout,
     composed: ComposedShader
 ): PbrPipelineVariant {
-    cache.ensureDevice(device);
+    const device = engine.device;
+    cache.ensureDevice(engine);
     const key = cacheKey(features, format, msaaSamples);
     const cached = cache.getOrIncRef(key);
     if (cached) {
@@ -222,7 +224,7 @@ export function getOrCreatePbrPipeline(
 // ─── Per-Mesh Bind Group ────────────────────────────────────────────
 
 export function createPbrMeshBindGroup(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     variant: PbrPipelineVariant,
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
@@ -233,6 +235,7 @@ export function createPbrMeshBindGroup(
     morphWeightsBuffer?: GPUBuffer,
     lightsUBO?: GPUBuffer
 ): GPUBindGroup {
+    const device = engine.device;
     const features = variant.features;
     const hasNormal = (features & PBR_HAS_NORMAL_MAP) !== 0;
     const hasCotangentNormal = (features & PBR_HAS_COTANGENT_NORMAL) !== 0;

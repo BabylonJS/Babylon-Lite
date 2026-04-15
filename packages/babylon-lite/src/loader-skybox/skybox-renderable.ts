@@ -10,9 +10,8 @@ import { buildSkyboxCubeMapGPU } from "../material/standard/skybox-cubemap.js";
 /** Build a skybox Renderable from a SkyboxData (loaded via loadSkybox). */
 export function buildSkyboxRenderable(scene: SceneContext, skybox: SkyboxData, sceneUBO: GPUBuffer): Renderable {
     const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
 
-    const gpu = buildSkyboxCubeMapGPU(device, engine.format, engine.msaaSamples, sceneUBO, skybox.worldMatrix, skybox.cubeView, skybox.cubeSampler);
+    const gpu = buildSkyboxCubeMapGPU(engine, engine.format, engine.msaaSamples, sceneUBO, skybox.worldMatrix, skybox.cubeView, skybox.cubeSampler);
 
     return {
         order: 0, // skybox behind everything

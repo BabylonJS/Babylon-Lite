@@ -3,6 +3,8 @@
  *  Provides a generic, ref-counted cache keyed by string with automatic
  *  invalidation when the GPU device changes.  Zero module-level side effects. */
 
+import type { EngineContextInternal } from "../engine/engine.js";
+
 export interface PipelineCacheEntry {
     refCount: number;
 }
@@ -17,7 +19,7 @@ export interface PipelineCache<V extends PipelineCacheEntry> {
     evictUnused(): void;
     readonly device: GPUDevice | null;
     /** Returns true if device changed (cache was cleared). */
-    ensureDevice(device: GPUDevice): boolean;
+    ensureDevice(engine: EngineContextInternal): boolean;
 }
 
 export function createPipelineCache<V extends PipelineCacheEntry>(): PipelineCache<V> {
@@ -52,7 +54,8 @@ export function createPipelineCache<V extends PipelineCacheEntry>(): PipelineCac
         get device(): GPUDevice | null {
             return _device;
         },
-        ensureDevice(device: GPUDevice): boolean {
+        ensureDevice(engine: EngineContextInternal): boolean {
+            const device = engine.device;
             if (device === _device) {
                 return false;
             }

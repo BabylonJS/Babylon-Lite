@@ -38,7 +38,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
     const device = engine.device;
     const mat = mesh.material as StandardMaterialProps;
     const features = computeFeatures(mat, mesh.receiveShadows);
-    const variant = getOrCreatePipeline(device, engine.format, engine.msaaSamples, features);
+    const variant = getOrCreatePipeline(engine, engine.format, engine.msaaSamples, features);
 
     const allLights = scene.lights;
     let lightMask = 0;
@@ -50,11 +50,11 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
         }
     }
     const filteredLights = allLights.filter((_, i) => (lightMask >> i) & 1);
-    const lightsBuffer = writeLightsUBO(device, filteredLights);
+    const lightsBuffer = writeLightsUBO(engine, filteredLights);
 
     const worldMatrix = mesh.worldMatrix;
     const meshShadowGens = mesh.receiveShadows ? scene.lights.filter((l) => l.shadowGenerator).map((l) => l.shadowGenerator!) : [];
-    const gpu = createDynamicMeshGPU(device, variant, {
+    const gpu = createDynamicMeshGPU(engine, variant, {
         worldMatrix,
         material: mat,
         lightsBuffer,
@@ -103,7 +103,14 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
                     const viewProj = getViewProjectionMatrix(scene.camera, aspect);
                     const viewMat = getViewMatrix(scene.camera);
                     const camPos = getCameraPosition(scene.camera);
-                    updateSceneUniforms(device, variant.sceneUBO, viewProj as Float32Array, viewMat as Float32Array, [camPos.x, camPos.y, camPos.z], scene.fog ?? undefined);
+                    updateSceneUniforms(
+                        engine as EngineContextInternal,
+                        variant.sceneUBO,
+                        viewProj as Float32Array,
+                        viewMat as Float32Array,
+                        [camPos.x, camPos.y, camPos.z],
+                        scene.fog ?? undefined
+                    );
                 }
             },
         });
@@ -131,7 +138,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
             const lightsVer = computeLightsVersion(filteredLights);
             if (lightsVer !== _lastLightsVersion) {
                 _lastLightsVersion = lightsVer;
-                refreshLightsUBO(device, lightsBuffer, filteredLights, lightsScratch);
+                refreshLightsUBO(engine, lightsBuffer, filteredLights, lightsScratch);
             }
         },
         draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder) {

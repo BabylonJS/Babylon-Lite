@@ -200,7 +200,8 @@ function computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: Me
 }
 
 export function createShadowGenerator(engine: EngineContext, light: DirectionalLight, casterMeshes: Mesh[], cfg: ShadowGeneratorConfig = {}): ShadowGenerator {
-    const device = (engine as EngineContextInternal).device;
+    const eng = engine as EngineContextInternal;
+    const device = eng.device;
     const mapSize = cfg.mapSize ?? 1024;
     const depthScale = cfg.depthScale ?? 50;
     const bias = cfg.bias ?? 0.00005;
@@ -247,7 +248,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
     device.queue.writeBuffer(shadowParamsUBO, 0, shadowParamsData);
 
     // Build caster data + per-caster bind groups
-    const casters = buildCasters(device, casterMeshes, depthMeshBGL, [{ binding: 1, resource: { buffer: shadowParamsUBO } }]);
+    const casters = buildCasters(eng, casterMeshes, depthMeshBGL, [{ binding: 1, resource: { buffer: shadowParamsUBO } }]);
 
     // --- Textures ---
     const esmTexture = device.createTexture({
@@ -341,7 +342,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         primitive: { topology: "triangle-list", cullMode: "none" },
     });
 
-    const blurSampler = getOrCreateSampler(device, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
+    const blurSampler = getOrCreateSampler(eng, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
 
     // Blur H params — delta in output (blurSize) texel space, matching BJS PostProcess
     const blurHData = new Float32Array([1.0 / blurSize, 0, 0, 0]);
@@ -369,7 +370,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         ],
     });
 
-    const outputSampler = getOrCreateSampler(device, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
+    const outputSampler = getOrCreateSampler(eng, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
 
     const lightMatrix = viewProj;
     const shadowsInfo = new Float32Array([darkness, 0, depthScale, frustumEdgeFalloff]);
@@ -426,7 +427,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         _lastCasterVerSum = casterVerSum;
         _lastCasterCount = casters.length;
 
-        syncCasterMatrices(device, casters);
+        syncCasterMatrices(eng, casters);
 
         // Pass 1: Shadow depth
         const dp = encoder.beginRenderPass({

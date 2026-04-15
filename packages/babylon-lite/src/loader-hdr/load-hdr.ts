@@ -35,7 +35,7 @@ export interface HdrLoadOptions {
 }
 
 export async function loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures> {
-    const device = (scene.engine as EngineContextInternal).device;
+    const engine = scene.engine as EngineContextInternal;
     const faceSize = options?.faceSize ?? 256;
 
     // 1. Fetch and parse RGBE
@@ -46,17 +46,17 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     const irradianceSH = computeSHFromEquirect(hdr.data, hdr.width, hdr.height);
 
     // 3. Equirect → cubemap (GPU compute)
-    const srcCube = equirectToCubemapGPU(device, hdr, faceSize);
+    const srcCube = equirectToCubemapGPU(engine, hdr, faceSize);
 
     // 4. Prefilter cubemap for IBL (GPU compute, importance-sampled GGX)
     const mipCount = Math.floor(Math.log2(faceSize)) + 1;
-    const specularCube = prefilterCubemapGPU(device, srcCube, faceSize, mipCount);
+    const specularCube = prefilterCubemapGPU(engine, srcCube, faceSize, mipCount);
 
     // 5. BRDF LUT
-    const brdfLut = generateBrdfLut(device);
+    const brdfLut = generateBrdfLut(engine);
 
     // 6. Assemble
-    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 1.0, device);
+    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 1.0, engine);
 
     (scene as SceneContextInternal)._envTextures = textures;
     (scene as SceneContextInternal)._irradianceSH = irradianceSH;

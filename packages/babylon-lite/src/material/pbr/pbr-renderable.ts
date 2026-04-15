@@ -146,8 +146,10 @@ export async function buildPbrRenderables(
     let _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null = null;
     let _multiLightWGSL = "";
     let _multiLightLoop = "";
-    let _writeLightsUBO: ((device: GPUDevice, lights: readonly import("../../light/types.js").LightBase[]) => GPUBuffer) | undefined;
-    let _refreshLightsUBO: ((device: GPUDevice, buffer: GPUBuffer, lights: readonly import("../../light/types.js").LightBase[], scratch: Float32Array) => void) | undefined;
+    let _writeLightsUBO: ((engine: EngineContextInternal, lights: readonly import("../../light/types.js").LightBase[]) => GPUBuffer) | undefined;
+    let _refreshLightsUBO:
+        | ((engine: EngineContextInternal, buffer: GPUBuffer, lights: readonly import("../../light/types.js").LightBase[], scratch: Float32Array) => void)
+        | undefined;
     let _computeLightsVersion: ((lights: readonly import("../../light/types.js").LightBase[]) => number) | undefined;
     let _LIGHTS_UBO_SIZE = 0;
     if (hasSomeShadows) {
@@ -220,7 +222,7 @@ export async function buildPbrRenderables(
     const hasSomeThinInstances = meshes.some((m) => !!m.thinInstances);
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
-        | ((device: GPUDevice, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | ((engine: EngineContextInternal, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
         | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
@@ -347,7 +349,7 @@ export async function buildPbrRenderables(
     const lightFieldName = lightConfig?.sceneUboFields[0]?.name ?? "lightDirection";
     const lightBaseOffset = sceneUboSpec.offsets.get(lightFieldName)! / 4;
 
-    const sceneBGL = createSceneBindGroupLayout(device);
+    const sceneBGL = createSceneBindGroupLayout(engine);
     const sceneUniformBuffer = device.createBuffer({
         size: sceneUboSize,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -360,7 +362,7 @@ export async function buildPbrRenderables(
     let lightsUBOBuffer: GPUBuffer | undefined;
     let lightsUBOScratch: Float32Array | undefined;
     if (hasMultiLight && _writeLightsUBO) {
-        lightsUBOBuffer = _writeLightsUBO(device, scene.lights);
+        lightsUBOBuffer = _writeLightsUBO(engine, scene.lights);
         lightsUBOScratch = new Float32Array(_LIGHTS_UBO_SIZE / 4);
         (scene as SceneContextInternal)._pbrLightsUBO = lightsUBOBuffer;
         (scene as SceneContextInternal)._pbrLightsUBOScratch = lightsUBOScratch;
@@ -438,14 +440,14 @@ export async function buildPbrRenderables(
         }
 
         const composed = composePbr(features);
-        const variant = getOrCreatePbrPipeline(device, engine.format, engine.msaaSamples, features, sceneBGL, composed);
+        const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, sceneBGL, composed);
         const worldMatrix = mesh.worldMatrix;
-        const meshUBO = createMeshUBO(device, worldMatrix, composed);
-        const materialUBO = createMaterialUBO(device, mat, composed);
+        const meshUBO = createMeshUBO(engine, worldMatrix, composed);
+        const materialUBO = createMaterialUBO(engine, mat, composed);
         const boneView = mesh.skeleton?.boneTexture.createView();
         const morphView = mesh.morphTargets?.texture.createView();
         const materialBindGroup = createPbrMeshBindGroup(
-            device,
+            engine,
             variant,
             meshUBO,
             materialUBO,
@@ -557,7 +559,7 @@ export async function buildPbrRenderables(
             const hasTI = (dp.variant.features & PBR_HAS_THIN_INSTANCES) !== 0;
             const hasTIColor = (dp.variant.features & PBR_HAS_INSTANCE_COLOR) !== 0;
             if (hasTI && ti && _syncThinInstanceBuffers) {
-                slot = _syncThinInstanceBuffers(device, ti, pass, slot, hasTIColor);
+                slot = _syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
             }
 
             pass.setIndexBuffer(dp.indexBuffer, dp.indexFormat);
@@ -571,7 +573,7 @@ export async function buildPbrRenderables(
     }
 
     function updatePacketUBOs(list: PbrDrawPacket[]) {
-        updateWorldMatrixUBOs(device, list);
+        updateWorldMatrixUBOs(engine, list);
         for (const dp of list) {
             const mat = dp.mesh.material as PbrMaterialProps;
             if (!(mat as any)._uboDirty) {
@@ -692,7 +694,7 @@ export async function buildPbrRenderables(
                 const ver = _computeLightsVersion(scene.lights);
                 if (ver !== _lastPbrLightsVersion) {
                     _lastPbrLightsVersion = ver;
-                    _refreshLightsUBO(device, lightsUBOBuffer, scene.lights, lightsUBOScratch);
+                    _refreshLightsUBO(engine as EngineContextInternal, lightsUBOBuffer, scene.lights, lightsUBOScratch);
                 }
             }
         },
@@ -704,23 +706,24 @@ export async function buildPbrRenderables(
 
     (scene as SceneContextInternal)._disposables.push(
         () => clearPbrPipelineCache(),
-        () => clearSamplerCache(device)
+        () => clearSamplerCache(engine)
     );
 
     return { renderables, updater, _sceneBGL: sceneBGL, _sceneBG: sceneBindGroup };
 }
 
-function allocUBO(device: GPUDevice, data: Float32Array): GPUBuffer {
+function allocUBO(engine: EngineContextInternal, data: Float32Array): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({ size: data.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(buf, 0, data as unknown as Float32Array<ArrayBuffer>);
     return buf;
 }
 
 /** Create a mesh UBO containing only the world matrix (64 bytes). */
-function createMeshUBO(device: GPUDevice, world: Mat4, composed: ComposedShader): GPUBuffer {
+function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader): GPUBuffer {
     const data = new Float32Array(composed.meshUboSpec.totalBytes / 4);
     data.set(world, 0);
-    return allocUBO(device, data);
+    return allocUBO(engine, data);
 }
 
 /** Write material properties into a pre-allocated Float32Array. */
@@ -785,11 +788,11 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
 }
 
 /** Create a material UBO from the ComposedShader's materialUboSpec. */
-function createMaterialUBO(device: GPUDevice, material: PbrMaterialProps, composed: ComposedShader): GPUBuffer {
+function createMaterialUBO(engine: EngineContextInternal, material: PbrMaterialProps, composed: ComposedShader): GPUBuffer {
     const spec = composed.materialUboSpec!;
     const data = new Float32Array(spec.totalBytes / 4);
     writeMaterialData(data, material, spec);
-    return allocUBO(device, data);
+    return allocUBO(engine, data);
 }
 
 /** Exported for use by pbr-single-rebuild.ts */

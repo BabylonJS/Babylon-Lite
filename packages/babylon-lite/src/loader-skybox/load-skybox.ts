@@ -26,14 +26,14 @@ export interface SkyboxData {
  *  @param size    - Box size (default 100, matches Babylon)
  */
 export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size = 100): Promise<void> {
-    const device = (scene.engine as EngineContextInternal).device;
+    const eng = scene.engine as EngineContextInternal;
 
-    const cubeTex = await loadCubeTexture(device, baseUrl, ext);
+    const cubeTex = await loadCubeTexture(eng, baseUrl, ext);
 
     const boxData = createBoxData(size);
-    const posBuffer = uploadBuffer(device, boxData.positions, GPUBufferUsage.VERTEX);
-    const normBuffer = uploadBuffer(device, boxData.normals, GPUBufferUsage.VERTEX);
-    const idxBuffer = uploadIdxBuffer(device, boxData.indices);
+    const posBuffer = uploadBuffer(eng, boxData.positions, GPUBufferUsage.VERTEX);
+    const normBuffer = uploadBuffer(eng, boxData.normals, GPUBufferUsage.VERTEX);
+    const idxBuffer = uploadIdxBuffer(eng, boxData.indices);
 
     const world = new Float32Array(16);
     world[0] = 1;
@@ -72,7 +72,8 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
     });
 }
 
-function uploadBuffer(device: GPUDevice, data: Float32Array, usage: GPUBufferUsageFlags): GPUBuffer {
+function uploadBuffer(engine: EngineContextInternal, data: Float32Array, usage: GPUBufferUsageFlags): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({
         size: data.byteLength,
         usage: usage | GPUBufferUsage.COPY_DST,
@@ -83,7 +84,8 @@ function uploadBuffer(device: GPUDevice, data: Float32Array, usage: GPUBufferUsa
     return buf;
 }
 
-function uploadIdxBuffer(device: GPUDevice, data: Uint32Array): GPUBuffer {
+function uploadIdxBuffer(engine: EngineContextInternal, data: Uint32Array): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({
         size: data.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,

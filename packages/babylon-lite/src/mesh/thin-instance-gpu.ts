@@ -2,9 +2,17 @@
  *  Keeps the standard renderable chunk unchanged for scenes without thin instances. */
 
 import type { ThinInstanceData } from "./thin-instance.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */
-export function syncThinInstanceBuffers(device: GPUDevice, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean): number {
+export function syncThinInstanceBuffers(
+    engine: EngineContextInternal,
+    ti: ThinInstanceData,
+    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+    slot: number,
+    hasColor: boolean
+): number {
+    const device = engine.device;
     if (ti._version !== ti._gpuVersion) {
         const byteSize = ti.count * 64;
         let bufferRecreated = false;

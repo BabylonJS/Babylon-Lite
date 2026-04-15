@@ -175,7 +175,8 @@ function computeSpotLightMatrix(light: SpotLight, near: number, far: number): { 
 }
 
 export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight, casterMeshes: Mesh[], cfg: PcfShadowGeneratorConfig = {}): ShadowGenerator {
-    const device = (engine as EngineContextInternal).device;
+    const eng = engine as EngineContextInternal;
+    const device = eng.device;
     ensurePcfRegistered();
     const mapSize = cfg.mapSize ?? 512;
     const bias = cfg.bias ?? 0.00005;
@@ -195,7 +196,7 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
     });
 
     // Build caster data + per-caster bind groups
-    const casters = buildCasters(device, casterMeshes, depthMeshBGL);
+    const casters = buildCasters(eng, casterMeshes, depthMeshBGL);
 
     // --- Depth-only texture ---
     const depthTexture = device.createTexture({
@@ -309,7 +310,7 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
             }
             _lastPcfCasterVerSum = casterVerSum;
 
-            syncCasterMatrices(device, casters);
+            syncCasterMatrices(eng, casters);
 
             const dp = encoder.beginRenderPass({
                 colorAttachments: [],

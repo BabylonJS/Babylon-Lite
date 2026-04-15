@@ -12,6 +12,7 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import { createStandardTemplate } from "./standard-template.js";
@@ -43,7 +44,7 @@ export const standardGroupBuilder: MeshGroupBuilder & { _loadRebuildSingle?: () 
     const hasReflection = meshes.some((m) => !!(m.material as any).reflectionTexture);
     const hasCubeReflection = meshes.some((m) => !!(m.material as any).reflectionCubeTexture);
 
-    let tiSync: ((device: GPUDevice, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
+    let tiSync: ((engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
     let tiFragment: any;
     let bumpFragment: any;
     let shadowFragment: any;
@@ -295,13 +296,14 @@ let _sceneUniformScratch: Float32Array<ArrayBuffer> | null = null;
 /** Write per-frame scene uniforms to the given UBO.
  *  Identical layout across all pipeline variants. */
 export function updateSceneUniforms(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     sceneUBO: GPUBuffer,
     viewProjection: Float32Array,
     viewMatrix: Float32Array,
     eyePosition: [number, number, number],
     fog?: FogConfig
 ): void {
+    const device = engine.device;
     const size = getSceneUboSize() / 4;
     if (!_sceneUniformScratch || _sceneUniformScratch.length !== size) {
         _sceneUniformScratch = new Float32Array(size);

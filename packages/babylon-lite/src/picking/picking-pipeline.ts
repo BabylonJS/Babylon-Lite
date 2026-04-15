@@ -1,3 +1,4 @@
+import type { EngineContextInternal } from "../engine/engine.js";
 import { pickingShaderSource, pickingThinInstanceShaderSource } from "./picking-shader.js";
 
 // ─── Cache state (auto-invalidate on device change) ─────────────────
@@ -9,7 +10,8 @@ let _sceneBGL: GPUBindGroupLayout | null = null;
 let _meshBGL: GPUBindGroupLayout | null = null;
 let _tiMeshBGL: GPUBindGroupLayout | null = null;
 
-function invalidateIfNeeded(device: GPUDevice): void {
+function invalidateIfNeeded(engine: EngineContextInternal): void {
+    const device = engine.device;
     if (device !== _cachedDevice) {
         _pipeline = null;
         _tiPipeline = null;
@@ -23,8 +25,9 @@ function invalidateIfNeeded(device: GPUDevice): void {
 // ─── Bind group layouts ─────────────────────────────────────────────
 
 /** Group 0: scene-level viewProjection uniform. */
-export function getPickingSceneBGL(device: GPUDevice): GPUBindGroupLayout {
-    invalidateIfNeeded(device);
+export function getPickingSceneBGL(engine: EngineContextInternal): GPUBindGroupLayout {
+    const device = engine.device;
+    invalidateIfNeeded(engine);
     if (!_sceneBGL) {
         _sceneBGL = device.createBindGroupLayout({
             label: "picking-scene-bgl",
@@ -41,8 +44,9 @@ export function getPickingSceneBGL(device: GPUDevice): GPUBindGroupLayout {
 }
 
 /** Group 1: per-mesh world matrix + pickId uniform (regular meshes). */
-export function getPickingMeshBGL(device: GPUDevice): GPUBindGroupLayout {
-    invalidateIfNeeded(device);
+export function getPickingMeshBGL(engine: EngineContextInternal): GPUBindGroupLayout {
+    const device = engine.device;
+    invalidateIfNeeded(engine);
     if (!_meshBGL) {
         _meshBGL = device.createBindGroupLayout({
             label: "picking-mesh-bgl",
@@ -59,8 +63,9 @@ export function getPickingMeshBGL(device: GPUDevice): GPUBindGroupLayout {
 }
 
 /** Group 1: per-mesh baseMeshPickId uniform + instance storage buffer (thin instances). */
-export function getPickingTIMeshBGL(device: GPUDevice): GPUBindGroupLayout {
-    invalidateIfNeeded(device);
+export function getPickingTIMeshBGL(engine: EngineContextInternal): GPUBindGroupLayout {
+    const device = engine.device;
+    invalidateIfNeeded(engine);
     if (!_tiMeshBGL) {
         _tiMeshBGL = device.createBindGroupLayout({
             label: "picking-ti-mesh-bgl",
@@ -96,11 +101,12 @@ interface PickingPipelineOptions {
     label: string;
 }
 
-function createPickingPipelineInternal(device: GPUDevice, opts: PickingPipelineOptions): GPURenderPipeline {
+function createPickingPipelineInternal(engine: EngineContextInternal, opts: PickingPipelineOptions): GPURenderPipeline {
+    const device = engine.device;
     const module = device.createShaderModule({ label: `${opts.label}-shader`, code: opts.shader });
     const layout = device.createPipelineLayout({
         label: `${opts.label}-pipeline-layout`,
-        bindGroupLayouts: [getPickingSceneBGL(device), opts.meshBGL],
+        bindGroupLayouts: [getPickingSceneBGL(engine), opts.meshBGL],
     });
     return device.createRenderPipeline({
         label: `${opts.label}-pipeline`,
@@ -130,12 +136,12 @@ function createPickingPipelineInternal(device: GPUDevice, opts: PickingPipelineO
 }
 
 /** Get (or create) the picking pipeline for regular meshes. */
-export function getPickingPipeline(device: GPUDevice): GPURenderPipeline {
-    invalidateIfNeeded(device);
+export function getPickingPipeline(engine: EngineContextInternal): GPURenderPipeline {
+    invalidateIfNeeded(engine);
     if (!_pipeline) {
-        _pipeline = createPickingPipelineInternal(device, {
+        _pipeline = createPickingPipelineInternal(engine, {
             shader: pickingShaderSource,
-            meshBGL: getPickingMeshBGL(device),
+            meshBGL: getPickingMeshBGL(engine),
             label: "picking",
         });
     }
@@ -143,12 +149,12 @@ export function getPickingPipeline(device: GPUDevice): GPURenderPipeline {
 }
 
 /** Get (or create) the picking pipeline for thin-instanced meshes. */
-export function getPickingTIPipeline(device: GPUDevice): GPURenderPipeline {
-    invalidateIfNeeded(device);
+export function getPickingTIPipeline(engine: EngineContextInternal): GPURenderPipeline {
+    invalidateIfNeeded(engine);
     if (!_tiPipeline) {
-        _tiPipeline = createPickingPipelineInternal(device, {
+        _tiPipeline = createPickingPipelineInternal(engine, {
             shader: pickingThinInstanceShaderSource,
-            meshBGL: getPickingTIMeshBGL(device),
+            meshBGL: getPickingTIMeshBGL(engine),
             label: "picking-ti",
         });
     }

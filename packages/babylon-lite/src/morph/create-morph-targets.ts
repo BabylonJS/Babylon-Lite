@@ -7,19 +7,21 @@
  *  creation time — no global registration needed. */
 
 import type { MorphTargetData } from "../animation/types.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 
 /** Create morph target GPU data from parsed glTF targets.
- *  @param device       WebGPU device
+ *  @param engine       Engine context (provides GPU device)
  *  @param targets      Array of {positions, normals} deltas per target
  *  @param vertexCount  Number of vertices in the base mesh
  *  @param morphWeights Initial morph weights (one per target, may be null)
  */
 export function createMorphTargets(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     targets: { positions: Float32Array; normals: Float32Array | null }[],
     vertexCount: number,
     morphWeights: number[] | null
 ): MorphTargetData {
+    const device = engine.device;
     const targetCount = Math.min(targets.length, 4); // max 4 (vec4 weights)
     const texWidth = Math.min(vertexCount, 2048);
     const rowsPerBand = Math.ceil(vertexCount / texWidth);

@@ -33,7 +33,6 @@ export async function buildBackgroundRenderables(
     groundImagePromise?: Promise<ImageBitmap>
 ): Promise<Renderable[]> {
     const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 
     // Compute scene size (matches BJS EnvironmentHelper._getSceneSize)
@@ -46,13 +45,13 @@ export async function buildBackgroundRenderables(
         const { skyHalfSize } = computeSkyboxGeometry(scene, options?.skyboxSize);
         const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
         const cc = scene.clearColor;
-        const skyBufs = createSkyboxBuffers(device, skyHalfSize);
+        const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
 
         const skyMat = createSkyboxMaterial(sceneBindGroupLayout);
         const skyOutputColor: [number, number, number] = [cc.r, cc.g, cc.b];
-        const skyUBO = createSkyMeshUBO(device, skyboxWorld, primaryColor, skyOutputColor);
-        const skyPipeline = skyMat.getPipeline(device, engine.format, engine.msaaSamples);
-        const skyBG = skyMat.createBindGroup(device, skyUBO, envTextures);
+        const skyUBO = createSkyMeshUBO(engine, skyboxWorld, primaryColor, skyOutputColor);
+        const skyPipeline = skyMat.getPipeline(engine, engine.format, engine.msaaSamples);
+        const skyBG = skyMat.createBindGroup(engine, skyUBO, envTextures);
 
         renderables.push({
             order: 0, // skybox renders first (behind everything)
@@ -73,7 +72,7 @@ export async function buildBackgroundRenderables(
     if (!options?.skipGround) {
         const { buildGroundRenderable } = await import("./background-ground.js");
         const groundRenderable = await buildGroundRenderable(
-            device,
+            engine,
             sceneBindGroupLayout,
             engine.format,
             engine.msaaSamples,
@@ -90,7 +89,8 @@ export async function buildBackgroundRenderables(
     return renderables;
 }
 
-function createSkyMeshUBO(device: GPUDevice, world: Mat4, primaryColor: [number, number, number], skyOutputColor: [number, number, number]): GPUBuffer {
+function createSkyMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColor: [number, number, number], skyOutputColor: [number, number, number]): GPUBuffer {
+    const device = engine.device;
     const data = new Float32Array(SKY_MESH_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];

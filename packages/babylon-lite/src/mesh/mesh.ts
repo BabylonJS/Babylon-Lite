@@ -1,6 +1,7 @@
 /** High-level Mesh — position/rotation/scaling + material + GPU geometry.
  *  Plain data (no scene reference). The scene collects meshes via addToScene(). */
 
+import type { EngineContextInternal } from "../engine/engine.js";
 import { mat4Compose, mat4Identity } from "../math/mat4.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
@@ -114,15 +115,23 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
 // ─── GPU Geometry Upload ─────────────────────────────────────────────
 
 /** Upload typed arrays to GPU buffers and return a MeshGPU handle. */
-export function uploadMeshToGPU(device: GPUDevice, positions: Float32Array, normals: Float32Array, indices: Uint32Array, uvs?: Float32Array, uvs2?: Float32Array): MeshGPU {
-    const positionBuffer = createGpuBuffer(device, positions, GPUBufferUsage.VERTEX);
-    const normalBuffer = createGpuBuffer(device, normals, GPUBufferUsage.VERTEX);
-    const indexBuffer = createGpuBuffer(device, indices, GPUBufferUsage.INDEX);
+export function uploadMeshToGPU(
+    engine: EngineContextInternal,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array
+): MeshGPU {
+    const device = engine.device;
+    const positionBuffer = createGpuBuffer(engine, positions, GPUBufferUsage.VERTEX);
+    const normalBuffer = createGpuBuffer(engine, normals, GPUBufferUsage.VERTEX);
+    const indexBuffer = createGpuBuffer(engine, indices, GPUBufferUsage.INDEX);
 
     // UVs: use provided or create zero-filled buffer
     let uvBuffer: GPUBuffer;
     if (uvs && uvs.length > 0) {
-        uvBuffer = createGpuBuffer(device, uvs, GPUBufferUsage.VERTEX);
+        uvBuffer = createGpuBuffer(engine, uvs, GPUBufferUsage.VERTEX);
     } else {
         uvBuffer = device.createBuffer({
             size: (positions.length / 3) * 8,
@@ -135,7 +144,7 @@ export function uploadMeshToGPU(device: GPUDevice, positions: Float32Array, norm
     // UV2: only create if provided
     let uv2Buffer: GPUBuffer | null = null;
     if (uvs2 && uvs2.length > 0) {
-        uv2Buffer = createGpuBuffer(device, uvs2, GPUBufferUsage.VERTEX);
+        uv2Buffer = createGpuBuffer(engine, uvs2, GPUBufferUsage.VERTEX);
     }
 
     return {
@@ -149,7 +158,8 @@ export function uploadMeshToGPU(device: GPUDevice, positions: Float32Array, norm
     };
 }
 
-function createGpuBuffer(device: GPUDevice, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+function createGpuBuffer(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST, mappedAtCreation: true });
     new Uint8Array(buf.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
     buf.unmap();

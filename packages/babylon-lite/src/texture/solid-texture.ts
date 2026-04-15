@@ -17,7 +17,7 @@ export function createSolidTexture2D(engine: EngineContext, r: number, g: number
     const data = new Uint8Array([Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), Math.round(a * 255)]);
     device.queue.writeTexture({ texture }, data, { bytesPerRow: 4, rowsPerImage: 1 }, { width: 1, height: 1 });
 
-    const sampler = getOrCreateSampler(device, {
+    const sampler = getOrCreateSampler(engine as EngineContextInternal, {
         minFilter: "linear",
         magFilter: "linear",
     });

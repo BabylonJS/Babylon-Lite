@@ -102,7 +102,7 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     const animModulePromise = hasAnimations ? Promise.all([import("./gltf-animation.js"), import("../animation/animation-group.js")]) : null;
 
     const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache);
-    const meshes = await uploadMeshes((engine as EngineContextInternal).device, meshDatas);
+    const meshes = await uploadMeshes(engine as EngineContextInternal, meshDatas);
 
     // Build TransformNode hierarchy from glTF nodes.
     // Hierarchy meshes get their worldMatrix cleared — the tree computes it.
@@ -279,7 +279,8 @@ async function extractAllMeshes(json: any, binChunk: DataView, baseUrl: string, 
 
 // --- GPU Upload ---
 
-function createBufferFromData(device: GPUDevice, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+function createBufferFromData(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+    const device = engine.device;
     const size = Math.max(data.byteLength, 4);
     const buffer = device.createBuffer({
         size: (size + 3) & ~3, // align to 4 bytes — required when mappedAtCreation is true
@@ -298,7 +299,7 @@ function linearToSrgbByte(v: number): number {
 }
 
 // Pre-resolved generateMipmaps function — loaded once before texture uploads
-let _generateMipmaps: ((device: GPUDevice, texture: GPUTexture) => void) | null = null;
+let _generateMipmaps: ((engine: EngineContextInternal, texture: GPUTexture, face?: number) => void) | null = null;
 
 async function ensureMipmapModule(): Promise<void> {
     if (!_generateMipmaps) {
@@ -306,7 +307,8 @@ async function ensureMipmapModule(): Promise<void> {
     }
 }
 
-function uploadTextureSynced(device: GPUDevice, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): Texture2D {
+function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): Texture2D {
+    const device = engine.device;
     const w = bitmap?.width ?? 1;
     const h = bitmap?.height ?? 1;
     const format: GPUTextureFormat = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
@@ -321,7 +323,7 @@ function uploadTextureSynced(device: GPUDevice, bitmap: ImageBitmap | null, srgb
 
     if (bitmap) {
         device.queue.copyExternalImageToTexture({ source: bitmap }, { texture, premultipliedAlpha: false }, { width: w, height: h });
-        _generateMipmaps!(device, texture);
+        _generateMipmaps!(engine, texture);
     } else {
         device.queue.writeTexture({ texture }, (fallbackBytes ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
     }
@@ -329,8 +331,8 @@ function uploadTextureSynced(device: GPUDevice, bitmap: ImageBitmap | null, srgb
     return { texture, view: texture.createView(), sampler, width: w, height: h };
 }
 
-async function uploadMeshes(device: GPUDevice, meshDatas: GltfMeshData[]): Promise<Mesh[]> {
-    const sampler = getOrCreateSampler(device, {
+async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshData[]): Promise<Mesh[]> {
+    const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
         mipmapFilter: "linear",
@@ -358,7 +360,7 @@ async function uploadMeshes(device: GPUDevice, meshDatas: GltfMeshData[]): Promi
 
     function getCachedTexture(bitmap: ImageBitmap | null, srgb: boolean): Texture2D {
         if (!bitmap) {
-            return uploadTextureSynced(device, null, srgb, sampler);
+            return uploadTextureSynced(engine, null, srgb, sampler);
         }
         let id = bitmapIds.get(bitmap);
         if (id === undefined) {
@@ -368,7 +370,7 @@ async function uploadMeshes(device: GPUDevice, meshDatas: GltfMeshData[]): Promi
         const key = `${id}:${srgb ? 1 : 0}`;
         let tex = texCache.get(key);
         if (!tex) {
-            tex = uploadTextureSynced(device, bitmap, srgb, sampler);
+            tex = uploadTextureSynced(engine, bitmap, srgb, sampler);
             texCache.set(key, tex);
         }
         return tex;
@@ -393,14 +395,14 @@ async function uploadMeshes(device: GPUDevice, meshDatas: GltfMeshData[]): Promi
                 d1.data[j] = d2.data[j]!;
             }
             x1.putImageData(d1, 0, 0);
-            return createImageBitmap(c1).then((bmp) => uploadTextureSynced(device, bmp, false, sampler));
+            return createImageBitmap(c1).then((bmp) => uploadTextureSynced(engine, bmp, false, sampler));
         } else if (mrImg ?? occImg) {
             return getCachedTexture((mrImg ?? occImg)!, false);
         } else {
             const rf = m.material.roughnessFactor,
                 mf = m.material.metallicFactor;
             const clampByte = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-            return uploadTextureSynced(device, null, false, sampler, new Uint8Array([255, clampByte(rf), clampByte(mf), 255]));
+            return uploadTextureSynced(engine, null, false, sampler, new Uint8Array([255, clampByte(rf), clampByte(mf), 255]));
         }
     }
 
@@ -412,7 +414,7 @@ async function uploadMeshes(device: GPUDevice, meshDatas: GltfMeshData[]): Promi
                 : (() => {
                       const f = m.material.baseColorFactor;
                       const bytes = new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)]);
-                      return uploadTextureSynced(device, null, true, sampler, bytes);
+                      return uploadTextureSynced(engine, null, true, sampler, bytes);
                   })();
             const normalTexture = m.material.normalImage ? getCachedTexture(m.material.normalImage, false) : undefined;
             const emissiveTexture = m.material.emissiveImage ? getCachedTexture(m.material.emissiveImage, true) : undefined;
@@ -426,21 +428,21 @@ async function uploadMeshes(device: GPUDevice, meshDatas: GltfMeshData[]): Promi
             if (m.joints && m.weights && m.skin && computeBoneTextureDataFn && createSkeletonFn) {
                 const boneCount = m.skin.jointNodes.length;
                 const boneData = computeBoneTextureDataFn(m.skin);
-                skeleton = createSkeletonFn(device, m.joints, m.weights, boneCount, boneData, m.joints1, m.weights1);
+                skeleton = createSkeletonFn(engine, m.joints, m.weights, boneCount, boneData, m.joints1, m.weights1);
             }
 
             // Morph targets (module already pre-loaded)
             let morphTargets: import("../animation/types.js").MorphTargetData | null = null;
             if (m.morphTargets && m.morphTargets.length > 0 && createMorphTargetsFn) {
-                morphTargets = createMorphTargetsFn(device, m.morphTargets, m.vertexCount, m.morphWeights);
+                morphTargets = createMorphTargetsFn(engine, m.morphTargets, m.vertexCount, m.morphWeights);
             }
 
             const gpu: MeshGPU = {
-                positionBuffer: createBufferFromData(device, m.positions, GPUBufferUsage.VERTEX),
-                normalBuffer: createBufferFromData(device, m.normals, GPUBufferUsage.VERTEX),
-                tangentBuffer: m.tangents ? createBufferFromData(device, m.tangents, GPUBufferUsage.VERTEX) : null,
-                uvBuffer: createBufferFromData(device, m.uvs, GPUBufferUsage.VERTEX),
-                indexBuffer: createBufferFromData(device, m.indices, GPUBufferUsage.INDEX),
+                positionBuffer: createBufferFromData(engine, m.positions, GPUBufferUsage.VERTEX),
+                normalBuffer: createBufferFromData(engine, m.normals, GPUBufferUsage.VERTEX),
+                tangentBuffer: m.tangents ? createBufferFromData(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
+                uvBuffer: createBufferFromData(engine, m.uvs, GPUBufferUsage.VERTEX),
+                indexBuffer: createBufferFromData(engine, m.indices, GPUBufferUsage.INDEX),
                 indexCount: m.indexCount,
                 indexFormat: (m.indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
             };

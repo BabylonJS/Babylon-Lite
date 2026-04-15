@@ -4,6 +4,7 @@
  *  up to MAX_LIGHTS × LightEntry (4 × vec4 = 64 bytes each).
  *  Total: 16 + 4 × 64 = 272 bytes. */
 
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { LightBase } from "../light/types.js";
 import type { LightBaseInternal } from "../light/types.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
@@ -48,7 +49,8 @@ export function fillLightsData(data: Float32Array, lights: readonly LightBase[])
 }
 
 /** Create a new lights UBO from all standard-compatible lights in the scene. */
-export function writeLightsUBO(device: GPUDevice, lights: readonly LightBase[]): GPUBuffer {
+export function writeLightsUBO(engine: EngineContextInternal, lights: readonly LightBase[]): GPUBuffer {
+    const device = engine.device;
     const data = new Float32Array(LIGHTS_UBO_SIZE / 4);
     fillLightsData(data, lights);
     const buf = device.createBuffer({ size: LIGHTS_UBO_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -57,7 +59,8 @@ export function writeLightsUBO(device: GPUDevice, lights: readonly LightBase[]):
 }
 
 /** Refresh an existing lights UBO with current light state. */
-export function refreshLightsUBO(device: GPUDevice, buffer: GPUBuffer, lights: readonly LightBase[], scratch: Float32Array): void {
+export function refreshLightsUBO(engine: EngineContextInternal, buffer: GPUBuffer, lights: readonly LightBase[], scratch: Float32Array): void {
+    const device = engine.device;
     fillLightsData(scratch, lights);
     device.queue.writeBuffer(buffer, 0, scratch as Float32Array<ArrayBuffer>);
 }

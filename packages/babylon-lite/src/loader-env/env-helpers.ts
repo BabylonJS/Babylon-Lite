@@ -1,12 +1,13 @@
 import type { EnvironmentTextures } from "./load-env.js";
 import { polynomialToPreScaledHarmonics } from "./load-env.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 
 /** Create the standard sampler pair used by all environment loaders */
-export function createEnvSamplers(device: GPUDevice): { cubeSampler: GPUSampler; brdfSampler: GPUSampler } {
+export function createEnvSamplers(engine: EngineContextInternal): { cubeSampler: GPUSampler; brdfSampler: GPUSampler } {
     return {
-        cubeSampler: getOrCreateSampler(device, { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" }),
-        brdfSampler: getOrCreateSampler(device, { magFilter: "linear", minFilter: "linear" }),
+        cubeSampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" }),
+        brdfSampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" }),
     };
 }
 
@@ -16,9 +17,9 @@ export function assembleEnvironmentTextures(
     brdfLut: GPUTexture,
     irradianceSH: Float32Array,
     lodGenerationScale: number,
-    device: GPUDevice
+    engine: EngineContextInternal
 ): EnvironmentTextures {
-    const { cubeSampler, brdfSampler } = createEnvSamplers(device);
+    const { cubeSampler, brdfSampler } = createEnvSamplers(engine);
     return {
         specularCube,
         specularCubeView: specularCube.createView({ dimension: "cube" }),

@@ -54,7 +54,7 @@ export async function loadEnvironment(
         brdfUrl: string;
     }
 ): Promise<EnvironmentTextures> {
-    const device = (scene.engine as EngineContextInternal).device;
+    const engine = scene.engine as EngineContextInternal;
 
     // Fetch .env and BRDF PNG in parallel
     const envPromise = fetch(url).then((r) => r.arrayBuffer());
@@ -68,17 +68,17 @@ export async function loadEnvironment(
     // Decode all face images in parallel (raw RGBD bytes — no color space conversion)
     const faceImages = await Promise.all(faceBlobs.map((blob) => createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" })));
 
-    const specularCube = uploadCubemapRGBD(device, faceImages, width, mipCount);
+    const specularCube = uploadCubemapRGBD(engine, faceImages, width, mipCount);
     for (const img of faceImages) {
         img.close();
     }
 
     const brdfImage = await brdfPromise;
     const { decodeBrdfPng } = await import("./brdf-rgbd-decode.js");
-    const brdfLut = decodeBrdfPng(device, brdfImage);
+    const brdfLut = decodeBrdfPng(engine, brdfImage);
     brdfImage.close();
 
-    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, device);
+    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
 
     (scene as SceneContextInternal)._envTextures = textures;
     (scene as SceneContextInternal)._irradianceSH = irradianceSH;
@@ -222,7 +222,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 let _rgbdPipeline: GPUComputePipeline | null = null;
 let _rgbdPipelineDevice: GPUDevice | null = null;
 
-function uploadCubemapRGBD(device: GPUDevice, images: ImageBitmap[], width: number, mipCount: number): GPUTexture {
+function uploadCubemapRGBD(engine: EngineContextInternal, images: ImageBitmap[], width: number, mipCount: number): GPUTexture {
+    const device = engine.device;
     if (device !== _rgbdPipelineDevice) {
         _rgbdPipeline = null;
         _rgbdPipelineDevice = device;

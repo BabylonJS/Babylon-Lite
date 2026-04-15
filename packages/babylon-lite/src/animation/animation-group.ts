@@ -1,6 +1,7 @@
 // AnimationGroup — user-facing handle for a single animation clip.
 // Stored on scene.animationGroups[]. Pure state interface.
 
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { GltfAnimationData } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
@@ -58,12 +59,12 @@ export function goToFrame(group: AnimationGroup, frame: number): void {
 }
 
 /** @internal Advance animation by deltaMs. Called by the engine each frame. */
-export function tickAnimation(group: AnimationGroup, deltaMs: number, device: GPUDevice): void {
+export function tickAnimation(group: AnimationGroup, deltaMs: number, engine: EngineContextInternal): void {
     if (group._stopped) {
         return;
     }
     if (group._ctrl) {
-        group._ctrl.tick(deltaMs, device);
+        group._ctrl.tick(deltaMs, engine);
     }
 }
 

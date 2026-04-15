@@ -3,6 +3,7 @@
  *  Centralises patterns that PBR and Standard pipelines previously duplicated:
  *  scene BGL creation, mesh world-matrix updates, and pipeline descriptors. */
 
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
@@ -12,7 +13,8 @@ let _cachedDevice: GPUDevice | null = null;
 
 /** Shared scene bind group layout — one uniform buffer at binding 0,
  *  visible to both vertex and fragment stages. Cached per device. */
-export function getSceneBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
+export function getSceneBindGroupLayout(engine: EngineContextInternal): GPUBindGroupLayout {
+    const device = engine.device;
     if (_cachedSceneBGL && _cachedDevice === device) {
         return _cachedSceneBGL;
     }
@@ -40,7 +42,8 @@ export interface WorldMatrixPacket {
 }
 
 /** Write world matrices to UBOs for packets whose version has changed. */
-export function updateWorldMatrixUBOs(device: GPUDevice, packets: WorldMatrixPacket[]): void {
+export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: WorldMatrixPacket[]): void {
+    const device = engine.device;
     for (const p of packets) {
         const wm = p.mesh.worldMatrix;
         if (p.mesh.worldMatrixVersion !== p._lastWorldVersion) {
@@ -54,7 +57,7 @@ export function updateWorldMatrixUBOs(device: GPUDevice, packets: WorldMatrixPac
 
 export interface PipelineDescriptorOpts {
     label: string;
-    device: GPUDevice;
+    engine: EngineContextInternal;
     bgls: GPUBindGroupLayout[];
     vertModule: GPUShaderModule;
     fragModule: GPUShaderModule;
@@ -72,7 +75,7 @@ export function createStandardPipelineDescriptor(opts: PipelineDescriptorOpts): 
     const target: GPUColorTargetState = opts.blend ? { format: opts.format, blend: opts.blend } : { format: opts.format };
     return {
         label: opts.label,
-        layout: opts.device.createPipelineLayout({ bindGroupLayouts: opts.bgls }),
+        layout: opts.engine.device.createPipelineLayout({ bindGroupLayouts: opts.bgls }),
         vertex: { module: opts.vertModule, entryPoint: "main", buffers: opts.vertexBuffers },
         fragment: { module: opts.fragModule, entryPoint: "main", targets: [target] },
         depthStencil: { format: "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: opts.depthWriteEnabled ?? true },

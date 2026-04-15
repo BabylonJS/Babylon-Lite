@@ -64,7 +64,7 @@ interface PipelineGroup {
 }
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
-type ThinInstanceSync = (device: GPUDevice, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
+type ThinInstanceSync = (engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
 
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
@@ -115,7 +115,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         if (!lightsUBOs[m]) {
             const filtered = allLights.filter((_, i) => (m >> i) & 1);
             lightsForMask[m] = filtered;
-            lightsUBOs[m] = writeLightsUBO(device, filtered);
+            lightsUBOs[m] = writeLightsUBO(engine, filtered);
         }
         return lightsUBOs[m]!;
     }
@@ -196,7 +196,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                     frags.push(tiFrag);
                 }
             }
-            const variant = getOrCreatePipeline(device, engine.format, engine.msaaSamples, features, frags);
+            const variant = getOrCreatePipeline(engine, engine.format, engine.msaaSamples, features, frags);
             group = { variant, packets: [] };
             groups.set(features, group);
         }
@@ -204,7 +204,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const worldMatrix = mesh.worldMatrix;
         const meshShadowGens = mesh.receiveShadows ? shadowLights.map((sl) => sl.gen) : [];
         const lightsBuffer = getLightsBuffer(mesh.id);
-        const gpu = createDynamicMeshGPU(device, group.variant, {
+        const gpu = createDynamicMeshGPU(engine, group.variant, {
             worldMatrix,
             material: mat,
             lightsBuffer,
@@ -287,7 +287,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
                     const ti = hasThinInstances ? pkt.mesh.thinInstances : null;
                     if (ti && tiSync) {
-                        slot = tiSync(device, ti, pass, slot, hasInstanceColor);
+                        slot = tiSync(engine, ti, pass, slot, hasInstanceColor);
                     }
 
                     pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
@@ -332,7 +332,14 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 const viewProj = getViewProjectionMatrix(scene.camera, aspect);
                 const viewMat = getViewMatrix(scene.camera);
                 const camPos = getCameraPosition(scene.camera);
-                updateSceneUniforms(device, sharedSceneUBO, viewProj as Float32Array, viewMat as Float32Array, [camPos.x, camPos.y, camPos.z], scene.fog ?? undefined);
+                updateSceneUniforms(
+                    engine as EngineContextInternal,
+                    sharedSceneUBO,
+                    viewProj as Float32Array,
+                    viewMat as Float32Array,
+                    [camPos.x, camPos.y, camPos.z],
+                    scene.fog ?? undefined
+                );
             }
             // Refresh light UBOs only when light state has changed
             for (let m = 0; m < lightsUBOs.length; m++) {
@@ -341,7 +348,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                     const ver = computeLightsVersion(lightsForMask[m]!);
                     if (ver !== lightsVersions[m]) {
                         lightsVersions[m] = ver;
-                        refreshLightsUBO(device, buf, lightsForMask[m]!, lightsScratch);
+                        refreshLightsUBO(engine as EngineContextInternal, buf, lightsForMask[m]!, lightsScratch);
                     }
                 }
             }
@@ -353,7 +360,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
     (scene as SceneContextInternal)._disposables.push(
         () => clearStandardPipelineCache(),
-        () => clearSamplerCache(device)
+        () => clearSamplerCache(engine)
     );
 
     return { renderables, updater };

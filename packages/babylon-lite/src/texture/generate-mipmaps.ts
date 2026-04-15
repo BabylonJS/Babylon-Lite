@@ -5,6 +5,7 @@
  * converts sRGB→linear on read and linear→sRGB on write, so filtering is correct.
  */
 
+import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 
 // Compact fullscreen-triangle blit shader (inline WGSL — minimal whitespace per GUIDANCE.md)
@@ -30,7 +31,8 @@ function clearMipmapCache(): void {
     _cachedDevice = null;
 }
 
-function ensureResources(device: GPUDevice): void {
+function ensureResources(engine: EngineContextInternal): void {
+    const device = engine.device;
     if (device !== _cachedDevice) {
         clearMipmapCache();
         _cachedDevice = device;
@@ -39,7 +41,7 @@ function ensureResources(device: GPUDevice): void {
         shaderModule = device.createShaderModule({ code: BLIT_SHADER });
     }
     if (!linearSampler) {
-        linearSampler = getOrCreateSampler(device, { magFilter: "linear", minFilter: "linear" });
+        linearSampler = getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" });
     }
     if (!bindGroupLayout) {
         bindGroupLayout = device.createBindGroupLayout({
@@ -51,8 +53,9 @@ function ensureResources(device: GPUDevice): void {
     }
 }
 
-function getPipeline(device: GPUDevice, format: GPUTextureFormat): GPURenderPipeline {
-    ensureResources(device);
+function getPipeline(engine: EngineContextInternal, format: GPUTextureFormat): GPURenderPipeline {
+    const device = engine.device;
+    ensureResources(engine);
     if (!pipelineCache) {
         pipelineCache = new Map();
     }
@@ -74,12 +77,13 @@ function getPipeline(device: GPUDevice, format: GPUTextureFormat): GPURenderPipe
 }
 
 /** Generate mip chain for a 2D texture via GPU blit. Works for cube faces via optional `face` layer index. */
-export function generateMipmaps(device: GPUDevice, texture: GPUTexture, face?: number): void {
+export function generateMipmaps(engine: EngineContextInternal, texture: GPUTexture, face?: number): void {
+    const device = engine.device;
     if (texture.mipLevelCount <= 1) {
         return;
     }
 
-    const pipeline = getPipeline(device, texture.format);
+    const pipeline = getPipeline(engine, texture.format);
     const encoder = device.createCommandEncoder();
     const vp = face != null ? { dimension: "2d" as const, baseArrayLayer: face, arrayLayerCount: 1 } : {};
 

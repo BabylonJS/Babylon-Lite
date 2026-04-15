@@ -149,7 +149,6 @@ export interface LoadBabylonOptions {
  * @param opts - Optional loader configuration
  */
 export async function loadBabylon(engine: EngineContext, url: string, opts: LoadBabylonOptions = {}): Promise<AssetContainer> {
-    const device = (engine as EngineContextInternal).device;
     const baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
 
     const response = await fetch(url);
@@ -308,7 +307,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 const cubeName = md.reflectionTexture.name;
                 texturePromises.push(
                     import("../texture/cube-texture.js").then(({ loadCubeTexture }) =>
-                        loadCubeTexture(device, baseUrl + cubeName).then((cube) => {
+                        loadCubeTexture(engine as EngineContextInternal, baseUrl + cubeName).then((cube) => {
                             mat.reflectionCubeTexture = cube;
                         })
                     )
@@ -414,7 +413,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                     }
 
                     const subIndices = allIndices.slice(sub.indexStart, sub.indexStart + sub.indexCount);
-                    const gpu = uploadMeshToGPU(device, positions, normals, subIndices, uvs, uvs2);
+                    const gpu = uploadMeshToGPU(engine as EngineContextInternal, positions, normals, subIndices, uvs, uvs2);
 
                     let mat: StandardMaterialProps;
                     if (matIds && sub.materialIndex < matIds.length) {

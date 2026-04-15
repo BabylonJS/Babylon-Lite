@@ -10,6 +10,7 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import type { MeshInternal } from "../mesh/mesh.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 
 export interface ShadowCaster {
     positionBuffer: GPUBuffer;
@@ -23,7 +24,8 @@ export interface ShadowCaster {
 }
 
 /** Build caster list from meshes, creating per-caster UBOs and bind groups. */
-export function buildCasters(device: GPUDevice, meshes: Mesh[], meshBGL: GPUBindGroupLayout, extraEntries?: GPUBindGroupEntry[]): ShadowCaster[] {
+export function buildCasters(engine: EngineContextInternal, meshes: Mesh[], meshBGL: GPUBindGroupLayout, extraEntries?: GPUBindGroupEntry[]): ShadowCaster[] {
+    const device = engine.device;
     return meshes.map((mesh) => {
         const gpu = (mesh as MeshInternal)._gpu;
         const worldMatrix = new Float32Array(mesh.worldMatrix);
@@ -51,7 +53,8 @@ export function buildCasters(device: GPUDevice, meshes: Mesh[], meshBGL: GPUBind
 }
 
 /** Sync caster world matrices that have changed since last frame. */
-export function syncCasterMatrices(device: GPUDevice, casters: ShadowCaster[]): void {
+export function syncCasterMatrices(engine: EngineContextInternal, casters: ShadowCaster[]): void {
+    const device = engine.device;
     for (const c of casters) {
         if (c._mesh.worldMatrixVersion !== c._lastWorldVersion) {
             c.worldMatrix.set(c._mesh.worldMatrix as unknown as Float32Array);

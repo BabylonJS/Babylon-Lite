@@ -20,7 +20,7 @@ import type { GroundOptions } from "./create-ground.js";
 
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
-function createMeshFromData(device: GPUDevice, name: string, positions: Float32Array, normals: Float32Array, indices: Uint32Array, uvs?: Float32Array): Mesh {
+function createMeshFromData(engine: EngineContextInternal, name: string, positions: Float32Array, normals: Float32Array, indices: Uint32Array, uvs?: Float32Array): Mesh {
     let minX = Infinity,
         minY = Infinity,
         minZ = Infinity;
@@ -57,7 +57,7 @@ function createMeshFromData(device: GPUDevice, name: string, positions: Float32A
         boundMin: isFinite(minX) ? ([minX, minY, minZ] as [number, number, number]) : undefined,
         boundMax: isFinite(maxX) ? ([maxX, maxY, maxZ] as [number, number, number]) : undefined,
         _materialDirty: false,
-        _gpu: uploadMeshToGPU(device, positions, normals, indices, uvs),
+        _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs),
     } as unknown as MeshInternal;
     initMeshTransform(mesh);
 
@@ -73,29 +73,29 @@ function createMeshFromData(device: GPUDevice, name: string, positions: Float32A
 /** Create a sphere mesh. Caller must assign material. */
 export function createSphere(engine: EngineContext, options?: SphereOptions): Mesh {
     const data = createSphereData(options);
-    return createMeshFromData((engine as EngineContextInternal).device, "sphere", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContextInternal, "sphere", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a box mesh. Caller must assign material. */
 export function createBox(engine: EngineContext, size = 1): Mesh {
     const data = createBoxData(size);
-    return createMeshFromData((engine as EngineContextInternal).device, "box", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContextInternal, "box", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a torus mesh. Caller must assign material. */
 export function createTorus(engine: EngineContext, options?: TorusOptions): Mesh {
     const data = createTorusData(options);
-    return createMeshFromData((engine as EngineContextInternal).device, "torus", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContextInternal, "torus", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a ground mesh from a heightmap URL. Caller must assign material. */
 export async function createGroundFromHeightMap(engine: EngineContext, url: string, options: GroundOptions): Promise<Mesh> {
     const data = await createGroundCPU(url, options);
-    return createMeshFromData((engine as EngineContextInternal).device, "ground", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContextInternal, "ground", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a flat ground mesh. Caller must assign material. */
 export function createGround(engine: EngineContext, options?: GroundOptions): Mesh {
     const data = createFlatGroundData(options);
-    return createMeshFromData((engine as EngineContextInternal).device, "ground", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContextInternal, "ground", data.positions, data.normals, data.indices, data.uvs);
 }

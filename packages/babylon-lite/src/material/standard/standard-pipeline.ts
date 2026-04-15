@@ -12,6 +12,7 @@
  *  Pipelines are cached per (features, format, msaaSamples) tuple.
  *  Shared scene UBO layout is identical across all variants (176 bytes). */
 
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { LIGHTS_UBO_SIZE, writeLightsUBO, refreshLightsUBO } from "../../render/lights-ubo.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -265,10 +266,17 @@ function cacheKey(features: number, format: GPUTextureFormat, msaa: number, frag
 }
 
 /** Get or create a pipeline variant for the given features. */
-export function getOrCreatePipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number, features: number, fragments: ShaderFragment[] = []): PipelineVariant {
+export function getOrCreatePipeline(
+    engine: EngineContextInternal,
+    format: GPUTextureFormat,
+    msaaSamples: number,
+    features: number,
+    fragments: ShaderFragment[] = []
+): PipelineVariant {
+    const device = engine.device;
     const c = getCache();
     const cc = getComposedCache();
-    if (c.ensureDevice(device)) {
+    if (c.ensureDevice(engine)) {
         cc.clear();
         clearSceneBGLCache();
         _sharedSceneUBO = null;
@@ -295,7 +303,7 @@ export function getOrCreatePipeline(device: GPUDevice, format: GPUTextureFormat,
     // ─── Bind Group Layouts (from composer) ──────────────────
 
     // Group 0: Scene (shared across all variants)
-    const sceneBGL = getSceneBindGroupLayout(device);
+    const sceneBGL = getSceneBindGroupLayout(engine);
 
     // Group 1: Per-mesh (from composer's meshBGLDescriptor)
     const meshBGL = device.createBindGroupLayout({
@@ -388,7 +396,7 @@ const MATERIAL_UBO_SIZE = 96; // 24 floats (20 base + reflectionLevel + 3 pad)
 const UV_UBO_SIZE = 16;
 
 export function createDynamicMeshGPU(
-    device: GPUDevice,
+    engine: EngineContextInternal,
     variant: PipelineVariant,
     opts: {
         worldMatrix: Float32Array;
@@ -397,6 +405,7 @@ export function createDynamicMeshGPU(
         shadowGenerators?: ShadowGenerator[];
     }
 ): DynamicMeshGPU {
+    const device = engine.device;
     const { worldMatrix, material, lightsBuffer, shadowGenerators = [] } = opts;
     const features = variant.features;
     const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
@@ -412,13 +421,13 @@ export function createDynamicMeshGPU(
     const hasCubeReflection = (features & HAS_CUBE_REFLECTION) !== 0;
 
     // Mesh UBO — size from pipeline variant's composed shader spec
-    const meshUBO = createUBO(device, variant.meshUboTotalBytes || 64, worldMatrix);
+    const meshUBO = createUBO(engine, variant.meshUboTotalBytes || 64, worldMatrix);
 
     // Material UBO
     const textureLevel = needsUV ? 1.0 : 0;
     const matData = new Float32Array(24);
     writeStdMaterialData(matData, material, textureLevel);
-    const materialUBO = createUBO(device, MATERIAL_UBO_SIZE, matData);
+    const materialUBO = createUBO(engine, MATERIAL_UBO_SIZE, matData);
 
     // Build mesh bind group entries — sequential numbering matching composer output
     let nextBinding = 0;
@@ -438,7 +447,7 @@ export function createDynamicMeshGPU(
         const uvData = new Float32Array(4);
         uvData[0] = material.uvScale[0];
         uvData[1] = material.uvScale[1];
-        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUBO(device, UV_UBO_SIZE, uvData) } });
+        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUBO(engine, UV_UBO_SIZE, uvData) } });
     }
 
     // Fragment-contributed bindings (after all base bindings)
@@ -498,7 +507,8 @@ export function createDynamicMeshGPU(
 
 // ─── Internal Helpers ───────────────────────────────────────────────
 
-function createUBO(device: GPUDevice, size: number, data: Float32Array): GPUBuffer {
+function createUBO(engine: EngineContextInternal, size: number, data: Float32Array): GPUBuffer {
+    const device = engine.device;
     const buf = device.createBuffer({ size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);
     return buf;
