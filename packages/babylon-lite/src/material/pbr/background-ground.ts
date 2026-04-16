@@ -8,7 +8,7 @@ import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
-import { createBuf } from "./background-material.js";
+import { createBuf } from "./skybox-geometry.js";
 import { WGSL_SCENE_UNIFORMS_PBR, WGSL_SCENE_UNIFORMS_PBR_SH, WGSL_IMAGE_PROCESSING, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 
 const BG_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + alpha + backgroundCenter vec3 + pad

@@ -10,9 +10,75 @@ import type { EngineContextInternal } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
-import { createSkyboxMaterial, createSkyboxBuffers, buildSkyboxWorldMatrix } from "./background-material.js";
+
+import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
+import skyboxFragSrc from "../../../shaders/skybox.fragment.wgsl?raw";
+import { createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
+import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
 
 const SKY_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad
+
+interface SkyboxMaterial {
+    getPipeline(engine: EngineContextInternal, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
+}
+
+function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): SkyboxMaterial {
+    let pipeline: GPURenderPipeline | null = null;
+    let layout: GPUBindGroupLayout | null = null;
+    let _cachedDevice: GPUDevice | null = null;
+
+    function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
+        const device = engine.device;
+        if (layout && _cachedDevice === device) {
+            return layout;
+        }
+        layout = device.createBindGroupLayout({
+            label: "skybox-material",
+            entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
+        });
+        return layout;
+    }
+
+    return {
+        getPipeline(engine, format, msaaSamples) {
+            const device = engine.device;
+            if (pipeline && _cachedDevice === device) {
+                return pipeline;
+            }
+            pipeline = null;
+            layout = null;
+            _cachedDevice = device;
+            const vertModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR + skyboxVertSrc, label: "skybox-vert" });
+            const fragModule = device.createShaderModule({ code: WGSL_DITHER + skyboxFragSrc, label: "skybox-frag" });
+            const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
+
+            pipeline = device.createRenderPipeline(
+                createStandardPipelineDescriptor({
+                    label: "skybox-pipeline",
+                    engine,
+                    bgls: [sceneBindGroupLayout, getLayout(engine)],
+                    vertModule,
+                    fragModule,
+                    vertexBuffers: SKYBOX_POS_BUFFER,
+                    format,
+                    msaaSamples,
+                    depthWriteEnabled: false,
+                })
+            );
+            return pipeline;
+        },
+
+        createBindGroup(engine, meshUBO, _env) {
+            const device = engine.device;
+            return device.createBindGroup({
+                layout: getLayout(engine),
+                entries: [{ binding: 0, resource: { buffer: meshUBO } }],
+            });
+        },
+    };
+}
 
 export function buildSolidSkyboxRenderable(
     scene: SceneContext,
