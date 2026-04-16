@@ -99,3 +99,32 @@ export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 // ─── Low-level (for advanced/custom rendering) ──────────────────────
 export type { EnvironmentTextures } from "./loader-env/load-env.js";
 export type { Renderable, PrePassRenderable, SceneUniformUpdater } from "./render/renderable.js";
+
+// ─── Physics ─────────────────────────────────────────────────────────
+export {
+    createHavokPhysics,
+    createPhysicsBody,
+    createPhysicsShape,
+    createPhysicsAggregate,
+    setPhysicsGravity,
+    getPhysicsGravity,
+    setPhysicsTimestep,
+    getPhysicsTimestep,
+    setPhysicsVelocityLimits,
+    getPhysicsVelocityLimits,
+    setPhysicsBodyShape,
+    setPhysicsShapeMaterial,
+    setPhysicsBodyMass,
+    disposePhysics,
+    PhysicsShapeType,
+    PhysicsMotionType,
+} from "./physics/havok.js";
+export type {
+    PhysicsWorld,
+    PhysicsBody,
+    PhysicsShape,
+    PhysicsAggregate,
+    PhysicsShapeOptions,
+    PhysicsShapeParameters,
+    PhysicsAggregateOptions,
+} from "./physics/havok.js";
