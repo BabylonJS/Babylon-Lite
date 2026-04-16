@@ -294,10 +294,10 @@ Both cloud test suites (perf and parity) produce:
 
 Report locations after a run:
 
-| Suite  | JUnit XML                        | HTML Report                            |
-| ------ | -------------------------------- | -------------------------------------- |
-| Parity | `test-results/parity-junit.xml`  | `test-results/parity-report/index.html`|
-| Perf   | `test-results/perf-junit.xml`    | `test-results/perf-report/index.html`  |
+| Suite  | JUnit XML                       | HTML Report                             |
+| ------ | ------------------------------- | --------------------------------------- |
+| Parity | `test-results/parity-junit.xml` | `test-results/parity-report/index.html` |
+| Perf   | `test-results/perf-junit.xml`   | `test-results/perf-report/index.html`   |
 
 To view the HTML report locally:
 
@@ -336,14 +336,14 @@ entry specifies:
 
 ## Environment Variables Reference
 
-| Variable | Scope | Default | Description |
-| ---------------------- | ------ | ------- | -------------------------------------------------- |
-| `PERF_REGRESSION_PCT` | Perf | `5` | Max allowed regression % |
-| `PERF_FRAMES` | Perf | `300` | Measured frames per run |
-| `PERF_RUNS` | Perf | `5` | Runs per version (takes median) |
-| `PERF_WARMUP` | Perf | `60` | Warmup frames before each run |
-| `PERF_SCENES` | Perf | all | Comma-separated scene IDs |
-| `BUNDLE_DELTA_PCT` | Bundle | — | Max allowed bundle size growth % |
-| `RECAPTURE_GOLDEN` | Parity | — | Set to `true` to force golden recapture |
-| `BROWSERSTACK_USERNAME`| Cloud | — | BrowserStack credentials |
-| `BROWSERSTACK_ACCESS_KEY`| Cloud | — | BrowserStack credentials |
+| Variable                  | Scope  | Default | Description                             |
+| ------------------------- | ------ | ------- | --------------------------------------- |
+| `PERF_REGRESSION_PCT`     | Perf   | `5`     | Max allowed regression %                |
+| `PERF_FRAMES`             | Perf   | `300`   | Measured frames per run                 |
+| `PERF_RUNS`               | Perf   | `5`     | Runs per version (takes median)         |
+| `PERF_WARMUP`             | Perf   | `60`    | Warmup frames before each run           |
+| `PERF_SCENES`             | Perf   | all     | Comma-separated scene IDs               |
+| `BUNDLE_DELTA_PCT`        | Bundle | —       | Max allowed bundle size growth %        |
+| `RECAPTURE_GOLDEN`        | Parity | —       | Set to `true` to force golden recapture |
+| `BROWSERSTACK_USERNAME`   | Cloud  | —       | BrowserStack credentials                |
+| `BROWSERSTACK_ACCESS_KEY` | Cloud  | —       | BrowserStack credentials                |
