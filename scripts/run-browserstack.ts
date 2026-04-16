@@ -13,7 +13,17 @@ config(); // .env fallback
 // Tell the SDK where to find browserstack.yml (not at root)
 process.env.BROWSERSTACK_CONFIG_FILE = resolve(__dirname, "../config/browserstack.yml");
 
+// Derive a descriptive build name from the Playwright config being used
 const args = process.argv.slice(2).join(" ");
+if (!process.env.BROWSERSTACK_BUILD_NAME) {
+    if (args.includes("perf-cloud")) {
+        process.env.BROWSERSTACK_BUILD_NAME = "Babylon-Lite Perf";
+    } else if (args.includes("parity-cloud")) {
+        process.env.BROWSERSTACK_BUILD_NAME = "Babylon-Lite Parity";
+    } else {
+        process.env.BROWSERSTACK_BUILD_NAME = "Babylon-Lite CI";
+    }
+}
 try {
     execSync(`npx browserstack-node-sdk ${args}`, { stdio: "inherit", env: process.env });
 } catch (e: any) {

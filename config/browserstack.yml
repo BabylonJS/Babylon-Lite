@@ -6,7 +6,7 @@ accessKey: BROWSERSTACK_ACCESS_KEY
 
 # Reporting
 projectName: Babylon-Lite
-buildName: Babylon-Lite CI
+buildName: ${BROWSERSTACK_BUILD_NAME}
 buildIdentifier: "#${BUILD_NUMBER}"
 
 # Target macOS for WebGPU support (Windows VMs lack GPU acceleration)
