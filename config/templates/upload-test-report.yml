@@ -1,0 +1,56 @@
+# Reusable step template: upload Playwright HTML report and post link to PR
+#
+# Parameters:
+#   reportDir     — path to the HTML report folder (e.g. test-results/perf-report)
+#   reportType    — label used in the deploy path and PR comment (e.g. perf, parity, unit)
+#
+# Required pipeline variables (secrets):
+#   DEPLOYMENT_SERVER, DEPLOY_ENDPOINT_UPLOAD, BASIC_AUTH, STORAGE_ACCOUNT, SERVE_DOMAIN
+# Required service connection:
+#   BabylonBotPAT — GitHub PAT service connection for PR comments
+
+parameters:
+    - name: reportDir
+      type: string
+    - name: reportType
+      type: string
+
+steps:
+    - script: |
+          REPORT_DIR="${{ parameters.reportDir }}"
+
+          if ! test -d "$REPORT_DIR"; then
+            echo "No report directory found at $REPORT_DIR, skipping upload"
+            exit 0
+          fi
+
+          cd "$REPORT_DIR"
+          zip -r $(Build.SourcesDirectory)/_test_report.zip *
+          cd $(Build.SourcesDirectory)
+
+          curl $(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD) -i -X POST \
+            -H "Content-Type: multipart/form-data" \
+            -H "Authorization: $(BASIC_AUTH)" \
+            -F "path=lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}" \
+            -F "storageAccount=$(STORAGE_ACCOUNT)" \
+            -F "zip=@_test_report.zip"
+
+          rm -f _test_report.zip
+      condition: failed()
+      continueOnError: true
+      displayName: "Upload ${{ parameters.reportType }} test report"
+
+    - task: GitHubComment@0
+      condition: failed()
+      continueOnError: true
+      displayName: "Post ${{ parameters.reportType }} report link to PR"
+      inputs:
+          gitHubConnection: "BabylonBotPAT"
+          repositoryName: "$(Build.Repository.Name)"
+          id: "$(System.PullRequest.PullRequestNumber)"
+          comment: |
+              ### 📋 ${{ parameters.reportType }} — Test Report
+
+              [View full Playwright report]($(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}/index.html)
+
+              <sub>Build $(Build.BuildNumber) · $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>

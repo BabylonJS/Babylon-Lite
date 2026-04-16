@@ -110,22 +110,31 @@ stages:
                       SKIP_BJS: "true"
 
                 # Absolute ceiling checks (scene-config.json maxRawKB/maxGzipKB)
-                - script: npx playwright test tests/parity/bundle-size.spec.ts
+                - script: npx playwright test tests/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
                   env:
                       HEADLESS: "true"
+                      PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-ceiling-junit.xml
 
                 # Delta comparison vs committed baseline
-                - script: npx playwright test tests/parity/bundle-size-delta.spec.ts
+                - script: npx playwright test tests/parity/bundle-size-delta.spec.ts --reporter=junit
                   displayName: "Bundle size delta vs baseline"
                   env:
                       HEADLESS: "true"
                       BUNDLE_DELTA_PCT: "$(BUNDLE_DELTA_PCT)"
+                      PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-delta-junit.xml
 
-                - publish: $(System.DefaultWorkingDirectory)/test-results
-                  artifact: bundle-size-results
-                  condition: failed()
-                  displayName: "Upload test artifacts on failure"
+                - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml test-results/bundle-delta-junit.xml
+                  condition: always()
+                  displayName: "Report bundle-size results to Azure"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  displayName: "Publish bundle-size test results"
+                  inputs:
+                      testResultsFormat: JUnit
+                      testResultsFiles: "test-results/bundle-*-junit.xml"
+                      testRunTitle: "Bundle Size"
 
           # ──────────────────────────────────────────────────────────────
           # Job 3: Performance Regression
@@ -188,6 +197,11 @@ stages:
                   continueOnError: true
                   displayName: "Report test results"
 
+                - template: config/templates/upload-test-report.yml
+                  parameters:
+                      reportDir: $(System.DefaultWorkingDirectory)/test-results/perf-report
+                      reportType: perf
+
           # ──────────────────────────────────────────────────────────────
           # Job 4: Parity (Cloud Browser)
           # ──────────────────────────────────────────────────────────────
@@ -240,6 +254,11 @@ stages:
                   condition: always()
                   continueOnError: true
                   displayName: "Report test results"
+
+                - template: config/templates/upload-test-report.yml
+                  parameters:
+                      reportDir: $(System.DefaultWorkingDirectory)/test-results/parity-report
+                      reportType: parity
 
           # ──────────────────────────────────────────────────────────────
           # Job 5: Lint
