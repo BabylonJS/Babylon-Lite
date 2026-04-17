@@ -492,6 +492,17 @@
                 color: #d29922;
                 font-weight: 600;
             }
+            .size-info .size-label-ceil {
+                color: #d29922;
+            }
+            .size-info .size-headroom {
+                color: #6e7681;
+                font-size: 0.7rem;
+            }
+            .size-info .size-headroom.low {
+                color: #f85149;
+                font-weight: 600;
+            }
 
             /* ── Perf Dashboard ─────────────────────────────────── */
             .perf-toolbar {
@@ -2831,6 +2842,7 @@
                 <button class="btn bundle-sort-btn active" onclick="sortBundleGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('asc')" data-sort="asc" title="Sort by Lite min size ascending">Size ↑</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('desc')" data-sort="desc" title="Sort by Lite min size descending">Size ↓</button>
+                <button class="btn" id="bundle-filter-btn" onclick="toggleBundleOverFilter()" title="Show only scenes over their size ceiling">🔴 Over Only</button>
             </div>
             <div class="grid" id="bundle-grid"></div>
         </div>
@@ -3136,6 +3148,18 @@
                                 '<div class="size-row"><span class="size-label">Lite</span>' +
                                 '<span><span class="size-value">' + sizes.rawKB + '</span> KB min</span>' +
                                 '<span class="size-gzip">' + sizes.gzipKB + ' KB gzip</span></div>';
+                            var cfg = (window.SCENE_CONFIG || []).find(function(c) { return "scene" + c.id === scene; });
+                            if (cfg && cfg.maxRawKB != null && cfg.maxGzipKB != null) {
+                                var rawHead = cfg.maxRawKB - sizes.rawKB;
+                                var gzHead = cfg.maxGzipKB - sizes.gzipKB;
+                                var lowCls = (rawHead < 0 || gzHead < 0) ? " low" : "";
+                                html +=
+                                    '<div class="size-row"><span class="size-label size-label-ceil">Ceil</span>' +
+                                    '<span><span class="size-value">' + cfg.maxRawKB + '</span> KB max</span>' +
+                                    '<span class="size-gzip">' + cfg.maxGzipKB + ' KB gzip</span>' +
+                                    '<span class="size-headroom' + lowCls + '" title="Headroom before ceiling">+' +
+                                    rawHead.toFixed(1) + '/' + gzHead.toFixed(1) + ' KB</span></div>';
+                            }
                             if (sizes.bjsRawKB != null) {
                                 bjsCount++;
                                 var ratio = (sizes.bjsGzipKB / sizes.gzipKB).toFixed(1);
@@ -3148,6 +3172,10 @@
                             card.innerHTML = html;
                             card.closest('.card').dataset.rawKb = sizes.rawKB;
                             card.closest('.card').dataset.gzipKb = sizes.gzipKB;
+                            if (cfg && cfg.maxRawKB != null && cfg.maxGzipKB != null) {
+                                card.closest('.card').dataset.maxRawKb = cfg.maxRawKB;
+                                card.closest('.card').dataset.maxGzipKb = cfg.maxGzipKB;
+                            }
                         }
                         // Re-apply stored sort now that size data is available
                         var activeBtn = document.querySelector(".bundle-sort-btn.active");
@@ -3294,6 +3322,29 @@
             }
 
             var parityFilterActive = false;
+            var bundleOverFilterActive = false;
+            function toggleBundleOverFilter() {
+                bundleOverFilterActive = !bundleOverFilterActive;
+                var btn = document.getElementById("bundle-filter-btn");
+                var cards = document.querySelectorAll("#bundle-grid > .card");
+                if (bundleOverFilterActive) {
+                    btn.style.background = "#3d1117";
+                    btn.style.borderColor = "#f85149";
+                    cards.forEach(function (c) {
+                        var raw = parseFloat(c.dataset.rawKb || "0");
+                        var gz = parseFloat(c.dataset.gzipKb || "0");
+                        var maxRaw = parseFloat(c.dataset.maxRawKb || "Infinity");
+                        var maxGz = parseFloat(c.dataset.maxGzipKb || "Infinity");
+                        c.style.display = (raw > maxRaw || gz > maxGz) ? "" : "none";
+                    });
+                } else {
+                    btn.style.background = "";
+                    btn.style.borderColor = "";
+                    // Re-apply tag filters (handles the non-over-filter hidden state correctly)
+                    applyBundleFilters();
+                }
+            }
+
             function toggleParityFilter() {
                 parityFilterActive = !parityFilterActive;
                 var btn = document.getElementById("parity-filter-btn");
