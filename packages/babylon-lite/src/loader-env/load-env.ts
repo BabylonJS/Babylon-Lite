@@ -111,13 +111,19 @@ export async function loadEnvironment(
         skipSkybox: skyboxIsDds || skyboxIsEnv || options?.skipSkybox,
         skipGround: options?.skipGround,
     };
+    // Only pull in the background-renderable chunk if solid skybox or ground is
+    // actually required. Scenes passing skipSkybox+skipGround (with no DDS/HDR
+    // skybox) skip the import and chunk fetch entirely.
+    const needsBgRenderables = !bgOptions.skipSkybox || !bgOptions.skipGround;
     const envBgBuilder = async (): Promise<void> => {
         const bgl = (scene as SceneContextInternal)._pbrSceneBGL;
         const bg = (scene as SceneContextInternal)._pbrSceneBG;
         if (bgl && bg) {
-            const { buildBackgroundRenderables } = await import("../material/pbr/background-renderable.js");
-            const bgRenderables = await buildBackgroundRenderables(scene, textures, bgl, bg, groundUrl, bgOptions, groundTexPromise);
-            (scene as SceneContextInternal)._renderables.push(...bgRenderables);
+            if (needsBgRenderables) {
+                const { buildBackgroundRenderables } = await import("../material/pbr/background-renderable.js");
+                const bgRenderables = await buildBackgroundRenderables(scene, textures, bgl, bg, groundUrl, bgOptions, groundTexPromise);
+                (scene as SceneContextInternal)._renderables.push(...bgRenderables);
+            }
 
             if (skyboxIsDds) {
                 const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
@@ -297,6 +303,7 @@ function uploadCubemapRGBD(engine: EngineContextInternal, images: ImageBitmap[],
 // ─── SH Polynomial → Pre-scaled Harmonics Conversion ────────────────────────
 // Matches Babylon.js: SphericalHarmonics.FromPolynomial() + preScaleForRendering()
 
+/** @internal — exported only for env-helpers.ts; not part of the public API. */
 export function polynomialToPreScaledHarmonics(poly: Float32Array): EnvironmentTextures["sphericalHarmonics"] {
     // poly layout: [x0,x1,x2, y0,y1,y2, z0,z1,z2, xx0..., yy..., zz..., yz..., zx..., xy...]
     const x = poly.subarray(0, 3);

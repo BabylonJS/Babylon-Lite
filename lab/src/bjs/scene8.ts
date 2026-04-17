@@ -13,7 +13,7 @@ import { Scene } from "@babylonjs/core/scene";
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas);
+    const engine = new WebGPUEngine(canvas, { adaptToDeviceRatio: true });
     await engine.initAsync();
 
     const scene = new Scene(engine);
@@ -64,6 +64,7 @@ import { Scene } from "@babylonjs/core/scene";
     });
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
 
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

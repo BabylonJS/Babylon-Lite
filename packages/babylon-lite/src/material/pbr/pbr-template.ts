@@ -92,6 +92,12 @@ export interface PbrTemplateConfig {
     readonly hasIbl?: boolean;
     /** Has clearcoat layer */
     readonly hasClearcoat?: boolean;
+    /** Has clearcoat intensity texture (R channel, multiplies intensity factor). */
+    readonly hasCcIntensityMap?: boolean;
+    /** Has clearcoat roughness texture (G channel, multiplies roughness factor). */
+    readonly hasCcRoughnessMap?: boolean;
+    /** Has clearcoat normal map (tangent-space, perturbs coat normal). */
+    readonly hasCcNormalMap?: boolean;
     /** Has sheen layer */
     readonly hasSheen?: boolean;
     /** Has anisotropy layer */
@@ -131,6 +137,9 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         hasReflectanceExt = false,
         hasIbl = false,
         hasClearcoat = false,
+        hasCcIntensityMap = false,
+        hasCcRoughnessMap = false,
+        hasCcNormalMap = false,
         hasSheen = false,
         hasAnisotropy = false,
         anisoBrdfFunctions = "",
@@ -170,6 +179,11 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         { name: "directIntensity", type: "f32" },
         { name: "reflectance", type: "f32" },
         { name: "materialAlpha", type: "f32" },
+        // glTF metallicFactor / roughnessFactor (default 1.0) — applied over MR texture channels.
+        { name: "metallicFactor", type: "f32" },
+        { name: "roughnessFactor", type: "f32" },
+        { name: "_mrfPad0", type: "f32" },
+        { name: "_mrfPad1", type: "f32" },
         // Extension UBO fields in old-system order for byte-layout compat
         ...(hasReflectanceExt
             ? [
@@ -259,6 +273,16 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     }
     if (hasSheenTexture) {
         baseBindings.push(...tex2d("sheenTexture_", "sheenSampler_"));
+    }
+    // Clearcoat textures — must match order in createPbrMeshBindGroup
+    if (hasCcIntensityMap) {
+        baseBindings.push(...tex2d("ccIntensityTexture", "ccIntensitySampler_"));
+    }
+    if (hasCcRoughnessMap) {
+        baseBindings.push(...tex2d("ccRoughnessTexture", "ccRoughnessSampler_"));
+    }
+    if (hasCcNormalMap) {
+        baseBindings.push(...tex2d("ccNormalTexture", "ccNormalSampler_"));
     }
     if (hasMultiLight) {
         baseBindings.push({ name: "lights", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT });
@@ -350,8 +374,8 @@ var alpha = baseColorSample.a;`;
         ? `let specGloss = textureSample(specGlossTexture, specGlossSampler, input.uv);
 let roughness = clamp(1.0 - specGloss.a, 0.0, 1.0);
 let metallic = 0.0;`
-        : `let roughness = clamp(orm.g, 0.0, 1.0);
-let metallic = orm.b;`;
+        : `let roughness = clamp(orm.g * material.roughnessFactor, 0.0, 1.0);
+let metallic = orm.b * material.metallicFactor;`;
 
     // Emissive default (overridden by emissive-color fragment's AT slot)
     const emissiveDefault = hasEmissiveColor

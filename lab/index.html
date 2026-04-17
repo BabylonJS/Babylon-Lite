@@ -19,7 +19,6 @@
             }
             header {
                 padding: 2rem 2rem 1rem;
-                border-bottom: 1px solid #21262d;
             }
             header h1 {
                 font-size: 1.5rem;
@@ -38,7 +37,13 @@
                 gap: 0;
                 padding: 0 2rem;
                 margin-top: 1.5rem;
+                position: sticky;
+                top: 0;
+                background: #0d1117;
+                z-index: 30;
+                height: 2.5rem;
                 border-bottom: 1px solid #21262d;
+                box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.6);
             }
             .tab {
                 padding: 0.6rem 1.2rem;
@@ -90,6 +95,9 @@
                 border-radius: 6px;
                 font-size: 0.85rem;
                 color: #8b949e;
+                position: sticky;
+                top: 40px;
+                z-index: 20;
             }
             .tab-hint code {
                 color: #e6edf3;
@@ -253,7 +261,11 @@
                 display: flex;
                 align-items: center;
                 gap: 1rem;
-                padding: 1.5rem 2rem 0.5rem;
+                padding: 1rem 2rem 0.75rem;
+                position: sticky;
+                top: 2.5rem;
+                background: #0d1117;
+                z-index: 10;
             }
             .parity-toolbar p {
                 color: #8b949e;
@@ -486,8 +498,12 @@
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
-                padding: 1.5rem 2rem 0.5rem;
+                padding: 1rem 2rem 0.75rem;
                 flex-wrap: wrap;
+                position: sticky;
+                top: 2.5rem;
+                background: #0d1117;
+                z-index: 10;
             }
             .perf-toolbar p {
                 color: #8b949e;
@@ -1131,6 +1147,101 @@
                 font-size: 0.75rem;
                 margin-bottom: 0.6rem;
             }
+            .bf-toolbar {
+                position: sticky;
+                top: 0;
+                z-index: 2;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                align-items: center;
+                padding: 0.5rem 0 0.6rem;
+                background: #0d1117;
+                border-bottom: 1px solid #21262d;
+                margin-bottom: 0.6rem;
+            }
+            .bf-toolbar-group {
+                display: inline-flex;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                overflow: hidden;
+                background: #161b22;
+            }
+            .bf-toolbar-group button {
+                background: transparent;
+                color: #8b949e;
+                border: none;
+                padding: 0.35rem 0.7rem;
+                font-size: 0.75rem;
+                font-family: inherit;
+                cursor: pointer;
+                border-right: 1px solid #30363d;
+            }
+            .bf-toolbar-group button:last-child {
+                border-right: none;
+            }
+            .bf-toolbar-group button:hover {
+                background: #1c232d;
+                color: #c9d1d9;
+            }
+            .bf-toolbar-group button.active {
+                background: #1f3a5f;
+                color: #58a6ff;
+            }
+            .bf-toolbar-check {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.35rem;
+                color: #8b949e;
+                font-size: 0.75rem;
+                cursor: pointer;
+                user-select: none;
+                padding: 0.3rem 0.5rem;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                background: #161b22;
+            }
+            .bf-toolbar-check input {
+                accent-color: #58a6ff;
+                margin: 0;
+            }
+            .bf-filter {
+                flex: 1;
+                min-width: 180px;
+                background: #161b22;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 0.35rem 0.6rem;
+                font-size: 0.8rem;
+                font-family: inherit;
+                outline: none;
+            }
+            .bf-filter:focus {
+                border-color: #58a6ff;
+            }
+            .bf-flat-list {
+                list-style: none;
+                margin: 0;
+                padding: 0;
+            }
+            .bf-flat-list li {
+                padding: 0.5rem 0.75rem;
+                border: 1px solid #21262d;
+                border-radius: 6px;
+                margin-bottom: 0.4rem;
+                background: #0d1117;
+            }
+            .bf-flat-list li.stripped {
+                opacity: 0.55;
+            }
+            .bf-flat-chunk-ref {
+                display: block;
+                font-size: 0.65rem;
+                color: #6e7681;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                margin-top: 0.2rem;
+            }
             .bf-chunk {
                 border: 1px solid #21262d;
                 border-radius: 6px;
@@ -1187,23 +1298,24 @@
                 list-style: none;
                 margin: 0;
                 padding: 0.3rem 0;
-                max-height: 40vh;
-                overflow: auto;
             }
             .bf-modules.collapsed {
                 display: none;
             }
             .bf-modules li {
-                padding: 0.2rem 0.75rem 0.2rem 1.5rem;
+                padding: 0.35rem 0.75rem 0.35rem 1.5rem;
                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
                 font-size: 0.75rem;
                 color: #c9d1d9;
-                display: flex;
-                gap: 0.5rem;
                 border-bottom: 1px solid #161b22;
             }
             .bf-modules li:last-child {
                 border-bottom: none;
+            }
+            .bf-mod-row {
+                display: flex;
+                gap: 0.5rem;
+                align-items: baseline;
             }
             .bf-mod-path {
                 flex: 1;
@@ -1212,6 +1324,66 @@
             .bf-mod-bytes {
                 color: #8b949e;
                 white-space: nowrap;
+            }
+            .bf-mod-exports {
+                display: flex;
+                flex-direction: column;
+                gap: 0.2rem;
+                margin: 0.3rem 0 0.1rem 0.75rem;
+            }
+            .bf-chip {
+                background: #1f2a3a;
+                color: #79c0ff;
+                border: 1px solid #30363d;
+                border-radius: 10px;
+                padding: 0.05rem 0.5rem;
+                font-size: 0.7rem;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                white-space: nowrap;
+            }
+            .bf-chip.bf-chip-fn {
+                background: #0f2a1a;
+                color: #3fb950;
+                border-color: #1a3a1a;
+            }
+            .bf-chip.bf-chip-const {
+                background: #2a2118;
+                color: #d29922;
+                border-color: #3a2d1a;
+            }
+            .bf-chip.bf-chip-class {
+                background: #2a1a2a;
+                color: #d2a8ff;
+                border-color: #3a2a3a;
+            }
+            .bf-chip.bf-chip-enum {
+                background: #1a2838;
+                color: #79c0ff;
+                border-color: #243a55;
+            }
+            .bf-chip.bf-chip-whole {
+                background: #2a2118;
+                color: #d29922;
+                border-color: #3a2d1a;
+            }
+            .bf-chip-group {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 0.25rem;
+            }
+            .bf-chip-group-label {
+                font-size: 0.65rem;
+                color: #6e7681;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin-right: 0.15rem;
+            }
+            .bf-mod-exports-empty {
+                color: #6e7681;
+                font-size: 0.7rem;
+                font-style: italic;
+                margin: 0.2rem 0 0.1rem 0.75rem;
             }
             .bf-empty {
                 padding: 1rem;
@@ -2635,7 +2807,6 @@
         </div>
 
         <div id="panel-source" class="tab-panel active">
-            <div class="tab-hint">💡 Live scenes served from Vite dev server. Start with: <code>pnpm dev</code></div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="source-filter-pills"></div>
             </div>
@@ -2643,9 +2814,6 @@
         </div>
 
         <div id="panel-parity" class="tab-panel">
-            <div class="tab-hint">
-                💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>; exceeding shown in <span style="color: #f85149">red</span>.
-            </div>
             <div class="parity-toolbar">
                 <div style="flex: 1"></div>
                 <button class="btn parity-sort-btn active" onclick="sortParityGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
@@ -2657,7 +2825,6 @@
         </div>
 
         <div id="panel-bundle" class="tab-panel">
-            <div class="tab-hint">💡 Bundle sizes shown below come from <code>manifest.json</code>. To regenerate: <code>pnpm build:bundle-scenes</code></div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="bundle-filter-pills"></div>
                 <div style="flex: 1"></div>
@@ -2669,7 +2836,6 @@
         </div>
 
         <div id="panel-perf" class="tab-panel">
-            <div class="tab-hint">💡 RAF callback CPU time per scene, measured via Playwright. <span id="perf-manifest-status" style="color: #3fb950"></span></div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="perf-filter-pills"></div>
                 <div style="flex: 1"></div>
@@ -3649,6 +3815,15 @@
         <script>
             // ── Bundle Files modal ──
             (function() {
+                var state = {
+                    info: null, manifest: null, runtimeSet: {}, hasRuntime: false,
+                    filter: "",
+                    groupByBundle: true,  // group by bundle vs flat list
+                    sortBy: "size",       // "size" | "path"
+                    sortDir: "desc",      // "asc" | "desc"
+                    hideUnloaded: true,
+                };
+
                 function fmtBytes(n) {
                     if (n < 1024) return n + " B";
                     if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
@@ -3661,9 +3836,183 @@
                     if (id.charCodeAt(0) === 0) return "virt";
                     return "—";
                 }
+                function escapeHtml(s) {
+                    return String(s).replace(/[&<>"]/g, function(c) {
+                        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+                    });
+                }
+                function normalizeExports(list) {
+                    return (Array.isArray(list) ? list : []).map(function(e) {
+                        return typeof e === "string" ? { name: e, kind: "unknown" } : e;
+                    });
+                }
+                function matchesFilter(m, q) {
+                    if (!q) return true;
+                    if (m.id.toLowerCase().indexOf(q) !== -1) return true;
+                    var exports = normalizeExports(m.exports);
+                    for (var i = 0; i < exports.length; i++) {
+                        if (exports[i].name.toLowerCase().indexOf(q) !== -1) return true;
+                    }
+                    return false;
+                }
+                function renderChipsHtml(m) {
+                    var exports = normalizeExports(m.exports);
+                    var isNonTs = /\.(wgsl|css|json|png|jpg|svg)(\?|$)/.test(m.id);
+                    var isVirtual = m.id.charCodeAt(0) === 0;
+                    if (exports.length > 0) {
+                        var groups = { function: [], class: [], enum: [], const: [], unknown: [] };
+                        exports.forEach(function(e) {
+                            (groups[e.kind] || groups.unknown).push(e.name);
+                        });
+                        var groupDefs = [
+                            { key: "function", label: "fn",    cls: "bf-chip-fn" },
+                            { key: "class",    label: "class", cls: "bf-chip-class" },
+                            { key: "enum",     label: "enum",  cls: "bf-chip-enum" },
+                            { key: "const",    label: "const", cls: "bf-chip-const" },
+                            { key: "unknown",  label: "other", cls: "" }
+                        ];
+                        var groupHtml = groupDefs.filter(function(g) {
+                            return groups[g.key].length > 0;
+                        }).map(function(g) {
+                            var chips = groups[g.key].map(function(name) {
+                                return '<span class="bf-chip ' + g.cls + '">' + escapeHtml(name) + '</span>';
+                            }).join("");
+                            return '<div class="bf-chip-group">' +
+                                   '<span class="bf-chip-group-label">' + g.label + '</span>' +
+                                   chips + '</div>';
+                        }).join("");
+                        return '<div class="bf-mod-exports">' + groupHtml + '</div>';
+                    }
+                    if (isNonTs || isVirtual) {
+                        return '<div class="bf-mod-exports"><div class="bf-chip-group"><span class="bf-chip bf-chip-whole">whole module</span></div></div>';
+                    }
+                    return '<div class="bf-mod-exports-empty">no named exports (side-effect only)</div>';
+                }
+                function renderModuleLi(m) {
+                    return '<div class="bf-mod-row">' +
+                           '<span class="bf-mod-path" title="' + modulePrefix(m.id) + '">' + escapeHtml(m.id) + '</span>' +
+                           '<span class="bf-mod-bytes">' + fmtBytes(m.bytes) + '</span>' +
+                           '</div>' +
+                           renderChipsHtml(m);
+                }
+
+                function renderBundleGrouped(chunks, filter) {
+                    var html = "";
+                    var anyShown = false;
+                    // Optionally filter out chunks that didn't load at runtime.
+                    var visibleChunks = chunks.filter(function(c) {
+                        var loaded = !state.hasRuntime || state.runtimeSet[c.file];
+                        return !(state.hideUnloaded && state.hasRuntime && !loaded);
+                    });
+                    // Sort chunks by current sort key.
+                    var cmpChunk = makeChunkComparator();
+                    visibleChunks = visibleChunks.slice().sort(cmpChunk);
+                    visibleChunks.forEach(function(c, idx) {
+                        var loaded = !state.hasRuntime || state.runtimeSet[c.file];
+                        var visibleMods = (c.modules || []).filter(function(m) { return matchesFilter(m, filter); });
+                        if (filter && visibleMods.length === 0) return;
+                        // Sort modules within the chunk by current sort key.
+                        visibleMods = visibleMods.slice().sort(makeModuleComparator());
+                        anyShown = true;
+                        var badges = "";
+                        if (c.isEntry) badges += '<span class="bf-chunk-badge bf-badge-entry">entry</span> ';
+                        if (state.hasRuntime) {
+                            badges += loaded
+                                ? '<span class="bf-chunk-badge bf-badge-runtime">loaded</span> '
+                                : '<span class="bf-chunk-badge bf-badge-stripped">not loaded</span> ';
+                        }
+                        var modsHtml = visibleMods.length
+                            ? visibleMods.map(function(m) { return '<li>' + renderModuleLi(m) + '</li>'; }).join("")
+                            : '<li class="bf-empty">(no module contributions recorded)</li>';
+                        // Collapse chunks by default except the first visible one, unless filtering (then expand all).
+                        var collapsed = !filter && idx > 0;
+                        html += '<div class="bf-chunk' + (loaded ? '' : ' stripped') + '">' +
+                                '<div class="bf-chunk-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">' +
+                                '<span class="bf-chunk-name">' + escapeHtml(c.file) + '</span>' +
+                                badges +
+                                '<span class="bf-chunk-size">' + fmtBytes(c.bytes) + ' · ' + c.modules.length + ' module' + (c.modules.length===1?'':'s') + '</span>' +
+                                '</div>' +
+                                '<ul class="bf-modules' + (collapsed ? ' collapsed' : '') + '">' + modsHtml + '</ul>' +
+                                '</div>';
+                    });
+                    if (!anyShown) return '<div class="bf-empty">No modules match the current filters.</div>';
+                    return html;
+                }
+
+                function makeChunkComparator() {
+                    var dir = state.sortDir === "asc" ? 1 : -1;
+                    if (state.sortBy === "path") {
+                        return function(a, b) { return a.file.localeCompare(b.file) * dir; };
+                    }
+                    return function(a, b) { return (a.bytes - b.bytes) * dir; };
+                }
+                function makeModuleComparator() {
+                    var dir = state.sortDir === "asc" ? 1 : -1;
+                    if (state.sortBy === "path") {
+                        return function(a, b) { return a.id.localeCompare(b.id) * dir; };
+                    }
+                    return function(a, b) { return (a.bytes - b.bytes) * dir; };
+                }
+
+                function renderFlat(chunks, filter) {
+                    var items = [];
+                    chunks.forEach(function(c) {
+                        var loaded = !state.hasRuntime || state.runtimeSet[c.file];
+                        if (state.hideUnloaded && state.hasRuntime && !loaded) return;
+                        (c.modules || []).forEach(function(m) {
+                            if (!matchesFilter(m, filter)) return;
+                            items.push({ m: m, chunk: c, loaded: loaded });
+                        });
+                    });
+                    var cmp = makeModuleComparator();
+                    items.sort(function(a, b) { return cmp(a.m, b.m); });
+                    if (items.length === 0) return '<div class="bf-empty">No modules match the current filters.</div>';
+                    var html = '<ul class="bf-flat-list">';
+                    items.forEach(function(it) {
+                        html += '<li' + (it.loaded ? '' : ' class="stripped"') + '>' +
+                                renderModuleLi(it.m) +
+                                '<span class="bf-flat-chunk-ref">in ' + escapeHtml(it.chunk.file) + (it.loaded ? '' : ' (not loaded)') + '</span>' +
+                                '</li>';
+                    });
+                    html += '</ul>';
+                    return html;
+                }
+
+                function render() {
+                    var list = document.getElementById("bf-list");
+                    if (!state.info) return;
+                    var chunks = state.info.chunks || [];
+                    var filter = (state.filter || "").trim().toLowerCase();
+                    if (state.groupByBundle) {
+                        list.innerHTML = renderBundleGrouped(chunks, filter);
+                    } else {
+                        list.innerHTML = renderFlat(chunks, filter);
+                    }
+                }
+
+                function wireToolbarButtons() {
+                    function wireGroup(groupId, key, onChange) {
+                        var group = document.getElementById(groupId);
+                        Array.prototype.forEach.call(group.querySelectorAll("button"), function(btn) {
+                            btn.addEventListener("click", function() {
+                                var val = btn.getAttribute("data-value");
+                                state[key] = val === "true" ? true : val === "false" ? false : val;
+                                Array.prototype.forEach.call(group.querySelectorAll("button"), function(b) { b.classList.remove("active"); });
+                                btn.classList.add("active");
+                                if (onChange) onChange();
+                                render();
+                            });
+                        });
+                    }
+                    wireGroup("bf-tg-group",  "groupByBundle");
+                    wireGroup("bf-tg-sortby", "sortBy");
+                    wireGroup("bf-tg-sortdir","sortDir");
+                }
+
                 window.closeBundleFiles = function() {
                     document.getElementById("bf-overlay").classList.remove("active");
                 };
+
                 window.showBundleFiles = function(scene) {
                     var cfg = (window.SCENE_CONFIG || []).filter(function(c){return "scene"+c.id===scene;})[0];
                     var title = cfg ? cfg.name : scene;
@@ -3711,32 +4060,49 @@
                         if (!hasRuntime) sub = "runtime info unavailable — all built chunks shown";
                         document.getElementById("bf-subtitle").textContent = sub;
 
-                        var html = '<div class="bf-note">Chunk sizes are post-minification bytes. Module sizes are the rendered contribution of each <code>.ts</code> / <code>.wgsl</code> file inside that chunk (tree-shaken code contributes 0 and is hidden).</div>';
-                        chunks.forEach(function(c, idx) {
-                            var loaded = !hasRuntime || runtimeSet[c.file];
-                            var badges = "";
-                            if (c.isEntry) badges += '<span class="bf-chunk-badge bf-badge-entry">entry</span> ';
-                            if (hasRuntime) {
-                                badges += loaded
-                                    ? '<span class="bf-chunk-badge bf-badge-runtime">loaded</span> '
-                                    : '<span class="bf-chunk-badge bf-badge-stripped">not loaded</span> ';
-                            }
-                            var modsHtml = c.modules.length
-                                ? c.modules.map(function(m) {
-                                    return '<li><span class="bf-mod-path" title="' + modulePrefix(m.id) + '">' + m.id + '</span>' +
-                                           '<span class="bf-mod-bytes">' + fmtBytes(m.bytes) + '</span></li>';
-                                  }).join("")
-                                : '<li class="bf-empty">(no module contributions recorded)</li>';
-                            html += '<div class="bf-chunk' + (loaded ? '' : ' stripped') + '">' +
-                                    '<div class="bf-chunk-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">' +
-                                    '<span class="bf-chunk-name">' + c.file + '</span>' +
-                                    badges +
-                                    '<span class="bf-chunk-size">' + fmtBytes(c.bytes) + ' · ' + c.modules.length + ' module' + (c.modules.length===1?'':'s') + '</span>' +
-                                    '</div>' +
-                                    '<ul class="bf-modules' + (idx > 0 ? ' collapsed' : '') + '">' + modsHtml + '</ul>' +
-                                    '</div>';
-                        });
-                        body.innerHTML = html;
+                        state.info = info;
+                        state.manifest = manifest;
+                        state.runtimeSet = runtimeSet;
+                        state.hasRuntime = hasRuntime;
+                        state.filter = "";
+                        state.groupByBundle = true;
+                        state.sortBy = "size";
+                        state.sortDir = "desc";
+                        state.hideUnloaded = true;
+
+                        function btn(group, value, label, active) {
+                            return '<button data-value="' + value + '"' + (active ? ' class="active"' : '') + '>' + label + '</button>';
+                        }
+                        body.innerHTML =
+                            '<div class="bf-toolbar">' +
+                              '<input id="bf-filter" class="bf-filter" type="text" placeholder="Filter by file path or export name…" />' +
+                              '<div id="bf-tg-group" class="bf-toolbar-group" title="Grouping">' +
+                                btn("group","true","Group by bundle",true) +
+                                btn("group","false","Flat list",false) +
+                              '</div>' +
+                              '<div id="bf-tg-sortby" class="bf-toolbar-group" title="Sort by">' +
+                                btn("sortby","size","Size",true) +
+                                btn("sortby","path","Path",false) +
+                              '</div>' +
+                              '<div id="bf-tg-sortdir" class="bf-toolbar-group" title="Direction">' +
+                                btn("sortdir","desc","↓ Desc",true) +
+                                btn("sortdir","asc","↑ Asc",false) +
+                              '</div>' +
+                              (hasRuntime
+                                ? '<label class="bf-toolbar-check" title="Hide chunks that were not actually fetched at runtime">' +
+                                    '<input type="checkbox" id="bf-hide-unloaded" checked /> Hide unloaded' +
+                                  '</label>'
+                                : '') +
+                            '</div>' +
+                            '<div class="bf-note">Chunk sizes are post-minification bytes. Module sizes are the rendered contribution of each <code>.ts</code> / <code>.wgsl</code> file. Chips show the exported symbols that survived tree-shaking.</div>' +
+                            '<div id="bf-list"></div>';
+
+                        var filterEl = document.getElementById("bf-filter");
+                        filterEl.addEventListener("input", function() { state.filter = filterEl.value; render(); });
+                        wireToolbarButtons();
+                        var hideEl = document.getElementById("bf-hide-unloaded");
+                        if (hideEl) hideEl.addEventListener("change", function() { state.hideUnloaded = hideEl.checked; render(); });
+                        render();
                     });
                 };
                 document.addEventListener("keydown", function(e) {

@@ -3,6 +3,9 @@ import type { SceneContextInternal } from "../scene/scene.js";
 import { buildScene, processMaterialSwaps } from "../scene/scene.js";
 import type { Renderable } from "../render/renderable.js";
 
+/** Babylon Lite version string. */
+export const VERSION = "0.1.0";
+
 /** Handle to the WebGPU engine — pure state, no attached methods. */
 export interface EngineContext {
     readonly canvas: HTMLCanvasElement;
@@ -57,6 +60,12 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
 
     const format = navigator.gpu.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: "opaque" });
+
+    const versionToLog = `Babylon Lite v${VERSION}`;
+    console.log(`${versionToLog} - WebGPU engine`);
+    if (canvas.setAttribute) {
+        canvas.setAttribute("data-engine", versionToLog);
+    }
 
     const msaaSamples = 4;
 

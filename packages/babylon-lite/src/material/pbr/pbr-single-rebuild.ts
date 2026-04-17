@@ -25,7 +25,18 @@ import {
     PBR_HAS_RECEIVE_SHADOWS,
     PBR_HAS_GAMMA_ALBEDO,
 } from "./pbr-pipeline.js";
-import { getLightTypeFeatureBits, PBR_HAS_OCCLUSION, PBR_HAS_CLEARCOAT, PBR_HAS_SHEEN, PBR_HAS_USE_ALPHA_ONLY_MR, _getSubsurfaceExt } from "./pbr-flags.js";
+import {
+    getLightTypeFeatureBits,
+    PBR_HAS_OCCLUSION,
+    PBR_HAS_CLEARCOAT,
+    PBR_HAS_SHEEN,
+    PBR_HAS_USE_ALPHA_ONLY_MR,
+    PBR2_CC_INT_MAP,
+    PBR2_CC_ROUGH_MAP,
+    PBR2_CC_NORMAL_MAP,
+    PBR2_CC_F0_REMAP_OFF,
+    _getSubsurfaceExt,
+} from "./pbr-flags.js";
 import { _createPbrMeshUBO, _createPbrMaterialUBO } from "./pbr-renderable.js";
 
 /** Build a single Renderable for one mesh after a PBR material swap.
@@ -78,6 +89,22 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
     if ((mat.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled) {
         features |= PBR_HAS_CLEARCOAT;
     }
+    let features2 = 0;
+    const ccProps = mat.clearCoat as import("./pbr-material.js").ClearCoatProps | undefined;
+    if (ccProps?.isEnabled) {
+        if (ccProps.texture) {
+            features2 |= PBR2_CC_INT_MAP;
+        }
+        if (ccProps.roughnessTexture) {
+            features2 |= PBR2_CC_ROUGH_MAP;
+        }
+        if (ccProps.bumpTexture) {
+            features2 |= PBR2_CC_NORMAL_MAP;
+        }
+        if (ccProps.useF0Remap === false) {
+            features2 |= PBR2_CC_F0_REMAP_OFF;
+        }
+    }
     if ((mat.sheen as SheenProps | undefined)?.isEnabled) {
         features |= PBR_HAS_SHEEN;
     }
@@ -95,8 +122,8 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
         features |= ssE.detect(mat);
     }
 
-    const composed = composePbr!(features);
-    const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, sceneBGL, composed);
+    const composed = composePbr!(features, features2);
+    const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, features2, sceneBGL, composed);
     const worldMatrix = mesh.worldMatrix;
     const meshUBO = _createPbrMeshUBO(engine, worldMatrix, composed);
     const materialUBO = _createPbrMaterialUBO(engine, mat, composed);

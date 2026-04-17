@@ -41,6 +41,10 @@ export interface PbrMaterialProps {
     directIntensity?: number;
     /** Dielectric F0 reflectance (default 0.04, glass ≈ 0.2). */
     reflectance?: number;
+    /** glTF metallicFactor multiplier applied over ORM.b metallic channel. Default 1.0. */
+    metallicFactor?: number;
+    /** glTF roughnessFactor multiplier applied over ORM.g roughness channel. Default 1.0. */
+    roughnessFactor?: number;
     /** Strength of ambient occlusion from ORM R channel. Default 1.0; 0.0 ignores R channel. */
     occlusionStrength?: number;
     /** Scales dielectric F0 (default 1.0). Maps to BJS metallicF0Factor. */
@@ -98,6 +102,19 @@ export interface ClearCoatProps {
     roughness?: number;
     /** Index of refraction of the clearcoat layer. Default 1.5. */
     indexOfRefraction?: number;
+    /** Optional clearcoat intensity texture (R channel). Multiplies `intensity`. */
+    texture?: Texture2D;
+    /** Optional clearcoat roughness texture (G channel). Multiplies `roughness`. */
+    roughnessTexture?: Texture2D;
+    /** Optional clearcoat normal map (tangent-space). Used to perturb the coat
+     *  layer normal independently of the base layer. */
+    bumpTexture?: Texture2D;
+    /** Clearcoat normal texture scale (glTF normalTexture.scale). Default 1.0. */
+    bumpTextureScale?: number;
+    /** Whether to remap base F0 across the clearcoat interface (CLEARCOAT_REMAP_F0).
+     *  Matches BJS PBRClearCoatConfiguration.remapF0OnInterfaceChange.
+     *  Default true. glTF loader sets this to false per KHR_materials_clearcoat. */
+    useF0Remap?: boolean;
 }
 
 /** Sheen layer properties. Maps to BJS PBRMaterial.sheen sub-object. */
@@ -209,6 +226,18 @@ export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[] {
     }
     if (mat.sheen?.texture) {
         t.push(mat.sheen.texture);
+    }
+    const cc = mat.clearCoat;
+    if (cc) {
+        if (cc.texture) {
+            t.push(cc.texture);
+        }
+        if (cc.roughnessTexture) {
+            t.push(cc.roughnessTexture);
+        }
+        if (cc.bumpTexture) {
+            t.push(cc.bumpTexture);
+        }
     }
     _getSubsurfaceExt()?.textures(mat, t);
     return t;

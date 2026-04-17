@@ -36,6 +36,10 @@ import {
     PBR_HAS_SHEEN,
     PBR_HAS_USE_ALPHA_ONLY_MR,
     PBR_HAS_ANISOTROPY,
+    PBR2_CC_INT_MAP,
+    PBR2_CC_ROUGH_MAP,
+    PBR2_CC_NORMAL_MAP,
+    PBR2_CC_F0_REMAP_OFF,
     _getSubsurfaceExt,
     _setPbrLightExtension,
     _getPbrLightExtension,
@@ -67,6 +71,10 @@ export {
     PBR_HAS_SHEEN,
     PBR_HAS_USE_ALPHA_ONLY_MR,
     PBR_HAS_ANISOTROPY,
+    PBR2_CC_INT_MAP,
+    PBR2_CC_ROUGH_MAP,
+    PBR2_CC_NORMAL_MAP,
+    PBR2_CC_F0_REMAP_OFF,
     _setPbrLightExtension,
     _getPbrLightExtension,
     getLightTypeFeatureBits,
@@ -136,6 +144,7 @@ export function computePbrFeatures(
 
 export interface PbrPipelineVariant {
     features: number;
+    features2: number;
     pipeline: GPURenderPipeline;
     sceneBGL: GPUBindGroupLayout;
     meshBGL: GPUBindGroupLayout;
@@ -162,8 +171,8 @@ export function releasePbrPipelineVariant(variant: PbrPipelineVariant): void {
     cache.evictUnused();
 }
 
-function cacheKey(features: number, format: GPUTextureFormat, msaa: number): string {
-    return `pbr:${features}:${format}:${msaa}`;
+function cacheKey(features: number, features2: number, format: GPUTextureFormat, msaa: number): string {
+    return `pbr:${features}:${features2}:${format}:${msaa}`;
 }
 
 export function getOrCreatePbrPipeline(
@@ -171,12 +180,13 @@ export function getOrCreatePbrPipeline(
     format: GPUTextureFormat,
     msaaSamples: number,
     features: number,
+    features2: number,
     sceneBGL: GPUBindGroupLayout,
     composed: ComposedShader
 ): PbrPipelineVariant {
     const device = engine.device;
     cache.ensureDevice(engine);
-    const key = cacheKey(features, format, msaaSamples);
+    const key = cacheKey(features, features2, format, msaaSamples);
     const cached = cache.getOrIncRef(key);
     if (cached) {
         return cached;
@@ -217,7 +227,7 @@ export function getOrCreatePbrPipeline(
         primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
     });
 
-    const variant: PbrPipelineVariant = { features, pipeline, sceneBGL, meshBGL, shadowBGL, refCount: 1 };
+    const variant: PbrPipelineVariant = { features, features2, pipeline, sceneBGL, meshBGL, shadowBGL, refCount: 1 };
     cache.set(key, variant);
     return variant;
 }
@@ -280,6 +290,20 @@ export function createPbrMeshBindGroup(
     }
     if ((features & PBR_HAS_SHEEN_TEXTURE) !== 0) {
         addTex((material.sheen as SheenProps).texture!);
+    }
+    // Clearcoat textures (after sheenTexture; matches template baseBindings order)
+    const features2 = variant.features2;
+    const cc = material.clearCoat as import("./pbr-material.js").ClearCoatProps | undefined;
+    if (cc) {
+        if ((features2 & PBR2_CC_INT_MAP) !== 0 && cc.texture) {
+            addTex(cc.texture);
+        }
+        if ((features2 & PBR2_CC_ROUGH_MAP) !== 0 && cc.roughnessTexture) {
+            addTex(cc.roughnessTexture);
+        }
+        if ((features2 & PBR2_CC_NORMAL_MAP) !== 0 && cc.bumpTexture) {
+            addTex(cc.bumpTexture);
+        }
     }
     // Lights UBO (after base texture bindings, before fragment bindings — matches composer order)
     if (lightsUBO) {

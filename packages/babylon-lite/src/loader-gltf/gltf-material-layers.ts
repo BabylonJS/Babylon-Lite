@@ -10,13 +10,33 @@
  */
 import type { GltfMaterialData } from "./gltf-material.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { Texture2D } from "../texture/texture-2d.js";
+
+/** Pre-uploaded clearcoat textures supplied by the main loader. */
+export interface GltfClearcoatTextures {
+    ccTexture?: Texture2D;
+    ccRoughnessTexture?: Texture2D;
+    ccNormalTexture?: Texture2D;
+}
 
 /** Build clearcoat / sheen / anisotropy props from parsed glTF extension data. */
-export function buildPbrLayers(m: GltfMaterialData): Partial<PbrMaterialProps> {
+export function buildPbrLayers(m: GltfMaterialData, ccTex?: GltfClearcoatTextures): Partial<PbrMaterialProps> {
     const r: Partial<PbrMaterialProps> = {};
     const c = m.clearcoat;
     if (c) {
-        r.clearCoat = { isEnabled: true, intensity: c.clearcoatFactor ?? 0, roughness: c.clearcoatRoughnessFactor ?? 0 };
+        r.clearCoat = {
+            isEnabled: true,
+            // glTF spec: when a clearcoat texture is present, factor defaults to 1.0.
+            intensity: c.clearcoatFactor ?? (c.clearcoatTexture ? 1 : 0),
+            roughness: c.clearcoatRoughnessFactor ?? (c.clearcoatRoughnessTexture ? 1 : 0),
+            texture: ccTex?.ccTexture,
+            roughnessTexture: ccTex?.ccRoughnessTexture,
+            bumpTexture: ccTex?.ccNormalTexture,
+            bumpTextureScale: c.clearcoatNormalTexture?.scale ?? 1,
+            // glTF KHR_materials_clearcoat: F0 is not remapped across the CC interface
+            // (BJS pbrMaterialLoadingAdapter.configureCoat sets remapF0OnInterfaceChange=false).
+            useF0Remap: false,
+        };
     }
     const s = m.sheen;
     if (s) {
@@ -29,4 +49,3 @@ export function buildPbrLayers(m: GltfMaterialData): Partial<PbrMaterialProps> {
     }
     return r;
 }
-

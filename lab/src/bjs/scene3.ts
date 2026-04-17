@@ -12,7 +12,7 @@ import { Scene } from "@babylonjs/core/scene";
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, { antialias: true });
+    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
 
     const scene = new Scene(engine);
@@ -57,6 +57,7 @@ import { Scene } from "@babylonjs/core/scene";
     });
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
     // Wait several frames to ensure skybox cube faces are fully uploaded
     for (let i = 0; i < 10; i++) {
         await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));

@@ -1,11 +1,10 @@
-import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import "@babylonjs/core/Materials/standardMaterial";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import "@babylonjs/core/Helpers/sceneHelpers";
+import "@babylonjs/core/Loading/loadingScreen";
+import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Scene } from "@babylonjs/core/scene";
+import "@babylonjs/loaders/glTF";
 
 (async function () {
     const __initStart = performance.now();
@@ -14,17 +13,12 @@ import { Scene } from "@babylonjs/core/scene";
     await engine.initAsync();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
 
-    const cam = new ArcRotateCamera("cam", -Math.PI / 2, Math.PI / 2, 5, new Vector3(0, 0, 0), scene);
-    cam.minZ = 1;
-    cam.maxZ = 10000;
+    await SceneLoader.AppendAsync("https://assets.babylonjs.com/meshes/ClearCoatTest/", "ClearCoatTest.gltf", scene);
 
-    const light = new DirectionalLight("dir", new Vector3(0, -1, 0), scene);
-    light.diffuse = new Color3(1, 0, 0);
-    light.specular = new Color3(0, 1, 0);
-
-    MeshBuilder.CreateSphere("sphere", { segments: 32 }, scene);
+    scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
+    scene.createDefaultCamera(true, true, true);
+    (scene.activeCamera as ArcRotateCamera).alpha += Math.PI;
 
     const eng = engine as any;
     scene.onBeforeRenderObservable.add(() => {
@@ -38,7 +32,14 @@ import { Scene } from "@babylonjs/core/scene";
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
+
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    const cam = scene.activeCamera as ArcRotateCamera;
+    canvas.dataset.camAlpha = String(cam.alpha);
+    canvas.dataset.camBeta = String(cam.beta);
+    canvas.dataset.camRadius = String(cam.radius);
+    canvas.dataset.camTarget = `${cam.target.x},${cam.target.y},${cam.target.z}`;
+    canvas.dataset.camFov = String(cam.fov);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

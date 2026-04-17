@@ -243,9 +243,14 @@ function normalizeModuleId(id: string): string {
     return out + query;
 }
 
+interface BundleInfoExport {
+    name: string;
+    kind: "function" | "class" | "const" | "enum" | "unknown";
+}
 interface BundleInfoModule {
     id: string;
     bytes: number;
+    exports: BundleInfoExport[];
 }
 interface BundleInfoChunk {
     file: string;
@@ -254,10 +259,111 @@ interface BundleInfoChunk {
     modules: BundleInfoModule[];
 }
 
+const exportKindCache = new Map<string, Record<string, BundleInfoExport["kind"]>>();
+
+/**
+ * Parse a .ts / .js source file to classify each exported binding as
+ * function / class / const / enum. Uses lightweight regex-based parsing —
+ * sufficient for the repo's conventional `export function / const / class`
+ * declarations. Also follows same-package `export { X } from "./path.js"`
+ * re-exports so chips inherit their original kind.
+ */
+function extractExportKinds(
+    absPath: string,
+    visited: Set<string> = new Set(),
+): Record<string, BundleInfoExport["kind"]> {
+    const cached = exportKindCache.get(absPath);
+    if (cached) return cached;
+    const map: Record<string, BundleInfoExport["kind"]> = {};
+    if (visited.has(absPath) || !existsSync(absPath)) {
+        exportKindCache.set(absPath, map);
+        return map;
+    }
+    visited.add(absPath);
+    const src = readFileSync(absPath, "utf8");
+    for (const m of src.matchAll(/^\s*export\s+(?:async\s+)?function\s*\*?\s*(\w+)/gm)) map[m[1]!] = "function";
+    for (const m of src.matchAll(/^\s*export\s+(?:abstract\s+)?class\s+(\w+)/gm)) map[m[1]!] = "class";
+    for (const m of src.matchAll(/^\s*export\s+(?:const\s+)?enum\s+(\w+)/gm)) map[m[1]!] = "enum";
+    // Match `export const/let/var NAME ... = RHS` without consuming past the line's
+    // end — previously the greedy [\s\S]{0,80} capture swallowed subsequent
+    // declarations, causing matchAll to skip every other line.
+    for (const m of src.matchAll(/^\s*export\s+(?:const|let|var)\s+(\w+)(?:\s*:[^=\r\n]+)?\s*=\s*([^\r\n]{0,200})/gm)) {
+        const name = m[1]!;
+        const rhs = m[2]!.trimStart();
+        const looksLikeFn =
+            /^(async\s+)?function\b/.test(rhs) ||
+            /^(async\s+)?\([^)]*\)\s*(?::[^=]+)?=>/.test(rhs) ||
+            /^(async\s+)?[A-Za-z_$][\w$]*\s*=>/.test(rhs);
+        map[name] = looksLikeFn ? "function" : "const";
+    }
+    // Parse imports so we can resolve bare `export { X }` lists below.
+    const importMap: Record<string, { source: string; origName: string }> = {};
+    for (const m of src.matchAll(/^\s*import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/gm)) {
+        const spec = m[2]!;
+        if (!spec.startsWith(".")) continue;
+        for (const raw of m[1]!.split(",")) {
+            const part = raw.trim().replace(/^type\s+/, "");
+            if (!part) continue;
+            const asMatch = part.match(/^(\w+)\s+as\s+(\w+)$/);
+            const origName = asMatch ? asMatch[1]! : part;
+            const localName = asMatch ? asMatch[2]! : part;
+            importMap[localName] = { source: spec, origName };
+        }
+    }
+    const resolveSpec = (spec: string): string | null => {
+        const baseDir = dirname(absPath);
+        const specNoJs = spec.replace(/\.js$/, "");
+        for (const c of [specNoJs + ".ts", specNoJs + ".tsx", specNoJs, spec]) {
+            const full = resolve(baseDir, c);
+            if (existsSync(full)) return full;
+        }
+        return null;
+    };
+
+    // Follow same-package re-exports: `export { A, B as C } from "./foo.js"`
+    for (const m of src.matchAll(/^\s*export\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/gm)) {
+        const names = m[1]!;
+        const spec = m[2]!;
+        if (!spec.startsWith(".")) continue;
+        const target = resolveSpec(spec);
+        if (!target) continue;
+        const targetKinds = extractExportKinds(target, visited);
+        for (const raw of names.split(",")) {
+            const part = raw.trim();
+            if (!part) continue;
+            const asMatch = part.match(/^(\w+)\s+as\s+(\w+)$/);
+            const sourceName = asMatch ? asMatch[1]! : part;
+            const localName = asMatch ? asMatch[2]! : part;
+            const kind = targetKinds[sourceName];
+            if (kind && !map[localName]) map[localName] = kind;
+        }
+    }
+    // Follow bare `export { A, B as C }` (no `from`) via the import map.
+    for (const m of src.matchAll(/^\s*export\s*\{([^}]+)\}\s*;?\s*$/gm)) {
+        for (const raw of m[1]!.split(",")) {
+            const part = raw.trim();
+            if (!part) continue;
+            const asMatch = part.match(/^(\w+)\s+as\s+(\w+)$/);
+            const localLookup = asMatch ? asMatch[1]! : part;
+            const exportName = asMatch ? asMatch[2]! : part;
+            if (map[exportName]) continue;
+            const imp = importMap[localLookup];
+            if (!imp) continue;
+            const target = resolveSpec(imp.source);
+            if (!target) continue;
+            const targetKinds = extractExportKinds(target, visited);
+            const kind = targetKinds[imp.origName];
+            if (kind) map[exportName] = kind;
+        }
+    }
+    exportKindCache.set(absPath, map);
+    return map;
+}
+
 /**
  * Write per-scene chunk/module contribution info alongside the bundle output.
  * Consumed by the lab "Bundle" tab to show which .ts files contribute to each
- * chunk (with rendered sizes).
+ * chunk (with rendered sizes) and which named exports survived tree-shaking.
  */
 function writeBundleInfo(scene: string, result: unknown): void {
     // Vite build() returns RollupOutput | RollupOutput[] (one per output format).
@@ -273,14 +379,22 @@ function writeBundleInfo(scene: string, result: unknown): void {
             fileName?: string;
             code?: string;
             isEntry?: boolean;
-            modules?: Record<string, { renderedLength?: number }>;
+            modules?: Record<string, { renderedLength?: number; renderedExports?: string[] }>;
         };
         if (it.type !== "chunk" || !it.fileName) continue;
         const modules: BundleInfoModule[] = [];
         for (const [rawId, m] of Object.entries(it.modules ?? {})) {
             const bytes = m.renderedLength ?? 0;
             if (bytes <= 0) continue;
-            modules.push({ id: normalizeModuleId(rawId), bytes });
+            const rawNames = Array.isArray(m.renderedExports) ? [...m.renderedExports].sort() : [];
+            // Resolve kinds from the source file on disk (strip any ?query suffix).
+            const srcPath = rawId.split("?")[0]!;
+            const kinds = srcPath.startsWith("\u0000") ? {} : extractExportKinds(srcPath);
+            const exports: BundleInfoExport[] = rawNames.map((name) => ({
+                name,
+                kind: kinds[name] ?? "unknown",
+            }));
+            modules.push({ id: normalizeModuleId(rawId), bytes, exports });
         }
         modules.sort((a, b) => b.bytes - a.bytes);
         chunks.push({

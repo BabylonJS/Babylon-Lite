@@ -93,7 +93,7 @@ export interface SceneContextInternal extends SceneContext {
     _irradianceSH?: Float32Array;
     _pbrSceneBGL?: GPUBindGroupLayout;
     _pbrSceneBG?: GPUBindGroup;
-    _composePbr?: (features: number) => ComposedShader;
+    _composePbr?: (features: number, features2?: number) => ComposedShader;
     _standardSceneUBO?: GPUBuffer;
     _pbrLightsUBO?: GPUBuffer;
     _pbrLightsUBOScratch?: Float32Array;

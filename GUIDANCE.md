@@ -236,6 +236,16 @@ When a parity diff exists on specific meshes:
 - **Use this tool whenever investigating bundle size regressions or exploring reduction opportunities.**
 - Example: `pnpm run analyze-bundle scene7`
 
+### 7b. Lab Bundle Files Panel (per-export tokens)
+
+- After `pnpm build:bundle-scenes`, the lab's **Bundle** tab exposes a **📄 Files** button on every scene card that opens a per-scene breakdown of every chunk, every module, and every **exported symbol (token chip)** that survived tree-shaking, annotated with runtime-loaded vs built-but-not-fetched.
+- Backing data lives in `lab/public/bundle/bundle-info/<scene>.json` (full module + export list) and `lab/public/bundle/manifest.json` (runtime-fetched chunk set per scene).
+- **When tasked with reducing bundle size, you MUST consult the bundle files data before proposing changes.** Compare the exported tokens retained for a scene against what the scene's `.ts` file actually imports:
+    - Tokens that survive tree-shaking but aren't needed by the scene's features reveal unconditional imports, side-effectful modules, or missing feature gates — these are the real optimization targets.
+    - Runtime-loaded chunks whose functionality the scene has explicitly opted out of (e.g. `background-renderable` despite `skipSkybox+skipGround`, `skeleton-*` for a non-skinned GLB) indicate conditional dynamic imports that are missing.
+    - Duplicate exports appearing in multiple chunks indicate re-exports or accidental duplication worth collapsing.
+- Read the JSON directly (e.g. `lab/public/bundle/bundle-info/scene12.json`) for scriptable analysis; use the lab UI for interactive exploration.
+
 ---
 
 ## Babylon.js Reference Repository

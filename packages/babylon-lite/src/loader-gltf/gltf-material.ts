@@ -26,6 +26,12 @@ export interface GltfMaterialData {
     alphaMode: string;
     /** glTF alphaCutoff for MASK mode (default 0.5). */
     alphaCutoff: number;
+    /** KHR_materials_clearcoat intensity map (R channel). */
+    clearcoatImage?: ImageBitmap | null;
+    /** KHR_materials_clearcoat roughness map (G channel). */
+    clearcoatRoughnessImage?: ImageBitmap | null;
+    /** KHR_materials_clearcoat normal map (tangent-space). */
+    clearcoatNormalImage?: ImageBitmap | null;
     /** Raw KHR_materials_clearcoat extension object (undefined when absent). */
     clearcoat?: any;
     /** Raw KHR_materials_sheen extension object (factor-only; texture not loaded). */
@@ -86,13 +92,16 @@ export async function assembleMaterial(
     const baseColorTexInfo = specGlossExt?.diffuseTexture ?? pbr.baseColorTexture;
     const specGlossTexInfo = specGlossExt?.specularGlossinessTexture ?? null;
 
-    const [baseColorImg, mrImg, normalImg, occlusionImg, emissiveImg, specGlossImg] = await Promise.all([
+    const [baseColorImg, mrImg, normalImg, occlusionImg, emissiveImg, specGlossImg, ccImg, ccRoughImg, ccNormImg] = await Promise.all([
         getTexImage(baseColorTexInfo),
         getTexImage(pbr.metallicRoughnessTexture),
         getTexImage(mat.normalTexture),
         getTexImage(mat.occlusionTexture),
         getTexImage(mat.emissiveTexture),
         getTexImage(specGlossTexInfo),
+        getTexImage(exts?.KHR_materials_clearcoat?.clearcoatTexture),
+        getTexImage(exts?.KHR_materials_clearcoat?.clearcoatRoughnessTexture),
+        getTexImage(exts?.KHR_materials_clearcoat?.clearcoatNormalTexture),
     ]);
 
     return {
@@ -110,6 +119,9 @@ export async function assembleMaterial(
         alphaMode: mat.alphaMode ?? "OPAQUE",
         alphaCutoff: mat.alphaCutoff ?? 0.5,
         clearcoat: exts?.KHR_materials_clearcoat,
+        clearcoatImage: ccImg,
+        clearcoatRoughnessImage: ccRoughImg,
+        clearcoatNormalImage: ccNormImg,
         sheen: exts?.KHR_materials_sheen,
         anisotropy: exts?.KHR_materials_anisotropy,
     };

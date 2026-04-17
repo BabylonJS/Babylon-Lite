@@ -33,6 +33,14 @@ export const PBR_HAS_SUBSURFACE = 1 << 27;
 export const PBR_HAS_THICKNESS_MAP = 1 << 28;
 export const PBR_HAS_SKYBOX = 1 << 29;
 
+// ─── features2 (extended feature bits) ──────────────────────────────
+// Used when `features` runs out of bits. Threaded separately through
+// composePbr / getOrCreatePbrPipeline / createPbrMeshBindGroup.
+export const PBR2_CC_INT_MAP = 1 << 0;
+export const PBR2_CC_ROUGH_MAP = 1 << 1;
+export const PBR2_CC_NORMAL_MAP = 1 << 2;
+export const PBR2_CC_F0_REMAP_OFF = 1 << 3;
+
 let _lightExt: PbrLightExtension | null = null;
 /** @internal */ export function _setPbrLightExtension(ext: PbrLightExtension): void {
     _lightExt = ext;

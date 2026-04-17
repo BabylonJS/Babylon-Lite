@@ -3,7 +3,6 @@
 
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
-import { quatSlerp } from "../math/mat4.js";
 
 /** Binary search: find index i such that input[i] <= t < input[i+1]. */
 function findKeyframe(input: Float32Array, t: number): number {
@@ -28,6 +27,40 @@ function findKeyframe(input: Float32Array, t: number): number {
 
 // Reusable scratch for quaternion slerp (avoids per-call allocation)
 const _quat = [0, 0, 0, 1];
+
+/** Spherical linear interpolation between two quaternions. Writes to out[].
+ *  Lives here (not in math/mat4.ts) so non-animated scenes don't pay for it. */
+function quatSlerp(out: number[], ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number, t: number): void {
+    let dot = ax * bx + ay * by + az * bz + aw * bw;
+    if (dot < 0) {
+        bx = -bx;
+        by = -by;
+        bz = -bz;
+        bw = -bw;
+        dot = -dot;
+    }
+    if (dot > 0.9995) {
+        // Near-parallel: linear interpolation + normalize
+        out[0] = ax + t * (bx - ax);
+        out[1] = ay + t * (by - ay);
+        out[2] = az + t * (bz - az);
+        out[3] = aw + t * (bw - aw);
+        const len = 1 / Math.sqrt(out[0]! * out[0]! + out[1]! * out[1]! + out[2]! * out[2]! + out[3]! * out[3]!);
+        out[0]! *= len;
+        out[1]! *= len;
+        out[2]! *= len;
+        out[3]! *= len;
+        return;
+    }
+    const theta = Math.acos(dot);
+    const sinTheta = Math.sin(theta);
+    const wa = Math.sin((1 - t) * theta) / sinTheta;
+    const wb = Math.sin(t * theta) / sinTheta;
+    out[0] = wa * ax + wb * bx;
+    out[1] = wa * ay + wb * by;
+    out[2] = wa * az + wb * bz;
+    out[3] = wa * aw + wb * bw;
+}
 
 /**
  * Evaluate a sampler at time `t` and write the result into `dst` at `dstOffset`.

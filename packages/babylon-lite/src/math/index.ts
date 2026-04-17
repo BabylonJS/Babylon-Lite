@@ -12,5 +12,4 @@ export {
     mat4Compose,
     mat4ComposeInto,
     mat4MultiplyInto,
-    quatSlerp,
 } from "./mat4.js";

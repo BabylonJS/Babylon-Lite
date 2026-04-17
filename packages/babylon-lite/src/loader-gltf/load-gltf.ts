@@ -435,7 +435,14 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
             let layers: Partial<import("../material/pbr/pbr-material.js").PbrMaterialProps> | undefined;
             if (mat.clearcoat || mat.sheen || mat.anisotropy) {
                 const mod = await import("./gltf-material-layers.js");
-                layers = mod.buildPbrLayers(mat);
+                const ccTextures = mat.clearcoat
+                    ? {
+                          ccTexture: mat.clearcoatImage ? getCachedTexture(mat.clearcoatImage, false) : undefined,
+                          ccRoughnessTexture: mat.clearcoatRoughnessImage ? getCachedTexture(mat.clearcoatRoughnessImage, false) : undefined,
+                          ccNormalTexture: mat.clearcoatNormalImage ? getCachedTexture(mat.clearcoatNormalImage, false) : undefined,
+                      }
+                    : undefined;
+                layers = mod.buildPbrLayers(mat, ccTextures);
             }
 
             return {
@@ -446,6 +453,9 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
                 specGlossTexture,
                 doubleSided: mat.doubleSided,
                 occlusionStrength: mat.occlusionImage ? 1.0 : 0,
+                // Apply glTF metallicFactor/roughnessFactor only when a real MR texture is present.
+                // When no MR texture, the factors are already baked into the 1×1 fallback ORM bytes above.
+                ...(mat.metallicRoughnessImage ? { metallicFactor: mat.metallicFactor, roughnessFactor: mat.roughnessFactor } : undefined),
                 enableSpecularAA: true,
                 ...(mat.alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat.baseColorFactor[3] } : undefined),
                 ...layers,

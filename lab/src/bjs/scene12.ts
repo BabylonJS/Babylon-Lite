@@ -14,7 +14,7 @@ import "@babylonjs/loaders/glTF";
 void (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, { antialias: true });
+    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
 
     const scene = new Scene(engine);

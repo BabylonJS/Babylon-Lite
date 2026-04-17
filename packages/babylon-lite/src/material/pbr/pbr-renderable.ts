@@ -42,6 +42,10 @@ import {
     PBR_HAS_SHEEN_TEXTURE,
     PBR_HAS_RECEIVE_SHADOWS,
     PBR_HAS_GAMMA_ALBEDO,
+    PBR2_CC_INT_MAP,
+    PBR2_CC_ROUGH_MAP,
+    PBR2_CC_NORMAL_MAP,
+    PBR2_CC_F0_REMAP_OFF,
 } from "./pbr-pipeline.js";
 import { PBR_HAS_THIN_INSTANCES, PBR_HAS_INSTANCE_COLOR } from "./pbr-pipeline.js";
 import {
@@ -185,7 +189,9 @@ export async function buildPbrRenderables(
     }
 
     const hasClearcoat = meshes.some((m) => !!(m.material as PbrMaterialProps).clearCoat?.isEnabled);
-    let _createClearcoatFragment: ((hasIbl: boolean, hasReflectance: boolean) => ShaderFragment) | null = null;
+    let _createClearcoatFragment:
+        | ((hasIbl: boolean, hasReflectance: boolean, hasIntensityMap?: boolean, hasRoughnessMap?: boolean, hasNormalMap?: boolean, disableF0Remap?: boolean) => ShaderFragment)
+        | null = null;
     if (hasClearcoat) {
         const mod = await import("./fragments/clearcoat-fragment.js");
         _createClearcoatFragment = mod.createClearcoatFragment;
@@ -250,10 +256,11 @@ export async function buildPbrRenderables(
     const lightTypeBits = getLightTypeFeatureBits();
 
     // ── Compose shaders per unique feature set (cached) ──
-    const composedCache = new Map<number, ComposedShader>();
+    const composedCache = new Map<string, ComposedShader>();
 
-    function composePbr(features: number): ComposedShader {
-        let c = composedCache.get(features);
+    function composePbr(features: number, features2: number = 0): ComposedShader {
+        const ckey = `${features}:${features2}`;
+        let c = composedCache.get(ckey);
         if (c) {
             return c;
         }
@@ -273,6 +280,10 @@ export async function buildPbrRenderables(
         const hasEmCol = has(PBR_HAS_EMISSIVE_COLOR);
         const hasEmTex = has(PBR_HAS_EMISSIVE);
         const hasTI = has(PBR_HAS_THIN_INSTANCES);
+        const ccIntMap = (features2 & PBR2_CC_INT_MAP) !== 0;
+        const ccRoughMap = (features2 & PBR2_CC_ROUGH_MAP) !== 0;
+        const ccNormalMap = (features2 & PBR2_CC_NORMAL_MAP) !== 0;
+        const ccF0RemapOff = (features2 & PBR2_CC_F0_REMAP_OFF) !== 0;
 
         const template = createPbrTemplate({
             light: hasMultiLight ? null : lightConfig,
@@ -296,6 +307,9 @@ export async function buildPbrRenderables(
             hasReflectanceExt: hasReflExt,
             hasIbl,
             hasClearcoat: hasCC,
+            hasCcIntensityMap: ccIntMap,
+            hasCcRoughnessMap: ccRoughMap,
+            hasCcNormalMap: ccNormalMap,
             hasSheen: hasSh,
             hasAnisotropy: hasAniso,
             anisoBrdfFunctions: hasAniso && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
@@ -317,7 +331,7 @@ export async function buildPbrRenderables(
             frags.push(_createEmissiveColorFragment(hasEmTex));
         }
         if (hasCC && _createClearcoatFragment) {
-            frags.push(_createClearcoatFragment(hasIbl, hasReflExt));
+            frags.push(_createClearcoatFragment(hasIbl, hasReflExt, ccIntMap, ccRoughMap, ccNormalMap, ccF0RemapOff, has(PBR_HAS_SPECULAR_AA)));
         }
         if (hasSh && _createSheenFragment) {
             frags.push(_createSheenFragment(has(PBR_HAS_SHEEN_TEXTURE), hasIbl));
@@ -341,7 +355,7 @@ export async function buildPbrRenderables(
         }
 
         c = composeShader(template, frags);
-        composedCache.set(features, c);
+        composedCache.set(ckey, c);
         return c;
     }
 
@@ -444,6 +458,22 @@ export async function buildPbrRenderables(
         if ((mat.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled) {
             features |= PBR_HAS_CLEARCOAT;
         }
+        let features2 = 0;
+        const ccProps = mat.clearCoat as import("./pbr-material.js").ClearCoatProps | undefined;
+        if (ccProps?.isEnabled) {
+            if (ccProps.texture) {
+                features2 |= PBR2_CC_INT_MAP;
+            }
+            if (ccProps.roughnessTexture) {
+                features2 |= PBR2_CC_ROUGH_MAP;
+            }
+            if (ccProps.bumpTexture) {
+                features2 |= PBR2_CC_NORMAL_MAP;
+            }
+            if (ccProps.useF0Remap === false) {
+                features2 |= PBR2_CC_F0_REMAP_OFF;
+            }
+        }
         const sheenProps = mat.sheen as SheenProps | undefined;
         if (sheenProps?.isEnabled) {
             features |= PBR_HAS_SHEEN;
@@ -473,8 +503,8 @@ export async function buildPbrRenderables(
             }
         }
 
-        const composed = composePbr(features);
-        const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, sceneBGL, composed);
+        const composed = composePbr(features, features2);
+        const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, features2, sceneBGL, composed);
         const worldMatrix = mesh.worldMatrix;
         const meshUBO = createMeshUBO(engine, worldMatrix, composed);
         const materialUBO = createMaterialUBO(engine, mat, composed);
@@ -769,6 +799,11 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
     data[1] = material.directIntensity ?? 1.0;
     data[2] = material.reflectance ?? 0.04;
     data[3] = material.alpha ?? 1.0;
+    if (spec.offsets.has("metallicFactor")) {
+        const off = spec.offsets.get("metallicFactor")! / 4;
+        data[off] = material.metallicFactor ?? 1.0;
+        data[off + 1] = material.roughnessFactor ?? 1.0;
+    }
 
     const hasReflectanceExt = spec.offsets.has("occlusionStrength") && (material.metallicReflectanceTexture !== undefined || material.reflectanceTexture !== undefined);
     if (hasReflectanceExt) {
@@ -789,13 +824,14 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
     }
 
     if ((material.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled && spec.offsets.has("ccParams")) {
-        const cc = material.clearCoat as { intensity?: number; roughness?: number; indexOfRefraction?: number };
+        const cc = material.clearCoat as import("./pbr-material.js").ClearCoatProps;
         const off = spec.offsets.get("ccParams")! / 4;
         const ior = cc.indexOfRefraction ?? 1.5;
         const a = 1 - ior;
         const b = 1 + ior;
         data[off] = cc.intensity ?? 1.0;
         data[off + 1] = cc.roughness ?? 0.0;
+        data[off + 2] = cc.bumpTextureScale ?? 1.0;
         data[off + 4] = Math.pow(-a / b, 2);
         data[off + 5] = 1 / ior;
         data[off + 6] = a;
