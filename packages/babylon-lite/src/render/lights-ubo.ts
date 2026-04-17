@@ -8,6 +8,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { LightBase } from "../light/types.js";
 import type { LightBaseInternal } from "../light/types.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
+import { createUniformBuffer } from "../resource/gpu-buffers.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.
  *  Avoids allocating a Uint32Array view on every fillLightsData call. */
@@ -50,12 +51,9 @@ export function fillLightsData(data: Float32Array, lights: readonly LightBase[])
 
 /** Create a new lights UBO from all standard-compatible lights in the scene. */
 export function writeLightsUBO(engine: EngineContextInternal, lights: readonly LightBase[]): GPUBuffer {
-    const device = engine.device;
     const data = new Float32Array(LIGHTS_UBO_SIZE / 4);
     fillLightsData(data, lights);
-    const buf = device.createBuffer({ size: LIGHTS_UBO_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);
-    return buf;
+    return createUniformBuffer(engine, data);
 }
 
 /** Refresh an existing lights UBO with current light state. */

@@ -10,14 +10,13 @@ import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { Mesh, MeshGPU, MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { parseGlbContainer, resolveAccessor, buildParentMap, computeNodeWorldMatrix } from "./gltf-parser.js";
 import type { GltfMaterialData } from "./gltf-material.js";
 import { assembleMaterial } from "./gltf-material.js";
 import type { MaterialVariantData } from "./material-variants.js";
-
-function mipLevelCount(w: number, h: number): number {
-    return Math.floor(Math.log2(Math.max(w, h))) + 1;
-}
+import { mipLevelCount } from "../texture/mip-count.js";
+import { linearToSrgbByte } from "../color/color.js";
 
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
@@ -293,26 +292,7 @@ async function extractAllMeshes(json: any, binChunk: DataView, baseUrl: string, 
 
 // --- GPU Upload ---
 
-function createBufferFromData(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
-    const device = engine.device;
-    const size = Math.max(data.byteLength, 4);
-    const buffer = device.createBuffer({
-        size: (size + 3) & ~3, // align to 4 bytes — required when mappedAtCreation is true
-        usage: usage | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Uint8Array(buffer.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-    buffer.unmap();
-    return buffer;
-}
-
-/** Convert linear [0,1] to sRGB [0,255]. */
-function linearToSrgbByte(v: number): number {
-    const c = Math.max(0, Math.min(1, v));
-    return Math.round((c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
-}
-
-// Pre-resolved generateMipmaps function — loaded once before texture uploads
+// Pre-resolved generateMipmaps function— loaded once before texture uploads
 let _generateMipmaps: ((engine: EngineContextInternal, texture: GPUTexture, face?: number) => void) | null = null;
 
 async function ensureMipmapModule(): Promise<void> {
@@ -487,11 +467,11 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
             }
 
             const gpu: MeshGPU = {
-                positionBuffer: createBufferFromData(engine, m.positions, GPUBufferUsage.VERTEX),
-                normalBuffer: createBufferFromData(engine, m.normals, GPUBufferUsage.VERTEX),
-                tangentBuffer: m.tangents ? createBufferFromData(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
-                uvBuffer: createBufferFromData(engine, m.uvs, GPUBufferUsage.VERTEX),
-                indexBuffer: createBufferFromData(engine, m.indices, GPUBufferUsage.INDEX),
+                positionBuffer: createMappedBuffer(engine, m.positions, GPUBufferUsage.VERTEX),
+                normalBuffer: createMappedBuffer(engine, m.normals, GPUBufferUsage.VERTEX),
+                tangentBuffer: m.tangents ? createMappedBuffer(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
+                uvBuffer: createMappedBuffer(engine, m.uvs, GPUBufferUsage.VERTEX),
+                indexBuffer: createMappedBuffer(engine, m.indices, GPUBufferUsage.INDEX),
                 indexCount: m.indexCount,
                 indexFormat: (m.indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
             };

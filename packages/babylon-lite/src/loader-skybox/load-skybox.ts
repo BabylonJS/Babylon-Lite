@@ -5,6 +5,7 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { loadCubeTexture } from "../texture/cube-texture.js";
 import { createBoxData } from "../mesh/create-box.js";
+import { createMappedBuffer } from "../resource/gpu-buffers.js";
 
 /** Skybox data stored on the scene for the auto-builder. */
 export interface SkyboxData {
@@ -31,9 +32,9 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
     const cubeTex = await loadCubeTexture(eng, baseUrl, ext);
 
     const boxData = createBoxData(size);
-    const posBuffer = uploadBuffer(eng, boxData.positions, GPUBufferUsage.VERTEX);
-    const normBuffer = uploadBuffer(eng, boxData.normals, GPUBufferUsage.VERTEX);
-    const idxBuffer = uploadIdxBuffer(eng, boxData.indices);
+    const posBuffer = createMappedBuffer(eng, boxData.positions, GPUBufferUsage.VERTEX);
+    const normBuffer = createMappedBuffer(eng, boxData.normals, GPUBufferUsage.VERTEX);
+    const idxBuffer = createMappedBuffer(eng, boxData.indices, GPUBufferUsage.INDEX);
 
     const world = new Float32Array(16);
     world[0] = 1;
@@ -70,28 +71,4 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
             });
         }
     });
-}
-
-function uploadBuffer(engine: EngineContextInternal, data: Float32Array, usage: GPUBufferUsageFlags): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({
-        size: data.byteLength,
-        usage: usage | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Float32Array(buf.getMappedRange()).set(data);
-    buf.unmap();
-    return buf;
-}
-
-function uploadIdxBuffer(engine: EngineContextInternal, data: Uint32Array): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({
-        size: data.byteLength,
-        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Uint32Array(buf.getMappedRange()).set(data);
-    buf.unmap();
-    return buf;
 }

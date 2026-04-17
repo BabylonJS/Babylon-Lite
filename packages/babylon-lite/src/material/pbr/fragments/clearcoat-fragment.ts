@@ -168,7 +168,16 @@ color = attColor;
 `;
 }
 
-export function createClearcoatFragment(hasIbl: boolean, hasReflectance = false, hasIntensityMap = false, hasRoughnessMap = false, hasNormalMap = false, disableF0Remap = false, hasSpecularAA = false, hasBaseNormalMap = false): ShaderFragment {
+export function createClearcoatFragment(
+    hasIbl: boolean,
+    hasReflectance = false,
+    hasIntensityMap = false,
+    hasRoughnessMap = false,
+    hasNormalMap = false,
+    disableF0Remap = false,
+    hasSpecularAA = false,
+    hasBaseNormalMap = false
+): ShaderFragment {
     const slots: Partial<Record<string, string>> = {
         MF: disableF0Remap ? "" : makeF0Remap(hasIntensityMap),
         AD: makeDirectMod(hasIntensityMap, hasRoughnessMap, hasNormalMap),
@@ -192,7 +201,13 @@ export function createClearcoatFragment(hasIbl: boolean, hasReflectance = false,
     }
     // Fragment id varies with texture config so shader-composer's fragmentKey
     // (and downstream pipeline cache) distinguishes variants.
-    const suffix = (hasIntensityMap ? "I" : "") + (hasRoughnessMap ? "R" : "") + (hasNormalMap ? "N" : "") + (disableF0Remap ? "X" : "") + (hasSpecularAA ? "A" : "") + (hasBaseNormalMap ? "B" : "");
+    const suffix =
+        (hasIntensityMap ? "I" : "") +
+        (hasRoughnessMap ? "R" : "") +
+        (hasNormalMap ? "N" : "") +
+        (disableF0Remap ? "X" : "") +
+        (hasSpecularAA ? "A" : "") +
+        (hasBaseNormalMap ? "B" : "");
     return {
         id: suffix ? `clearcoat-${suffix}` : "clearcoat",
         dependencies: deps.length > 0 ? deps : undefined,

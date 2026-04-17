@@ -24,6 +24,7 @@ import { composeShader } from "../../shader/shader-composer.js";
 import { createPbrTemplate } from "./pbr-template.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
+import { createEmptyUniformBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { updateWorldMatrixUBOs } from "../../render/scene-helpers.js";
 import {
     computePbrFeatures,
@@ -190,7 +191,16 @@ export async function buildPbrRenderables(
 
     const hasClearcoat = meshes.some((m) => !!(m.material as PbrMaterialProps).clearCoat?.isEnabled);
     let _createClearcoatFragment:
-        | ((hasIbl: boolean, hasReflectance: boolean, hasIntensityMap?: boolean, hasRoughnessMap?: boolean, hasNormalMap?: boolean, disableF0Remap?: boolean) => ShaderFragment)
+        | ((
+              hasIbl: boolean,
+              hasReflectance?: boolean,
+              hasIntensityMap?: boolean,
+              hasRoughnessMap?: boolean,
+              hasNormalMap?: boolean,
+              disableF0Remap?: boolean,
+              hasSpecularAA?: boolean,
+              hasBaseNormalMap?: boolean
+          ) => ShaderFragment)
         | null = null;
     if (hasClearcoat) {
         const mod = await import("./fragments/clearcoat-fragment.js");
@@ -384,10 +394,7 @@ export async function buildPbrRenderables(
     const lightBaseOffset = sceneUboSpec.offsets.get(lightFieldName)! / 4;
 
     const sceneBGL = createSceneBindGroupLayout(engine);
-    const sceneUniformBuffer = device.createBuffer({
-        size: sceneUboSize,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    const sceneUniformBuffer = createEmptyUniformBuffer(engine, sceneUboSize);
     const sceneBindGroup = device.createBindGroup({
         layout: sceneBGL,
         entries: [{ binding: 0, resource: { buffer: sceneUniformBuffer } }],
@@ -779,18 +786,10 @@ export async function buildPbrRenderables(
     return { renderables, updater, _sceneBGL: sceneBGL, _sceneBG: sceneBindGroup };
 }
 
-function allocUBO(engine: EngineContextInternal, data: Float32Array): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({ size: data.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, data as unknown as Float32Array<ArrayBuffer>);
-    return buf;
-}
-
-/** Create a mesh UBO containing only the world matrix (64 bytes). */
 function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader): GPUBuffer {
     const data = new Float32Array(composed.meshUboSpec.totalBytes / 4);
     data.set(world, 0);
-    return allocUBO(engine, data);
+    return createUniformBuffer(engine, data);
 }
 
 /** Write material properties into a pre-allocated Float32Array. */
@@ -867,7 +866,7 @@ function createMaterialUBO(engine: EngineContextInternal, material: PbrMaterialP
     const spec = composed.materialUboSpec!;
     const data = new Float32Array(spec.totalBytes / 4);
     writeMaterialData(data, material, spec);
-    return allocUBO(engine, data);
+    return createUniformBuffer(engine, data);
 }
 
 /** Exported for use by pbr-single-rebuild.ts */

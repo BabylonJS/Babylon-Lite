@@ -28,6 +28,22 @@ function findKeyframe(input: Float32Array, t: number): number {
 // Reusable scratch for quaternion slerp (avoids per-call allocation)
 const _quat = [0, 0, 0, 1];
 
+/** Normalise 4 consecutive components (quaternion) in-place. No-op on zero length. */
+function normalizeQuat4(buf: number[] | Float32Array, o: number): void {
+    const x = buf[o]!;
+    const y = buf[o + 1]!;
+    const z = buf[o + 2]!;
+    const w = buf[o + 3]!;
+    const lenSq = x * x + y * y + z * z + w * w;
+    if (lenSq > 0) {
+        const inv = 1 / Math.sqrt(lenSq);
+        buf[o] = x * inv;
+        buf[o + 1] = y * inv;
+        buf[o + 2] = z * inv;
+        buf[o + 3] = w * inv;
+    }
+}
+
 /** Spherical linear interpolation between two quaternions. Writes to out[].
  *  Lives here (not in math/mat4.ts) so non-animated scenes don't pay for it. */
 function quatSlerp(out: number[], ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number, t: number): void {
@@ -45,11 +61,7 @@ function quatSlerp(out: number[], ax: number, ay: number, az: number, aw: number
         out[1] = ay + t * (by - ay);
         out[2] = az + t * (bz - az);
         out[3] = aw + t * (bw - aw);
-        const len = 1 / Math.sqrt(out[0]! * out[0]! + out[1]! * out[1]! + out[2]! * out[2]! + out[3]! * out[3]!);
-        out[0]! *= len;
-        out[1]! *= len;
-        out[2]! *= len;
-        out[3]! *= len;
+        normalizeQuat4(out, 0);
         return;
     }
     const theta = Math.acos(dot);
@@ -119,15 +131,7 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
 
         // Normalize quaternion result for cubicspline rotation
         if (isQuat) {
-            const o = dstOffset;
-            const len = Math.sqrt(dst[o]! * dst[o]! + dst[o + 1]! * dst[o + 1]! + dst[o + 2]! * dst[o + 2]! + dst[o + 3]! * dst[o + 3]!);
-            if (len > 0) {
-                const inv = 1 / len;
-                dst[o] = dst[o]! * inv;
-                dst[o + 1] = dst[o + 1]! * inv;
-                dst[o + 2] = dst[o + 2]! * inv;
-                dst[o + 3] = dst[o + 3]! * inv;
-            }
+            normalizeQuat4(dst, dstOffset);
         }
         return;
     }

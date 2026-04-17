@@ -62,6 +62,7 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
     context.configure({ device, format, alphaMode: "opaque" });
 
     const versionToLog = `Babylon Lite v${VERSION}`;
+    // eslint-disable-next-line no-console
     console.log(`${versionToLog} - WebGPU engine`);
     if (canvas.setAttribute) {
         canvas.setAttribute("data-engine", versionToLog);

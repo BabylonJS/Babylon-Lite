@@ -4,6 +4,7 @@ import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { MeshInternal } from "../mesh/mesh.js";
+import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
@@ -240,25 +241,7 @@ export function disposeScene(scene: SceneContext): void {
     }
     ctx._meshDisposables.clear();
     for (const mesh of ctx.meshes) {
-        const g = (mesh as MeshInternal)._gpu;
-        g.positionBuffer.destroy();
-        g.normalBuffer.destroy();
-        g.uvBuffer.destroy();
-        g.indexBuffer.destroy();
-        g.tangentBuffer?.destroy();
-        g.uv2Buffer?.destroy();
-        const sk = mesh.skeleton;
-        if (sk) {
-            sk.boneTexture.destroy();
-            sk.jointsBuffer.destroy();
-            sk.weightsBuffer.destroy();
-            sk.joints1Buffer?.destroy();
-            sk.weights1Buffer?.destroy();
-        }
-        if (mesh.morphTargets) {
-            mesh.morphTargets.texture.destroy();
-            mesh.morphTargets.weightsBuffer.destroy();
-        }
+        disposeMeshGpu(mesh);
     }
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;

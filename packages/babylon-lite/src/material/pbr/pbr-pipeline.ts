@@ -10,7 +10,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
-import { _getSubsurfaceExt, _getPbrLightExtension, getLightTypeFeatureBits } from "./pbr-flags.js";
+import { _getSubsurfaceExt, _getPbrLightExtension } from "./pbr-flags.js";
 import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_EMISSIVE,
@@ -25,10 +25,7 @@ import {
     PBR_HAS_COTANGENT_NORMAL,
     PBR_HAS_METALLIC_REFLECTANCE_MAP,
     PBR_HAS_REFLECTANCE_MAP,
-    PBR_HAS_SPECULAR_AA,
     PBR_HAS_SHEEN_TEXTURE,
-    PBR_HAS_OCCLUSION,
-    PBR_HAS_USE_ALPHA_ONLY_MR,
     PBR2_CC_INT_MAP,
     PBR2_CC_ROUGH_MAP,
     PBR2_CC_NORMAL_MAP,

@@ -22,6 +22,7 @@ import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
+import { createEmptyUniformBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 // (flags imported from same file)
 
 // ─── Pluggable Shadow Shader Extensions (tree-shakable) ────────────
@@ -361,10 +362,7 @@ export function getOrCreatePipeline(
     // ─── Scene UBO + Bind Group (shared across all variants) ───
 
     if (!_sharedSceneUBO) {
-        _sharedSceneUBO = device.createBuffer({
-            size: composed.sceneUboSpec.totalBytes,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
+        _sharedSceneUBO = createEmptyUniformBuffer(engine, composed.sceneUboSpec.totalBytes);
     }
     const sceneUBO = _sharedSceneUBO;
 
@@ -392,8 +390,6 @@ export function getOrCreatePipeline(
 // ─── Per-Mesh GPU Setup ─────────────────────────────────────────────
 
 export { LIGHTS_UBO_SIZE, writeLightsUBO, refreshLightsUBO };
-const MATERIAL_UBO_SIZE = 96; // 24 floats (20 base + reflectionLevel + 3 pad)
-const UV_UBO_SIZE = 16;
 
 export function createDynamicMeshGPU(
     engine: EngineContextInternal,
@@ -421,13 +417,13 @@ export function createDynamicMeshGPU(
     const hasCubeReflection = (features & HAS_CUBE_REFLECTION) !== 0;
 
     // Mesh UBO — size from pipeline variant's composed shader spec
-    const meshUBO = createUBO(engine, variant.meshUboTotalBytes || 64, worldMatrix);
+    const meshUBO = createUniformBuffer(engine, worldMatrix);
 
     // Material UBO
     const textureLevel = needsUV ? 1.0 : 0;
     const matData = new Float32Array(24);
     writeStdMaterialData(matData, material, textureLevel);
-    const materialUBO = createUBO(engine, MATERIAL_UBO_SIZE, matData);
+    const materialUBO = createUniformBuffer(engine, matData);
 
     // Build mesh bind group entries — sequential numbering matching composer output
     let nextBinding = 0;
@@ -447,7 +443,7 @@ export function createDynamicMeshGPU(
         const uvData = new Float32Array(4);
         uvData[0] = material.uvScale[0];
         uvData[1] = material.uvScale[1];
-        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUBO(engine, UV_UBO_SIZE, uvData) } });
+        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
     }
 
     // Fragment-contributed bindings (after all base bindings)
@@ -506,13 +502,6 @@ export function createDynamicMeshGPU(
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────
-
-function createUBO(engine: EngineContextInternal, size: number, data: Float32Array): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({ size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);
-    return buf;
-}
 
 /** Write standard material properties into a pre-allocated Float32Array (24 floats). */
 export function writeStdMaterialData(data: Float32Array, mat: StandardMaterialProps, textureLevel: number): void {

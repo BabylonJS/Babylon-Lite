@@ -6,9 +6,10 @@ import type { Mat4 } from "../../math/types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
+import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
-import { createBuf } from "./skybox-geometry.js";
+import { createMappedBuffer } from "../../resource/gpu-buffers.js";
 import { WGSL_SCENE_UNIFORMS_PBR, WGSL_SCENE_UNIFORMS_PBR_SH, WGSL_IMAGE_PROCESSING, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 
 const BG_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + alpha + backgroundCenter vec3 + pad
@@ -195,10 +196,10 @@ function createGroundBuffers(
     const indices = new Uint16Array([0, 2, 1, 0, 3, 2]);
 
     return {
-        posBuffer: createBuf(engine, positions, GPUBufferUsage.VERTEX),
-        normBuffer: createBuf(engine, normals, GPUBufferUsage.VERTEX),
-        uvBuffer: createBuf(engine, uvs, GPUBufferUsage.VERTEX),
-        idxBuffer: createBuf(engine, indices, GPUBufferUsage.INDEX),
+        posBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
+        normBuffer: createMappedBuffer(engine, normals, GPUBufferUsage.VERTEX),
+        uvBuffer: createMappedBuffer(engine, uvs, GPUBufferUsage.VERTEX),
+        idxBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
         idxCount: 6,
     };
 }
@@ -206,7 +207,6 @@ function createGroundBuffers(
 // ─── Ground UBO ─────────────────────────────────────────────────────────────
 
 function createBgMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColor: [number, number, number]): GPUBuffer {
-    const device = engine.device;
     const data = new Float32Array(BG_MESH_UNIFORM_SIZE / 4);
     data.set(world, 0); // offset 0: world mat4x4
     data[16] = primaryColor[0]; // offset 64: primaryColor.r
@@ -216,12 +216,7 @@ function createBgMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColo
     data[20] = 0;
     data[21] = 0;
     data[22] = 0; // offset 80: backgroundCenter
-    const buf = device.createBuffer({
-        size: BG_MESH_UNIFORM_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(buf, 0, data);
-    return buf;
+    return createUniformBuffer(engine, data);
 }
 
 // ─── Ground Texture ─────────────────────────────────────────────────────────

@@ -13,15 +13,8 @@ import { assembleMaterial } from "./gltf-material.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-
-function mipCount(w: number, h: number): number {
-    return Math.floor(Math.log2(Math.max(w, h))) + 1;
-}
-
-function linearToSrgbByte(v: number): number {
-    const c = Math.max(0, Math.min(1, v));
-    return Math.round((c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
-}
+import { mipLevelCount } from "../texture/mip-count.js";
+import { linearToSrgbByte } from "../color/color.js";
 
 let _generateMipmaps: ((engine: EngineContextInternal, texture: GPUTexture) => void) | null = null;
 
@@ -30,7 +23,7 @@ function uploadTex(engine: EngineContextInternal, bitmap: ImageBitmap | null, sr
     const w = bitmap?.width ?? 1;
     const h = bitmap?.height ?? 1;
     const fmt: GPUTextureFormat = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
-    const mips = bitmap ? mipCount(w, h) : 1;
+    const mips = bitmap ? mipLevelCount(w, h) : 1;
     const tex = device.createTexture({
         size: { width: w, height: h },
         format: fmt,

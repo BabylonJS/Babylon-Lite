@@ -8,6 +8,7 @@
 
 import type { MorphTargetData } from "../animation/types.js";
 import type { EngineContextInternal } from "../engine/engine.js";
+import { createMappedBuffer } from "../resource/gpu-buffers.js";
 
 /** Create morph target GPU data from parsed glTF targets.
  *  @param engine       Engine context (provides GPU device)
@@ -70,13 +71,7 @@ export function createMorphTargets(
     u32[1] = texWidth;
     u32[2] = rowsPerBand;
 
-    const weightsBuffer = device.createBuffer({
-        size: 32,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Uint8Array(weightsBuffer.getMappedRange()).set(new Uint8Array(uboData));
-    weightsBuffer.unmap();
+    const weightsBuffer = createMappedBuffer(engine, new Uint8Array(uboData), GPUBufferUsage.UNIFORM);
 
     return { texture, count: targetCount, weightsBuffer };
 }
