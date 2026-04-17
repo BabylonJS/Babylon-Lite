@@ -68,13 +68,13 @@ export async function loadEnvironment(
     // Decode all face images in parallel (raw RGBD bytes — no color space conversion)
     const faceImages = await Promise.all(faceBlobs.map((blob) => createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" })));
 
+    const { uploadCubemapRGBD, decodeBrdfPng } = await import("./rgbd-decode.js");
     const specularCube = uploadCubemapRGBD(engine, faceImages, width, mipCount);
     for (const img of faceImages) {
         img.close();
     }
 
     const brdfImage = await brdfPromise;
-    const { decodeBrdfPng } = await import("./brdf-rgbd-decode.js");
     const brdfLut = decodeBrdfPng(engine, brdfImage);
     brdfImage.close();
 
@@ -196,108 +196,6 @@ function parseEnvFile(buffer: ArrayBuffer): ParsedEnv {
     }
 
     return { faceBlobs, irradianceSH, width, mipCount };
-}
-
-// ─── GPU Compute: RGBD → linear HDR float16 ─────────────────────────────────
-
-const RGBD_DECODE_WGSL = /* wgsl */ `
-@group(0) @binding(0) var inputTex: texture_2d<f32>;
-@group(0) @binding(1) var outputTex: texture_storage_2d<rgba16float, write>;
-
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid: vec3u) {
-    let dims = textureDimensions(inputTex);
-    if (gid.x >= dims.x || gid.y >= dims.y) { return; }
-
-    // Y-flip: Babylon uploads cubemap faces with invertY=true
-    let srcY = dims.y - 1u - gid.y;
-    let rgba = textureLoad(inputTex, vec2u(gid.x, srcY), 0);
-
-    // RGBD decode: pow(sRGB, 2.2) / alpha  (matches Babylon's fromRGBD shader)
-    let a = max(rgba.a, 1.0 / 255.0);
-    let linear = vec3f(
-        pow(rgba.r, 2.2) / a,
-        pow(rgba.g, 2.2) / a,
-        pow(rgba.b, 2.2) / a
-    );
-
-    textureStore(outputTex, vec2u(gid.x, gid.y), vec4f(linear, 1.0));
-}
-`;
-
-let _rgbdPipeline: GPUComputePipeline | null = null;
-let _rgbdPipelineDevice: GPUDevice | null = null;
-
-function uploadCubemapRGBD(engine: EngineContextInternal, images: ImageBitmap[], width: number, mipCount: number): GPUTexture {
-    const device = engine.device;
-    if (device !== _rgbdPipelineDevice) {
-        _rgbdPipeline = null;
-        _rgbdPipelineDevice = device;
-    }
-    if (!_rgbdPipeline) {
-        _rgbdPipeline = device.createComputePipeline({
-            layout: "auto",
-            compute: { module: device.createShaderModule({ code: RGBD_DECODE_WGSL }), entryPoint: "main" },
-        });
-    }
-    const pipeline = _rgbdPipeline;
-
-    const texture = device.createTexture({
-        size: { width, height: width, depthOrArrayLayers: 6 },
-        format: "rgba16float",
-        mipLevelCount: mipCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
-        dimension: "2d",
-    });
-
-    for (let mip = 0; mip < mipCount; mip++) {
-        const mipSize = Math.max(1, width >> mip);
-
-        const inputTex = device.createTexture({
-            size: { width: mipSize, height: mipSize },
-            format: "rgba8unorm",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-        });
-
-        const outputTex = device.createTexture({
-            size: { width: mipSize, height: mipSize },
-            format: "rgba16float",
-            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
-        });
-
-        const bindGroup = device.createBindGroup({
-            layout: pipeline.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: inputTex.createView() },
-                { binding: 1, resource: outputTex.createView() },
-            ],
-        });
-
-        for (let face = 0; face < 6; face++) {
-            const idx = mip * 6 + face;
-            if (idx >= images.length) {
-                break;
-            }
-
-            device.queue.copyExternalImageToTexture({ source: images[idx]!, flipY: false }, { texture: inputTex, premultipliedAlpha: false }, { width: mipSize, height: mipSize });
-
-            const encoder = device.createCommandEncoder();
-            const pass = encoder.beginComputePass();
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, bindGroup);
-            pass.dispatchWorkgroups(Math.ceil(mipSize / 8), Math.ceil(mipSize / 8));
-            pass.end();
-
-            encoder.copyTextureToTexture({ texture: outputTex }, { texture, origin: { x: 0, y: 0, z: face }, mipLevel: mip }, { width: mipSize, height: mipSize });
-
-            device.queue.submit([encoder.finish()]);
-        }
-
-        inputTex.destroy();
-        outputTex.destroy();
-    }
-
-    return texture;
 }
 
 // ─── SH Polynomial → Pre-scaled Harmonics Conversion ────────────────────────
