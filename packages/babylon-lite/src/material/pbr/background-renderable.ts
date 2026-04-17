@@ -8,7 +8,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Renderable } from "../../render/renderable.js";
-import { computeSceneSize, computeSkyboxGeometry } from "./skybox-geometry.js";
+import { computeSceneSize } from "./skybox-geometry.js";
 
 export interface BackgroundRenderableOptions {
     /** When true, skip the solid-color skybox (e.g. caller provides HDR skybox separately). */
@@ -32,16 +32,14 @@ export async function buildBackgroundRenderables(
     const engine = scene.engine as EngineContextInternal;
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 
-    // Compute scene size (matches BJS EnvironmentHelper._getSceneSize)
-    const { groundSize, rootPosition } = computeSceneSize(scene);
+    const { groundSize, skyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
 
     const renderables: Renderable[] = [];
 
     // ─── Skybox ────────────────────────────────────────────────
     if (!options?.skipSkybox) {
-        const { skyHalfSize } = computeSkyboxGeometry(scene, options?.skyboxSize);
         const { buildSolidSkyboxRenderable } = await import("./background-solid-skybox.js");
-        renderables.push(buildSolidSkyboxRenderable(scene, envTextures, sceneBindGroupLayout, sceneBindGroup, skyHalfSize, rootPosition, primaryColor));
+        renderables.push(buildSolidSkyboxRenderable(scene, envTextures, sceneBindGroupLayout, sceneBindGroup, skyboxSize / 2, rootPosition, primaryColor));
     }
 
     // ─── Ground ────────────────────────────────────────────────

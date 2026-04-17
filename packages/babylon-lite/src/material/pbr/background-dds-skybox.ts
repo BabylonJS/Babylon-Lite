@@ -5,7 +5,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
-import { computeSkyboxGeometry, createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
+import { computeSceneSize, createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 import ddsSkyboxVertSrc from "../../../shaders/skybox-dds.vertex.wgsl?raw";
@@ -24,7 +24,8 @@ export async function buildDdsSkyboxRenderable(
 ): Promise<Renderable> {
     const engine = scene.engine as EngineContextInternal;
 
-    const { skyHalfSize, rootPosition } = computeSkyboxGeometry(scene, skyboxSize);
+    const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, skyboxSize);
+    const skyHalfSize = autoSkyboxSize / 2;
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
     const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 

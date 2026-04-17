@@ -134,12 +134,3 @@ export function computeSceneSize(
 
     return { groundSize, skyboxSize, rootPosition };
 }
-
-/** Compute skybox half-size and root position.
- *  Matches BJS EnvironmentHelper._setupSizes() with sizeAuto=true (default):
- *  even when user provides explicit skyboxSize, BJS still applies the diagonal
- *  override and the ×1.5 multiplier. */
-export function computeSkyboxGeometry(scene: SceneContext, userSkyboxSize?: number): { skyHalfSize: number; rootPosition: [number, number, number] } {
-    const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, userSkyboxSize);
-    return { skyHalfSize: autoSkyboxSize / 2, rootPosition };
-}

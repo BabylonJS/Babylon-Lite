@@ -7,9 +7,8 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Renderable } from "../../render/renderable.js";
-import { createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
+import { createSkyboxBuffers, buildSkyboxWorldMatrix, computeSceneSize } from "./skybox-geometry.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
-import { computeSkyboxGeometry } from "./skybox-geometry.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxHdrFragSrc from "../../../shaders/skybox-hdr.fragment.wgsl?raw";
 import { WGSL_SCENE_UNIFORMS_PBR } from "../../shader/wgsl-helpers.js";
@@ -26,7 +25,8 @@ export function buildHdrSkyboxRenderable(
 ): Renderable {
     const engine = scene.engine as EngineContextInternal;
 
-    const { skyHalfSize, rootPosition } = computeSkyboxGeometry(scene, skyboxSize);
+    const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, skyboxSize);
+    const skyHalfSize = autoSkyboxSize / 2;
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 
     const cc = scene.clearColor;
