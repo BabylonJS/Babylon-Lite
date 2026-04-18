@@ -164,20 +164,16 @@ export function createPbrMeshBindGroup(
     materialUBO: GPUBuffer,
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
-    boneTextureView?: GPUTextureView,
-    morphTargetView?: GPUTextureView,
-    morphWeightsBuffer?: GPUBuffer,
+    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null,
     lightsUBO?: GPUBuffer
 ): GPUBindGroup {
     const device = engine.device;
     const features = variant.features;
+    const features2 = variant.features2;
     const hasNormal = (features & PBR_HAS_NORMAL_MAP) !== 0;
     const hasCotangentNormal = (features & PBR_HAS_COTANGENT_NORMAL) !== 0;
     const hasAnyNormal = hasNormal || hasCotangentNormal;
     const hasEmissive = (features & PBR_HAS_EMISSIVE) !== 0;
-    const hasEnv = (features & PBR_HAS_ENV) !== 0;
-    const hasSkeleton = (features & PBR_HAS_SKELETON) !== 0;
-    const hasMorph = (features & PBR_HAS_MORPH_TARGETS) !== 0;
     const hasSpecGloss = (features & PBR_HAS_SPEC_GLOSS) !== 0;
 
     const entries: GPUBindGroupEntry[] = [];
@@ -187,17 +183,26 @@ export function createPbrMeshBindGroup(
         entries.push({ binding: b++, resource: t.sampler });
     };
 
+    const ctx: import("./pbr-flags.js").PbrBindCtx = {
+        features,
+        features2,
+        material,
+        mesh: meshCtx ?? undefined,
+        env,
+    };
+
+    // Sort exts by id to match composer's alphabetical binding emission order.
+    const sortedExts = Array.from(_getPbrExts().values()).sort((a, b) => a.id.localeCompare(b.id));
+
     // Mesh UBO (binding 0)
     entries.push({ binding: b++, resource: { buffer: meshUBO } });
     // Material UBO (binding 1)
     entries.push({ binding: b++, resource: { buffer: materialUBO } });
-    // Vertex bindings: morph before skeleton (alphabetical order matching composer)
-    if (hasMorph) {
-        entries.push({ binding: b++, resource: morphTargetView! });
-        entries.push({ binding: b++, resource: { buffer: morphWeightsBuffer! } });
-    }
-    if (hasSkeleton) {
-        entries.push({ binding: b++, resource: boneTextureView! });
+    // Vertex-phase exts (morph before skeleton via alphabetical composer order)
+    for (const ext of sortedExts) {
+        if (ext.phase === "vertex" && ext.bind) {
+            b = ext.bind(ctx, entries, b);
+        }
     }
     // Base bindings (matching composer order: baseColor, normal, ORM, emissive, specGloss, sheen)
     addTex(material.baseColorTexture!);
@@ -214,29 +219,25 @@ export function createPbrMeshBindGroup(
     if ((features & PBR_HAS_SHEEN_TEXTURE) !== 0) {
         addTex((material.sheen as SheenProps).texture!);
     }
-    // Unified PBR extensions (clearcoat, reflectance, ...). Registration
-    // order is alphabetical-by-id via ext.id (composer's tie-break), so
-    // iteration matches composer phase layout without an explicit sort.
-    const features2 = variant.features2;
-    for (const ext of _getPbrExts().values()) {
+    // Base-tex phase exts (alphabetical: clearcoat < reflectance < ...).
+    for (const ext of sortedExts) {
         if (ext.phase === "base-tex" && ext.bind) {
-            b = ext.bind(features, features2, material, entries, b);
+            b = ext.bind(ctx, entries, b);
         }
     }
     // Lights UBO (after base texture bindings, before fragment bindings — matches composer order)
     if (lightsUBO) {
         entries.push({ binding: b++, resource: { buffer: lightsUBO } });
     }
-    // Fragment bindings: IBL (comes before reflectance in composer's alphabetical order)
-    if (hasEnv && env) {
-        entries.push({ binding: b++, resource: env.brdfLutView });
-        entries.push({ binding: b++, resource: env.brdfSampler });
-        entries.push({ binding: b++, resource: env.specularCubeView });
-        entries.push({ binding: b++, resource: env.cubeSampler });
+    // IBL-phase exts (alphabetical within phase).
+    for (const ext of sortedExts) {
+        if (ext.phase === "ibl" && ext.bind) {
+            b = ext.bind(ctx, entries, b);
+        }
     }
-    for (const ext of _getPbrExts().values()) {
+    for (const ext of sortedExts) {
         if (ext.phase === "fragment" && ext.bind) {
-            b = ext.bind(features, features2, material, entries, b);
+            b = ext.bind(ctx, entries, b);
         }
     }
 

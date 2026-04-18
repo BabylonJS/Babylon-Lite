@@ -44,9 +44,11 @@ export function writeEmissiveUBO(data: Float32Array, material: PbrMaterialProps,
 export const emissiveColorExt: PbrExt = {
     id: "emissive-color",
     phase: "fragment",
-    frag(features) {
-        if (!(features & PBR_HAS_EMISSIVE_COLOR)) return null;
-        return createEmissiveColorFragment((features & PBR_HAS_EMISSIVE) !== 0);
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_EMISSIVE_COLOR)) {
+            return null;
+        }
+        return createEmissiveColorFragment((ctx.features & PBR_HAS_EMISSIVE) !== 0);
     },
     writeUbo: writeEmissiveUBO as PbrExt["writeUbo"],
 };

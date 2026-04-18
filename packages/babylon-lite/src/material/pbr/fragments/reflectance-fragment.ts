@@ -119,20 +119,20 @@ export const reflectanceExt: PbrExt = {
         }
         return { f, f2: 0 };
     },
-    frag(features) {
-        const hasMR = (features & PBR_HAS_METALLIC_REFLECTANCE_MAP) !== 0;
-        const hasR = (features & PBR_HAS_REFLECTANCE_MAP) !== 0;
+    frag(ctx) {
+        const hasMR = (ctx.features & PBR_HAS_METALLIC_REFLECTANCE_MAP) !== 0;
+        const hasR = (ctx.features & PBR_HAS_REFLECTANCE_MAP) !== 0;
         if (!hasMR && !hasR) {
             return null;
         }
-        return createReflectanceFragment(hasMR, hasR, (features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0);
+        return createReflectanceFragment(hasMR, hasR, (ctx.features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0);
     },
     writeUbo: writeReflectanceUBO as PbrExt["writeUbo"],
-    bind(features, _f2, mat, entries, b) {
-        if ((features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) === 0) {
+    bind(ctx, entries, b) {
+        if ((ctx.features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) === 0) {
             return b;
         }
-        const m = mat as PbrMaterialProps;
+        const m = ctx.material as PbrMaterialProps;
         if (m.metallicReflectanceTexture) {
             entries.push({ binding: b++, resource: m.metallicReflectanceTexture.view });
             entries.push({ binding: b++, resource: m.metallicReflectanceTexture.sampler });

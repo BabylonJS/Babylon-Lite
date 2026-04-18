@@ -45,3 +45,30 @@ export function createMorphFragment(): ShaderFragment {
         },
     };
 }
+
+import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_MORPH_TARGETS } from "../pbr-flags.js";
+
+export const morphExt: PbrExt = {
+    id: "morph",
+    phase: "vertex",
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_MORPH_TARGETS)) {
+            return null;
+        }
+        return createMorphFragment();
+    },
+    bind(ctx, entries, b) {
+        const mesh = ctx.mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } } | undefined;
+        if (!(ctx.features & PBR_HAS_MORPH_TARGETS) || !mesh?.morphTargets) {
+            return b;
+        }
+        entries.push({ binding: b++, resource: mesh.morphTargets.texture.createView() });
+        // Weights UBO is pushed separately by the pipeline (needs engine-side buffer handle).
+        // Caller supplies weightsBuffer on mesh.morphTargets.
+        if (mesh.morphTargets.weightsBuffer) {
+            entries.push({ binding: b++, resource: { buffer: mesh.morphTargets.weightsBuffer } });
+        }
+        return b;
+    },
+};

@@ -183,23 +183,29 @@ export const sheenExt: PbrExt = {
     phase: "base-tex",
     detect(mat) {
         const sh = (mat as PbrMaterialProps).sheen as SheenProps | undefined;
-        if (!sh?.isEnabled) return { f: 0, f2: 0 };
+        if (!sh?.isEnabled) {
+            return { f: 0, f2: 0 };
+        }
         let f = PBR_HAS_SHEEN;
-        if (sh.texture) f |= PBR_HAS_SHEEN_TEXTURE;
-        if (sh.albedoScaling) f |= PBR_HAS_SHEEN_ALBEDO_SCALING;
+        if (sh.texture) {
+            f |= PBR_HAS_SHEEN_TEXTURE;
+        }
+        if (sh.albedoScaling) {
+            f |= PBR_HAS_SHEEN_ALBEDO_SCALING;
+        }
         return { f, f2: 0 };
     },
-    frag(features, _features2, hasIbl) {
-        if (!(features & PBR_HAS_SHEEN)) return null;
-        return createSheenFragment(
-            (features & PBR_HAS_SHEEN_TEXTURE) !== 0,
-            hasIbl,
-            (features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
-        );
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_SHEEN)) {
+            return null;
+        }
+        return createSheenFragment((ctx.features & PBR_HAS_SHEEN_TEXTURE) !== 0, ctx.hasIbl, (ctx.features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0);
     },
     writeUbo: writeSheenUBO as PbrExt["writeUbo"],
     textures(mat, out) {
         const sh = (mat as PbrMaterialProps).sheen;
-        if (sh?.texture) out.push(sh.texture);
+        if (sh?.texture) {
+            out.push(sh.texture);
+        }
     },
 };

@@ -68,3 +68,25 @@ export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
         },
     };
 }
+
+import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_SKELETON, PBR_HAS_SKELETON_8 } from "../pbr-flags.js";
+
+export const skeletonExt: PbrExt = {
+    id: "skeleton",
+    phase: "vertex",
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_SKELETON)) {
+            return null;
+        }
+        return createSkeletonFragment((ctx.features & PBR_HAS_SKELETON_8) !== 0);
+    },
+    bind(ctx, entries, b) {
+        const mesh = ctx.mesh as { skeleton?: { boneTexture: GPUTexture } } | undefined;
+        if (!(ctx.features & PBR_HAS_SKELETON) || !mesh?.skeleton) {
+            return b;
+        }
+        entries.push({ binding: b++, resource: mesh.skeleton.boneTexture.createView() });
+        return b;
+    },
+};

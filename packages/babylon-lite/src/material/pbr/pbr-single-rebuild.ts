@@ -41,22 +41,9 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
     const worldMatrix = mesh.worldMatrix;
     const meshUBO = _createPbrMeshUBO(engine, worldMatrix, composed, mat);
     const materialUBO = _createPbrMaterialUBO(engine, mat, composed);
-    const boneView = mesh.skeleton?.boneTexture.createView();
-    const morphView = mesh.morphTargets?.texture.createView();
     // Pass shared lights UBO if available (multi-light path)
     const lightsUBO = (scene as SceneContextInternal)._pbrLightsUBO;
-    const materialBindGroup = createPbrMeshBindGroup(
-        engine,
-        variant,
-        meshUBO,
-        materialUBO,
-        mat,
-        envTextures ?? null,
-        boneView,
-        morphView,
-        mesh.morphTargets?.weightsBuffer,
-        lightsUBO
-    );
+    const materialBindGroup = createPbrMeshBindGroup(engine, variant, meshUBO, materialUBO, mat, envTextures ?? null, mesh, lightsUBO);
 
     // Shadow bind group (group 2) — multi-shadow support
     const shadowLights: { gen: ShadowGenerator }[] = [];

@@ -156,14 +156,20 @@ export const subsurfaceExt: PbrExt = {
     phase: "fragment",
     detect(mat) {
         const m = mat as PbrMaterialProps;
-        if (!m.subsurface?.translucency) return { f: 0, f2: 0 };
+        if (!m.subsurface?.translucency) {
+            return { f: 0, f2: 0 };
+        }
         let f = PBR_HAS_SUBSURFACE;
-        if (m.subsurface.thickness?.texture) f |= PBR_HAS_THICKNESS_MAP;
+        if (m.subsurface.thickness?.texture) {
+            f |= PBR_HAS_THICKNESS_MAP;
+        }
         return { f, f2: 0 };
     },
-    frag(features, _features2, hasIbl) {
-        if (!(features & PBR_HAS_SUBSURFACE)) return null;
-        return createSubsurfaceFragment((features & PBR_HAS_THICKNESS_MAP) !== 0, hasIbl);
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_SUBSURFACE)) {
+            return null;
+        }
+        return createSubsurfaceFragment((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0, ctx.hasIbl);
     },
     writeUbo(data, mat, offsets) {
         const m = mat as PbrMaterialProps;
@@ -171,9 +177,9 @@ export const subsurfaceExt: PbrExt = {
             writeSubsurfaceUBO(data, m.subsurface as SubSurfaceProps, offsets);
         }
     },
-    bind(features, _features2, mat, entries, b) {
-        if ((features & PBR_HAS_THICKNESS_MAP) !== 0) {
-            const tex = (mat as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+    bind(ctx, entries, b) {
+        if ((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0) {
+            const tex = (ctx.material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
             if (tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });
@@ -183,6 +189,8 @@ export const subsurfaceExt: PbrExt = {
     },
     textures(mat, out) {
         const t = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
-        if (t) out.push(t);
+        if (t) {
+            out.push(t);
+        }
     },
 };
