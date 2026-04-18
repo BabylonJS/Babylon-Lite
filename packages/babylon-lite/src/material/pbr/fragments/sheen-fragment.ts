@@ -13,6 +13,8 @@
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SheenProps } from "../pbr-material.js";
+import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING } from "../pbr-flags.js";
 
 const SHEEN_HELPERS = `
 fn normalDistributionFunction_CharlieSheen(NdotH_sh: f32, alphaG_sh: f32) -> f32 {
@@ -175,3 +177,29 @@ export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, of
     data[off + 4] = sh.roughness ?? 0.0;
     data[off + 5] = sh.texture ? 1.0 : 0.0;
 }
+
+export const sheenExt: PbrExt = {
+    id: "sheen",
+    phase: "base-tex",
+    detect(mat) {
+        const sh = (mat as PbrMaterialProps).sheen as SheenProps | undefined;
+        if (!sh?.isEnabled) return { f: 0, f2: 0 };
+        let f = PBR_HAS_SHEEN;
+        if (sh.texture) f |= PBR_HAS_SHEEN_TEXTURE;
+        if (sh.albedoScaling) f |= PBR_HAS_SHEEN_ALBEDO_SCALING;
+        return { f, f2: 0 };
+    },
+    frag(features, _features2, hasIbl) {
+        if (!(features & PBR_HAS_SHEEN)) return null;
+        return createSheenFragment(
+            (features & PBR_HAS_SHEEN_TEXTURE) !== 0,
+            hasIbl,
+            (features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
+        );
+    },
+    writeUbo: writeSheenUBO as PbrExt["writeUbo"],
+    textures(mat, out) {
+        const sh = (mat as PbrMaterialProps).sheen;
+        if (sh?.texture) out.push(sh.texture);
+    },
+};

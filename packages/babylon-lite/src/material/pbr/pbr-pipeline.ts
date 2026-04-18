@@ -10,7 +10,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
-import { _getSubsurfaceExt, _getPbrLightExtension, _getPbrExts } from "./pbr-flags.js";
+import { _getPbrLightExtension, _getPbrExts } from "./pbr-flags.js";
 import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_EMISSIVE,
@@ -239,8 +239,6 @@ export function createPbrMeshBindGroup(
             b = ext.bind(features, features2, material, entries, b);
         }
     }
-    // Fragment bindings: subsurface thickness map (after reflectance, "subsurface" sorts last)
-    _getSubsurfaceExt()?.bind(features, material, entries, b);
 
     return device.createBindGroup({ layout: variant.meshBGL, entries });
 }

@@ -56,23 +56,6 @@ const _lightTagToType: Record<string, number> = { hemispheric: 1, directional: 2
     return (_lightTagToType[_lightExt?.tag ?? ""] ?? 0) << PBR_LIGHT_TYPE_SHIFT;
 }
 
-// ─── Subsurface Extension Registry ──────────────────────────────────
-/** @internal */
-export interface PbrSubsurfaceExt {
-    detect(mat: unknown): number;
-    frag(features: number, hasIbl: boolean): unknown;
-    ubo(d: Float32Array, m: unknown, o: ReadonlyMap<string, number>): void;
-    bind(f: number, m: unknown, e: GPUBindGroupEntry[], b: number): void;
-    textures(m: unknown, t: unknown[]): void;
-}
-let _ssExt: PbrSubsurfaceExt | null = null;
-/** @internal */ export function _setSubsurfaceExt(e: PbrSubsurfaceExt): void {
-    _ssExt = e;
-}
-/** @internal */ export function _getSubsurfaceExt(): PbrSubsurfaceExt | null {
-    return _ssExt;
-}
-
 // ─── Material UBO Writer Registry ───────────────────────────────────
 /** @internal Signature for a material-UBO writer contributed by a PBR fragment.
  *  Called once per material update. Each writer checks its own gating

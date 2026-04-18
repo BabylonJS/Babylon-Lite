@@ -7,19 +7,17 @@
 
 import type { Mesh } from "../../mesh/mesh.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { PbrMaterialProps, SheenProps } from "./pbr-material.js";
+import type { PbrMaterialProps } from "./pbr-material.js";
 import {
     computePbrFeatures,
     PBR_HAS_SKELETON_8,
     PBR_HAS_SPECULAR_AA,
-    PBR_HAS_SHEEN_TEXTURE,
-    PBR_HAS_SHEEN_ALBEDO_SCALING,
     PBR_HAS_RECEIVE_SHADOWS,
     PBR_HAS_GAMMA_ALBEDO,
     PBR_HAS_THIN_INSTANCES,
     PBR_HAS_INSTANCE_COLOR,
 } from "./pbr-pipeline.js";
-import { getLightTypeFeatureBits, _getSubsurfaceExt, _getPbrExts, PBR_HAS_OCCLUSION, PBR_HAS_SHEEN, PBR_HAS_ANISOTROPY, PBR_HAS_SKYBOX } from "./pbr-flags.js";
+import { getLightTypeFeatureBits, _getPbrExts, PBR_HAS_OCCLUSION, PBR_HAS_ANISOTROPY, PBR_HAS_SKYBOX } from "./pbr-flags.js";
 
 /** Scene-level context cached once by the caller (all constant across meshes). */
 export interface PbrFeatureCtx {
@@ -65,17 +63,6 @@ export function computeMeshPbrFeatures(mesh: Mesh, scene: SceneContext, ctx: Pbr
 
     let features2 = 0;
 
-    const sh = mat.sheen as SheenProps | undefined;
-    if (sh?.isEnabled) {
-        features |= PBR_HAS_SHEEN;
-        if (sh.texture) {
-            features |= PBR_HAS_SHEEN_TEXTURE;
-        }
-        if (sh.albedoScaling) {
-            features |= PBR_HAS_SHEEN_ALBEDO_SCALING;
-        }
-    }
-
     if (mesh.receiveShadows && ctx.hasSomeShadows) {
         features |= PBR_HAS_RECEIVE_SHADOWS;
     }
@@ -87,10 +74,6 @@ export function computeMeshPbrFeatures(mesh: Mesh, scene: SceneContext, ctx: Pbr
     }
     if (mat.skyboxMode) {
         features |= PBR_HAS_SKYBOX;
-    }
-    const ssE = _getSubsurfaceExt();
-    if (ssE) {
-        features |= ssE.detect(mat);
     }
     // Unified PBR extensions contribute their own feature bits.
     for (const ext of _getPbrExts().values()) {

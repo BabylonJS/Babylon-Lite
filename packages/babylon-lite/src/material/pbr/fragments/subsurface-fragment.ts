@@ -12,7 +12,10 @@
  */
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
-import type { SubSurfaceProps } from "../pbr-material.js";
+import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
+import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP } from "../pbr-flags.js";
 
 const SS_HELPERS = `
 fn transmittanceBRDF_Burley(tintColor: vec3<f32>, diffusionDistance: vec3<f32>, thickness: f32) -> vec3<f32> {
@@ -147,3 +150,39 @@ export function writeSubsurfaceUBO(data: Float32Array, ss: SubSurfaceProps, offs
     data[off3 + 1] = tc[1]!;
     data[off3 + 2] = tc[2]!;
 }
+
+export const subsurfaceExt: PbrExt = {
+    id: "subsurface",
+    phase: "fragment",
+    detect(mat) {
+        const m = mat as PbrMaterialProps;
+        if (!m.subsurface?.translucency) return { f: 0, f2: 0 };
+        let f = PBR_HAS_SUBSURFACE;
+        if (m.subsurface.thickness?.texture) f |= PBR_HAS_THICKNESS_MAP;
+        return { f, f2: 0 };
+    },
+    frag(features, _features2, hasIbl) {
+        if (!(features & PBR_HAS_SUBSURFACE)) return null;
+        return createSubsurfaceFragment((features & PBR_HAS_THICKNESS_MAP) !== 0, hasIbl);
+    },
+    writeUbo(data, mat, offsets) {
+        const m = mat as PbrMaterialProps;
+        if (m.subsurface?.translucency && offsets.has("subsurfaceParams")) {
+            writeSubsurfaceUBO(data, m.subsurface as SubSurfaceProps, offsets);
+        }
+    },
+    bind(features, _features2, mat, entries, b) {
+        if ((features & PBR_HAS_THICKNESS_MAP) !== 0) {
+            const tex = (mat as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+            if (tex) {
+                entries.push({ binding: b++, resource: tex.view });
+                entries.push({ binding: b++, resource: tex.sampler });
+            }
+        }
+        return b;
+    },
+    textures(mat, out) {
+        const t = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
+        if (t) out.push(t);
+    },
+};
