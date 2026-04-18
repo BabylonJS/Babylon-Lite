@@ -1,9 +1,9 @@
 /** glTF KHR_materials_clearcoat extension. */
-import type { GltfMatExt } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 
-const ext: GltfMatExt = {
+const ext: GltfFeature = {
     id: "KHR_materials_clearcoat",
-    async apply(mat, ctx) {
+    async applyMaterial(mat, ctx) {
         const c = mat._rawMatDef?.extensions?.KHR_materials_clearcoat;
         if (!c) {
             return null;

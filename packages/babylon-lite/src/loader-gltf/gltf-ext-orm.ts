@@ -6,7 +6,7 @@
  *  `needs()` gate in load-gltf.ts. Materials that already ship packed ORM (or
  *  no occlusion at all) take the core's default ORM upload path and never hit
  *  this module. */
-import type { GltfMatExt } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 
 async function compositeOrm(mr: ImageBitmap, occ: ImageBitmap): Promise<ImageBitmap> {
     const w = mr.width;
@@ -26,9 +26,9 @@ async function compositeOrm(mr: ImageBitmap, occ: ImageBitmap): Promise<ImageBit
     return createImageBitmap(c1);
 }
 
-const ext: GltfMatExt = {
+const ext: GltfFeature = {
     id: "_orm-composite",
-    async apply(mat, ctx) {
+    async applyMaterial(mat, ctx) {
         const mr = mat.metallicRoughnessImage;
         const occ = mat.occlusionImage;
         if (!mr || !occ || mr === occ) {

@@ -2,11 +2,11 @@
  *  single material-wide ST quad. Lite supports only the case where every
  *  textureInfo in the material agrees on scale + offset and uses no rotation.
  *  Inconsistent or rotated transforms are silently ignored (return null). */
-import type { GltfMatExt } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 
-const ext: GltfMatExt = {
+const ext: GltfFeature = {
     id: "KHR_texture_transform",
-    async apply(mat) {
+    async applyMaterial(mat) {
         const m = mat._rawMatDef;
         if (!m) {
             return null;

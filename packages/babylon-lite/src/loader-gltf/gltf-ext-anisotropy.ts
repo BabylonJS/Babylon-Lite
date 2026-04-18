@@ -1,9 +1,9 @@
 /** glTF KHR_materials_anisotropy extension. */
-import type { GltfMatExt } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 
-const ext: GltfMatExt = {
+const ext: GltfFeature = {
     id: "KHR_materials_anisotropy",
-    async apply(mat) {
+    async applyMaterial(mat) {
         const a = mat._rawMatDef?.extensions?.KHR_materials_anisotropy;
         if (!a) {
             return null;

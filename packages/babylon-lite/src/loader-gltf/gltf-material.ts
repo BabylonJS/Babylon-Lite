@@ -4,29 +4,19 @@
  * - Handles alpha modes and double-sided flag
  *
  * All KHR material extensions (clearcoat, sheen, anisotropy, spec-gloss, ...)
- * are handled by separate `gltf-ext-*.ts` modules driven by the GltfMatExt
+ * are handled by separate `gltf-ext-*.ts` modules driven by the GltfFeature
  * registry in load-gltf.ts. This core file knows ZERO extension names.
  */
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { resolveImage } from "./gltf-parser.js";
 
-/** Per-load context handed to each material extension's `apply()`. */
+/** Per-load context handed to each material extension's `applyMaterial()`. */
 export interface GltfMatExtCtx {
     /** Fetch + upload a texture from a glTF textureInfo object.
      *  Returns undefined if texInfo is null/undefined. */
     texture(texInfo: unknown, sRGB: boolean): Promise<Texture2D | undefined>;
     /** Upload an arbitrary ImageBitmap (e.g. composited bitmap from an ext). */
     uploadImage(bitmap: ImageBitmap, sRGB: boolean): Texture2D;
-}
-
-/** A glTF material extension. One module per extension, dynamically loaded. */
-export interface GltfMatExt {
-    /** Canonical id, e.g. "KHR_materials_clearcoat". Used only for diagnostics. */
-    id: string;
-    /** Build a partial PbrMaterialProps fragment for one assembled glTF material.
-     *  Return null when this material doesn't trigger the extension. */
-    apply(mat: GltfMaterialData, ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | null>;
 }
 
 /** Parsed core PBR material data. */

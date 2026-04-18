@@ -14,12 +14,12 @@
  *  texture itself. Add explicit factor handling here only if a regression
  *  appears.
  */
-import type { GltfMatExt } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 
-const ext: GltfMatExt = {
+const ext: GltfFeature = {
     id: "KHR_materials_pbrSpecularGlossiness",
-    async apply(mat, ctx) {
+    async applyMaterial(mat, ctx) {
         const sg = mat._rawMatDef?.extensions?.KHR_materials_pbrSpecularGlossiness;
         if (!sg) {
             return null;

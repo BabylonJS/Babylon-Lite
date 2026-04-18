@@ -8,8 +8,9 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { PbrMaterialPropsInternal, PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
-import type { GltfMaterialData, GltfMatExt, GltfMatExtCtx } from "./gltf-material.js";
+import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
@@ -87,11 +88,11 @@ async function buildPbr(
 }
 
 /** Drive all registered exts on one assembled variant material. */
-async function buildExtLayers(mat: GltfMaterialData, exts: GltfMatExt[], ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | undefined> {
+async function buildExtLayers(mat: GltfMaterialData, exts: GltfFeature[], ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | undefined> {
     if (exts.length === 0) {
         return undefined;
     }
-    const fragments = await Promise.all(exts.map((ext) => ext.apply(mat, ctx)));
+    const fragments = await Promise.all(exts.map((ext) => ext.applyMaterial!(mat, ctx)));
     let layers: Partial<PbrMaterialProps> | undefined;
     for (const f of fragments) {
         if (f) {
@@ -114,7 +115,7 @@ export async function loadVariantMaterials(
     variantNames: string[],
     meshes: Mesh[],
     engine: EngineContextInternal,
-    exts: GltfMatExt[]
+    exts: GltfFeature[]
 ): Promise<MaterialVariantData> {
     // Ensure mipmap module is loaded
     if (!_generateMipmaps) {
