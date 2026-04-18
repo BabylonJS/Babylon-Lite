@@ -382,7 +382,7 @@
         "id": 29,
         "slug": "scene29-sheen-cloth-gltf",
         "name": "Scene 29 — Sheen Cloth glTF",
-        "maxMad": 0.02,
+        "maxMad": 0.015,
         "maxRawKB": 81.0,
         "maxGzipKB": 30.5,
         "description": "SheenCloth.gltf (KHR_materials_sheen + KHR_texture_transform 30× tiling) with default environment (IBL only). Matches PG #YG3BBF#2.",

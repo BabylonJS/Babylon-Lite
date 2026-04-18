@@ -136,6 +136,11 @@ export interface SheenProps {
     intensity?: number;
     /** Optional sheen tint texture (modulates sheen color). Loaded via loadTexture2D(). */
     texture?: Texture2D;
+    /** When true (recommended for glTF), applies proper sheen albedo scaling
+     *  on the base layer and treats the sheen texture as already-linear (no pow).
+     *  When false (default, legacy), applies pow(rgb, 2.2) to the sheen texture
+     *  and uses a (1-F0) attenuation on the sheen lobe without base-layer scaling. */
+    albedoScaling?: boolean;
 }
 
 /** Anisotropy layer properties. Maps to BJS PBRMaterial.anisotropy sub-object.

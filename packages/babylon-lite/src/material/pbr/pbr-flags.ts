@@ -32,6 +32,7 @@ export const PBR_HAS_ANISOTROPY = 1 << 26;
 export const PBR_HAS_SUBSURFACE = 1 << 27;
 export const PBR_HAS_THICKNESS_MAP = 1 << 28;
 export const PBR_HAS_SKYBOX = 1 << 29;
+export const PBR_HAS_SHEEN_ALBEDO_SCALING = 1 << 30;
 
 // ─── features2 (extended feature bits) ──────────────────────────────
 // Used when `features` runs out of bits. Threaded separately through
@@ -68,4 +69,22 @@ let _ssExt: PbrSubsurfaceExt | null = null;
 }
 /** @internal */ export function _getSubsurfaceExt(): PbrSubsurfaceExt | null {
     return _ssExt;
+}
+
+// ─── Material UBO Writer Registry ───────────────────────────────────
+/** @internal Signature for a material-UBO writer contributed by a PBR fragment.
+ *  Called once per material update. Each writer checks its own gating
+ *  (material props + presence of its UBO fields in `offsets`) and writes
+ *  only the slice it owns. Keeps `pbr-renderable.writeMaterialData` neutral. */
+export type PbrMaterialUboWriter = (data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>) => void;
+
+const _matUboWriters = new Map<string, PbrMaterialUboWriter>();
+/** @internal Register a material-UBO writer. Keyed by fragment id so
+ *  repeated dynamic imports of the same fragment remain idempotent. */
+export function _registerPbrMaterialUboWriter(id: string, fn: PbrMaterialUboWriter): void {
+    _matUboWriters.set(id, fn);
+}
+/** @internal Iterate the registered writers. */
+export function _getPbrMaterialUboWriters(): ReadonlyMap<string, PbrMaterialUboWriter> {
+    return _matUboWriters;
 }

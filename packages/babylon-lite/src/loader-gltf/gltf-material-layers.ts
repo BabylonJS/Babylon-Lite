@@ -50,6 +50,7 @@ export function buildPbrLayers(m: GltfMaterialData, ccTex?: GltfClearcoatTexture
             roughness: s.sheenRoughnessFactor ?? 0,
             intensity: 1,
             texture: shTex?.sheenTexture,
+            albedoScaling: true,
         };
     }
     const a = m.anisotropy;

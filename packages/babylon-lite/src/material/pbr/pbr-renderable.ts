@@ -41,6 +41,7 @@ import {
     PBR_HAS_SPECULAR_AA,
     PBR_HAS_EMISSIVE_COLOR,
     PBR_HAS_SHEEN_TEXTURE,
+    PBR_HAS_SHEEN_ALBEDO_SCALING,
     PBR_HAS_RECEIVE_SHADOWS,
     PBR_HAS_GAMMA_ALBEDO,
     PBR2_CC_INT_MAP,
@@ -52,6 +53,7 @@ import { PBR_HAS_THIN_INSTANCES, PBR_HAS_INSTANCE_COLOR } from "./pbr-pipeline.j
 import {
     _getPbrLightExtension,
     _getSubsurfaceExt,
+    _getPbrMaterialUboWriters,
     getLightTypeFeatureBits,
     PBR_HAS_EMISSIVE,
     PBR_HAS_ENV,
@@ -208,7 +210,7 @@ export async function buildPbrRenderables(
     }
 
     const hasSheen = meshes.some((m) => !!(m.material as PbrMaterialProps).sheen?.isEnabled);
-    let _createSheenFragment: ((hasTex: boolean, hasIbl: boolean) => ShaderFragment) | null = null;
+    let _createSheenFragment: ((hasTex: boolean, hasIbl: boolean, hasAlbedoScaling: boolean) => ShaderFragment) | null = null;
     if (hasSheen) {
         const mod = await import("./fragments/sheen-fragment.js");
         _createSheenFragment = mod.createSheenFragment;
@@ -344,7 +346,7 @@ export async function buildPbrRenderables(
             frags.push(_createClearcoatFragment(hasIbl, hasReflExt, ccIntMap, ccRoughMap, ccNormalMap, ccF0RemapOff, has(PBR_HAS_SPECULAR_AA), hasNormal || hasCotangent));
         }
         if (hasSh && _createSheenFragment) {
-            frags.push(_createSheenFragment(has(PBR_HAS_SHEEN_TEXTURE), hasIbl));
+            frags.push(_createSheenFragment(has(PBR_HAS_SHEEN_TEXTURE), hasIbl, has(PBR_HAS_SHEEN_ALBEDO_SCALING)));
         }
         if (hasIbl && _createIblFragment) {
             const anisoBentCode = hasAniso && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "";
@@ -486,6 +488,9 @@ export async function buildPbrRenderables(
             features |= PBR_HAS_SHEEN;
             if (sheenProps.texture) {
                 features |= PBR_HAS_SHEEN_TEXTURE;
+            }
+            if (sheenProps.albedoScaling) {
+                features |= PBR_HAS_SHEEN_ALBEDO_SCALING;
             }
         }
         if (mesh.receiveShadows && hasSomeShadows) {
@@ -794,7 +799,11 @@ function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: Com
     return createUniformBuffer(engine, data);
 }
 
-/** Write material properties into a pre-allocated Float32Array. */
+/** Write material properties into a pre-allocated Float32Array.
+ *  Core fields only; per-extension slices are contributed by registered
+ *  writers (see `_registerPbrMaterialUboWriter` — each PBR fragment module
+ *  registers its own writer when dynamically imported, keeping this
+ *  function neutral and tree-shake-friendly. */
 function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec: import("../../shader/fragment-types.js").UboSpec): void {
     data[0] = material.environmentIntensity ?? 1.0;
     data[1] = material.directIntensity ?? 1.0;
@@ -806,60 +815,11 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
         data[off + 1] = material.roughnessFactor ?? 1.0;
     }
 
-    const hasReflectanceExt = spec.offsets.has("occlusionStrength") && (material.metallicReflectanceTexture !== undefined || material.reflectanceTexture !== undefined);
-    if (hasReflectanceExt) {
-        const off = spec.offsets.get("occlusionStrength")! / 4;
-        data[off] = material.occlusionStrength ?? 1.0;
-        data[off + 1] = material.metallicF0Factor ?? 1.0;
-        const mrc = material.metallicReflectanceColor;
-        data[off + 4] = mrc ? mrc[0]! : 1.0;
-        data[off + 5] = mrc ? mrc[1]! : 1.0;
-        data[off + 6] = mrc ? mrc[2]! : 1.0;
+    for (const write of _getPbrMaterialUboWriters().values()) {
+        write(data, material, spec.offsets);
     }
 
-    if (material.emissiveColor && spec.offsets.has("emissiveColor")) {
-        const off = spec.offsets.get("emissiveColor")! / 4;
-        data[off] = material.emissiveColor[0]!;
-        data[off + 1] = material.emissiveColor[1]!;
-        data[off + 2] = material.emissiveColor[2]!;
-    }
-
-    if ((material.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled && spec.offsets.has("ccParams")) {
-        const cc = material.clearCoat as import("./pbr-material.js").ClearCoatProps;
-        const off = spec.offsets.get("ccParams")! / 4;
-        const ior = cc.indexOfRefraction ?? 1.5;
-        const a = 1 - ior;
-        const b = 1 + ior;
-        data[off] = cc.intensity ?? 1.0;
-        data[off + 1] = cc.roughness ?? 0.0;
-        data[off + 2] = cc.bumpTextureScale ?? 1.0;
-        data[off + 4] = Math.pow(-a / b, 2);
-        data[off + 5] = 1 / ior;
-        data[off + 6] = a;
-        data[off + 7] = b;
-    }
-
-    if ((material.sheen as SheenProps | undefined)?.isEnabled && spec.offsets.has("sheenParams")) {
-        const sh = material.sheen as SheenProps;
-        const off = spec.offsets.get("sheenParams")! / 4;
-        const color = sh.color ?? [1, 1, 1];
-        data[off] = color[0]!;
-        data[off + 1] = color[1]!;
-        data[off + 2] = color[2]!;
-        data[off + 3] = sh.intensity ?? 1.0;
-        data[off + 4] = sh.roughness ?? 0.0;
-        data[off + 5] = sh.texture ? 1.0 : 0.0;
-    }
-
-    if (material.anisotropy?.isEnabled && spec.offsets.has("anisotropyParams")) {
-        const aniso = material.anisotropy;
-        const off = spec.offsets.get("anisotropyParams")! / 4;
-        const dir = aniso.direction ?? [1, 0];
-        data[off] = aniso.intensity ?? 1.0;
-        data[off + 1] = dir[0]!;
-        data[off + 2] = dir[1]!;
-    }
-
+    // Subsurface still uses its own dedicated extension slot (detect/frag/bind/textures + ubo).
     _getSubsurfaceExt()?.ubo(data, material, spec.offsets);
 }
 

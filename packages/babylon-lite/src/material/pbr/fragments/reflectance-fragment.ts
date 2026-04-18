@@ -9,9 +9,34 @@
  */
 
 import type { ShaderFragment, BindingDecl } from "../../../shader/fragment-types.js";
+import type { PbrMaterialProps } from "../pbr-material.js";
+import { _registerPbrMaterialUboWriter } from "../pbr-flags.js";
 
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
+
+/** Write the reflectance-extension material-UBO slice
+ *  (occlusionStrength, metallicF0Factor, metallicReflectanceColor).
+ *  Gated by the presence of the `occlusionStrength` field in the UBO spec,
+ *  which is added only when a metallic-reflectance or reflectance texture
+ *  is in use. */
+export function writeReflectanceUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
+    if (!offsets.has("occlusionStrength")) {
+        return;
+    }
+    if (material.metallicReflectanceTexture === undefined && material.reflectanceTexture === undefined) {
+        return;
+    }
+    const off = offsets.get("occlusionStrength")! / 4;
+    data[off] = material.occlusionStrength ?? 1.0;
+    data[off + 1] = material.metallicF0Factor ?? 1.0;
+    const mrc = material.metallicReflectanceColor;
+    data[off + 4] = mrc ? mrc[0]! : 1.0;
+    data[off + 5] = mrc ? mrc[1]! : 1.0;
+    data[off + 6] = mrc ? mrc[2]! : 1.0;
+}
+
+_registerPbrMaterialUboWriter("reflectance", (d, m, o) => writeReflectanceUBO(d, m as PbrMaterialProps, o));
 
 /**
  * Create a metallic reflectance fragment.

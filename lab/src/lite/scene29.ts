@@ -14,7 +14,7 @@ async function main(): Promise<void> {
 
     addToScene(scene, await loadGltf(engine, "https://assets.babylonjs.com/meshes/SheenCloth/SheenCloth.gltf"));
 
-    await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", {
+    await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
         skipSkybox: true,
         skipGround: true,
         brdfUrl: "/brdf-lut.png",
