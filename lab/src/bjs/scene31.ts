@@ -45,13 +45,15 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     // construction re-uploads the texture without `invertY=true`, which breaks
     // BJS's sprite shader UV convention and produces a vertical mirror inside
     // each cell. Setting it on the constructor preserves the correct upload.
+    // epsilon=0: BJS defaults to 0.01 which insets each corner by 1% of the
+    // sprite size; Lite renders the full quad, so we disable the inset here.
     const mgr = new SpriteManager(
         "spin",
         getSpriteAtlasDataUrl(),
         16,
         { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx },
         scene,
-        0.01,
+        0,
         Texture.NEAREST_NEAREST
     );
 

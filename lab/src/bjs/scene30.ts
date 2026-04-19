@@ -39,7 +39,10 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     const cell = { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx };
 
     // Layer 1 — backdrop (alpha 0.35).
-    const back = new SpriteManager("back", url, 32, cell, scene);
+    // epsilon=0 on every manager: BJS defaults to 0.01 (1% inset of the quad
+    // for UV alignment), which Lite does not do and which produces a 1-2px
+    // mismatch border in the diff map.
+    const back = new SpriteManager("back", url, 32, cell, scene, 0);
     back.renderingGroupId = 0;
     for (let i = 0; i < 16; i++) {
         const s = new Sprite(`b${i}`, back);
@@ -51,7 +54,7 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     }
 
     // Layer 2 — score digits.
-    const score = new SpriteManager("score", url, 8, cell, scene);
+    const score = new SpriteManager("score", url, 8, cell, scene, 0);
     score.renderingGroupId = 1;
     const digits = [3, 1, 4, 1, 5];
     for (let i = 0; i < digits.length; i++) {
@@ -63,7 +66,7 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     }
 
     // Layer 3 — health bar (10 segments, tinted).
-    const health = new SpriteManager("health", url, 16, cell, scene);
+    const health = new SpriteManager("health", url, 16, cell, scene, 0);
     health.renderingGroupId = 2;
     for (let i = 0; i < 10; i++) {
         const healthy = i < 7;
@@ -76,14 +79,15 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     }
 
     // Layer 4 — central rotated action icon.
-    const action = new SpriteManager("action", url, 4, cell, scene);
+    const action = new SpriteManager("action", url, 4, cell, scene, 0);
     action.renderingGroupId = 3;
     const a = new Sprite("a", action);
     a.position.x = canvas.width / 2;
     a.position.y = 100;
     a.size = 96;
     a.cellIndex = 12;
-    a.angle = Math.PI / 12;
+    // Negate angle: Y-up projection flips rotation direction (CW becomes CCW).
+    a.angle = -Math.PI / 12;
     a.color = new Color4(1, 0.95, 0.7, 1);
 
     const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };

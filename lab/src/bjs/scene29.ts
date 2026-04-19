@@ -37,7 +37,10 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
-    const mgr = new SpriteManager("grid", getSpriteAtlasDataUrl(), 256, { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx }, scene);
+    // epsilon=0: BJS defaults to 0.01, which insets each corner by 1% of the
+    // sprite size (used for UV alignment, but also shrinks the geometry quad).
+    // Lite does NOT inset, so matching parity requires disabling epsilon here.
+    const mgr = new SpriteManager("grid", getSpriteAtlasDataUrl(), 256, { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx }, scene, 0);
 
     const cols = 25;
     const rows = 10;
@@ -58,7 +61,10 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
             sprite.position.y = canvas.height - (oy + r * cellPx);
             sprite.size = sizePx;
             sprite.cellIndex = frame;
-            sprite.angle = idx % 5 === 0 ? Math.PI / 6 : 0;
+            // Negate angle: a Y-up projection (we flipped Y to keep UVs upright)
+            // also flips rotation direction (CW becomes CCW). Lite uses canvas
+            // convention where positive angle is CW, so negate here to match.
+            sprite.angle = idx % 5 === 0 ? -Math.PI / 6 : 0;
             if (tintIdx === 1) {
                 sprite.color = new Color4(1, 0.7, 0.7, 1);
             } else if (tintIdx === 2) {

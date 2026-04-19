@@ -149,8 +149,12 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
     const ctx = scene as SceneContextInternal;
     const engine = ctx.engine as EngineContextInternal;
 
-    // Per-frame clip tick — register once per layer.
-    ctx._beforeRender.push((dt) => _tickAnchoredSpriteClips(layer, dt));
+    // Per-frame clip tick — register once per layer. Use `unshift` (not push)
+    // so the tick runs BEFORE user-registered `onBeforeRender` callbacks, which
+    // matches the Sprite2D convention. This ensures freeze-flag user callbacks
+    // observe the fully-advanced clip state on the freeze frame (otherwise the
+    // clip loses one tick of animation on the frame that sets `animationFrozen`).
+    ctx._beforeRender.unshift((dt) => _tickAnchoredSpriteClips(layer, dt));
 
     // Shared per-scene Sprite3DSceneUBO (created lazily, registered once).
     const sceneUBO = ensureSprite3DSceneUBO(scene);

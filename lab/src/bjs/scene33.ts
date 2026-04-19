@@ -58,7 +58,8 @@ import { CUTOUT_ATLAS_INFO, getCutoutAtlasDataUrl } from "../_shared/sprite-cuto
     const cell = { width: CUTOUT_ATLAS_INFO.cellWidthPx, height: CUTOUT_ATLAS_INFO.cellHeightPx };
 
     // Layer A — alpha-blend animated.
-    const alphaMgr = new SpriteManager("alpha", url, 8, cell, scene);
+    // epsilon=0 on both managers to avoid the 1% quad inset BJS applies by default.
+    const alphaMgr = new SpriteManager("alpha", url, 8, cell, scene, 0);
     alphaMgr.renderingGroupId = 1;
     const alphaAnchors: Vector3[] = [new Vector3(-1.4, 1.0, 0), new Vector3(1.4, 1.0, -0.4), new Vector3(0, 1.4, 0)];
     const alphaSprites: Sprite[] = [];
@@ -69,7 +70,9 @@ import { CUTOUT_ATLAS_INFO, getCutoutAtlasDataUrl } from "../_shared/sprite-cuto
         const s = new Sprite(`a${i}`, alphaMgr);
         s.position.copyFrom(alphaAnchors[i]!);
         if (i === 2) {
-            s.angle = Math.PI / 4;
+            // Negate angle: Lite uses positive=CW (canvas2D convention), BJS
+            // sprite.angle is positive=CCW. Flip sign here to match Lite.
+            s.angle = -Math.PI / 4;
         }
         alphaSprites.push(s);
         // Lite's third sprite has +1 frame phase offset.
@@ -77,7 +80,7 @@ import { CUTOUT_ATLAS_INFO, getCutoutAtlasDataUrl } from "../_shared/sprite-cuto
     }
 
     // Layer B — cutout (depth-write on, drawn before animated layer).
-    const cutoutMgr = new SpriteManager("cutout", url, 4, cell, scene);
+    const cutoutMgr = new SpriteManager("cutout", url, 4, cell, scene, 0);
     cutoutMgr.renderingGroupId = 0;
     cutoutMgr.disableDepthWrite = false;
     const cutoutAnchors: Vector3[] = [new Vector3(-0.6, 0.5, -1.2), new Vector3(0.6, 0.5, -1.2)];
@@ -100,17 +103,21 @@ import { CUTOUT_ATLAS_INFO, getCutoutAtlasDataUrl } from "../_shared/sprite-cuto
 
     function updateSizes(): void {
         const tan = Math.tan(cam.fov * 0.5);
-        const camPos = cam.globalPosition;
+        // Use camera-space Z (view-space depth), not 3D distance: BJS's sprite
+        // projection only uses cz for perspective divide. Per LookAtLHToRef,
+        // world-forward = (m[2], m[6], m[10]) and translation_z = m[14].
+        const vm = cam.getViewMatrix().m;
+        const fx = vm[2]!, fy = vm[6]!, fz = vm[10]!, ft = vm[14]!;
         for (let i = 0; i < alphaSprites.length; i++) {
             const a = alphaAnchors[i]!;
-            const d = Vector3.Distance(a, camPos);
-            const worldPerPxY = (2 * d * tan) / canvas.height;
+            const cz = Math.abs(fx * a.x + fy * a.y + fz * a.z + ft);
+            const worldPerPxY = (2 * cz * tan) / canvas.height;
             alphaSprites[i]!.size = targetSizePx * worldPerPxY;
         }
         for (let i = 0; i < cutoutSprites.length; i++) {
             const a = cutoutAnchors[i]!;
-            const d = Vector3.Distance(a, camPos);
-            const worldPerPxY = (2 * d * tan) / canvas.height;
+            const cz = Math.abs(fx * a.x + fy * a.y + fz * a.z + ft);
+            const worldPerPxY = (2 * cz * tan) / canvas.height;
             cutoutSprites[i]!.size = cutoutSizePx * worldPerPxY;
         }
     }
