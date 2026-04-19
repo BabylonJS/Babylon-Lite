@@ -132,6 +132,7 @@ function packSlot(layer: AnchoredSpriteLayer, index: number, init: AnchoredSprit
     const color = init.color ?? [1, 1, 1, 1];
     const flipX = init.flipX === true ? 1 : 0;
     const flipY = init.flipY === true ? 1 : 0;
+    const pickable = init.pickable !== false ? 1 : 0;
     const out: [number, number] = visible ? [sizePx[0]!, sizePx[1]!] : [0, 0];
     const off = index * SPRITE_ANCHORED_STRIDE;
     const d = layer._storage.data;
@@ -157,7 +158,8 @@ function packSlot(layer: AnchoredSpriteLayer, index: number, init: AnchoredSprit
     d[off + 19] = color[3]!;
     d[off + 20] = flipX;
     d[off + 21] = flipY;
-    d[off + 22] = 0;
+    // flagsAndPad.z reserved for picking parity with billboards (anchored uses CPU pick).
+    d[off + 22] = pickable;
     d[off + 23] = 0;
 
     layer._meta[index] = {

@@ -28,16 +28,17 @@ ${BILLBOARD_VS_IN_WGSL}
 
 @vertex
 fn vs_main(in: VSIn) -> VSOut {
+    let s = sprites[in.sortIndex];
     let corner = cornerOf(in.vid);
-    let local = (corner - in.pivot) * in.sizeWorld;
-    let rotated = rotate2(local, in.sinCos);
-    let world = in.worldPos
+    let local = (corner - s.pivot) * s.sizePxOrWorld;
+    let rotated = rotate2(local, s.sinCos);
+    let world = s.worldPos
               + scene.cameraRight.xyz * rotated.x
               + scene.cameraUp.xyz    * rotated.y;
     var out: VSOut;
     out.pos = scene.viewProjection * vec4<f32>(world, 1.0);
-    out.uv = cornerUV(corner, in.uvRect, in.flagsAndPad.x, in.flagsAndPad.y);
-    out.color = in.color;
+    out.uv = cornerUV(corner, s.uvRect, s.flagsAndPad.x, s.flagsAndPad.y);
+    out.color = s.color;
     return out;
 }
 `;

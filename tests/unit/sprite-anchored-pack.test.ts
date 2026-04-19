@@ -50,8 +50,8 @@ describe("Anchored sprite per-instance layout", () => {
         // uvRect — frame 0 of a 64×64 atlas with 16×16 cells → uv (0,0..0.25,0.25)
         expect(Array.from(d.subarray(12, 16))).toEqual([0, 0, 0.25, 0.25]);
         expect(Array.from(d.subarray(16, 20)).map((v) => +v.toFixed(4))).toEqual([0.1, 0.2, 0.3, 0.4]);
-        // flagsAndPad: flipX=1, flipY=0, pad=0,0
-        expect(Array.from(d.subarray(20, 24))).toEqual([1, 0, 0, 0]);
+        // flagsAndPad: flipX=1, flipY=0, pickable=1 (default), pad=0
+        expect(Array.from(d.subarray(20, 24))).toEqual([1, 0, 1, 0]);
     });
 
     it("invisible sprite collapses sizePx to [0, 0]", () => {

@@ -1,54 +1,19 @@
 /**
  * Shared WGSL helpers for billboard sprite shader composers.
  *
- * Tiny TS string consts concatenated into each variant's vertex / fragment
- * WGSL. Mirrors the convention used by the larger PBR/Background composers
- * (see `shader/wgsl-helpers.ts`). No `?raw` imports — sprite shaders are too
- * small + parameterised to benefit from separate `.wgsl` files.
+ * Per blocker 4 of docs/architecture/26-sprites.md, the per-instance data is
+ * read from a storage buffer at `@group(1) @binding(3)` (see
+ * `sprite-3d-instance-wgsl.ts` for the struct layout). The vertex shader's
+ * single per-instance attribute is the Uint32 sort indirection at @location(0).
  */
 
 import type { SpriteBlendMode } from "./sprite-atlas.js";
+import { SPRITE_3D_DATA_WGSL, SPRITE_3D_VS_IN_WGSL } from "./sprite-3d-instance-wgsl.js";
 
-/** VSIn struct — identical for all three billboard variants. */
+/** Shared 3D-sprite VS input + helpers + storage-buffer record. */
 export const BILLBOARD_VS_IN_WGSL = /* wgsl */ `
-struct VSIn {
-    @builtin(vertex_index) vid: u32,
-    @location(0) worldPos: vec3<f32>,
-    @location(1) reserved0: f32,
-    @location(2) reserved1: vec2<f32>,
-    @location(3) sizeWorld: vec2<f32>,
-    @location(4) pivot: vec2<f32>,
-    @location(5) sinCos: vec2<f32>,
-    @location(6) uvRect: vec4<f32>,
-    @location(7) color: vec4<f32>,
-    @location(8) flagsAndPad: vec4<f32>,
-};
-
-struct VSOut {
-    @builtin(position) pos: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
-};
-
-fn rotate2(p: vec2<f32>, sinCos: vec2<f32>) -> vec2<f32> {
-    return vec2<f32>(p.x * sinCos.y - p.y * sinCos.x, p.x * sinCos.x + p.y * sinCos.y);
-}
-
-fn cornerOf(vid: u32) -> vec2<f32> {
-    var corners = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0)
-    );
-    return corners[vid];
-}
-
-fn cornerUV(corner: vec2<f32>, rect: vec4<f32>, flipX: f32, flipY: f32) -> vec2<f32> {
-    var u = mix(rect.x, rect.z, corner.x);
-    var v = mix(rect.y, rect.w, corner.y);
-    if (flipX > 0.5) { u = rect.x + rect.z - u; }
-    if (flipY > 0.5) { v = rect.y + rect.w - v; }
-    return vec2<f32>(u, v);
-}
+${SPRITE_3D_DATA_WGSL}
+${SPRITE_3D_VS_IN_WGSL}
 `;
 
 /** Build the shared sprite fragment WGSL. `layerStructWGSL` lets the

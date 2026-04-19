@@ -17,10 +17,11 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Renderable } from "../render/renderable.js";
 import type { AnchoredSpriteLayer } from "./sprite-anchored.js";
-import { SPRITE_ANCHORED_STRIDE, _tickAnchoredSpriteClips } from "./sprite-anchored.js";
+import { _tickAnchoredSpriteClips } from "./sprite-anchored.js";
 import type { SpriteBlendMode } from "./shared/sprite-atlas.js";
 import { syncSpriteStorage, disposeSpriteStorage } from "./shared/sprite-gpu.js";
 import { ensureSprite3DSceneUBO } from "./shared/sprite-3d-scene-ubo.js";
+import { computeSpriteCentroid, createSpriteSortState, disposeSpriteSortState, syncSpriteSortIndices } from "./shared/sprite-sort.js";
 import { composeAnchoredSprite } from "./sprite-anchored-shader.js";
 import { createPipelineCache, type PipelineCache, type PipelineCacheEntry } from "../material/pipeline-cache.js";
 
@@ -92,29 +93,21 @@ function getOrCreatePipeline(engine: EngineContextInternal, format: GPUTextureFo
             { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
             { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
             { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            // Per blocker 4 of 26-sprites.md — packed sprite data lives in a
+            // storage buffer; per-instance vertex attribute is just the sort index.
+            { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
         ],
     });
 
     const vertModule = device.createShaderModule({ code: composed.vertexWGSL, label: "sprite-anchored-vert" });
     const fragModule = device.createShaderModule({ code: composed.fragmentWGSL, label: "sprite-anchored-frag" });
 
-    // Per-instance attribute layout (stride 96 B = 24 floats):
-    //   worldPos3 (12) | depthBias (4) | offsetPx2 (8) | sizePx2 (8) | pivot2 (8) |
-    //   sinCos2 (8) | uvRect4 (16) | color4 (16) | flagsAndPad4 (16)
+    // Per-instance buffer = Uint32 sort indirection (4 B per instance). The
+    // packed sprite data lives in the storage buffer at @group(1) @binding(3).
     const instanceLayout: GPUVertexBufferLayout = {
-        arrayStride: SPRITE_ANCHORED_STRIDE * 4,
+        arrayStride: 4,
         stepMode: "instance",
-        attributes: [
-            { shaderLocation: 0, offset: 0, format: "float32x3" },
-            { shaderLocation: 1, offset: 12, format: "float32" },
-            { shaderLocation: 2, offset: 16, format: "float32x2" },
-            { shaderLocation: 3, offset: 24, format: "float32x2" },
-            { shaderLocation: 4, offset: 32, format: "float32x2" },
-            { shaderLocation: 5, offset: 40, format: "float32x2" },
-            { shaderLocation: 6, offset: 48, format: "float32x4" },
-            { shaderLocation: 7, offset: 64, format: "float32x4" },
-            { shaderLocation: 8, offset: 80, format: "float32x4" },
-        ],
+        attributes: [{ shaderLocation: 0, offset: 0, format: "uint32" }],
     };
 
     const isCutout = layer.blendMode === "cutout";
@@ -174,17 +167,28 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
         layout: variant.sceneBGL,
         entries: [{ binding: 0, resource: { buffer: sceneUBO } }],
     });
-    const layerBG = device.createBindGroup({
-        label: "sprite-anchored-layer-bg",
-        layout: variant.layerBGL,
-        entries: [
-            { binding: 0, resource: layer.atlas.texture.view },
-            { binding: 1, resource: layer.atlas.texture.sampler },
-            { binding: 2, resource: { buffer: layerUBO } },
-        ],
-    });
 
     const isCutout = layer.blendMode === "cutout";
+
+    // Per blocker 4 — separate sort indirection buffer + storage buffer rebind on
+    // capacity grow. Cutout uses sequential indirection (no per-frame back-to-front sort).
+    const sortState = createSpriteSortState(!isCutout);
+    let layerBG: GPUBindGroup | null = null;
+    let cachedStorageBuffer: GPUBuffer | null = null;
+    function rebuildLayerBG(storageBuffer: GPUBuffer): void {
+        layerBG = device.createBindGroup({
+            label: "sprite-anchored-layer-bg",
+            layout: variant.layerBGL,
+            entries: [
+                { binding: 0, resource: layer.atlas.texture.view },
+                { binding: 1, resource: layer.atlas.texture.sampler },
+                { binding: 2, resource: { buffer: layerUBO } },
+                { binding: 3, resource: { buffer: storageBuffer } },
+            ],
+        });
+        cachedStorageBuffer = storageBuffer;
+    }
+
     const renderable: Renderable = {
         // Cutout = opaque queue (110 + order); blended = transparent queue (210 + order).
         order: (isCutout ? 110 : 210) + layer.order,
@@ -197,13 +201,26 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
             layerScratch[0] = layer.opacity;
             device.queue.writeBuffer(layerUBO, 0, layerScratch.buffer, layerScratch.byteOffset, SPRITE_LAYER_UBO_BYTES);
             syncSpriteStorage(engine, layer._storage, "sprite-anchored-instances");
+            if (layer._storage.gpuBuffer && layer._storage.gpuBuffer !== cachedStorageBuffer) {
+                rebuildLayerBG(layer._storage.gpuBuffer);
+            }
+            const cam = ctx.camera;
+            const wm = cam ? cam.worldMatrix : null;
+            const cx = wm ? wm[12]! : 0;
+            const cy = wm ? wm[13]! : 0;
+            const cz = wm ? wm[14]! : 0;
+            syncSpriteSortIndices(engine, sortState, layer._storage, layer._sortVersion, cx, cy, cz, "sprite-anchored-sort");
+            const c = computeSpriteCentroid(sortState, layer._storage);
+            this._worldCenter![0] = c[0];
+            this._worldCenter![1] = c[1];
+            this._worldCenter![2] = c[2];
         },
         draw(pass): number {
-            if (!layer.visible || layer._storage.count === 0 || !layer._storage.gpuBuffer) {
+            if (!layer.visible || layer._storage.count === 0 || !layer._storage.gpuBuffer || !layerBG || !sortState.indexBuffer) {
                 return 0;
             }
             pass.setBindGroup(1, layerBG);
-            pass.setVertexBuffer(0, layer._storage.gpuBuffer);
+            pass.setVertexBuffer(0, sortState.indexBuffer);
             pass.draw(6, layer._storage.count);
             return 1;
         },
@@ -212,6 +229,7 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
     ctx._renderables.push(renderable);
     ctx._disposables.push(() => {
         layerUBO.destroy();
+        disposeSpriteSortState(sortState);
         disposeSpriteStorage(layer._storage);
     });
 }

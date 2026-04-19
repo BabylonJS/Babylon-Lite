@@ -35,12 +35,13 @@ ${BILLBOARD_VS_IN_WGSL}
 
 @vertex
 fn vs_main(in: VSIn) -> VSOut {
+    let s = sprites[in.sortIndex];
     let corner = cornerOf(in.vid);
-    let local = (corner - in.pivot) * in.sizeWorld;
-    let rotated = rotate2(local, in.sinCos);
+    let local = (corner - s.pivot) * s.sizePxOrWorld;
+    let rotated = rotate2(local, s.sinCos);
     let camPos = vec3<f32>(scene.cameraRight.w, scene.cameraUp.w, scene.cameraForward.w);
     let a = normalize(system.lockAxis);
-    let toCam = normalize(camPos - in.worldPos);
+    let toCam = normalize(camPos - s.worldPos);
     // Project camera direction onto the plane perpendicular to the axis.
     let fRaw = toCam - a * dot(toCam, a);
     let fLen = length(fRaw);
@@ -49,11 +50,11 @@ fn vs_main(in: VSIn) -> VSOut {
     let fallback = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(a.x) < 0.9);
     let f = select(fallback, fRaw / max(fLen, 1e-6), fLen > 1e-4);
     let right = normalize(cross(a, f));
-    let world = in.worldPos + right * rotated.x + a * rotated.y;
+    let world = s.worldPos + right * rotated.x + a * rotated.y;
     var out: VSOut;
     out.pos = scene.viewProjection * vec4<f32>(world, 1.0);
-    out.uv = cornerUV(corner, in.uvRect, in.flagsAndPad.x, in.flagsAndPad.y);
-    out.color = in.color;
+    out.uv = cornerUV(corner, s.uvRect, s.flagsAndPad.x, s.flagsAndPad.y);
+    out.color = s.color;
     return out;
 }
 `;

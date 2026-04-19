@@ -17,6 +17,7 @@
 
 import type { SpriteBlendMode } from "./shared/sprite-atlas.js";
 import { SPRITE_3D_SCENE_UBO_WGSL } from "./shared/sprite-3d-scene-ubo.js";
+import { SPRITE_3D_DATA_WGSL, SPRITE_3D_VS_IN_WGSL } from "./shared/sprite-3d-instance-wgsl.js";
 
 export interface AnchoredSpriteShaderOptions {
     pixelSnap: boolean;
@@ -36,58 +37,31 @@ export function composeAnchoredSprite(opts: AnchoredSpriteShaderOptions): Compos
     const vertexWGSL = /* wgsl */ `
 ${SPRITE_3D_SCENE_UBO_WGSL}
 @group(0) @binding(0) var<uniform> scene: Sprite3DSceneUBO;
-
-struct VSIn {
-    @builtin(vertex_index) vid: u32,
-    @location(0) worldPos: vec3<f32>,
-    @location(1) depthBias: f32,
-    @location(2) offsetPx: vec2<f32>,
-    @location(3) sizePx: vec2<f32>,
-    @location(4) pivot: vec2<f32>,
-    @location(5) sinCos: vec2<f32>,
-    @location(6) uvRect: vec4<f32>,
-    @location(7) color: vec4<f32>,
-    @location(8) flagsAndPad: vec4<f32>,
-};
-
-struct VSOut {
-    @builtin(position) pos: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
-};
-
-fn rotate2(p: vec2<f32>, sinCos: vec2<f32>) -> vec2<f32> {
-    return vec2<f32>(p.x * sinCos.y - p.y * sinCos.x, p.x * sinCos.x + p.y * sinCos.y);
-}
+${SPRITE_3D_DATA_WGSL}
+${SPRITE_3D_VS_IN_WGSL}
 
 @vertex
 fn vs_main(in: VSIn) -> VSOut {
-    var corners = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0)
-    );
-    let corner = corners[in.vid];
-    let anchorClip = scene.viewProjection * vec4<f32>(in.worldPos, 1.0);
-    let localPx = (corner - in.pivot) * in.sizePx + in.offsetPx;
-    let rotated = rotate2(localPx, in.sinCos);
+    let s = sprites[in.sortIndex];
+    let corner = cornerOf(in.vid);
+    let anchorClip = scene.viewProjection * vec4<f32>(s.worldPos, 1.0);
+    let localPx = (corner - s.pivot) * s.sizePxOrWorld + s.offsetPx_or_reserved;
+    let rotated = rotate2(localPx, s.sinCos);
     ${snap}
     let ndcOffset = vec2<f32>(
          snapped.x * scene.invViewportPx.x * 2.0,
         -snapped.y * scene.invViewportPx.y * 2.0
     );
-    var u = mix(in.uvRect.x, in.uvRect.z, corner.x);
-    var v = mix(in.uvRect.y, in.uvRect.w, corner.y);
-    if (in.flagsAndPad.x > 0.5) { u = in.uvRect.x + in.uvRect.z - u; }
-    if (in.flagsAndPad.y > 0.5) { v = in.uvRect.y + in.uvRect.w - v; }
+    let uv = cornerUV(corner, s.uvRect, s.flagsAndPad.x, s.flagsAndPad.y);
     var out: VSOut;
     out.pos = vec4<f32>(
         anchorClip.x + ndcOffset.x * anchorClip.w,
         anchorClip.y + ndcOffset.y * anchorClip.w,
-        anchorClip.z + in.depthBias * anchorClip.w,
+        anchorClip.z + s.depthBias_or_reserved * anchorClip.w,
         anchorClip.w
     );
-    out.uv = vec2<f32>(u, v);
-    out.color = in.color;
+    out.uv = uv;
+    out.color = s.color;
     return out;
 }
 `;

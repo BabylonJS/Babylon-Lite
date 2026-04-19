@@ -35,6 +35,17 @@ export const SPRITE_BILLBOARD_STRIDE = 24;
 /** Internal tag identifying which billboard variant a system was built from. */
 export type BillboardVariant = "facing" | "yaw" | "axis";
 
+/** @internal CPU-side basis computer used by picking to inverse-project a
+ *  world-space hit point back into the sprite's local 2D plane. Each variant
+ *  attaches its own closure at factory time, so callers never branch on the
+ *  variant tag (per GUIDANCE rule "no runtime mode/family `if` branches"). */
+export type BillboardBasisFn = (
+    worldPos: readonly [number, number, number],
+    camRight: readonly [number, number, number],
+    camUp: readonly [number, number, number],
+    camPos: readonly [number, number, number]
+) => { right: [number, number, number]; up: [number, number, number] };
+
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
     blendMode?: SpriteBlendMode;
@@ -86,6 +97,10 @@ export interface BillboardSpriteSystem {
     readonly _variant: BillboardVariant;
     /** @internal lock axis (axis-locked variant only). Normalized. */
     readonly _lockAxis: [number, number, number] | null;
+    /** @internal Per-variant basis computer used by CPU helpers (e.g. pick UV
+     *  inverse-projection). Attached by each variant factory; callers never
+     *  branch on `_variant` to compute a basis. Null until factory wires it. */
+    _basisFn: BillboardBasisFn | null;
     /** @internal flat instance storage. */
     readonly _storage: SpriteStorage;
     /** @internal per-slot CPU metadata. */
@@ -120,6 +135,7 @@ export function _createBillboardSystem(
         count: 0,
         _variant: variant,
         _lockAxis: lockAxis,
+        _basisFn: null,
         _storage: createSpriteStorage(opts.capacity ?? 64, SPRITE_BILLBOARD_STRIDE),
         _meta: [],
         _clips: new Map(),
@@ -139,6 +155,7 @@ function packSlot(system: BillboardSpriteSystem, index: number, init: BillboardS
     const color = init.color ?? [1, 1, 1, 1];
     const flipX = init.flipX === true ? 1 : 0;
     const flipY = init.flipY === true ? 1 : 0;
+    const pickable = init.pickable !== false ? 1 : 0;
     const out: [number, number] = visible ? [sizeWorld[0], sizeWorld[1]] : [0, 0];
     const off = index * SPRITE_BILLBOARD_STRIDE;
     const d = system._storage.data;
@@ -165,7 +182,9 @@ function packSlot(system: BillboardSpriteSystem, index: number, init: BillboardS
     d[off + 19] = color[3]!;
     d[off + 20] = flipX;
     d[off + 21] = flipY;
-    d[off + 22] = 0;
+    // flagsAndPad.z carries the pickable bit (read by the GPU pick fragment
+    // shader to discard non-pickable sprites). See pick-billboard pipeline.
+    d[off + 22] = pickable;
     d[off + 23] = 0;
 
     system._meta[index] = {

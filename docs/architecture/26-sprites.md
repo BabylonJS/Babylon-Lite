@@ -427,6 +427,27 @@ export function pickBillboardSprite(scene: SceneContext, xPx: number, yPx: numbe
 
 There is no shared `createSprite()`, no `SpriteMode` enum, and no per-frame `if (sprite.kind === ...)`. The shared atlas, animation, and packing helpers operate on already-typed concrete batches; they never branch on family.
 
+### Per-Variant `BillboardBasisFn` closure (CPU helper)
+
+CPU helpers that need to compute the right/up basis a billboard variant uses (currently only the GPU pick contributor's UV inverse-projection) call a per-system closure rather than branching on the variant tag. The type lives in `sprite-billboard-shared.ts`:
+
+```typescript
+export type BillboardBasisFn = (
+    worldPos: readonly [number, number, number],
+    camRight: readonly [number, number, number],
+    camUp: readonly [number, number, number],
+    camPos: readonly [number, number, number],
+) => { right: [number, number, number]; up: [number, number, number] };
+```
+
+Each variant factory attaches its own closure to `system._basisFn` immediately after construction:
+
+- `facingBasisFn` (constant) — returns `{ right: camRight, up: camUp }`.
+- `yawBasisFn` (closes over world-Y up) — returns `{ right: normalize(cross([0,1,0], normalize(camPos - worldPos))), up: [0,1,0] }`.
+- `makeAxisBasisFn(axis)` (closes over the normalized lock axis) — returns the projected camera-perpendicular right + the lock axis as up.
+
+Callers invoke `system._basisFn(...)` unconditionally; they never read `system._variant`. The variant tag remains on the system for diagnostic / pipeline-cache-key purposes only, never for runtime branching.
+
 ### Plain Public Data, Flat Internal Storage
 
 The public `*Init` interfaces are ergonomic plain objects. Internally, each layer/system stores its sprite data as **interleaved typed arrays** (`Float32Array`) following the thin-instance pattern. Public mutation helpers (`updateSprite2D`, `setBillboardSpriteFrame`, etc.) write directly into the flat storage and bump a version counter. Direct array access is not exposed; for users who want raw control, `flush*` helpers exist.
@@ -460,7 +481,7 @@ All families use **64-byte aligned strides**. Layouts differ slightly because th
 | 10..11          | `sinCos`      | precomputed sin/cos of rotation                                                               |
 | 12..15          | `uvRect`      | uvMin.xy, uvMax.xy                                                                            |
 | 16..19          | `color`       | RGBA tint                                                                                     |
-| 20..23          | `flagsAndPad` | `[0]=flipX`, `[1]=flipY`, `[2..3]=reserved` — same float-encoding convention as Sprite2DLayer |
+| 20..23          | `flagsAndPad` | `[0]=flipX`, `[1]=flipY`, `[2]=pickable` (1.0 if `pickable !== false`, else 0.0), `[3]=reserved` — same float-encoding convention as Sprite2DLayer. The pickable bit is read by the GPU pick fragment shader for billboard variants — non-pickable sprites are `discard`-ed so the picked silhouette matches the rendered silhouette excluding non-pickable instances. Anchored layers also pack this bit for parity even though they pick on the CPU. |
 
 #### BillboardSpriteSystem (96 B = 24 floats)
 
@@ -468,6 +489,7 @@ Identical layout to AnchoredSpriteLayer, with two semantic differences:
 
 - Floats 6..7 carry `sizeWorld` (world units) instead of `sizePx`.
 - Floats 3 (`depthBias`) and 4..5 (`offsetPx`) are **reserved / unused** in the billboard vertex shaders (kept in the layout to share the pack helper signature with AnchoredSpriteLayer; the CPU pack helper writes 0.0).
+- Float 22 (`flagsAndPad.z`) carries the **`pickable`** bit (1.0 if `pickable !== false`, else 0.0). Read by the GPU pick fragment shader — non-pickable sprites are `discard`-ed so the picked silhouette matches the rendered silhouette excluding non-pickable instances.
 
 The lock axis (axis-locked variant only) lives in the **system UBO**, not per-sprite.
 
@@ -517,6 +539,84 @@ Caveat: the GPU upload uses a single contiguous `[min, max]` range, not a sparse
 ### Visibility (`visible: false`)
 
 Toggling `visible: false` on a sprite does **not** compact the array or shift indices. The pack step writes `sizePx = [0, 0]` (or `sizeWorld = [0, 0]`) into the slot; the vertex shader collapses all six vertices to a single point and the rasterizer emits zero fragments. Indices stay stable, sort order is unaffected, and toggling visibility is just a regular `update*({ visible })` call that bumps `_version`. Trade-off: invisible sprites still cost their stride bytes in the per-frame upload range. For layers with dense visibility churn (rare in practice), split into two layers instead.
+
+### Sort Indirection + Storage Buffer (3D families)
+
+3D sprite families (anchored + all three billboard variants) never reorder the packed sprite buffer. Sorting is expressed entirely through a separate `Uint32Array` indirection buffer of sprite indices, uploaded once per frame as a per-instance vertex attribute at `@location(0)`. The shader reads `sortIndex` and indexes into the packed sprite storage buffer to fetch the actual record. This keeps sort cost O(N), not O(N × stride).
+
+**Packed sprite buffer.** Allocated by `sprite-gpu.ts` with `usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST`. (Sprite2DLayer still binds it as VERTEX through the pre-existing instance-attribute path; 3D families bind it as a `var<storage, read>` storage buffer instead and never declare per-instance attributes for sprite data.)
+
+**Sort indirection vertex buffer.** Per-instance Uint32 buffer at `@location(0)` with `stepMode: "instance"`, `arrayStride: 4`, attribute format `uint32`. One u32 per active sprite. Recreated when storage capacity grows.
+
+**Storage buffer binding.** Bound at `@group(1) @binding(3)` as `var<storage, read> sprites: array<SpriteData>`. The bind-group layout entry uses `buffer: { type: "read-only-storage" }` with `GPUShaderStage.VERTEX` visibility. The renderable rebuilds the layer bind group lazily — only when `system._storage.gpuBuffer` (the JS pointer) changes between frames (capacity grew, or first sync after construction).
+
+**Shared WGSL.** `sprite/shared/sprite-3d-instance-wgsl.ts` exports two TS string consts that both anchored and billboard variant shaders include:
+
+```wgsl
+// SPRITE_3D_DATA_WGSL — 96 B / 24-float storage record.
+struct SpriteData {
+    worldPos: vec3<f32>,
+    depthBias_or_reserved: f32,        // anchored: depthBias; billboard: 0
+    offsetPx_or_reserved: vec2<f32>,   // anchored: offsetPx; billboard: (0,0)
+    sizePxOrWorld: vec2<f32>,          // anchored: sizePx;   billboard: sizeWorld
+    pivot: vec2<f32>,
+    sinCos: vec2<f32>,
+    uvRect: vec4<f32>,
+    color: vec4<f32>,
+    flagsAndPad: vec4<f32>,            // .x flipX, .y flipY, .z pickable, .w reserved
+};
+@group(1) @binding(3) var<storage, read> sprites: array<SpriteData>;
+
+// SPRITE_3D_VS_IN_WGSL — input/output structs + helpers.
+struct VSIn {
+    @builtin(vertex_index) vid: u32,
+    @location(0) sortIndex: u32,
+};
+struct VSOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
+};
+fn rotate2(p: vec2<f32>, sinCos: vec2<f32>) -> vec2<f32> { /* ... */ }
+fn cornerOf(vid: u32) -> vec2<f32> { /* 6-corner triangle list */ }
+fn cornerUV(corner: vec2<f32>, rect: vec4<f32>, flipX: f32, flipY: f32) -> vec2<f32> { /* ... */ }
+```
+
+Field names in `SpriteData` are deliberately unified (`depthBias_or_reserved`, `offsetPx_or_reserved`, `sizePxOrWorld`) so a single struct definition serves every 3D family. Anchored shaders read `depthBias_or_reserved` as `depthBias`; billboard shaders ignore it. Anchored reads `sizePxOrWorld` as pixel size; billboards read it as world size.
+
+**Re-sort triggers.** A re-sort runs only when at least one of the following changed since the last sync:
+
+- `_sortVersion` (bumped by add / remove / position update).
+- Camera world-position (only matters for blended layers — cutout layers do not back-to-front sort).
+- Sprite count (forces re-upload after grow).
+
+**Cutout vs. blended.** Cutout layers always emit a sequential `0..N-1` indirection (no per-frame back-to-front cost) so the shader path stays uniform. Blended layers use insertion sort over squared camera distance — fast for small N and near-sorted lists, which is the typical case as the camera moves smoothly.
+
+**`SpriteSortState`** (lives in `sprite/shared/sprite-sort.ts`):
+
+```typescript
+export interface SpriteSortState {
+    indexBuffer: GPUBuffer | null;
+    indices: Uint32Array;
+    distances: Float32Array;
+    lastSortVersion: number;
+    lastCamX: number;
+    lastCamY: number;
+    lastCamZ: number;
+    lastUploadedCount: number;
+    blended: boolean;
+    centroid: [number, number, number];
+}
+```
+
+**Centroid for engine-wide transparent sort.** `computeSpriteCentroid(state, storage)` walks the first three floats of every active slot, computes the mean world position, writes it into `state.centroid`, and returns it. The renderable copies this into `Renderable._worldCenter` every frame so the engine-wide transparent sort orders sprite systems correctly against transparent meshes.
+
+**Helpers exported by `sprite-sort.ts`:**
+
+- `createSpriteSortState(blended)` — allocate state. GPU buffer is created lazily on first sync.
+- `syncSpriteSortIndices(engine, state, storage, sortVersion, camX, camY, camZ, label)` — ensures capacity, runs sort if any trigger fired, uploads via a single `writeBuffer`.
+- `computeSpriteCentroid(state, storage)` — mean world position of all active slots.
+- `disposeSpriteSortState(state)` — release the GPU index buffer.
 
 ---
 
@@ -845,7 +945,7 @@ The composer emits exactly the right fragment shader for the family + blend mode
 | Billboard (blended)           | transparent (210 + order)      | back-to-front by sprite view-Z         | per-blend | off          |
 | Billboard (cutout)            | opaque (110 + order)           | front-to-back by sprite view-Z         | none      | on           |
 
-3D families share the existing engine-wide transparent sort by registering with `_worldCenter` (anchored) or per-frame computed `_sortDistance` (billboard). Sorting _within_ a layer/system is recomputed every frame when the camera moved or the batch changed (`_sortVersion` check); the result is a `Uint32Array` indirection buffer uploaded to GPU as the second instance source. The packed sprite buffer itself is never reordered — sort cost is proportional to count, not to instance stride.
+3D families share the existing engine-wide transparent sort by writing their per-frame `computeSpriteCentroid` result into `Renderable._worldCenter`. Sorting _within_ a layer/system is driven by the sort indirection + storage buffer mechanism described in [Sort Indirection + Storage Buffer (3D families)](#sort-indirection--storage-buffer-3d-families): the packed sprite buffer is never reordered, only the per-instance `Uint32` indirection at `@location(0)` changes per frame, so sort cost stays O(N) and is independent of instance stride.
 
 **Inter-renderable interleaving:** A single sprite layer is one draw call. Individual sprites cannot interleave with arbitrary transparent meshes. This matches Babylon.js behavior. When per-sprite ordering against meshes is needed, the mitigations are (a) splitting into multiple layers with distinct `order` values, or (b) future order-independent transparency (OIT) work being developed for the 3D path; sprites will participate naturally once OIT lands because they register through the same transparent renderable interface meshes use.
 
@@ -857,15 +957,67 @@ The composer emits exactly the right fragment shader for the family + blend mode
 
 ## Picking
 
-All three pickers honor the per-sprite `pickable` flag (default `true`). Sprites with `pickable === false` are skipped during the CPU walk (Sprite2D / Anchored) and have their per-instance ID written as 0 in the GPU ID pass (Billboard), causing them never to be returned by the picker even when they cover the cursor. `visible: false` sprites are also skipped (degenerate quad already returns 0 in the GPU ID pass; CPU pickers explicitly check the visible flag before the rectangle test).
+All three pickers honor the per-sprite `pickable` flag (default `true`). CPU pickers (Sprite2D / Anchored) skip non-pickable sprites by checking `meta.pickable` before the rectangle test; the GPU picker (Billboard) `discard`s them in the pick fragment shader by reading `flagsAndPad.z < 0.5`. `visible: false` sprites are also skipped — the degenerate quad already returns no fragment in the GPU ID pass; CPU pickers explicitly check the visible flag before the rectangle test.
 
-| Family              | Strategy                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sprite2DLayer       | CPU. Walk layers in reverse `order`, then walk sprites in reverse `(layerZ, insertion)` skipping `!visible` and `!pickable`, transform the screen point into sprite-local space (inverse pan/zoom/rotation, then inverse sprite rotation around pivot), and test against the pivot-aware local rectangle `[-pivot.x · sizePx.x, (1 - pivot.x) · sizePx.x] × [-pivot.y · sizePx.y, (1 - pivot.y) · sizePx.y]` (the same `(corner - pivot) * sizePx` convention used in the WGSL). |
-| AnchoredSpriteLayer | CPU. For each `visible` and `pickable` sprite, project anchor through `viewProjection`, NDC → pixels, apply `offsetPx`, then transform the screen point into sprite-local space (inverse rotation around the projected pivot) and test against the same pivot-aware rectangle as Sprite2D — exact, rotation-aware. Walk reverse-order.                                                                                                                                           |
-| Billboard           | **GPU ID pass.** Reuses the existing `picking-pipeline.ts` infrastructure. Each billboard system contributes a per-instance ID via the same WGSL composer that powers the main pass (so the picked silhouette matches the rendered silhouette, including alpha-cutout discard). Sprites with `pickable === false` write ID 0 (no-hit sentinel). The picker resolves non-zero IDs to `(system, spriteIndex)` via a per-renderable side table.                                     |
+| Family              | Strategy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sprite2DLayer       | **CPU.** Walk layers in reverse `order`, then walk sprites in reverse `(layerZ, insertion)` skipping `!visible` and `!pickable`, transform the screen point into sprite-local space (inverse pan/zoom/rotation, then inverse sprite rotation around pivot), and test against the pivot-aware local rectangle `[-pivot.x · sizePx.x, (1 - pivot.x) · sizePx.x] × [-pivot.y · sizePx.y, (1 - pivot.y) · sizePx.y]` (the same `(corner - pivot) * sizePx` convention used in the WGSL).                                                                                |
+| AnchoredSpriteLayer | **CPU.** For each `visible` and `pickable` sprite, project anchor through `viewProjection`, NDC → pixels, apply `offsetPx`, then transform the screen point into sprite-local space (inverse rotation around the projected pivot) and test against the same pivot-aware rectangle as Sprite2D. Walk reverse-order.                                                                                                                                                                                                                                                  |
+| BillboardSpriteSystem | **GPU**, via the engine's shared `pickAsync()` 1×1 ID pass plus a per-system `PickContributor`. The pick pipeline reuses each variant's vertex math (Facing / Yaw / Axis), so the picked silhouette is byte-equal to the rendered silhouette. Cutout pipelines `discard` based on `alphaCutoff`; non-pickable sprites `discard` via `flagsAndPad.z < 0.5`. UV is reconstructed at resolve time by inverse-projecting the GPU's reconstructed world hit point through `system._basisFn` and `meta.rotation`/`meta.pivot`/`meta.sizeWorld`.                          |
 
-Each picker lives in its own file (`pick-2d.ts`, `pick-anchored.ts`, `pick-billboard.ts`) and is imported only when the corresponding `pick*` function is called. Apps that never pick a sprite pay zero bytes.
+### `PickContributor` interface
+
+A generic per-scene contributor pattern lives in `picking/picking-contributors.ts`:
+
+```typescript
+export interface PickContributor {
+    /** Issue draw commands into the shared pick pass. Returns the next free pick ID. */
+    draw(ctx: PickPassContext, nextPickId: number): number;
+    /** Try to resolve a pick ID returned by the GPU. Returns the domain-specific
+     *  PickingInfo if this contributor owns the ID, or null otherwise. */
+    resolve(pickId: number, worldPoint: [number, number, number] | null, depth: number): PickingInfo | null;
+}
+```
+
+`gpu-picker.ts` runs all mesh draws first into the 1×1 ID pass (consuming IDs `1..M`), ends that pass, then opens a second render pass that loads the same color/depth attachments and dispatches each registered contributor with the next free pick ID. Each contributor returns the next free ID after its draws; the picker accumulates and uses the result to bound mesh-vs-contributor ID dispatch. The depth-test contract (`less`) carries across the pass boundary because the second pass loads the previous depth, so closest-hit semantics are preserved across mesh + contributor draws.
+
+### Per-system contributor (Billboard)
+
+Each `BillboardSpriteSystem` registers exactly one contributor. Registration is idempotent (guarded by a `_pickContributorRegistered` flag on the system) and lives in the system's renderable build path — the contributor module is dynamic-imported only when a billboard renderable is actually built, so mesh-only scenes pay zero bytes for sprite picking code.
+
+**Per-system 80-byte pick UBO** (`BILLBOARD_PICK_UBO_BYTES = 80`, layout matches the WGSL struct in `billboard-pick-pipeline.ts`):
+
+| Offset | Field           | Notes                                                                 |
+| ------ | --------------- | --------------------------------------------------------------------- |
+| 0..15  | `cameraRight`   | `vec4<f32>` — xyz from camera world matrix; `w` packs `camPos.x`     |
+| 16..31 | `cameraUp`      | `vec4<f32>` — xyz; `w` packs `camPos.y`                                |
+| 32..47 | `cameraForward` | `vec4<f32>` — xyz; `w` packs `camPos.z`                                |
+| 48..63 | `lockAxis`      | `vec4<f32>` — axis variant only; xyz; `w` unused                       |
+| 64..67 | `baseId`        | `u32` — first pick ID assigned to instance 0 in this system           |
+| 68..71 | `alphaCutoff`   | `f32` — used only when cutout pipeline is selected                    |
+| 72..79 | `_pad`          | 8 B trailing pad                                                      |
+
+Packing the camera position into the basis vectors' `w` channels keeps the UBO at 80 B and avoids re-binding the main `Sprite3DSceneUBO` in the pick pass.
+
+**Bind groups.** `@group(0)` = scene UBO (the pick-zoomed VP — same one mesh picking uses). `@group(1)` = `tex@0`, `samp@1`, system pick UBO at `@2`, packed sprite storage buffer at `@3` (the same buffer used for rendering). The bind group is rebuilt lazily — only when `system._storage.gpuBuffer` (the JS pointer) changes between picks.
+
+**Per-(variant, isCutout) pipeline cache** (`billboard-pick-pipeline.ts`). Cache key is `"${variant}|${isCutout ? 1 : 0}"`. Six entries maximum (3 variants × 2 cutout flags). Each pipeline embeds the variant's basis math (Facing reads `cameraRight.xyz` / `cameraUp.xyz`; Yaw reconstructs `camPos` from the basis `w` channels and computes `cross(worldUp, toCam)`; Axis does the same with the lock axis). The fragment shader writes the pick ID as RGB and depth as `@location(1)` matching the mesh picker's two-color-attachment contract.
+
+**Pick ID assignment.** Each contributor's `draw` is given `nextPickId`, draws its sprites with consecutive IDs `[baseId, baseId + count)` (the WGSL emits `baseId + sortIndex`), and returns `baseId + count` for the next contributor. Contributors track their own `rangeStart` / `rangeEnd` for resolve.
+
+**Resolution.** When the GPU picker reads back a pick ID, it iterates contributors in registration order; the first one whose range contains the ID returns a `PickingInfo`. The billboard contributor smuggles a `_spritePick: SpritePickInfo` payload onto the `PickingInfo` object; `pickBillboardSprite()` extracts it.
+
+**UV reconstruction at resolve time.** Given the engine's reconstructed world hit point `worldPoint` and the camera's world matrix:
+
+1. Look up `meta = system._meta[localIndex]` for `rotation`, `pivot`, `sizeWorld`.
+2. Call `basis = system._basisFn(worldPos, camRight, camUp, camPos)` (no variant branching).
+3. Project `worldPoint - worldPos` onto `basis.right` / `basis.up` to get local-plane `(localX, localY)`.
+4. Inverse-rotate by `meta.rotation` (positive sin/cos rotation in the shader → negate sin here).
+5. Divide by `meta.sizeWorld`, add `meta.pivot`, clamp to `[0, 1]`.
+
+This matches the shader's `(corner - pivot) * sizeWorld` plane definition exactly.
+
+Each picker lives in its own file (`pick-2d.ts`, `pick-anchored.ts`, `pick-billboard.ts`) and is imported only when the corresponding `pick*` function is called. Apps that never pick a sprite pay zero bytes for the picker. Mesh-only scenes additionally pay zero bytes for `picking-contributors.ts`'s body — only the lazy `getPickContributors` dispatch in `gpu-picker.ts` references it.
 
 ---
 
@@ -1009,7 +1161,7 @@ Imports:
 - `Renderable`, `SceneUniformUpdater` from `../render/renderable.js` (type-only)
 - `Camera` from `../camera/camera.js` (3D families: VP matrix, camera basis)
 - `createPipelineCache` from `../material/pipeline-cache.js`
-- `createGpuPicker` from `../picking/gpu-picker.js` — pulled in by the **billboard renderable** at build time so it can register its per-instance ID contribution to the picking pass; not loaded by 2D or anchored families
+- `PickContributor` from `../picking/picking-contributors.js` — the billboard renderable lazily registers a per-system contributor via dynamic import of `sprite/picking/billboard-pick-contributor.js` when the system is added to the scene. The picker itself (`gpu-picker.ts`) is dynamic-imported by `pickBillboardSprite()` in `sprite/picking/pick-billboard.ts`. Mesh-only scenes pay zero bytes for sprite picking; sprite scenes that never call `pickBillboardSprite()` pay zero bytes for the picker itself.
 
 **Dynamic-import boundary**: each family's renderable file (`sprite-2d-renderable.ts`, `sprite-anchored-renderable.ts`, `sprite-*-billboard-renderable.ts`) is loaded via dynamic `import()` from the layer/system's deferred builder — never statically. This is what makes the bundle splitting real: a scene that only uses one family ships only that family's renderable + composer + pipeline.
 
@@ -1034,7 +1186,9 @@ NOT depended on:
 - `sprite-2d-projection`: pixel (0,0) → top-left NDC; (W,H) → bottom-right; pan + zoom + rotation correctness.
 - `sprite-anchored-projection`: screen size invariant under varying camera distance.
 - `sprite-billboard-basis`: orthonormality of facing/yaw/axis basis vectors at edge cases (camera straight up, camera at sprite, lock axis parallel to view).
-- `sprite-sort`: stable back-to-front for equal Z; layer-order for 2D.
+- `sprite-sort`: re-sort triggers (version bump, camera move, count change); cutout emits sequential indirection; blended emits back-to-front; centroid is mean of visible world positions.
+- `sprite-pick-billboard-uv`: GPU contributor inverse-projection produces correct UV in `[0,1]` for facing/yaw/axis variants; non-pickable sprite discards in the pick pass (verify via mock contributor); per-system base ID range works (two systems → IDs disjoint).
+- `pick-contributor-registry`: lazy creation, idempotent registration, dispatch order matches registration order.
 - `sprite-pick-2d`: rotation-aware hit test in `Scene2DContext`; reverse-order topmost selection.
 - `sprite-pick-anchored`: rotation-aware hit test in projected screen space (per §10); reverse-order topmost selection.
 
@@ -1058,6 +1212,8 @@ Each family in its own ratchet:
 - Anchored-only scene: must not include `scene2d`, `sprite-billboard-*`.
 - Each billboard variant: must not include the other two billboard variants.
 - Sprite-free scenes: zero `sprite-*` chunks fetched.
+- Mesh-only scenes (no sprite system) must NOT pull in `picking/picking-contributors.ts`'s body — only the lazy `getPickContributors` accessor reference in `gpu-picker.ts` may appear, and tree-shaking eliminates the rest.
+- Scenes with billboard systems pull in `sprite/picking/billboard-pick-contributor.ts` and `sprite/picking/billboard-pick-pipeline.ts` — both are dynamic-imported by the billboard renderable, never statically.
 
 ---
 
@@ -1074,9 +1230,10 @@ packages/babylon-lite/src/
     shared/
       sprite-atlas.ts                           # SpriteAtlas, createGrid/Named/loadSpriteAtlas, resolveSpriteFrame
       sprite-animation.ts                       # SpriteClipState, evaluate/advanceSpriteClip
-      sprite-gpu.ts                             # CPU→GPU dirty-range writeBuffer, capacity grow (dynamic-imported)
+      sprite-gpu.ts                             # CPU→GPU dirty-range writeBuffer, capacity grow (dynamic-imported); allocates packed buffer with VERTEX | STORAGE | COPY_DST
       sprite-pack.ts                            # Per-family packing helpers (one per family, no shared if)
-      sprite-sort.ts                            # Back-to-front and layer-order indirection-buffer helpers
+      sprite-sort.ts                            # SpriteSortState + createSpriteSortState / syncSpriteSortIndices / computeSpriteCentroid / disposeSpriteSortState
+      sprite-3d-instance-wgsl.ts                # Shared SPRITE_3D_DATA_WGSL (storage struct + binding) + SPRITE_3D_VS_IN_WGSL helpers (cornerOf, cornerUV, rotate2)
 
     sprite-2d.ts                                # createSprite2DLayer + add/update/remove/setFrame/playClip/stopClip
     sprite-2d-renderable.ts                     # Renderable builder for Sprite2DLayer (dynamic-imported)
@@ -1100,7 +1257,16 @@ packages/babylon-lite/src/
     picking/                                    # mirrors engine's existing src/picking/ directory
       pick-2d.ts                                # pickSprite2D
       pick-anchored.ts                          # pickAnchoredSprite
-      pick-billboard.ts                         # pickBillboardSprite (GPU ID-pass integration)
+      pick-billboard.ts                         # pickBillboardSprite — dynamic-imports gpu-picker.ts; lazily creates per-scene picker
+      billboard-pick-contributor.ts             # Per-system PickContributor: registers idempotently, draws into shared pick pass, resolves pickId → SpritePickInfo (incl. UV inverse-projection via system._basisFn)
+      billboard-pick-pipeline.ts                # Per-(variant, isCutout) pipeline cache + 80 B per-system pick UBO layout
+```
+
+Plus, in the engine-wide `picking/` directory (one new file):
+
+```
+packages/babylon-lite/src/picking/
+  picking-contributors.ts                       # Generic PickContributor interface + getOrCreatePickContributors / getPickContributors registry accessors
 ```
 
 Test + scene files (mirroring existing Lite layout):
@@ -1116,6 +1282,8 @@ tests/unit/                                     # vitest unit tests (one file pe
   sprite-sort.test.ts
   sprite-pick-2d.test.ts
   sprite-pick-anchored.test.ts
+  sprite-pick-billboard-uv.test.ts
+  pick-contributor-registry.test.ts
 
 tests/parity/scenes/                            # Playwright parity specs reference scene NN
   (parity scenes are driven by lab/sceneNN.html via the existing scene-runner)

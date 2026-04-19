@@ -9,6 +9,8 @@ import { mat4Invert } from "../math/mat4.js";
 import { getPickingPipeline, getPickingTIPipeline, getPickingSceneBGL, getPickingMeshBGL, getPickingTIMeshBGL } from "./picking-pipeline.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { createEmptyUniformBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
+import type { PickPassContext } from "./picking-contributors.js";
+import { getPickContributors } from "./picking-contributors.js";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
 const _pickVP = new Float32Array(16);
@@ -200,6 +202,43 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     }
     pass.end();
 
+    // ── Contributors (sprites, future renderable types) ──────────────
+    // Run AFTER mesh draws so contributor IDs start above the mesh range.
+    // The 1×1 depth target's `less` test naturally picks the closest hit
+    // across mesh + contributor draws.
+    const contributors = getPickContributors(scene);
+    const meshIdEnd = nextId;
+    if (contributors && contributors.length > 0) {
+        // Restart the pass — WebGPU forbids issuing draws after end(). We open a
+        // second pass that loads the previous color/depth and lets contributors
+        // draw on top with the same depth-test contract.
+        const contribPass = encoder.beginRenderPass({
+            colorAttachments: [
+                { view: rt.colorView, loadOp: "load", storeOp: "store" },
+                { view: rt.depthColorView, loadOp: "load", storeOp: "store" },
+            ],
+            depthStencilAttachment: { view: rt.depthView, depthLoadOp: "load", depthStoreOp: "discard" },
+        });
+        const pctx: PickPassContext = {
+            encoder,
+            pass: contribPass,
+            sceneBG: picker._sceneBG!,
+            engine,
+            tempBuffers,
+            pickVP: _pickVP,
+            fullVP: vp as Float32Array,
+            pickXPx: px,
+            pickYPx: py,
+            canvasWidth: w,
+            canvasHeight: h,
+            camera,
+        };
+        for (const c of contributors) {
+            nextId = c.draw(pctx, nextId);
+        }
+        contribPass.end();
+    }
+
     // ── Readback (both 1×1 — trivially small) ────────────────────────
     encoder.copyTextureToBuffer({ texture: rt.colorTex }, { buffer: rt.colorStaging, bytesPerRow: 256 }, { width: 1, height: 1 });
     encoder.copyTextureToBuffer({ texture: rt.depthColorTex }, { buffer: rt.depthStaging, bytesPerRow: 256 }, { width: 1, height: 1 });
@@ -222,6 +261,41 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     if (pickId === 0) {
         return createEmptyPickingInfo();
     }
+
+    // Reconstruct world position from depth (using original full-res VP) — used
+    // by both the mesh path (info.pickedPoint) and contributor.resolve().
+    let worldPoint: [number, number, number] | null = null;
+    let camDistance = 0;
+    const invVP = mat4Invert(vp);
+    if (invVP) {
+        const ndcX = (2 * px) / w - 1;
+        const ndcY = 1 - (2 * py) / h;
+        const wx = invVP[0]! * ndcX + invVP[4]! * ndcY + invVP[8]! * depth + invVP[12]!;
+        const wy = invVP[1]! * ndcX + invVP[5]! * ndcY + invVP[9]! * depth + invVP[13]!;
+        const wz = invVP[2]! * ndcX + invVP[6]! * ndcY + invVP[10]! * depth + invVP[14]!;
+        const ww = invVP[3]! * ndcX + invVP[7]! * ndcY + invVP[11]! * depth + invVP[15]!;
+        const invW = 1 / ww;
+        worldPoint = [wx * invW, wy * invW, wz * invW];
+        const camPos = getCameraPosition(camera);
+        const dx = worldPoint[0] - camPos.x;
+        const dy = worldPoint[1] - camPos.y;
+        const dz = worldPoint[2] - camPos.z;
+        camDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // Pick ID lies in the contributor range — dispatch to first contributor that owns it.
+    if (pickId >= meshIdEnd) {
+        if (contributors) {
+            for (const c of contributors) {
+                const info = c.resolve(pickId, worldPoint, depth);
+                if (info) {
+                    return info;
+                }
+            }
+        }
+        return createEmptyPickingInfo();
+    }
+
     let hitMesh: Mesh | null = null;
     let hitThinIdx = -1;
     let scanId = 1;
@@ -251,24 +325,9 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     info.hit = true;
     info.pickedMesh = hitMesh;
     info.thinInstanceIndex = hitThinIdx;
-
-    // Reconstruct world position from depth (using original full-res VP)
-    const invVP = mat4Invert(vp);
-    if (invVP) {
-        const ndcX = (2 * px) / w - 1;
-        const ndcY = 1 - (2 * py) / h;
-        const wx = invVP[0]! * ndcX + invVP[4]! * ndcY + invVP[8]! * depth + invVP[12]!;
-        const wy = invVP[1]! * ndcX + invVP[5]! * ndcY + invVP[9]! * depth + invVP[13]!;
-        const wz = invVP[2]! * ndcX + invVP[6]! * ndcY + invVP[10]! * depth + invVP[14]!;
-        const ww = invVP[3]! * ndcX + invVP[7]! * ndcY + invVP[11]! * depth + invVP[15]!;
-        const invW = 1 / ww;
-        info.pickedPoint = [wx * invW, wy * invW, wz * invW];
-
-        const camPos = getCameraPosition(camera);
-        const dx = info.pickedPoint[0] - camPos.x;
-        const dy = info.pickedPoint[1] - camPos.y;
-        const dz = info.pickedPoint[2] - camPos.z;
-        info.distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (worldPoint) {
+        info.pickedPoint = worldPoint;
+        info.distance = camDistance;
     }
 
     if (picker._detailedPick) {
