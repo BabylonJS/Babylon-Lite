@@ -43,7 +43,7 @@
         "name": "Scene 5 — Alien Skeleton",
         "maxMad": 0.01,
         "maxRegionMad": 0.08,
-        "maxRawKB": 81.9,
+        "maxRawKB": 86.0,
         "description": "glTF Alien model with PBR, skeleton/bones, normal map, hemispheric light.",
         "tags": ["pbr", "gltf"]
     },
@@ -107,7 +107,7 @@
         "slug": "scene12-shader-balls",
         "name": "Scene 12 — PBR Shader Balls",
         "maxMad": 0.027,
-        "maxRawKB": 93.9,
+        "maxRawKB": 98.6,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
         "tags": ["pbr", "gltf"]
     },

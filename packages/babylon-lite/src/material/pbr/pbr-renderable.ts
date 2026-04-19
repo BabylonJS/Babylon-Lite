@@ -212,6 +212,11 @@ export async function buildPbrRenderables(
         _registerPbrExt(mod.subsurfaceExt);
     }
 
+    if (meshes.some((m) => ((m.material as PbrMaterialProps).subsurface?.refraction?.intensity ?? 0) > 0)) {
+        const mod = await import("./fragments/refraction-fragment.js");
+        _registerPbrExt(mod.refractionExt);
+    }
+
     const needsEmissiveColor = meshes.some((m) => !!(m.material as PbrMaterialProps).emissiveColor);
     if (needsEmissiveColor) {
         const mod = await import("./fragments/emissive-fragment.js");
