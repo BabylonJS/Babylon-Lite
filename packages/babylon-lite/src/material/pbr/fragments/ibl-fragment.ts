@@ -97,3 +97,27 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
         },
     };
 }
+
+import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_ENV } from "../pbr-flags.js";
+
+export const iblExt: PbrExt = {
+    id: "ibl",
+    phase: "ibl",
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_ENV)) {
+            return null;
+        }
+        return createIblFragment(ctx.hasAnyNormal, ctx.anisoBentNormalCode ?? "", ctx.iblSkyboxCalc ?? "");
+    },
+    bind(ctx, entries, b) {
+        if (!(ctx.features & PBR_HAS_ENV) || !ctx.env) {
+            return b;
+        }
+        entries.push({ binding: b++, resource: ctx.env.brdfLutView });
+        entries.push({ binding: b++, resource: ctx.env.brdfSampler });
+        entries.push({ binding: b++, resource: ctx.env.specularCubeView });
+        entries.push({ binding: b++, resource: ctx.env.cubeSampler });
+        return b;
+    },
+};

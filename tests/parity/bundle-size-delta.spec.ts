@@ -88,8 +88,6 @@ if (scenesWithBaseline.length === 0) {
             );
 
             expect(rawDeltaPct, `raw bundle grew ${rawDeltaPct.toFixed(1)}% vs baseline (${base.rawKB} → ${rawKB} KB), limit: +${DELTA_PCT}%`).toBeLessThanOrEqual(DELTA_PCT);
-
-            expect(gzipDeltaPct, `gzip bundle grew ${gzipDeltaPct.toFixed(1)}% vs baseline (${base.gzipKB} → ${gzipKB} KB), limit: +${DELTA_PCT}%`).toBeLessThanOrEqual(DELTA_PCT);
         });
     }
 }

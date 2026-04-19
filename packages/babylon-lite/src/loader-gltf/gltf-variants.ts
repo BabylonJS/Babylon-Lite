@@ -7,90 +7,13 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
-import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
-import type { GltfMaterialData } from "./gltf-material.js";
-import { assembleMaterial } from "./gltf-material.js";
+import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
+import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
+import type { GltfFeature } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-
-function mipCount(w: number, h: number): number {
-    return Math.floor(Math.log2(Math.max(w, h))) + 1;
-}
-
-function linearToSrgbByte(v: number): number {
-    const c = Math.max(0, Math.min(1, v));
-    return Math.round((c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
-}
-
-let _generateMipmaps: ((engine: EngineContextInternal, texture: GPUTexture) => void) | null = null;
-
-function uploadTex(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallback?: Uint8Array) {
-    const device = engine.device;
-    const w = bitmap?.width ?? 1;
-    const h = bitmap?.height ?? 1;
-    const fmt: GPUTextureFormat = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
-    const mips = bitmap ? mipCount(w, h) : 1;
-    const tex = device.createTexture({
-        size: { width: w, height: h },
-        format: fmt,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
-        mipLevelCount: mips,
-    });
-    if (bitmap) {
-        device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: tex, premultipliedAlpha: false }, { width: w, height: h });
-        _generateMipmaps!(engine, tex);
-    } else {
-        device.queue.writeTexture({ texture: tex }, (fallback ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
-    }
-    return { texture: tex, view: tex.createView(), sampler, width: w, height: h };
-}
-
-async function buildPbr(engine: EngineContextInternal, mat: GltfMaterialData, sampler: GPUSampler): Promise<PbrMaterialPropsInternal> {
-    const baseColorTexture = mat.baseColorImage
-        ? uploadTex(engine, mat.baseColorImage, true, sampler)
-        : (() => {
-              const f = mat.baseColorFactor;
-              return uploadTex(
-                  engine,
-                  null,
-                  true,
-                  sampler,
-                  new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
-              );
-          })();
-    const normalTexture = mat.normalImage ? uploadTex(engine, mat.normalImage, false, sampler) : undefined;
-    const emissiveTexture = mat.emissiveImage ? uploadTex(engine, mat.emissiveImage, true, sampler) : undefined;
-    const specGlossTexture = mat.specGlossImage ? uploadTex(engine, mat.specGlossImage, true, sampler) : undefined;
-
-    // ORM
-    const mrImg = mat.metallicRoughnessImage;
-    const occImg = mat.occlusionImage;
-    let ormTexture;
-    if (mrImg && occImg && mrImg !== occImg) {
-        const { compositeOrm } = await import("./gltf-orm-composite.js");
-        const bmp = await compositeOrm(mrImg, occImg);
-        ormTexture = uploadTex(engine, bmp, false, sampler);
-    } else if (mrImg ?? occImg) {
-        ormTexture = uploadTex(engine, (mrImg ?? occImg)!, false, sampler);
-    } else {
-        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, new Uint8Array([255, clamp(mat.roughnessFactor), clamp(mat.metallicFactor), 255]));
-    }
-
-    return {
-        baseColorTexture,
-        normalTexture,
-        ormTexture,
-        emissiveTexture,
-        specGlossTexture,
-        doubleSided: mat.doubleSided,
-        occlusionStrength: mat.occlusionImage ? 1.0 : 0,
-        enableSpecularAA: true,
-        ...(mat.alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat.baseColorFactor[3] } : undefined),
-        _buildGroup: pbrGroupBuilder,
-    } satisfies PbrMaterialPropsInternal;
-}
+import { assemblePbrProps, buildDefaultPbrTextures, runMatExts, uploadTex, type GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 
 /**
  * Self-contained variant material loader.
@@ -103,12 +26,10 @@ export async function loadVariantMaterials(
     baseUrl: string,
     variantNames: string[],
     meshes: Mesh[],
-    engine: EngineContextInternal
+    engine: EngineContextInternal,
+    exts: GltfFeature[]
 ): Promise<MaterialVariantData> {
-    // Ensure mipmap module is loaded
-    if (!_generateMipmaps) {
-        _generateMipmaps = (await import("../texture/generate-mipmaps.js")).generateMipmaps;
-    }
+    const generateMipmaps: GenerateMipmapsFn = (await import("../texture/generate-mipmaps.js")).generateMipmaps;
 
     const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
@@ -119,9 +40,22 @@ export async function loadVariantMaterials(
         maxAnisotropy: 4,
     });
 
-    // Cache for assembled glTF materials (by material index)
     const matCache = new Map<number, Promise<GltfMaterialData>>();
     const imageCache = new Map<number, Promise<ImageBitmap>>();
+    const fetchImg = makeImageFetcher(json, binChunk, baseUrl, imageCache);
+    const getCachedTex = (bitmap: ImageBitmap, srgb: boolean) => uploadTex(engine, bitmap, srgb, sampler, generateMipmaps);
+    const extCtx: GltfMatExtCtx = {
+        async texture(texInfo, sRGB) {
+            if (!texInfo) {
+                return undefined;
+            }
+            const img = await fetchImg(texInfo);
+            return img ? uploadTex(engine, img, sRGB, sampler, generateMipmaps) : undefined;
+        },
+        uploadImage(bitmap, sRGB) {
+            return uploadTex(engine, bitmap, sRGB, sampler, generateMipmaps);
+        },
+    };
     const getMat = (matIdx: number): Promise<GltfMaterialData> => {
         let p = matCache.get(matIdx);
         if (!p) {
@@ -131,12 +65,15 @@ export async function loadVariantMaterials(
         return p;
     };
 
-    // Cache for uploaded PBR materials (by GltfMaterialData identity)
     const pbrCache = new Map<GltfMaterialData, Promise<PbrMaterialPropsInternal>>();
     const getPbr = (gltfMat: GltfMaterialData): Promise<PbrMaterialPropsInternal> => {
         let p = pbrCache.get(gltfMat);
         if (!p) {
-            p = buildPbr(engine, gltfMat, sampler);
+            p = (async () => {
+                const tex = buildDefaultPbrTextures(engine, gltfMat, sampler, generateMipmaps, getCachedTex);
+                const layers = await runMatExts(gltfMat, exts, extCtx);
+                return assemblePbrProps(gltfMat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, layers);
+            })();
             pbrCache.set(gltfMat, p);
         }
         return p;
@@ -148,7 +85,6 @@ export async function loadVariantMaterials(
         variants[name] = [];
     }
 
-    // Walk meshDatas to find which primitives have variant extensions
     let meshIdx = 0;
     for (let nodeIdx = 0; nodeIdx < json.nodes.length; nodeIdx++) {
         const node = json.nodes[nodeIdx];

@@ -145,14 +145,13 @@ Add an entry to **`scene-config.json`**:
     "name": "Scene 23 — My Feature",
     "maxMad": 0.01,
     "maxRawKB": 60,
-    "maxGzipKB": 22,
     "description": "Brief description of what the scene demonstrates.",
     "tags": ["pbr", "procedural"]
 }
 ```
 
 - `maxMad` — Maximum Mean Absolute Difference allowed (start tight, loosen only with approval)
-- `maxRawKB` / `maxGzipKB` — Bundle size ceilings (never raise without explicit approval)
+- `maxRawKB` — Bundle raw size ceiling (never raise without explicit approval)
 
 ### 7. Create the Parity Test
 

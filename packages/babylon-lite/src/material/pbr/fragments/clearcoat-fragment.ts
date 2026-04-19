@@ -18,6 +18,17 @@
  */
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
+import type { PbrExt } from "../pbr-flags.js";
+import {
+    PBR_HAS_CLEARCOAT,
+    PBR_HAS_METALLIC_REFLECTANCE_MAP,
+    PBR_HAS_REFLECTANCE_MAP,
+    PBR2_CC_INT_MAP,
+    PBR2_CC_ROUGH_MAP,
+    PBR2_CC_NORMAL_MAP,
+    PBR2_CC_F0_REMAP_OFF,
+} from "../pbr-flags.js";
 
 const CC_HELPERS = `
 fn visibility_Kelemen(VdotH_kl: f32) -> f32 {
@@ -168,16 +179,15 @@ color = attColor;
 `;
 }
 
-export function createClearcoatFragment(
-    hasIbl: boolean,
-    hasReflectance = false,
-    hasIntensityMap = false,
-    hasRoughnessMap = false,
-    hasNormalMap = false,
-    disableF0Remap = false,
-    hasSpecularAA = false,
-    hasBaseNormalMap = false
-): ShaderFragment {
+export function createClearcoatFragment(features: number, features2: number, hasIbl: boolean, hasBaseNormalMap: boolean, hasSpecularAA: boolean): ShaderFragment | null {
+    if ((features & PBR_HAS_CLEARCOAT) === 0) {
+        return null;
+    }
+    const hasReflectance = (features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) !== 0;
+    const hasIntensityMap = (features2 & PBR2_CC_INT_MAP) !== 0;
+    const hasRoughnessMap = (features2 & PBR2_CC_ROUGH_MAP) !== 0;
+    const hasNormalMap = (features2 & PBR2_CC_NORMAL_MAP) !== 0;
+    const disableF0Remap = (features2 & PBR2_CC_F0_REMAP_OFF) !== 0;
     const slots: Partial<Record<string, string>> = {
         MF: disableF0Remap ? "" : makeF0Remap(hasIntensityMap),
         AD: makeDirectMod(hasIntensityMap, hasRoughnessMap, hasNormalMap),
@@ -219,3 +229,78 @@ export function createClearcoatFragment(
         fragmentSlots: slots,
     };
 }
+
+/** Write the clearcoat material-UBO slice (ccParams + ccParams2). */
+export function writeClearcoatUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
+    const cc = material.clearCoat as ClearCoatProps | undefined;
+    if (!cc?.isEnabled || !offsets.has("ccParams")) {
+        return;
+    }
+    const off = offsets.get("ccParams")! / 4;
+    const ior = cc.indexOfRefraction ?? 1.5;
+    const a = 1 - ior;
+    const b = 1 + ior;
+    data[off] = cc.intensity ?? 1.0;
+    data[off + 1] = cc.roughness ?? 0.0;
+    data[off + 2] = cc.bumpTextureScale ?? 1.0;
+    data[off + 4] = Math.pow(-a / b, 2);
+    data[off + 5] = 1 / ior;
+    data[off + 6] = a;
+    data[off + 7] = b;
+}
+
+const CC_TEX: ReadonlyArray<readonly [number, "texture" | "roughnessTexture" | "bumpTexture"]> = [
+    [PBR2_CC_INT_MAP, "texture"],
+    [PBR2_CC_ROUGH_MAP, "roughnessTexture"],
+    [PBR2_CC_NORMAL_MAP, "bumpTexture"],
+];
+
+/** Clearcoat PBR extension (group 1, base-tex phase). */
+export const clearcoatExt: PbrExt = {
+    id: "clearcoat",
+    phase: "base-tex",
+    detect(mat) {
+        const cc = (mat as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        if (!cc?.isEnabled) {
+            return { f: 0, f2: 0 };
+        }
+        let f2 = 0;
+        for (const [flag, key] of CC_TEX) {
+            if (cc[key]) {
+                f2 |= flag;
+            }
+        }
+        if (cc.useF0Remap === false) {
+            f2 |= PBR2_CC_F0_REMAP_OFF;
+        }
+        return { f: PBR_HAS_CLEARCOAT, f2 };
+    },
+    frag: (ctx) => createClearcoatFragment(ctx.features, ctx.features2, ctx.hasIbl, ctx.hasAnyNormal, ctx.hasSpecularAA),
+    writeUbo: writeClearcoatUBO as PbrExt["writeUbo"],
+    bind(ctx, entries, b) {
+        const cc = (ctx.material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        if (!cc) {
+            return b;
+        }
+        for (const [flag, key] of CC_TEX) {
+            const tex = cc[key];
+            if ((ctx.features2 & flag) !== 0 && tex) {
+                entries.push({ binding: b++, resource: tex.view });
+                entries.push({ binding: b++, resource: tex.sampler });
+            }
+        }
+        return b;
+    },
+    textures(mat, t) {
+        const cc = (mat as PbrMaterialProps).clearCoat;
+        if (!cc) {
+            return;
+        }
+        for (const [, key] of CC_TEX) {
+            const tex = cc[key];
+            if (tex) {
+                t.push(tex);
+            }
+        }
+    },
+};

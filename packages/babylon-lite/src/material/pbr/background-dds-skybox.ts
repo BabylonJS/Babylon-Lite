@@ -5,6 +5,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
+import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { computeSceneSize, createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
@@ -55,7 +56,6 @@ export async function buildDdsSkyboxRenderable(
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────
 
 function createDdsMeshUBO(engine: EngineContextInternal, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
-    const device = engine.device;
     const data = new Float32Array(SKY_DDS_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];
@@ -63,12 +63,7 @@ function createDdsMeshUBO(engine: EngineContextInternal, world: Float32Array, pr
     data[18] = primaryColor[2];
     data[19] = exposureLinear;
     data[20] = contrast;
-    const buf = device.createBuffer({
-        size: SKY_DDS_UNIFORM_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(buf, 0, data);
-    return buf;
+    return createUniformBuffer(engine, data);
 }
 
 // ─── DDS Cube Texture Loader ─────────────────────────────────────────────────

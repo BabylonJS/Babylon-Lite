@@ -8,6 +8,7 @@ import { createPickingRay } from "./ray.js";
 import { mat4Invert } from "../math/mat4.js";
 import { getPickingPipeline, getPickingTIPipeline, getPickingSceneBGL, getPickingMeshBGL, getPickingTIMeshBGL } from "./picking-pipeline.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
+import { createEmptyUniformBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
 const _pickVP = new Float32Array(16);
@@ -82,7 +83,7 @@ function ensureTargets(engine: EngineContextInternal, picker: GpuPicker): PickTa
 function ensureSceneUbo(engine: EngineContextInternal, picker: GpuPicker): GPUBuffer {
     const device = engine.device;
     if (!picker._sceneUbo) {
-        picker._sceneUbo = device.createBuffer({ label: "pick-scene-ubo", size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        picker._sceneUbo = createEmptyUniformBuffer(engine, 64, "pick-scene-ubo");
         const sceneBGL = getPickingSceneBGL(engine);
         picker._sceneBG = device.createBindGroup({ label: "pick-scene-bg", layout: sceneBGL, entries: [{ binding: 0, resource: { buffer: picker._sceneUbo } }] });
     }
@@ -163,8 +164,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
 
         if (ti && ti.count > 0 && ti._gpuBuffer) {
             _tiUboScratch[0] = nextId;
-            const tiUbo = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-            device.queue.writeBuffer(tiUbo, 0, _tiUboScratch);
+            const tiUbo = createUniformBuffer(engine, _tiUboScratch);
             tempBuffers.push(tiUbo);
 
             pass.setPipeline(tiPipeline);
@@ -186,8 +186,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
         } else {
             _uboF32.set(mesh.worldMatrix);
             _uboU32[0] = nextId;
-            const meshUbo = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-            device.queue.writeBuffer(meshUbo, 0, _uboView);
+            const meshUbo = createUniformBuffer(engine, _uboView);
             tempBuffers.push(meshUbo);
 
             pass.setPipeline(regularPipeline);

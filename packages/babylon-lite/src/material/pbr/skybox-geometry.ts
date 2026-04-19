@@ -4,6 +4,7 @@
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Mat4 } from "../../math/types.js";
 import type { SceneContext } from "../../scene/scene.js";
+import { createMappedBuffer } from "../../resource/gpu-buffers.js";
 
 /** Skybox box geometry (24 verts, 36 indices — matches Babylon). */
 export function createSkyboxBuffers(engine: EngineContextInternal, S = 15): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
@@ -24,22 +25,10 @@ export function createSkyboxBuffers(engine: EngineContextInternal, S = 15): { po
   ]);
 
     return {
-        posBuffer: createBuf(engine, positions, GPUBufferUsage.VERTEX),
-        idxBuffer: createBuf(engine, indices, GPUBufferUsage.INDEX),
+        posBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
+        idxBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
         idxCount: 36,
     };
-}
-
-export function createBuf(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({
-        size: Math.max(data.byteLength, 4),
-        usage: usage | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Uint8Array(buf.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-    buf.unmap();
-    return buf;
 }
 
 /** Build an identity world matrix translated to rootPosition (no scaling). */

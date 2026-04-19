@@ -1,13 +1,25 @@
 /**
- * glTF PBR material assembly:
- * - Extracts material properties from glTF material definitions
- * - Resolves textures (baseColor, normal, ORM, emissive, specGloss)
+ * glTF core PBR material assembly:
+ * - Extracts core PBR properties (baseColor, MR, normal, ORM, emissive)
  * - Handles alpha modes and double-sided flag
- * - Supports KHR_materials_pbrSpecularGlossiness, _clearcoat, _sheen, _anisotropy extensions
+ *
+ * All KHR material extensions (clearcoat, sheen, anisotropy, spec-gloss, ...)
+ * are handled by separate `gltf-ext-*.ts` modules driven by the GltfFeature
+ * registry in load-gltf.ts. This core file knows ZERO extension names.
  */
+import type { Texture2D } from "../texture/texture-2d.js";
 import { resolveImage } from "./gltf-parser.js";
 
-/** Parsed PBR material data. */
+/** Per-load context handed to each material extension's `applyMaterial()`. */
+export interface GltfMatExtCtx {
+    /** Fetch + upload a texture from a glTF textureInfo object.
+     *  Returns undefined if texInfo is null/undefined. */
+    texture(texInfo: unknown, sRGB: boolean): Promise<Texture2D | undefined>;
+    /** Upload an arbitrary ImageBitmap (e.g. composited bitmap from an ext). */
+    uploadImage(bitmap: ImageBitmap, sRGB: boolean): Texture2D;
+}
+
+/** Parsed core PBR material data. */
 export interface GltfMaterialData {
     baseColorFactor: [number, number, number, number];
     metallicFactor: number;
@@ -18,29 +30,22 @@ export interface GltfMaterialData {
     normalImage: ImageBitmap | null;
     occlusionImage: ImageBitmap | null;
     emissiveImage: ImageBitmap | null;
-    /** KHR_materials_pbrSpecularGlossiness: specular+glossiness texture. */
-    specGlossImage: ImageBitmap | null;
     /** Whether material is double-sided. */
     doubleSided: boolean;
     /** glTF alphaMode: "OPAQUE" (default), "BLEND", or "MASK". */
     alphaMode: string;
     /** glTF alphaCutoff for MASK mode (default 0.5). */
     alphaCutoff: number;
-    /** KHR_materials_clearcoat intensity map (R channel). */
-    clearcoatImage?: ImageBitmap | null;
-    /** KHR_materials_clearcoat roughness map (G channel). */
-    clearcoatRoughnessImage?: ImageBitmap | null;
-    /** KHR_materials_clearcoat normal map (tangent-space). */
-    clearcoatNormalImage?: ImageBitmap | null;
-    /** Raw KHR_materials_clearcoat extension object (undefined when absent). */
-    clearcoat?: any;
-    /** Raw KHR_materials_sheen extension object (factor-only; texture not loaded). */
-    sheen?: any;
-    /** Raw KHR_materials_anisotropy extension object. */
-    anisotropy?: any;
+    /** Raw glTF material definition. Always set so ext modules can read raw
+     *  extension data + KHR_texture_transform from texture infos. */
+    _rawMatDef?: any;
 }
 
-/** Assemble a PBR material from a glTF material definition. */
+/** Assemble core PBR material data from a glTF material definition.
+ *
+ *  Per-material extension parsing/fetching is handled by load-gltf.ts using
+ *  the GltfMatExt registry — this function only fills in the spec-baseline
+ *  PBR properties shared by every material. */
 export async function assembleMaterial(
     json: any,
     binChunk: DataView,
@@ -60,7 +65,6 @@ export async function assembleMaterial(
             normalImage: null,
             occlusionImage: null,
             emissiveImage: null,
-            specGlossImage: null,
             doubleSided: false,
             alphaMode: "OPAQUE",
             alphaCutoff: 0.5,
@@ -68,10 +72,38 @@ export async function assembleMaterial(
     }
 
     const pbr = mat.pbrMetallicRoughness ?? {};
-    const exts = mat.extensions;
-    const specGlossExt = exts?.KHR_materials_pbrSpecularGlossiness;
+    const fetchImg = makeImageFetcher(json, binChunk, baseUrl, imageCache);
 
-    const getTexImage = (texInfo: any): Promise<ImageBitmap | null> => {
+    const [baseColorImg, mrImg, normalImg, occlusionImg, emissiveImg] = await Promise.all([
+        fetchImg(pbr.baseColorTexture),
+        fetchImg(pbr.metallicRoughnessTexture),
+        fetchImg(mat.normalTexture),
+        fetchImg(mat.occlusionTexture),
+        fetchImg(mat.emissiveTexture),
+    ]);
+
+    return {
+        baseColorFactor: pbr.baseColorFactor ?? [1, 1, 1, 1],
+        metallicFactor: pbr.metallicFactor ?? 1,
+        roughnessFactor: pbr.roughnessFactor ?? 1,
+        emissiveFactor: mat.emissiveFactor ?? [0, 0, 0],
+        baseColorImage: baseColorImg,
+        metallicRoughnessImage: mrImg,
+        normalImage: normalImg,
+        occlusionImage: occlusionImg,
+        emissiveImage: emissiveImg,
+        doubleSided: !!mat.doubleSided,
+        alphaMode: mat.alphaMode ?? "OPAQUE",
+        alphaCutoff: mat.alphaCutoff ?? 0.5,
+        _rawMatDef: mat,
+    };
+}
+
+/** Build a per-load image fetcher that decodes glTF texture references via
+ *  the shared image cache. Used by both core assembleMaterial and the ext
+ *  driver in load-gltf.ts. */
+export function makeImageFetcher(json: any, binChunk: DataView, baseUrl: string, imageCache?: Map<number, Promise<ImageBitmap>>): (texInfo: any) => Promise<ImageBitmap | null> {
+    return (texInfo: any): Promise<ImageBitmap | null> => {
         if (!texInfo) {
             return Promise.resolve(null);
         }
@@ -87,46 +119,4 @@ export async function assembleMaterial(
         }
         return resolveImage(json, binChunk, imgIdx, baseUrl);
     };
-
-    // If spec-gloss extension present, use its diffuseTexture as baseColor
-    const baseColorTexInfo = specGlossExt?.diffuseTexture ?? pbr.baseColorTexture;
-    const specGlossTexInfo = specGlossExt?.specularGlossinessTexture ?? null;
-
-    const [baseColorImg, mrImg, normalImg, occlusionImg, emissiveImg, specGlossImg, ccImg, ccRoughImg, ccNormImg] = await Promise.all([
-        getTexImage(baseColorTexInfo),
-        getTexImage(pbr.metallicRoughnessTexture),
-        getTexImage(mat.normalTexture),
-        getTexImage(mat.occlusionTexture),
-        getTexImage(mat.emissiveTexture),
-        getTexImage(specGlossTexInfo),
-        getTexImage(exts?.KHR_materials_clearcoat?.clearcoatTexture),
-        getTexImage(exts?.KHR_materials_clearcoat?.clearcoatRoughnessTexture),
-        getTexImage(exts?.KHR_materials_clearcoat?.clearcoatNormalTexture),
-    ]);
-
-    return {
-        baseColorFactor: specGlossExt?.diffuseFactor ?? pbr.baseColorFactor ?? [1, 1, 1, 1],
-        metallicFactor: pbr.metallicFactor ?? 1,
-        roughnessFactor: pbr.roughnessFactor ?? 1,
-        emissiveFactor: mat.emissiveFactor ?? [0, 0, 0],
-        baseColorImage: baseColorImg,
-        metallicRoughnessImage: mrImg,
-        normalImage: normalImg,
-        occlusionImage: occlusionImg,
-        emissiveImage: emissiveImg,
-        specGlossImage: specGlossImg,
-        doubleSided: !!mat.doubleSided,
-        alphaMode: mat.alphaMode ?? "OPAQUE",
-        alphaCutoff: mat.alphaCutoff ?? 0.5,
-        clearcoat: exts?.KHR_materials_clearcoat,
-        clearcoatImage: ccImg,
-        clearcoatRoughnessImage: ccRoughImg,
-        clearcoatNormalImage: ccNormImg,
-        sheen: exts?.KHR_materials_sheen,
-        anisotropy: exts?.KHR_materials_anisotropy,
-    };
 }
-
-/** Build optional PBR layer props (clearcoat / sheen / anisotropy) from parsed glTF
- *  extension data. Returns a partial PbrMaterialProps to spread onto the built material.
- *  Defined in gltf-material-layers.ts (dynamically imported when needed). */

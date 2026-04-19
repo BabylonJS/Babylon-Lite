@@ -5,6 +5,7 @@
 
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
+import { createSingleUniformBGL } from "../shader/bgl-helpers.js";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
 
@@ -19,10 +20,7 @@ export function getSceneBindGroupLayout(engine: EngineContextInternal): GPUBindG
         return _cachedSceneBGL;
     }
     _cachedDevice = device;
-    _cachedSceneBGL = device.createBindGroupLayout({
-        label: "scene",
-        entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
-    });
+    _cachedSceneBGL = createSingleUniformBGL(engine, "scene", GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT);
     return _cachedSceneBGL;
 }
 

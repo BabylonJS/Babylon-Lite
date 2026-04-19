@@ -208,9 +208,9 @@ PERF_WARMUP=120 PERF_FRAMES=500 pnpm test:perf-cloud
 
 Two complementary checks:
 
-1. **Ceiling checks** — each scene bundle must stay under `maxRawKB` /
-   `maxGzipKB` defined in `scene-config.json`
-2. **Delta checks** — compares current bundle sizes against a committed
+1. **Ceiling checks** — each scene bundle must stay under `maxRawKB`
+   defined in `scene-config.json` (gzip size is shown for reference but not enforced)
+2. **Delta checks** — compares current bundle raw sizes against a committed
    baseline (`baselines/bundle-size.json`), fails if any scene grows beyond a
    threshold
 
@@ -323,14 +323,13 @@ entry specifies:
     "name": "BoomBox",
     "maxMad": 1.5,
     "maxRegionMad": 3.0,
-    "maxRawKB": 200,
-    "maxGzipKB": 80
+    "maxRawKB": 200
 }
 ```
 
 - `maxMad` — parity MAD threshold (whole image)
 - `maxRegionMad` — parity MAD threshold (focus region, if defined)
-- `maxRawKB` / `maxGzipKB` — bundle size ceilings
+- `maxRawKB` — bundle raw size ceiling (gzip is informational only)
 
 ---
 

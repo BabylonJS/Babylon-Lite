@@ -2,6 +2,7 @@
  *  Plain data (no scene reference). The scene collects meshes via addToScene(). */
 
 import type { EngineContextInternal } from "../engine/engine.js";
+import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { mat4Compose, mat4Identity } from "../math/mat4.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
@@ -124,14 +125,14 @@ export function uploadMeshToGPU(
     uvs2?: Float32Array
 ): MeshGPU {
     const device = engine.device;
-    const positionBuffer = createGpuBuffer(engine, positions, GPUBufferUsage.VERTEX);
-    const normalBuffer = createGpuBuffer(engine, normals, GPUBufferUsage.VERTEX);
-    const indexBuffer = createGpuBuffer(engine, indices, GPUBufferUsage.INDEX);
+    const positionBuffer = createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX);
+    const normalBuffer = createMappedBuffer(engine, normals, GPUBufferUsage.VERTEX);
+    const indexBuffer = createMappedBuffer(engine, indices, GPUBufferUsage.INDEX);
 
     // UVs: use provided or create zero-filled buffer
     let uvBuffer: GPUBuffer;
     if (uvs && uvs.length > 0) {
-        uvBuffer = createGpuBuffer(engine, uvs, GPUBufferUsage.VERTEX);
+        uvBuffer = createMappedBuffer(engine, uvs, GPUBufferUsage.VERTEX);
     } else {
         uvBuffer = device.createBuffer({
             size: (positions.length / 3) * 8,
@@ -144,7 +145,7 @@ export function uploadMeshToGPU(
     // UV2: only create if provided
     let uv2Buffer: GPUBuffer | null = null;
     if (uvs2 && uvs2.length > 0) {
-        uv2Buffer = createGpuBuffer(engine, uvs2, GPUBufferUsage.VERTEX);
+        uv2Buffer = createMappedBuffer(engine, uvs2, GPUBufferUsage.VERTEX);
     }
 
     return {
@@ -156,12 +157,4 @@ export function uploadMeshToGPU(
         indexCount: indices.length,
         indexFormat: "uint32",
     };
-}
-
-function createGpuBuffer(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST, mappedAtCreation: true });
-    new Uint8Array(buf.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-    buf.unmap();
-    return buf;
 }

@@ -109,7 +109,7 @@ stages:
                   env:
                       SKIP_BJS: "true"
 
-                # Absolute ceiling checks (scene-config.json maxRawKB/maxGzipKB)
+                # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
                   env:

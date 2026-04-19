@@ -8,6 +8,7 @@
 
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { SkeletonData } from "../animation/types.js";
+import { createMappedBuffer } from "../resource/gpu-buffers.js";
 
 /** Create skeleton GPU data from parsed glTF skin.
  *  @param engine   Engine context (provides GPUDevice)
@@ -43,8 +44,8 @@ export function createSkeleton(
         joints32[i] = joints[i]!;
     }
 
-    const jointsBuffer = createVertexBuffer(engine, joints32);
-    const weightsBuffer = createVertexBuffer(engine, weights);
+    const jointsBuffer = createMappedBuffer(engine, joints32, GPUBufferUsage.VERTEX);
+    const weightsBuffer = createMappedBuffer(engine, weights, GPUBufferUsage.VERTEX);
 
     let joints1Buffer: GPUBuffer | null = null;
     let weights1Buffer: GPUBuffer | null = null;
@@ -53,21 +54,9 @@ export function createSkeleton(
         for (let i = 0; i < joints1.length; i++) {
             joints132[i] = joints1[i]!;
         }
-        joints1Buffer = createVertexBuffer(engine, joints132);
-        weights1Buffer = createVertexBuffer(engine, weights1);
+        joints1Buffer = createMappedBuffer(engine, joints132, GPUBufferUsage.VERTEX);
+        weights1Buffer = createMappedBuffer(engine, weights1, GPUBufferUsage.VERTEX);
     }
 
     return { boneTexture, boneCount, jointsBuffer, weightsBuffer, joints1Buffer, weights1Buffer };
-}
-
-function createVertexBuffer(engine: EngineContextInternal, data: ArrayBufferView): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({
-        size: Math.max(data.byteLength, 4),
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Uint8Array(buf.getMappedRange()).set(new Uint8Array(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength));
-    buf.unmap();
-    return buf;
 }

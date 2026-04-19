@@ -95,7 +95,8 @@ scene.fog = { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.8
 | Babylon.js | Babylon Lite |
 |---|---|
 | `new BABYLON.ArcRotateCamera("cam", alpha, beta, radius, target, scene)` | `createArcRotateCamera(alpha, beta, radius, target)` |
-| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas)` |
+| `new BABYLON.FreeCamera("cam", position, scene)` | `createFreeCamera(position, target)` |
+| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas)` *(arc-rotate)* or `attachFreeControl(camera, canvas)` *(free)* |
 | `scene.createDefaultCamera(true, true, true)` | `createDefaultCamera(scene)` |
 | `camera.target = new BABYLON.Vector3(x,y,z)` | `camera.target = { x, y, z }` |
 | `camera.minZ = 0.1` | `camera.minZ = 0.1` *(same)* |
@@ -128,6 +129,7 @@ attachControl(camera, canvas);
 | `new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0,1,0), scene)` | `createHemisphericLight([0,1,0], intensity)` |
 | `new BABYLON.DirectionalLight("light", new BABYLON.Vector3(x,y,z), scene)` | `createDirectionalLight([x,y,z], intensity)` |
 | `new BABYLON.PointLight("light", new BABYLON.Vector3(x,y,z), scene)` | `createPointLight([x,y,z], intensity)` |
+| `new BABYLON.SpotLight("light", pos, dir, angle, exponent, scene)` | `createSpotLight(pos, dir, angle, exponent)` |
 | `light.intensity = 0.7` | Pass as second arg, or set `light.intensity = 0.7` |
 | `light.diffuse = new BABYLON.Color3(r,g,b)` | `light.diffuse = [r, g, b]` |
 | `light.specular = new BABYLON.Color3(r,g,b)` | `light.specular = [r, g, b]` |
@@ -238,6 +240,7 @@ material creation is rarely needed.
 | `new BABYLON.Texture(url, scene)` | `await loadTexture2D(engine.device, url)` |
 | `new BABYLON.Texture(url, scene, noMipmap, invertY)` | `await loadTexture2D(engine.device, url, { mipMaps: !noMipmap, invertY })` |
 | `new BABYLON.CubeTexture(baseUrl, scene, extensions)` | `await loadSkybox(scene, baseUrl, ext)` |
+| KTX2 compressed texture loader | `await loadKtxTexture2D(engine, baseUrl, suffixes)` *(auto-selects ASTC/BC/ETC2)* |
 
 **Key differences**:
 - Texture loading is always **async** (explicit `await`).
@@ -432,6 +435,29 @@ await loadSkybox(scene, 'textures/skybox', '.jpg');
 
 ---
 
+## Supported glTF / PBR Extensions
+
+Babylon Lite's glTF loader and PBR material understand these advanced features. All are
+tree-shakable — scenes that don't use a given extension pay no bundle cost for it.
+
+| Feature | Support | How to use |
+|---|---|---|
+| `KHR_materials_pbrSpecularGlossiness` | ✅ | Auto-detected by `loadGltf()` |
+| `KHR_materials_clearcoat` | ✅ | Auto-detected; or manual `createPbrMaterial({ clearCoat: { ... } })` |
+| `KHR_materials_sheen` | ✅ | Auto-detected; or manual `createPbrMaterial({ sheen: { ... } })` |
+| `KHR_materials_anisotropy` | ✅ | Auto-detected; or manual `createPbrMaterial({ anisotropy: { ... } })` |
+| `KHR_materials_variants` | ✅ | Use `selectVariant(scene, name)` / `getVariantNames(scene)` / `resetVariant(scene)` |
+| `KHR_texture_transform` | ✅ | Auto-resolved at load time (material-wide UV transform) |
+| Subsurface translucency / thickness map | ✅ | Manual `createPbrMaterial({ subsurface: { translucency: { ... }, thickness: { ... } } })` |
+| Specular anti-aliasing | ✅ | `createPbrMaterial({ enableSpecularAA: true })` (auto-on for glTF) |
+| Morph targets | ✅ | Auto-detected by `loadGltf()` (PBR pipeline only) |
+| Skeletal animation | ✅ | Auto-detected; `createAnimationController(scene)` to drive |
+| Compressed cube/env (DDS/HDR/.env) | ✅ | `loadEnvironment(scene, url)`; HDR via `loadHdrEnvironment(scene, url)` |
+| Compressed 2D (KTX1/KTX2 ASTC/BC/ETC2) | ✅ | `loadKtxTexture2D(engine, baseUrl, suffixes)` |
+| GPU picking | ✅ | `createGpuPicker()` / `pickAsync()` — see picking docs |
+
+---
+
 ## Things That Do NOT Exist in Babylon Lite
 
 These Babylon.js features are **not available**. If the source code uses them, note them
@@ -440,23 +466,24 @@ as unsupported and omit them (or suggest the closest alternative):
 | Feature | Status | Alternative |
 |---|---|---|
 | WebGL rendering | ❌ Not supported | WebGPU only |
-| `FreeCamera`, `UniversalCamera`, `FollowCamera` | ❌ | Use `createArcRotateCamera` |
+| `UniversalCamera`, `FollowCamera` | ❌ | Use `createFreeCamera` or `createArcRotateCamera` |
 | `NodeMaterial` | ❌ | Use `createPbrMaterial` or `createStandardMaterial` |
 | `ShaderMaterial` | ❌ | Not available |
 | `GUI` (2D/3D) | ❌ | Not available |
 | Physics engines | ❌ | Not available |
 | Particles | ❌ | Not available |
-| Post-processing pipeline | ❌ | Tone mapping built into PBR material |
-| `ActionManager` / `Observable` | ❌ | Use standard DOM events |
-| `scene.onBeforeRenderObservable` | ❌ | Use `onBeforeRender(scene, callback)` |
+| Post-processing pipeline | ❌ | Tone mapping + image processing built into PBR material |
+| `ActionManager` | ❌ | Use standard DOM events |
+| `scene.onBeforeRenderObservable.add(fn)` | ✅ | `onBeforeRender(scene, callback)` |
 | `AssetContainer` | ✅ | Returned by `loadGltf` |
 | Multiple scenes | ❌ | One scene per engine |
-| Multiple cameras | ❌ | One active camera |
-| Spot lights | ❌ | Use directional or point lights |
+| Multiple cameras | ❌ | One active camera (`scene.camera`) |
 | Area lights | ❌ | Not available |
 | `Color3.FromHexString()` etc. | ❌ | Convert manually: `[r/255, g/255, b/255]` |
-| `.obj`, `.stl` loaders | ❌ | Only glTF/GLB supported |
+| `.obj`, `.stl` loaders | ❌ | Only glTF/GLB and `.babylon` supported |
 | Sprites, layers, lens effects | ❌ | Not available |
+| Screen-space subsurface scattering (SSS PrePass) | ❌ | Subsurface translucency via BRDF is supported; PrePass SSS is not yet implemented |
+| Morph targets on `StandardMaterial` | ❌ | Morph targets work only on PBR meshes |
 
 ---
 

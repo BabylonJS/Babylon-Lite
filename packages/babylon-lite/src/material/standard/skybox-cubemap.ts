@@ -11,8 +11,7 @@ import skyVertSrc from "../../../shaders/skybox-cubemap.vertex.wgsl?raw";
 import skyFragSrc from "../../../shaders/skybox-cubemap.fragment.wgsl?raw";
 import { getSceneBindGroupLayout, createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
 import { WGSL_SCENE_UNIFORMS_STD, WGSL_FOG } from "../../shader/wgsl-helpers.js";
-
-const MESH_UBO_SIZE = 64;
+import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 
 export interface SkyboxCubeMapGPU {
     pipeline: GPURenderPipeline;
@@ -67,11 +66,7 @@ export function buildSkyboxCubeMapGPU(
         })
     );
 
-    const meshUBO = device.createBuffer({
-        size: MESH_UBO_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(meshUBO, 0, worldMatrix as Float32Array<ArrayBuffer>);
+    const meshUBO = createUniformBuffer(engine, worldMatrix as Float32Array);
 
     const sceneBindGroup = device.createBindGroup({
         layout: sceneBindGroupLayout,

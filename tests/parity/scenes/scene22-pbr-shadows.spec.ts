@@ -24,6 +24,9 @@ test("Scene 22 — PBR Shadows matches Babylon.js reference", async ({ page }, t
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 
+    // Hide interactive UI buttons so they don't leak into the canvas screenshot.
+    await page.addStyleTag({ content: "button { display: none !important; }" });
+
     const screenshotPath = path.join(REFERENCE_DIR, "test-actual.png");
     await page.locator("canvas").screenshot({ path: screenshotPath });
 

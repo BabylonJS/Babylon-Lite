@@ -10,6 +10,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "./mesh.js";
 import type { MeshInternal } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
+import { computeAabb } from "../math/aabb.js";
 import { createSphereData } from "./create-sphere.js";
 import type { SphereOptions } from "./create-sphere.js";
 import { createBoxData } from "./create-box.js";
@@ -21,41 +22,13 @@ import type { GroundOptions } from "./create-ground.js";
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
 function createMeshFromData(engine: EngineContextInternal, name: string, positions: Float32Array, normals: Float32Array, indices: Uint32Array, uvs?: Float32Array): Mesh {
-    let minX = Infinity,
-        minY = Infinity,
-        minZ = Infinity;
-    let maxX = -Infinity,
-        maxY = -Infinity,
-        maxZ = -Infinity;
-    for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i]!,
-            y = positions[i + 1]!,
-            z = positions[i + 2]!;
-        if (x < minX) {
-            minX = x;
-        }
-        if (x > maxX) {
-            maxX = x;
-        }
-        if (y < minY) {
-            minY = y;
-        }
-        if (y > maxY) {
-            maxY = y;
-        }
-        if (z < minZ) {
-            minZ = z;
-        }
-        if (z > maxZ) {
-            maxZ = z;
-        }
-    }
+    const [min, max] = computeAabb(positions);
     const mesh = {
         name,
         material: null as any,
         receiveShadows: false,
-        boundMin: isFinite(minX) ? ([minX, minY, minZ] as [number, number, number]) : undefined,
-        boundMax: isFinite(maxX) ? ([maxX, maxY, maxZ] as [number, number, number]) : undefined,
+        boundMin: isFinite(min[0]) ? min : undefined,
+        boundMax: isFinite(max[0]) ? max : undefined,
         _materialDirty: false,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs),
     } as unknown as MeshInternal;

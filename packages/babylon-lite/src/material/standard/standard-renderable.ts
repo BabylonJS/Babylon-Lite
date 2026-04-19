@@ -27,20 +27,10 @@ import {
     NEEDS_UV,
     NEEDS_UV2,
     RECEIVE_SHADOWS,
-    HAS_OPACITY_TEXTURE,
     THIN_INSTANCES,
     THIN_INSTANCE_COLOR,
-    HAS_BUMP_TEXTURE,
-    HAS_EMISSIVE_TEXTURE,
-    HAS_SPECULAR_TEXTURE,
-    HAS_AMBIENT_TEXTURE,
-    HAS_LIGHTMAP_TEXTURE,
-    HAS_REFLECTION_TEXTURE,
-    HAS_CUBE_REFLECTION,
-    LIGHTMAP_USES_UV2,
-    AMBIENT_USES_UV2,
-    SPECULAR_USES_UV2,
-    OPACITY_FROM_RGB,
+    HAS_OPACITY_TEXTURE,
+    _getStdExts,
     writeStdMaterialData,
 } from "./standard-pipeline.js";
 import { computeLightsVersion } from "../../render/lights-ubo.js";
@@ -70,15 +60,7 @@ type ThinInstanceSync = (engine: EngineContextInternal, ti: any, pass: GPURender
 export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
-    bumpFragment?: () => ShaderFragment;
     shadowFragment?: (shadowLights: import("./fragments/std-shadow-fragment.js").ShadowLightSlot[]) => ShaderFragment;
-    emissiveFragment?: () => ShaderFragment;
-    specularFragment?: (usesUV2: boolean) => ShaderFragment;
-    ambientFragment?: (usesUV2: boolean) => ShaderFragment;
-    lightmapFragment?: (usesUV2: boolean) => ShaderFragment;
-    opacityFragment?: (fromRGB: boolean) => ShaderFragment;
-    reflectionFragment?: () => ShaderFragment;
-    cubeReflectionFragment?: () => ShaderFragment;
 }
 
 /** Build Renderable(s) + a SceneUniformUpdater for a set of standard meshes.
@@ -120,19 +102,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         return lightsUBOs[m]!;
     }
 
-    const {
-        tiSync,
-        tiFragment: tiFragmentFactory,
-        bumpFragment: bumpFragmentFactory,
-        shadowFragment: shadowFragmentFactory,
-        emissiveFragment: emissiveFragmentFactory,
-        specularFragment: specularFragmentFactory,
-        ambientFragment: ambientFragmentFactory,
-        lightmapFragment: lightmapFragmentFactory,
-        opacityFragment: opacityFragmentFactory,
-        reflectionFragment: reflectionFragmentFactory,
-        cubeReflectionFragment: cubeReflectionFragmentFactory,
-    } = factories;
+    const { tiSync, tiFragment: tiFragmentFactory, shadowFragment: shadowFragmentFactory } = factories;
+
+    const exts = _getStdExts();
 
     // Group meshes by feature bitmask
     const groups = new Map<number, PipelineGroup>();
@@ -150,33 +122,17 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         if (!group) {
             // Build fragments for this feature set
             const frags: ShaderFragment[] = [];
-            if (features & HAS_BUMP_TEXTURE && bumpFragmentFactory) {
-                frags.push(bumpFragmentFactory());
+            for (const ext of exts.values()) {
+                if (features & ext.feature) {
+                    const f = ext.frag(features);
+                    if (f) {
+                        frags.push(f);
+                    }
+                }
             }
             if (features & RECEIVE_SHADOWS && shadowFragmentFactory && hasSomeShadows) {
                 const slots = shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
                 frags.push(shadowFragmentFactory(slots));
-            }
-            if (features & HAS_EMISSIVE_TEXTURE && emissiveFragmentFactory) {
-                frags.push(emissiveFragmentFactory());
-            }
-            if (features & HAS_SPECULAR_TEXTURE && specularFragmentFactory) {
-                frags.push(specularFragmentFactory(!!(features & SPECULAR_USES_UV2)));
-            }
-            if (features & HAS_AMBIENT_TEXTURE && ambientFragmentFactory) {
-                frags.push(ambientFragmentFactory(!!(features & AMBIENT_USES_UV2)));
-            }
-            if (features & HAS_LIGHTMAP_TEXTURE && lightmapFragmentFactory) {
-                frags.push(lightmapFragmentFactory(!!(features & LIGHTMAP_USES_UV2)));
-            }
-            if (features & HAS_OPACITY_TEXTURE && opacityFragmentFactory) {
-                frags.push(opacityFragmentFactory(!!(features & OPACITY_FROM_RGB)));
-            }
-            if (features & HAS_REFLECTION_TEXTURE && reflectionFragmentFactory) {
-                frags.push(reflectionFragmentFactory());
-            }
-            if (features & HAS_CUBE_REFLECTION && cubeReflectionFragmentFactory) {
-                frags.push(cubeReflectionFragmentFactory());
             }
             if (features & THIN_INSTANCES && tiFragmentFactory) {
                 const hasColor = !!(features & THIN_INSTANCE_COLOR);

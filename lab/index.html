@@ -125,6 +125,7 @@
                 text-decoration: none;
                 color: inherit;
                 display: block;
+                position: relative;
             }
             .card:hover {
                 border-color: #58a6ff;
@@ -179,6 +180,36 @@
                 font-size: 0.8rem;
                 color: #8b949e;
                 line-height: 1.4;
+            }
+            .card-note {
+                position: absolute;
+                left: 0.5rem;
+                right: 0.5rem;
+                bottom: 0.5rem;
+                display: flex;
+                gap: 0.4rem;
+                align-items: flex-start;
+                padding: 0.45rem 0.55rem;
+                background: rgba(61, 46, 0, 0.92);
+                border: 1px solid #7a5a00;
+                border-radius: 4px;
+                font-size: 0.72rem;
+                line-height: 1.35;
+                color: #f5c849;
+                backdrop-filter: blur(4px);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+                z-index: 2;
+                pointer-events: auto;
+            }
+            .card-note::before {
+                content: "\26A0";
+                flex-shrink: 0;
+                font-size: 0.85rem;
+                line-height: 1;
+                margin-top: 0.1rem;
+            }
+            .card-image {
+                position: relative;
             }
             .badge {
                 display: inline-block;
@@ -1454,7 +1485,7 @@
                         </div>
                         <div class="arch-mod arch-mod-loader">
                             <div class="arch-mod-name">Loaders</div>
-                            <div class="arch-mod-sub">glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KHR_materials_variants</div>
+                            <div class="arch-mod-sub">glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KHR_materials_variants · _clearcoat · _sheen · _anisotropy · _texture_transform</div>
                         </div>
                         <div class="arch-mod arch-mod-anim">
                             <div class="arch-mod-name">Animation</div>
@@ -2296,27 +2327,27 @@
                         </tr>
                         <tr>
                             <td>KHR_materials_clearcoat</td>
-                            <td>⚡</td>
                             <td>✅</td>
-                            <td>Shader supports clearcoat (Scene 19); glTF loader wiring pending</td>
+                            <td>✅</td>
+                            <td>Scene 28 — glTF loader auto-wires clearcoat + roughness + normal textures</td>
                         </tr>
                         <tr>
                             <td>KHR_materials_sheen</td>
-                            <td>⚡</td>
                             <td>✅</td>
-                            <td>Shader supports sheen (Scene 21); glTF loader wiring pending</td>
+                            <td>✅</td>
+                            <td>Scene 29 — glTF loader with BJS-spec albedo scaling</td>
                         </tr>
                         <tr>
                             <td>KHR_materials_anisotropy</td>
-                            <td>⚡</td>
                             <td>✅</td>
-                            <td>Shader supports anisotropy (Scene 23); glTF loader wiring pending</td>
+                            <td>✅</td>
+                            <td>glTF loader auto-wires strength + rotation (manual API: Scene 23)</td>
                         </tr>
                         <tr>
                             <td>KHR_materials_volume</td>
                             <td>⚡</td>
                             <td>✅</td>
-                            <td>Shader supports subsurface thickness (Scene 26); glTF loader wiring pending</td>
+                            <td>Subsurface translucency + thickness via manual API (Scene 26); glTF loader wiring pending</td>
                         </tr>
                         <tr>
                             <td>KHR_materials_transmission</td>
@@ -2362,9 +2393,9 @@
                         </tr>
                         <tr>
                             <td>KHR_texture_transform</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>UV offset / scale / rotate per texture</td>
+                            <td>✅</td>
+                            <td>Material-wide UV offset / scale / rotate resolved at load (Scene 29)</td>
                         </tr>
                         <tr>
                             <td>KHR_texture_basisu</td>
@@ -2898,7 +2929,10 @@
                 var grid = document.getElementById("source-grid");
                 grid.innerHTML = config.map(function(s) {
                     return '<a class="card" href="/scene' + s.id + '.html" data-tags="' + s.tags.join(" ") + '">' +
+                        '<div class="card-image">' +
                         '<img src="/reference/' + s.slug + '/test-actual.png" alt="' + s.name + '" />' +
+                        renderNote(s) +
+                        '</div>' +
                         '<div class="card-body">' +
                         '<h2>' + s.name +
                         ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/babylon-ref-scene' + s.id + '.html\',\'_blank\');">\u25b6 BJS Ref</span>' +
@@ -2910,6 +2944,11 @@
                 renderFilterPills("source-filter-pills", "toggleSourceTag");
             }
 
+            function renderNote(s) {
+                if (!s.note) return "";
+                return '<div class="card-note" title="' + s.note.replace(/"/g, "&quot;") + '">' + s.note + '</div>';
+            }
+
             function initBundleGrid(config) {
                 var grid = document.getElementById("bundle-grid");
                 grid.innerHTML = config.map(function(s) {
@@ -2919,7 +2958,9 @@
                         '<div class="card-overlay">' +
                         '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' + s.id + '\');" title="Show .ts files contributing to this bundle">\ud83d\udcc4 Files</span>' +
                         '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/bundle-bjs-scene' + s.id + '.html\',\'_blank\');" title="Open Babylon.js reference">\u25b6 BJS Ref</span>' +
-                        '</div></div>' +
+                        '</div>' +
+                        renderNote(s) +
+                        '</div>' +
                         '<div class="card-body">' +
                         '<h2>' + s.name + '</h2>' +
                         '<p>' + s.description + '</p>' +
@@ -3149,16 +3190,14 @@
                                 '<span><span class="size-value">' + sizes.rawKB + '</span> KB min</span>' +
                                 '<span class="size-gzip">' + sizes.gzipKB + ' KB gzip</span></div>';
                             var cfg = (window.SCENE_CONFIG || []).find(function(c) { return "scene" + c.id === scene; });
-                            if (cfg && cfg.maxRawKB != null && cfg.maxGzipKB != null) {
+                            if (cfg && cfg.maxRawKB != null) {
                                 var rawHead = cfg.maxRawKB - sizes.rawKB;
-                                var gzHead = cfg.maxGzipKB - sizes.gzipKB;
-                                var lowCls = (rawHead < 0 || gzHead < 0) ? " low" : "";
+                                var lowCls = (rawHead < 0) ? " low" : "";
                                 html +=
                                     '<div class="size-row"><span class="size-label size-label-ceil">Ceil</span>' +
                                     '<span><span class="size-value">' + cfg.maxRawKB + '</span> KB max</span>' +
-                                    '<span class="size-gzip">' + cfg.maxGzipKB + ' KB gzip</span>' +
                                     '<span class="size-headroom' + lowCls + '" title="Headroom before ceiling">+' +
-                                    rawHead.toFixed(1) + '/' + gzHead.toFixed(1) + ' KB</span></div>';
+                                    rawHead.toFixed(1) + ' KB</span></div>';
                             }
                             if (sizes.bjsRawKB != null) {
                                 bjsCount++;
@@ -3172,9 +3211,8 @@
                             card.innerHTML = html;
                             card.closest('.card').dataset.rawKb = sizes.rawKB;
                             card.closest('.card').dataset.gzipKb = sizes.gzipKB;
-                            if (cfg && cfg.maxRawKB != null && cfg.maxGzipKB != null) {
+                            if (cfg && cfg.maxRawKB != null) {
                                 card.closest('.card').dataset.maxRawKb = cfg.maxRawKB;
-                                card.closest('.card').dataset.maxGzipKb = cfg.maxGzipKB;
                             }
                         }
                         // Re-apply stored sort now that size data is available

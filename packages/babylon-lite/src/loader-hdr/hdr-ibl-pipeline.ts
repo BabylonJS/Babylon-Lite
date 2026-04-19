@@ -8,6 +8,7 @@
 import type { HdrImage } from "./hdr-parser.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { createUniformBuffer, createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?raw";
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";
 import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
@@ -45,8 +46,7 @@ export function equirectToCubemapGPU(engine: EngineContextInternal, hdr: HdrImag
         layout: "auto",
         compute: { module, entryPoint: "main" },
     });
-    const paramBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(paramBuf, 0, new Uint32Array([faceSize, hdr.width, hdr.height, 0]));
+    const paramBuf = createUniformBuffer(engine, new Uint32Array([faceSize, hdr.width, hdr.height, 0]));
 
     const bg = device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
@@ -89,7 +89,7 @@ export function prefilterCubemapGPU(engine: EngineContextInternal, srcCube: GPUT
         compute: { module: device.createShaderModule({ code: prefilterCubeWGSL }), entryPoint: "main" },
     });
 
-    const paramsBuffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const paramsBuffer = createEmptyUniformBuffer(engine, 16);
 
     // LOD 0: exact texel copy (no bilinear resampling) to match BJS
     {

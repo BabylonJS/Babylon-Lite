@@ -6,6 +6,8 @@
  * non-anisotropy PBR bundles lean.
  */
 
+import type { PbrMaterialProps } from "../pbr-material.js";
+
 export const ANISO_BRDF_FUNCTIONS = `
 const RECIPROCAL_PI: f32 = 0.3183098861837907;
 fn getAnisotropicRoughness(alphaG: f32, anisotropy: f32) -> vec2<f32> {
@@ -80,3 +82,16 @@ let anisoSq = 1.0 - anisoIntensity * (1.0 - roughness);
 let anisoA = anisoSq * anisoSq * anisoSq * anisoSq;
 anisoBentNormal = normalize(mix(anisoBentNormal, N, anisoA));
 let R_raw = reflect(-V, anisoBentNormal);`;
+
+/** Write the anisotropy material-UBO slice (anisotropyParams). */
+export function writeAnisotropyUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
+    const aniso = material.anisotropy;
+    if (!aniso?.isEnabled || !offsets.has("anisotropyParams")) {
+        return;
+    }
+    const off = offsets.get("anisotropyParams")! / 4;
+    const dir = aniso.direction ?? [1, 0];
+    data[off] = aniso.intensity ?? 1.0;
+    data[off + 1] = dir[0]!;
+    data[off + 2] = dir[1]!;
+}

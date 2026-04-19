@@ -7,37 +7,15 @@ import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
-import type { PbrMaterialProps, SheenProps } from "./pbr-material.js";
+import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
-import {
-    computePbrFeatures,
-    getOrCreatePbrPipeline,
-    createPbrMeshBindGroup,
-    releasePbrPipelineVariant,
-    PBR_HAS_NORMAL_MAP,
-    PBR_HAS_SKELETON_8,
-    PBR_HAS_SPECULAR_AA,
-    PBR_HAS_SHEEN_TEXTURE,
-    PBR_HAS_RECEIVE_SHADOWS,
-    PBR_HAS_GAMMA_ALBEDO,
-} from "./pbr-pipeline.js";
-import {
-    getLightTypeFeatureBits,
-    PBR_HAS_OCCLUSION,
-    PBR_HAS_CLEARCOAT,
-    PBR_HAS_SHEEN,
-    PBR_HAS_USE_ALPHA_ONLY_MR,
-    PBR2_CC_INT_MAP,
-    PBR2_CC_ROUGH_MAP,
-    PBR2_CC_NORMAL_MAP,
-    PBR2_CC_F0_REMAP_OFF,
-    _getSubsurfaceExt,
-} from "./pbr-flags.js";
+import { getOrCreatePbrPipeline, createPbrMeshBindGroup, releasePbrPipelineVariant, PBR_HAS_NORMAL_MAP } from "./pbr-pipeline.js";
 import { _createPbrMeshUBO, _createPbrMaterialUBO } from "./pbr-renderable.js";
+import { computeMeshPbrFeatures } from "./pbr-mesh-features.js";
 
 /** Build a single Renderable for one mesh after a PBR material swap.
  *  Reuses the existing scene bind group and extensions from the initial build. */
@@ -52,97 +30,20 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
 
     const hasEnv = !!envTextures;
     const mi = mesh as MeshInternal;
-    const hasTangents = !!mi._gpu.tangentBuffer;
-    const hasSkeleton = !!mesh.skeleton;
-    const hasMorphTargets = !!mesh.morphTargets;
     const hasAlphaBlend = mat.alphaBlend === true || (mat.alpha !== undefined && mat.alpha < 1);
     const hasTonemap = scene.imageProcessing.toneMappingEnabled;
+    const hasSomeShadows = scene.lights.some((l) => !!l.shadowGenerator);
 
-    let features = computePbrFeatures(
-        hasTangents,
-        !!mat.emissiveTexture,
-        hasEnv,
-        hasSkeleton,
-        hasTonemap,
-        hasMorphTargets,
-        hasAlphaBlend,
-        !!mat.specGlossTexture,
-        !!mat.doubleSided,
-        !!mat.normalTexture,
-        !!mat.metallicReflectanceTexture,
-        !!mat.reflectanceTexture,
-        !!mat.emissiveColor
-    );
-    if (mat.useOnlyMetallicFromMetallicReflectanceTexture) {
-        features |= PBR_HAS_USE_ALPHA_ONLY_MR;
-    }
-    features |= getLightTypeFeatureBits();
-    if ((mat.occlusionStrength ?? 1.0) > 0) {
-        features |= PBR_HAS_OCCLUSION;
-    }
-    if (hasSkeleton && mesh.skeleton?.joints1Buffer) {
-        features |= PBR_HAS_SKELETON_8;
-    }
-    if (mat.enableSpecularAA) {
-        features |= PBR_HAS_SPECULAR_AA;
-    }
-    if ((mat.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled) {
-        features |= PBR_HAS_CLEARCOAT;
-    }
-    let features2 = 0;
-    const ccProps = mat.clearCoat as import("./pbr-material.js").ClearCoatProps | undefined;
-    if (ccProps?.isEnabled) {
-        if (ccProps.texture) {
-            features2 |= PBR2_CC_INT_MAP;
-        }
-        if (ccProps.roughnessTexture) {
-            features2 |= PBR2_CC_ROUGH_MAP;
-        }
-        if (ccProps.bumpTexture) {
-            features2 |= PBR2_CC_NORMAL_MAP;
-        }
-        if (ccProps.useF0Remap === false) {
-            features2 |= PBR2_CC_F0_REMAP_OFF;
-        }
-    }
-    if ((mat.sheen as SheenProps | undefined)?.isEnabled) {
-        features |= PBR_HAS_SHEEN;
-    }
-    if ((mat.sheen as SheenProps | undefined)?.isEnabled && (mat.sheen as SheenProps | undefined)?.texture) {
-        features |= PBR_HAS_SHEEN_TEXTURE;
-    }
-    if (mesh.receiveShadows && scene.lights.some((l) => l.shadowGenerator)) {
-        features |= PBR_HAS_RECEIVE_SHADOWS;
-    }
-    if (mat.gammaAlbedo) {
-        features |= PBR_HAS_GAMMA_ALBEDO;
-    }
-    const ssE = _getSubsurfaceExt();
-    if (ssE) {
-        features |= ssE.detect(mat);
-    }
+    const { features, features2 } = computeMeshPbrFeatures(mesh, scene, { hasEnv, hasTonemap, hasSomeShadows });
 
     const composed = composePbr!(features, features2);
     const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, features2, sceneBGL, composed);
     const worldMatrix = mesh.worldMatrix;
-    const meshUBO = _createPbrMeshUBO(engine, worldMatrix, composed);
+    const meshUBO = _createPbrMeshUBO(engine, worldMatrix, composed, mat);
     const materialUBO = _createPbrMaterialUBO(engine, mat, composed);
-    const boneView = mesh.skeleton?.boneTexture.createView();
-    const morphView = mesh.morphTargets?.texture.createView();
     // Pass shared lights UBO if available (multi-light path)
     const lightsUBO = (scene as SceneContextInternal)._pbrLightsUBO;
-    const materialBindGroup = createPbrMeshBindGroup(
-        engine,
-        variant,
-        meshUBO,
-        materialUBO,
-        mat,
-        envTextures ?? null,
-        boneView,
-        morphView,
-        mesh.morphTargets?.weightsBuffer,
-        lightsUBO
-    );
+    const materialBindGroup = createPbrMeshBindGroup(engine, variant, meshUBO, materialUBO, mat, envTextures ?? null, mesh, lightsUBO);
 
     // Shadow bind group (group 2) — multi-shadow support
     const shadowLights: { gen: ShadowGenerator }[] = [];

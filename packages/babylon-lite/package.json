@@ -19,7 +19,9 @@
       "import": "./src/loader-env/load-dds-env.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "vite build",
     "build:prod": "vite build --mode prod",
@@ -27,8 +29,11 @@
   },
   "sideEffects": false,
   "devDependencies": {
+    "@webgpu/types": "^0.1.52",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0",
-    "@webgpu/types": "^0.1.52"
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "draco3d": "^1.5.7"
   }
 }

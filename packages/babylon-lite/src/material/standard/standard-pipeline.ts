@@ -22,6 +22,7 @@ import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
+import { createEmptyUniformBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 // (flags imported from same file)
 
 // ─── Pluggable Shadow Shader Extensions (tree-shakable) ────────────
@@ -82,6 +83,41 @@ export function registerPcfShadowBgl(config: ShadowBglConfig): void {
 /** Get the registered PCF shadow BGL config (if any). */
 export function getPcfShadowBglConfig(): ShadowBglConfig | null {
     return _pcfBglConfig;
+}
+
+// ─── Standard Material Extension Registry ───────────────────────────
+import type { Texture2D } from "../../texture/texture-2d.js";
+
+/** Bind-ordering phase for StdExt textures (alphabetical by id within phase, matching composer). */
+export type StdExtPhase = "mesh";
+
+/** Unified extension for Standard material. Each fragment module exports one.
+ *  Fragments register via `_registerStdExt(ext)` at dynamic-import sites. */
+export interface StdExt {
+    readonly id: string;
+    readonly phase: StdExtPhase;
+    /** Feature bit this ext gates on. */
+    readonly feature: number;
+    frag(features: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
+    /** Push group-1 bind entries starting at binding `b`; return new b. */
+    bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number;
+    /** Enumerate textures for acquire/release. */
+    textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
+}
+
+export interface ShadowLightSlotLite {
+    lightIndex: number;
+    shadowType: "esm" | "pcf";
+}
+
+const _stdExts = new Map<string, StdExt>();
+
+export function _registerStdExt(ext: StdExt): void {
+    _stdExts.set(ext.id, ext);
+}
+
+export function _getStdExts(): ReadonlyMap<string, StdExt> {
+    return _stdExts;
 }
 
 /** Derived: mesh needs UV attribute (any texture present). */
@@ -361,10 +397,7 @@ export function getOrCreatePipeline(
     // ─── Scene UBO + Bind Group (shared across all variants) ───
 
     if (!_sharedSceneUBO) {
-        _sharedSceneUBO = device.createBuffer({
-            size: composed.sceneUboSpec.totalBytes,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        });
+        _sharedSceneUBO = createEmptyUniformBuffer(engine, composed.sceneUboSpec.totalBytes);
     }
     const sceneUBO = _sharedSceneUBO;
 
@@ -392,8 +425,6 @@ export function getOrCreatePipeline(
 // ─── Per-Mesh GPU Setup ─────────────────────────────────────────────
 
 export { LIGHTS_UBO_SIZE, writeLightsUBO, refreshLightsUBO };
-const MATERIAL_UBO_SIZE = 96; // 24 floats (20 base + reflectionLevel + 3 pad)
-const UV_UBO_SIZE = 16;
 
 export function createDynamicMeshGPU(
     engine: EngineContextInternal,
@@ -411,23 +442,15 @@ export function createDynamicMeshGPU(
     const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
-    const hasEmissiveTex = (features & HAS_EMISSIVE_TEXTURE) !== 0;
-    const hasBumpTex = (features & HAS_BUMP_TEXTURE) !== 0;
-    const hasSpecularTex = (features & HAS_SPECULAR_TEXTURE) !== 0;
-    const hasAmbientTex = (features & HAS_AMBIENT_TEXTURE) !== 0;
-    const hasLightmapTex = (features & HAS_LIGHTMAP_TEXTURE) !== 0;
-    const hasOpacityTex = (features & HAS_OPACITY_TEXTURE) !== 0;
-    const hasReflectionTex = (features & HAS_REFLECTION_TEXTURE) !== 0;
-    const hasCubeReflection = (features & HAS_CUBE_REFLECTION) !== 0;
 
     // Mesh UBO — size from pipeline variant's composed shader spec
-    const meshUBO = createUBO(engine, variant.meshUboTotalBytes || 64, worldMatrix);
+    const meshUBO = createUniformBuffer(engine, worldMatrix);
 
     // Material UBO
     const textureLevel = needsUV ? 1.0 : 0;
     const matData = new Float32Array(24);
     writeStdMaterialData(matData, material, textureLevel);
-    const materialUBO = createUBO(engine, MATERIAL_UBO_SIZE, matData);
+    const materialUBO = createUniformBuffer(engine, matData);
 
     // Build mesh bind group entries — sequential numbering matching composer output
     let nextBinding = 0;
@@ -447,43 +470,16 @@ export function createDynamicMeshGPU(
         const uvData = new Float32Array(4);
         uvData[0] = material.uvScale[0];
         uvData[1] = material.uvScale[1];
-        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUBO(engine, UV_UBO_SIZE, uvData) } });
+        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
     }
 
-    // Fragment-contributed bindings (after all base bindings)
-    // Order must match the composer's fragment sorting: alphabetical by fragment ID
-    // normal-map (bump), std-ambient, std-emissive, std-lightmap, std-opacity, std-reflection, std-specular
-    if (hasBumpTex) {
-        const tex = material.bumpTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
-    }
-    if (hasAmbientTex) {
-        const tex = material.ambientTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
-    }
-    if (hasCubeReflection) {
-        const cube = material.reflectionCubeTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: cube.view }, { binding: nextBinding++, resource: cube.sampler });
-    }
-    if (hasEmissiveTex) {
-        const tex = material.emissiveTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
-    }
-    if (hasLightmapTex) {
-        const tex = material.lightmapTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
-    }
-    if (hasOpacityTex) {
-        const tex = material.opacityTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
-    }
-    if (hasReflectionTex) {
-        const tex = material.reflectionTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
-    }
-    if (hasSpecularTex) {
-        const tex = material.specularTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
+    // Fragment-contributed bindings — iterate ext registry in alphabetical id order
+    // to match composer's fragment sort order.
+    const sortedExts = Array.from(_stdExts.values()).sort((a, b) => a.id.localeCompare(b.id));
+    for (const ext of sortedExts) {
+        if (features & ext.feature && ext.bind) {
+            nextBinding = ext.bind(material, meshEntries, nextBinding);
+        }
     }
 
     const meshBG = device.createBindGroup({ layout: variant.meshBGL, entries: meshEntries });
@@ -506,13 +502,6 @@ export function createDynamicMeshGPU(
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────
-
-function createUBO(engine: EngineContextInternal, size: number, data: Float32Array): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({ size, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);
-    return buf;
-}
 
 /** Write standard material properties into a pre-allocated Float32Array (24 floats). */
 export function writeStdMaterialData(data: Float32Array, mat: StandardMaterialProps, textureLevel: number): void {

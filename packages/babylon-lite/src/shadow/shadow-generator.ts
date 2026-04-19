@@ -21,6 +21,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import {
     buildCasters,
     syncCasterMatrices,
@@ -213,11 +214,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
     });
 
     // --- Shadow depth pipeline ---
-    const depthSceneUBO = device.createBuffer({
-        size: 64,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(depthSceneUBO, 0, viewProj as Float32Array<ArrayBuffer>);
+    const depthSceneUBO = createUniformBuffer(eng, viewProj as Float32Array<ArrayBuffer>);
 
     const depthSceneBGL = createDepthSceneBGL(eng, "shadow-depth-scene");
 
@@ -279,8 +276,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
 
     // Blur H params — delta in output (blurSize) texel space, matching BJS PostProcess
     const blurHData = new Float32Array([1.0 / blurSize, 0, 0, 0]);
-    const blurHUBO = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(blurHUBO, 0, blurHData);
+    const blurHUBO = createUniformBuffer(eng, blurHData);
     const blurHBG = device.createBindGroup({
         layout: blurBGL,
         entries: [
@@ -292,8 +288,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
 
     // Blur V params
     const blurVData = new Float32Array([0, 1.0 / blurSize, 0, 0]);
-    const blurVUBO = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(blurVUBO, 0, blurVData);
+    const blurVUBO = createUniformBuffer(eng, blurVData);
     const blurVBG = device.createBindGroup({
         layout: blurBGL,
         entries: [

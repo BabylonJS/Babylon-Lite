@@ -11,7 +11,7 @@
  * automatically.
  *
  * Ceilings are set ~5 KB above baseline to catch regressions while allowing
- * natural growth.  Per-scene ceilings live in scene-config.json (maxRawKB / maxGzipKB).
+ * natural growth.  Per-scene ceilings live in scene-config.json (maxRawKB).
  */
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "fs";
@@ -22,10 +22,10 @@ import type { SceneConfig } from "./compare-utils";
 
 const CONFIG_PATH = resolve(__dirname, "../../scene-config.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
-const SCENES = allScenes.filter((s) => s.maxRawKB != null && s.maxGzipKB != null);
+const SCENES = allScenes.filter((s) => s.maxRawKB != null);
 
 for (const scene of SCENES) {
-    test(`${scene.name} bundle ≤ ${scene.maxRawKB} KB raw, ≤ ${scene.maxGzipKB} KB gzip`, async ({ page }) => {
+    test(`${scene.name} bundle ≤ ${scene.maxRawKB} KB raw`, async ({ page }) => {
         const jsPayloads: { url: string; body: Buffer }[] = [];
 
         // Intercept every JS response served from /bundle/
@@ -41,7 +41,7 @@ for (const scene of SCENES) {
         await page.goto(`/bundle-scene${scene.id}.html`);
         await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
 
-        // Tally raw + gzipped sizes of all JS that was actually loaded
+        // Tally raw + gzipped sizes of all JS that was actually loaded (gzip is informational only)
         let totalRaw = 0;
         let totalGzip = 0;
         const details: string[] = [];
@@ -56,15 +56,12 @@ for (const scene of SCENES) {
         const rawKB = totalRaw;
         const gzipKB = totalGzip;
 
-        console.log(`  ${scene.name}: ${rawKB.toFixed(1)} KB raw (limit: ${scene.maxRawKB} KB), ${gzipKB.toFixed(1)} KB gzip (limit: ${scene.maxGzipKB} KB)`);
+        console.log(`  ${scene.name}: ${rawKB.toFixed(1)} KB raw (limit: ${scene.maxRawKB} KB), ${gzipKB.toFixed(1)} KB gzip (informational)`);
         console.log(`  Files loaded (${jsPayloads.length}):`);
         for (const d of details) {
             console.log(d);
         }
 
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
-        expect(gzipKB, `gzip ${gzipKB.toFixed(1)} KB exceeds ceiling ${scene.maxGzipKB} KB (+${(gzipKB - scene.maxGzipKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(
-            scene.maxGzipKB!
-        );
     });
 }

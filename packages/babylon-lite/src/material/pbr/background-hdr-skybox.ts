@@ -12,6 +12,7 @@ import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxHdrFragSrc from "../../../shaders/skybox-hdr.fragment.wgsl?raw";
 import { WGSL_SCENE_UNIFORMS_PBR } from "../../shader/wgsl-helpers.js";
+import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2
 
@@ -64,7 +65,6 @@ function createSkyHdrMeshUBO(
     exposure: number,
     contrast: number
 ): GPUBuffer {
-    const device = engine.device;
     const data = new Float32Array(SKY_HDR_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];
@@ -75,10 +75,5 @@ function createSkyHdrMeshUBO(
     data[22] = skyOutputColor[2];
     data[24] = exposure; // exposureLinear
     data[25] = contrast; // contrast
-    const buf = device.createBuffer({
-        size: SKY_HDR_UNIFORM_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(buf, 0, data);
-    return buf;
+    return createUniformBuffer(engine, data);
 }

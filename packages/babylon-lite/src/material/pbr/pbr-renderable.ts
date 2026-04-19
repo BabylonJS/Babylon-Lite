@@ -4,17 +4,16 @@
  *  feature set, which provides WGSL source, BGL descriptors, vertex layouts,
  *  and UBO specs. Scene UBO updated once per frame. */
 
-import type { EngineContext, EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
 import type { LightBaseInternal } from "../../light/types.js";
-import type { PbrMaterialProps, SheenProps } from "./pbr-material.js";
+import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
-import { getViewProjectionMatrix, getCameraPosition } from "../../camera/camera.js";
 import type { Mat4 } from "../../math/types.js";
 import type { Renderable, SceneUniformUpdater } from "../../render/renderable.js";
 import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types.js";
@@ -24,9 +23,9 @@ import { composeShader } from "../../shader/shader-composer.js";
 import { createPbrTemplate } from "./pbr-template.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
+import { createEmptyUniformBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { updateWorldMatrixUBOs } from "../../render/scene-helpers.js";
 import {
-    computePbrFeatures,
     createSceneBindGroupLayout,
     getOrCreatePbrPipeline,
     createPbrMeshBindGroup,
@@ -34,27 +33,27 @@ import {
     clearPbrPipelineCache,
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_ALPHA_BLEND,
+    PBR2_HAS_REFRACTION,
     PBR_HAS_METALLIC_REFLECTANCE_MAP,
     PBR_HAS_REFLECTANCE_MAP,
-    PBR_HAS_SKELETON_8,
     PBR_HAS_SPECULAR_AA,
     PBR_HAS_EMISSIVE_COLOR,
     PBR_HAS_SHEEN_TEXTURE,
-    PBR_HAS_RECEIVE_SHADOWS,
     PBR_HAS_GAMMA_ALBEDO,
+    PBR_HAS_RECEIVE_SHADOWS,
     PBR2_CC_INT_MAP,
     PBR2_CC_ROUGH_MAP,
     PBR2_CC_NORMAL_MAP,
-    PBR2_CC_F0_REMAP_OFF,
 } from "./pbr-pipeline.js";
 import { PBR_HAS_THIN_INSTANCES, PBR_HAS_INSTANCE_COLOR } from "./pbr-pipeline.js";
 import {
     _getPbrLightExtension,
-    _getSubsurfaceExt,
-    getLightTypeFeatureBits,
+    _getPbrMaterialUboWriters,
+    _registerPbrExt,
+    _getPbrExts,
+    _registerPbrMaterialUboWriter,
     PBR_HAS_EMISSIVE,
     PBR_HAS_ENV,
-    PBR_HAS_SKELETON,
     PBR_HAS_TONEMAP,
     PBR_HAS_MORPH_TARGETS,
     PBR_HAS_SPEC_GLOSS,
@@ -63,10 +62,11 @@ import {
     PBR_HAS_OCCLUSION,
     PBR_HAS_CLEARCOAT,
     PBR_HAS_SHEEN,
-    PBR_HAS_USE_ALPHA_ONLY_MR,
     PBR_HAS_ANISOTROPY,
     PBR_HAS_SKYBOX,
 } from "./pbr-flags.js";
+import { computeMeshPbrFeatures } from "./pbr-mesh-features.js";
+import { createPbrSceneUpdater } from "./pbr-scene-updater.js";
 import type { PbrPipelineVariant } from "./pbr-pipeline.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
@@ -142,11 +142,10 @@ export async function buildPbrRenderables(
     // ── Dynamically import fragment creators based on scene capabilities ──
 
     // IBL fragment
-    let _createIblFragment: ((hasNormalMap: boolean, anisoBentNormalCode?: string, skyboxCalculation?: string) => ShaderFragment) | null = null;
     let _iblSkyboxCalc = "";
     if (hasEnv) {
         const mod = await import("./fragments/ibl-fragment.js");
-        _createIblFragment = mod.createIblFragment;
+        _registerPbrExt(mod.iblExt);
         // Skybox-mode WGSL is only loaded when at least one mesh in the scene needs it.
         if (meshes.some((m) => !!(m.material as PbrMaterialProps).skyboxMode)) {
             const sky = await import("./fragments/ibl-skybox-wgsl.js");
@@ -182,68 +181,58 @@ export async function buildPbrRenderables(
         const mat = m.material as PbrMaterialProps;
         return !!mat.metallicReflectanceTexture || !!mat.reflectanceTexture;
     });
-    let _createReflectanceFragment: ((hasMR: boolean, hasR: boolean, useAlpha: boolean) => ShaderFragment) | null = null;
     if (hasMetallicReflectance) {
         const mod = await import("./fragments/reflectance-fragment.js");
-        _createReflectanceFragment = mod.createReflectanceFragment;
+        _registerPbrExt(mod.reflectanceExt);
     }
 
     const hasClearcoat = meshes.some((m) => !!(m.material as PbrMaterialProps).clearCoat?.isEnabled);
-    let _createClearcoatFragment:
-        | ((
-              hasIbl: boolean,
-              hasReflectance: boolean,
-              hasIntensityMap?: boolean,
-              hasRoughnessMap?: boolean,
-              hasNormalMap?: boolean,
-              disableF0Remap?: boolean,
-              hasSpecularAA?: boolean,
-              hasBaseNormalMap?: boolean
-          ) => ShaderFragment)
-        | null = null;
     if (hasClearcoat) {
         const mod = await import("./fragments/clearcoat-fragment.js");
-        _createClearcoatFragment = mod.createClearcoatFragment;
+        _registerPbrExt(mod.clearcoatExt);
     }
 
     const hasSheen = meshes.some((m) => !!(m.material as PbrMaterialProps).sheen?.isEnabled);
-    let _createSheenFragment: ((hasTex: boolean, hasIbl: boolean) => ShaderFragment) | null = null;
     if (hasSheen) {
         const mod = await import("./fragments/sheen-fragment.js");
-        _createSheenFragment = mod.createSheenFragment;
+        _registerPbrExt(mod.sheenExt);
     }
 
     const hasAnyAnisotropy = meshes.some((m) => !!(m.material as PbrMaterialProps).anisotropy?.isEnabled);
     let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
     if (hasAnyAnisotropy) {
         _anisoExt = await import("./fragments/anisotropy-fragment.js");
+        const anisoMod = _anisoExt;
+        _registerPbrMaterialUboWriter("anisotropy", (d, m, o) => anisoMod.writeAnisotropyUBO(d, m as PbrMaterialProps, o));
     }
 
     const hasAnySubsurface = meshes.some((m) => !!(m.material as PbrMaterialProps).subsurface?.translucency);
-    if (hasAnySubsurface && !_getSubsurfaceExt()) {
-        await import("./install-subsurface.js");
+    if (hasAnySubsurface) {
+        const mod = await import("./fragments/subsurface-fragment.js");
+        _registerPbrExt(mod.subsurfaceExt);
     }
-    const _ssExt = _getSubsurfaceExt();
+
+    if (meshes.some((m) => ((m.material as PbrMaterialProps).subsurface?.refraction?.intensity ?? 0) > 0)) {
+        const mod = await import("./fragments/refraction-fragment.js");
+        _registerPbrExt(mod.refractionExt);
+    }
 
     const needsEmissiveColor = meshes.some((m) => !!(m.material as PbrMaterialProps).emissiveColor);
-    let _createEmissiveColorFragment: ((hasTex: boolean) => ShaderFragment) | null = null;
     if (needsEmissiveColor) {
         const mod = await import("./fragments/emissive-fragment.js");
-        _createEmissiveColorFragment = mod.createEmissiveColorFragment;
+        _registerPbrExt(mod.emissiveColorExt);
     }
 
     const hasSomeSkeletons = meshes.some((m) => !!m.skeleton);
-    let _createSkeletonFragment: ((has8: boolean) => ShaderFragment) | null = null;
     if (hasSomeSkeletons) {
         const mod = await import("./fragments/skeleton-fragment.js");
-        _createSkeletonFragment = mod.createSkeletonFragment;
+        _registerPbrExt(mod.skeletonExt);
     }
 
     const hasSomeMorphs = meshes.some((m) => !!m.morphTargets);
-    let _createMorphFragment: (() => ShaderFragment) | null = null;
     if (hasSomeMorphs) {
         const mod = await import("./fragments/morph-fragment.js");
-        _createMorphFragment = mod.createMorphFragment;
+        _registerPbrExt(mod.morphExt);
     }
 
     const hasSomeThinInstances = meshes.some((m) => !!m.thinInstances);
@@ -262,7 +251,6 @@ export async function buildPbrRenderables(
     const lightExt = _getPbrLightExtension();
     const lightConfig: PbrLightConfig | null = lightExt ? lightExtToConfig(lightExt) : null;
     const hasLight = !!lightExt;
-    const lightTypeBits = getLightTypeFeatureBits();
 
     // ── Compose shaders per unique feature set (cached) ──
     const composedCache = new Map<string, ComposedShader>();
@@ -281,7 +269,6 @@ export async function buildPbrRenderables(
         const hasReflExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP);
         const hasIbl = has(PBR_HAS_ENV);
         const hasMorph = has(PBR_HAS_MORPH_TARGETS);
-        const hasSkel = has(PBR_HAS_SKELETON);
         const hasShadow = has(PBR_HAS_RECEIVE_SHADOWS);
         const hasCC = has(PBR_HAS_CLEARCOAT);
         const hasSh = has(PBR_HAS_SHEEN);
@@ -292,7 +279,6 @@ export async function buildPbrRenderables(
         const ccIntMap = (features2 & PBR2_CC_INT_MAP) !== 0;
         const ccRoughMap = (features2 & PBR2_CC_ROUGH_MAP) !== 0;
         const ccNormalMap = (features2 & PBR2_CC_NORMAL_MAP) !== 0;
-        const ccF0RemapOff = (features2 & PBR2_CC_F0_REMAP_OFF) !== 0;
 
         const template = createPbrTemplate({
             light: hasMultiLight ? null : lightConfig,
@@ -327,32 +313,25 @@ export async function buildPbrRenderables(
         });
 
         const frags: ShaderFragment[] = [];
-        if (hasSkel && _createSkeletonFragment) {
-            frags.push(_createSkeletonFragment(has(PBR_HAS_SKELETON_8)));
-        }
-        if (hasMorph && _createMorphFragment) {
-            frags.push(_createMorphFragment());
-        }
-        if (hasReflExt && _createReflectanceFragment) {
-            frags.push(_createReflectanceFragment(has(PBR_HAS_METALLIC_REFLECTANCE_MAP), has(PBR_HAS_REFLECTANCE_MAP), has(PBR_HAS_USE_ALPHA_ONLY_MR)));
-        }
-        if (hasEmCol && _createEmissiveColorFragment) {
-            frags.push(_createEmissiveColorFragment(hasEmTex));
-        }
-        if (hasCC && _createClearcoatFragment) {
-            frags.push(_createClearcoatFragment(hasIbl, hasReflExt, ccIntMap, ccRoughMap, ccNormalMap, ccF0RemapOff, has(PBR_HAS_SPECULAR_AA), hasNormal || hasCotangent));
-        }
-        if (hasSh && _createSheenFragment) {
-            frags.push(_createSheenFragment(has(PBR_HAS_SHEEN_TEXTURE), hasIbl));
-        }
-        if (hasIbl && _createIblFragment) {
-            const anisoBentCode = hasAniso && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "";
-            frags.push(_createIblFragment(hasNormal || hasCotangent, anisoBentCode, has(PBR_HAS_SKYBOX) ? _iblSkyboxCalc : ""));
-        }
-        if (_ssExt) {
-            const ssFrag = _ssExt.frag(f, hasIbl);
-            if (ssFrag) {
-                frags.push(ssFrag as ShaderFragment);
+        const hasAnyNormal = hasNormal || hasCotangent;
+        const hasSpecularAAbit = has(PBR_HAS_SPECULAR_AA);
+        const fragCtx: import("./pbr-flags.js").PbrFragCtx = {
+            features,
+            features2,
+            hasIbl,
+            hasAnyNormal,
+            hasSpecularAA: hasSpecularAAbit,
+            anisoBentNormalCode: hasAniso && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "",
+            iblSkyboxCalc: has(PBR_HAS_SKYBOX) ? _iblSkyboxCalc : "",
+        };
+        // All registered exts contribute fragments via ext.frag().
+        // Registration order defines iteration order; callers register in composer-matching order.
+        for (const ext of _getPbrExts().values()) {
+            if (ext.frag) {
+                const fr = ext.frag(fragCtx);
+                if (fr) {
+                    frags.push(fr);
+                }
             }
         }
         if (hasShadow && _createPbrShadowFragment) {
@@ -385,18 +364,9 @@ export async function buildPbrRenderables(
     });
     const sceneUboSpec = computeUboLayout(refTemplate.baseSceneUboFields);
     const sceneUboSize = sceneUboSpec.totalBytes;
-    const envRotYOffset = sceneUboSpec.offsets.get("envRotationY")! / 4;
-    const shBaseOffset = hasEnv ? sceneUboSpec.offsets.get("vSphericalL00")! / 4 : 0;
-    const exposureOffset = sceneUboSpec.offsets.get("exposureLinear")! / 4;
-    // First light field offset — light extension writes relative to this
-    const lightFieldName = lightConfig?.sceneUboFields[0]?.name ?? "lightDirection";
-    const lightBaseOffset = sceneUboSpec.offsets.get(lightFieldName)! / 4;
 
     const sceneBGL = createSceneBindGroupLayout(engine);
-    const sceneUniformBuffer = device.createBuffer({
-        size: sceneUboSize,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    const sceneUniformBuffer = createEmptyUniformBuffer(engine, sceneUboSize);
     const sceneBindGroup = device.createBindGroup({
         layout: sceneBGL,
         entries: [{ binding: 0, resource: { buffer: sceneUniformBuffer } }],
@@ -422,115 +392,18 @@ export async function buildPbrRenderables(
     }
 
     const packets: PbrDrawPacket[] = [];
+    const featureCtx: import("./pbr-mesh-features.js").PbrFeatureCtx = { hasEnv, hasTonemap, hasSomeShadows };
     for (const mesh of meshes) {
         const gpu = (mesh as MeshInternal)._gpu;
-        const hasTangents = !!gpu.tangentBuffer;
-        const hasEmissive = !!(mesh.material as PbrMaterialProps).emissiveTexture;
-        const hasEmissiveCol = !!(mesh.material as PbrMaterialProps).emissiveColor;
-        const hasSkeleton = !!mesh.skeleton;
-        const hasMorphTargets = !!mesh.morphTargets;
         const mat = mesh.material as PbrMaterialProps;
-        const hasAlphaBlend = mat.alphaBlend === true || (mat.alpha !== undefined && mat.alpha < 1);
-        const hasSpecGloss = !!mat.specGlossTexture;
-        const hasDoubleSided = !!mat.doubleSided;
-        const hasNormalTexture = !!mat.normalTexture;
-        const hasMetallicReflectanceMap = !!mat.metallicReflectanceTexture;
-        const hasReflectanceMap = !!mat.reflectanceTexture;
-        let features = computePbrFeatures(
-            hasTangents,
-            hasEmissive,
-            hasEnv,
-            hasSkeleton,
-            hasTonemap,
-            hasMorphTargets,
-            hasAlphaBlend,
-            hasSpecGloss,
-            hasDoubleSided,
-            hasNormalTexture,
-            hasMetallicReflectanceMap,
-            hasReflectanceMap,
-            hasEmissiveCol
-        );
-        if (mat.useOnlyMetallicFromMetallicReflectanceTexture) {
-            features |= PBR_HAS_USE_ALPHA_ONLY_MR;
-        }
-        features |= lightTypeBits;
-        if ((mat.occlusionStrength ?? 1.0) > 0) {
-            features |= PBR_HAS_OCCLUSION;
-        }
-        if (hasSkeleton && mesh.skeleton?.joints1Buffer) {
-            features |= PBR_HAS_SKELETON_8;
-        }
-        if (mat.enableSpecularAA) {
-            features |= PBR_HAS_SPECULAR_AA;
-        }
-        if ((mat.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled) {
-            features |= PBR_HAS_CLEARCOAT;
-        }
-        let features2 = 0;
-        const ccProps = mat.clearCoat as import("./pbr-material.js").ClearCoatProps | undefined;
-        if (ccProps?.isEnabled) {
-            if (ccProps.texture) {
-                features2 |= PBR2_CC_INT_MAP;
-            }
-            if (ccProps.roughnessTexture) {
-                features2 |= PBR2_CC_ROUGH_MAP;
-            }
-            if (ccProps.bumpTexture) {
-                features2 |= PBR2_CC_NORMAL_MAP;
-            }
-            if (ccProps.useF0Remap === false) {
-                features2 |= PBR2_CC_F0_REMAP_OFF;
-            }
-        }
-        const sheenProps = mat.sheen as SheenProps | undefined;
-        if (sheenProps?.isEnabled) {
-            features |= PBR_HAS_SHEEN;
-            if (sheenProps.texture) {
-                features |= PBR_HAS_SHEEN_TEXTURE;
-            }
-        }
-        if (mesh.receiveShadows && hasSomeShadows) {
-            features |= PBR_HAS_RECEIVE_SHADOWS;
-        }
-        if (mat.gammaAlbedo) {
-            features |= PBR_HAS_GAMMA_ALBEDO;
-        }
-        if (mat.anisotropy?.isEnabled) {
-            features |= PBR_HAS_ANISOTROPY;
-        }
-        if (mat.skyboxMode) {
-            features |= PBR_HAS_SKYBOX;
-        }
-        if (_ssExt) {
-            features |= _ssExt.detect(mat);
-        }
-        if (mesh.thinInstances) {
-            features |= PBR_HAS_THIN_INSTANCES;
-            if (mesh.thinInstances.colors) {
-                features |= PBR_HAS_INSTANCE_COLOR;
-            }
-        }
+        const { features, features2 } = computeMeshPbrFeatures(mesh, scene, featureCtx);
 
         const composed = composePbr(features, features2);
         const variant = getOrCreatePbrPipeline(engine, engine.format, engine.msaaSamples, features, features2, sceneBGL, composed);
         const worldMatrix = mesh.worldMatrix;
-        const meshUBO = createMeshUBO(engine, worldMatrix, composed);
+        const meshUBO = createMeshUBO(engine, worldMatrix, composed, mat);
         const materialUBO = createMaterialUBO(engine, mat, composed);
-        const boneView = mesh.skeleton?.boneTexture.createView();
-        const morphView = mesh.morphTargets?.texture.createView();
-        const materialBindGroup = createPbrMeshBindGroup(
-            engine,
-            variant,
-            meshUBO,
-            materialUBO,
-            mat,
-            envTextures ?? null,
-            boneView,
-            morphView,
-            mesh.morphTargets?.weightsBuffer,
-            lightsUBOBuffer
-        );
+        const materialBindGroup = createPbrMeshBindGroup(engine, variant, meshUBO, materialUBO, mat, envTextures ?? null, mesh, lightsUBOBuffer);
 
         // Shadow bind group (group 2) — per-light: texture, sampler, and shared shadow UBO
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -590,13 +463,15 @@ export async function buildPbrRenderables(
         ]);
     }
 
-    // Split packets into opaque and transparent for correct draw order
-    const opaquePackets = packets.filter((p) => (p.variant.features & PBR_HAS_ALPHA_BLEND) === 0);
-    const transparentPackets = packets.filter((p) => (p.variant.features & PBR_HAS_ALPHA_BLEND) !== 0);
-
-    // Sort each list by pipeline variant so consecutive draws can skip redundant setPipeline
-    opaquePackets.sort((a, b) => a.variant.features - b.variant.features);
-    transparentPackets.sort((a, b) => a.variant.features - b.variant.features);
+    // Three-way partition: 0=opaque, 1=transmissive (refraction), 2=transparent (alpha-blend).
+    const buckets: PbrDrawPacket[][] = [[], [], []];
+    for (const p of packets) {
+        const b = p.variant.features & PBR_HAS_ALPHA_BLEND ? 2 : p.variant.features2 & PBR2_HAS_REFRACTION ? 1 : 0;
+        buckets[b]!.push(p);
+    }
+    for (const b of buckets) {
+        b.sort((a, b) => a.variant.features - b.variant.features);
+    }
     const renderables: Renderable[] = [];
 
     function drawPackets(pass: GPURenderPassEncoder | GPURenderBundleEncoder, list: PbrDrawPacket[]): number {
@@ -666,115 +541,36 @@ export async function buildPbrRenderables(
         }
     }
 
-    if (opaquePackets.length > 0) {
+    const ORDERS = [100, 140, 150];
+    for (let i = 0; i < 3; i++) {
+        const list = buckets[i]!;
+        if (list.length === 0) {
+            continue;
+        }
         renderables.push({
-            order: 100,
-            isTransparent: false,
+            order: ORDERS[i]!,
+            isTransparent: i === 2,
+            isTransmissive: i === 1,
             _sceneBG: sceneBindGroup,
             updateUBOs() {
-                updatePacketUBOs(opaquePackets);
+                updatePacketUBOs(list);
             },
-            draw: (pass) => drawPackets(pass, opaquePackets),
-        });
-    }
-    if (transparentPackets.length > 0) {
-        renderables.push({
-            order: 150,
-            isTransparent: true,
-            _sceneBG: sceneBindGroup,
-            updateUBOs() {
-                updatePacketUBOs(transparentPackets);
-            },
-            draw: (pass) => drawPackets(pass, transparentPackets),
+            draw: (pass) => drawPackets(pass, list),
         });
     }
 
-    // Pre-allocate scene uniform scratch buffer
-    const sceneUniformData = new Float32Array(sceneUboSize / 4);
-    let _lastPbrLightsVersion = -1;
-    // Scene UBO dirty tracking
-    let _lastPbrCamVersion = -1;
-    let _lastPbrAspect = -1;
-    let _lastPbrLightVersion = -1;
-    let _lastExposure = -1;
-    let _lastContrast = -1;
-    let _lastEnvRotY = -Infinity;
-
-    const updater: SceneUniformUpdater = {
-        update(engine: EngineContext) {
-            const cam = scene.camera;
-            if (!cam) {
-                return;
-            }
-            const aspect = engine.canvas.width / engine.canvas.height;
-            const camVer = cam.worldMatrixVersion;
-            // Inline light-version sum (avoids importing lights-ubo.js on the single-light path)
-            let lightVer = 0;
-            for (const l of scene.lights) {
-                lightVer += (l as LightBaseInternal)._lightVersion ?? 0;
-            }
-            const exposure = scene.imageProcessing.exposure;
-            const contrast = scene.imageProcessing.contrast;
-            const envRotY = scene.envRotationY ?? 0;
-
-            // Only rewrite scene UBO if any input changed
-            if (
-                camVer !== _lastPbrCamVersion ||
-                aspect !== _lastPbrAspect ||
-                lightVer !== _lastPbrLightVersion ||
-                exposure !== _lastExposure ||
-                contrast !== _lastContrast ||
-                envRotY !== _lastEnvRotY
-            ) {
-                _lastPbrCamVersion = camVer;
-                _lastPbrAspect = aspect;
-                _lastPbrLightVersion = lightVer;
-                _lastExposure = exposure;
-                _lastContrast = contrast;
-                _lastEnvRotY = envRotY;
-
-                const viewProj = getViewProjectionMatrix(cam, aspect);
-                const camPos = getCameraPosition(cam);
-
-                const data = sceneUniformData;
-                data.fill(0);
-                data.set(viewProj, 0);
-                data[16] = camPos.x;
-                data[17] = camPos.y;
-                data[18] = camPos.z;
-                if (hasLight) {
-                    const light = scene.lights[0];
-                    const ext = _getPbrLightExtension();
-                    if (light && ext) {
-                        ext.writeSceneUbo(data, lightBaseOffset, light);
-                    }
-                }
-                data[envRotYOffset] = envRotY;
-                const sh = envTextures?.sphericalHarmonics;
-                if (sh) {
-                    data.set(sh.l00, shBaseOffset);
-                    data.set(sh.l1_1, shBaseOffset + 4);
-                    data.set(sh.l10, shBaseOffset + 8);
-                    data.set(sh.l11, shBaseOffset + 12);
-                    data.set(sh.l2_2, shBaseOffset + 16);
-                    data.set(sh.l2_1, shBaseOffset + 20);
-                    data.set(sh.l20, shBaseOffset + 24);
-                    data.set(sh.l21, shBaseOffset + 28);
-                    data.set(sh.l22, shBaseOffset + 32);
-                }
-                data[exposureOffset] = exposure;
-                data[exposureOffset + 1] = contrast;
-                data[exposureOffset + 2] = envTextures?.lodGenerationScale ?? 0.8;
-                device.queue.writeBuffer(sceneUniformBuffer, 0, data);
-            }
-            if (lightsUBOBuffer && lightsUBOScratch && _refreshLightsUBO) {
-                if (lightVer !== _lastPbrLightsVersion) {
-                    _lastPbrLightsVersion = lightVer;
-                    _refreshLightsUBO(engine as EngineContextInternal, lightsUBOBuffer, scene.lights, lightsUBOScratch);
-                }
-            }
-        },
-    };
+    const updater = createPbrSceneUpdater({
+        scene,
+        device,
+        envTextures,
+        sceneUboSpec,
+        sceneUniformBuffer,
+        hasLight,
+        lightConfig,
+        lightsUBOBuffer,
+        lightsUBOScratch,
+        refreshLightsUBO: _refreshLightsUBO,
+    });
 
     // Stash the PBR scene bind group for background renderables to reuse
     (scene as SceneContextInternal)._pbrSceneBGL = sceneBGL;
@@ -788,21 +584,19 @@ export async function buildPbrRenderables(
     return { renderables, updater, _sceneBGL: sceneBGL, _sceneBG: sceneBindGroup };
 }
 
-function allocUBO(engine: EngineContextInternal, data: Float32Array): GPUBuffer {
-    const device = engine.device;
-    const buf = device.createBuffer({ size: data.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, data as unknown as Float32Array<ArrayBuffer>);
-    return buf;
-}
-
-/** Create a mesh UBO containing only the world matrix (64 bytes). */
-function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader): GPUBuffer {
+const _UV_IDENTITY = new Float32Array([1, 1, 0, 0]);
+function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader, material: PbrMaterialProps): GPUBuffer {
     const data = new Float32Array(composed.meshUboSpec.totalBytes / 4);
     data.set(world, 0);
-    return allocUBO(engine, data);
+    data.set(material.uvTransformST ?? _UV_IDENTITY, 16);
+    return createUniformBuffer(engine, data);
 }
 
-/** Write material properties into a pre-allocated Float32Array. */
+/** Write material properties into a pre-allocated Float32Array.
+ *  Core fields only; per-extension slices are contributed by registered
+ *  writers — each PBR fragment module's writer is registered by
+ *  buildPbrRenderables right after the dynamic import, avoiding
+ *  module-level side effects. */
 function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec: import("../../shader/fragment-types.js").UboSpec): void {
     data[0] = material.environmentIntensity ?? 1.0;
     data[1] = material.directIntensity ?? 1.0;
@@ -814,61 +608,16 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
         data[off + 1] = material.roughnessFactor ?? 1.0;
     }
 
-    const hasReflectanceExt = spec.offsets.has("occlusionStrength") && (material.metallicReflectanceTexture !== undefined || material.reflectanceTexture !== undefined);
-    if (hasReflectanceExt) {
-        const off = spec.offsets.get("occlusionStrength")! / 4;
-        data[off] = material.occlusionStrength ?? 1.0;
-        data[off + 1] = material.metallicF0Factor ?? 1.0;
-        const mrc = material.metallicReflectanceColor;
-        data[off + 4] = mrc ? mrc[0]! : 1.0;
-        data[off + 5] = mrc ? mrc[1]! : 1.0;
-        data[off + 6] = mrc ? mrc[2]! : 1.0;
+    for (const write of _getPbrMaterialUboWriters().values()) {
+        write(data, material, spec.offsets);
     }
 
-    if (material.emissiveColor && spec.offsets.has("emissiveColor")) {
-        const off = spec.offsets.get("emissiveColor")! / 4;
-        data[off] = material.emissiveColor[0]!;
-        data[off + 1] = material.emissiveColor[1]!;
-        data[off + 2] = material.emissiveColor[2]!;
+    // Unified PBR extensions contribute their material-UBO slice.
+    for (const ext of _getPbrExts().values()) {
+        if (ext.writeUbo) {
+            ext.writeUbo(data, material, spec.offsets);
+        }
     }
-
-    if ((material.clearCoat as { isEnabled?: boolean } | undefined)?.isEnabled && spec.offsets.has("ccParams")) {
-        const cc = material.clearCoat as import("./pbr-material.js").ClearCoatProps;
-        const off = spec.offsets.get("ccParams")! / 4;
-        const ior = cc.indexOfRefraction ?? 1.5;
-        const a = 1 - ior;
-        const b = 1 + ior;
-        data[off] = cc.intensity ?? 1.0;
-        data[off + 1] = cc.roughness ?? 0.0;
-        data[off + 2] = cc.bumpTextureScale ?? 1.0;
-        data[off + 4] = Math.pow(-a / b, 2);
-        data[off + 5] = 1 / ior;
-        data[off + 6] = a;
-        data[off + 7] = b;
-    }
-
-    if ((material.sheen as SheenProps | undefined)?.isEnabled && spec.offsets.has("sheenParams")) {
-        const sh = material.sheen as SheenProps;
-        const off = spec.offsets.get("sheenParams")! / 4;
-        const color = sh.color ?? [1, 1, 1];
-        data[off] = color[0]!;
-        data[off + 1] = color[1]!;
-        data[off + 2] = color[2]!;
-        data[off + 3] = sh.intensity ?? 1.0;
-        data[off + 4] = sh.roughness ?? 0.0;
-        data[off + 5] = sh.texture ? 1.0 : 0.0;
-    }
-
-    if (material.anisotropy?.isEnabled && spec.offsets.has("anisotropyParams")) {
-        const aniso = material.anisotropy;
-        const off = spec.offsets.get("anisotropyParams")! / 4;
-        const dir = aniso.direction ?? [1, 0];
-        data[off] = aniso.intensity ?? 1.0;
-        data[off + 1] = dir[0]!;
-        data[off + 2] = dir[1]!;
-    }
-
-    _getSubsurfaceExt()?.ubo(data, material, spec.offsets);
 }
 
 /** Create a material UBO from the ComposedShader's materialUboSpec. */
@@ -876,7 +625,7 @@ function createMaterialUBO(engine: EngineContextInternal, material: PbrMaterialP
     const spec = composed.materialUboSpec!;
     const data = new Float32Array(spec.totalBytes / 4);
     writeMaterialData(data, material, spec);
-    return allocUBO(engine, data);
+    return createUniformBuffer(engine, data);
 }
 
 /** Exported for use by pbr-single-rebuild.ts */

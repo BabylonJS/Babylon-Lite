@@ -12,7 +12,10 @@
  */
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
-import type { SubSurfaceProps } from "../pbr-material.js";
+import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
+import type { PbrExt } from "../pbr-flags.js";
+import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP, PBR2_HAS_THICKNESS_GLTF_CHANNEL } from "../pbr-flags.js";
 
 const SS_HELPERS = `
 fn transmittanceBRDF_Burley(tintColor: vec3<f32>, diffusionDistance: vec3<f32>, thickness: f32) -> vec3<f32> {
@@ -32,9 +35,12 @@ const SS_SCOPE_VARS = `var translucencyDirect = vec3<f32>(0.0);
 var ssTransmittance = vec3<f32>(0.0);
 var ssIntensity = 0.0;`;
 
-// AT: sample thickness + compute transmittance (BJS non-glTF path samples .r channel)
-function makeThicknessBlock(hasThicknessMap: boolean): string {
-    const texSample = hasThicknessMap ? `let thicknessSample = textureSample(thicknessTexture_, thicknessSampler_, input.uv).r;` : `let thicknessSample = 1.0;`;
+// AT: sample thickness + compute transmittance.
+// Channel: R by default (matches existing non-glTF path); G when the glTF
+// KHR_materials_volume flag is on (spec mandates G channel).
+function makeThicknessBlock(hasThicknessMap: boolean, useGltfChannel: boolean): string {
+    const chan = useGltfChannel ? "g" : "r";
+    const texSample = hasThicknessMap ? `let thicknessSample = textureSample(thicknessTexture_, thicknessSampler_, input.uv).${chan};` : `let thicknessSample = 1.0;`;
     return `${texSample}
 let ssThickness = max(material.subsurfaceParams.y + thicknessSample * material.subsurfaceParams.z, 0.000001);
 let ssTranslucencyColor = material.subsurfaceParams3.rgb;
@@ -84,8 +90,10 @@ const STAGE_FRAGMENT = 0x2;
  * Create a subsurface translucency fragment.
  * @param hasThicknessMap Whether the material has a thickness texture.
  * @param hasIbl Whether the scene has IBL.
+ * @param useGltfThicknessChannel Sample the thickness texture's G channel
+ *        (KHR_materials_volume) instead of R (BJS default).
  */
-export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boolean): ShaderFragment {
+export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boolean, useGltfThicknessChannel: boolean): ShaderFragment {
     const bindings = hasThicknessMap
         ? [
               { name: "thicknessTexture_", type: { kind: "texture" as const, textureType: "texture_2d<f32>" as const }, visibility: STAGE_FRAGMENT },
@@ -95,7 +103,7 @@ export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boole
 
     const slots: Partial<Record<string, string>> = {
         SV: SS_SCOPE_VARS,
-        AT: makeThicknessBlock(hasThicknessMap),
+        AT: makeThicknessBlock(hasThicknessMap, useGltfThicknessChannel),
         AD: SS_DIRECT,
     };
     if (hasIbl) {
@@ -147,3 +155,51 @@ export function writeSubsurfaceUBO(data: Float32Array, ss: SubSurfaceProps, offs
     data[off3 + 1] = tc[1]!;
     data[off3 + 2] = tc[2]!;
 }
+
+export const subsurfaceExt: PbrExt = {
+    id: "subsurface",
+    phase: "fragment",
+    detect(mat) {
+        const m = mat as PbrMaterialProps;
+        if (!m.subsurface?.translucency) {
+            return { f: 0, f2: 0 };
+        }
+        let f = PBR_HAS_SUBSURFACE;
+        let f2 = 0;
+        if (m.subsurface.thickness?.texture) {
+            f |= PBR_HAS_THICKNESS_MAP;
+        }
+        if (m.subsurface.thickness?.useGlTFChannel) {
+            f2 |= PBR2_HAS_THICKNESS_GLTF_CHANNEL;
+        }
+        return { f, f2 };
+    },
+    frag(ctx) {
+        if (!(ctx.features & PBR_HAS_SUBSURFACE)) {
+            return null;
+        }
+        return createSubsurfaceFragment((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0, ctx.hasIbl, (ctx.features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
+    },
+    writeUbo(data, mat, offsets) {
+        const m = mat as PbrMaterialProps;
+        if (m.subsurface?.translucency && offsets.has("subsurfaceParams")) {
+            writeSubsurfaceUBO(data, m.subsurface as SubSurfaceProps, offsets);
+        }
+    },
+    bind(ctx, entries, b) {
+        if ((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0) {
+            const tex = (ctx.material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+            if (tex) {
+                entries.push({ binding: b++, resource: tex.view });
+                entries.push({ binding: b++, resource: tex.sampler });
+            }
+        }
+        return b;
+    },
+    textures(mat, out) {
+        const t = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
+        if (t) {
+            out.push(t);
+        }
+    },
+};

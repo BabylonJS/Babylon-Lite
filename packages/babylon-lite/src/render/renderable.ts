@@ -15,6 +15,9 @@ export interface Renderable {
     readonly order: number;
     /** Whether this renderable is transparent (auto-derived from material). */
     readonly isTransparent: boolean;
+    /** Whether this renderable is transmissive (refraction through surface). Opaque write-depth
+     *  but rendered AFTER the opaque-scene RTT is built. Defaults to false. */
+    readonly isTransmissive?: boolean;
     /** Reference to the source mesh (for distance sort + material-change detection). */
     readonly mesh?: Mesh;
     /** Pipeline reference for state batching (skip redundant setPipeline). */

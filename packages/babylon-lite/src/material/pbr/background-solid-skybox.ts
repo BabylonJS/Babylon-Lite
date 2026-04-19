@@ -16,6 +16,8 @@ import skyboxFragSrc from "../../../shaders/skybox.fragment.wgsl?raw";
 import { createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
 import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 import { createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
+import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createSingleUniformBGL } from "../../shader/bgl-helpers.js";
 
 const SKY_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad
 
@@ -34,10 +36,7 @@ function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): SkyboxM
         if (layout && _cachedDevice === device) {
             return layout;
         }
-        layout = device.createBindGroupLayout({
-            label: "skybox-material",
-            entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
-        });
+        layout = createSingleUniformBGL(engine, "skybox-material", GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT);
         return layout;
     }
 
@@ -116,7 +115,6 @@ export function buildSolidSkyboxRenderable(
 }
 
 function createSkyMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColor: [number, number, number], skyOutputColor: [number, number, number]): GPUBuffer {
-    const device = engine.device;
     const data = new Float32Array(SKY_MESH_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];
@@ -125,10 +123,5 @@ function createSkyMeshUBO(engine: EngineContextInternal, world: Mat4, primaryCol
     data[20] = skyOutputColor[0];
     data[21] = skyOutputColor[1];
     data[22] = skyOutputColor[2];
-    const buf = device.createBuffer({
-        size: SKY_MESH_UNIFORM_SIZE,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    device.queue.writeBuffer(buf, 0, data);
-    return buf;
+    return createUniformBuffer(engine, data);
 }

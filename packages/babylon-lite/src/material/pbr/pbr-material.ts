@@ -6,7 +6,7 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { SceneContextInternal } from "../../scene/scene.js";
-import { _getSubsurfaceExt } from "./pbr-flags.js";
+import { _getPbrExts } from "./pbr-flags.js";
 
 /** Lazy-imports the PBR renderable builder and builds the pipeline.
  *  Thin instances are handled by the fragment composer automatically. */
@@ -83,6 +83,13 @@ export interface PbrMaterialProps {
      *  where the mesh surrounds the camera and should display the environment directly.
      *  Also zeroes SH irradiance — skybox is pure cubemap + BRDF only. */
     skyboxMode?: boolean;
+    /** Material-wide UV transform (scale + offset), applied in the vertex shader
+     *  before emitting `out.uv`. Mirrors BJS `Texture.uScale/vScale/uOffset/vOffset`
+     *  when all textures on the material share the same transform (common case).
+     *  Format: `[uScale, vScale, uOffset, vOffset]`. Absence = identity.
+     *  Set by the glTF loader from `KHR_texture_transform` when every textureInfo
+     *  on a material declares the same transform. */
+    uvTransformST?: [number, number, number, number];
 }
 
 /** @internal Extended PbrMaterialProps with internal build group. */
@@ -129,6 +136,11 @@ export interface SheenProps {
     intensity?: number;
     /** Optional sheen tint texture (modulates sheen color). Loaded via loadTexture2D(). */
     texture?: Texture2D;
+    /** When true (recommended for glTF), applies proper sheen albedo scaling
+     *  on the base layer and treats the sheen texture as already-linear (no pow).
+     *  When false (default, legacy), applies pow(rgb, 2.2) to the sheen texture
+     *  and uses a (1-F0) attenuation on the sheen lobe without base-layer scaling. */
+    albedoScaling?: boolean;
 }
 
 /** Anisotropy layer properties. Maps to BJS PBRMaterial.anisotropy sub-object.
@@ -164,12 +176,33 @@ export interface ScatteringProps {
 
 /** Thickness sub-feature. Controls how thick the material is at each point. */
 export interface ThicknessProps {
-    /** Thickness map texture. G channel is sampled (BJS default / glTF-style). */
+    /** Thickness map texture. R channel is sampled by default (matches
+     *  existing BJS non-glTF path). Set `useGlTFChannel=true` for G-channel
+     *  sampling as specified by KHR_materials_volume. */
     texture?: Texture2D;
+    /** When true, sample the thickness texture's G channel (KHR_materials_volume).
+     *  Default false — samples R channel (BJS default). Set by the glTF loader. */
+    useGlTFChannel?: boolean;
     /** Minimum thickness. Default 0. */
     min?: number;
     /** Maximum thickness. Default 1.0. */
     max?: number;
+}
+
+/** Refraction sub-feature (KHR_materials_transmission + _volume + _ior).
+ *  Presence enables transmission. Requires an opaque-scene RTT at render time. */
+export interface RefractionProps {
+    /** Transmission factor (0=off, 1=fully transmissive). Default 0.
+     *  Maps to KHR_materials_transmission.transmissionFactor. */
+    intensity?: number;
+    /** Optional transmission texture (R channel). Multiplies `intensity`. */
+    texture?: Texture2D;
+    /** Index of refraction (KHR_materials_ior.ior). Default 1.5 (glass). */
+    indexOfRefraction?: number;
+    /** When true, the thickness value is also used as the refracted
+     *  sample offset depth (KHR_materials_volume — matches BJS
+     *  `useThicknessAsDepth`). Default true when volume is present. */
+    useThicknessAsDepth?: boolean;
 }
 
 /** Tint sub-feature. Controls absorption tint color for transmittance. */
@@ -190,6 +223,10 @@ export interface SubSurfaceProps {
     thickness?: ThicknessProps;
     /** Tint: absorption tint color for transmittance. */
     tint?: TintProps;
+    /** Refraction: physical light transmission through the surface
+     *  (KHR_materials_transmission + _volume + _ior). Presence enables it.
+     *  Requires the engine to produce an opaque-scene render target. */
+    refraction?: RefractionProps;
 }
 
 /** Create a PbrMaterialProps with optional overrides. */
@@ -218,27 +255,8 @@ export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[] {
     if (mat.specGlossTexture) {
         t.push(mat.specGlossTexture);
     }
-    if (mat.metallicReflectanceTexture) {
-        t.push(mat.metallicReflectanceTexture);
+    for (const ext of _getPbrExts().values()) {
+        ext.textures?.(mat, t);
     }
-    if (mat.reflectanceTexture) {
-        t.push(mat.reflectanceTexture);
-    }
-    if (mat.sheen?.texture) {
-        t.push(mat.sheen.texture);
-    }
-    const cc = mat.clearCoat;
-    if (cc) {
-        if (cc.texture) {
-            t.push(cc.texture);
-        }
-        if (cc.roughnessTexture) {
-            t.push(cc.roughnessTexture);
-        }
-        if (cc.bumpTexture) {
-            t.push(cc.bumpTexture);
-        }
-    }
-    _getSubsurfaceExt()?.textures(mat, t);
     return t;
 }

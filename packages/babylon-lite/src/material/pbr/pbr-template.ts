@@ -170,8 +170,11 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     }
     baseVaryings.push({ name: "uv", type: "vec2<f32>" });
 
-    // ── Base mesh UBO fields (transform only) ──────────────────────
-    const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
+    // ── Base mesh UBO fields (transform + uv transform) ────────────
+    const baseMeshUboFields: UboField[] = [
+        { name: "world", type: "mat4x4<f32>" },
+        { name: "uvTransformST", type: "vec4<f32>" },
+    ];
 
     // ── Base material UBO fields ────────────────────────────────────
     const baseMaterialUboFields: UboField[] = [
@@ -324,7 +327,7 @@ out.worldPos = worldPos4.xyz;
 out.clipPos = scene.viewProj * worldPos4;
 out.worldNormal = (finalWorld * vec4<f32>(normalize(${normVar}), 0.0)).xyz;
 ${tangentBlock}
-out.uv = uv;
+out.uv = uv * mesh.uvTransformST.xy + mesh.uvTransformST.zw;
 /*VB*/
 return out;
 }`;
@@ -400,14 +403,23 @@ var colorF0 = mix(vec3<f32>(dielectricF0), baseColor, metallic);
 let colorF90 = vec3<f32>(1.0);
 let surfaceAlbedo = baseColor * (1.0 - dielectricF0) * (1.0 - metallic);`;
 
-    // Specular AA
+    // Specular AA + geometric-curvature roughness factors (BJS getAARoughnessFactors).
+    // AA_factor_x is the direct-light roughness floor (matches BJS `computeSheenLighting`
+    // which clamps info.roughness upward). AA_factor_y is the IBL/alphaG additive bump.
+    // Emitted unconditionally as var so sheen/other fragments can reference them
+    // without needing a define; zero on the no-curvature path makes them a no-op.
     const specularAABlock =
         hasSpecularAA || hasAnyNormal
-            ? `{ let nDfdx_AA = dpdx(N);
+            ? `var AA_factor_x = 0.0;
+var AA_factor_y = 0.0;
+{ let nDfdx_AA = dpdx(N);
   let nDfdy_AA = dpdy(N);
   let slopeSquare_AA = max(dot(nDfdx_AA, nDfdx_AA), dot(nDfdy_AA, nDfdy_AA));
-  alphaG += sqrt(slopeSquare_AA) * 0.75; }`
-            : "";
+  AA_factor_x = pow(saturate(slopeSquare_AA), 0.333);
+  AA_factor_y = sqrt(slopeSquare_AA) * 0.75;
+  alphaG += AA_factor_y; }`
+            : `var AA_factor_x = 0.0;
+var AA_factor_y = 0.0;`;
 
     // Direct lighting block
     let directLightBlock: string;

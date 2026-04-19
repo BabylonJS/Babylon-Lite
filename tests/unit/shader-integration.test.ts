@@ -9,6 +9,7 @@ import { createPbrTemplate } from "../../packages/babylon-lite/src/material/pbr/
 import { createStandardTemplate } from "../../packages/babylon-lite/src/material/standard/standard-template";
 import { createEmissiveColorFragment } from "../../packages/babylon-lite/src/material/pbr/fragments/emissive-fragment";
 import { createClearcoatFragment } from "../../packages/babylon-lite/src/material/pbr/fragments/clearcoat-fragment";
+import { PBR_HAS_CLEARCOAT } from "../../packages/babylon-lite/src/material/pbr/pbr-flags";
 import { createSheenFragment } from "../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
 import { createIblFragment } from "../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
 import { createSkeletonFragment } from "../../packages/babylon-lite/src/material/pbr/fragments/skeleton-fragment";
@@ -64,7 +65,7 @@ describe("PBR template + fragments integration", () => {
         expect(result.fragmentWGSL).toContain("@fragment fn main");
         expect(result.fragmentWGSL).toContain("distributionGGX");
         expect(result.fragmentWGSL).toContain("fresnelSchlick");
-        expect(result.meshUboSpec.totalBytes).toBe(64); // world matrix only (split UBO)
+        expect(result.meshUboSpec.totalBytes).toBe(80); // world matrix (64) + uvTransformST (16)
         expect(result.materialUboSpec).toBeDefined();
     });
 
@@ -77,7 +78,7 @@ describe("PBR template + fragments integration", () => {
 
     it("composes PBR + clearcoat", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent", hasEmissiveTexture: true, hasTonemap: true, hasClearcoat: true });
-        const result = composeShader(template, [createClearcoatFragment(false)]);
+        const result = composeShader(template, [createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, false, false, false)!]);
         expect(result.fragmentWGSL).toContain("visibility_Kelemen");
         expect(result.fragmentWGSL).toContain("getR0RemappedForClearCoat");
         expect(result.fragmentWGSL).toContain("material.ccParams");
@@ -165,7 +166,7 @@ describe("PBR template + fragments integration", () => {
         });
         const fragments: ShaderFragment[] = [
             createIblFragment(true),
-            createClearcoatFragment(true),
+            createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, true, false, true)!,
             createSheenFragment(false, true),
             createEmissiveColorFragment(true),
             createPbrShadowFragment(),

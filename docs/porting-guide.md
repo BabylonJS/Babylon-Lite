@@ -12,8 +12,9 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `new Scene(engine)` | `createSceneContext(engine)` |
 | `engine.runRenderLoop(() => scene.render())` | `await startEngine(engine, scene)` |
 | `new ArcRotateCamera("cam", α, β, r, target, scene)` | `createArcRotateCamera(α, β, r, target)` |
+| `new FreeCamera("cam", position, scene)` | `createFreeCamera(position, target)` |
 | `scene.createDefaultCamera(true, true, true)` | `createDefaultCamera(scene)` |
-| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas, scene)` |
+| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas, scene)` *(arc-rotate)* / `attachFreeControl(camera, canvas)` *(free)* |
 | `new HemisphericLight("h", new Vector3(0,1,0), scene)` | `createHemisphericLight([0,1,0], 1.0)` |
 | `new DirectionalLight("d", new Vector3(0,-1,0), scene)` | `createDirectionalLight([0,-1,0])` |
 | `new SpotLight("s", pos, dir, angle, exp, scene)` | `createSpotLight(pos, dir, angle, exp)` |
@@ -25,6 +26,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `SceneLoader.ImportMeshAsync("", url, file, scene)` | `await loadGltf(scene, url)` |
 | `new CubeTexture(url, scene)` + `createDefaultEnvironment()` | `await loadEnvironment(scene, url, opts)` |
 | `new Texture(url, scene)` | `await loadTexture2D(engine, url)` |
+| KTX/KTX2 compressed 2D texture | `await loadKtxTexture2D(engine, baseUrl, suffixes)` |
 | `new ShadowGenerator(size, light)` | `createShadowGenerator(engine, light, casters, opts)` |
 | `sg.usePercentageCloserFiltering = true` | `createPcfShadowGenerator(engine, light, casters, opts)` |
 | `mesh.thinInstanceSetBuffer("matrix", data, 16)` | `setThinInstances(mesh, data, count)` |
@@ -309,3 +311,27 @@ onBeforeRender(scene, () => {
 | Per-frame cost | Zero (manual call) | Zero (setter fires only on change) |
 | Catches `color[0] = x` | ❌ (must call manually) | ✅ |
 | Catches `mat.alpha = x` | ❌ (must call manually) | ✅ |
+
+---
+
+## glTF / PBR Extensions
+
+Babylon Lite's glTF loader + PBR material understand the following extensions. Each
+feature is tree-shakable: scenes that don't use it pay no bundle cost.
+
+| Extension / Feature | Support | Notes |
+|---|---|---|
+| `KHR_materials_pbrSpecularGlossiness` | ✅ | Auto-detected by `loadGltf()` |
+| `KHR_materials_clearcoat` | ✅ | Auto-detected; or `createPbrMaterial({ clearCoat: { ... } })` |
+| `KHR_materials_sheen` | ✅ | Auto-detected (BJS-spec albedo scaling for glTF); or `createPbrMaterial({ sheen: { ... } })` |
+| `KHR_materials_anisotropy` | ✅ | Auto-detected; or `createPbrMaterial({ anisotropy: { ... } })` |
+| `KHR_materials_variants` | ✅ | `selectVariant(scene, name)`, `getVariantNames(scene)`, `resetVariant(scene)` |
+| `KHR_texture_transform` | ✅ | Auto-resolved at load (material-wide UV transform) |
+| Subsurface translucency + thickness | ✅ | `createPbrMaterial({ subsurface: { translucency, thickness } })` |
+| Specular anti-aliasing | ✅ | Auto-on for glTF; manual: `createPbrMaterial({ enableSpecularAA: true })` |
+| Morph targets | ✅ | PBR meshes only (not `StandardMaterial`) |
+| Skeletal animation (4 or 8 bones) | ✅ | Driven by `createAnimationController(scene)` |
+| Screen-space SSS (PrePass) | ❌ | Not implemented — only BRDF-layer translucency |
+
+See `lab/src/lite/scene*.ts` for end-to-end examples of each extension in action.
+

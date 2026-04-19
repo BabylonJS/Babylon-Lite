@@ -1,4 +1,5 @@
 import type { Mat4 } from "../math/types.js";
+import { computeAabb } from "../math/aabb.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
@@ -6,18 +7,15 @@ import type { AssetContainer } from "../asset-container.js";
 import { createTransformNode } from "../scene/transform-node.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
-import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { Mesh, MeshGPU, MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { parseGlbContainer, resolveAccessor, buildParentMap, computeNodeWorldMatrix } from "./gltf-parser.js";
-import type { GltfMaterialData } from "./gltf-material.js";
-import { assembleMaterial } from "./gltf-material.js";
-import type { MaterialVariantData } from "./material-variants.js";
-
-function mipLevelCount(w: number, h: number): number {
-    return Math.floor(Math.log2(Math.max(w, h))) + 1;
-}
+import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
+import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
+import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
+import { assemblePbrProps, buildDefaultPbrTextures, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
 
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
@@ -71,70 +69,141 @@ export interface GltfSkinData {
  * registers animation ticks, and applies any scene-level settings.
  */
 export async function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer> {
-    const isGlb = url.toLowerCase().endsWith(".glb");
-    let json: any;
-    let binChunk: DataView;
-    let baseUrl: string;
-
-    if (isGlb) {
-        const buffer = await fetch(url).then((r) => r.arrayBuffer());
-        ({ json, binChunk } = parseGlbContainer(buffer));
-        baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
-    } else {
-        // .gltf: fetch JSON, then resolve external buffer
-        baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
-        json = await fetch(url).then((r) => r.json());
-        const bufferDef = json.buffers?.[0];
-        if (bufferDef?.uri) {
-            const binUrl = new URL(bufferDef.uri, baseUrl + "x").href; // resolve relative to base
-            const binBuffer = await fetch(binUrl).then((r) => r.arrayBuffer());
-            binChunk = new DataView(binBuffer);
-        } else {
-            binChunk = new DataView(new ArrayBuffer(0));
-        }
-    }
+    const { json, binChunk, baseUrl } = await fetchGltfAsset(url);
 
     // Build parent map + world-matrix cache once for O(n) hierarchy traversal
     const parentMap = buildParentMap(json);
     const worldMatrixCache = new Map<number, Mat4>();
 
-    // Parse KHR_materials_variants variant names from root extension (if present)
-    const variantDefs: { name: string }[] | undefined = json.extensions?.KHR_materials_variants?.variants;
-    const variantNames: string[] | undefined = variantDefs?.map((v: { name: string }) => v.name);
-    const hasVariants = !!variantNames?.length;
+    // Discover every triggered feature (material exts, skeleton, morph,
+    // animations, variants, …) and dynamic-import them concurrently with
+    // mesh extraction. Core loader knows zero feature names.
+    const features = await loadGltfFeatures(json);
+    const matExts: GltfFeature[] = features.filter((f) => f.applyMaterial);
 
-    // Pre-load animation + variant modules in parallel with mesh extraction (dynamic import for tree-shaking)
-    const hasAnimations = !!json.animations?.length;
-    const animModulePromise = hasAnimations ? Promise.all([import("./gltf-animation.js"), import("../animation/animation-group.js")]) : null;
-    const variantModulePromise = hasVariants ? import("./gltf-variants.js") : null;
-
-    const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache);
-    const meshes = await uploadMeshes(engine as EngineContextInternal, meshDatas);
-
-    // Build TransformNode hierarchy from glTF nodes.
-    // Hierarchy meshes get their worldMatrix cleared — the tree computes it.
-    const root = buildNodeHierarchy(json, meshes, meshDatas);
-
-    // Parse animation data (clips + node hierarchy + skeleton bindings)
-    let animationGroups: import("../animation/animation-group.js").AnimationGroup[] | undefined;
-    if (hasAnimations) {
-        const [{ parseAnimationData }, { createAnimationGroups }] = (await animModulePromise)!;
-        const animData = parseAnimationData(json, binChunk, meshes, parentMap, worldMatrixCache);
-
-        if (animData && animData.clips.length > 0 && (animData.skeletons.length > 0 || animData.morphBindings.length > 0)) {
-            animationGroups = createAnimationGroups(animData);
+    // Run every feature's pre-mesh hook (e.g. Draco decompression) and merge
+    // their primitive-keyed decode caches. Features without `preMesh` contribute
+    // nothing; the map stays empty when no primitive-level feature triggered.
+    const decodedPrimitives = new Map<unknown, DecodedPrimitive>();
+    for (const frag of await Promise.all(features.flatMap((f) => (f.preMesh ? [f.preMesh(json, binChunk)] : [])))) {
+        for (const [k, v] of frag) {
+            decodedPrimitives.set(k, v);
         }
     }
 
-    // Build KHR_materials_variants data (fully dynamic — zero overhead for non-variant models)
-    let materialVariants: MaterialVariantData | undefined;
-    if (hasVariants) {
-        const { loadVariantMaterials } = (await variantModulePromise)!;
-        materialVariants = await loadVariantMaterials(json, binChunk, baseUrl, variantNames!, meshes, engine as EngineContextInternal);
-    }
+    const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache, decodedPrimitives);
 
-    // Return AssetContainer — addToScene() handles hierarchy, animation ticks, and clearColor.
-    return { entities: [root], animationGroups, materialVariants };
+    const ctx: GltfLoadCtx = {
+        engine: engine as EngineContextInternal,
+        json,
+        binChunk,
+        baseUrl,
+        parentMap,
+        worldMatrixCache,
+        matExts,
+    };
+
+    const meshes = await uploadMeshes(meshDatas, features, ctx);
+
+    // Build TransformNode hierarchy from glTF nodes.
+    const root = buildNodeHierarchy(json, meshes, meshDatas);
+
+    // Run every feature's per-asset hook (animations, variants, …) and merge
+    // the returned AssetContainer fragments.
+    const assetFragments = await Promise.all(features.flatMap((f) => (f.applyAsset ? [f.applyAsset(meshes, root, ctx)] : [])));
+    const container: AssetContainer = { entities: [root] };
+    for (const frag of assetFragments) {
+        Object.assign(container, frag);
+    }
+    return container;
+}
+
+// --- glTF Feature Driver ---
+
+/** A glTF feature: per-asset gating + dynamic-import of a `GltfFeature` module.
+ *  Unknown features contribute zero bytes when their `needs(json)` returns false.
+ *  Stored as a tuple [needs, load] for bundle-size reasons. */
+type GltfFeatureLoader = [(json: any) => boolean, () => Promise<{ default: GltfFeature }>];
+
+/** Fetch + parse a .glb or .gltf asset. Returns the JSON, binary chunk, and base URL. */
+async function fetchGltfAsset(url: string): Promise<{ json: any; binChunk: DataView; baseUrl: string }> {
+    const baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
+    if (url.toLowerCase().endsWith(".glb")) {
+        const buffer = await fetch(url).then((r) => r.arrayBuffer());
+        const { json, binChunk } = parseGlbContainer(buffer);
+        return { json, binChunk, baseUrl };
+    }
+    const json = await fetch(url).then((r) => r.json());
+    const bufferDef = json.buffers?.[0];
+    let binChunk: DataView;
+    if (bufferDef?.uri) {
+        const binUrl = new URL(bufferDef.uri, baseUrl + "x").href;
+        const binBuffer = await fetch(binUrl).then((r) => r.arrayBuffer());
+        binChunk = new DataView(binBuffer);
+    } else {
+        binChunk = new DataView(new ArrayBuffer(0));
+    }
+    return { json, binChunk, baseUrl };
+}
+
+/** Returns true if any mesh primitive in the asset matches `pred`. */
+function anyPrimitive(json: any, pred: (p: any) => boolean): boolean {
+    for (const m of json.meshes ?? []) {
+        for (const p of m.primitives ?? []) {
+            if (pred(p)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+const _MAT_EXT = "KHR_materials_";
+const hasMatExt =
+    (suffix: string) =>
+    (json: any): boolean =>
+        json.extensionsUsed?.includes(_MAT_EXT + suffix);
+
+/** Asset has at least one material that needs ORM compositing
+ *  (separate metallicRoughnessTexture + occlusionTexture pointing at different images). */
+function needsOrmComposite(json: any): boolean {
+    const mats = json.materials ?? [];
+    const textures = json.textures ?? [];
+    for (const m of mats) {
+        const mr = m.pbrMetallicRoughness?.metallicRoughnessTexture;
+        const occ = m.occlusionTexture;
+        if (mr && occ && textures[mr.index]?.source !== textures[occ.index]?.source) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const _features: GltfFeatureLoader[] = [
+    // Pre-mesh features (geometry decompression)
+    [(j) => j.extensionsUsed?.includes("KHR_draco_mesh_compression"), () => import("./gltf-feature-draco.js")],
+    // Material extensions
+    [hasMatExt("clearcoat"), () => import("./gltf-ext-clearcoat.js")],
+    [hasMatExt("sheen"), () => import("./gltf-ext-sheen.js")],
+    [hasMatExt("anisotropy"), () => import("./gltf-ext-anisotropy.js")],
+    [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
+    // Dielectric cluster (ior/specular/transmission/volume) — any of the four triggers the loader;
+    // refraction render path is wired via fragments/refraction-fragment.ts (env-only V1).
+    [(j) => ["transmission", "volume", "ior", "specular"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
+    [(j) => j.extensionsUsed?.includes("KHR_texture_transform"), () => import("./gltf-ext-uv-transform.js")],
+    [needsOrmComposite, () => import("./gltf-ext-orm.js")],
+    // Per-mesh features (predicates inlined to avoid eager imports)
+    [(json) => !!json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined), () => import("./gltf-feature-skeleton.js")],
+    [(json) => anyPrimitive(json, (p) => !!p.targets?.length), () => import("./gltf-feature-morph.js")],
+    // Per-asset features
+    [(json) => !!json.animations?.length, () => import("./gltf-feature-animations.js")],
+    [hasMatExt("variants"), () => import("./gltf-feature-variants.js")],
+];
+
+/** Dynamic-import every feature the asset triggers. */
+async function loadGltfFeatures(json: any): Promise<GltfFeature[]> {
+    const mods = await Promise.all(_features.flatMap(([needs, load]) => (needs(json) ? [load()] : [])));
+    return mods.map((m) => m.default);
 }
 
 // --- Hierarchy Reconstruction ---
@@ -184,7 +253,14 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
 
 // --- Mesh Extraction ---
 
-async function extractAllMeshes(json: any, binChunk: DataView, baseUrl: string, parentMap: Map<number, number>, worldMatrixCache: Map<number, Mat4>): Promise<GltfMeshData[]> {
+async function extractAllMeshes(
+    json: any,
+    binChunk: DataView,
+    baseUrl: string,
+    parentMap: Map<number, number>,
+    worldMatrixCache: Map<number, Mat4>,
+    decodedPrimitives: Map<unknown, DecodedPrimitive>
+): Promise<GltfMeshData[]> {
     // Pre-load skin extraction once if any node uses a skin (avoids per-primitive dynamic import)
     const needsSkin = json.nodes.some((n: any) => n.skin !== undefined) && !!json.skins;
     const extractSkinFn = needsSkin ? (await import("./gltf-animation.js")).extractSkin : null;
@@ -219,13 +295,25 @@ async function extractAllMeshes(json: any, binChunk: DataView, baseUrl: string, 
 
         for (const primitive of mesh.primitives) {
             const attrs = primitive.attributes;
-            const resolve = (idx: number | undefined) => (idx !== undefined ? resolveAccessor(json, binChunk, idx) : null);
-
-            const posData = resolveAccessor(json, binChunk, attrs.POSITION);
-            const normData = resolveAccessor(json, binChunk, attrs.NORMAL);
-            const uvData = resolve(attrs.TEXCOORD_0);
-            const tanData = resolve(attrs.TANGENT);
-            const idxData = resolve(primitive.indices);
+            const decoded = decodedPrimitives.get(primitive);
+            const resolveAttr = (name: string): { data: ArrayBufferView; count: number; componentCount: number } | null => {
+                if (decoded && decoded.attributes.has(name)) {
+                    const data = decoded.attributes.get(name)!;
+                    const componentCount = data.length / decoded.vertexCount;
+                    return { data, count: decoded.vertexCount, componentCount };
+                }
+                const idx = attrs[name];
+                return idx !== undefined ? resolveAccessor(json, binChunk, idx) : null;
+            };
+            const posData = resolveAttr("POSITION")!;
+            const normData = resolveAttr("NORMAL")!;
+            const uvData = resolveAttr("TEXCOORD_0");
+            const tanData = resolveAttr("TANGENT");
+            const idxData = decoded
+                ? { data: decoded.indices, count: decoded.indexCount, componentCount: 1 }
+                : primitive.indices !== undefined
+                  ? resolveAccessor(json, binChunk, primitive.indices)
+                  : null;
 
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
@@ -235,10 +323,10 @@ async function extractAllMeshes(json: any, binChunk: DataView, baseUrl: string, 
                 : new Uint16Array(0);
 
             // Joints + weights for skeletal animation (4-bone + optional 8-bone)
-            const jointsData = resolve(attrs.JOINTS_0);
-            const weightsData = resolve(attrs.WEIGHTS_0);
-            const joints1Data = resolve(attrs.JOINTS_1);
-            const weights1Data = resolve(attrs.WEIGHTS_1);
+            const jointsData = resolveAttr("JOINTS_0");
+            const weightsData = resolveAttr("WEIGHTS_0");
+            const joints1Data = resolveAttr("JOINTS_1");
+            const weights1Data = resolveAttr("WEIGHTS_1");
 
             // Skin extraction is synchronous once the module is loaded
             let skin: GltfSkinData | null = null;
@@ -293,26 +381,7 @@ async function extractAllMeshes(json: any, binChunk: DataView, baseUrl: string, 
 
 // --- GPU Upload ---
 
-function createBufferFromData(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
-    const device = engine.device;
-    const size = Math.max(data.byteLength, 4);
-    const buffer = device.createBuffer({
-        size: (size + 3) & ~3, // align to 4 bytes — required when mappedAtCreation is true
-        usage: usage | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-    });
-    new Uint8Array(buffer.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-    buffer.unmap();
-    return buffer;
-}
-
-/** Convert linear [0,1] to sRGB [0,255]. */
-function linearToSrgbByte(v: number): number {
-    const c = Math.max(0, Math.min(1, v));
-    return Math.round((c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
-}
-
-// Pre-resolved generateMipmaps function — loaded once before texture uploads
+// Pre-resolved generateMipmaps function— loaded once before texture uploads
 let _generateMipmaps: ((engine: EngineContextInternal, texture: GPUTexture, face?: number) => void) | null = null;
 
 async function ensureMipmapModule(): Promise<void> {
@@ -322,30 +391,11 @@ async function ensureMipmapModule(): Promise<void> {
 }
 
 function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): Texture2D {
-    const device = engine.device;
-    const w = bitmap?.width ?? 1;
-    const h = bitmap?.height ?? 1;
-    const format: GPUTextureFormat = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
-    const mips = bitmap ? mipLevelCount(w, h) : 1;
-
-    const texture = device.createTexture({
-        size: { width: w, height: h },
-        format,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
-        mipLevelCount: mips,
-    });
-
-    if (bitmap) {
-        device.queue.copyExternalImageToTexture({ source: bitmap }, { texture, premultipliedAlpha: false }, { width: w, height: h });
-        _generateMipmaps!(engine, texture);
-    } else {
-        device.queue.writeTexture({ texture }, (fallbackBytes ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
-    }
-
-    return { texture, view: texture.createView(), sampler, width: w, height: h };
+    return uploadTex(engine, bitmap, srgb, sampler, _generateMipmaps!, fallbackBytes);
 }
 
-async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshData[]): Promise<Mesh[]> {
+async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], ctx: GltfLoadCtx): Promise<Mesh[]> {
+    const { engine, json, binChunk, baseUrl, matExts } = ctx;
     const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
@@ -355,23 +405,8 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
         maxAnisotropy: 4,
     });
 
-    // Pre-load dynamic imports once before the mesh loop
-    const needsSkeleton = meshDatas.some((m) => m.joints && m.weights && m.skin);
-    const needsMorph = meshDatas.some((m) => m.morphTargets && m.morphTargets.length > 0);
-    const needsOrmComposite = meshDatas.some((m) => {
-        const mat = m.material;
-        return !!(mat.metallicRoughnessImage && mat.occlusionImage && mat.metallicRoughnessImage !== mat.occlusionImage);
-    });
-    const [, skelMods, morphMod, ormMod] = await Promise.all([
-        ensureMipmapModule(),
-        needsSkeleton ? Promise.all([import("./gltf-animation.js"), import("../skeleton/create-skeleton.js")]) : null,
-        needsMorph ? import("../morph/create-morph-targets.js") : null,
-        needsOrmComposite ? import("./gltf-orm-composite.js") : null,
-    ]);
-    const computeBoneTextureDataFn = skelMods?.[0].computeBoneTextureData ?? null;
-    const createSkeletonFn = skelMods?.[1].createSkeleton ?? null;
-    const createMorphTargetsFn = morphMod?.createMorphTargets ?? null;
-    const compositeOrmFn = ormMod?.compositeOrm ?? null;
+    await ensureMipmapModule();
+    const meshFeatures = features.filter((f) => f.applyMesh);
 
     // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb)
     const texCache = new Map<string, Texture2D>();
@@ -396,21 +431,25 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
         return tex;
     }
 
-    function getOrmTexture(mat: GltfMaterialData): Promise<Texture2D> | Texture2D {
-        const mrImg = mat.metallicRoughnessImage;
-        const occImg = mat.occlusionImage;
-        if (mrImg && occImg && mrImg !== occImg && compositeOrmFn) {
-            // Separate MR + occlusion: composite R=occlusion into MR texture (dyn-imported)
-            return compositeOrmFn(mrImg, occImg).then((bmp) => uploadTextureSynced(engine, bmp, false, sampler));
-        } else if (mrImg ?? occImg) {
-            return getCachedTexture((mrImg ?? occImg)!, false);
-        } else {
-            const rf = mat.roughnessFactor,
-                mf = mat.metallicFactor;
-            const clampByte = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-            return uploadTextureSynced(engine, null, false, sampler, new Uint8Array([255, clampByte(rf), clampByte(mf), 255]));
-        }
-    }
+    // Per-load image fetcher for ext modules (uses same image cache as core).
+    const extImageCache = matExts.length > 0 ? new Map<number, Promise<ImageBitmap>>() : null;
+    const extFetchImg = extImageCache ? makeImageFetcher(json, binChunk, baseUrl, extImageCache) : null;
+    const extCtx: GltfMatExtCtx = {
+        async texture(texInfo, sRGB) {
+            if (!texInfo || !extFetchImg) {
+                return undefined;
+            }
+            const img = await extFetchImg(texInfo);
+            return img ? getCachedTexture(img, sRGB) : undefined;
+        },
+        uploadImage(bitmap, sRGB) {
+            return uploadTextureSynced(engine, bitmap, sRGB, sampler);
+        },
+    };
+
+    /** Default ORM upload: single MR-or-occlusion image, or 1×1 fallback baked from
+     *  metallicFactor/roughnessFactor. The composite case (MR+occlusion separate) is
+     *  handled by the gltf-ext-orm extension which overrides this via `extLayers`. */
 
     // Build a PbrMaterialPropsInternal from parsed glTF material data.
     // Uses shared texture caches so identical bitmaps are uploaded once.
@@ -421,46 +460,9 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
             return cached;
         }
         cached = (async () => {
-            const baseColorTexture = mat.baseColorImage
-                ? getCachedTexture(mat.baseColorImage, true)
-                : (() => {
-                      const f = mat.baseColorFactor;
-                      const bytes = new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)]);
-                      return uploadTextureSynced(engine, null, true, sampler, bytes);
-                  })();
-            const normalTexture = mat.normalImage ? getCachedTexture(mat.normalImage, false) : undefined;
-            const emissiveTexture = mat.emissiveImage ? getCachedTexture(mat.emissiveImage, true) : undefined;
-            const specGlossTexture = mat.specGlossImage ? getCachedTexture(mat.specGlossImage, true) : undefined;
-            const ormTexture = await getOrmTexture(mat);
-            let layers: Partial<import("../material/pbr/pbr-material.js").PbrMaterialProps> | undefined;
-            if (mat.clearcoat || mat.sheen || mat.anisotropy) {
-                const mod = await import("./gltf-material-layers.js");
-                const ccTextures = mat.clearcoat
-                    ? {
-                          ccTexture: mat.clearcoatImage ? getCachedTexture(mat.clearcoatImage, false) : undefined,
-                          ccRoughnessTexture: mat.clearcoatRoughnessImage ? getCachedTexture(mat.clearcoatRoughnessImage, false) : undefined,
-                          ccNormalTexture: mat.clearcoatNormalImage ? getCachedTexture(mat.clearcoatNormalImage, false) : undefined,
-                      }
-                    : undefined;
-                layers = mod.buildPbrLayers(mat, ccTextures);
-            }
-
-            return {
-                baseColorTexture,
-                normalTexture,
-                ormTexture,
-                emissiveTexture,
-                specGlossTexture,
-                doubleSided: mat.doubleSided,
-                occlusionStrength: mat.occlusionImage ? 1.0 : 0,
-                // Apply glTF metallicFactor/roughnessFactor only when a real MR texture is present.
-                // When no MR texture, the factors are already baked into the 1×1 fallback ORM bytes above.
-                ...(mat.metallicRoughnessImage ? { metallicFactor: mat.metallicFactor, roughnessFactor: mat.roughnessFactor } : undefined),
-                enableSpecularAA: true,
-                ...(mat.alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat.baseColorFactor[3] } : undefined),
-                ...layers,
-                _buildGroup: pbrGroupBuilder,
-            } satisfies PbrMaterialPropsInternal;
+            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+            const extLayers = await runMatExts(mat, matExts, extCtx);
+            return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
         })();
         builtMaterialCache.set(mat, cached);
         return cached;
@@ -470,28 +472,14 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
         meshDatas.map(async (m, i): Promise<Mesh> => {
             const material = await buildPbrFromGltfMat(m.material);
 
-            const [boundMin, boundMax] = computeWorldBounds(m.positions, m.worldMatrix);
-
-            // Skeleton (modules already pre-loaded)
-            let skeleton: import("../animation/types.js").SkeletonData | null = null;
-            if (m.joints && m.weights && m.skin && computeBoneTextureDataFn && createSkeletonFn) {
-                const boneCount = m.skin.jointNodes.length;
-                const boneData = computeBoneTextureDataFn(m.skin);
-                skeleton = createSkeletonFn(engine, m.joints, m.weights, boneCount, boneData, m.joints1, m.weights1);
-            }
-
-            // Morph targets (module already pre-loaded)
-            let morphTargets: import("../animation/types.js").MorphTargetData | null = null;
-            if (m.morphTargets && m.morphTargets.length > 0 && createMorphTargetsFn) {
-                morphTargets = createMorphTargetsFn(engine, m.morphTargets, m.vertexCount, m.morphWeights);
-            }
+            const [boundMin, boundMax] = computeAabb(m.positions, m.worldMatrix);
 
             const gpu: MeshGPU = {
-                positionBuffer: createBufferFromData(engine, m.positions, GPUBufferUsage.VERTEX),
-                normalBuffer: createBufferFromData(engine, m.normals, GPUBufferUsage.VERTEX),
-                tangentBuffer: m.tangents ? createBufferFromData(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
-                uvBuffer: createBufferFromData(engine, m.uvs, GPUBufferUsage.VERTEX),
-                indexBuffer: createBufferFromData(engine, m.indices, GPUBufferUsage.INDEX),
+                positionBuffer: createMappedBuffer(engine, m.positions, GPUBufferUsage.VERTEX),
+                normalBuffer: createMappedBuffer(engine, m.normals, GPUBufferUsage.VERTEX),
+                tangentBuffer: m.tangents ? createMappedBuffer(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
+                uvBuffer: createMappedBuffer(engine, m.uvs, GPUBufferUsage.VERTEX),
+                indexBuffer: createMappedBuffer(engine, m.indices, GPUBufferUsage.INDEX),
                 indexCount: m.indexCount,
                 indexFormat: (m.indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
             };
@@ -502,8 +490,8 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
                 receiveShadows: false,
                 boundMin,
                 boundMax,
-                skeleton,
-                morphTargets,
+                skeleton: null,
+                morphTargets: null,
                 _materialDirty: false,
                 _gpu: gpu,
             } as unknown as MeshInternal;
@@ -515,52 +503,15 @@ async function uploadMeshes(engine: EngineContextInternal, meshDatas: GltfMeshDa
             mesh._cpuUvs = m.uvs;
             mesh._cpuIndices = m.indices instanceof Uint32Array ? m.indices : new Uint32Array(m.indices);
 
+            // Run all per-mesh feature hooks (skeleton, morph, …) in parallel.
+            // Each hook mutates `mesh` directly (e.g. attaches mesh.skeleton).
+            if (meshFeatures.length > 0) {
+                await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
+            }
+
             return mesh as Mesh;
         })
     );
 
     return meshes;
-}
-
-/** Compute world-space AABB from local positions x world matrix. */
-function computeWorldBounds(positions: Float32Array, world: Mat4): [[number, number, number], [number, number, number]] {
-    let minX = Infinity,
-        minY = Infinity,
-        minZ = Infinity;
-    let maxX = -Infinity,
-        maxY = -Infinity,
-        maxZ = -Infinity;
-
-    for (let i = 0; i < positions.length; i += 3) {
-        const lx = positions[i]!;
-        const ly = positions[i + 1]!;
-        const lz = positions[i + 2]!;
-        // Column-major transform: m[col*4+row]
-        const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]!;
-        const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]!;
-        const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]!;
-        if (wx < minX) {
-            minX = wx;
-        }
-        if (wx > maxX) {
-            maxX = wx;
-        }
-        if (wy < minY) {
-            minY = wy;
-        }
-        if (wy > maxY) {
-            maxY = wy;
-        }
-        if (wz < minZ) {
-            minZ = wz;
-        }
-        if (wz > maxZ) {
-            maxZ = wz;
-        }
-    }
-
-    return [
-        [minX, minY, minZ],
-        [maxX, maxY, maxZ],
-    ];
 }

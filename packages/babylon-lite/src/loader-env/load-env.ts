@@ -2,6 +2,7 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
+import { mipLevelCount } from "../texture/mip-count.js";
 
 /** GPU-resident environment textures. */
 export interface EnvironmentTextures {
@@ -171,7 +172,7 @@ function parseEnvFile(buffer: ArrayBuffer): ParsedEnv {
 
     const manifest = JSON.parse(jsonStr);
     const width: number = manifest.width;
-    const mipCount = Math.floor(Math.log2(width)) + 1;
+    const mipCount = mipLevelCount(width, width);
 
     // Irradiance spherical harmonics (9 vec3 coefficients = 27 floats)
     const irr = manifest.irradiance;

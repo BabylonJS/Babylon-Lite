@@ -1,5 +1,9 @@
 /** Standard Opacity Texture Fragment — modulates alpha by opacity texture. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import type { StandardMaterialProps } from "../standard-material.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
+import type { StdExt } from "../standard-pipeline.js";
+import { HAS_OPACITY_TEXTURE, OPACITY_FROM_RGB } from "../standard-pipeline.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -18,3 +22,21 @@ export function createStdOpacityFragment(fromRGB: boolean): ShaderFragment {
         },
     };
 }
+
+export const stdOpacityExt: StdExt = {
+    id: "std-opacity",
+    phase: "mesh",
+    feature: HAS_OPACITY_TEXTURE,
+    frag: (features) => createStdOpacityFragment((features & OPACITY_FROM_RGB) !== 0),
+    bind(mat, entries, b) {
+        const tex = mat.opacityTexture!;
+        entries.push({ binding: b++, resource: tex.texture.createView() });
+        entries.push({ binding: b++, resource: tex.sampler });
+        return b;
+    },
+    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+        if (mat.opacityTexture) {
+            out.push(mat.opacityTexture);
+        }
+    },
+};

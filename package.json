@@ -12,7 +12,7 @@
         "test:watch": "vitest",
         "test:bundle-size": "npx playwright test tests/parity/bundle-size.spec.ts",
         "test:perf": "npx playwright test --config playwright.perf.config.ts",
-        "test:parity": "npx playwright test",
+        "test:parity": "npx playwright test tests/parity",
         "test:all": "npx playwright test && npx playwright test --config playwright.perf.config.ts",
         "test:bundle-delta": "npx playwright test tests/parity/bundle-size-delta.spec.ts",
         "test:perf-regression": "npx playwright test --config playwright.perf.config.ts tests/perf/perf-regression.spec.ts",

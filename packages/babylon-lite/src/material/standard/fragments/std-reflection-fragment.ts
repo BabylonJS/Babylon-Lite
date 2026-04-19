@@ -37,3 +37,26 @@ reflectionColor = textureSample(reflectionTex, reflectionSampler, reflCoords).rg
         },
     };
 }
+
+import type { StandardMaterialProps } from "../standard-material.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
+import type { StdExt } from "../standard-pipeline.js";
+import { HAS_REFLECTION_TEXTURE } from "../standard-pipeline.js";
+
+export const stdReflectionExt: StdExt = {
+    id: "std-reflection",
+    phase: "mesh",
+    feature: HAS_REFLECTION_TEXTURE,
+    frag: createStdReflectionFragment,
+    bind(mat, entries, b) {
+        const tex = mat.reflectionTexture!;
+        entries.push({ binding: b++, resource: tex.texture.createView() });
+        entries.push({ binding: b++, resource: tex.sampler });
+        return b;
+    },
+    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+        if (mat.reflectionTexture) {
+            out.push(mat.reflectionTexture);
+        }
+    },
+};

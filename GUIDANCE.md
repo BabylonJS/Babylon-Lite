@@ -66,6 +66,15 @@
 - The renderer never imports shader files directly. It only sees materials.
 - This keeps rendering logic generic and makes materials self-contained, swappable units.
 
+### 4c′. Always Use Extensions, Never Hardcode (Critical)
+
+- **Every optional feature MUST be expressed as an extension module.** The three extension surfaces are:
+    - glTF loader extensions → `packages/babylon-lite/src/loader-gltf/gltf-ext-*.ts` or `gltf-feature-*.ts` implementing `GltfFeature` (hooks: `preMesh`, `applyMaterial`, `applyMesh`, `applyAsset`). Registered in `load-gltf.ts` as `[needs(json), () => import(...)]` tuples — dynamic-imported only when the asset triggers them.
+    - PBR material extensions → `packages/babylon-lite/src/material/pbr/fragments/*-fragment.ts` implementing `PbrExt` (`detect`, `frag`, `writeUbo`, `bind`, `textures`). Registered via `_registerPbrExt(ext)` after dynamic-import from `pbr-renderable.ts`.
+    - Standard material extensions → follow the same pattern on the standard material side.
+- **Never hardcode feature-specific logic in the core loader or core material builders.** No `if (primitive.extensions?.KHR_...)` in `load-gltf.ts`. No `if (mat.subsurface)` inside the core PBR pipeline. The core walks an opaque feature list; feature modules own their triggers and their code paths.
+- **Why:** zero bytes for unused features (tree-shaking + dynamic import), no coupling between core and feature code, new extensions can be added without touching the core. Violating this rule breaks bundle-size ceilings for all scenes.
+
 ### 5. Pixel-Perfect Accuracy
 
 - Rendering output must be mathematically and visually identical to Babylon.js.

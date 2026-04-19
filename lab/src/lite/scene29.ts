@@ -1,0 +1,38 @@
+// Scene 29 — Sheen Cloth glTF — matches Babylon #YG3BBF#2
+// Loads SheenCloth.gltf (draped cloth, KHR_materials_sheen), default environment
+// (IBL only — no ground, no skybox), and a default camera flipped by +π to face
+// the front of the cloth.
+
+import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl } from "babylon-lite";
+
+async function main(): Promise<void> {
+    const __initStart = performance.now();
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+
+    const engine = await createEngine(canvas);
+    const scene = createSceneContext(engine);
+
+    addToScene(scene, await loadGltf(engine, "https://assets.babylonjs.com/meshes/SheenCloth/SheenCloth.gltf"));
+
+    await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
+        skipSkybox: true,
+        skipGround: true,
+        brdfUrl: "/brdf-lut.png",
+    });
+
+    const cam = createDefaultCamera(scene);
+    cam.alpha += Math.PI;
+    attachControl(cam, canvas, scene);
+
+    await startEngine(engine, scene);
+    canvas.dataset.drawCalls = String(engine.drawCallCount);
+    canvas.dataset.camAlpha = String(cam.alpha);
+    canvas.dataset.camBeta = String(cam.beta);
+    canvas.dataset.camRadius = String(cam.radius);
+    canvas.dataset.camTarget = `${cam.target.x},${cam.target.y},${cam.target.z}`;
+    canvas.dataset.camFov = String(cam.fov);
+    canvas.dataset.initMs = String(performance.now() - __initStart);
+    canvas.dataset.ready = "true";
+}
+
+main().catch(console.error);
