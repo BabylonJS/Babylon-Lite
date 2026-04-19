@@ -1,12 +1,25 @@
 /**
- * Refraction Fragment — KHR_materials_transmission + _volume + _ior.
+ * Refraction Fragment — KHR_materials_transmission + _volume + _ior + _specular.
  *
- * V1: env-only refraction. Samples the IBL specular cube along the refracted
- * view direction (Snell), modulated by Beer-Lambert absorption using volume
- * attenuation color + distance. No opaque-scene RTT is needed — a full-fidelity
- * scene-behind-the-glass sample is a follow-up extension.
+ * Ports the BJS `pbrBlockSubSurface.fx` refraction path:
+ *   1. Snell refraction with IOR-scaled alphaG
+ *      `refractionAlphaG = mix(alphaG, 0, clamp(ior*3-2, 0, 1))`
+ *   2. LOD from refractionAlphaG via BJS `getLodFromAlphaG` formula
+ *      `log2(textureSize * refractionAlphaG) * lodScale`
+ *   3. Beer-Lambert volume absorption (KHR_materials_volume):
+ *      `volumeAlbedo = -log(tintColor) / atDistance`
+ *      `refractionTransmittance = intensity * exp(-volumeAlbedo * thickness)`
+ *   4. Energy conservation:
+ *      `finalRefraction = envRefraction * refractionTransmittance * (1 - specEnvReflectance)`
+ *   5. Composition:
+ *      `finalIrradiance *= (1 - refractionIntensity)`
+ *      `directDiffuse *= (1 - refractionIntensity)`
+ *      `color = finalIrradiance + finalRadianceScaled + finalSpecularScaled
+ *             + directDiffuse + finalRefraction + emissive`
  *
- * Maps BJS SubSurfaceConfiguration.refraction with useOpaqueSceneTexture=false.
+ * V2 env-only: samples the IBL specular cube along the refracted direction.
+ * V3 (future) will sample an opaque-scene RTT for true behind-the-glass rendering.
+ * Maps BJS `SubSurfaceConfiguration.refraction`.
  */
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
@@ -14,28 +27,48 @@ import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR2_HAS_REFRACTION, PBR2_HAS_VOLUME } from "../pbr-flags.js";
 
-// AI: applied inside the IBL-modification slot, after subsurface had its chance.
-// Reuses iblTexture + iblSampler (already bound for IBL).
-// `color` at this point contains the pre-refraction shaded output. Mix the refraction
-// contribution in by `transmissionFactor` and modulate by Beer-Lambert absorption
-// when KHR_materials_volume is present.
+// `dependencies: ["ibl"]` guarantees the IBL fragment's AI slot has already run,
+// so the following symbols are in scope when this slot executes:
+//   finalIrradiance, finalRadianceScaled, finalSpecularScaled, directDiffuse,
+//   emissive, specularEnvironmentReflectance, N, V, NdotV, NdotVUnclamped,
+//   alphaG, roughness, iblTexture, iblSampler, cubemapDim, maxLod, rotateY(), scene.envRotationY.
 function makeRefractionMod(hasVolume: boolean): string {
-    // Beer-Lambert: exp(-sigma_a * d) where sigma_a = -log(color) / dist.
-    // BJS formulation: absorption = exp(ln(attenuationColor) * thickness / attenuationDistance)
-    // We pre-bake ln(attenuationColor)/attenuationDistance into volumeParams.rgb on the CPU side.
-    const absorption = hasVolume ? `let absorption = exp(material.volumeParams.rgb * material.refractionParams.z);` : `let absorption = vec3<f32>(1.0);`;
+    // Beer-Lambert: exp(-sigma_a * d) where sigma_a = -ln(tint)/atDistance.
+    // `volumeParams.rgb` is pre-baked to ln(tint)/atDistance on the CPU side; the
+    // shader multiplies by thickness and exp. Matches BJS cocaLambertVec3 ∘ computeColorAtDistanceInMedia.
+    const absorptionLine = hasVolume
+        ? `let absorption = exp(material.volumeParams.rgb * material.refractionParams.z);`
+        : `let absorption = vec3<f32>(1.0);`;
 
     return `{
-let etaRatio = 1.0 / max(material.refractionParams.y, 1.001);
+let refrIntensity = material.refractionParams.x;
+let refrOpacity = 1.0 - refrIntensity;
+let ior = max(material.refractionParams.y, 1.001);
+let etaRatio = 1.0 / ior;
 let refrDir_raw = refract(-V, N, etaRatio);
 let refrDir = rotateY(refrDir_raw, scene.envRotationY);
-let refrMaxLod = f32(textureNumLevels(iblTexture) - 1);
-let refrLod = clamp(roughness * refrMaxLod, 0.0, refrMaxLod);
-let refrSample = textureSampleLevel(iblTexture, iblSampler, refrDir, refrLod).rgb * material.environmentIntensity;
-${absorption}
-let refractionColor = refrSample * absorption;
-let transmission = material.refractionParams.x;
-color = mix(color, refractionColor, transmission);
+
+// BJS: refractionAlphaG = mix(alphaG, 0, clamp(ior*3-2, 0, 1))
+// At IOR=1.0 → alphaG (no microfacet refraction change)
+// At IOR≥1.5 → 0 (perfect refraction, sharp)
+let refrAlphaG = mix(alphaG, 0.0, clamp(ior * 3.0 - 2.0, 0.0, 1.0));
+// BJS getLodFromAlphaG:  log2(textureSize * alphaG) * lodGenerationScale
+let refrSpecLod = log2(cubemapDim * refrAlphaG) * scene.lodGenerationScale;
+let refrLodClamped = clamp(refrSpecLod, 0.0, maxLod);
+let envRefraction = textureSampleLevel(iblTexture, iblSampler, refrDir, refrLodClamped).rgb * material.environmentIntensity;
+
+${absorptionLine}
+let refractionTransmittance = refrIntensity * absorption;
+let finalRefraction = envRefraction * refractionTransmittance * (vec3<f32>(1.0) - specularEnvironmentReflectance);
+
+// BJS composition: refractionOpacity modulates finalIrradiance + finalDiffuse only.
+// finalSpecular/finalRadiance are NOT attenuated (surface specular survives through glass).
+color = finalIrradiance * refrOpacity
+      + finalRadianceScaled
+      + finalSpecularScaled
+      + directDiffuse * refrOpacity
+      + finalRefraction
+      + emissive;
 }`;
 }
 
@@ -50,8 +83,8 @@ export function createRefractionFragment(hasVolume: boolean): ShaderFragment {
     }
     return {
         id: "refraction",
-        // Must come after IBL so `color` already contains the shaded output; also requires
-        // the env cube binding + rotateY helper provided by IBL.
+        // Must run after IBL so finalIrradiance/finalRadianceScaled/finalSpecularScaled
+        // are in scope. The IBL AI slot also produces `cubemapDim` + `maxLod` + `rotateY`.
         dependencies: ["ibl"],
         uboFields,
         fragmentSlots: { AI: makeRefractionMod(hasVolume) },
