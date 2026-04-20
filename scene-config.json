@@ -278,6 +278,15 @@
         "skipPerf": true
     },
     {
+        "id": 31,
+        "slug": "scene31-emissive-strength",
+        "name": "Scene 31 — KHR_materials_emissive_strength",
+        "maxMad": 0.01,
+        "maxRawKB": 78,
+        "description": "EmissiveStrengthTest.glb (grid of materials with varying emissive_strength) against default IBL environment. Matches PG #YG3BBF#52.",
+        "tags": ["pbr", "gltf", "env", "emissive"]
+    },
+    {
         "id": 40,
         "slug": "scene40-physics",
         "name": "Scene 40 — Physics",

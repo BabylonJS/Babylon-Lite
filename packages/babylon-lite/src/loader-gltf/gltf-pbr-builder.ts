@@ -52,6 +52,13 @@ export function assemblePbrProps(
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
 ): PbrMaterialPropsInternal {
+    // Propagate non-default emissiveFactor as `emissiveColor` so the emissive fragment
+    // multiplies the texture sample by it. Factors of [1,1,1] (pass-through) and
+    // [0,0,0] (no-emissive, the glTF spec default) both leave `emissiveColor` unset
+    // so scenes without emissive pay zero bytes for the emissive-color fragment.
+    // The emissive-strength extension overrides this via `extLayers`.
+    const ef = mat.emissiveFactor;
+    const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
     return {
         baseColorTexture,
         normalTexture,
@@ -62,6 +69,7 @@ export function assemblePbrProps(
         // Apply factors only when a real MR texture is present. Without one,
         // the factors are baked into the 1×1 fallback ORM bytes.
         ...(mat.metallicRoughnessImage ? { metallicFactor: mat.metallicFactor, roughnessFactor: mat.roughnessFactor } : undefined),
+        ...(!defaultFactor ? { emissiveColor: [ef[0], ef[1], ef[2]] as [number, number, number] } : undefined),
         enableSpecularAA: true,
         ...(mat.alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat.baseColorFactor[3] } : undefined),
         ...extLayers,

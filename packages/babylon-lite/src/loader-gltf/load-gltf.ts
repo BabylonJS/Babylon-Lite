@@ -164,6 +164,7 @@ const _features: GltfFeatureLoader[] = [
     [(j) => j.extensionsUsed?.includes("KHR_draco_mesh_compression"), () => import("./gltf-feature-draco.js")],
     // Material extensions
     [hasMatExt("clearcoat"), () => import("./gltf-ext-clearcoat.js")],
+    [hasMatExt("emissive_strength"), () => import("./gltf-ext-emissive-strength.js")],
     [hasMatExt("sheen"), () => import("./gltf-ext-sheen.js")],
     [hasMatExt("anisotropy"), () => import("./gltf-ext-anisotropy.js")],
     [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
