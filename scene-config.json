@@ -273,5 +273,15 @@
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment. V1 env-only refraction. Matches PG #YG3BBF#16.",
         "note": "MAD ceiling temporarily relaxed (18.59 actual vs 0.02 target). Env-only refraction cannot show scene-behind-the-glass; full parity requires opaque-scene RTT, deferred to land with the frame-graph.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume"]
+    },
+    {
+        "id": 40,
+        "slug": "scene40-physics",
+        "name": "Scene 40 — Physics",
+        "maxMad": 0.5,
+        "maxRawKB": 55,
+        "maxGzipKB": 22,
+        "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
+        "tags": ["std", "procedural", "physics"]
     }
 ]

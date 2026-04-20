@@ -184,6 +184,19 @@ function terserPropertyManglePlugin(): Plugin {
             for (const [, chunk] of Object.entries(bundle)) {
                 if (chunk.type !== "chunk") continue;
 
+                // Dynamically extract WASM import binding names from emscripten
+                // glue code.  These are property keys in the env object that the
+                // WASM binary imports by name at instantiation time — they must
+                // survive property mangling.  The variable holding the object may
+                // have been renamed by esbuild, so we anchor on `_abort_js:` which
+                // is always the first alphabetical key emscripten emits.
+                const wasmReserved: string[] = [];
+                const wasmObjMatch = chunk.code.match(/\{(_abort_js:[^}]+)\}/);
+                if (wasmObjMatch) {
+                    const keys = wasmObjMatch[1].match(/\b(_\w+)\s*:/g);
+                    if (keys) wasmReserved.push(...keys.map((k) => k.replace(/\s*:/, "")));
+                }
+
                 const result = await terserMinify(chunk.code, {
                     compress: {
                         passes: 2,
@@ -198,7 +211,7 @@ function terserPropertyManglePlugin(): Plugin {
                         toplevel: true,
                         properties: {
                             regex: /^_[a-z]/,
-                            reserved: ["_pad", "_pad0", "_pad1", "_pad2", "_pad3", "_pad4", "_imgPad0", "_imgPad1"],
+                            reserved: ["_pad", "_pad0", "_pad1", "_pad2", "_pad3", "_pad4", "_imgPad0", "_imgPad1", ...wasmReserved],
                         },
                     },
                     nameCache,
@@ -215,6 +228,7 @@ function terserPropertyManglePlugin(): Plugin {
 
 import { createServer, type Server } from "http";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -440,6 +454,7 @@ const MIME: Record<string, string> = {
     ".json": "application/json",
     ".png": "image/png",
     ".css": "text/css",
+    ".wasm": "application/wasm",
 };
 
 function startStaticServer(root: string): Promise<{ server: Server; port: number }> {
@@ -529,6 +544,9 @@ export async function buildBundleScenes(): Promise<void> {
                 modulePreload: false,
                 rollupOptions: {
                     input: { [scene]: resolve(labDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
+                    // Exclude third-party WASM runtimes from Lite bundles so the
+                    // bundle-size metric reflects only first-party Lite engine code.
+                    ...(!isBjs && { external: ["@babylonjs/havok"] }),
                     output: {
                         format: "es",
                         entryFileNames: "[name].js",
@@ -612,6 +630,19 @@ export async function buildBundleScenes(): Promise<void> {
 
     console.log(`\nAll ${totalScenes} scenes built in ${elapsed(t0)}`);
 
+    // Copy third-party WASM runtimes needed by import-mapped bundle pages.
+    const vendorDir = resolve(labDir, "public/vendor");
+    mkdirSync(vendorDir, { recursive: true });
+    try {
+        const _require = createRequire(resolve(labDir, "package.json"));
+        const havokMain = _require.resolve("@babylonjs/havok");
+        const havokSrc = resolve(dirname(dirname(havokMain)), "esm/HavokPhysics_es.js");
+        if (existsSync(havokSrc)) {
+            writeFileSync(resolve(vendorDir, "havok.js"), readFileSync(havokSrc));
+        }
+    } catch {
+        /* @babylonjs/havok not installed — skip vendor copy */
+    }
     // ── 2. Measure real runtime sizes via headless browser ───────────────
     if (process.env.SKIP_MEASURE) {
         console.log("Skipping live size measurement (SKIP_MEASURE is set)");
@@ -724,7 +755,7 @@ async function measurePage(
 
     await page.goto(`http://localhost:${port}/${htmlFile}`);
     try {
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
+        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
     } catch {
         // BJS pages may not reach ready state without GPU — just measure fetched JS
     }

@@ -233,3 +233,14 @@ For pure logic (shader composition, math) that doesn't need a browser:
 - Prefix intentionally unused variables with `_` (e.g., `_light`, `_cam`)
 - Use `import type` for type-only imports
 - Never raise bundle-size ceilings or MAD thresholds without explicit approval
+
+---
+
+## Reserved Test Scene Numbers
+
+Certain scene number ranges are reserved for specific feature areas. When adding a new scene, pick an ID from the appropriate reserved range (or from the unreserved pool if your scene doesn't belong to a reserved category).
+
+| Range | Feature Area | Notes |
+|-------|-------------|-------|
+| 1–39 | General (unreserved) | Rendering, materials, lighting, loaders, etc. |
+| 40–49 | Physics | Havok V2, rigid bodies, constraints, ragdolls |

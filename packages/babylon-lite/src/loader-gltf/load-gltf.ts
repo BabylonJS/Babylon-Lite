@@ -66,7 +66,9 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // nothing; the map stays empty when no primitive-level feature triggered.
     const decodedPrimitives = new Map<unknown, DecodedPrimitive>();
     for (const frag of await Promise.all(features.flatMap((f) => (f.preMesh ? [f.preMesh(json, binChunk)] : [])))) {
-        for (const [k, v] of frag) decodedPrimitives.set(k, v);
+        for (const [k, v] of frag) {
+            decodedPrimitives.set(k, v);
+        }
     }
 
     const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache, decodedPrimitives);
@@ -237,7 +239,7 @@ async function extractAllMeshes(
     baseUrl: string,
     parentMap: Map<number, number>,
     worldMatrixCache: Map<number, Mat4>,
-    decodedPrimitives: Map<unknown, DecodedPrimitive>,
+    decodedPrimitives: Map<unknown, DecodedPrimitive>
 ): Promise<GltfMeshData[]> {
     // Per-load image cache — avoids decoding the same glTF image index multiple times
     const imageCache = new Map<number, Promise<ImageBitmap>>();

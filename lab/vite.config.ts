@@ -39,7 +39,7 @@ export default defineConfig({
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.
         // Exclude both from Vite's dep optimizer.
-        exclude: ["@babylonjs/core", "@babylonjs/loaders"],
+        exclude: ["@babylonjs/core", "@babylonjs/loaders", "@babylonjs/havok"],
     },
     resolve: {
         // Ensure @babylonjs/core resolves to a single instance (loaders registers

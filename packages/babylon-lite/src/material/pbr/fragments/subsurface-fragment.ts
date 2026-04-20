@@ -178,11 +178,7 @@ export const subsurfaceExt: PbrExt = {
         if (!(ctx.features & PBR_HAS_SUBSURFACE)) {
             return null;
         }
-        return createSubsurfaceFragment(
-            (ctx.features & PBR_HAS_THICKNESS_MAP) !== 0,
-            ctx.hasIbl,
-            (ctx.features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0
-        );
+        return createSubsurfaceFragment((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0, ctx.hasIbl, (ctx.features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
     },
     writeUbo(data, mat, offsets) {
         const m = mat as PbrMaterialProps;

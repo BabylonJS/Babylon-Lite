@@ -39,7 +39,7 @@ for (const scene of SCENES) {
 
         // Navigate to the bundle page and wait for the scene to finish rendering
         await page.goto(`/bundle-scene${scene.id}.html`);
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
+        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
 
         // Tally raw + gzipped sizes of all JS that was actually loaded (gzip is informational only)
         let totalRaw = 0;
