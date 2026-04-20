@@ -51,6 +51,8 @@ export const PBR2_HAS_VOLUME = 1 << 5;
 export const PBR2_HAS_REFRACTION_MAP = 1 << 6;
 /** Thickness texture samples the G channel (KHR_materials_volume). */
 export const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
+/** Material is unlit — bypass all lighting (KHR_materials_unlit). */
+export const PBR2_HAS_UNLIT = 1 << 8;
 
 let _lightExt: PbrLightExtension | null = null;
 /** @internal */ export function _setPbrLightExtension(ext: PbrLightExtension): void {

@@ -148,6 +148,7 @@ export async function buildPbrRenderables(
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
+    let hasAnyUnlit = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps;
@@ -184,6 +185,9 @@ export async function buildPbrRenderables(
         if (!hasSomeThinInstances && !!m.thinInstances) {
             hasSomeThinInstances = true;
         }
+        if (!hasAnyUnlit && !!mat.unlit) {
+            hasAnyUnlit = true;
+        }
         if (
             hasSkybox &&
             hasMetallicReflectance &&
@@ -195,7 +199,8 @@ export async function buildPbrRenderables(
             needsEmissiveColor &&
             hasSomeSkeletons &&
             hasSomeMorphs &&
-            hasSomeThinInstances
+            hasSomeThinInstances &&
+            hasAnyUnlit
         ) {
             break;
         }
@@ -272,6 +277,11 @@ export async function buildPbrRenderables(
     if (needsEmissiveColor) {
         const mod = await import("./fragments/emissive-fragment.js");
         _registerPbrExt(mod.emissiveColorExt);
+    }
+
+    if (hasAnyUnlit) {
+        const mod = await import("./fragments/unlit-fragment.js");
+        _registerPbrExt(mod.unlitExt);
     }
 
     if (hasSomeSkeletons) {

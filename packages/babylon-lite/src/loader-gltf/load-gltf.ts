@@ -167,6 +167,7 @@ const _features: GltfFeatureLoader[] = [
     [hasMatExt("emissive_strength"), () => import("./gltf-ext-emissive-strength.js")],
     [hasMatExt("sheen"), () => import("./gltf-ext-sheen.js")],
     [hasMatExt("anisotropy"), () => import("./gltf-ext-anisotropy.js")],
+    [hasMatExt("unlit"), () => import("./gltf-ext-unlit.js")],
     [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
     // Dielectric cluster (ior/specular/transmission/volume) — any of the four triggers the loader;
     // refraction render path is wired via fragments/refraction-fragment.ts (env-only V1).

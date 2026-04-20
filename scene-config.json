@@ -287,6 +287,15 @@
         "tags": ["pbr", "gltf", "env", "emissive"]
     },
     {
+        "id": 32,
+        "slug": "scene32-unlit",
+        "name": "Scene 32 — KHR_materials_unlit",
+        "maxMad": 0.01,
+        "maxRawKB": 75,
+        "description": "UnlitTest.glb (KHR_materials_unlit) against default IBL environment. Base color output directly with no lighting. Matches PG #YG3BBF#53.",
+        "tags": ["pbr", "gltf", "env", "unlit"]
+    },
+    {
         "id": 40,
         "slug": "scene40-physics",
         "name": "Scene 40 — Physics",
