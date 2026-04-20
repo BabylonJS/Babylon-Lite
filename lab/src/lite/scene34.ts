@@ -6,19 +6,7 @@
 // all animation groups after the first tick so parity tests can diff
 // against a stable golden.
 
-import {
-    onBeforeRender,
-    addToScene,
-    startEngine,
-    createEngine,
-    createSceneContext,
-    createDefaultCamera,
-    loadEnvironment,
-    loadGltf,
-    attachControl,
-    goToFrame,
-    pauseAnimation,
-} from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl, goToFrame, pauseAnimation, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -68,7 +56,8 @@ async function main(): Promise<void> {
         }
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     (window as any).__scene = scene;
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.camAlpha = String(cam.alpha);

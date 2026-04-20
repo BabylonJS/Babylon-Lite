@@ -3,7 +3,7 @@
 // KHR_materials_emissive_strength factors) against the default IBL environment
 // (no ground, no skybox).
 
-import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -27,7 +27,8 @@ async function main(): Promise<void> {
     cam.alpha += Math.PI;
     attachControl(cam, canvas, scene);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.camAlpha = String(cam.alpha);
     canvas.dataset.camBeta = String(cam.beta);

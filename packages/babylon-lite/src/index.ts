@@ -2,8 +2,8 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, renderOneFrame, VERSION } from "./engine/engine.js";
-export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene } from "./scene/scene.js";
+export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
+export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene, registerScene, unregisterScene } from "./scene/scene.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";

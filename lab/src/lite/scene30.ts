@@ -5,7 +5,7 @@
 // absorption from KHR_materials_volume attenuation. Opaque-scene RTT refraction
 // is follow-up work.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -31,7 +31,8 @@ async function main(): Promise<void> {
         }),
     ]);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.camAlpha = String(cam.alpha);
     canvas.dataset.camBeta = String(cam.beta);

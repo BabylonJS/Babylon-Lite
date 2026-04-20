@@ -1,17 +1,4 @@
-import { onBeforeRender, addToScene, startEngine,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    createDirectionalLight,
-    cloneTransformNode,
-    attachControl,
-    loadGltf,
-    loadEnvironment,
-    loadTexture2D,
-    createPbrMaterial,
-    createSolidTexture2D,
-    goToFrame,
-} from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, cloneTransformNode, attachControl, loadGltf, loadEnvironment, loadTexture2D, createPbrMaterial, createSolidTexture2D, goToFrame, registerScene } from "babylon-lite";
 import type { TransformNode } from "babylon-lite";
 
 export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
@@ -133,7 +120,8 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
         }
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

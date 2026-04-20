@@ -1,16 +1,7 @@
 // Scene 23: PBR Anisotropy — metallic sphere with anisotropic reflections
 // Based on playground #FEEK7G#1175
 
-import { addToScene, startEngine, onBeforeRender,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    attachControl,
-    createSphere,
-    createPbrMaterial,
-    createSolidTexture2D,
-    loadEnvironment,
-} from "babylon-lite";
+import { addToScene, startEngine, onBeforeRender, createEngine, createSceneContext, createArcRotateCamera, attachControl, createSphere, createPbrMaterial, createSolidTexture2D, loadEnvironment, registerScene } from "babylon-lite";
 import { installPbrTracking } from "babylon-lite/material/tracking/pbr-tracking";
 
 async function main(): Promise<void> {
@@ -76,7 +67,8 @@ async function main(): Promise<void> {
         });
     }
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

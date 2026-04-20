@@ -2,22 +2,7 @@
 // Based on playground #5H0H89#5 (Georgia Tech Dragon)
 // Dragon with translucent teal PBR material, thickness map, point light, DDS environment
 
-import {
-    addToScene,
-    startEngine,
-    onBeforeRender,
-    createEngine,
-    createSceneContext,
-    createDefaultCamera,
-    attachControl,
-    createPbrMaterial,
-    createPointLight,
-    createSphere,
-    createBox,
-    createSolidTexture2D,
-    loadGltf,
-    loadTexture2D,
-} from "babylon-lite";
+import { addToScene, startEngine, onBeforeRender, createEngine, createSceneContext, createDefaultCamera, attachControl, createPbrMaterial, createPointLight, createSphere, createBox, createSolidTexture2D, loadGltf, loadTexture2D, registerScene } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 
 async function main(): Promise<void> {
@@ -142,7 +127,8 @@ async function main(): Promise<void> {
         });
     }
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

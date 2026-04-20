@@ -46,7 +46,7 @@
 
 - **All public interfaces are pure state — no attached methods.**
 - `EngineContext`, `SceneContext`, `Camera`, `ArcRotateCamera`, `FreeCamera`, `Mesh`, `LightBase`, etc. are plain data objects.
-- Behaviour is provided by standalone functions that accept the interface as their first argument: `startEngine(engine, scene)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
+- Behaviour is provided by standalone functions that accept the interface as their first argument: `registerScene(engine, scene)`, `startEngine(engine)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
 - This maximises tree-shakability: unused functions are fully eliminated. Methods on interfaces cannot be tree-shaken.
 - Internal interfaces (`SceneContextInternal`, `EngineContextInternal`) follow the same rule — no methods.
 
@@ -110,7 +110,8 @@ async function main(): Promise<void> {
     camera.alpha += Math.PI;
 
     // Materials own their renderable builders — no explicit pipeline building
-    await startEngine(engine, scene); // resolves after first frame rendered
+    await registerScene(engine, scene); // builds deferred work, partitions renderables
+    await startEngine(engine); // resolves after first frame rendered; renders all registered scenes
 }
 ```
 

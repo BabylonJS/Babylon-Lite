@@ -2,7 +2,7 @@
 // Loads LightsPunctualLamp.glb (KHR_lights_punctual + KHR_materials_transmission),
 // default environment (IBL only), default camera flipped by +π.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -23,7 +23,8 @@ async function main(): Promise<void> {
     cam.alpha += Math.PI;
     attachControl(cam, canvas, scene);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.camAlpha = String(cam.alpha);
     canvas.dataset.camBeta = String(cam.beta);

@@ -49,7 +49,7 @@ Pick the next available scene number (e.g., `23`) and a descriptive slug:
 **`lab/src/lite/sceneN.ts`**
 
 ```typescript
-import { createEngine, createSceneContext, createDefaultCamera, attachControl } from "babylon-lite";
+import { createEngine, createSceneContext, createDefaultCamera, attachControl, registerScene, startEngine } from "babylon-lite";
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -61,7 +61,8 @@ async function main(): Promise<void> {
     const cam = createDefaultCamera(scene);
     attachControl(cam, canvas, scene);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.ready = "true";
 }
 

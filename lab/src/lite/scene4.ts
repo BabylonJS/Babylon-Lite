@@ -1,20 +1,6 @@
 // Scene 4: Shadows — matches Babylon #IIZ9UU
 
-import { onBeforeRender, addToScene, startEngine,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    createDirectionalLight,
-    createSpotLight,
-    createTorus,
-    createSphere,
-    createGroundFromHeightMap,
-    createShadowGenerator,
-    createPcfShadowGenerator,
-    createStandardMaterial,
-    loadTexture2D,
-    attachControl,
-} from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSpotLight, createTorus, createSphere, createGroundFromHeightMap, createShadowGenerator, createPcfShadowGenerator, createStandardMaterial, loadTexture2D, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -135,7 +121,8 @@ async function main(): Promise<void> {
     });
     document.body.appendChild(btnOrbit);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

@@ -1,5 +1,6 @@
-import type { EngineContext } from "../engine/engine.js";
+import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
+import { _vis } from "../engine/engine.js";
 import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -56,8 +57,8 @@ export interface SceneContext {
 }
 
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
-export interface SceneContextInternal extends SceneContext {
-    /** Sorted list of renderables. Built lazily by startEngine(). */
+export interface SceneContextInternal extends SceneContext, RenderingContext {
+    /** Sorted list of renderables. Built lazily by registerScene(). */
     _renderables: Renderable[];
     /** Opaque renderables — sorted by order at build time. */
     _opaqueRenderables: Renderable[];
@@ -87,8 +88,6 @@ export interface SceneContextInternal extends SceneContext {
     _meshDisposables: Map<Mesh, (() => void)[]>;
     /** Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
-    /** Whether this scene has been disposed. */
-    _disposed: boolean;
     /** Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
     _renderableVersion: number;
 
@@ -135,6 +134,11 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
 
 /** Create an empty scene context bound to the given engine. */
 export function createSceneContext(engine: EngineContext): SceneContext {
+    const eng = engine as EngineContextInternal;
+    let opaqueBundle: GPURenderBundle | null = null;
+    let bundleVersion = -1;
+    let bundleVis = 0;
+
     const ctx: SceneContextInternal = {
         engine,
         clearColor: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
@@ -164,10 +168,101 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         _disposables: [],
         _meshDisposables: new Map(),
         _materialSwapQueue: [],
-        _disposed: false,
         _renderableVersion: 0,
+        _drawCallsPre: 0,
+
+        _update(encoder: GPUCommandEncoder, delta: number): GPUCommandEncoder {
+            const d = ctx._fixedDeltaMs > 0 ? ctx._fixedDeltaMs : delta;
+            let draws = 0;
+            for (const cb of ctx._beforeRender) {
+                cb(d);
+            }
+            if (ctx._materialSwapQueue.length > 0) {
+                processMaterialSwaps(ctx);
+            }
+            for (const light of ctx.lights) {
+                if (light.shadowGenerator) {
+                    draws += light.shadowGenerator.renderShadowMap(encoder);
+                }
+            }
+            for (const pp of ctx._prePasses) {
+                draws += pp.execute(encoder, eng);
+            }
+            for (const u of ctx._uniformUpdaters) {
+                u.update(eng);
+            }
+            for (const r of ctx._renderables) {
+                if (r.updateUBOs) {
+                    r.updateUBOs();
+                }
+            }
+            const cam = ctx.camera;
+            if (ctx._transparentRenderables.length > 1 && cam) {
+                const w = cam.worldMatrix;
+                const cx = w[12]!,
+                    cy = w[13]!,
+                    cz = w[14]!;
+                for (const r of ctx._transparentRenderables) {
+                    if (r._worldCenter) {
+                        const [wx, wy, wz] = r._worldCenter;
+                        r._sortDistance = (wx - cx) ** 2 + (wy - cy) ** 2 + (wz - cz) ** 2;
+                    }
+                }
+                ctx._transparentRenderables.sort((a, b) => (b._sortDistance ?? 0) - (a._sortDistance ?? 0) || a.order - b.order);
+            }
+            if (ctx._beforeMain) {
+                encoder = ctx._beforeMain(eng, ctx, encoder);
+            }
+            ctx._drawCallsPre = draws;
+            return encoder;
+        },
+        _record(pass: GPURenderPassEncoder): number {
+            if (bundleVersion !== ctx._renderableVersion || bundleVis !== _vis || !opaqueBundle) {
+                const be = eng.device.createRenderBundleEncoder({
+                    colorFormats: [eng.format],
+                    depthStencilFormat: "depth24plus-stencil8",
+                    sampleCount: eng.msaaSamples,
+                });
+                drawList(be, ctx._opaqueRenderables, eng);
+                opaqueBundle = be.finish();
+                bundleVersion = ctx._renderableVersion;
+                bundleVis = _vis;
+            }
+            let draws = ctx._opaqueRenderables.length;
+            pass.executeBundles([opaqueBundle]);
+            draws += drawList(pass, ctx._transmissiveRenderables, eng);
+            draws += drawList(pass, ctx._transparentRenderables, eng);
+            return draws;
+        },
     };
     return ctx;
+}
+
+function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly Renderable[], engine: EngineContextInternal): number {
+    let lp: GPURenderPipeline | null = null;
+    let lb: GPUBindGroup | null = null;
+    let draws = 0;
+    for (const r of list) {
+        if (r.mesh && r.mesh.visible === false) {
+            continue;
+        }
+        if (r._pipeline && r._pipeline !== lp) {
+            enc.setPipeline(r._pipeline);
+            lp = r._pipeline;
+        }
+        if (r._sceneBG && r._sceneBG !== lb) {
+            enc.setBindGroup(0, r._sceneBG);
+            lb = r._sceneBG;
+        }
+        draws += r.draw(enc, engine);
+        if (!r._pipeline) {
+            lp = null;
+        }
+        if (!r._sceneBG) {
+            lb = null;
+        }
+    }
+    return draws;
 }
 
 /** Register a callback to run before each rendered frame. */
@@ -238,10 +333,11 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void {
     const ctx = scene as SceneContextInternal;
-    if (ctx._disposed) {
-        return;
+    const eng = ctx.engine as EngineContextInternal;
+    const i = eng._renderingContexts.indexOf(ctx);
+    if (i >= 0) {
+        eng._renderingContexts.splice(i, 1);
     }
-    ctx._disposed = true;
     for (const fn of ctx._disposables) {
         fn();
     }
@@ -271,7 +367,7 @@ export function disposeScene(scene: SceneContext): void {
     ctx.camera = null;
 }
 
-/** @internal Run all deferred builders (called by startEngine before the render loop). */
+/** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
 export async function buildScene(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContextInternal;
     while (ctx._deferredBuilders.length > 0) {
@@ -284,6 +380,34 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     }
     ctx._materialSwapQueue.length = 0;
     ctx._renderableVersion++;
+}
+
+/**
+ * Register a scene with the engine. Builds deferred work, partitions renderables,
+ * and adds the scene to the engine's render list in overlay order.
+ */
+export async function registerScene(engine: EngineContext, scene: SceneContext): Promise<void> {
+    const ctx = scene as SceneContextInternal;
+    await buildScene(scene);
+    for (const r of ctx._renderables) {
+        const bucket = r.isTransparent ? ctx._transparentRenderables : r.isTransmissive ? ctx._transmissiveRenderables : ctx._opaqueRenderables;
+        bucket.push(r);
+    }
+    ctx._opaqueRenderables.sort(byOrder);
+    ctx._transmissiveRenderables.sort(byOrder);
+    ctx._renderables.sort(byOrder);
+    (engine as EngineContextInternal)._renderingContexts.push(ctx);
+}
+
+const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
+
+/** Remove a previously-registered scene. Idempotent. Does not dispose scene resources. */
+export function unregisterScene(engine: EngineContext, scene: SceneContext): void {
+    const eng = engine as EngineContextInternal;
+    const i = eng._renderingContexts.indexOf(scene as SceneContextInternal);
+    if (i >= 0) {
+        eng._renderingContexts.splice(i, 1);
+    }
 }
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */

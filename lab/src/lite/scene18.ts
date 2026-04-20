@@ -1,18 +1,7 @@
 // Scene 18: Spotlight Hard Shadows (PCF) — FreeCamera + SpotLight + PCF Shadow Generator
 // Demonstrates new FreeCamera type and PCF shadow mapping for spot lights.
 
-import { addToScene, startEngine,
-    createEngine,
-    createSceneContext,
-    createFreeCamera,
-    createSpotLight,
-    createGround,
-    createBox,
-    createStandardMaterial,
-    createPcfShadowGenerator,
-    loadTexture2D,
-    attachFreeControl,
-} from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createFreeCamera, createSpotLight, createGround, createBox, createStandardMaterial, createPcfShadowGenerator, loadTexture2D, attachFreeControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -57,7 +46,8 @@ async function main(): Promise<void> {
         far: cam.farPlane,
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

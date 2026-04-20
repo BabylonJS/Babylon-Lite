@@ -1,14 +1,9 @@
-import type { SceneContext } from "../scene/scene.js";
-import type { SceneContextInternal } from "../scene/scene.js";
-import { buildScene, processMaterialSwaps } from "../scene/scene.js";
-import type { Renderable } from "../render/renderable.js";
-
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
 
-// Module-scoped visibility epoch. `setSubtreeVisible` (scene/visibility.ts,
+// Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
-// this. drawList reads it to invalidate the cached opaque bundle.
+// this. Per-scene bundle caches compare against it for invalidation.
 export let _vis = 0;
 export function bumpVisibilityEpoch(): void {
     _vis = (_vis + 1) | 0;
@@ -23,6 +18,29 @@ export interface EngineContext {
     drawCallCount: number;
 }
 
+/**
+ * Minimal surface an engine sees for anything it renders. Scenes (and any other
+ * future renderable thing) register themselves as a `RenderingContext` and
+ * own their own update / record logic. Engine knows nothing of scene internals.
+ */
+/**
+ * Minimal surface an engine sees for anything it renders. Scenes (and any other
+ * future renderable thing) register themselves as a `RenderingContext` and
+ * own their own update / record logic. Engine knows nothing of scene internals.
+ */
+export interface RenderingContext {
+    /** Draw calls produced by pre-pass work during `_update` (shadows + pre-passes). */
+    _drawCallsPre: number;
+    /** Clear color used when this context is the first active one in a frame. */
+    clearColor: GPUColorDict;
+    /** Run per-frame update work (beforeRender hooks, shadow + pre-passes, UBO updates,
+     *  transparent sort, and any user _beforeMain hook). May finish+submit `encoder`
+     *  and return a new one. */
+    _update(encoder: GPUCommandEncoder, delta: number): GPUCommandEncoder;
+    /** Record main-pass draws into `pass`. Returns draw-call count. */
+    _record(pass: GPURenderPassEncoder): number;
+}
+
 /** @internal Engine with GPU internals exposed. Not re-exported from index.ts. */
 export interface EngineContextInternal extends EngineContext {
     readonly device: GPUDevice;
@@ -31,9 +49,8 @@ export interface EngineContextInternal extends EngineContext {
     _targets: RenderTargets;
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
-    _opaqueBundle: GPURenderBundle | null;
-    _bundleVersion: number;
-    _bundleVis: number;
+    /** Registered rendering contexts in render order (first clears; subsequent overlay). */
+    _renderingContexts: RenderingContext[];
 }
 
 interface RenderTargets {
@@ -90,9 +107,7 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
         _targets: targets,
         _animFrameId: 0,
         _renderFn: null,
-        _opaqueBundle: null,
-        _bundleVersion: -1,
-        _bundleVis: 0,
+        _renderingContexts: [],
     };
 
     return engine;
@@ -115,49 +130,28 @@ export function resizeEngine(engine: EngineContext): void {
     eng._targets = createRenderTargets(eng.device, w, h, eng.format, eng.msaaSamples);
 }
 
-/** Start the render loop for the given scene. Resolves after the first frame has been rendered. */
-export function startEngine(engine: EngineContext, scene: SceneContext): Promise<void> {
+/**
+ * Start the render loop. Resolves after the first frame has been rendered.
+ * Scenes registered via `registerScene()` before this call are included in
+ * the first frame; later registrations join on subsequent frames.
+ */
+export function startEngine(engine: EngineContext): Promise<void> {
     const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
     return new Promise<void>((resolve) => {
-        const boot = async () => {
-            // Run deferred builders (entities register these at add/load time)
-            await buildScene(scene);
-            // Split renderables: transparent → back-to-front each frame, transmissive → opaque but sampled,
-            // everything else → opaque-opaque.
-            for (const r of sc._renderables) {
-                const bucket = r.isTransparent ? sc._transparentRenderables : r.isTransmissive ? sc._transmissiveRenderables : sc._opaqueRenderables;
-                bucket.push(r);
+        let firstRafFrame = true;
+        let lastTime = 0;
+        eng._renderFn = (now: number) => {
+            const delta = firstRafFrame ? 0 : lastTime > 0 ? now - lastTime : 16.667;
+            lastTime = now;
+            resizeEngine(engine);
+            renderFrame(eng, delta);
+            if (firstRafFrame) {
+                firstRafFrame = false;
+                resolve();
             }
-            sc._opaqueRenderables.sort((a, b) => a.order - b.order);
-            sc._transmissiveRenderables.sort((a, b) => a.order - b.order);
-            // Also keep _renderables sorted for pre-passes and legacy consumers
-            sc._renderables.sort((a, b) => a.order - b.order);
-
-            let lastTime = 0;
-            let firstFrame = true;
-            eng._renderFn = (now: number) => {
-                // First frame: delta=0 (matches Babylon.js _localDelayOffset which
-                // absorbs the first accumulated deltaTime, so frame 1 evaluates at t=0)
-                const delta = firstFrame ? 0 : sc._fixedDeltaMs > 0 ? sc._fixedDeltaMs : lastTime > 0 ? now - lastTime : 16.667;
-                lastTime = now;
-                resizeEngine(engine);
-                for (const cb of sc._beforeRender) {
-                    cb(delta);
-                }
-                if (sc._materialSwapQueue.length > 0) {
-                    processMaterialSwaps(scene);
-                }
-                renderFrame(eng, eng._targets, sc);
-                if (firstFrame) {
-                    firstFrame = false;
-                    resolve();
-                }
-                eng._animFrameId = requestAnimationFrame(eng._renderFn!);
-            };
-            eng._animFrameId = requestAnimationFrame(eng._renderFn);
+            eng._animFrameId = requestAnimationFrame(eng._renderFn!);
         };
-        void boot();
+        eng._animFrameId = requestAnimationFrame(eng._renderFn);
     });
 }
 
@@ -171,36 +165,14 @@ export function stopEngine(engine: EngineContext): void {
     eng._renderFn = null;
 }
 
-/**
- * Render a single frame synchronously (CPU-side command encoding + submit).
- * The caller is responsible for calling this outside the RAF loop — use
- * `stopEngine()` first if the loop is running.
- *
- * Returns a promise that resolves after the GPU has finished executing
- * the submitted commands (`device.queue.onSubmittedWorkDone`).
- */
-export async function renderOneFrame(engine: EngineContext, scene: SceneContext): Promise<void> {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
-    resizeEngine(engine);
-    for (const cb of sc._beforeRender) {
-        cb(0);
-    }
-    if (sc._materialSwapQueue.length > 0) {
-        processMaterialSwaps(scene);
-    }
-    renderFrame(eng, eng._targets, sc);
-    await eng.device.queue.onSubmittedWorkDone();
-}
-
 /** Release all engine-owned GPU resources (render targets, device). */
 export function disposeEngine(engine: EngineContext): void {
     const eng = engine as EngineContextInternal;
     stopEngine(engine);
+    eng._renderingContexts.length = 0;
     eng._targets.msaaTexture.destroy();
     eng._targets.depthTexture.destroy();
     eng.context.unconfigure();
-    // Pipeline caches auto-clear on device change (no side-effect registry needed)
     eng.device.destroy();
 }
 
@@ -227,99 +199,23 @@ function createRenderTargets(device: GPUDevice, width: number, height: number, f
     };
 }
 
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly Renderable[], engine: EngineContextInternal): number {
-    let lp: GPURenderPipeline | null = null;
-    let lb: GPUBindGroup | null = null;
-    let draws = 0;
-    for (const r of list) {
-        if (r.mesh && r.mesh.visible === false) {
-            continue;
-        }
-        if (r._pipeline && r._pipeline !== lp) {
-            enc.setPipeline(r._pipeline);
-            lp = r._pipeline;
-        }
-        if (r._sceneBG && r._sceneBG !== lb) {
-            enc.setBindGroup(0, r._sceneBG);
-            lb = r._sceneBG;
-        }
-        draws += r.draw(enc, engine);
-        // Renderables without a declared pipeline/sceneBG set their own state internally
-        // (e.g. PBR drawPackets cycles through multiple variants). Invalidate the trackers
-        // so the next renderable correctly re-binds even if it happens to match our record.
-        if (!r._pipeline) {
-            lp = null;
-        }
-        if (!r._sceneBG) {
-            lb = null;
-        }
-    }
-    return draws;
-}
+function renderFrame(engine: EngineContextInternal, delta: number): void {
+    const targets = engine._targets;
+    const ctxs = engine._renderingContexts;
 
-function renderFrame(engine: EngineContextInternal, targets: RenderTargets, scene: SceneContextInternal): void {
     let encoder = engine.device.createCommandEncoder();
-
-    // Pre-passes: shadow maps from lights that have shadow generators
     let drawCalls = 0;
-    for (const light of scene.lights) {
-        const sg = light.shadowGenerator;
-        if (sg) {
-            drawCalls += sg.renderShadowMap(encoder);
-        }
-    }
-    // Additional pre-passes (compute, etc.)
-    for (const pp of scene._prePasses) {
-        drawCalls += pp.execute(encoder, engine);
-    }
+    let rendered = 0;
 
-    // Update scene uniforms (one per shared UBO)
-    for (const u of scene._uniformUpdaters) {
-        u.update(engine);
-    }
-
-    // Update per-mesh UBOs (world matrices) for dynamic transforms — iterates the
-    // pre-built renderables union so we pay one loop regardless of opaque/transmissive/transparent split.
-    for (const r of scene._renderables) {
-        if (r.updateUBOs) {
-            r.updateUBOs();
-        }
-    }
-
-    // Per-frame transparent sort by camera distance (back-to-front)
-    const cam = scene.camera;
-    if (scene._transparentRenderables.length > 1 && cam) {
-        const w = cam.worldMatrix;
-        const cx = w[12]!,
-            cy = w[13]!,
-            cz = w[14]!;
-        for (const r of scene._transparentRenderables) {
-            if (r._worldCenter) {
-                const [wx, wy, wz] = r._worldCenter;
-                r._sortDistance = (wx - cx) ** 2 + (wy - cy) ** 2 + (wz - cz) ** 2;
-            }
-        }
-        scene._transparentRenderables.sort((a, b) => (b._sortDistance ?? 0) - (a._sortDistance ?? 0) || a.order - b.order);
-    }
-
-    // Lazy hook: refraction/transmission module inserts the opaque-scene RTT + mipmap submit here,
-    // then hands back a fresh encoder that the main pass uses. Also lets the hook decide when to
-    // acquire the swap-chain view (late, after mid-frame submit).
-    if (scene._beforeMain) {
-        encoder = scene._beforeMain(engine, scene, encoder);
-    }
-    const swapChainView = engine.context.getCurrentTexture().createView();
-
-    const pass = encoder.beginRenderPass({
-        colorAttachments: [
-            {
-                view: targets.msaaView,
-                resolveTarget: swapChainView,
-                clearValue: scene.clearColor,
-                loadOp: "clear",
-                storeOp: "store",
-            },
-        ],
+    const colorAtt: GPURenderPassColorAttachment = {
+        view: targets.msaaView,
+        resolveTarget: undefined,
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: "clear",
+        storeOp: "store",
+    };
+    const desc: GPURenderPassDescriptor = {
+        colorAttachments: [colorAtt],
         depthStencilAttachment: {
             view: targets.depthView,
             depthClearValue: 1.0,
@@ -329,33 +225,25 @@ function renderFrame(engine: EngineContextInternal, targets: RenderTargets, scen
             stencilLoadOp: "clear",
             stencilStoreOp: "store",
         },
-    });
+    };
 
-    pass.setViewport(0, 0, targets.width, targets.height, 0, 1);
+    for (let i = 0; i < ctxs.length; i++) {
+        const s = ctxs[i]!;
+        encoder = s._update(encoder, delta);
+        drawCalls += s._drawCallsPre;
+        if (rendered === 0) {
+            colorAtt.resolveTarget = engine.context.getCurrentTexture().createView();
+            colorAtt.clearValue = s.clearColor;
+        } else {
+            colorAtt.loadOp = "load";
+        }
+        rendered++;
 
-    // Opaque pass bundle cache: invalidated on renderable list change or
-    // visibility epoch bump (KHR_node_visibility / KHR_animation_pointer).
-    if (engine._bundleVersion !== scene._renderableVersion || engine._bundleVis !== _vis || !engine._opaqueBundle) {
-        const bundleEncoder = engine.device.createRenderBundleEncoder({
-            colorFormats: [engine.format],
-            depthStencilFormat: "depth24plus-stencil8",
-            sampleCount: engine.msaaSamples,
-        });
-        drawList(bundleEncoder, scene._opaqueRenderables, engine);
-        engine._opaqueBundle = bundleEncoder.finish();
-        engine._bundleVersion = scene._renderableVersion;
-        engine._bundleVis = _vis;
+        const pass = encoder.beginRenderPass(desc);
+        drawCalls += s._record(pass);
+        pass.end();
     }
-    drawCalls += scene._opaqueRenderables.length;
-    pass.executeBundles([engine._opaqueBundle]);
 
-    // ─── Transmissive pass: direct-encoded after opaque, before transparent ───
-    drawCalls += drawList(pass, scene._transmissiveRenderables, engine);
-
-    // ─── Transparent pass: direct-encoded (re-sorted every frame) ───
-    drawCalls += drawList(pass, scene._transparentRenderables, engine);
-
-    pass.end();
     engine.device.queue.submit([encoder.finish()]);
     engine.drawCallCount = drawCalls;
 }
