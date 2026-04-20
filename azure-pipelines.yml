@@ -16,7 +16,7 @@ pr:
             - master
 
 variables:
-    NODE_VERSION: "22"
+    NODE_VERSION: "22.x"
     PNPM_VERSION: "9.15.4"
     CI: "true"
     HEADLESS: "true"
