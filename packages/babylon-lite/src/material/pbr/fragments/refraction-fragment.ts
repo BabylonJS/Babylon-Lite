@@ -36,9 +36,7 @@ function makeRefractionMod(hasVolume: boolean): string {
     // Beer-Lambert: exp(-sigma_a * d) where sigma_a = -ln(tint)/atDistance.
     // `volumeParams.rgb` is pre-baked to ln(tint)/atDistance on the CPU side; the
     // shader multiplies by thickness and exp. Matches BJS cocaLambertVec3 ∘ computeColorAtDistanceInMedia.
-    const absorptionLine = hasVolume
-        ? `let absorption = exp(material.volumeParams.rgb * material.refractionParams.z);`
-        : `let absorption = vec3<f32>(1.0);`;
+    const absorptionLine = hasVolume ? `let absorption = exp(material.volumeParams.rgb * material.refractionParams.z);` : `let absorption = vec3<f32>(1.0);`;
 
     return `{
 let refrIntensity = material.refractionParams.x;

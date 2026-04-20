@@ -123,4 +123,3 @@ const ext: GltfFeature = {
     },
 };
 export default ext;
-

@@ -86,7 +86,9 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // nothing; the map stays empty when no primitive-level feature triggered.
     const decodedPrimitives = new Map<unknown, DecodedPrimitive>();
     for (const frag of await Promise.all(features.flatMap((f) => (f.preMesh ? [f.preMesh(json, binChunk)] : [])))) {
-        for (const [k, v] of frag) decodedPrimitives.set(k, v);
+        for (const [k, v] of frag) {
+            decodedPrimitives.set(k, v);
+        }
     }
 
     const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache, decodedPrimitives);
@@ -257,7 +259,7 @@ async function extractAllMeshes(
     baseUrl: string,
     parentMap: Map<number, number>,
     worldMatrixCache: Map<number, Mat4>,
-    decodedPrimitives: Map<unknown, DecodedPrimitive>,
+    decodedPrimitives: Map<unknown, DecodedPrimitive>
 ): Promise<GltfMeshData[]> {
     // Pre-load skin extraction once if any node uses a skin (avoids per-primitive dynamic import)
     const needsSkin = json.nodes.some((n: any) => n.skin !== undefined) && !!json.skins;
