@@ -161,11 +161,12 @@ stages:
                       BASELINE_SHA=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | xargs git rev-parse 2>/dev/null || git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
                       echo "##vso[task.setvariable variable=BASELINE_SHA]$BASELINE_SHA"
                       echo "Baseline SHA: $BASELINE_SHA"
+                      mkdir -p lab/public/bundle-baseline
                   displayName: "Resolve baseline ref"
 
                 - task: Cache@2
                   inputs:
-                      key: perf-baseline | $(BASELINE_SHA)
+                      key: '"perf-baseline" | "$(BASELINE_SHA)"'
                       path: $(System.DefaultWorkingDirectory)/lab/public/bundle-baseline
                       cacheHitVar: BASELINE_CACHE_HIT
                   displayName: "Cache baseline bundles"
