@@ -34,7 +34,7 @@ import type { BrowserContext, Page } from "@playwright/test";
 // ── Configuration ──────────────────────────────────────────────────
 
 const REGRESSION_PCT = Number(process.env.PERF_REGRESSION_PCT) || 5;
-const FRAME_COUNT = Number(process.env.PERF_FRAMES) || 300;
+const FRAME_COUNT = Number(process.env.PERF_FRAMES) || 800;
 const WARMUP_FRAMES = Number(process.env.PERF_WARMUP) || 60;
 
 interface SceneConfigEntry {
