@@ -150,27 +150,31 @@ async function preparePage(context: BrowserContext, url: string): Promise<Page> 
  * Run all measurement runs on a single page (one model load).
  * Each run = warmup + FRAME_COUNT measured frames.
  * Returns the median result across runs.
+ *
+ * Each run is a separate page.evaluate() call so the CDP WebSocket
+ * gets a chance to respond to keepalive pings between runs, avoiding
+ * "Socket idle from a long time" errors on BrowserStack.
  */
 async function measurePage(context: BrowserContext, url: string, runs: number): Promise<PerfResult> {
     const page = await preparePage(context, url);
 
-    const allResults: PerfResult[] = await page.evaluate(
-        async ({ warmup, count, numRuns }) => {
-            const render = (window as any).__perfRender as () => Promise<void>;
-            if (!render) throw new Error("__perfRender not found on window");
+    const allResults: PerfResult[] = [];
 
-            function trimmedMean(values: number[]): number {
-                if (values.length === 0) return 0;
-                const sorted = [...values].sort((a: number, b: number) => a - b);
-                const trimCount = Math.floor(sorted.length * 0.1);
-                const trimmed = sorted.slice(trimCount, sorted.length - trimCount);
-                if (trimmed.length === 0) return sorted[Math.floor(sorted.length / 2)]!;
-                return trimmed.reduce((s: number, v: number) => s + v, 0) / trimmed.length;
-            }
+    for (let r = 0; r < runs; r++) {
+        const result: PerfResult | null = await page.evaluate(
+            async ({ warmup, count }) => {
+                const render = (window as any).__perfRender as () => Promise<void>;
+                if (!render) throw new Error("__perfRender not found on window");
 
-            const results: Array<{ avgMs: number; p95Ms: number; medianMs: number; frameCount: number }> = [];
+                function trimmedMean(values: number[]): number {
+                    if (values.length === 0) return 0;
+                    const sorted = [...values].sort((a: number, b: number) => a - b);
+                    const trimCount = Math.floor(sorted.length * 0.1);
+                    const trimmed = sorted.slice(trimCount, sorted.length - trimCount);
+                    if (trimmed.length === 0) return sorted[Math.floor(sorted.length / 2)]!;
+                    return trimmed.reduce((s: number, v: number) => s + v, 0) / trimmed.length;
+                }
 
-            for (let r = 0; r < numRuns; r++) {
                 // Warmup for this run
                 for (let i = 0; i < warmup; i++) {
                     await render();
@@ -185,21 +189,21 @@ async function measurePage(context: BrowserContext, url: string, runs: number): 
                     times.push(t1 - t0);
                 }
 
-                if (times.length > 0) {
-                    const sorted = [...times].sort((a: number, b: number) => a - b);
-                    results.push({
-                        avgMs: trimmedMean(times),
-                        p95Ms: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
-                        medianMs: sorted[Math.floor(sorted.length / 2)] ?? 0,
-                        frameCount: times.length,
-                    });
-                }
-            }
+                if (times.length === 0) return null;
 
-            return results;
-        },
-        { warmup: WARMUP_FRAMES, count: FRAME_COUNT, numRuns: runs }
-    );
+                const sorted = [...times].sort((a: number, b: number) => a - b);
+                return {
+                    avgMs: trimmedMean(times),
+                    p95Ms: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
+                    medianMs: sorted[Math.floor(sorted.length / 2)] ?? 0,
+                    frameCount: times.length,
+                };
+            },
+            { warmup: WARMUP_FRAMES, count: FRAME_COUNT }
+        );
+
+        if (result) allResults.push(result);
+    }
 
     await page.close();
 
