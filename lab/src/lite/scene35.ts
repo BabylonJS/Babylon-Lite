@@ -1,34 +1,36 @@
-// Scene 35 — Billboard Yaw-Locked / Cylindrical (Family 3).
+// Scene 35 — Sprites Anchored Animated + Cutout (Family 2).
 //
-// Five sprites rendered through `createYawLockedBillboardSystem`. Quad up-axis
-// is locked to world-Y, so trees stay vertical regardless of camera tilt.
-// Comparing this scene's golden against scene 34's exposes the difference:
-// here the top edges remain world-vertical, while in scene 34 they tilt with
-// the camera.
+// Two anchored layers in a 3D scene with a static camera:
+//   1. Alpha-blend layer: 3 sprites running a 4-frame `spin` clip at 8 fps.
+//      The clip is frozen at `?seekTime=` so the golden is deterministic.
+//      One sprite has rotation = π/4 to exercise the rotation path.
+//   2. Cutout layer: 2 sprites with `alphaCutoff = 0.5`, depthWrite-on by
+//      default, placed in front of geometry so the depth-write contract is
+//      visible (cutout silhouettes punch sharp holes vs. blended sprites).
 //
-// Reference path: BJS has no native yaw-locked SpriteManager, so the BJS
-// reference (`bjs/scene35.ts`) builds its own quads via textured planes with
-// the same yaw-lock basis (up = worldY, right = normalize(cross(worldY,
-// toCam))). This produces tight parity (MAD ≪ 0.01) — the alternative of
-// using BJS's spherical SpriteManager would produce a structural diff that
-// has nothing to do with the math we're validating.
+// Picking smoke-test: pick at the projected center of one visible and one
+// non-pickable sprite; results land on `canvas.dataset.pickResults`.
 
 import {
-    addBillboardSpriteIndex,
+    addAnchoredSpriteIndex,
     addToScene,
+    createAnchoredSpriteLayer,
     createArcRotateCamera,
+    createBox,
+    createEngine,
     createGround,
     createHemisphericLight,
     createSceneContext,
     createStandardMaterial,
-    createEngine,
-    createYawLockedBillboardSystem,
+    getViewProjectionMatrix,
     loadSpriteAtlas,
     onBeforeRender,
+    pickAnchoredSprite,
+    playAnchoredSpriteClipIndex,
     startEngine,
+    stopAnchoredSpriteClipIndex,
 } from "babylon-lite";
-import { BILLBOARD_ATLAS_INFO, BILLBOARD_ATLAS_URL } from "../_shared/sprite-billboard-atlas";
-import { BILLBOARD_SCENE_LAYOUT } from "../_shared/billboard-scene-layout";
+import { CUTOUT_ATLAS_INFO, getCutoutAtlasDataUrl } from "../_shared/sprite-cutout-atlas";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -36,54 +38,105 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const seekParam = new URLSearchParams(location.search).get("seekTime");
-    const seekTime = seekParam !== null ? parseFloat(seekParam) : 1.0;
+    // Default seekTime lands the spin clip on a non-trivial frame.
+    const seekTime = seekParam !== null ? parseFloat(seekParam) : 0.5;
 
     const scene = createSceneContext(engine);
-    scene.clearColor = BILLBOARD_SCENE_LAYOUT.clearColor;
+    scene.clearColor = { r: 0.03, g: 0.04, b: 0.06, a: 1 };
     scene.fixedDeltaMs = 16.667;
 
-    const cam = BILLBOARD_SCENE_LAYOUT.camera;
-    scene.camera = createArcRotateCamera(cam.alpha, cam.beta, cam.radius, cam.target);
-    scene.camera.fov = cam.fov;
-    scene.camera.nearPlane = cam.near;
-    scene.camera.farPlane = cam.far;
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.4, 7, { x: 0, y: 0.4, z: 0 });
+    scene.camera.fov = Math.PI / 4;
+    scene.camera.nearPlane = 0.1;
+    scene.camera.farPlane = 50;
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.95));
 
+    // Ground + 2 boxes.
     const groundMat = createStandardMaterial();
-    groundMat.diffuseColor = BILLBOARD_SCENE_LAYOUT.groundColor;
-    const ground = createGround(engine, { width: 12, height: 12 });
+    groundMat.diffuseColor = [0.3, 0.32, 0.38];
+    const ground = createGround(engine, { width: 8, height: 8 });
     ground.material = groundMat;
     addToScene(scene, ground);
 
-    const atlas = await loadSpriteAtlas(engine, BILLBOARD_ATLAS_URL, {
-        cellWidthPx: BILLBOARD_ATLAS_INFO.cellWidthPx,
-        cellHeightPx: BILLBOARD_ATLAS_INFO.cellHeightPx,
-        columns: BILLBOARD_ATLAS_INFO.columns,
-        rows: BILLBOARD_ATLAS_INFO.rows,
+    const boxMatA = createStandardMaterial();
+    boxMatA.diffuseColor = [0.85, 0.3, 0.25];
+    const boxA = createBox(engine, 0.7);
+    boxA.material = boxMatA;
+    boxA.position.x = -1.4;
+    boxA.position.y = 0.35;
+    addToScene(scene, boxA);
+
+    const boxMatB = createStandardMaterial();
+    boxMatB.diffuseColor = [0.25, 0.55, 0.85];
+    const boxB = createBox(engine, 0.7);
+    boxB.material = boxMatB;
+    boxB.position.x = 1.4;
+    boxB.position.y = 0.35;
+    boxB.position.z = -0.4;
+    addToScene(scene, boxB);
+
+    const atlas = await loadSpriteAtlas(engine, getCutoutAtlasDataUrl(), {
+        cellWidthPx: CUTOUT_ATLAS_INFO.cellWidthPx,
+        cellHeightPx: CUTOUT_ATLAS_INFO.cellHeightPx,
+        columns: CUTOUT_ATLAS_INFO.columns,
+        rows: CUTOUT_ATLAS_INFO.rows,
         sampling: "linear",
+        clips: [CUTOUT_ATLAS_INFO.spinClip],
     });
 
-    const layer = createYawLockedBillboardSystem(atlas, { capacity: 8, blendMode: "alpha" });
-    for (const s of BILLBOARD_SCENE_LAYOUT.sprites) {
-        addBillboardSpriteIndex(layer, {
-            position: s.position,
-            sizeWorld: s.sizeWorld,
-            frame: BILLBOARD_ATLAS_INFO.frames.tree,
-        });
+    // Layer A — alpha blend, animated.
+    const alphaLayer = createAnchoredSpriteLayer(atlas, { capacity: 8, blendMode: "alpha", order: 1 });
+    const alphaSprites: number[] = [];
+    alphaSprites.push(addAnchoredSpriteIndex(alphaLayer, { position: [-1.4, 1.0, 0], sizePx: [80, 80] }));
+    alphaSprites.push(addAnchoredSpriteIndex(alphaLayer, { position: [1.4, 1.0, -0.4], sizePx: [80, 80] }));
+    // Rotated sprite at center to exercise the pivot-aware rotation path.
+    alphaSprites.push(addAnchoredSpriteIndex(alphaLayer, { position: [0, 1.4, 0], sizePx: [80, 80], rotation: Math.PI / 4 }));
+    for (const i of alphaSprites) {
+        playAnchoredSpriteClipIndex(alphaLayer, i, "spin", true);
     }
-    addToScene(scene, layer);
+    // Phase the third sprite differently so the golden shows two frames.
+    const lastClip = alphaLayer._clips.get(alphaSprites[2]!)!;
+    lastClip.elapsedMs = 1000 / CUTOUT_ATLAS_INFO.spinClip.fps; // +1 frame phase
+    addToScene(scene, alphaLayer);
 
-    let frames = 0;
-    const target = Math.round(seekTime * 60);
+    // Layer B — cutout, depth-write on (default).
+    // These sprites sit in front of the boxes and punch sharp holes.
+    const cutoutLayer = createAnchoredSpriteLayer(atlas, { capacity: 4, blendMode: "cutout", alphaCutoff: 0.5, order: 0 });
+    const cutoutPickable = addAnchoredSpriteIndex(cutoutLayer, { position: [-0.6, 0.5, -1.2], sizePx: [120, 120], frame: 0 });
+    const cutoutNotPickable = addAnchoredSpriteIndex(cutoutLayer, { position: [0.6, 0.5, -1.2], sizePx: [120, 120], frame: 2, pickable: false });
+    addToScene(scene, cutoutLayer);
+
+    // Animation freeze for deterministic capture.
+    let elapsedFrames = 0;
+    const targetFrames = Math.round(seekTime * 60);
     onBeforeRender(scene, () => {
-        frames++;
-        if (frames === target + 1) {
+        elapsedFrames++;
+        if (elapsedFrames === targetFrames + 1) {
+            for (const i of alphaSprites) {
+                stopAnchoredSpriteClipIndex(alphaLayer, i);
+            }
             canvas.dataset.animationFrozen = "true";
         }
     });
 
     await startEngine(engine, scene);
+
+    // Picking smoke-test on the cutout sprites (one pickable, one not).
+    const aspect = canvas.width / canvas.height;
+    const vp = getViewProjectionMatrix(scene.camera, aspect) as unknown as Float32Array;
+    function projectAnchor(world: [number, number, number]): [number, number] {
+        const cx = vp[0]! * world[0] + vp[4]! * world[1] + vp[8]! * world[2] + vp[12]!;
+        const cy = vp[1]! * world[0] + vp[5]! * world[1] + vp[9]! * world[2] + vp[13]!;
+        const cw = vp[3]! * world[0] + vp[7]! * world[1] + vp[11]! * world[2] + vp[15]!;
+        return [((cx / cw) * 0.5 + 0.5) * canvas.width, (1 - ((cy / cw) * 0.5 + 0.5)) * canvas.height];
+    }
+    const [pxOk, pyOk] = projectAnchor([-0.6, 0.5, -1.2]);
+    const [pxNo, pyNo] = projectAnchor([0.6, 0.5, -1.2]);
+    canvas.dataset.pickResults = JSON.stringify([
+        { label: "pickable-cutout", expectedHit: true, hit: pickAnchoredSprite(scene, pxOk, pyOk) !== null, idx: cutoutPickable },
+        { label: "non-pickable-cutout", expectedHit: false, hit: pickAnchoredSprite(scene, pxNo, pyNo) !== null, idx: cutoutNotPickable },
+    ]);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

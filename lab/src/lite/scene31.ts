@@ -1,22 +1,11 @@
-// Scene 31 — Sprites Animated (Family 1: animated 2D clip).
+// Scene 31 — Sprites 2D Grid (Family 1: pure 2D scene).
 //
-// 4×3 = 12 spinner sprites all playing the same 8-frame "spin" clip at 12 fps.
-// Each sprite is offset in time so the grid shows every frame of the loop
-// simultaneously. Honours `?seekTime=` for deterministic golden capture
-// (per GUIDANCE.md §2c).
+// Renders a deterministic 25×10 = 250-sprite grid of icon frames using a
+// `Scene2DContext`. Demonstrates: pure-2D rendering with no depth buffer,
+// orthographic pixel coordinates, per-sprite color tint, frame variety,
+// and rotation.
 
-import {
-    addSprite2DIndex,
-    addToScene2D,
-    createEngine,
-    createScene2DContext,
-    createSprite2DLayer,
-    loadSpriteAtlas,
-    onBeforeRender2D,
-    playSprite2DClipIndex,
-    startEngine2D,
-    stopSprite2DClipIndex,
-} from "babylon-lite";
+import { createEngine, createScene2DContext, addToScene2D, addSprite2DIndex, createSprite2DLayer, loadSpriteAtlas, startEngine2D } from "babylon-lite";
 import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
 async function main(): Promise<void> {
@@ -24,64 +13,48 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
 
-    const seekParam = new URLSearchParams(location.search).get("seekTime");
-    const seekTime = seekParam !== null ? parseFloat(seekParam) : null;
+    const scene = createScene2DContext(engine, { clearColor: { r: 0.07, g: 0.08, b: 0.12, a: 1 } });
 
-    const scene = createScene2DContext(engine, { clearColor: { r: 0.04, g: 0.04, b: 0.04, a: 1 } });
-    if (seekTime !== null) {
-        scene.fixedDeltaMs = 16.667;
-    }
-
-    const clips = [SPRITE_ATLAS_INFO.spinnerClip];
     const atlas = await loadSpriteAtlas(engine, getSpriteAtlasDataUrl(), {
         cellWidthPx: SPRITE_ATLAS_INFO.cellWidthPx,
         cellHeightPx: SPRITE_ATLAS_INFO.cellHeightPx,
         columns: SPRITE_ATLAS_INFO.columns,
         rows: SPRITE_ATLAS_INFO.rows,
-        sampling: "nearest",
-        clips,
+        sampling: "linear",
     });
 
-    const layer = createSprite2DLayer(atlas, { capacity: 16 });
-    const cols = 4;
-    const rows = 3;
-    const spacing = 140;
-    const ox = (canvas.width - (cols - 1) * spacing) / 2;
-    const oy = (canvas.height - (rows - 1) * spacing) / 2;
+    const layer = createSprite2DLayer(atlas, { capacity: 256 });
+
+    // 25 columns × 10 rows of 36-pixel-spaced icons centred in a 1280×720 canvas.
+    const cols = 25;
+    const rows = 10;
+    const cellPx = 40;
+    const gridW = cols * cellPx;
+    const gridH = rows * cellPx;
+    const ox = (canvas.width - gridW) / 2 + cellPx / 2;
+    const oy = (canvas.height - gridH) / 2 + cellPx / 2;
+
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             const idx = r * cols + c;
-            const i = addSprite2DIndex(layer, {
-                positionPx: [ox + c * spacing, oy + r * spacing],
-                sizePx: [96, 96],
-                frame: idx % 8,
+            // Cycle through icon frames (8..23 — 16 distinct icons).
+            const frame = 8 + (idx % 16);
+            // Tint cycles through three primaries to add per-sprite color test coverage.
+            const tintIdx = idx % 3;
+            const color: [number, number, number, number] = tintIdx === 0 ? [1, 1, 1, 1] : tintIdx === 1 ? [1, 0.7, 0.7, 1] : [0.7, 1, 0.85, 1];
+            // Every 5th sprite rotated for rotation coverage.
+            const rotation = idx % 5 === 0 ? Math.PI / 6 : 0;
+            addSprite2DIndex(layer, {
+                positionPx: [ox + c * cellPx, oy + r * cellPx],
+                sizePx: [28, 28],
+                frame,
+                color,
+                rotation,
             });
-            playSprite2DClipIndex(layer, i, "spin", true);
-            // Offset each sprite's clip phase so we see all 8 frames at once.
-            const state = layer._clips.get(i)!;
-            state.elapsedMs = (idx % 8) * (1000 / SPRITE_ATLAS_INFO.spinnerClip.fps);
         }
     }
-    addToScene2D(scene, layer);
 
-    if (seekTime !== null) {
-        // Freeze at the requested time: count rAF frames; once we have advanced
-        // clips by `seekTime * 60` full ticks, stop every clip so subsequent
-        // frames don't advance them.  The first frame's delta is 0 (per render-loop
-        // contract), so we need (target + 1) total frames to land on `target`
-        // advances of `fixedDeltaMs`.
-        let elapsedFrames = 0;
-        const targetFrames = Math.round(seekTime * 60);
-        onBeforeRender2D(scene, (_dt) => {
-            elapsedFrames++;
-            if (elapsedFrames === targetFrames + 1) {
-                for (let i = 0; i < layer.count; i++) {
-                    stopSprite2DClipIndex(layer, i);
-                }
-                canvas.dataset.animationFrozen = "true";
-            }
-        });
-    }
+    addToScene2D(scene, layer);
 
     await startEngine2D(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

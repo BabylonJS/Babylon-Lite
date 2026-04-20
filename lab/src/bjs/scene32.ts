@@ -1,24 +1,19 @@
-// Reference scene 32 — Babylon.js anchored labels using SpriteManager with
-// per-frame distance-based size adjustment to maintain a fixed pixel size,
-// matching Lite's `AnchoredSpriteLayer` semantics.
+// Reference scene 32 — Babylon.js HUD using four ordered SpriteManagers.
 //
-// This is the canonical lightweight BJS pattern for HUD-style labels above
-// 3D meshes (without depending on `@babylonjs/gui`). Each frame, every
-// sprite's world `size` is recomputed from its distance to the camera so
-// that its on-screen footprint stays constant in pixels.
+// Each Lite Sprite2DLayer maps to one BJS SpriteManager with a distinct
+// `renderingGroupId` so layer order matches the Lite `order` field.
+// Per-sprite size, color, and angle are set directly. This is the canonical
+// BJS way to compose a sprite-based HUD.
 
-import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { Camera } from "@babylonjs/core/Cameras/camera";
+import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import "@babylonjs/core/Materials/standardMaterial";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { Sprite } from "@babylonjs/core/Sprites/sprite";
 import { SpriteManager } from "@babylonjs/core/Sprites/spriteManager";
-import { getLabelAtlasDataUrl, LABEL_ATLAS_INFO } from "../_shared/sprite-label-atlas";
+import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
 (async function () {
     const __initStart = performance.now();
@@ -27,81 +22,73 @@ import { getLabelAtlasDataUrl, LABEL_ATLAS_INFO } from "../_shared/sprite-label-
     await engine.initAsync();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.04, 0.06, 0.1, 1);
+    scene.clearColor = new Color4(0.05, 0.06, 0.09, 1);
 
-    const cam = new ArcRotateCamera("cam", -Math.PI / 2.2, Math.PI / 2.6, 14, new Vector3(0, 0.5, 3.5), scene);
-    cam.fov = Math.PI / 4;
-    cam.minZ = 0.1;
-    cam.maxZ = 100;
+    // Y-up ortho (top>bottom): a Y-down ortho would invert the projection's Y
+    // axis, which flips sprite UVs vertically within each sprite quad.
+    const camera = new FreeCamera("ortho", new Vector3(0, 0, -10), scene);
+    camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+    camera.orthoLeft = 0;
+    camera.orthoRight = canvas.width;
+    camera.orthoTop = canvas.height;
+    camera.orthoBottom = 0;
+    camera.minZ = 0.1;
+    camera.maxZ = 100;
 
-    new HemisphericLight("light", new Vector3(0, 1, 0), scene).intensity = 0.95;
+    const url = getSpriteAtlasDataUrl();
+    const cell = { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx };
 
-    const colors: [number, number, number][] = [
-        [0.9, 0.25, 0.25],
-        [0.25, 0.75, 0.35],
-        [0.3, 0.5, 0.95],
-        [0.95, 0.78, 0.2],
-    ];
-    const sizes = [1.0, 1.4, 0.8, 1.6];
-    const zs = [0, 2.5, 5, 7.5];
-    const anchors: Vector3[] = [];
-    for (let i = 0; i < 4; i++) {
-        const sz = sizes[i]!;
-        const mat = new StandardMaterial(`m${i}`, scene);
-        mat.diffuseColor = new Color3(colors[i]![0], colors[i]![1], colors[i]![2]);
-        const box = MeshBuilder.CreateBox(`b${i}`, { size: sz }, scene);
-        box.material = mat;
-        box.position.x = -3 + i * 2;
-        box.position.y = sz / 2;
-        box.position.z = zs[i]!;
-        anchors.push(new Vector3(box.position.x, box.position.y + sz / 2 + 0.1, box.position.z));
+    // Layer 1 — backdrop (alpha 0.35).
+    // epsilon=0 on every manager: BJS defaults to 0.01 (1% inset of the quad
+    // for UV alignment), which Lite does not do and which produces a 1-2px
+    // mismatch border in the diff map.
+    const back = new SpriteManager("back", url, 32, cell, scene, 0);
+    back.renderingGroupId = 0;
+    for (let i = 0; i < 16; i++) {
+        const s = new Sprite(`b${i}`, back);
+        s.position.x = 80 + i * 76;
+        s.position.y = canvas.height - 360;
+        s.size = 64;
+        s.cellIndex = 8 + i;
+        s.color = new Color4(1, 1, 1, 0.35);
     }
 
-    // epsilon=0 to avoid the 1% quad inset BJS applies by default.
-    const mgr = new SpriteManager("labels", getLabelAtlasDataUrl(), 8, { width: LABEL_ATLAS_INFO.cellWidthPx, height: LABEL_ATLAS_INFO.cellHeightPx }, scene, 0);
-    mgr.renderingGroupId = 1;
-    const labels: Sprite[] = [];
-    for (let i = 0; i < anchors.length; i++) {
-        const s = new Sprite(`l${i}`, mgr);
-        s.cellIndex = i;
-        s.position.copyFrom(anchors[i]!);
-        s.isPickable = i !== 2;
-        labels.push(s);
+    // Layer 2 — score digits.
+    const score = new SpriteManager("score", url, 8, cell, scene, 0);
+    score.renderingGroupId = 1;
+    const digits = [3, 1, 4, 1, 5];
+    for (let i = 0; i < digits.length; i++) {
+        const s = new Sprite(`d${i}`, score);
+        s.position.x = 60 + i * 50;
+        s.position.y = canvas.height - 60;
+        s.size = 40;
+        s.cellIndex = 24 + digits[i]!;
     }
 
-    // Maintain ~56-pixel size and a -32-pixel Y offset (in screen space)
-    // by reprojecting each frame, matching the Lite scene's anchored layout.
-    // IMPORTANT: apply the Y offset along the CAMERA's up vector (screen-up
-    // mapped into world space), not along world-Y. With a tilted camera,
-    // world-Y is not aligned with screen-Y, so a pure world-Y offset would
-    // land sub-pixel off from Lite's clip-space offset — causing a ~1px
-    // outline in the parity diff on every sprite.
-    const targetSizePx = 56;
-    const offsetPxY = -32;
-    scene.onBeforeRenderObservable.add(() => {
-        const tan = Math.tan(cam.fov * 0.5);
-        // Extract camera-space axes in world coordinates from the view matrix.
-        // Per BJS Matrix.LookAtLHToRef: world-up axis = (m[1], m[5], m[9]),
-        // world-forward axis = (m[2], m[6], m[10]), translation = (m[12], m[13], m[14]).
-        const vm = cam.getViewMatrix().m;
-        const upX = vm[1]!, upY = vm[5]!, upZ = vm[9]!;
-        const fx = vm[2]!, fy = vm[6]!, fz = vm[10]!, ft = vm[14]!;
-        for (let i = 0; i < labels.length; i++) {
-            const a = anchors[i]!;
-            // Use camera-space Z (view-space depth), NOT 3D distance: BJS's
-            // sprite projection uses cz for perspective divide. Using distance
-            // would over-scale off-axis sprites vs Lite's clip-space sizing.
-            const cz = Math.abs(fx * a.x + fy * a.y + fz * a.z + ft);
-            const worldPerPxY = (2 * cz * tan) / canvas.height;
-            labels[i]!.size = targetSizePx * worldPerPxY;
-            // screen-down by offsetPxY pixels → world shift along -camUp * offsetPxY * worldPerPxY.
-            // (offsetPxY is negative = screen-up → +camUp direction).
-            const shift = -offsetPxY * worldPerPxY;
-            labels[i]!.position.x = a.x + upX * shift;
-            labels[i]!.position.y = a.y + upY * shift;
-            labels[i]!.position.z = a.z + upZ * shift;
-        }
-    });
+    // Layer 3 — health bar (10 segments, tinted).
+    const health = new SpriteManager("health", url, 16, cell, scene, 0);
+    health.renderingGroupId = 2;
+    for (let i = 0; i < 10; i++) {
+        const healthy = i < 7;
+        const s = new Sprite(`h${i}`, health);
+        s.position.x = 60 + i * 28;
+        s.position.y = 60;
+        s.size = 24;
+        s.cellIndex = 8;
+        s.color = healthy ? new Color4(0.2, 1.0, 0.4, 1.0) : new Color4(0.5, 0.5, 0.5, 0.6);
+    }
+
+    // Layer 4 — central rotated action icon.
+    const action = new SpriteManager("action", url, 4, cell, scene, 0);
+    action.renderingGroupId = 3;
+    const a = new Sprite("a", action);
+    a.position.x = canvas.width / 2;
+    a.position.y = 100;
+    a.size = 96;
+    a.cellIndex = 12;
+    // Negate angle: Y-up projection flips rotation direction (CW becomes CCW).
+    a.angle = -Math.PI / 12;
+    a.color = new Color4(1, 0.95, 0.7, 1);
 
     const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };
     scene.onBeforeRenderObservable.add(() => {
@@ -115,34 +102,6 @@ import { getLabelAtlasDataUrl, LABEL_ATLAS_INFO } from "../_shared/sprite-label-
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-
-    // Picking smoke-test via scene.pickSprite at each label's screen position.
-    const results: { i: number; pickable: boolean; hit: boolean }[] = [];
-    const tan = Math.tan(cam.fov * 0.5);
-    const view = cam.getViewMatrix();
-    const proj = scene.getProjectionMatrix();
-    const vp = view.multiply(proj).m;
-    const vm = view.m;
-    const upX = vm[1]!, upY = vm[5]!, upZ = vm[9]!;
-    const fx = vm[2]!, fy = vm[6]!, fz = vm[10]!, ft = vm[14]!;
-    for (let i = 0; i < anchors.length; i++) {
-        const a = anchors[i]!;
-        const cz = Math.abs(fx * a.x + fy * a.y + fz * a.z + ft);
-        const worldPerPxY = (2 * cz * tan) / canvas.height;
-        const shift = -offsetPxY * worldPerPxY;
-        const wx = a.x + upX * shift;
-        const wy = a.y + upY * shift;
-        const wz = a.z + upZ * shift;
-        const cx = vp[0]! * wx + vp[4]! * wy + vp[8]! * wz + vp[12]!;
-        const cy = vp[1]! * wx + vp[5]! * wy + vp[9]! * wz + vp[13]!;
-        const cw = vp[3]! * wx + vp[7]! * wy + vp[11]! * wz + vp[15]!;
-        const sx = ((cx / cw) * 0.5 + 0.5) * canvas.width;
-        const sy = (1 - ((cy / cw) * 0.5 + 0.5)) * canvas.height;
-        const pick = scene.pickSprite(sx, sy);
-        results.push({ i, pickable: i !== 2, hit: !!pick?.hit });
-    }
-    canvas.dataset.pickResults = JSON.stringify(results);
-
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

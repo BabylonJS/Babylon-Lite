@@ -1,14 +1,14 @@
-// Reference scene 31 — Babylon.js SpriteManager with deterministic clip
-// playback frozen at `?seekTime=`.
+// Reference scene 31 — Babylon.js SpriteManager rendering of the same
+// 25×10 sprite grid as the Lite scene, under an orthographic FreeCamera.
 //
-// Each sprite's `cellIndex` is set explicitly each frame from
-// (frame counter * fixedDeltaMs + phase) so the freeze point matches Lite's
-// fixed-tick advancement exactly (16.667 ms/frame, seekTime * 60 frames).
+// This is the canonical Babylon.js way to render a pure-2D sprite grid:
+// one SpriteManager backed by an atlas, one Sprite per cell, per-sprite
+// `cellIndex` selecting the atlas frame, per-sprite `color` and `angle`.
+// Used as the apples-to-apples reference for bundle-size and perf metrics.
 
 import { Camera } from "@babylonjs/core/Cameras/camera";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
@@ -22,16 +22,12 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: false });
     await engine.initAsync();
 
-    const seekParam = new URLSearchParams(location.search).get("seekTime");
-    const seekTime = seekParam !== null ? parseFloat(seekParam) : null;
-
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.04, 0.04, 0.04, 1);
+    scene.clearColor = new Color4(0.07, 0.08, 0.12, 1);
 
-    // Use standard Y-up orthographic projection: a Y-down ortho (top<bottom)
-    // inverts the projection matrix's Y axis, which flips sprite UVs vertically
-    // within each sprite quad. Keep the projection standard and flip sprite Y
-    // coordinates instead so positions still match Lite's pixel-space layout.
+    // Y-up ortho (top>bottom): a Y-down ortho would invert the projection's Y
+    // axis, which flips sprite UVs vertically within each sprite quad. We use a
+    // standard Y-up projection and flip sprite Y positions instead.
     const camera = new FreeCamera("ortho", new Vector3(0, 0, -10), scene);
     camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
     camera.orthoLeft = 0;
@@ -41,77 +37,46 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     camera.minZ = 0.1;
     camera.maxZ = 100;
 
-    // Pass samplingMode in the constructor: calling `updateSamplingMode` after
-    // construction re-uploads the texture without `invertY=true`, which breaks
-    // BJS's sprite shader UV convention and produces a vertical mirror inside
-    // each cell. Setting it on the constructor preserves the correct upload.
-    // epsilon=0: BJS defaults to 0.01 which insets each corner by 1% of the
-    // sprite size; Lite renders the full quad, so we disable the inset here.
-    const mgr = new SpriteManager(
-        "spin",
-        getSpriteAtlasDataUrl(),
-        16,
-        { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx },
-        scene,
-        0,
-        Texture.NEAREST_NEAREST
-    );
+    // epsilon=0: BJS defaults to 0.01, which insets each corner by 1% of the
+    // sprite size (used for UV alignment, but also shrinks the geometry quad).
+    // Lite does NOT inset, so matching parity requires disabling epsilon here.
+    const mgr = new SpriteManager("grid", getSpriteAtlasDataUrl(), 256, { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx }, scene, 0);
 
-    const cols = 4;
-    const rows = 3;
-    const spacing = 140;
-    const ox = (canvas.width - (cols - 1) * spacing) / 2;
-    const oy = (canvas.height - (rows - 1) * spacing) / 2;
-    const fps = SPRITE_ATLAS_INFO.spinnerClip.fps;
-    const frameCount = SPRITE_ATLAS_INFO.spinnerClip.frames.length;
-    const msPerFrame = 1000 / fps;
+    const cols = 25;
+    const rows = 10;
+    const cellPx = 40;
+    const gridW = cols * cellPx;
+    const gridH = rows * cellPx;
+    const ox = (canvas.width - gridW) / 2 + cellPx / 2;
+    const oy = (canvas.height - gridH) / 2 + cellPx / 2;
+    const sizePx = 28;
 
-    const sprites: Sprite[] = [];
-    const phases: number[] = [];
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             const idx = r * cols + c;
-            const s = new Sprite(`s${idx}`, mgr);
-            s.position.x = ox + c * spacing;
-            // Flip Y: Lite places sprites in pixel-space (y down), but we now use
-            // a standard Y-up ortho projection.
-            s.position.y = canvas.height - (oy + r * spacing);
-            s.size = 96;
-            s.cellIndex = idx % frameCount;
-            sprites.push(s);
-            phases.push((idx % frameCount) * msPerFrame);
-        }
-    }
-
-    function setCellsForElapsed(elapsedMs: number): void {
-        for (let i = 0; i < sprites.length; i++) {
-            const t = phases[i]! + elapsedMs;
-            sprites[i]!.cellIndex = Math.floor(t / msPerFrame) % frameCount;
+            const frame = 8 + (idx % 16);
+            const tintIdx = idx % 3;
+            const sprite = new Sprite(`s${idx}`, mgr);
+            sprite.position.x = ox + c * cellPx;
+            sprite.position.y = canvas.height - (oy + r * cellPx);
+            sprite.size = sizePx;
+            sprite.cellIndex = frame;
+            // Negate angle: a Y-up projection (we flipped Y to keep UVs upright)
+            // also flips rotation direction (CW becomes CCW). Lite uses canvas
+            // convention where positive angle is CW, so negate here to match.
+            sprite.angle = idx % 5 === 0 ? -Math.PI / 6 : 0;
+            if (tintIdx === 1) {
+                sprite.color = new Color4(1, 0.7, 0.7, 1);
+            } else if (tintIdx === 2) {
+                sprite.color = new Color4(0.7, 1, 0.85, 1);
+            }
         }
     }
 
     const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };
-
-    if (seekTime !== null) {
-        // Lite advances by exactly 16.667 ms per rAF tick; first frame's delta is 0.
-        let frameCounter = 0;
-        const targetFrames = Math.round(seekTime * 60);
-        scene.onBeforeRenderObservable.add(() => {
-            eng._drawCalls?.fetchNewFrame();
-            const advances = Math.min(frameCounter, targetFrames);
-            setCellsForElapsed(advances * 16.667);
-            frameCounter++;
-            if (frameCounter === targetFrames + 1) {
-                canvas.dataset.animationFrozen = "true";
-            }
-        });
-    } else {
-        const startT = performance.now();
-        scene.onBeforeRenderObservable.add(() => {
-            eng._drawCalls?.fetchNewFrame();
-            setCellsForElapsed(performance.now() - startT);
-        });
-    }
+    scene.onBeforeRenderObservable.add(() => {
+        eng._drawCalls?.fetchNewFrame();
+    });
     scene.onAfterRenderObservable.add(() => {
         canvas.dataset.drawCalls = String(eng._drawCalls?.current ?? 0);
     });

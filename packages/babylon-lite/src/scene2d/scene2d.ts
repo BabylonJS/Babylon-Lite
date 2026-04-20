@@ -32,6 +32,8 @@ export interface Scene2DContextInternal extends Scene2DContext {
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
     _disposed: boolean;
+    /** @internal lazily allocated by ensureSprite2DSceneUBO; shared across Sprite2D layers. */
+    _sprite2dSceneUBO?: GPUBuffer;
 }
 
 export function createScene2DContext(engine: EngineContext, opts: Scene2DOptions = {}): Scene2DContext {

@@ -113,6 +113,17 @@ export interface BillboardSpriteSystem {
     _parentedHandles: Set<IParentedBillboardHandle> | null;
     /** @internal function-pointer hook installed by sprite-billboard-handle.ts on first parenting. */
     _parentedHandlesWalker: ((system: BillboardSpriteSystem) => void) | null;
+    /**
+     * @internal Variant-specific quad basis closure used by the GPU pick contributor
+     * to reconstruct UV from a 3D hit point. Optionally attached by each variant
+     * factory; absent ⇒ pick UV defaults to (0.5, 0.5).
+     */
+    _basisFn?: (
+        worldPos: [number, number, number],
+        camRight: [number, number, number],
+        camUp: [number, number, number],
+        camPos: [number, number, number]
+    ) => { right: [number, number, number]; up: [number, number, number] };
     /** @internal deferred renderable build (set by factory). */
     _deferredBuild?: (scene: SceneContext) => Promise<void>;
 }

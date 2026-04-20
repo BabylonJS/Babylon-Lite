@@ -1,103 +1,80 @@
-// Scene 32 — Sprites Anchored Labels (Family 2: AnchoredSpriteLayer).
+// Scene 32 — Sprites UI (Family 1: pure 2D HUD).
 //
-// 4 procedural boxes at varying camera distances; one anchored label per
-// box. Labels stay the same pixel size regardless of distance — the
-// headline contract of Family 2. One sprite is `pickable: false` to verify
-// picking honors the flag.
+// Demonstrates a HUD-style layout entirely in `Scene2DContext`:
+//   - Top bar with score "digits" (tally-mark frames) and an icon row.
+//   - Bottom-left health bar built from repeated icon frames.
+//   - Centre-bottom action icon.
+//   - All sprites use varied alpha/color to exercise per-sprite tint blending.
 
-import {
-    addAnchoredSpriteIndex,
-    addToScene,
-    createAnchoredSpriteLayer,
-    createArcRotateCamera,
-    createBox,
-    createEngine,
-    createHemisphericLight,
-    createSceneContext,
-    createStandardMaterial,
-    getViewProjectionMatrix,
-    loadSpriteAtlas,
-    pickAnchoredSprite,
-    startEngine,
-} from "babylon-lite";
-import { getLabelAtlasDataUrl, LABEL_ATLAS_INFO } from "../_shared/sprite-label-atlas";
+import { createEngine, createScene2DContext, addToScene2D, addSprite2DIndex, createSprite2DLayer, loadSpriteAtlas, startEngine2D } from "babylon-lite";
+import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
-async function bootScene32(): Promise<void> {
+async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
-    const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0.04, g: 0.06, b: 0.1, a: 1 };
 
-    scene.camera = createArcRotateCamera(-Math.PI / 2.2, Math.PI / 2.6, 14, { x: 0, y: 0.5, z: 3.5 });
-    scene.camera.fov = Math.PI / 4;
-    scene.camera.nearPlane = 0.1;
-    scene.camera.farPlane = 100;
+    const scene = createScene2DContext(engine, { clearColor: { r: 0.05, g: 0.06, b: 0.09, a: 1 } });
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 0.95));
-
-    const colors: [number, number, number][] = [
-        [0.9, 0.25, 0.25],
-        [0.25, 0.75, 0.35],
-        [0.3, 0.5, 0.95],
-        [0.95, 0.78, 0.2],
-    ];
-    const sizes = [1.0, 1.4, 0.8, 1.6];
-    const zs = [0, 2.5, 5, 7.5];
-    const boxAnchors: [number, number, number][] = [];
-    for (let i = 0; i < 4; i++) {
-        const s = sizes[i]!;
-        const mat = createStandardMaterial();
-        mat.diffuseColor = colors[i]!;
-        const box = createBox(engine, s);
-        box.material = mat;
-        box.position.x = -3 + i * 2;
-        box.position.y = s / 2;
-        box.position.z = zs[i]!;
-        addToScene(scene, box);
-        boxAnchors.push([box.position.x, box.position.y + s / 2 + 0.1, box.position.z]);
-    }
-
-    const atlas = await loadSpriteAtlas(engine, getLabelAtlasDataUrl(), {
-        cellWidthPx: LABEL_ATLAS_INFO.cellWidthPx,
-        cellHeightPx: LABEL_ATLAS_INFO.cellHeightPx,
-        columns: LABEL_ATLAS_INFO.columns,
-        rows: LABEL_ATLAS_INFO.rows,
+    const atlas = await loadSpriteAtlas(engine, getSpriteAtlasDataUrl(), {
+        cellWidthPx: SPRITE_ATLAS_INFO.cellWidthPx,
+        cellHeightPx: SPRITE_ATLAS_INFO.cellHeightPx,
+        columns: SPRITE_ATLAS_INFO.columns,
+        rows: SPRITE_ATLAS_INFO.rows,
         sampling: "linear",
     });
 
-    const layer = createAnchoredSpriteLayer(atlas, { capacity: 8, blendMode: "alpha" });
-    for (let i = 0; i < boxAnchors.length; i++) {
-        addAnchoredSpriteIndex(layer, {
-            position: boxAnchors[i]!,
-            sizePx: [56, 56],
-            offsetPx: [0, -32],
-            frame: i,
-            pickable: i !== 2,
+    // Layer 1 — backdrop icon row (low alpha, larger).
+    const back = createSprite2DLayer(atlas, { capacity: 32, order: 0, opacity: 0.35 });
+    for (let i = 0; i < 16; i++) {
+        addSprite2DIndex(back, {
+            positionPx: [80 + i * 76, 360],
+            sizePx: [64, 64],
+            frame: 8 + i,
         });
     }
-    addToScene(scene, layer);
+    addToScene2D(scene, back);
 
-    await startEngine(engine, scene);
-
-    const aspect = canvas.width / canvas.height;
-    const vp = getViewProjectionMatrix(scene.camera, aspect) as unknown as Float32Array;
-    const results: { i: number; pickable: boolean; hit: boolean }[] = [];
-    for (let i = 0; i < boxAnchors.length; i++) {
-        const [wx, wy, wz] = boxAnchors[i]!;
-        const cx = vp[0]! * wx + vp[4]! * wy + vp[8]! * wz + vp[12]!;
-        const cy = vp[1]! * wx + vp[5]! * wy + vp[9]! * wz + vp[13]!;
-        const cw = vp[3]! * wx + vp[7]! * wy + vp[11]! * wz + vp[15]!;
-        const px = ((cx / cw) * 0.5 + 0.5) * canvas.width;
-        const py = (1 - ((cy / cw) * 0.5 + 0.5)) * canvas.height;
-        const hit = pickAnchoredSprite(scene, px, py - 32);
-        results.push({ i, pickable: i !== 2, hit: hit !== null });
+    // Layer 2 — top score (tally digits frames 24..31).
+    const score = createSprite2DLayer(atlas, { capacity: 8, order: 10 });
+    const digits = [3, 1, 4, 1, 5];
+    for (let i = 0; i < digits.length; i++) {
+        addSprite2DIndex(score, {
+            positionPx: [60 + i * 50, 60],
+            sizePx: [40, 40],
+            frame: 24 + digits[i]!,
+        });
     }
-    canvas.dataset.pickResults = JSON.stringify(results);
+    addToScene2D(scene, score);
 
+    // Layer 3 — health bar (10 segments, first 7 healthy, last 3 dimmed).
+    const health = createSprite2DLayer(atlas, { capacity: 16, order: 20 });
+    for (let i = 0; i < 10; i++) {
+        const healthy = i < 7;
+        addSprite2DIndex(health, {
+            positionPx: [60 + i * 28, canvas.height - 60],
+            sizePx: [24, 24],
+            frame: 8, // first icon
+            color: healthy ? [0.2, 1.0, 0.4, 1.0] : [0.5, 0.5, 0.5, 0.6],
+        });
+    }
+    addToScene2D(scene, health);
+
+    // Layer 4 — central action icon (rotated, large).
+    const action = createSprite2DLayer(atlas, { capacity: 4, order: 30 });
+    addSprite2DIndex(action, {
+        positionPx: [canvas.width / 2, canvas.height - 100],
+        sizePx: [96, 96],
+        frame: 12,
+        rotation: Math.PI / 12,
+        color: [1, 0.95, 0.7, 1],
+    });
+    addToScene2D(scene, action);
+
+    await startEngine2D(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }
 
-bootScene32().catch(console.error);
+main().catch(console.error);

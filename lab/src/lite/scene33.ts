@@ -1,36 +1,23 @@
-// Scene 33 — Sprites Anchored Animated + Cutout (Family 2).
+// Scene 33 — Sprites Animated (Family 1: animated 2D clip).
 //
-// Two anchored layers in a 3D scene with a static camera:
-//   1. Alpha-blend layer: 3 sprites running a 4-frame `spin` clip at 8 fps.
-//      The clip is frozen at `?seekTime=` so the golden is deterministic.
-//      One sprite has rotation = π/4 to exercise the rotation path.
-//   2. Cutout layer: 2 sprites with `alphaCutoff = 0.5`, depthWrite-on by
-//      default, placed in front of geometry so the depth-write contract is
-//      visible (cutout silhouettes punch sharp holes vs. blended sprites).
-//
-// Picking smoke-test: pick at the projected center of one visible and one
-// non-pickable sprite; results land on `canvas.dataset.pickResults`.
+// 4×3 = 12 spinner sprites all playing the same 8-frame "spin" clip at 12 fps.
+// Each sprite is offset in time so the grid shows every frame of the loop
+// simultaneously. Honours `?seekTime=` for deterministic golden capture
+// (per GUIDANCE.md §2c).
 
 import {
-    addAnchoredSpriteIndex,
-    addToScene,
-    createAnchoredSpriteLayer,
-    createArcRotateCamera,
-    createBox,
+    addSprite2DIndex,
+    addToScene2D,
     createEngine,
-    createGround,
-    createHemisphericLight,
-    createSceneContext,
-    createStandardMaterial,
-    getViewProjectionMatrix,
+    createScene2DContext,
+    createSprite2DLayer,
     loadSpriteAtlas,
-    onBeforeRender,
-    pickAnchoredSprite,
-    playAnchoredSpriteClipIndex,
-    startEngine,
-    stopAnchoredSpriteClipIndex,
+    onBeforeRender2D,
+    playSprite2DClipIndex,
+    startEngine2D,
+    stopSprite2DClipIndex,
 } from "babylon-lite";
-import { CUTOUT_ATLAS_INFO, getCutoutAtlasDataUrl } from "../_shared/sprite-cutout-atlas";
+import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -38,106 +25,65 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
 
     const seekParam = new URLSearchParams(location.search).get("seekTime");
-    // Default seekTime lands the spin clip on a non-trivial frame.
-    const seekTime = seekParam !== null ? parseFloat(seekParam) : 0.5;
+    const seekTime = seekParam !== null ? parseFloat(seekParam) : null;
 
-    const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0.03, g: 0.04, b: 0.06, a: 1 };
-    scene.fixedDeltaMs = 16.667;
+    const scene = createScene2DContext(engine, { clearColor: { r: 0.04, g: 0.04, b: 0.04, a: 1 } });
+    if (seekTime !== null) {
+        scene.fixedDeltaMs = 16.667;
+    }
 
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.4, 7, { x: 0, y: 0.4, z: 0 });
-    scene.camera.fov = Math.PI / 4;
-    scene.camera.nearPlane = 0.1;
-    scene.camera.farPlane = 50;
-
-    addToScene(scene, createHemisphericLight([0, 1, 0], 0.95));
-
-    // Ground + 2 boxes.
-    const groundMat = createStandardMaterial();
-    groundMat.diffuseColor = [0.3, 0.32, 0.38];
-    const ground = createGround(engine, { width: 8, height: 8 });
-    ground.material = groundMat;
-    addToScene(scene, ground);
-
-    const boxMatA = createStandardMaterial();
-    boxMatA.diffuseColor = [0.85, 0.3, 0.25];
-    const boxA = createBox(engine, 0.7);
-    boxA.material = boxMatA;
-    boxA.position.x = -1.4;
-    boxA.position.y = 0.35;
-    addToScene(scene, boxA);
-
-    const boxMatB = createStandardMaterial();
-    boxMatB.diffuseColor = [0.25, 0.55, 0.85];
-    const boxB = createBox(engine, 0.7);
-    boxB.material = boxMatB;
-    boxB.position.x = 1.4;
-    boxB.position.y = 0.35;
-    boxB.position.z = -0.4;
-    addToScene(scene, boxB);
-
-    const atlas = await loadSpriteAtlas(engine, getCutoutAtlasDataUrl(), {
-        cellWidthPx: CUTOUT_ATLAS_INFO.cellWidthPx,
-        cellHeightPx: CUTOUT_ATLAS_INFO.cellHeightPx,
-        columns: CUTOUT_ATLAS_INFO.columns,
-        rows: CUTOUT_ATLAS_INFO.rows,
-        sampling: "linear",
-        clips: [CUTOUT_ATLAS_INFO.spinClip],
+    const clips = [SPRITE_ATLAS_INFO.spinnerClip];
+    const atlas = await loadSpriteAtlas(engine, getSpriteAtlasDataUrl(), {
+        cellWidthPx: SPRITE_ATLAS_INFO.cellWidthPx,
+        cellHeightPx: SPRITE_ATLAS_INFO.cellHeightPx,
+        columns: SPRITE_ATLAS_INFO.columns,
+        rows: SPRITE_ATLAS_INFO.rows,
+        sampling: "nearest",
+        clips,
     });
 
-    // Layer A — alpha blend, animated.
-    const alphaLayer = createAnchoredSpriteLayer(atlas, { capacity: 8, blendMode: "alpha", order: 1 });
-    const alphaSprites: number[] = [];
-    alphaSprites.push(addAnchoredSpriteIndex(alphaLayer, { position: [-1.4, 1.0, 0], sizePx: [80, 80] }));
-    alphaSprites.push(addAnchoredSpriteIndex(alphaLayer, { position: [1.4, 1.0, -0.4], sizePx: [80, 80] }));
-    // Rotated sprite at center to exercise the pivot-aware rotation path.
-    alphaSprites.push(addAnchoredSpriteIndex(alphaLayer, { position: [0, 1.4, 0], sizePx: [80, 80], rotation: Math.PI / 4 }));
-    for (const i of alphaSprites) {
-        playAnchoredSpriteClipIndex(alphaLayer, i, "spin", true);
-    }
-    // Phase the third sprite differently so the golden shows two frames.
-    const lastClip = alphaLayer._clips.get(alphaSprites[2]!)!;
-    lastClip.elapsedMs = 1000 / CUTOUT_ATLAS_INFO.spinClip.fps; // +1 frame phase
-    addToScene(scene, alphaLayer);
-
-    // Layer B — cutout, depth-write on (default).
-    // These sprites sit in front of the boxes and punch sharp holes.
-    const cutoutLayer = createAnchoredSpriteLayer(atlas, { capacity: 4, blendMode: "cutout", alphaCutoff: 0.5, order: 0 });
-    const cutoutPickable = addAnchoredSpriteIndex(cutoutLayer, { position: [-0.6, 0.5, -1.2], sizePx: [120, 120], frame: 0 });
-    const cutoutNotPickable = addAnchoredSpriteIndex(cutoutLayer, { position: [0.6, 0.5, -1.2], sizePx: [120, 120], frame: 2, pickable: false });
-    addToScene(scene, cutoutLayer);
-
-    // Animation freeze for deterministic capture.
-    let elapsedFrames = 0;
-    const targetFrames = Math.round(seekTime * 60);
-    onBeforeRender(scene, () => {
-        elapsedFrames++;
-        if (elapsedFrames === targetFrames + 1) {
-            for (const i of alphaSprites) {
-                stopAnchoredSpriteClipIndex(alphaLayer, i);
-            }
-            canvas.dataset.animationFrozen = "true";
+    const layer = createSprite2DLayer(atlas, { capacity: 16 });
+    const cols = 4;
+    const rows = 3;
+    const spacing = 140;
+    const ox = (canvas.width - (cols - 1) * spacing) / 2;
+    const oy = (canvas.height - (rows - 1) * spacing) / 2;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+            const idx = r * cols + c;
+            const i = addSprite2DIndex(layer, {
+                positionPx: [ox + c * spacing, oy + r * spacing],
+                sizePx: [96, 96],
+                frame: idx % 8,
+            });
+            playSprite2DClipIndex(layer, i, "spin", true);
+            // Offset each sprite's clip phase so we see all 8 frames at once.
+            const state = layer._clips.get(i)!;
+            state.elapsedMs = (idx % 8) * (1000 / SPRITE_ATLAS_INFO.spinnerClip.fps);
         }
-    });
-
-    await startEngine(engine, scene);
-
-    // Picking smoke-test on the cutout sprites (one pickable, one not).
-    const aspect = canvas.width / canvas.height;
-    const vp = getViewProjectionMatrix(scene.camera, aspect) as unknown as Float32Array;
-    function projectAnchor(world: [number, number, number]): [number, number] {
-        const cx = vp[0]! * world[0] + vp[4]! * world[1] + vp[8]! * world[2] + vp[12]!;
-        const cy = vp[1]! * world[0] + vp[5]! * world[1] + vp[9]! * world[2] + vp[13]!;
-        const cw = vp[3]! * world[0] + vp[7]! * world[1] + vp[11]! * world[2] + vp[15]!;
-        return [((cx / cw) * 0.5 + 0.5) * canvas.width, (1 - ((cy / cw) * 0.5 + 0.5)) * canvas.height];
     }
-    const [pxOk, pyOk] = projectAnchor([-0.6, 0.5, -1.2]);
-    const [pxNo, pyNo] = projectAnchor([0.6, 0.5, -1.2]);
-    canvas.dataset.pickResults = JSON.stringify([
-        { label: "pickable-cutout", expectedHit: true, hit: pickAnchoredSprite(scene, pxOk, pyOk) !== null, idx: cutoutPickable },
-        { label: "non-pickable-cutout", expectedHit: false, hit: pickAnchoredSprite(scene, pxNo, pyNo) !== null, idx: cutoutNotPickable },
-    ]);
+    addToScene2D(scene, layer);
 
+    if (seekTime !== null) {
+        // Freeze at the requested time: count rAF frames; once we have advanced
+        // clips by `seekTime * 60` full ticks, stop every clip so subsequent
+        // frames don't advance them.  The first frame's delta is 0 (per render-loop
+        // contract), so we need (target + 1) total frames to land on `target`
+        // advances of `fixedDeltaMs`.
+        let elapsedFrames = 0;
+        const targetFrames = Math.round(seekTime * 60);
+        onBeforeRender2D(scene, (_dt) => {
+            elapsedFrames++;
+            if (elapsedFrames === targetFrames + 1) {
+                for (let i = 0; i < layer.count; i++) {
+                    stopSprite2DClipIndex(layer, i);
+                }
+                canvas.dataset.animationFrozen = "true";
+            }
+        });
+    }
+
+    await startEngine2D(engine, scene);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

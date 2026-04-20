@@ -1,20 +1,21 @@
-// Reference scene 36 — Babylon.js textured-plane rendering of axis-locked
-// billboards (lock axis = world-X = [1,0,0]).
+// Reference scene 36 — Babylon.js textured-plane rendering of facing
+// (spherical) billboards.
 //
-// `SpriteManager` has no axis-lock equivalent, so we build per-sprite quads
-// with `MeshBuilder.CreatePlane` and orient them with the SAME basis as
-// Lite's `composeAxisLockedBillboard` WGSL:
+// `SpriteManager` performs an off-by-axis projection that does not match
+// Lite's `composeFacingBillboard` WGSL (which expands each quad along
+// `cameraRight`/`cameraUp` extracted from the camera world matrix). To
+// remove the spurious sub-pixel diff that SpriteManager introduces under
+// camera tilt, we instead build per-sprite quads with `MeshBuilder.CreatePlane`
+// and orient them with the SAME basis as Lite's vertex shader:
 //
-//   a       = normalize(lockAxis)
-//   toCam   = normalize(camPos - sprite.pos)
-//   fRaw    = toCam - a * dot(toCam, a)   // project toCam ⟂ to axis
-//   f       = normalize(fRaw)             // (deterministic fallback when degenerate)
-//   right   = normalize(cross(a, f))
-//   up      = a
-//   fwd_for_plane = cross(right, up) = f  // plane normal points toward camera
+//   right = camera.worldMatrix column 0
+//   up    = camera.worldMatrix column 1
+//   fwd   = cross(right, up)               // plane normal toward camera
 //
-// The basis is recomputed every frame in `onBeforeRenderObservable` from the
-// camera's current world position.
+// This is the same recipe scenes 35 (yaw-locked) and 36 (axis-locked) use
+// to achieve MAD = 0.0000.
+//
+// Pivot is the plane center (matches Lite's `(0.5, 0.5)` convention).
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Constants } from "@babylonjs/core/Engines/constants";
@@ -31,8 +32,6 @@ import { Scene } from "@babylonjs/core/scene";
 import { BILLBOARD_ATLAS_INFO, BILLBOARD_ATLAS_URL } from "../_shared/sprite-billboard-atlas";
 import { BILLBOARD_SCENE_LAYOUT } from "../_shared/billboard-scene-layout";
 
-const LOCK_AXIS: [number, number, number] = [1, 0, 0];
-
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -47,7 +46,14 @@ const LOCK_AXIS: [number, number, number] = [1, 0, 0];
     scene.clearColor = new Color4(cc.r, cc.g, cc.b, cc.a);
 
     const camCfg = BILLBOARD_SCENE_LAYOUT.camera;
-    const cam = new ArcRotateCamera("cam", camCfg.alpha, camCfg.beta, camCfg.radius, new Vector3(camCfg.target.x, camCfg.target.y, camCfg.target.z), scene);
+    const cam = new ArcRotateCamera(
+        "cam",
+        camCfg.alpha,
+        camCfg.beta,
+        camCfg.radius,
+        new Vector3(camCfg.target.x, camCfg.target.y, camCfg.target.z),
+        scene,
+    );
     cam.fov = camCfg.fov;
     cam.minZ = camCfg.near;
     cam.maxZ = camCfg.far;
@@ -68,7 +74,7 @@ const LOCK_AXIS: [number, number, number] = [1, 0, 0];
         t.wrapU = Texture.CLAMP_ADDRESSMODE;
         t.wrapV = Texture.CLAMP_ADDRESSMODE;
         t.hasAlpha = true;
-        const f = BILLBOARD_ATLAS_INFO.frames.flag;
+        const f = BILLBOARD_ATLAS_INFO.frames.glow;
         t.uScale = BILLBOARD_ATLAS_INFO.cellWidthPx / BILLBOARD_ATLAS_INFO.widthPx;
         t.uOffset = (f * BILLBOARD_ATLAS_INFO.cellWidthPx) / BILLBOARD_ATLAS_INFO.widthPx;
         t.vScale = 1;
@@ -100,38 +106,23 @@ const LOCK_AXIS: [number, number, number] = [1, 0, 0];
         planes.push({ mesh: plane, pos: plane.position.clone() });
     }
 
-    const axis = new Vector3(LOCK_AXIS[0], LOCK_AXIS[1], LOCK_AXIS[2]).normalize();
-    const tmpToCam = new Vector3();
-    const tmpProj = new Vector3();
+    // Facing basis: right/up extracted directly from the camera's world
+    // matrix columns — identical to `Sprite3DSceneUBO`'s updater, which is
+    // the source of `scene.cameraRight` / `scene.cameraUp` consumed by
+    // Lite's facing-billboard vertex shader.
     const tmpRight = new Vector3();
+    const tmpUp = new Vector3();
     const tmpFwd = new Vector3();
     const basisMat = new Matrix();
-    // Deterministic fallback for the degenerate `toCam ∥ axis` case — matches
-    // the WGSL select() in sprite-billboard-axis-shader.ts.
-    const fallback = Math.abs(axis.x) < 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 0, 1);
-
     function updateBillboards(): void {
-        const camPos = cam.globalPosition;
-        for (const { mesh, pos } of planes) {
-            tmpToCam.copyFrom(camPos).subtractInPlace(pos).normalize();
-            const dotAT = Vector3.Dot(tmpToCam, axis);
-            tmpProj.copyFrom(tmpToCam).subtractInPlace(axis.scale(dotAT));
-            const projLen = tmpProj.length();
-            if (projLen > 1e-4) {
-                tmpProj.scaleInPlace(1 / projLen);
-            } else {
-                tmpProj.copyFrom(fallback);
-            }
-            // right = normalize(cross(axis, projectedForward))
-            Vector3.CrossToRef(axis, tmpProj, tmpRight);
-            const rLen = tmpRight.length();
-            if (rLen > 1e-6) {
-                tmpRight.scaleInPlace(1 / rLen);
-            }
-            // fwd_for_plane = cross(right, axis) — guarantees right-handed
-            // orthonormal basis with plane normal facing the camera.
-            Vector3.CrossToRef(tmpRight, axis, tmpFwd);
-            Matrix.FromXYZAxesToRef(tmpRight, axis, tmpFwd, basisMat);
+        const wm = cam.getWorldMatrix().m;
+        tmpRight.set(wm[0]!, wm[1]!, wm[2]!);
+        tmpUp.set(wm[4]!, wm[5]!, wm[6]!);
+        // fwd = cross(right, up) — guarantees right-handed orthonormal basis
+        // with the plane normal pointing toward the camera.
+        Vector3.CrossToRef(tmpRight, tmpUp, tmpFwd);
+        Matrix.FromXYZAxesToRef(tmpRight, tmpUp, tmpFwd, basisMat);
+        for (const { mesh } of planes) {
             Quaternion.FromRotationMatrixToRef(basisMat, mesh.rotationQuaternion!);
         }
     }

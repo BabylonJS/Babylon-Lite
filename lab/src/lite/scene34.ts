@@ -1,90 +1,103 @@
-// Scene 34 — Billboard Facing (Family 3, spherical billboard).
+// Scene 34 — Sprites Anchored Labels (Family 2: AnchoredSpriteLayer).
 //
-// Five sprites at varying world Y rendered through `createFacingBillboardSystem`.
-// Quad basis comes from the camera's right + up vectors (extracted on the CPU
-// each frame), so sprites face the camera fully — top edges tilt toward the
-// camera as it tilts down.
-//
-// Reference path: Babylon.js `SpriteManager` (see `bjs/scene34.ts`). BJS
-// SpriteManager uses the same spherical-billboard math, so the parity diff is
-// driven only by float rounding in the shaders + texture sampling — which is
-// expected to land well under MAD 0.01.
+// 4 procedural boxes at varying camera distances; one anchored label per
+// box. Labels stay the same pixel size regardless of distance — the
+// headline contract of Family 2. One sprite is `pickable: false` to verify
+// picking honors the flag.
 
 import {
-    addBillboardSpriteIndex,
+    addAnchoredSpriteIndex,
     addToScene,
+    createAnchoredSpriteLayer,
     createArcRotateCamera,
-    createFacingBillboardSystem,
-    createGround,
+    createBox,
+    createEngine,
     createHemisphericLight,
     createSceneContext,
     createStandardMaterial,
-    createEngine,
+    getViewProjectionMatrix,
     loadSpriteAtlas,
-    onBeforeRender,
+    pickAnchoredSprite,
     startEngine,
 } from "babylon-lite";
-import { BILLBOARD_ATLAS_INFO, BILLBOARD_ATLAS_URL } from "../_shared/sprite-billboard-atlas";
-import { BILLBOARD_SCENE_LAYOUT } from "../_shared/billboard-scene-layout";
+import { getLabelAtlasDataUrl, LABEL_ATLAS_INFO } from "../_shared/sprite-label-atlas";
 
-async function main(): Promise<void> {
+async function bootScene34(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
-
-    const seekParam = new URLSearchParams(location.search).get("seekTime");
-    const seekTime = seekParam !== null ? parseFloat(seekParam) : 1.0;
-
     const scene = createSceneContext(engine);
-    scene.clearColor = BILLBOARD_SCENE_LAYOUT.clearColor;
-    scene.fixedDeltaMs = 16.667;
+    scene.clearColor = { r: 0.04, g: 0.06, b: 0.1, a: 1 };
 
-    const cam = BILLBOARD_SCENE_LAYOUT.camera;
-    scene.camera = createArcRotateCamera(cam.alpha, cam.beta, cam.radius, cam.target);
-    scene.camera.fov = cam.fov;
-    scene.camera.nearPlane = cam.near;
-    scene.camera.farPlane = cam.far;
+    scene.camera = createArcRotateCamera(-Math.PI / 2.2, Math.PI / 2.6, 14, { x: 0, y: 0.5, z: 3.5 });
+    scene.camera.fov = Math.PI / 4;
+    scene.camera.nearPlane = 0.1;
+    scene.camera.farPlane = 100;
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.95));
 
-    const groundMat = createStandardMaterial();
-    groundMat.diffuseColor = BILLBOARD_SCENE_LAYOUT.groundColor;
-    const ground = createGround(engine, { width: 12, height: 12 });
-    ground.material = groundMat;
-    addToScene(scene, ground);
+    const colors: [number, number, number][] = [
+        [0.9, 0.25, 0.25],
+        [0.25, 0.75, 0.35],
+        [0.3, 0.5, 0.95],
+        [0.95, 0.78, 0.2],
+    ];
+    const sizes = [1.0, 1.4, 0.8, 1.6];
+    const zs = [0, 2.5, 5, 7.5];
+    const boxAnchors: [number, number, number][] = [];
+    for (let i = 0; i < 4; i++) {
+        const s = sizes[i]!;
+        const mat = createStandardMaterial();
+        mat.diffuseColor = colors[i]!;
+        const box = createBox(engine, s);
+        box.material = mat;
+        box.position.x = -3 + i * 2;
+        box.position.y = s / 2;
+        box.position.z = zs[i]!;
+        addToScene(scene, box);
+        boxAnchors.push([box.position.x, box.position.y + s / 2 + 0.1, box.position.z]);
+    }
 
-    const atlas = await loadSpriteAtlas(engine, BILLBOARD_ATLAS_URL, {
-        cellWidthPx: BILLBOARD_ATLAS_INFO.cellWidthPx,
-        cellHeightPx: BILLBOARD_ATLAS_INFO.cellHeightPx,
-        columns: BILLBOARD_ATLAS_INFO.columns,
-        rows: BILLBOARD_ATLAS_INFO.rows,
+    const atlas = await loadSpriteAtlas(engine, getLabelAtlasDataUrl(), {
+        cellWidthPx: LABEL_ATLAS_INFO.cellWidthPx,
+        cellHeightPx: LABEL_ATLAS_INFO.cellHeightPx,
+        columns: LABEL_ATLAS_INFO.columns,
+        rows: LABEL_ATLAS_INFO.rows,
         sampling: "linear",
     });
 
-    const layer = createFacingBillboardSystem(atlas, { capacity: 8, blendMode: "alpha" });
-    for (const s of BILLBOARD_SCENE_LAYOUT.sprites) {
-        addBillboardSpriteIndex(layer, {
-            position: s.position,
-            sizeWorld: s.sizeWorld,
-            frame: BILLBOARD_ATLAS_INFO.frames.glow,
+    const layer = createAnchoredSpriteLayer(atlas, { capacity: 8, blendMode: "alpha" });
+    for (let i = 0; i < boxAnchors.length; i++) {
+        addAnchoredSpriteIndex(layer, {
+            position: boxAnchors[i]!,
+            sizePx: [56, 56],
+            offsetPx: [0, -32],
+            frame: i,
+            pickable: i !== 2,
         });
     }
     addToScene(scene, layer);
 
-    let frames = 0;
-    const target = Math.round(seekTime * 60);
-    onBeforeRender(scene, () => {
-        frames++;
-        if (frames === target + 1) {
-            canvas.dataset.animationFrozen = "true";
-        }
-    });
-
     await startEngine(engine, scene);
+
+    const aspect = canvas.width / canvas.height;
+    const vp = getViewProjectionMatrix(scene.camera, aspect) as unknown as Float32Array;
+    const results: { i: number; pickable: boolean; hit: boolean }[] = [];
+    for (let i = 0; i < boxAnchors.length; i++) {
+        const [wx, wy, wz] = boxAnchors[i]!;
+        const cx = vp[0]! * wx + vp[4]! * wy + vp[8]! * wz + vp[12]!;
+        const cy = vp[1]! * wx + vp[5]! * wy + vp[9]! * wz + vp[13]!;
+        const cw = vp[3]! * wx + vp[7]! * wy + vp[11]! * wz + vp[15]!;
+        const px = ((cx / cw) * 0.5 + 0.5) * canvas.width;
+        const py = (1 - ((cy / cw) * 0.5 + 0.5)) * canvas.height;
+        const hit = pickAnchoredSprite(scene, px, py - 32);
+        results.push({ i, pickable: i !== 2, hit: hit !== null });
+    }
+    canvas.dataset.pickResults = JSON.stringify(results);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }
 
-main().catch(console.error);
+bootScene34().catch(console.error);

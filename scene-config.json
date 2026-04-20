@@ -385,5 +385,50 @@
             "billboard",
             "axis-locked"
         ]
+    },
+    {
+        "id": 39,
+        "slug": "scene39-sprite2d-handles",
+        "name": "Scene 39 — Sprite2D Handles + 2D Parenting",
+        "maxMad": 0.05,
+        "maxRawKB": 25,
+        "maxGzipKB": 10,
+        "description": "Sprite2D Handle API: addSprite2D returns a handle with observable position; parented child handle (health bar) follows a moving character via 2D parenting (Family 1).",
+        "tags": [
+            "sprites",
+            "2d",
+            "handle",
+            "parenting"
+        ]
+    },
+    {
+        "id": 40,
+        "slug": "scene40-anchored-handles",
+        "name": "Scene 40 — Anchored Sprite Handles + 3D Parenting",
+        "maxMad": 0.05,
+        "maxRawKB": 85,
+        "maxGzipKB": 32,
+        "description": "Anchored Sprite Handle API: addAnchoredSprite returns a handle parentable to a 3D mesh; label follows a moving box via the renderable's world-matrix walker (Family 2).",
+        "tags": [
+            "sprites",
+            "anchored",
+            "handle",
+            "parenting"
+        ]
+    },
+    {
+        "id": 41,
+        "slug": "scene41-billboard-handles",
+        "name": "Scene 41 — Billboard Sprite Handles + 3D Parenting",
+        "maxMad": 0.05,
+        "maxRawKB": 85,
+        "maxGzipKB": 32,
+        "description": "Billboard Sprite Handle API: addBillboardSprite returns a handle parented to a moving 3D box; translation follows the parent worldMatrix while the renderable faces the camera (Family 3).",
+        "tags": [
+            "sprites",
+            "billboard",
+            "handle",
+            "parenting"
+        ]
     }
 ]
