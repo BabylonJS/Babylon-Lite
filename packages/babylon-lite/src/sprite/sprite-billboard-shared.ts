@@ -259,7 +259,10 @@ export function removeBillboardSprite(system: BillboardSpriteSystem, index: numb
     system._meta.length = last;
     swapRemove(system._storage, index);
     system.count = system._storage.count;
-    markDirty(system._storage, Math.min(index, last), last + 1);
+    // Only the swapped slot needs re-upload; the popped tail is past `count`.
+    if (index !== last) {
+        markDirty(system._storage, index, index + 1);
+    }
     system._sortVersion++;
 }
 

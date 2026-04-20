@@ -237,7 +237,10 @@ export function removeAnchoredSprite(layer: AnchoredSpriteLayer, index: number):
     layer._meta.length = last;
     swapRemove(layer._storage, index);
     layer.count = layer._storage.count;
-    markDirty(layer._storage, Math.min(index, last), last + 1);
+    // Only the swapped slot needs re-upload; the popped tail is past `count`.
+    if (index !== last) {
+        markDirty(layer._storage, index, index + 1);
+    }
     layer._sortVersion++;
 }
 

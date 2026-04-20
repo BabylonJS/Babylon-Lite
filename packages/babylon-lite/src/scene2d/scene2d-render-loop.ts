@@ -12,14 +12,21 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
+import type { Renderable } from "../render/renderable.js";
 import type { Scene2DContext, Scene2DContextInternal } from "./scene2d.js";
 import type { Sprite2DLayer } from "../sprite/sprite-2d.js";
 import { _tickSprite2DClips } from "../sprite/sprite-2d.js";
+import { ensureSprite2DSceneUBO } from "../sprite/shared/sprite-2d-scene-ubo.js";
+
+// Module-level pure comparator — defined once, no per-frame closure allocation.
+function byOrder(a: Renderable, b: Renderable): number {
+    return a.order - b.order;
+}
 
 async function buildLayer(engine: EngineContextInternal, layer: Sprite2DLayer, format: GPUTextureFormat, ctx: Scene2DContextInternal): Promise<void> {
     const mod = await import("../sprite/sprite-2d-renderable.js");
-    const sceneUBO = mod.createSprite2DSceneUBO(engine);
-    const updater = mod.createSprite2DSceneUpdater(engine, sceneUBO, layer.view);
+    // Shared per-scene Sprite2DSceneUBO (created lazily, registered once).
+    const sceneUBO = ensureSprite2DSceneUBO(ctx);
     const built = mod.buildSprite2DRenderable(layer, {
         engine,
         format,
@@ -28,10 +35,8 @@ async function buildLayer(engine: EngineContextInternal, layer: Sprite2DLayer, f
         sceneUBO,
     });
     ctx._renderables.push(built.renderable);
-    ctx._updaters.push(updater);
     ctx._disposables.push(() => {
         built.dispose();
-        sceneUBO.destroy();
     });
 }
 
@@ -76,8 +81,14 @@ function renderFrame2D(engine: EngineContextInternal, scene: Scene2DContextInter
     let drawCalls = 0;
     let lastPipeline: GPURenderPipeline | null = null;
     let lastSceneBG: GPUBindGroup | null = null;
-    // Sort by ascending order (layer.order via renderable.order).
-    const ordered = scene._renderables.slice().sort((a, b) => a.order - b.order);
+    // Sort by ascending order (layer.order via renderable.order). Refill the
+    // reusable scratch in place so the per-frame path allocates nothing.
+    const ordered = scene._sortedRenderables;
+    ordered.length = 0;
+    for (const r of scene._renderables) {
+        ordered.push(r);
+    }
+    ordered.sort(byOrder);
     for (const r of ordered) {
         if (r._pipeline && r._pipeline !== lastPipeline) {
             pass.setPipeline(r._pipeline);

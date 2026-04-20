@@ -174,7 +174,6 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
     // capacity grow. Cutout uses sequential indirection (no per-frame back-to-front sort).
     const sortState = createSpriteSortState(!isCutout);
     let layerBG: GPUBindGroup | null = null;
-    let cachedStorageBuffer: GPUBuffer | null = null;
     function rebuildLayerBG(storageBuffer: GPUBuffer): void {
         layerBG = device.createBindGroup({
             label: "sprite-anchored-layer-bg",
@@ -186,7 +185,6 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
                 { binding: 3, resource: { buffer: storageBuffer } },
             ],
         });
-        cachedStorageBuffer = storageBuffer;
     }
 
     const renderable: Renderable = {
@@ -200,10 +198,7 @@ export async function buildAnchoredSpriteRenderable(layer: AnchoredSpriteLayer, 
         updateUBOs(): void {
             layerScratch[0] = layer.opacity;
             device.queue.writeBuffer(layerUBO, 0, layerScratch.buffer, layerScratch.byteOffset, SPRITE_LAYER_UBO_BYTES);
-            syncSpriteStorage(engine, layer._storage, "sprite-anchored-instances");
-            if (layer._storage.gpuBuffer && layer._storage.gpuBuffer !== cachedStorageBuffer) {
-                rebuildLayerBG(layer._storage.gpuBuffer);
-            }
+            syncSpriteStorage(engine, layer._storage, "sprite-anchored-instances", rebuildLayerBG);
             const cam = ctx.camera;
             const wm = cam ? cam.worldMatrix : null;
             const cx = wm ? wm[12]! : 0;

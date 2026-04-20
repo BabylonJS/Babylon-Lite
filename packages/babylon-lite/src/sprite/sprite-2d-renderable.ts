@@ -8,7 +8,7 @@
  */
 
 import type { EngineContextInternal } from "../engine/engine.js";
-import type { Renderable, SceneUniformUpdater } from "../render/renderable.js";
+import type { Renderable } from "../render/renderable.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
 import { SPRITE_2D_STRIDE } from "./sprite-2d.js";
 import type { SpriteBlendMode } from "./shared/sprite-atlas.js";
@@ -16,8 +16,6 @@ import { syncSpriteStorage, disposeSpriteStorage } from "./shared/sprite-gpu.js"
 import { composeSprite2D } from "./sprite-2d-shader.js";
 import { createPipelineCache, type PipelineCache, type PipelineCacheEntry } from "../material/pipeline-cache.js";
 
-/** Sprite2DLayer scene UBO (32 bytes — viewportPx, invViewportPx, viewPositionPx, zoom, viewRotation). */
-export const SPRITE2D_SCENE_UBO_BYTES = 32;
 /** SpriteLayerUBO (32 bytes — opacity at offset 0, then padded vec3 to satisfy WGSL alignment). */
 const SPRITE_LAYER_UBO_BYTES = 32;
 
@@ -209,38 +207,4 @@ export function buildSprite2DRenderable(layer: Sprite2DLayer, ctx: Sprite2DBuild
     };
 
     return { renderable, dispose };
-}
-
-/** SceneUniformUpdater factory for the Sprite2DSceneUBO.
- *  Reads viewport from the engine's swap-chain target each frame. */
-export function createSprite2DSceneUpdater(
-    engine: EngineContextInternal,
-    sceneUBO: GPUBuffer,
-    view: { positionPx: [number, number]; zoom: number; rotation: number }
-): SceneUniformUpdater {
-    const scratch = new Float32Array(SPRITE2D_SCENE_UBO_BYTES / 4);
-    return {
-        update(): void {
-            const w = engine.canvas.width;
-            const h = engine.canvas.height;
-            scratch[0] = w;
-            scratch[1] = h;
-            scratch[2] = w > 0 ? 1 / w : 0;
-            scratch[3] = h > 0 ? 1 / h : 0;
-            scratch[4] = view.positionPx[0];
-            scratch[5] = view.positionPx[1];
-            scratch[6] = view.zoom;
-            scratch[7] = view.rotation;
-            engine.device.queue.writeBuffer(sceneUBO, 0, scratch.buffer, scratch.byteOffset, SPRITE2D_SCENE_UBO_BYTES);
-        },
-    };
-}
-
-/** Allocate a new Sprite2DSceneUBO buffer. */
-export function createSprite2DSceneUBO(engine: EngineContextInternal): GPUBuffer {
-    return engine.device.createBuffer({
-        label: "sprite2d-scene-ubo",
-        size: SPRITE2D_SCENE_UBO_BYTES,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
 }

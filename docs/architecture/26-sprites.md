@@ -190,15 +190,11 @@ import type { Renderable, SceneUniformUpdater } from "../render/renderable.js";
 
 export interface Scene2DOptions {
     clearColor?: GPUColorDict;
-    designWidth?: number; // default: canvas width
-    designHeight?: number; // default: canvas height
 }
 
 export interface Scene2DContext {
     readonly engine: EngineContext;
     clearColor: GPUColorDict;
-    designWidth: number;
-    designHeight: number;
     layers: Sprite2DLayer[];
 }
 
@@ -653,8 +649,8 @@ Per-batch only. Per-sprite blend mode would require splitting a layer into multi
 | Depth attachment | **none**                                  | yes                                                                    | yes                                                                                                                                              |
 | Depth compare    | n/a                                       | `less-equal` (or `always` if `depthTest=false`)                        | `less-equal`                                                                                                                                     |
 | Depth write      | n/a                                       | `false`                                                                | `false` for blended, `true` for `cutout` (or per `depthWrite`)                                                                                   |
-| Bind group 0     | `Sprite2DSceneUBO` @binding(0)            | `SceneUBO` @binding(0) (existing 3D, unchanged)                        | `SceneUBO` @binding(0) (existing 3D, unchanged)                                                                                                  |
-| Bind group 1     | tex@0, samp@1, `SpriteLayerUBO`@2         | tex@0, samp@1, `SpriteLayerUBO`@2, `Sprite3DSceneUBO`@3                | tex@0, samp@1, **`SpriteLayerUBO`@2 (facing/yaw) _or_ `AxisLockedBillboardSystemUBO`@2 (axis-locked, replaces layer UBO)**, `Sprite3DSceneUBO`@3 |
+| Bind group 0     | `Sprite2DSceneUBO` @binding(0)            | `Sprite3DSceneUBO` @binding(0) (replaces 3D `SceneUBO` for sprite renderables — consolidates viewProjection + camera basis + viewport into a single UBO) | `Sprite3DSceneUBO` @binding(0) (replaces 3D `SceneUBO` for sprite renderables — consolidates viewProjection + camera basis + viewport into a single UBO) |
+| Bind group 1     | tex@0, samp@1, `SpriteLayerUBO`@2         | tex@0, samp@1, `SpriteLayerUBO`@2, packed sprite storage buffer@3      | tex@0, samp@1, **`SpriteLayerUBO`@2 (facing/yaw) _or_ `AxisLockedBillboardSystemUBO`@2 (axis-locked, replaces layer UBO)**, packed sprite storage buffer@3 |
 | Sort key         | `(layer.order, sprite.layerZ, insertion)` | `(layer.order, anchor view-Z back-to-front)`                           | back-to-front view-Z when blended; front-to-back view-Z when `cutout`                                                                            |
 | Render queue     | dedicated overlay pass (final)            | transparent (210 + order) for blended, opaque (110 + order) for cutout | transparent (210 + order) for blended, opaque (110 + order) for cutout                                                                           |
 
@@ -672,17 +668,19 @@ struct Sprite2DSceneUBO {
 };
 ```
 
-**Sprite3D scene UBO** (separate UBO, **only allocated and bound when an Anchored or Billboard family is present in the scene**; `@internal` — not exported from the public barrel):
+**Sprite3D scene UBO** (separate UBO, **only allocated and bound when an Anchored or Billboard family is present in the scene**; `@internal` — not exported from the public barrel). Sprite renderables bind it at `@group(0) @binding(0)` in place of the engine's main 3D `SceneUBO` — the sprite vertex shaders only need `viewProjection` plus the camera basis and viewport, all of which this UBO already carries.
 
 ```wgsl
 // Lives in its own bind-group binding, in its own module (sprite-3d-scene-ubo.ts).
-// The existing 3D SceneUBO is unchanged. A scene with no sprites pays zero bytes,
-// runs zero updater code, and never imports this module (dynamic import via the
-// sprite renderable builder).
+// Sprite-free scenes never allocate this UBO and never import the module (dynamic
+// import via the sprite renderable builder). The engine's main `SceneUBO` is used
+// by mesh renderables only.
 struct Sprite3DSceneUBO {
-    cameraRight: vec4<f32>,        // pre-extracted from invView, written by the
-    cameraUp: vec4<f32>,           // sprite scene-uniform updater. Reused across
-    cameraForward: vec4<f32>,      // all anchored + billboard layers in the scene.
+    viewProjection: mat4x4<f32>,   // pre-multiplied so sprite shaders avoid binding
+                                   // the engine SceneUBO and stay self-contained.
+    cameraRight: vec4<f32>,        // .xyz = camera right basis, .w = cameraPos.x
+    cameraUp: vec4<f32>,           // .xyz = camera up basis,    .w = cameraPos.y
+    cameraForward: vec4<f32>,      // .xyz = camera forward,     .w = cameraPos.z
     viewportPx: vec2<f32>,
     invViewportPx: vec2<f32>,
 };
@@ -690,7 +688,7 @@ struct Sprite3DSceneUBO {
 
 The `Sprite3DSceneUBO` updater is registered into `scene._uniformUpdaters` exactly once, the first time any anchored or billboard family is added to the scene. Subsequent layers/systems reuse the same UBO. If the user later removes the last sprite renderable, the updater stays registered for the remainder of the scene's lifetime (no per-frame `if` to check whether sprites still exist) — but the UBO and its updater were never created in the first place for sprite-free scenes, which is what the no-pay-if-unused rule requires.
 
-This costs one extra binding on sprite renderables (group 0 = main `SceneUBO`; group 1 holds atlas tex/sampler, the per-layer or system UBO, and `Sprite3DSceneUBO`). The cost lands only on draws that need it.
+Sprite renderables bind only `Sprite3DSceneUBO` at group 0; the engine's main `SceneUBO` is not bound on sprite draws. Group 1 holds atlas tex/sampler, the per-layer or system UBO, and the packed sprite storage buffer.
 
 **Per-layer UBO (`SpriteLayerUBO`, 32 B)** — bound at `@group(1) @binding(2)` for Sprite2DLayer, AnchoredSpriteLayer, and the facing/yaw billboard variants. Holds animation-friendly per-layer scalars; not in the pipeline cache key.
 
@@ -790,12 +788,11 @@ No view matrix. No perspective divide. ~12 multiplications per vertex.
 ### Family 2 — AnchoredSpriteLayer Vertex Shader
 
 ```wgsl
-@group(0) @binding(0) var<uniform> scene:       SceneUBO;            // existing 3D UBO, unchanged
+@group(0) @binding(0) var<uniform> scene:       Sprite3DSceneUBO;    // sprite-only consolidated UBO (viewProjection + camera basis + viewport)
 @group(1) @binding(2) var<uniform> layer:       SpriteLayerUBO;      // per-layer scalars (opacity)
-@group(1) @binding(3) var<uniform> spriteScene: Sprite3DSceneUBO;    // sprite-only, pay-per-use
 
 @vertex fn vs(in: VSIn) -> VSOut {
-    // 1. Project the world anchor through the 3D viewProjection.
+    // 1. Project the world anchor through the sprite-only viewProjection.
     let anchorClip = scene.viewProjection * vec4<f32>(in.worldPos, 1.0);
 
     // 2. Compute the rotated pixel offset.
@@ -807,10 +804,9 @@ No view matrix. No perspective divide. ~12 multiplications per vertex.
     let snapped = rotated;  // shown in non-snap form; composer rewrites this line
 
     // 3. Convert pixel offset to NDC offset, scaled by clip.w to survive perspective divide.
-    //    Viewport lives in the sprite-only UBO so the main SceneUBO stays untouched.
     let ndcOffset = vec2<f32>(
-         snapped.x * spriteScene.invViewportPx.x * 2.0,
-        -snapped.y * spriteScene.invViewportPx.y * 2.0,
+         snapped.x * scene.invViewportPx.x * 2.0,
+        -snapped.y * scene.invViewportPx.y * 2.0,
     );
 
     var out: VSOut;
@@ -833,9 +829,8 @@ The sprite's screen size is invariant to camera distance — the multiplication 
 #### Facing (spherical)
 
 ```wgsl
-@group(0) @binding(0) var<uniform> scene:       SceneUBO;            // existing 3D UBO, unchanged
+@group(0) @binding(0) var<uniform> scene:       Sprite3DSceneUBO;    // sprite-only consolidated UBO
 @group(1) @binding(2) var<uniform> layer:       SpriteLayerUBO;      // per-layer scalars (opacity)
-@group(1) @binding(3) var<uniform> spriteScene: Sprite3DSceneUBO;    // sprite-only, pay-per-use
 
 @vertex fn vs(in: VSIn) -> VSOut {
     let corner = cornerOf(in.vid);
@@ -843,8 +838,8 @@ The sprite's screen size is invariant to camera distance — the multiplication 
     let rotated = rotate2(local, in.sinCos);
     // Camera basis vectors live in the sprite-only UBO — never touched in sprite-free scenes.
     let world = in.worldPos
-              + spriteScene.cameraRight.xyz * rotated.x
-              + spriteScene.cameraUp.xyz    * rotated.y;
+              + scene.cameraRight.xyz * rotated.x
+              + scene.cameraUp.xyz    * rotated.y;
     var out: VSOut;
     out.pos = scene.viewProjection * vec4<f32>(world, 1.0);
     out.uv = cornerUV(corner, in.uvRect, false, false);
@@ -856,15 +851,15 @@ The sprite's screen size is invariant to camera distance — the multiplication 
 #### Yaw-Locked (cylindrical, world-Y axis)
 
 ```wgsl
-@group(0) @binding(0) var<uniform> scene:       SceneUBO;
+@group(0) @binding(0) var<uniform> scene:       Sprite3DSceneUBO;
 @group(1) @binding(2) var<uniform> layer:       SpriteLayerUBO;
-@group(1) @binding(3) var<uniform> spriteScene: Sprite3DSceneUBO;
 
 @vertex fn vs(in: VSIn) -> VSOut {
     let corner = cornerOf(in.vid);
     let local = (corner - in.pivot) * in.sizeWorld;
     let rotated = rotate2(local, in.sinCos);
-    let toCam = normalize(scene.cameraPosition - in.worldPos);
+    let camPos = vec3<f32>(scene.cameraRight.w, scene.cameraUp.w, scene.cameraForward.w);
+    let toCam = normalize(camPos - in.worldPos);
     let up = vec3<f32>(0.0, 1.0, 0.0);
     let right = normalize(cross(up, toCam));
     let world = in.worldPos + right * rotated.x + up * rotated.y;
@@ -879,18 +874,18 @@ The sprite's screen size is invariant to camera distance — the multiplication 
 #### Axis-Locked (arbitrary axis)
 
 ```wgsl
-@group(0) @binding(0) var<uniform> scene:       SceneUBO;
+@group(0) @binding(0) var<uniform> scene:       Sprite3DSceneUBO;
 // Axis-locked replaces SpriteLayerUBO@2 with the system UBO. Both expose `.opacity`
 // at offset 0 so the shared fragment shader still binds `layer` at @binding(2).
 @group(1) @binding(2) var<uniform> layer:       AxisLockedBillboardSystemUBO;
-@group(1) @binding(3) var<uniform> spriteScene: Sprite3DSceneUBO;
 
 @vertex fn vs(in: VSIn) -> VSOut {
     let corner = cornerOf(in.vid);
     let local = (corner - in.pivot) * in.sizeWorld;
     let rotated = rotate2(local, in.sinCos);
     let a = normalize(layer.lockAxis);
-    let toCam = normalize(scene.cameraPosition - in.worldPos);
+    let camPos = vec3<f32>(scene.cameraRight.w, scene.cameraUp.w, scene.cameraForward.w);
+    let toCam = normalize(camPos - in.worldPos);
     // Project camera direction onto the plane perpendicular to the axis.
     let f = normalize(toCam - a * dot(toCam, a));
     let right = normalize(cross(a, f));

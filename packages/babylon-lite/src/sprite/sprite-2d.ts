@@ -117,7 +117,7 @@ function packSlot(layer: Sprite2DLayer, index: number, init: Sprite2DInit, frame
     const sin = Math.sin(rotation);
     const cos = Math.cos(rotation);
     const color = init.color ?? [1, 1, 1, 1];
-    const layerZ = (init.layer ?? 0) >= 0 && (init.layer ?? 0) <= 1 ? (init.layer ?? 0) : Math.max(0, Math.min(1, init.layer ?? 0));
+    const layerZ = Math.max(0, Math.min(1, init.layer ?? 0));
     const flipX = init.flipX === true ? 1 : 0;
     const flipY = init.flipY === true ? 1 : 0;
     const out = visible ? sizePx : [0, 0];
@@ -214,7 +214,10 @@ export function removeSprite2D(layer: Sprite2DLayer, index: number): void {
     layer._meta.length = last;
     swapRemove(layer._storage, index);
     layer.count = layer._storage.count;
-    markDirty(layer._storage, Math.min(index, last), last + 1);
+    // Only the swapped slot needs re-upload; the popped tail is past `count`.
+    if (index !== last) {
+        markDirty(layer._storage, index, index + 1);
+    }
 }
 
 export function setSprite2DFrame(layer: Sprite2DLayer, index: number, frame: SpriteFrameRef): void {

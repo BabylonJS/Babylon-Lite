@@ -31,13 +31,14 @@ interface BillboardPipelineVariant extends PipelineCacheEntry {
 /** Per-variant pipeline cache key prefix (unique per WGSL composer). */
 export type BillboardCacheKey = "facing" | "yaw" | "axis";
 
-const _caches: Record<BillboardCacheKey, PipelineCache<BillboardPipelineVariant> | null> = {
-    facing: null,
-    yaw: null,
-    axis: null,
-};
+// Lazy: avoid module-level object allocation so unused billboard variants are
+// fully tree-shaken (per GUIDANCE rule "zero module-level side effects").
+let _caches: Record<BillboardCacheKey, PipelineCache<BillboardPipelineVariant> | null> | null = null;
 
 function getCache(key: BillboardCacheKey): PipelineCache<BillboardPipelineVariant> {
+    if (!_caches) {
+        _caches = { facing: null, yaw: null, axis: null };
+    }
     let cache = _caches[key];
     if (!cache) {
         cache = createPipelineCache<BillboardPipelineVariant>();
@@ -184,7 +185,6 @@ export async function buildBillboardRenderable(system: BillboardSpriteSystem, sc
     // the layer bind group is rebuilt lazily on storage replacement.
     const sortState = createSpriteSortState(!isCutout);
     let layerBG: GPUBindGroup | null = null;
-    let cachedStorageBuffer: GPUBuffer | null = null;
     function rebuildLayerBG(storageBuffer: GPUBuffer): void {
         layerBG = device.createBindGroup({
             label: `${spec.label}-layer-bg`,
@@ -196,7 +196,6 @@ export async function buildBillboardRenderable(system: BillboardSpriteSystem, sc
                 { binding: 3, resource: { buffer: storageBuffer } },
             ],
         });
-        cachedStorageBuffer = storageBuffer;
     }
 
     const renderable: Renderable = {
@@ -209,12 +208,7 @@ export async function buildBillboardRenderable(system: BillboardSpriteSystem, sc
         updateUBOs(): void {
             spec.writeSystemUbo(layerScratch);
             device.queue.writeBuffer(layerUBO, 0, layerScratch.buffer, layerScratch.byteOffset, spec.systemUboBytes);
-            syncSpriteStorage(engine, system._storage, `${spec.label}-instances`);
-            // Rebuild the layer bind group if the storage buffer was reallocated
-            // (capacity grew, or first sync). Cheap pointer compare.
-            if (system._storage.gpuBuffer && system._storage.gpuBuffer !== cachedStorageBuffer) {
-                rebuildLayerBG(system._storage.gpuBuffer);
-            }
+            syncSpriteStorage(engine, system._storage, `${spec.label}-instances`, rebuildLayerBG);
             // Camera position drives the back-to-front re-sort for blended
             // billboards. For cutout systems the sort state still emits a
             // sequential indirection (cheap) so the shader path is uniform.
