@@ -1,5 +1,5 @@
 /**
- * Scene 51 — Sprite Grid Parity Test
+ * Scene 50 — Sprite Grid Parity Test
  *
  * Compares Babylon Lite's v2 sprite renderer rendering of a 25×10 sprite grid
  * against the Babylon.js SpriteManager rendering of the same grid (oracle).
@@ -10,17 +10,17 @@ import { test, expect } from "@playwright/test";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(51);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene51-sprite-grid");
+const sceneConfig = getSceneConfig(50);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene50-sprite-grid");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 51 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 50 skipped via skipParity in scene-config.json");
 
-test("Scene 51 — Sprite Grid matches Babylon.js reference", async ({ page }, testInfo) => {
+test("Scene 50 — Sprite Grid matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 51 });
+    await captureGolden(browser, { sceneId: 50 });
 
-    await page.goto("/scene51.html");
+    await page.goto("/scene50.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

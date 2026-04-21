@@ -1,4 +1,4 @@
-// Scene 51 — Sprite Grid (v2 sprite API)
+// Scene 50 — Sprite Grid (v2 sprite API)
 //
 // Replicates the visual idea of lite-2d's scene50: a deterministic 25×10 grid
 // of icon sprites with cycled tints and rotated thirds, rendered via the v2

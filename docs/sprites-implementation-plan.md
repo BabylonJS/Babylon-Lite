@@ -121,7 +121,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 **No new engine surface.** All engine plumbing (`_renderingContexts`, shared pass, clear-vs-load) is already in master.
 
-**Visual proof:** lab scene `scene51-sprite-grid` is now the BJS-validated parity scene that covers PR 1 (scene50 was consolidated into scene51-sprite-grid for BJS-oracle validation). It exercises the full pure-2D path — atlas, layer, tints, rotation, flipX, and per-sprite size variation — against a BJS `SpriteManager` oracle.
+**Visual proof:** lab scene `scene50-sprite-grid` is the BJS-validated parity scene that covers PR 1. It exercises the full pure-2D path — atlas, layer, tints, rotation, flipX, and per-sprite size variation — against a BJS `SpriteManager` oracle.
 
 **Tests:**
 

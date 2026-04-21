@@ -1,4 +1,4 @@
-// Reference scene 51 — Babylon.js SpriteManager rendering of the same 25×10
+// Reference scene 50 — Babylon.js SpriteManager rendering of the same 25×10
 // sprite grid as the Lite scene, under an orthographic FreeCamera. Used as
 // the apples-to-apples BJS oracle for parity comparison.
 

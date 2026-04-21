@@ -55,7 +55,7 @@ is **Gandalf's job** at the gate — not yours during implementation.
 
 1. Identify which scenes (under `tests/parity/scenes/sceneN-*.spec.ts`) actually
    exercise the code path you touched. Match by feature keyword (e.g. a sprite
-   change → `scene50-pure-2d-sprites.spec.ts`; a clearcoat change → `scene19-`
+   change → `scene50-sprite-grid.spec.ts`; a clearcoat change → `scene19-`
    and `scene28-`; a shadow change → `scene4-`, `scene18-`, `scene22-`).
 2. If you are not sure which scenes are relevant, search:
     ```bash
@@ -71,7 +71,7 @@ is **Gandalf's job** at the gate — not yours during implementation.
 
 | Need                             | Command                                                                                           |
 | -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| One scene                        | `npx playwright test tests/parity/scenes/scene50-pure-2d-sprites.spec.ts`                         |
+| One scene                        | `npx playwright test tests/parity/scenes/scene50-sprite-grid.spec.ts`                             |
 | A few specific scenes            | `npx playwright test tests/parity/scenes/scene19-*.spec.ts tests/parity/scenes/scene28-*.spec.ts` |
 | A single test name within a spec | `npx playwright test tests/parity/scenes/sceneNN-*.spec.ts -g "MAD"`                              |
 | Bundle-size only (when relevant) | `pnpm test:bundle-size`                                                                           |

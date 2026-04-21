@@ -64,11 +64,11 @@ for (const scene of SCENES) {
 
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 
-        // Pure-2D ceiling: scene51 must NOT pull any scene/* code.
-        if (scene.slug === "scene51-sprite-grid") {
+        // Pure-2D ceiling: scene50 must NOT pull any scene/* code.
+        if (scene.slug === "scene50-sprite-grid") {
             const forbidden = /scene-core|scene-camera|scene-node|asset-container/;
             const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => forbidden.test(f));
-            expect(offenders, `pure-2D scene51 must not load scene/* chunks; found: ${offenders.join(", ")}`).toEqual([]);
+            expect(offenders, `pure-2D scene50 must not load scene/* chunks; found: ${offenders.join(", ")}`).toEqual([]);
         }
     });
 }
