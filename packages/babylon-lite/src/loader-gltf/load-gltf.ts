@@ -11,18 +11,20 @@ import type { Mesh, MeshGPU, MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { parseGlbContainer, resolveAccessor, buildParentMap, computeNodeWorldMatrix } from "./gltf-parser.js";
+import { parseGlbContainer, resolveAccessor, buildParentMap, computeNodeWorldMatrix, getTextureImageIndex } from "./gltf-parser.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
-import { assemblePbrProps, buildDefaultPbrTextures, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
-
+import type { TextureWrapFn } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
     positions: Float32Array;
     normals: Float32Array;
     tangents: Float32Array | null;
     uvs: Float32Array;
+    uv2s: Float32Array | null;
+    colors: Float32Array | null;
     indices: Uint16Array | Uint32Array;
     vertexCount: number;
     indexCount: number;
@@ -60,6 +62,11 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // mesh extraction. Core loader knows zero feature names.
     const features = await loadGltfFeatures(json);
     const matExts: GltfFeature[] = features.filter((f) => f.applyMaterial);
+    // Compose every feature's wrapTexture hook into a single function. Identity
+    // when no feature contributes one (common case) — keeps the hot path free
+    // of per-texture work and lets bundlers tree-shake the helpers.
+    const texWraps = features.filter((f) => f.wrapTexture).map((f) => f.wrapTexture!);
+    const wrapTex: TextureWrapFn = texWraps.length === 0 ? identityTexWrap : (tex, ti) => texWraps.reduce((acc, w) => w(acc, ti), tex);
 
     // Run every feature's pre-mesh hook (e.g. Draco decompression) and merge
     // their primitive-keyed decode caches. Features without `preMesh` contribute
@@ -81,6 +88,7 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
         parentMap,
         worldMatrixCache,
         matExts,
+        wrapTex,
     };
 
     const meshes = await uploadMeshes(meshDatas, features, ctx);
@@ -165,7 +173,7 @@ function needsOrmComposite(json: any): boolean {
     for (const m of mats) {
         const mr = m.pbrMetallicRoughness?.metallicRoughnessTexture;
         const occ = m.occlusionTexture;
-        if (mr && occ && textures[mr.index]?.source !== textures[occ.index]?.source) {
+        if (mr && occ && textures[mr.index] && textures[occ.index] && getTextureImageIndex(textures[mr.index]) !== getTextureImageIndex(textures[occ.index])) {
             return true;
         }
     }
@@ -308,7 +316,9 @@ async function extractAllMeshes(
             const posData = resolveAttr("POSITION")!;
             const normData = resolveAttr("NORMAL")!;
             const uvData = resolveAttr("TEXCOORD_0");
+            const uv2Data = resolveAttr("TEXCOORD_1");
             const tanData = resolveAttr("TANGENT");
+            const colorData = resolveAttr("COLOR_0");
             const idxData = decoded
                 ? { data: decoded.indices, count: decoded.indexCount, componentCount: 1 }
                 : primitive.indices !== undefined
@@ -332,6 +342,8 @@ async function extractAllMeshes(
                 normals: normData.data as Float32Array,
                 tangents: tanData ? (tanData.data as Float32Array) : null,
                 uvs: uvData ? (uvData.data as Float32Array) : new Float32Array(posData.count * 2),
+                uv2s: uv2Data ? (uv2Data.data as Float32Array) : null,
+                colors: colorData ? (colorData.data as Float32Array) : null,
                 indices: idxData ? indices : new Uint16Array(0),
                 vertexCount: posData.count,
                 indexCount: idxData?.count ?? 0,
@@ -364,7 +376,7 @@ function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap 
 }
 
 async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], ctx: GltfLoadCtx): Promise<Mesh[]> {
-    const { engine, json, binChunk, baseUrl, matExts } = ctx;
+    const { engine, json, binChunk, baseUrl, matExts, wrapTex } = ctx;
     const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
@@ -409,7 +421,10 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 return undefined;
             }
             const img = await extFetchImg(texInfo);
-            return img ? getCachedTexture(img, sRGB) : undefined;
+            if (!img) {
+                return undefined;
+            }
+            return wrapTex(getCachedTexture(img, sRGB), texInfo);
         },
         uploadImage(bitmap, sRGB) {
             return uploadTextureSynced(engine, bitmap, sRGB, sampler);
@@ -429,9 +444,9 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             return cached;
         }
         cached = (async () => {
-            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
+            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex);
             const extLayers = await runMatExts(mat, matExts, extCtx);
-            return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
+            return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers, tex.occlusionTexture);
         })();
         builtMaterialCache.set(mat, cached);
         return cached;
@@ -448,6 +463,8 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 normalBuffer: createMappedBuffer(engine, m.normals, GPUBufferUsage.VERTEX),
                 tangentBuffer: m.tangents ? createMappedBuffer(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
                 uvBuffer: createMappedBuffer(engine, m.uvs, GPUBufferUsage.VERTEX),
+                uv2Buffer: m.uv2s ? createMappedBuffer(engine, m.uv2s, GPUBufferUsage.VERTEX) : null,
+                colorBuffer: m.colors ? createMappedBuffer(engine, m.colors, GPUBufferUsage.VERTEX) : null,
                 indexBuffer: createMappedBuffer(engine, m.indices, GPUBufferUsage.INDEX),
                 indexCount: m.indexCount,
                 indexFormat: (m.indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,

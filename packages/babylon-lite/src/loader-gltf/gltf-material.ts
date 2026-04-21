@@ -8,7 +8,7 @@
  * registry in load-gltf.ts. This core file knows ZERO extension names.
  */
 import type { Texture2D } from "../texture/texture-2d.js";
-import { resolveImage } from "./gltf-parser.js";
+import { getTextureImageIndex, resolveImage } from "./gltf-parser.js";
 
 /** Per-load context handed to each material extension's `applyMaterial()`. */
 export interface GltfMatExtCtx {
@@ -28,6 +28,10 @@ export interface GltfMaterialData {
     baseColorImage: ImageBitmap | null;
     metallicRoughnessImage: ImageBitmap | null;
     normalImage: ImageBitmap | null;
+    /** glTF normalTexture.scale (default 1.0). */
+    normalScale: number;
+    /** glTF occlusionTexture.texCoord (default 0). */
+    occlusionTexCoord: number;
     occlusionImage: ImageBitmap | null;
     emissiveImage: ImageBitmap | null;
     /** Whether material is double-sided. */
@@ -63,6 +67,8 @@ export async function assembleMaterial(
             baseColorImage: null,
             metallicRoughnessImage: null,
             normalImage: null,
+            normalScale: 1,
+            occlusionTexCoord: 0,
             occlusionImage: null,
             emissiveImage: null,
             doubleSided: false,
@@ -90,6 +96,8 @@ export async function assembleMaterial(
         baseColorImage: baseColorImg,
         metallicRoughnessImage: mrImg,
         normalImage: normalImg,
+        normalScale: typeof mat.normalTexture?.scale === "number" ? mat.normalTexture.scale : 1,
+        occlusionTexCoord: typeof mat.occlusionTexture?.texCoord === "number" ? mat.occlusionTexture.texCoord : 0,
         occlusionImage: occlusionImg,
         emissiveImage: emissiveImg,
         doubleSided: !!mat.doubleSided,
@@ -108,7 +116,7 @@ export function makeImageFetcher(json: any, binChunk: DataView, baseUrl: string,
             return Promise.resolve(null);
         }
         const tex = json.textures[texInfo.index];
-        const imgIdx: number = tex.source;
+        const imgIdx: number = getTextureImageIndex(tex);
         if (imageCache) {
             let cached = imageCache.get(imgIdx);
             if (!cached) {

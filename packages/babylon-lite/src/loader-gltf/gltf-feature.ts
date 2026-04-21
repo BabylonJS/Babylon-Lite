@@ -20,6 +20,8 @@ import type { Mesh, MeshInternal } from "../mesh/mesh.js";
 import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
 import type { GltfMeshData } from "./load-gltf.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { Texture2D } from "../texture/texture-2d.js";
+import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
@@ -31,6 +33,9 @@ export interface GltfLoadCtx {
     worldMatrixCache: Map<number, Mat4>;
     /** All material-layer features active for this load (so e.g. variants can re-use them). */
     matExts: GltfFeature[];
+    /** Composed texture-wrap function aggregating every active feature's
+     *  `wrapTexture` hook. Identity when no feature contributes one. */
+    wrapTex: TextureWrapFn;
     /** glTF-node-index → SceneNode, populated by buildNodeHierarchy. Consumers:
      *  KHR_node_visibility (load-time), KHR_animation_pointer (runtime pointer writers).
      *  `undefined` for a given index means the node was unreachable from any scene root. */
@@ -56,6 +61,12 @@ export interface GltfFeature {
     preMesh?(json: unknown, binChunk: DataView): Promise<Map<unknown, DecodedPrimitive>>;
     /** Material-layer hook: contributes a partial PbrMaterialProps per material. */
     applyMaterial?(mat: GltfMaterialData, ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | null>;
+    /** Texture-wrap hook: given a textureInfo and an already-uploaded Texture2D,
+     *  returns either the same Texture2D or a fresh wrapper carrying extra
+     *  per-texture state (e.g. KHR_texture_transform patches `uScale/vScale/
+     *  uOffset/vOffset/uAng` via `cloneTexture2D`). Called eagerly during
+     *  material assembly. Unknown textureInfos must return `tex` unchanged. */
+    wrapTexture?(tex: Texture2D, texInfo: unknown): Texture2D;
     /** Per-mesh hook: mutates a freshly-uploaded `MeshInternal`
      *  (e.g. attaches `mesh.skeleton`, `mesh.morphTargets`). Runs in parallel
      *  for each mesh inside the loader's mesh-upload Promise.all. */

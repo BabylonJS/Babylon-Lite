@@ -17,6 +17,29 @@ export interface Texture2D {
     sampler: GPUSampler;
     width: number;
     height: number;
+    /** Per-texture UV transform fields. All optional; defaults make identity.
+     *  Match BJS Texture.uScale/vScale/uOffset/vOffset/uAng semantics. These
+     *  fields are **build-time**: they are sampled when a material pipeline
+     *  is first compiled. Mutating them after the pipeline is built requires
+     *  a material rebuild (flag-based rebuild path). If a cached texture
+     *  wrapper needs a different transform than another use site, create a
+     *  fresh wrapper via `cloneTexture2D()`. */
+    uScale?: number;
+    vScale?: number;
+    uOffset?: number;
+    vOffset?: number;
+    /** Rotation in radians around the (0,0) UV corner. */
+    uAng?: number;
+}
+
+/** Create a fresh Texture2D wrapper that shares GPU resources with `base`
+ *  but carries its own UV transform. Use this when the same underlying image
+ *  is referenced with different transforms (e.g. glTF KHR_texture_transform
+ *  on different textureInfos pointing at the same source). The caller is
+ *  responsible for acquireTexture/release pairing if the wrapper outlives
+ *  the base. */
+export function cloneTexture2D(base: Texture2D, transform: Partial<Pick<Texture2D, "uScale" | "vScale" | "uOffset" | "vOffset" | "uAng">>): Texture2D {
+    return { ...base, ...transform };
 }
 
 export interface Texture2DOptions {

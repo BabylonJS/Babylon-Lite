@@ -65,7 +65,7 @@ describe("PBR template + fragments integration", () => {
         expect(result.fragmentWGSL).toContain("@fragment fn main");
         expect(result.fragmentWGSL).toContain("distributionGGX");
         expect(result.fragmentWGSL).toContain("fresnelSchlick");
-        expect(result.meshUboSpec.totalBytes).toBe(80); // world matrix (64) + uvTransformST (16)
+        expect(result.meshUboSpec.totalBytes).toBe(64); // world matrix only — uv transforms now per-texture on material UBO
         expect(result.materialUboSpec).toBeDefined();
     });
 

@@ -325,6 +325,15 @@
         "tags": ["pbr", "gltf", "env", "gpu-instancing"]
     },
     {
+        "id": 37,
+        "slug": "scene37-sheen-sofa",
+        "name": "Scene 37 — Sheen Wood Leather Sofa",
+        "maxMad": 0.02,
+        "maxRawKB": 95,
+        "description": "SheenWoodLeatherSofa.glb (KHR_materials_sheen + KHR_materials_specular + KHR_texture_transform + EXT_texture_webp) with default IBL environment (no skybox, no ground). Matches PG #YG3BBF#58.",
+        "tags": ["pbr", "gltf", "env", "sheen", "specular", "texture-transform", "webp"]
+    },
+    {
         "id": 40,
         "slug": "scene40-physics",
         "name": "Scene 40 — Physics",

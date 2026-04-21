@@ -10,7 +10,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
-import { _getPbrLightExtension, _getPbrExtsSorted } from "./pbr-flags.js";
+import { _getPbrLightExtension, _getPbrExtsSorted, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_EMISSIVE,
@@ -225,6 +225,9 @@ export function createPbrMeshBindGroup(
         addTex(material.normalTexture!);
     }
     addTex(material.ormTexture!);
+    if ((features2 & PBR2_HAS_UV2) !== 0 && material.occlusionTexture) {
+        addTex(material.occlusionTexture);
+    }
     if (hasEmissive) {
         addTex(material.emissiveTexture!);
     }

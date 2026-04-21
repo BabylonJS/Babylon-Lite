@@ -1,49 +1,47 @@
-/** glTF KHR_texture_transform — collapses per-textureInfo scale/offset into a
- *  single material-wide ST quad. Lite supports only the case where every
- *  textureInfo in the material agrees on scale + offset and uses no rotation.
- *  Inconsistent or rotated transforms are silently ignored (return null). */
+/** KHR_texture_transform — per-texture UV transform.
+ *
+ *  Attaches `uScale/vScale/uOffset/vOffset/uAng` to the Texture2D wrapper
+ *  returned by the loader when a textureInfo carries a KHR_texture_transform.
+ *  Downstream the PBR material detects these fields and compiles a shader
+ *  with per-texture `txfUV` wrapping. Identity transforms are skipped so the
+ *  same cached Texture2D is reused without allocating a new wrapper.
+ *
+ *  Lazy-loaded: only pulled into bundles whose glTF declares
+ *  `KHR_texture_transform` in `extensionsUsed`. */
+import type { Texture2D } from "../texture/texture-2d.js";
+import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { GltfFeature } from "./gltf-feature.js";
+
+interface KtInfo {
+    extensions?: {
+        KHR_texture_transform?: {
+            scale?: [number, number];
+            offset?: [number, number];
+            rotation?: number;
+        };
+    };
+}
 
 const ext: GltfFeature = {
     id: "KHR_texture_transform",
-    async applyMaterial(mat) {
-        const m = mat._rawMatDef;
-        if (!m) {
-            return null;
+    wrapTexture(tex: Texture2D, texInfo: unknown): Texture2D {
+        const kt = (texInfo as KtInfo | null | undefined)?.extensions?.KHR_texture_transform;
+        if (!kt) {
+            return tex;
         }
-        const pbr = m.pbrMetallicRoughness;
-        const e = m.extensions;
-        const sg = e?.KHR_materials_pbrSpecularGlossiness;
-        const cc = e?.KHR_materials_clearcoat;
-        const sh = e?.KHR_materials_sheen;
-        const texInfos: any[] = [
-            sg?.diffuseTexture ?? pbr?.baseColorTexture,
-            pbr?.metallicRoughnessTexture,
-            m.normalTexture,
-            m.occlusionTexture,
-            m.emissiveTexture,
-            sg?.specularGlossinessTexture,
-            cc?.clearcoatTexture,
-            cc?.clearcoatRoughnessTexture,
-            cc?.clearcoatNormalTexture,
-            sh?.sheenColorTexture,
-            sh?.sheenRoughnessTexture,
-        ];
-        let st: [number, number, number, number] | undefined;
-        for (const ti of texInfos) {
-            const kt = ti?.extensions?.KHR_texture_transform;
-            if (!kt || kt.rotation) {
-                continue;
-            }
-            const s = kt.scale ?? [1, 1];
-            const o = kt.offset ?? [0, 0];
-            if (!st) {
-                st = [s[0], s[1], o[0], o[1]];
-            } else if (s[0] !== st[0] || s[1] !== st[1] || o[0] !== st[2] || o[1] !== st[3]) {
-                return null;
-            }
+        const patch: { uScale?: number; vScale?: number; uOffset?: number; vOffset?: number; uAng?: number } = {};
+        if (kt.scale) {
+            patch.uScale = kt.scale[0];
+            patch.vScale = kt.scale[1];
         }
-        return st ? { uvTransformST: st } : null;
+        if (kt.offset) {
+            patch.uOffset = kt.offset[0];
+            patch.vOffset = kt.offset[1];
+        }
+        if (kt.rotation) {
+            patch.uAng = kt.rotation;
+        }
+        return Object.keys(patch).length ? cloneTexture2D(tex, patch) : tex;
     },
 };
 export default ext;

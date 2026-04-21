@@ -96,6 +96,16 @@ export interface PbrTemplateConfig {
     readonly anisoTBBlock?: string;
     /** Anisotropy WGSL: direct lighting D/G replacement (dynamically imported). */
     readonly anisoDirectDG?: string;
+    /** When true, emit per-texture UV-transform UBO fields + `txfUV` wrapping
+     *  for every base-texture sample. Detected by pbr-mesh-features from
+     *  non-identity fields on any bound Texture2D. */
+    readonly hasUvTransform?: boolean;
+    /** When true, mesh has per-vertex COLOR_0 attribute. */
+    readonly hasVertexColor?: boolean;
+    /** When true, mesh has a second UV set (TEXCOORD_1). */
+    readonly hasUv2?: boolean;
+    /** When true, occlusion is sampled from a separate texture using UV2. */
+    readonly hasOcclusionUv2?: boolean;
 }
 
 /**
@@ -171,10 +181,30 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         anisoBrdfFunctions = "",
         anisoTBBlock = "",
         anisoDirectDG = "",
+        hasUvTransform = false,
+        hasVertexColor = false,
+        hasUv2 = false,
+        hasOcclusionUv2 = false,
     } = config;
     const hasNormal = normalMode === "tangent";
     const hasCotangentNormal = normalMode === "cotangent";
     const hasAnyNormal = hasNormal || hasCotangentNormal;
+
+    // ── Inline UV-transform helpers (used only when hasUvTransform=true).
+    //    Kept here (not in a shared module) so that non-UV-transform bundles
+    //    tree-shake these strings+branches entirely. ──
+    const uvTransformUboFields = (name: string): UboField[] => [
+        { name: `${name}UVm`, type: "vec4<f32>" },
+        { name: `${name}UVt`, type: "vec4<f32>" },
+    ];
+    const uvVarName = (name: string) => (hasUvTransform ? `${name}UV` : "input.uv");
+    const uvTransformDecl = (name: string) =>
+        hasUvTransform ? `let ${name}UV = txfUV(input.uv, material.${name}UVm, material.${name}UVt.xy);\n` : "";
+    const UV_TRANSFORM_HELPER_WGSL = `
+fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
+return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
+}
+`;
 
     // ── Base vertex attributes ──────────────────────────────────
     const baseVertexAttributes: VertexAttribute[] = [
@@ -185,6 +215,12 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         baseVertexAttributes.push({ name: "tangent", type: "vec4<f32>", gpuFormat: "float32x4", arrayStride: 16 });
     }
     baseVertexAttributes.push({ name: "uv", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+    if (hasUv2) {
+        baseVertexAttributes.push({ name: "uv2", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+    }
+    if (hasVertexColor) {
+        baseVertexAttributes.push({ name: "color", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 });
+    }
 
     // ── Base varyings ───────────────────────────────────────────
     const baseVaryings: Varying[] = [
@@ -195,12 +231,16 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         baseVaryings.push({ name: "worldTangent", type: "vec3<f32>" }, { name: "worldBitangent", type: "vec3<f32>" });
     }
     baseVaryings.push({ name: "uv", type: "vec2<f32>" });
+    if (hasUv2) {
+        baseVaryings.push({ name: "uv2", type: "vec2<f32>" });
+    }
+    if (hasVertexColor) {
+        baseVaryings.push({ name: "vColor", type: "vec3<f32>" });
+    }
 
-    // ── Base mesh UBO fields (transform + uv transform) ────────────
-    const baseMeshUboFields: UboField[] = [
-        { name: "world", type: "mat4x4<f32>" },
-        { name: "uvTransformST", type: "vec4<f32>" },
-    ];
+    // ── Base mesh UBO fields (world matrix only — UV transforms are
+    // per-texture now, emitted on the material UBO when hasUvTransform). ─
+    const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
 
     // ── Base material UBO fields ────────────────────────────────────
     const baseMaterialUboFields: UboField[] = [
@@ -211,13 +251,19 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         // glTF metallicFactor / roughnessFactor (default 1.0) — applied over MR texture channels.
         { name: "metallicFactor", type: "f32" },
         { name: "roughnessFactor", type: "f32" },
-        { name: "_mrfPad0", type: "f32" },
+        { name: "normalScale", type: "f32" },
         { name: "_mrfPad1", type: "f32" },
         // Anisotropy UBO field kept here because its registration path does not
         // yet flow through the composer fragment pipeline (see pbr-renderable:
         // _registerPbrMaterialUboWriter). The reflectance/emissive/clearcoat/sheen
         // UBO fields are now contributed by their own fragments.
         ...(hasAnisotropy ? [{ name: "anisotropyParams", type: "vec4<f32>" as const }] : []),
+        // ── Per-texture UV transforms (each a 2×vec4: m0..m3 + tx,ty,_,_) ─
+        ...(hasUvTransform ? uvTransformUboFields("baseColor") : []),
+        ...(hasUvTransform && hasAnyNormal ? uvTransformUboFields("normal") : []),
+        ...(hasUvTransform ? uvTransformUboFields("orm") : []),
+        ...(hasUvTransform && hasEmissiveTexture ? uvTransformUboFields("emissive") : []),
+        ...(hasUvTransform && hasSpecGloss ? uvTransformUboFields("specGloss") : []),
     ];
 
     // ── Helper: texture + sampler binding pair ────────────────────
@@ -235,6 +281,9 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         baseBindings.push(...tex2d("normalTexture", "normalSampler_"));
     }
     baseBindings.push(...tex2d("ormTexture", "ormSampler"));
+    if (hasOcclusionUv2) {
+        baseBindings.push(...tex2d("occlusionTexture", "occlusionSampler_"));
+    }
     if (hasEmissiveTexture) {
         baseBindings.push(...tex2d("emissiveTexture", "emissiveSampler"));
     }
@@ -281,7 +330,9 @@ out.worldPos = worldPos4.xyz;
 out.clipPos = scene.viewProj * worldPos4;
 out.worldNormal = (finalWorld * vec4<f32>(normalize(${normVar}), 0.0)).xyz;
 ${tangentBlock}
-out.uv = uv * mesh.uvTransformST.xy + mesh.uvTransformST.zw;
+out.uv = uv;
+${hasUv2 ? "out.uv2 = uv2;" : ""}
+${hasVertexColor ? "out.vColor = color;" : ""}
 /*VB*/
 return out;
 }`;
@@ -289,20 +340,23 @@ return out;
     // ── Fragment template ────────────────────────────────────────
 
     // Normal handling block
+    const normalUV = uvVarName("normal");
     let normalBlock: string;
     if (hasNormal) {
-        normalBlock = `let normalMapRaw = textureSample(normalTexture, normalSampler_, input.uv).rgb * 2.0 - 1.0;
-let normalMapNorm = normalize(normalMapRaw);
+        normalBlock = `let normalMapRaw = textureSample(normalTexture, normalSampler_, ${normalUV}).rgb * 2.0 - 1.0;
+let scaledNormal = vec3<f32>(normalMapRaw.xy * material.normalScale, normalMapRaw.z);
+let normalMapNorm = normalize(scaledNormal);
 let N_geom = normalize(input.worldNormal);
 let TBN = mat3x3<f32>(input.worldTangent, input.worldBitangent, input.worldNormal);
 var N = normalize(TBN * normalMapNorm);`;
     } else if (hasCotangentNormal) {
-        normalBlock = `let normalMapSample = textureSample(normalTexture, normalSampler_, input.uv).rgb * 2.0 - 1.0;
+        normalBlock = `let normalMapSample = textureSample(normalTexture, normalSampler_, ${normalUV}).rgb * 2.0 - 1.0;
+let scaledNormalCT = vec3<f32>(normalMapSample.xy * material.normalScale, normalMapSample.z);
 let N_geom = normalize(input.worldNormal);
 let dp1 = dpdx(input.worldPos);
 let dp2 = dpdy(input.worldPos);
-let duv1 = dpdx(input.uv);
-let duv2 = dpdy(input.uv);
+let duv1 = dpdx(${normalUV});
+let duv2 = dpdy(${normalUV});
 let dp2perp = cross(dp2, N_geom);
 let dp1perp = cross(N_geom, dp1);
 let tangent_ct = dp2perp * duv1.x + dp1perp * duv2.x;
@@ -310,7 +364,7 @@ let bitangent_ct = -(dp2perp * duv1.y + dp1perp * duv2.y);
 let det = max(dot(tangent_ct, tangent_ct), dot(bitangent_ct, bitangent_ct));
 let invmax = select(inverseSqrt(det), 0.0, det == 0.0);
 let cotangentFrame = mat3x3<f32>(tangent_ct * invmax, bitangent_ct * invmax, N_geom);
-var N = normalize(cotangentFrame * normalize(normalMapSample));`;
+var N = normalize(cotangentFrame * normalize(scaledNormalCT));`;
     } else {
         normalBlock = `let N_geom = normalize(input.worldNormal);
 var N = N_geom;`;
@@ -320,29 +374,35 @@ var N = N_geom;`;
     const anisotropyTBBlock = hasAnisotropy ? anisoTBBlock : "";
 
     // Base color decoding
+    const vertexColorMod = hasVertexColor ? "\nbaseColor *= input.vColor;" : "";
     const baseColorDecode = hasGammaAlbedo
         ? `var baseColor = pow(baseColorSample.rgb, vec3<f32>(2.2));
-var alpha = baseColorSample.a;`
+var alpha = baseColorSample.a;${vertexColorMod}`
         : `var baseColor = baseColorSample.rgb;
-var alpha = baseColorSample.a;`;
+var alpha = baseColorSample.a;${vertexColorMod}`;
 
     // Roughness / metallic
+    const specGlossUV = uvVarName("specGloss");
     const roughnessMetallic = hasSpecGloss
-        ? `let specGloss = textureSample(specGlossTexture, specGlossSampler, input.uv);
+        ? `let specGloss = textureSample(specGlossTexture, specGlossSampler, ${specGlossUV});
 let roughness = clamp(1.0 - specGloss.a, 0.0, 1.0);
 let metallic = 0.0;`
         : `let roughness = clamp(orm.g * material.roughnessFactor, 0.0, 1.0);
 let metallic = orm.b * material.metallicFactor;`;
 
     // Emissive default (overridden by emissive-color fragment's AT slot)
+    const emissiveUV = uvVarName("emissive");
     const emissiveDefault = hasEmissiveColor
         ? ``
         : hasEmissiveTexture
-          ? `let emissive = textureSample(emissiveTexture, emissiveSampler, input.uv).rgb;`
+          ? `let emissive = textureSample(emissiveTexture, emissiveSampler, ${emissiveUV}).rgb;`
           : `let emissive = vec3<f32>(0.0);`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot)
-    const occlusionDefault = hasReflectanceExt ? `` : hasOcclusion ? `let occlusion = orm.r;` : `let occlusion = 1.0;`;
+    const occlusionDefault = hasReflectanceExt ? ``
+        : hasOcclusionUv2 ? `let occlusion = textureSample(occlusionTexture, occlusionSampler_, input.uv2).r;`
+        : hasOcclusion ? `let occlusion = orm.r;`
+        : `let occlusion = 1.0;`;
 
     // F0 computation (overridden by reflectance fragment's MF slot)
     const f0Default = hasReflectanceExt
@@ -433,6 +493,20 @@ return vec4<f32>(color, finalAlpha);`
 
     const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
 
+    const uvTransformHelper = hasUvTransform ? UV_TRANSFORM_HELPER_WGSL : "";
+    // Per-texture UV locals, emitted once at the top of fragment main when
+    // hasUvTransform is set. Every texture sample + derivative site uses
+    // these locals via uvVarName().
+    const uvTransformLocals = hasUvTransform
+        ? uvTransformDecl("baseColor") +
+          (hasAnyNormal ? uvTransformDecl("normal") : "") +
+          uvTransformDecl("orm") +
+          (hasEmissiveTexture ? uvTransformDecl("emissive") : "") +
+          (hasSpecGloss ? uvTransformDecl("specGloss") : "")
+        : "";
+    const baseColorUV = uvVarName("baseColor");
+    const ormUV = uvVarName("orm");
+
     const fragmentTemplate = `/*SU*/
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
@@ -444,11 +518,12 @@ ${BRDF_FUNCTIONS}
 ${acesBlock}
 ${anisoBrdfBlock}
 ${multiLightDecls}
+${uvTransformHelper}
 ${doubleSidedEntry}
-/*SV*/
-let baseColorSample = textureSample(baseColorTexture, baseColorSampler, input.uv);
+${uvTransformLocals}/*SV*/
+let baseColorSample = textureSample(baseColorTexture, baseColorSampler, ${baseColorUV});
 ${baseColorDecode}
-let orm = textureSample(ormTexture, ormSampler, input.uv).rgb;
+let orm = textureSample(ormTexture, ormSampler, ${ormUV}).rgb;
 ${occlusionDefault}
 ${roughnessMetallic}
 ${emissiveDefault}

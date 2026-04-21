@@ -53,6 +53,17 @@ export const PBR2_HAS_REFRACTION_MAP = 1 << 6;
 export const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
 /** Material is unlit — bypass all lighting (KHR_materials_unlit). */
 export const PBR2_HAS_UNLIT = 1 << 8;
+/** Any bound texture on this material carries a non-identity UV transform
+ *  (`uScale/vScale/uOffset/vOffset/uAng` on its Texture2D). Enables per-
+ *  texture UV-transform UBO fields + `txfUV` wrapping in the shader. */
+export const PBR2_HAS_UV_TRANSFORM = 1 << 9;
+/** Material has non-default metallicF0Factor or metallicReflectanceColor
+ *  without reflectance textures (factor-only KHR_materials_specular). */
+export const PBR2_HAS_REFLECTANCE_FACTORS = 1 << 10;
+/** Mesh has per-vertex COLOR_0 data. */
+export const PBR2_HAS_VERTEX_COLOR = 1 << 11;
+/** Mesh has a second UV set (TEXCOORD_1) and the material uses it for occlusion. */
+export const PBR2_HAS_UV2 = 1 << 12;
 
 let _lightExt: PbrLightExtension | null = null;
 /** @internal */ export function _setPbrLightExtension(ext: PbrLightExtension): void {

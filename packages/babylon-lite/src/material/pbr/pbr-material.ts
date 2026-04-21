@@ -21,6 +21,8 @@ pbrGroupBuilder._loadRebuildSingle = () => import("./pbr-single-rebuild.js");
 export interface PbrMaterialProps {
     baseColorTexture?: Texture2D;
     normalTexture?: Texture2D;
+    /** Normal map scale (glTF normalTexture.scale). Default 1.0. */
+    normalTextureScale?: number;
     /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
     ormTexture?: Texture2D;
     emissiveTexture?: Texture2D;
@@ -47,6 +49,11 @@ export interface PbrMaterialProps {
     roughnessFactor?: number;
     /** Strength of ambient occlusion from ORM R channel. Default 1.0; 0.0 ignores R channel. */
     occlusionStrength?: number;
+    /** UV set index for the occlusion texture (0 = UV1, 1 = UV2). Default 0. */
+    occlusionTexCoord?: number;
+    /** Separate occlusion texture sampled with UV2 when occlusionTexCoord=1.
+     *  R channel is occlusion. When set, ORM.r is NOT used for occlusion. */
+    occlusionTexture?: Texture2D;
     /** Scales dielectric F0 (default 1.0). Maps to BJS metallicF0Factor. */
     metallicF0Factor?: number;
     /** Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor. */
@@ -83,13 +90,6 @@ export interface PbrMaterialProps {
      *  where the mesh surrounds the camera and should display the environment directly.
      *  Also zeroes SH irradiance — skybox is pure cubemap + BRDF only. */
     skyboxMode?: boolean;
-    /** Material-wide UV transform (scale + offset), applied in the vertex shader
-     *  before emitting `out.uv`. Mirrors BJS `Texture.uScale/vScale/uOffset/vOffset`
-     *  when all textures on the material share the same transform (common case).
-     *  Format: `[uScale, vScale, uOffset, vOffset]`. Absence = identity.
-     *  Set by the glTF loader from `KHR_texture_transform` when every textureInfo
-     *  on a material declares the same transform. */
-    uvTransformST?: [number, number, number, number];
     /** When true, the material is unlit — the base color is output directly,
      *  bypassing all lighting, IBL, tonemap, and shading calculations.
      *  Matches `KHR_materials_unlit` glTF extension. Alpha handling is preserved. */
@@ -256,6 +256,9 @@ export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[] {
     }
     if (mat.ormTexture) {
         t.push(mat.ormTexture);
+    }
+    if (mat.occlusionTexture) {
+        t.push(mat.occlusionTexture);
     }
     if (mat.emissiveTexture) {
         t.push(mat.emissiveTexture);

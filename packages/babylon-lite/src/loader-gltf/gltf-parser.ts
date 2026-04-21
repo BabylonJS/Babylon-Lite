@@ -88,6 +88,14 @@ export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: numb
 
 // --- Image Extraction ---
 
+/** Resolve the image index for a glTF texture, honoring alternate-source
+ *  extensions such as EXT_texture_webp (WebP decode is native in
+ *  createImageBitmap, so no extra module is required — we only need to
+ *  pick the correct image source). */
+export function getTextureImageIndex(tex: any): number {
+    return tex.extensions?.EXT_texture_webp?.source ?? tex.source;
+}
+
 export async function resolveImage(json: any, binChunk: DataView, imageIdx: number, baseUrl: string): Promise<ImageBitmap> {
     const image = json.images[imageIdx];
 

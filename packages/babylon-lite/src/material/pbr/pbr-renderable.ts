@@ -11,6 +11,7 @@ import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
 import type { LightBaseInternal } from "../../light/types.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
+import type { Texture2D } from "../../texture/texture-2d.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
@@ -34,6 +35,10 @@ import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_ALPHA_BLEND,
     PBR2_HAS_REFRACTION,
+    PBR2_HAS_UV_TRANSFORM,
+    PBR2_HAS_REFLECTANCE_FACTORS,
+    PBR2_HAS_VERTEX_COLOR,
+    PBR2_HAS_UV2,
     PBR_HAS_METALLIC_REFLECTANCE_MAP,
     PBR_HAS_REFLECTANCE_MAP,
     PBR_HAS_SPECULAR_AA,
@@ -80,6 +85,8 @@ interface PbrDrawPacket {
     normalBuffer: GPUBuffer;
     tangentBuffer: GPUBuffer | null;
     uvBuffer: GPUBuffer;
+    uv2Buffer: GPUBuffer | null;
+    colorBuffer: GPUBuffer | null;
     jointsBuffer: GPUBuffer | null;
     weightsBuffer: GPUBuffer | null;
     joints1Buffer: GPUBuffer | null;
@@ -152,13 +159,16 @@ export async function buildPbrRenderables(
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
     let hasAnyUnlit = false;
+    let hasAnyUvTransform = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps;
         if (!hasSkybox && !!mat.skyboxMode) {
             hasSkybox = true;
         }
-        if (!hasMetallicReflectance && (!!mat.metallicReflectanceTexture || !!mat.reflectanceTexture)) {
+        if (!hasMetallicReflectance && (!!mat.metallicReflectanceTexture || !!mat.reflectanceTexture ||
+            (mat.metallicF0Factor != null && Math.abs(mat.metallicF0Factor - 1) > 1e-6) ||
+            (mat.metallicReflectanceColor != null && (mat.metallicReflectanceColor[0] !== 1 || mat.metallicReflectanceColor[1] !== 1 || mat.metallicReflectanceColor[2] !== 1)))) {
             hasMetallicReflectance = true;
         }
         if (!hasClearcoat && !!mat.clearCoat?.isEnabled) {
@@ -191,6 +201,16 @@ export async function buildPbrRenderables(
         if (!hasAnyUnlit && !!mat.unlit) {
             hasAnyUnlit = true;
         }
+        if (!hasAnyUvTransform) {
+            const txs: (Texture2D | undefined)[] = [mat.baseColorTexture, mat.normalTexture, mat.ormTexture, mat.emissiveTexture, mat.specGlossTexture];
+            for (const t of txs) {
+                if (!t) continue;
+                if ((t.uScale !== undefined && t.uScale !== 1) || (t.vScale !== undefined && t.vScale !== 1) || (t.uOffset !== undefined && t.uOffset !== 0) || (t.vOffset !== undefined && t.vOffset !== 0) || (t.uAng !== undefined && t.uAng !== 0)) {
+                    hasAnyUvTransform = true;
+                    break;
+                }
+            }
+        }
         if (
             hasSkybox &&
             hasMetallicReflectance &&
@@ -203,7 +223,8 @@ export async function buildPbrRenderables(
             hasSomeSkeletons &&
             hasSomeMorphs &&
             hasSomeThinInstances &&
-            hasAnyUnlit
+            hasAnyUnlit &&
+            hasAnyUvTransform
         ) {
             break;
         }
@@ -296,6 +317,11 @@ export async function buildPbrRenderables(
         _registerPbrExt(mod.morphExt);
     }
 
+    if (hasAnyUvTransform) {
+        const mod = await import("./fragments/uv-transform-fragment.js");
+        _registerPbrMaterialUboWriter("uv-transform", mod.writeUvTransformUBO);
+    }
+
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
         | ((engine: EngineContextInternal, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
@@ -326,7 +352,7 @@ export async function buildPbrRenderables(
         const has = (bit: number) => (f & bit) !== 0;
         const hasNormal = has(PBR_HAS_NORMAL_MAP);
         const hasCotangent = has(PBR_HAS_COTANGENT_NORMAL);
-        const hasReflExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP);
+        const hasReflExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         const hasIbl = has(PBR_HAS_ENV);
         const hasMorph = has(PBR_HAS_MORPH_TARGETS);
         const hasShadow = has(PBR_HAS_RECEIVE_SHADOWS);
@@ -359,6 +385,10 @@ export async function buildPbrRenderables(
             anisoBrdfFunctions: hasAniso && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
             anisoTBBlock: hasAniso && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal) : "",
             anisoDirectDG: hasAniso && _anisoExt ? _anisoExt.ANISO_DIRECT_DG : "",
+            hasUvTransform: (features2 & PBR2_HAS_UV_TRANSFORM) !== 0,
+            hasVertexColor: (features2 & PBR2_HAS_VERTEX_COLOR) !== 0,
+            hasUv2: (features2 & PBR2_HAS_UV2) !== 0,
+            hasOcclusionUv2: (features2 & PBR2_HAS_UV2) !== 0,
         });
 
         const frags: ShaderFragment[] = [];
@@ -491,6 +521,8 @@ export async function buildPbrRenderables(
             normalBuffer: gpu.normalBuffer,
             tangentBuffer: gpu.tangentBuffer ?? null,
             uvBuffer: gpu.uvBuffer,
+            uv2Buffer: gpu.uv2Buffer ?? null,
+            colorBuffer: gpu.colorBuffer ?? null,
             jointsBuffer: mesh.skeleton?.jointsBuffer ?? null,
             weightsBuffer: mesh.skeleton?.weightsBuffer ?? null,
             joints1Buffer: mesh.skeleton?.joints1Buffer ?? null,
@@ -551,6 +583,12 @@ export async function buildPbrRenderables(
                 pass.setVertexBuffer(slot++, dp.tangentBuffer);
             }
             pass.setVertexBuffer(slot++, dp.uvBuffer);
+            if ((dp.variant.features2 & PBR2_HAS_UV2) !== 0 && dp.uv2Buffer) {
+                pass.setVertexBuffer(slot++, dp.uv2Buffer);
+            }
+            if ((dp.variant.features2 & PBR2_HAS_VERTEX_COLOR) !== 0 && dp.colorBuffer) {
+                pass.setVertexBuffer(slot++, dp.colorBuffer);
+            }
             if (dp.jointsBuffer && dp.weightsBuffer) {
                 pass.setVertexBuffer(slot++, dp.jointsBuffer);
                 pass.setVertexBuffer(slot++, dp.weightsBuffer);
@@ -642,11 +680,9 @@ export async function buildPbrRenderables(
     return { renderables, updater, _sceneBGL: sceneBGL, _sceneBG: sceneBindGroup };
 }
 
-const _UV_IDENTITY = new Float32Array([1, 1, 0, 0]);
-function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader, material: PbrMaterialProps): GPUBuffer {
+function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader, _material: PbrMaterialProps): GPUBuffer {
     const data = new Float32Array(composed.meshUboSpec.totalBytes / 4);
     data.set(world, 0);
-    data.set(material.uvTransformST ?? _UV_IDENTITY, 16);
     return createUniformBuffer(engine, data);
 }
 
@@ -664,11 +700,16 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
         const off = spec.offsets.get("metallicFactor")! / 4;
         data[off] = material.metallicFactor ?? 1.0;
         data[off + 1] = material.roughnessFactor ?? 1.0;
+        data[off + 2] = material.normalTextureScale ?? 1.0;
     }
 
     for (const write of _getPbrMaterialUboWriters().values()) {
         write(data, material, spec.offsets);
     }
+
+    // Per-texture UV transforms — registered lazily; the writer is only
+    // included in the bundle when a scene has at least one UV-transform
+    // material (see uv-transform-fragment dynamic import below).
 
     // Unified PBR extensions contribute their material-UBO slice.
     for (const ext of _getPbrExts().values()) {

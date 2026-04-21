@@ -13,7 +13,7 @@ import type { Renderable } from "../../render/renderable.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
-import { getOrCreatePbrPipeline, createPbrMeshBindGroup, releasePbrPipelineVariant, PBR_HAS_NORMAL_MAP } from "./pbr-pipeline.js";
+import { getOrCreatePbrPipeline, createPbrMeshBindGroup, releasePbrPipelineVariant, PBR_HAS_NORMAL_MAP, PBR2_HAS_VERTEX_COLOR, PBR2_HAS_UV2 } from "./pbr-pipeline.js";
 import { _createPbrMeshUBO, _createPbrMaterialUBO } from "./pbr-renderable.js";
 import { computeMeshPbrFeatures } from "./pbr-mesh-features.js";
 
@@ -120,6 +120,12 @@ export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Rende
                 pass.setVertexBuffer(slot++, gpu.tangentBuffer);
             }
             pass.setVertexBuffer(slot++, gpu.uvBuffer);
+            if ((features2 & PBR2_HAS_UV2) !== 0 && gpu.uv2Buffer) {
+                pass.setVertexBuffer(slot++, gpu.uv2Buffer);
+            }
+            if ((features2 & PBR2_HAS_VERTEX_COLOR) !== 0 && gpu.colorBuffer) {
+                pass.setVertexBuffer(slot++, gpu.colorBuffer);
+            }
             if (mesh.skeleton) {
                 pass.setVertexBuffer(slot++, mesh.skeleton.jointsBuffer);
                 pass.setVertexBuffer(slot++, mesh.skeleton.weightsBuffer);

@@ -13,7 +13,7 @@ import type { GltfFeature } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
-import { assemblePbrProps, buildDefaultPbrTextures, runMatExts, uploadTex, type GenerateMipmapsFn } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex, type GenerateMipmapsFn, type TextureWrapFn } from "./gltf-pbr-builder.js";
 
 /**
  * Self-contained variant material loader.
@@ -27,7 +27,8 @@ export async function loadVariantMaterials(
     variantNames: string[],
     meshes: Mesh[],
     engine: EngineContextInternal,
-    exts: GltfFeature[]
+    exts: GltfFeature[],
+    wrapTex: TextureWrapFn = identityTexWrap
 ): Promise<MaterialVariantData> {
     const generateMipmaps: GenerateMipmapsFn = (await import("../texture/generate-mipmaps.js")).generateMipmaps;
 
@@ -50,7 +51,7 @@ export async function loadVariantMaterials(
                 return undefined;
             }
             const img = await fetchImg(texInfo);
-            return img ? uploadTex(engine, img, sRGB, sampler, generateMipmaps) : undefined;
+            return img ? wrapTex(uploadTex(engine, img, sRGB, sampler, generateMipmaps), texInfo) : undefined;
         },
         uploadImage(bitmap, sRGB) {
             return uploadTex(engine, bitmap, sRGB, sampler, generateMipmaps);
@@ -70,9 +71,9 @@ export async function loadVariantMaterials(
         let p = pbrCache.get(gltfMat);
         if (!p) {
             p = (async () => {
-                const tex = buildDefaultPbrTextures(engine, gltfMat, sampler, generateMipmaps, getCachedTex);
+                const tex = buildDefaultPbrTextures(engine, gltfMat, sampler, generateMipmaps, getCachedTex, wrapTex);
                 const layers = await runMatExts(gltfMat, exts, extCtx);
-                return assemblePbrProps(gltfMat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, layers);
+                return assemblePbrProps(gltfMat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, layers, tex.occlusionTexture);
             })();
             pbrCache.set(gltfMat, p);
         }

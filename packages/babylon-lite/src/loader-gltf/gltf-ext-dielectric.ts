@@ -61,7 +61,14 @@ const ext: GltfFeature = {
 
         if (eIor) {
             const ior: number = typeof eIor.ior === "number" ? eIor.ior : 1.5;
-            out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
+            // Skip writing metallicF0Factor at default IOR 1.5 (F0=0.04 → factor=1).
+            // JS floats compute ((0.5/2.5)^2)/0.04 as 1.0000000000000002, which
+            // would trigger the reflectance-factor code path and pull in the
+            // reflectance fragment for every KHR_materials_ior scene with
+            // default IOR. Only write when the factor meaningfully differs.
+            if (ior !== 1.5) {
+                out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
+            }
             subsurface.refraction = { indexOfRefraction: ior };
         }
 

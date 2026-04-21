@@ -11,6 +11,12 @@ import type { GltfFeature } from "./gltf-feature.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { linearToSrgbByte } from "../color/color.js";
 
+/** Texture post-processor composed from every active feature's `wrapTexture`
+ *  hook. Identity when no feature contributes one (common case). Kept simple
+ *  so the core loader stays feature-agnostic and tree-shakes cleanly. */
+export type TextureWrapFn = (tex: Texture2D, texInfo: unknown) => Texture2D;
+export const identityTexWrap: TextureWrapFn = (tex) => tex;
+
 export type GenerateMipmapsFn = (engine: EngineContextInternal, texture: GPUTexture, face?: number) => void;
 
 export function uploadTex(
@@ -50,7 +56,8 @@ export function assemblePbrProps(
     ormTexture: Texture2D,
     normalTexture: Texture2D | undefined,
     emissiveTexture: Texture2D | undefined,
-    extLayers: Partial<PbrMaterialProps> | undefined
+    extLayers: Partial<PbrMaterialProps> | undefined,
+    occlusionTexture?: Texture2D | undefined
 ): PbrMaterialPropsInternal {
     // Propagate non-default emissiveFactor as `emissiveColor` so the emissive fragment
     // multiplies the texture sample by it. Factors of [1,1,1] (pass-through) and
@@ -66,6 +73,9 @@ export function assemblePbrProps(
         emissiveTexture,
         doubleSided: mat.doubleSided,
         occlusionStrength: mat.occlusionImage ? 1.0 : 0,
+        ...(mat.occlusionTexCoord ? { occlusionTexCoord: mat.occlusionTexCoord } : undefined),
+        ...(occlusionTexture ? { occlusionTexture } : undefined),
+        ...(mat.normalScale !== 1 ? { normalTextureScale: mat.normalScale } : undefined),
         // Apply factors only when a real MR texture is present. Without one,
         // the factors are baked into the 1×1 fallback ORM bytes.
         ...(mat.metallicRoughnessImage ? { metallicFactor: mat.metallicFactor, roughnessFactor: mat.roughnessFactor } : undefined),
@@ -77,16 +87,21 @@ export function assemblePbrProps(
     } satisfies PbrMaterialPropsInternal;
 }
 
-/** Build the always-present default textures (base color + ORM) from a parsed glTF material. */
+/** Build the always-present default textures (base color + ORM) from a parsed glTF material.
+ *  Each returned Texture2D is passed through `wrapTex` so feature extensions
+ *  (e.g. KHR_texture_transform) can attach per-texture state. */
 export function buildDefaultPbrTextures(
     engine: EngineContextInternal,
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
-    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
-): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
+    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D,
+    wrapTex: TextureWrapFn = identityTexWrap
+): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined; occlusionTexture: Texture2D | undefined } {
+    const raw = mat._rawMatDef ?? {};
+    const pbr = raw.pbrMetallicRoughness ?? {};
     const baseColorTexture = mat.baseColorImage
-        ? getCachedTex(mat.baseColorImage, true)
+        ? wrapTex(getCachedTex(mat.baseColorImage, true), pbr.baseColorTexture)
         : (() => {
               const f = mat.baseColorFactor;
               return uploadTex(
@@ -98,21 +113,36 @@ export function buildDefaultPbrTextures(
                   new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
               );
           })();
-    const normalTexture = mat.normalImage ? getCachedTex(mat.normalImage, false) : undefined;
-    const emissiveTexture = mat.emissiveImage ? getCachedTex(mat.emissiveImage, true) : undefined;
+    const normalTexture = mat.normalImage ? wrapTex(getCachedTex(mat.normalImage, false), raw.normalTexture) : undefined;
+    const emissiveTexture = mat.emissiveImage ? wrapTex(getCachedTex(mat.emissiveImage, true), raw.emissiveTexture) : undefined;
 
-    const single = mat.metallicRoughnessImage ?? mat.occlusionImage;
+    // When occlusion uses a different UV set (texCoord=1) and there's no MR
+    // texture sharing the same image, keep occlusion as a separate texture
+    // sampled with UV2 and build a factor-based ORM for roughness/metallic.
+    const occlusionOnUv2 = mat.occlusionTexCoord !== 0 && mat.occlusionImage && !mat.metallicRoughnessImage;
+    let occlusionTexture: Texture2D | undefined;
+
+    // ORM: pick the MR textureInfo's transform for the shared texture case.
+    // When AO+MR are collapsed in the ext path, that path handles its own
+    // transform copy — see gltf-ext-orm.ts.
+    const single = mat.metallicRoughnessImage ?? (occlusionOnUv2 ? null : mat.occlusionImage);
     let ormTexture: Texture2D;
-    if (single && (!mat.metallicRoughnessImage || !mat.occlusionImage || mat.metallicRoughnessImage === mat.occlusionImage)) {
-        ormTexture = getCachedTex(single, false);
+    if (occlusionOnUv2) {
+        // Occlusion on UV2: separate texture for occlusion, factor-based ORM
+        const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
+        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat.roughnessFactor), clamp(mat.metallicFactor), 255]));
+        occlusionTexture = wrapTex(getCachedTex(mat.occlusionImage!, false), raw.occlusionTexture);
+    } else if (single && (!mat.metallicRoughnessImage || !mat.occlusionImage || mat.metallicRoughnessImage === mat.occlusionImage)) {
+        const ormTi = mat.metallicRoughnessImage ? pbr.metallicRoughnessTexture : raw.occlusionTexture;
+        ormTexture = wrapTex(getCachedTex(single, false), ormTi);
     } else if (!single) {
         const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
         ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat.roughnessFactor), clamp(mat.metallicFactor), 255]));
     } else {
         // Separate MR + occlusion: ext will override, but we need a placeholder.
-        ormTexture = getCachedTex(mat.metallicRoughnessImage!, false);
+        ormTexture = wrapTex(getCachedTex(mat.metallicRoughnessImage!, false), pbr.metallicRoughnessTexture);
     }
-    return { baseColorTexture, ormTexture, normalTexture, emissiveTexture };
+    return { baseColorTexture, ormTexture, normalTexture, emissiveTexture, occlusionTexture };
 }
 
 /** Run all material-layer features and merge their fragments. */
