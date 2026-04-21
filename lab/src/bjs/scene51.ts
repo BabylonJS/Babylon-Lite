@@ -45,22 +45,28 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     const gridH = rows * cellPx;
     const ox = (canvas.width - gridW) / 2 + cellPx / 2;
     const oy = (canvas.height - gridH) / 2 + cellPx / 2;
-    const sizePx = 28;
 
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             const idx = r * cols + c;
             const frame = 8 + (idx % 16);
             const tintIdx = idx % 3;
+            // Match Lite's per-sprite size variation: every 11th sprite is larger.
+            const sizePx = idx % 11 === 0 ? 40 : 28;
             const sprite = new Sprite(`s${idx}`, mgr);
             sprite.position.x = ox + c * cellPx;
             sprite.position.y = canvas.height - (oy + r * cellPx);
-            sprite.size = sizePx;
+            sprite.width = sizePx;
+            sprite.height = sizePx;
             sprite.cellIndex = frame;
             // Negate angle: a Y-up projection (we flipped Y to keep UVs upright)
             // also flips rotation direction. Lite uses canvas convention where
             // positive angle is CW, so negate here to match.
             sprite.angle = idx % 5 === 0 ? -Math.PI / 6 : 0;
+            // Match Lite's flipX (every 7th sprite). BJS uses invertU on Sprite.
+            if (idx % 7 === 0) {
+                sprite.invertU = true;
+            }
             if (tintIdx === 1) {
                 sprite.color = new Color4(1, 0.7, 0.7, 1);
             } else if (tintIdx === 2) {

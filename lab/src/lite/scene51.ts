@@ -38,12 +38,17 @@ async function main(): Promise<void> {
             const color: [number, number, number, number] = tintIdx === 0 ? [1, 1, 1, 1] : tintIdx === 1 ? [1, 0.7, 0.7, 1] : [0.7, 1, 0.85, 1];
             // Every 5th sprite rotated for rotation coverage.
             const rotation = idx % 5 === 0 ? Math.PI / 6 : 0;
+            // Every 7th sprite flipped horizontally (flipX coverage, ported from old scene50).
+            const flipX = idx % 7 === 0;
+            // Every 11th sprite drawn larger (per-sprite size variation).
+            const sizePx: [number, number] = idx % 11 === 0 ? [40, 40] : [28, 28];
             addSprite2DIndex(layer, {
                 positionPx: [ox + c * cellPx, oy + r * cellPx],
-                sizePx: [28, 28],
+                sizePx,
                 frame,
                 color,
                 rotation,
+                flipX,
             });
         }
     }

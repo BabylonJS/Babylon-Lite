@@ -3,7 +3,7 @@
  * (`createSpriteRenderer` / `registerSpriteRenderer` /
  * `unregisterSpriteRenderer` / `disposeSpriteRenderer`) plus the
  * pipeline-cache and depth-mode guard rails. Real GPU draws are covered
- * by the `scene50-pure-2d-sprites` parity test.
+ * by the `scene51-sprite-grid` parity test.
  *
  * Note on test layout: vitest runs `tests/**\/*.test.ts` per
  * `vitest.config.ts`, so this file lives under `tests/unit/` rather than

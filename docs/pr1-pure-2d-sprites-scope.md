@@ -14,9 +14,11 @@ here lands in later PRs (see the Deferred section at the end).
 
 ## Acceptance criteria (must all pass for PR 1 to merge)
 
+> **Note:** scene50 was consolidated into `scene51-sprite-grid` for BJS-oracle validation. scene51 is now the BJS-validated parity scene that covers PR 1, and the pure-2D bundle ceiling (forbidding `scene/scene-core.js`) is asserted on scene51.
+
 1. `pnpm test:parity` green — all existing 36 parity scenes still pass byte-identical.
-2. New parity scene `scene50-pure-2d-sprites` passes its golden screenshot.
-3. `tests/parity/bundle-size.spec.ts` green — including a **new ceiling for scene50** that forbids `scene/scene-core.js` from the bundle.
+2. Parity scene `scene51-sprite-grid` passes its golden screenshot.
+3. `tests/parity/bundle-size.spec.ts` green — including the **pure-2D ceiling on scene51** that forbids `scene/scene-core.js` from the bundle.
 4. New vitest: `sprite-renderer.test.ts` passes (create / register / unregister / dispose + pipeline-cache size check).
 5. `pnpm build:bundle-scenes` succeeds.
 6. `npm run format:check` and `npm run lint:check` green.
