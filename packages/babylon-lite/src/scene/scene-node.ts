@@ -35,6 +35,9 @@ export interface SceneNode {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
+    /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
+     *  Cascade is materialized at write-time by `setSubtreeVisible`. */
+    visible?: boolean;
 }
 
 // ─── Math helpers ─────────────────────────────────────────────────────

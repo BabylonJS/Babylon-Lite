@@ -31,6 +31,10 @@ export interface GltfLoadCtx {
     worldMatrixCache: Map<number, Mat4>;
     /** All material-layer features active for this load (so e.g. variants can re-use them). */
     matExts: GltfFeature[];
+    /** glTF-node-index → SceneNode, populated by buildNodeHierarchy. Consumers:
+     *  KHR_node_visibility (load-time), KHR_animation_pointer (runtime pointer writers).
+     *  `undefined` for a given index means the node was unreachable from any scene root. */
+    nodeMap?: (TransformNode | undefined)[];
 }
 
 /** Pre-decoded primitive data keyed by the primitive object. Features like

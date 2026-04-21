@@ -13,11 +13,10 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
+import { MAX_LIGHTS } from "../../light/types.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
-
-const MAX_LIGHTS = 4;
 
 // ── Lighting function (always present unless disableLighting) ───
 
@@ -269,7 +268,7 @@ var baseColor = _ds.rgb * mat.tl;`
         lightingBlock = `var glossiness = mat.sc.a;
 var diffuseBase = vec3<f32>(0.0);
 var specularBase = vec3<f32>(0.0);
-var shadowFactors = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
+var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
 let lc = min(lights.count, ${MAX_LIGHTS}u);

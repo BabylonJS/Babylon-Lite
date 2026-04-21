@@ -24,20 +24,19 @@ This repo uses two Copilot chat modes (`.github/chatmodes/`):
 2. **Gandalf → Einstein**: Gandalf delegates coding work via sub-agent with full context.
 3. **Einstein → Gandalf**: Einstein reports completion with checklist status.
 4. **Gandalf verifies**: Runs **all** guardrail checks independently (does NOT trust Einstein's word).
-   Gandalf **MUST** run the full test suite before declaring success:
-   - `pnpm test:perf` — RAF performance benchmarks pass
+   Gandalf **MUST** run the agent-allowed test suite before declaring success:
    - `pnpm build:bundle-scenes` — bundle scenes build successfully
    - `pnpm test:parity` — no MAD regression in visual parity AND bundle-size ceilings hold
    - `git diff tests/bundle-size.test.ts` — no ceiling changes
    - `git diff reference/` — no golden reference changes
-   These can also be run as a single command: `pnpm test` (which chains all three).
+   These can be chained via `pnpm test` (build + parity). **Do NOT run `pnpm test:perf`** — perf tests are machine-sensitive and reserved for the user / CI. If perf validation is needed, ask the user to run it locally.
 5. **All pass** → Gandalf reports success. **Any fail** → Einstein sent back to fix.
 
 ### Guardrails (Non-Negotiable)
 
-- **Run ALL tests before validating** — Gandalf must actually execute `pnpm test` (or the three commands above) and review the output. Never skip tests or declare success based on code review alone.
+- **Run ALL agent-allowed tests before validating** — Gandalf must actually execute `pnpm test` (build + parity) and review the output. Never skip tests or declare success based on code review alone.
 - **No MAD regression** — visual parity tests must all pass.
-- **All tests green** — perf, bundle-size, and parity tests must all pass.
+- **All agent-allowed tests green** — bundle-size and parity tests must all pass. Perf tests are user/CI-only.
 - **No bundle-size regression** — bundle size must stay within ceilings.
 - **No ceiling updates** — bundle-size test thresholds cannot be changed without explicit user approval.
 - **No golden reference changes** — reference screenshots are immutable unless user explicitly requests update.

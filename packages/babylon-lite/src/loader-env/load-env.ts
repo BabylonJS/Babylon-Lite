@@ -203,67 +203,38 @@ function parseEnvFile(buffer: ArrayBuffer): ParsedEnv {
 
 /** @internal — exported only for env-helpers.ts; not part of the public API. */
 export function polynomialToPreScaledHarmonics(poly: Float32Array): EnvironmentTextures["sphericalHarmonics"] {
-    // poly layout: [x0,x1,x2, y0,y1,y2, z0,z1,z2, xx0..., yy..., zz..., yz..., zx..., xy...]
-    const x = poly.subarray(0, 3);
-    const y = poly.subarray(3, 6);
-    const z = poly.subarray(6, 9);
-    const xx = poly.subarray(9, 12);
-    const yy = poly.subarray(12, 15);
-    const zz = poly.subarray(15, 18);
-    const yz = poly.subarray(18, 21);
-    const zx = poly.subarray(21, 24);
-    const xy = poly.subarray(24, 27);
+    // poly layout (3 floats per group): x, y, z, xx, yy, zz, yz, zx, xy
+    // Constants = K_fromPoly * PI * B_basis (pre-computed; signs folded in).
+    // Matches Babylon.js SphericalHarmonics.FromPolynomial() + preScaleForRendering().
+    const C00xy = 0.3333338747897695; // 0.376127 * PI * sqrt(1/(4PI))
+    const C00z = 0.33333298856284405; // 0.376126 * PI * sqrt(1/(4PI))
+    const C1 = 1.4999984284682104; // 0.977204 * PI * sqrt(3/(4PI))
+    const C2 = 3.999982863580422; // 1.16538 * PI * sqrt(15/(4PI))
+    const C20zz = 1.3333326611423701; // 1.34567 * PI * sqrt(5/(16PI))
+    const C20xy = 0.6666653397393608; // 0.672834 * PI * sqrt(5/(16PI))
+    const C22 = 1.999991431790211; // 1.16538 * PI * sqrt(15/(16PI))
 
-    const PI = Math.PI;
-
-    // FromPolynomial constants
-    const K00 = 0.376127;
-    const K1 = 0.977204;
-    const K2 = 1.16538;
-    const K20_zz = 1.34567;
-    const K20_xy = 0.672834;
-
-    // preScaleForRendering basis constants
-    const B00 = Math.sqrt(1 / (4 * PI));
-    const B1m = -Math.sqrt(3 / (4 * PI));
-    const B1p = Math.sqrt(3 / (4 * PI));
-    const B2_2 = Math.sqrt(15 / (4 * PI));
-    const B2_1 = -Math.sqrt(15 / (4 * PI));
-    const B20 = Math.sqrt(5 / (16 * PI));
-    const B21 = -Math.sqrt(15 / (4 * PI));
-    const B22 = Math.sqrt(15 / (16 * PI));
-
-    const scale = (a: Float32Array, s: number): Float32Array => {
-        return new Float32Array([a[0]! * s, a[1]! * s, a[2]! * s]);
-    };
-    const add3 = (a: Float32Array, b: Float32Array, c: Float32Array): Float32Array => {
-        return new Float32Array([a[0]! + b[0]! + c[0]!, a[1]! + b[1]! + c[1]!, a[2]! + b[2]! + c[2]!]);
-    };
-    const sub = (a: Float32Array, b: Float32Array): Float32Array => {
-        return new Float32Array([a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!]);
-    };
-
-    // Step 1: FromPolynomial (includes sign corrections and ×π)
-    const raw_l00 = scale(add3(scale(xx, K00), scale(yy, K00), scale(zz, 0.376126)), PI);
-    const raw_l1_1 = scale(y, -K1 * PI); // sign correction: -1
-    const raw_l10 = scale(z, K1 * PI);
-    const raw_l11 = scale(x, -K1 * PI); // sign correction: -1
-    const raw_l2_2 = scale(xy, K2 * PI);
-    const raw_l2_1 = scale(yz, -K2 * PI); // sign correction: -1
-    const raw_l20 = scale(sub(scale(zz, K20_zz), add3(scale(xx, K20_xy), scale(yy, K20_xy), new Float32Array(3))), PI);
-    const raw_l21 = scale(zx, -K2 * PI); // sign correction: -1
-    const raw_l22 = scale(sub(scale(xx, K2), scale(yy, K2)), PI);
-
-    // Step 2: preScaleForRendering
-    return {
-        l00: scale(raw_l00, B00),
-        l1_1: scale(raw_l1_1, B1m),
-        l10: scale(raw_l10, B1p),
-        l11: scale(raw_l11, B1m),
-        l2_2: scale(raw_l2_2, B2_2),
-        l2_1: scale(raw_l2_1, B2_1),
-        l20: scale(raw_l20, B20),
-        l21: scale(raw_l21, B21),
-        l22: scale(raw_l22, B22),
-    };
+    const out = Array.from({ length: 9 }, () => new Float32Array(3));
+    const [l00, l1_1, l10, l11, l2_2, l2_1, l20, l21, l22] = out;
+    for (let i = 0; i < 3; i++) {
+        const x = poly[i]!;
+        const y = poly[3 + i]!;
+        const z = poly[6 + i]!;
+        const xx = poly[9 + i]!;
+        const yy = poly[12 + i]!;
+        const zz = poly[15 + i]!;
+        const yz = poly[18 + i]!;
+        const zx = poly[21 + i]!;
+        const xy = poly[24 + i]!;
+        l00![i] = (xx + yy) * C00xy + zz * C00z;
+        l1_1![i] = y * C1;
+        l10![i] = z * C1;
+        l11![i] = x * C1;
+        l2_2![i] = xy * C2;
+        l2_1![i] = yz * C2;
+        l20![i] = zz * C20zz - (xx + yy) * C20xy;
+        l21![i] = zx * C2;
+        l22![i] = (xx - yy) * C22;
+    }
+    return { l00: l00!, l1_1: l1_1!, l10: l10!, l11: l11!, l2_2: l2_2!, l2_1: l2_1!, l20: l20!, l21: l21!, l22: l22! };
 }

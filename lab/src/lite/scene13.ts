@@ -2,7 +2,7 @@
 // Loads PBR_Spheres.glb with varying metallic/roughness/baseColor materials.
 // Uses default environment (environmentSpecular.env) + hemispheric light.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -23,7 +23,8 @@ async function main(): Promise<void> {
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

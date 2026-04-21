@@ -3,6 +3,7 @@
 
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { GltfAnimationData } from "./types.js";
+import { PATH_POINTER } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
@@ -71,7 +72,8 @@ export function tickAnimation(group: AnimationGroup, deltaMs: number, engine: En
 /** Create AnimationGroup(s) from parsed glTF animation data.
  *  Returns one group per animation clip. */
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[] {
-    if (animData.clips.length === 0 || (animData.skeletons.length === 0 && animData.morphBindings.length === 0)) {
+    const hasPointer = animData.clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
+    if (animData.clips.length === 0 || (animData.skeletons.length === 0 && animData.morphBindings.length === 0 && !hasPointer)) {
         return [];
     }
 

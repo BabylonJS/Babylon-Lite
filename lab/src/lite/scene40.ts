@@ -1,21 +1,7 @@
 // Scene 40: Physics V2 — Havok sphere drop (matches playground #Z8HTUN#1)
 
 import HavokPhysics from "@babylonjs/havok";
-import {
-    addToScene,
-    startEngine,
-    createEngine,
-    createSceneContext,
-    createFreeCamera,
-    createHemisphericLight,
-    createSphere,
-    createGround,
-    createStandardMaterial,
-    onBeforeRender,
-    createHavokWorld,
-    createPhysicsAggregate,
-    PhysicsShapeType,
-} from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createFreeCamera, createHemisphericLight, createSphere, createGround, createStandardMaterial, onBeforeRender, createHavokWorld, createPhysicsAggregate, PhysicsShapeType, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -73,7 +59,8 @@ async function main(): Promise<void> {
         }
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
 }
 
 main().catch(console.error);

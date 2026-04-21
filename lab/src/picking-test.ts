@@ -1,23 +1,7 @@
 /** GPU Picking test — creates a sphere at origin, picks center & corner,
  *  tests both basic and detailed picking. Exposes results on window for Playwright. */
 
-import {
-    createEngine,
-    startEngine,
-    stopEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    createHemisphericLight,
-    createSphere,
-    createStandardMaterial,
-    addToScene,
-    createGpuPicker,
-    pickAsync,
-    disposePicker,
-    enableDetailedPicking,
-    getPickedNormal,
-    getPickedUV,
-} from "babylon-lite";
+import { createEngine, startEngine, stopEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createStandardMaterial, addToScene, createGpuPicker, pickAsync, disposePicker, enableDetailedPicking, getPickedNormal, getPickedUV, registerScene } from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
@@ -62,7 +46,8 @@ async function run(): Promise<void> {
         sphere.material = createStandardMaterial();
         addToScene(scene, sphere);
 
-        await startEngine(engine, scene);
+        await registerScene(engine, scene);
+    await startEngine(engine);
 
         // Let a few frames render so GPU resources are fully initialized
         for (let i = 0; i < 5; i++) {

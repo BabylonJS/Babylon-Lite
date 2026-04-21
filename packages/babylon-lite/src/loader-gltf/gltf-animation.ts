@@ -1,6 +1,11 @@
 /**
  *  Lazy-loaded animation/skin parsing for glTF.
  *  Dynamically imported by load-gltf.ts only when a glTF contains animations or skins.
+ *
+ *  This module is pointer-feature agnostic: KHR_animation_pointer (and the
+ *  non-Float32 sampler conversion that CubeVisibility-style assets need) are
+ *  installed via the registration seam below, so scenes that don't declare
+ *  the extension pay zero bytes for it.
  */
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -8,6 +13,31 @@ import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChann
 import { INTERP_LINEAR, INTERP_STEP, INTERP_CUBICSPLINE, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
 import { mat4Invert, mat4Identity, mat4Multiply } from "../math/mat4.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
+import type { SceneNode } from "../scene/scene-node.js";
+
+/** Registration seam for KHR_animation_pointer. The pointer feature module
+ *  calls `_installPointerHandlers` on side-effect import; if never called,
+ *  pointer channels are skipped and non-Float32 samplers fall back to the
+ *  aliasing fast path (which throws on misaligned/short accessors). */
+export type PointerChannelParser = (ptr: string, channel: any, nodeMap: readonly (SceneNode | undefined)[] | undefined) => AnimationChannel | null;
+export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
+let _parsePointerChannel: PointerChannelParser | null = null;
+let _convertSampler: SamplerConverter | null = null;
+export function _installPointerHandlers(parser: PointerChannelParser, converter: SamplerConverter): void {
+    _parsePointerChannel = parser;
+    _convertSampler = converter;
+}
+
+/** Convert sampler input/output to Float32Array. Default: reinterpret existing
+ *  Float32 accessor as Float32Array (legacy behaviour; fast but requires
+ *  aligned Float32 data). KHR_animation_pointer installs a converter that
+ *  additionally handles non-Float32 / normalized accessors. */
+function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: boolean): Float32Array {
+    if (_convertSampler) {
+        return _convertSampler(src, length, normalized);
+    }
+    return new Float32Array(src.buffer, src.byteOffset, length);
+}
 
 /** Parsed skin/skeleton data. */
 export interface GltfSkinData {
@@ -100,12 +130,25 @@ const PATH_MAP: Record<string, 0 | 1 | 2 | 3> = {
 
 /**
  * Parse glTF animation data: clips, node hierarchy, and skeleton bindings.
- * Returns null if no animations or no skeletons present.
+ * Returns null if no animations, or no drivable state at all (no skeletons,
+ * no morphs, no pointer channels).
+ *
+ * `nodeMap` (optional) maps glTF node index → SceneNode. It's required to
+ * resolve KHR_animation_pointer targets that write to node properties.
  */
-export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[], parentMap: Map<number, number>, worldMatrixCache: Map<number, Mat4>): GltfAnimationData | null {
+export function parseAnimationData(
+    json: any,
+    binChunk: DataView,
+    meshes: Mesh[],
+    parentMap: Map<number, number>,
+    worldMatrixCache: Map<number, Mat4>,
+    nodeMap?: readonly (SceneNode | undefined)[]
+): GltfAnimationData | null {
     if (!json.animations || json.animations.length === 0) {
         return null;
     }
+
+    let pointerChannelCount = 0;
 
     // Parse animation clips
     const clips: AnimationClip[] = [];
@@ -114,15 +157,31 @@ export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[]
         for (const s of anim.samplers) {
             const inputAcc = resolveAccessor(json, binChunk, s.input);
             const outputAcc = resolveAccessor(json, binChunk, s.output);
+            const inNorm = json.accessors[s.input]?.normalized === true;
+            const outNorm = json.accessors[s.output]?.normalized === true;
             samplers.push({
-                input: new Float32Array(inputAcc.data.buffer, inputAcc.data.byteOffset, inputAcc.count),
-                output: new Float32Array(outputAcc.data.buffer, outputAcc.data.byteOffset, outputAcc.count * outputAcc.componentCount),
+                input: toSamplerFloat32(inputAcc.data, inputAcc.count, inNorm),
+                output: toSamplerFloat32(outputAcc.data, outputAcc.count * outputAcc.componentCount, outNorm),
                 interpolation: INTERP_MAP[s.interpolation ?? "LINEAR"] ?? INTERP_LINEAR,
             });
         }
 
         const channels: AnimationChannel[] = [];
         for (const c of anim.channels) {
+            // KHR_animation_pointer: delegated to the registered pointer parser
+            // (installed by gltf-feature-animation-pointer on side-effect import).
+            const ptr = c.target?.extensions?.KHR_animation_pointer?.pointer;
+            if (ptr) {
+                if (!_parsePointerChannel) {
+                    continue;
+                }
+                const ch = _parsePointerChannel(ptr, c, nodeMap);
+                if (ch) {
+                    channels.push(ch);
+                    pointerChannelCount++;
+                }
+                continue;
+            }
             if (c.target.node === undefined) {
                 continue;
             }
@@ -264,7 +323,7 @@ export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[]
         }
     }
 
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0)) {
+    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && pointerChannelCount === 0)) {
         return null;
     }
     return { clips, nodes, skeletons, morphBindings };

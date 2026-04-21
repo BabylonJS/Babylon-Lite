@@ -4,7 +4,7 @@
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { GltfAnimationData, AnimationClip } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
-import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
+import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
 import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto, mat4MultiplyInto } from "../math/mat4.js";
 
@@ -70,7 +70,8 @@ export interface AnimationController {
  */
 export function createAnimationController(animData: GltfAnimationData): AnimationController {
     const { clips, nodes, skeletons, morphBindings } = animData;
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0)) {
+    const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
+    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer)) {
         return { tick() {}, time: 0, playing: false, speedRatio: 1, loop: true };
     }
 
@@ -99,6 +100,9 @@ export function createAnimationController(animData: GltfAnimationData): Animatio
     const morphWeightScratch = new Float32Array(8); // supports up to 8 weights evaluation
     // Only write first 16 bytes (weights vec4) — count/texWidth/rowsPerBand are immutable
     const morphUploadF32 = new Float32Array(4);
+    // Pointer-channel scratch (sized to largest registered pointer arity).
+    // Current registered writers need at most 4 (quaternion/color4). Keep 16 for headroom.
+    const pointerScratch = new Float32Array(16);
 
     let _hasTickedOnce = false;
 
@@ -180,6 +184,13 @@ export function createAnimationController(animData: GltfAnimationData): Animatio
                                 // Write only the weights vec4 (first 16 bytes); count/texWidth/rowsPerBand are immutable
                                 device.queue.writeBuffer(mb.weightsBuffer, 0, morphUploadF32.buffer, 0, 16);
                             }
+                        }
+                        break;
+                    }
+                    case PATH_POINTER: {
+                        if (ch.pointerArity && ch.pointerWriter) {
+                            evaluateSampler(sampler, t, ch.pointerArity, false, pointerScratch, 0);
+                            ch.pointerWriter(pointerScratch, 0);
                         }
                         break;
                     }

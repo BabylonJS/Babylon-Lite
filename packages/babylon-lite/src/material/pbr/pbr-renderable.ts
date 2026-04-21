@@ -123,7 +123,10 @@ export async function buildPbrRenderables(
         }
     }
     const hasSomeShadows = shadowLights.length > 0;
-    const hasMultiLight = scene.lights.length > 0 && hasSomeShadows;
+    // Multi-light path: any time there are multiple lights OR any light casts shadows.
+    // The shadow fragment itself is only attached when meshes have PBR_HAS_RECEIVE_SHADOWS;
+    // the multi-light loop's default `shadowFactors = 1.0` leaves unlit meshes untouched.
+    const hasMultiLight = scene.lights.length > 1 || hasSomeShadows;
 
     // Register PBR extensions for all lights
     for (const light of scene.lights) {
@@ -148,6 +151,7 @@ export async function buildPbrRenderables(
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
+    let hasAnyUnlit = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps;
@@ -184,6 +188,9 @@ export async function buildPbrRenderables(
         if (!hasSomeThinInstances && !!m.thinInstances) {
             hasSomeThinInstances = true;
         }
+        if (!hasAnyUnlit && !!mat.unlit) {
+            hasAnyUnlit = true;
+        }
         if (
             hasSkybox &&
             hasMetallicReflectance &&
@@ -195,7 +202,8 @@ export async function buildPbrRenderables(
             needsEmissiveColor &&
             hasSomeSkeletons &&
             hasSomeMorphs &&
-            hasSomeThinInstances
+            hasSomeThinInstances &&
+            hasAnyUnlit
         ) {
             break;
         }
@@ -222,18 +230,17 @@ export async function buildPbrRenderables(
         | ((engine: EngineContextInternal, buffer: GPUBuffer, lights: readonly import("../../light/types.js").LightBase[], scratch: Float32Array) => void)
         | undefined;
     let _LIGHTS_UBO_SIZE = 0;
-    if (hasSomeShadows) {
-        const [shadowMod, lightsUboMod, wgslMod] = await Promise.all([
-            import("./fragments/pbr-shadow-fragment.js"),
-            import("../../render/lights-ubo.js"),
-            import("./fragments/multilight-wgsl.js"),
-        ]);
-        _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
+    if (hasMultiLight) {
+        const [lightsUboMod, wgslMod] = await Promise.all([import("../../render/lights-ubo.js"), import("./fragments/multilight-wgsl.js")]);
         _writeLightsUBO = lightsUboMod.writeLightsUBO;
         _refreshLightsUBO = lightsUboMod.refreshLightsUBO;
-        _LIGHTS_UBO_SIZE = lightsUboMod.LIGHTS_UBO_SIZE;
-        _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS + wgslMod.COMPUTE_PBR_LIGHT;
-        _multiLightLoop = wgslMod.MULTI_LIGHT_LOOP;
+        _LIGHTS_UBO_SIZE = lightsUboMod.getLightsUboSize();
+        _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
+        _multiLightLoop = wgslMod.getMultiLightLoop();
+        if (hasSomeShadows) {
+            const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
+            _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
+        }
     }
 
     // Per-mesh fragment creators (imported if any mesh needs them — flags populated by single pass above)
@@ -272,6 +279,11 @@ export async function buildPbrRenderables(
     if (needsEmissiveColor) {
         const mod = await import("./fragments/emissive-fragment.js");
         _registerPbrExt(mod.emissiveColorExt);
+    }
+
+    if (hasAnyUnlit) {
+        const mod = await import("./fragments/unlit-fragment.js");
+        _registerPbrExt(mod.unlitExt);
     }
 
     if (hasSomeSkeletons) {
@@ -521,6 +533,9 @@ export async function buildPbrRenderables(
         // sceneBindGroup is bound by engine.drawList via _sceneBG.
         let currentPipeline: GPURenderPipeline | null = null;
         for (const dp of list) {
+            if (dp.mesh.visible === false) {
+                continue;
+            }
             if (dp.variant.pipeline !== currentPipeline) {
                 pass.setPipeline(dp.variant.pipeline);
                 currentPipeline = dp.variant.pipeline;

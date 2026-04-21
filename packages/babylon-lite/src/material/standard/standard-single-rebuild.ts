@@ -21,7 +21,7 @@ import {
     writeLightsUBO,
     refreshLightsUBO,
     releaseStandardPipelineVariant,
-    LIGHTS_UBO_SIZE,
+    getLightsUboSize,
     NEEDS_UV,
     NEEDS_UV2,
     RECEIVE_SHADOWS,
@@ -63,7 +63,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
     let _lastLightsVersion = -1;
-    const lightsScratch = new Float32Array(LIGHTS_UBO_SIZE / 4);
+    const lightsScratch = new Float32Array(getLightsUboSize() / 4);
 
     const needsUV = (features & NEEDS_UV) !== 0;
     const needsUV2 = (features & NEEDS_UV2) !== 0;

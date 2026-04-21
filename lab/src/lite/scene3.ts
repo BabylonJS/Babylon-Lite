@@ -1,6 +1,6 @@
 // Scene 3: Fog + Boxes — matches Babylon #7G0IQW
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPointLight, createBox, createStandardMaterial, loadSkybox, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPointLight, createBox, createStandardMaterial, loadSkybox, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -29,7 +29,8 @@ async function main(): Promise<void> {
 
     await loadSkybox(scene, "https://playground.babylonjs.com/textures/skybox", ".jpg");
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

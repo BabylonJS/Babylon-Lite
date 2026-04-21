@@ -1,7 +1,7 @@
 // Scene 15: Two SpotLights + Ground — demonstrates multi-light support.
 // Matches Babylon playground #20OAV9#3.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createSpotLight, createGround, createStandardMaterial, attachControl } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createSpotLight, createGround, createStandardMaterial, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -30,7 +30,8 @@ async function main(): Promise<void> {
     ground.material = createStandardMaterial();
     addToScene(scene, ground);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

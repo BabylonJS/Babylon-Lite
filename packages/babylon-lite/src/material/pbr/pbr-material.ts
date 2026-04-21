@@ -90,6 +90,14 @@ export interface PbrMaterialProps {
      *  Set by the glTF loader from `KHR_texture_transform` when every textureInfo
      *  on a material declares the same transform. */
     uvTransformST?: [number, number, number, number];
+    /** When true, the material is unlit — the base color is output directly,
+     *  bypassing all lighting, IBL, tonemap, and shading calculations.
+     *  Matches `KHR_materials_unlit` glTF extension. Alpha handling is preserved. */
+    unlit?: boolean;
+    /** Linear-RGB tint applied to baseColor when `unlit` is true (i.e. glTF
+     *  `baseColorFactor`). When omitted or [1,1,1], no tint is applied.
+     *  Only bundled/bound when the unlit extension is active. */
+    unlitColor?: [number, number, number];
 }
 
 /** @internal Extended PbrMaterialProps with internal build group. */

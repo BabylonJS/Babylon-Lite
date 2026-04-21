@@ -195,14 +195,19 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         animFrameId = requestAnimationFrame(applyInertia);
     }
 
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    canvas.addEventListener("contextmenu", onContextMenu);
-    canvas.addEventListener("touchstart", onTouchStart, { passive: true });
-    canvas.addEventListener("touchmove", onTouchMove, { passive: true });
-    canvas.addEventListener("touchend", onTouchEnd);
+    const listeners: [string, EventListener, AddEventListenerOptions?][] = [
+        ["pointerdown", onPointerDown as EventListener],
+        ["pointermove", onPointerMove as EventListener],
+        ["pointerup", onPointerUp as EventListener],
+        ["wheel", onWheel as EventListener, { passive: false }],
+        ["contextmenu", onContextMenu as EventListener],
+        ["touchstart", onTouchStart as EventListener, { passive: true }],
+        ["touchmove", onTouchMove as EventListener, { passive: true }],
+        ["touchend", onTouchEnd as EventListener],
+    ];
+    for (const [ev, h, opts] of listeners) {
+        canvas.addEventListener(ev, h, opts);
+    }
 
     return () => {
         if (animFrameId) {
@@ -214,13 +219,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
                 (scene as SceneContextInternal)._beforeRender.splice(idx, 1);
             }
         }
-        canvas.removeEventListener("pointerdown", onPointerDown);
-        canvas.removeEventListener("pointermove", onPointerMove);
-        canvas.removeEventListener("pointerup", onPointerUp);
-        canvas.removeEventListener("wheel", onWheel);
-        canvas.removeEventListener("contextmenu", onContextMenu);
-        canvas.removeEventListener("touchstart", onTouchStart);
-        canvas.removeEventListener("touchmove", onTouchMove);
-        canvas.removeEventListener("touchend", onTouchEnd);
+        for (const [ev, h] of listeners) {
+            canvas.removeEventListener(ev, h);
+        }
     };
 }

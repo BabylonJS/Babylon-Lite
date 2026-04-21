@@ -37,8 +37,22 @@ export interface LightBaseInternal extends LightBase {
  *  Returns true when the mesh should receive this light's contribution. */
 // Removed: lightAffectsMesh was unused — inline the logic at call sites if needed.
 
-/** Maximum simultaneous lights for standard material shading. */
-export const MAX_LIGHTS = 4;
+/** Maximum simultaneous lights supported by the multi-light pipeline (both
+ *  Standard and PBR). Default 4 to match Babylon.js's `maxSimultaneousLights`.
+ *  Raise via `setMaxLights(n)` before creating any scene / loading any asset
+ *  that needs more lights (e.g. the glTF loader auto-raises this when an
+ *  asset declares more KHR_lights_punctual lights than the current cap). */
+export let MAX_LIGHTS = 4;
+
+/** Raise (or lower) the maximum number of lights bound to a single draw.
+ *  Must be called BEFORE scene pipelines are compiled — existing pipelines
+ *  and UBOs bake the cap into their WGSL/layout. */
+export function setMaxLights(n: number): void {
+    if (!Number.isFinite(n) || n < 1) {
+        throw new Error(`setMaxLights: expected positive integer, got ${n}`);
+    }
+    MAX_LIGHTS = n | 0;
+}
 
 /** Bytes per light entry in the lights UBO (4 × vec4 = 64 bytes). */
 export const LIGHT_ENTRY_FLOATS = 16;

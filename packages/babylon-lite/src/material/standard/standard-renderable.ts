@@ -23,7 +23,7 @@ import {
     refreshLightsUBO,
     releaseStandardPipelineVariant,
     clearStandardPipelineCache,
-    LIGHTS_UBO_SIZE,
+    getLightsUboSize,
     NEEDS_UV,
     NEEDS_UV2,
     RECEIVE_SHADOWS,
@@ -311,7 +311,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     }
 
     // Pre-allocated scratch buffer for light UBO refresh
-    const lightsScratch = new Float32Array(LIGHTS_UBO_SIZE / 4);
+    const lightsScratch = new Float32Array(getLightsUboSize() / 4);
     // Per-mask light version tracking — skip refresh when lights haven't changed
     const lightsVersions: number[] = [];
     // Scene UBO dirty tracking

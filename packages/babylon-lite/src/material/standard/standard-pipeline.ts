@@ -14,7 +14,7 @@
 
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
-import { LIGHTS_UBO_SIZE, writeLightsUBO, refreshLightsUBO } from "../../render/lights-ubo.js";
+import { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO } from "../../render/lights-ubo.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { getSceneBindGroupLayout, clearSceneBGLCache } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
@@ -433,7 +433,7 @@ export function getOrCreatePipeline(
 
 // ─── Per-Mesh GPU Setup ─────────────────────────────────────────────
 
-export { LIGHTS_UBO_SIZE, writeLightsUBO, refreshLightsUBO };
+export { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO };
 
 export function createDynamicMeshGPU(
     engine: EngineContextInternal,

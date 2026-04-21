@@ -13,9 +13,12 @@ export const PATH_TRANSLATION = 0;
 export const PATH_ROTATION = 1;
 export const PATH_SCALE = 2;
 export const PATH_WEIGHTS = 3;
+/** KHR_animation_pointer target — value is dispatched to an arbitrary writer
+ *  resolved from the JSON pointer at load time. */
+export const PATH_POINTER = 4;
 
 export type InterpMode = 0 | 1 | 2;
-export type TargetPath = 0 | 1 | 2 | 3;
+export type TargetPath = 0 | 1 | 2 | 3 | 4;
 
 /** Parsed keyframe sampler — times + values + interpolation. */
 export interface AnimationSampler {
@@ -27,11 +30,19 @@ export interface AnimationSampler {
     readonly interpolation: InterpMode;
 }
 
-/** Single animation channel — targets one node property. */
+/** Single animation channel — targets one node property, or an arbitrary
+ *  KHR_animation_pointer target resolved at load time to a writer function. */
 export interface AnimationChannel {
     readonly samplerIdx: number;
+    /** For standard channels: glTF node index. For `PATH_POINTER`: unused (-1). */
     readonly nodeIdx: number;
     readonly path: TargetPath;
+    /** PATH_POINTER only: invoked per-frame with the interpolated sampler output.
+     *  The writer is responsible for applying the value to the runtime target
+     *  (node.visible, material factor, camera fov, light color, ...). */
+    readonly pointerWriter?: (output: Float32Array, offset: number) => void;
+    /** PATH_POINTER only: number of floats per keyframe (1, 3, 4, ...). */
+    readonly pointerArity?: number;
 }
 
 /** One glTF animation clip (may animate many nodes). */

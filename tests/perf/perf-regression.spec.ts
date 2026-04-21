@@ -226,6 +226,13 @@ if (!hasBaseline) {
     test.describe("Performance: Current vs Stable", () => {
         for (const scene of SCENES) {
             test(`${scene.name} — current ≤ ${REGRESSION_PCT}% slower than baseline`, async ({ browser }) => {
+                // New scenes added in a PR won't have a baseline bundle — skip gracefully
+                const baselineHtml = resolve(__dirname, `../../lab/bundle-baseline-scene${scene.id}.html`);
+                if (!existsSync(baselineHtml)) {
+                    test.skip();
+                    return;
+                }
+
                 const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 
                 const currentUrl = `/bundle-scene${scene.id}.html`;

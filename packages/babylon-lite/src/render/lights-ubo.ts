@@ -8,14 +8,23 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { LightBase } from "../light/types.js";
 import type { LightBaseInternal } from "../light/types.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
+import { createUniformBuffer } from "../resource/gpu-buffers.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.
  *  Avoids allocating a Uint32Array view on every fillLightsData call. */
 const _countU32 = new Uint32Array(1);
 const _countF32 = new Float32Array(_countU32.buffer);
 
-/** Total byte size of the lights UBO (header + MAX_LIGHTS entries). */
-export const LIGHTS_UBO_SIZE = 16 + MAX_LIGHTS * LIGHT_ENTRY_FLOATS * 4;
+/** Total byte size of the lights UBO (header + MAX_LIGHTS entries).
+ *  Recomputed dynamically because MAX_LIGHTS is mutable via `setMaxLights`. */
+export function getLightsUboSize(): number {
+    return 16 + MAX_LIGHTS * LIGHT_ENTRY_FLOATS * 4;
+}
+
+/** @deprecated Use {@link getLightsUboSize} — this constant only reflects the
+ *  MAX_LIGHTS value at module load. Retained for backwards compat; readers
+ *  that call it lazily via getter will pick up runtime updates. */
+export const LIGHTS_UBO_SIZE = getLightsUboSize();
 
 /** Compute a composite version from all lights (sum of _lightVersion).
  *  Returns 0 for lights without version tracking (always refresh). */
@@ -50,12 +59,9 @@ export function fillLightsData(data: Float32Array, lights: readonly LightBase[])
 
 /** Create a new lights UBO from all standard-compatible lights in the scene. */
 export function writeLightsUBO(engine: EngineContextInternal, lights: readonly LightBase[]): GPUBuffer {
-    const device = engine.device;
-    const data = new Float32Array(LIGHTS_UBO_SIZE / 4);
+    const data = new Float32Array(getLightsUboSize() / 4);
     fillLightsData(data, lights);
-    const buf = device.createBuffer({ size: LIGHTS_UBO_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    device.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);
-    return buf;
+    return createUniformBuffer(engine, data);
 }
 
 /** Refresh an existing lights UBO with current light state. */
