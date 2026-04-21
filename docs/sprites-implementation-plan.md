@@ -121,7 +121,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 **No new engine surface.** All engine plumbing (`_renderingContexts`, shared pass, clear-vs-load) is already in master.
 
-**Visual proof:** new lab scene `scene36-pure-2d-sprites` — solid background + a few static quads from a texture atlas. No `Scene`, no camera, no lights.
+**Visual proof:** new lab scene `scene50-pure-2d-sprites` — solid background + a few static quads from a texture atlas. No `Scene`, no camera, no lights.
 
 **Tests:**
 
@@ -143,7 +143,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 - `registerScene` auto-creates an internal `SpriteRenderer` and pushes it onto `engine._renderingContexts` _after_ the scene if `_hudSpriteLayers.length > 0`
 - **No special pass plumbing needed** — engine already uses `loadOp: "load"` for registrations 2+; HUD sprite context just disables depth-test in its pipeline
 
-**Visual proof:** new lab scene `scene37-3d-with-sprite-hud` — rotating cube + static health-bar overlay in screen-space.
+**Visual proof:** new lab scene `scene51-3d-with-sprite-hud` — rotating cube + static health-bar overlay in screen-space.
 
 **Tests:**
 
@@ -165,7 +165,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 - `addToScene` branch routes these into existing `_opaqueRenderables` / `_transparentRenderables` via `_deferredBuild` — no new render pass, no new pipeline-cache plumbing
 - WGSL fragment composes correctly with depth attachment
 
-**Visual proof:** new lab scene `scene38-depth-tested-sprites` — a sprite that is occluded by a rotating 3D mesh.
+**Visual proof:** new lab scene `scene52-depth-tested-sprites` — a sprite that is occluded by a rotating 3D mesh.
 
 **Tests:**
 
@@ -184,7 +184,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 - Reuse existing `_sprite3dSceneUBO` / `_anchoredSceneUBO` machinery already on `SceneContextInternal`
 - Variants: anchored to a transform vs. world-positioned
 
-**Visual proof:** new lab scene `scene39-billboards` — a field of camera-facing sprites that always face the camera.
+**Visual proof:** new lab scene `scene53-billboards` — a field of camera-facing sprites that always face the camera.
 
 **Tests:**
 
@@ -206,7 +206,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 - Hooks into existing engine pointer events
 - Returns `(layer, spriteIndex)` initially; `Sprite2DHandle` integration comes in PR 6
 
-**Visual proof:** new lab scene `scene40-sprite-picking` — click a sprite, log/highlight it.
+**Visual proof:** new lab scene `scene54-sprite-picking` — click a sprite, log/highlight it.
 
 **Tests:**
 
@@ -229,7 +229,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 - Parenting: handles can have a parent (mesh, transform node, another sprite handle)
 - PR 5's picking returns handles when the handle module is loaded, falls back to `(layer, index)` when not
 
-**Visual proof:** new lab scene `scene41-sprite-handles` — drag sprites around the screen using handles + picking; demonstrate parenting (sprite follows a moving 3D mesh).
+**Visual proof:** new lab scene `scene55-sprite-handles` — drag sprites around the screen using handles + picking; demonstrate parenting (sprite follows a moving 3D mesh).
 
 **Tests:**
 
