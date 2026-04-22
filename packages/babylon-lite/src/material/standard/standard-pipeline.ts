@@ -309,11 +309,6 @@ function fragmentKey(fragments: ShaderFragment[]): string {
               .join(",");
 }
 
-function cacheKey(features: number, format: GPUTextureFormat, msaa: number, fragments: ShaderFragment[]): string {
-    const fk = fragmentKey(fragments);
-    return fk ? `${features}:${format}:${msaa}:${fk}` : `${features}:${format}:${msaa}`;
-}
-
 /** Get or create a pipeline variant for the given features. */
 export function getOrCreatePipeline(
     engine: EngineContextInternal,
@@ -330,7 +325,8 @@ export function getOrCreatePipeline(
         clearSceneBGLCache();
         _sharedSceneUBO = null;
     }
-    const key = cacheKey(features, format, msaaSamples, fragments);
+    const fk = fragmentKey(fragments);
+    const key = fk ? `${features}:${format}:${msaaSamples}:${fk}` : `${features}:${format}:${msaaSamples}`;
     const cached = c.getOrIncRef(key);
     if (cached) {
         return cached;
@@ -339,7 +335,6 @@ export function getOrCreatePipeline(
     const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
 
     // Compose shader via the generic composer — WGSL + BGL descriptors
-    const fk = fragmentKey(fragments);
     const composedKey = fk ? `${features}:${fk}` : `${features}`;
     let composed = cc.get(composedKey);
     if (!composed) {

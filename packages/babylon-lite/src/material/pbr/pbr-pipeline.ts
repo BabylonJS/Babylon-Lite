@@ -33,16 +33,23 @@ export { getSceneBindGroupLayout as createSceneBindGroupLayout } from "../../ren
 
 // ─── Pipeline Cache ─────────────────────────────────────────────────
 
-const cache: PipelineCache<PbrPipelineVariant> = createPipelineCache();
+let cache: PipelineCache<PbrPipelineVariant> | null = null;
+
+function getCache(): PipelineCache<PbrPipelineVariant> {
+    if (!cache) {
+        cache = createPipelineCache();
+    }
+    return cache;
+}
 
 /** Clear the pipeline cache. Must be called when a GPU device is destroyed. */
 export function clearPbrPipelineCache(): void {
-    cache.clear();
+    cache?.clear();
 }
 
 export function releasePbrPipelineVariant(variant: PbrPipelineVariant): void {
     releaseVariant(variant);
-    cache.evictUnused();
+    cache?.evictUnused();
 }
 
 function cacheKey(features: number, features2: number, format: GPUTextureFormat, msaa: number): string {
@@ -59,9 +66,10 @@ export function getOrCreatePbrPipeline(
     composed: ComposedShader
 ): PbrPipelineVariant {
     const device = engine.device;
-    cache.ensureDevice(engine);
+    const c = getCache();
+    c.ensureDevice(engine);
     const key = cacheKey(features, features2, format, msaaSamples);
-    const cached = cache.getOrIncRef(key);
+    const cached = c.getOrIncRef(key);
     if (cached) {
         return cached;
     }
@@ -102,7 +110,7 @@ export function getOrCreatePbrPipeline(
     });
 
     const variant: PbrPipelineVariant = { features, features2, pipeline, sceneBGL, meshBGL, shadowBGL, refCount: 1 };
-    cache.set(key, variant);
+    c.set(key, variant);
     return variant;
 }
 
