@@ -131,21 +131,25 @@ export interface PbrExt {
     textures?(mat: unknown, out: Texture2D[]): void;
 }
 
-const _pbrExts = new Map<string, PbrExt>();
+// Lazy-init: a module-level `new Map()` would defeat tree-shaking for any
+// consumer that imports from pbr-flags.ts without actually registering or
+// iterating extensions. See GUIDANCE.md §4 ("Zero module-level side effects").
+let _pbrExts: Map<string, PbrExt> | null = null;
 let _pbrExtsSorted: readonly PbrExt[] | null = null;
 /** @internal Register a PBR extension. Idempotent (keyed by id). */
 export function _registerPbrExt(ext: PbrExt): void {
-    _pbrExts.set(ext.id, ext);
+    (_pbrExts ??= new Map()).set(ext.id, ext);
     _pbrExtsSorted = null;
 }
 /** @internal Iterate the registered extensions. */
 export function _getPbrExts(): ReadonlyMap<string, PbrExt> {
-    return _pbrExts;
+    return (_pbrExts ??= new Map());
 }
 /** @internal Return extensions sorted by id (alphabetical, stable within a build). Memoised. */
 export function _getPbrExtsSorted(): readonly PbrExt[] {
     if (!_pbrExtsSorted) {
-        _pbrExtsSorted = Array.from(_pbrExts.values()).sort((a, b) => a.id.localeCompare(b.id));
+        const map = _pbrExts;
+        _pbrExtsSorted = map ? Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id)) : [];
     }
     return _pbrExtsSorted;
 }
