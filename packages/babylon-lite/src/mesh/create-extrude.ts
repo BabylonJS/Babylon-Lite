@@ -91,7 +91,9 @@ export function createExtrudeShapeData(options: ExtrudeShapeOptions): RibbonData
         bc.y *= inv;
         bc.z *= inv;
         const out: Vec3[] = [];
-        for (let i = 0; i < shapePath.length; i++) out.push(bc);
+        for (let i = 0; i < shapePath.length; i++) {
+            out.push(bc);
+        }
         return out;
     };
 

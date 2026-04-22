@@ -38,7 +38,9 @@ function getLastNonNullVector(curve: Vec3[], index: number): Vec3 {
 function normalVector(vt: Vec3, va: Vec3 | null): Vec3 {
     let n: Vec3;
     let tgl = lengthVec3(vt);
-    if (tgl === 0) tgl = 1;
+    if (tgl === 0) {
+        tgl = 1;
+    }
     if (va === null) {
         let point: Vec3;
         if (!withinEpsilon(Math.abs(vt.y) / tgl, 1, EPSILON)) {

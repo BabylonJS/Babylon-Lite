@@ -8,9 +8,13 @@
 export function computeNormals(positions: number[], indices: number[]): number[] {
     const n = positions.length;
     const pos = new Float64Array(n);
-    for (let i = 0; i < n; i++) pos[i] = positions[i]!;
+    for (let i = 0; i < n; i++) {
+        pos[i] = positions[i]!;
+    }
     const idx = new Uint32Array(indices.length);
-    for (let i = 0; i < indices.length; i++) idx[i] = indices[i]!;
+    for (let i = 0; i < indices.length; i++) {
+        idx[i] = indices[i]!;
+    }
     const normals = new Float64Array(n);
     const nbFaces = (indices.length / 3) | 0;
     for (let f = 0; f < nbFaces; f++) {

@@ -30,7 +30,7 @@ export interface DiscOptions {
 export function createDiscData(options: DiscOptions = {}): DiscData {
     const radius = options.radius ?? 0.5;
     const tessellation = options.tessellation ?? 64;
-    const arc = options.arc && (options.arc <= 0 || options.arc > 1) ? 1 : options.arc ?? 1;
+    const arc = options.arc && (options.arc <= 0 || options.arc > 1) ? 1 : (options.arc ?? 1);
 
     const positions: number[] = [];
     const uvs: number[] = [];

@@ -50,7 +50,7 @@ export function createTubeData(options: TubeOptions): RibbonData {
     const radiusFunction = options.radiusFunction ?? null;
     let cap = options.cap ?? CAP_NONE;
     cap = cap < 0 || cap > 3 ? CAP_NONE : cap;
-    const arc = options.arc && (options.arc <= 0 || options.arc > 1) ? 1 : options.arc ?? 1;
+    const arc = options.arc && (options.arc <= 0 || options.arc > 1) ? 1 : (options.arc ?? 1);
 
     const path3D = computePath3D(path);
     const { tangents, normals, distances } = path3D;
@@ -79,7 +79,9 @@ export function createTubeData(options: TubeOptions): RibbonData {
 
     const capPath = (nbPoints: number, pathIndex: number): Vec3[] => {
         const pts: Vec3[] = [];
-        for (let i = 0; i < nbPoints; i++) pts.push(path[pathIndex]!);
+        for (let i = 0; i < nbPoints; i++) {
+            pts.push(path[pathIndex]!);
+        }
         return pts;
     };
     if (cap === CAP_START || cap === CAP_ALL) {

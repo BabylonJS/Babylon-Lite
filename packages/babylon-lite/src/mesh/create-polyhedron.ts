@@ -37,7 +37,7 @@ export interface PolyhedronOptions {
 }
 
 export function createPolyhedronData(options: PolyhedronOptions = {}): PolyhedronData {
-    const type = options.type !== undefined && (options.type < 0 || options.type >= POLYHEDRA.length) ? 0 : options.type ?? 0;
+    const type = options.type !== undefined && (options.type < 0 || options.type >= POLYHEDRA.length) ? 0 : (options.type ?? 0);
     const size = options.size;
     const sizeX = options.sizeX ?? size ?? 1;
     const sizeY = options.sizeY ?? size ?? 1;

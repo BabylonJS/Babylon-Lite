@@ -33,8 +33,12 @@ export function createCylinderData(options: CylinderOptions = {}): CylinderData 
     let diameterTop = options.diameterTop === 0 ? 0 : (options.diameterTop ?? options.diameter ?? 1);
     let diameterBottom = options.diameterBottom === 0 ? 0 : (options.diameterBottom ?? options.diameter ?? 1);
     // Prevent broken normals on degenerate rings.
-    if (diameterTop === 0) diameterTop = 0.00001;
-    if (diameterBottom === 0) diameterBottom = 0.00001;
+    if (diameterTop === 0) {
+        diameterTop = 0.00001;
+    }
+    if (diameterBottom === 0) {
+        diameterBottom = 0.00001;
+    }
     const tessellation = Math.max(3, (options.tessellation ?? 24) | 0);
     const subdivisions = Math.max(1, (options.subdivisions ?? 1) | 0);
     const arc = 1; // full circle only (see header comment)
@@ -100,7 +104,9 @@ export function createCylinderData(options: CylinderOptions = {}): CylinderData 
     // Caps (CAP_ALL)
     const createCap = (isTop: boolean): void => {
         const radius = isTop ? diameterTop / 2 : diameterBottom / 2;
-        if (radius === 0) return;
+        if (radius === 0) {
+            return;
+        }
 
         const vbase = positions.length / 3;
         const offset = isTop ? height / 2 : -height / 2;

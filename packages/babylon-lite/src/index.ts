@@ -22,7 +22,20 @@ export type { LightBase } from "./light/types.js";
 export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 
 // ─── Mesh Factories (high-level) ─────────────────────────────────────
-export { createSphere, createBox, createTorus, createGround, createGroundFromHeightMap, createCylinder, createPlane, createDisc, createPolyhedron, createRibbon, createTube, createExtrudeShape } from "./mesh/mesh-factories.js";
+export {
+    createSphere,
+    createBox,
+    createTorus,
+    createGround,
+    createGroundFromHeightMap,
+    createCylinder,
+    createPlane,
+    createDisc,
+    createPolyhedron,
+    createRibbon,
+    createTube,
+    createExtrudeShape,
+} from "./mesh/mesh-factories.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";

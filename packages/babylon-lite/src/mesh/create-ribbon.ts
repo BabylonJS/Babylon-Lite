@@ -164,7 +164,9 @@ export function createRibbonData(options: RibbonOptions): RibbonData {
             normals[indexFirst + 1] = (normals[indexFirst + 1]! + normals[indexLast + 1]!) * 0.5;
             normals[indexFirst + 2] = (normals[indexFirst + 2]! + normals[indexLast + 2]!) * 0.5;
             const nl =
-                Math.sqrt(normals[indexFirst]! * normals[indexFirst]! + normals[indexFirst + 1]! * normals[indexFirst + 1]! + normals[indexFirst + 2]! * normals[indexFirst + 2]!) || 1;
+                Math.sqrt(
+                    normals[indexFirst]! * normals[indexFirst]! + normals[indexFirst + 1]! * normals[indexFirst + 1]! + normals[indexFirst + 2]! * normals[indexFirst + 2]!
+                ) || 1;
             normals[indexFirst] = normals[indexFirst]! / nl;
             normals[indexFirst + 1] = normals[indexFirst + 1]! / nl;
             normals[indexFirst + 2] = normals[indexFirst + 2]! / nl;
@@ -181,7 +183,9 @@ export function createRibbonData(options: RibbonOptions): RibbonData {
             normals[indexFirst + 1] = (normals[indexFirst + 1]! + normals[indexLast + 1]!) * 0.5;
             normals[indexFirst + 2] = (normals[indexFirst + 2]! + normals[indexLast + 2]!) * 0.5;
             const nl =
-                Math.sqrt(normals[indexFirst]! * normals[indexFirst]! + normals[indexFirst + 1]! * normals[indexFirst + 1]! + normals[indexFirst + 2]! * normals[indexFirst + 2]!) || 1;
+                Math.sqrt(
+                    normals[indexFirst]! * normals[indexFirst]! + normals[indexFirst + 1]! * normals[indexFirst + 1]! + normals[indexFirst + 2]! * normals[indexFirst + 2]!
+                ) || 1;
             normals[indexFirst] = normals[indexFirst]! / nl;
             normals[indexFirst + 1] = normals[indexFirst + 1]! / nl;
             normals[indexFirst + 2] = normals[indexFirst + 2]! / nl;
