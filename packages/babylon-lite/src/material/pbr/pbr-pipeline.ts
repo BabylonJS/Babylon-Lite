@@ -14,53 +14,12 @@ import { _getPbrLightExtension, _getPbrExtsSorted, PBR2_HAS_UV2 } from "./pbr-fl
 import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_EMISSIVE,
-    PBR_HAS_EMISSIVE_COLOR,
-    PBR_HAS_ENV,
-    PBR_HAS_SKELETON,
-    PBR_HAS_TONEMAP,
-    PBR_HAS_MORPH_TARGETS,
-    PBR_HAS_ALPHA_BLEND,
     PBR_HAS_SPEC_GLOSS,
     PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_COTANGENT_NORMAL,
-    PBR_HAS_METALLIC_REFLECTANCE_MAP,
-    PBR_HAS_REFLECTANCE_MAP,
+    PBR_HAS_ALPHA_BLEND,
 } from "./pbr-flags.js";
 export * from "./pbr-flags.js";
-
-// ─── Feature detection ──────────────────────────────────────────────
-
-/** Compute PBR feature bitmask from mesh capabilities + environment. */
-export function computePbrFeatures(
-    hasTangents: boolean,
-    hasEmissive: boolean,
-    hasEnv: boolean,
-    hasSkeleton: boolean = false,
-    hasTonemap: boolean = false,
-    hasMorphTargets: boolean = false,
-    hasAlphaBlend: boolean = false,
-    hasSpecGloss: boolean = false,
-    hasDoubleSided: boolean = false,
-    hasNormalTexture: boolean = false,
-    hasMetallicReflectanceMap: boolean = false,
-    hasReflectanceMap: boolean = false,
-    hasEmissiveColor: boolean = false
-): number {
-    return (
-        (hasNormalTexture ? (hasTangents ? PBR_HAS_NORMAL_MAP : PBR_HAS_COTANGENT_NORMAL) : 0) |
-        (hasEmissive ? PBR_HAS_EMISSIVE : 0) |
-        (hasEmissiveColor ? PBR_HAS_EMISSIVE_COLOR : 0) |
-        (hasEnv ? PBR_HAS_ENV : 0) |
-        (hasSkeleton ? PBR_HAS_SKELETON : 0) |
-        (hasTonemap ? PBR_HAS_TONEMAP : 0) |
-        (hasMorphTargets ? PBR_HAS_MORPH_TARGETS : 0) |
-        (hasAlphaBlend ? PBR_HAS_ALPHA_BLEND : 0) |
-        (hasSpecGloss ? PBR_HAS_SPEC_GLOSS : 0) |
-        (hasDoubleSided ? PBR_HAS_DOUBLE_SIDED : 0) |
-        (hasMetallicReflectanceMap ? PBR_HAS_METALLIC_REFLECTANCE_MAP : 0) |
-        (hasReflectanceMap ? PBR_HAS_REFLECTANCE_MAP : 0)
-    );
-}
 
 // ─── Pipeline Variant ───────────────────────────────────────────────
 

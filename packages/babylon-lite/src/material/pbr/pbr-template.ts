@@ -222,10 +222,9 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         { name: "roughnessFactor", type: "f32" },
         { name: "normalScale", type: "f32" },
         { name: "_mrfPad1", type: "f32" },
-        // Anisotropy UBO field kept here because its registration path does not
-        // yet flow through the composer fragment pipeline (see pbr-renderable:
-        // _registerPbrMaterialUboWriter). The reflectance/emissive/clearcoat/sheen
-        // UBO fields are now contributed by their own fragments.
+        // Anisotropy UBO field stays on the base template because anisotropy is
+        // template-only (no ShaderFragment) — the anisotropyExt just writes its
+        // slice through the unified ext.writeUbo hook.
         ...(hasAnisotropy ? [{ name: "anisotropyParams", type: "vec4<f32>" as const }] : []),
         // ── Extension fields (per-texture UV transforms, etc.) ─
         ...(ext ? ext.extraMaterialUboFields : []),

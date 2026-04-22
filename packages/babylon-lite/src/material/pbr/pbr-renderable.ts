@@ -49,10 +49,8 @@ import {
 import { PBR_HAS_THIN_INSTANCES, PBR_HAS_INSTANCE_COLOR } from "./pbr-pipeline.js";
 import {
     _getPbrLightExtension,
-    _getPbrMaterialUboWriters,
     _registerPbrExt,
     _getPbrExts,
-    _registerPbrMaterialUboWriter,
     PBR_HAS_EMISSIVE,
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
@@ -294,8 +292,7 @@ export async function buildPbrRenderables(
     let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
     if (hasAnyAnisotropy) {
         _anisoExt = await import("./fragments/anisotropy-fragment.js");
-        const anisoMod = _anisoExt;
-        _registerPbrMaterialUboWriter("anisotropy", (d, m, o) => anisoMod.writeAnisotropyUBO(d, m as PbrMaterialProps, o));
+        _registerPbrExt(_anisoExt.anisotropyExt);
     }
 
     if (hasAnySubsurface) {
@@ -330,7 +327,7 @@ export async function buildPbrRenderables(
 
     if (hasAnyUvTransform) {
         const mod = await import("./fragments/uv-transform-fragment.js");
-        _registerPbrMaterialUboWriter("uv-transform", mod.writeUvTransformUBO);
+        _registerPbrExt(mod.uvTransformExt);
     }
 
     // Lazy-load pbr-template-ext when any advanced features are present.
@@ -737,15 +734,8 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
         data[off + 2] = material.normalTextureScale ?? 1.0;
     }
 
-    for (const write of _getPbrMaterialUboWriters().values()) {
-        write(data, material, spec.offsets);
-    }
-
-    // Per-texture UV transforms — registered lazily; the writer is only
-    // included in the bundle when a scene has at least one UV-transform
-    // material (see uv-transform-fragment dynamic import below).
-
-    // Unified PBR extensions contribute their material-UBO slice.
+    // Unified PBR extensions contribute their material-UBO slice
+    // (uv-transform, reflectance, emissive, clearcoat, sheen, anisotropy, ...).
     for (const ext of _getPbrExts().values()) {
         if (ext.writeUbo) {
             ext.writeUbo(data, material, spec.offsets);

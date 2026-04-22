@@ -77,24 +77,6 @@ const _lightTagToType: Record<string, number> = { hemispheric: 1, directional: 2
     return (_lightTagToType[_lightExt?.tag ?? ""] ?? 0) << PBR_LIGHT_TYPE_SHIFT;
 }
 
-// ─── Material UBO Writer Registry ───────────────────────────────────
-/** @internal Signature for a material-UBO writer contributed by a PBR fragment.
- *  Called once per material update. Each writer checks its own gating
- *  (material props + presence of its UBO fields in `offsets`) and writes
- *  only the slice it owns. Keeps `pbr-renderable.writeMaterialData` neutral. */
-export type PbrMaterialUboWriter = (data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>) => void;
-
-const _matUboWriters = new Map<string, PbrMaterialUboWriter>();
-/** @internal Register a material-UBO writer. Keyed by fragment id so
- *  repeated dynamic imports of the same fragment remain idempotent. */
-export function _registerPbrMaterialUboWriter(id: string, fn: PbrMaterialUboWriter): void {
-    _matUboWriters.set(id, fn);
-}
-/** @internal Iterate the registered writers. */
-export function _getPbrMaterialUboWriters(): ReadonlyMap<string, PbrMaterialUboWriter> {
-    return _matUboWriters;
-}
-
 // ─── Unified PBR Extension Registry ─────────────────────────────────
 /** @internal Bind-group phase, matching composer slot layout:
  *  - "vertex": vertex-stage bindings (morph, skeleton) — between material UBO and base textures
