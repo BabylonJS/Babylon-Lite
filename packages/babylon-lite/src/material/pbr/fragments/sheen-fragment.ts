@@ -30,9 +30,9 @@ return 1.0 / (4.0 * (NdotL_sh + NdotV_sh - NdotL_sh * NdotV_sh));
 }
 `;
 
-const SHEEN_DIRECT_MOD_NEW = `
+const SHEEN_DIRECT_MOD = (intensityExpr: string): string => `
 {
-let shIntensity = material.sheenParams.a;
+let shIntensity = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity;
 let shRoughness_clamped = max(sheenRoughnessAdjusted, AA_factor_x);
 let shAlphaG = shRoughness_clamped * shRoughness_clamped + 0.0005;
@@ -42,23 +42,24 @@ sheenDirectTerm = shColorScaled * shD * shV * NdotL * lightColor * lightAtten * 
 }
 `;
 
-const SHEEN_IBL_MOD_NEW = `
+const SHEEN_IBL_MOD = (intensityExpr: string, albedoScaling: boolean): string => `
 {
-let shIntensity_ibl = material.sheenParams.a;
+let shIntensity_ibl = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity_ibl;
 let shRoughness_ibl = sheenRoughnessAdjusted;
 let shAlphaG_ibl = shRoughness_ibl * shRoughness_ibl + 0.0005 + AA_factor_y;
 var shSpecLod = log2(cubemapDim * shAlphaG_ibl) * scene.lodGenerationScale;
 let shEnvRadiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * material.environmentIntensity;
 let shBrdf = textureSampleLevel(brdfLUT, brdfSampler_, vec2<f32>(NdotV, shRoughness_ibl), 0.0);
-let shEnvReflectance = shColorScaled * shBrdf.b * seo * eho;
+let shEnvReflectance = shColorScaled * shBrdf.b${albedoScaling ? " * seo * eho" : ""};
 sheenIblTerm = shEnvRadiance * shEnvReflectance;
-let shMax = max(shColorScaled.r, max(shColorScaled.g, shColorScaled.b));
-sheenAlbedoScaling = 1.0 - shMax * shBrdf.b;
+${albedoScaling ? "let shMax = max(shColorScaled.r, max(shColorScaled.g, shColorScaled.b));\nsheenAlbedoScaling = 1.0 - shMax * shBrdf.b;" : ""}
 }
 `;
 
-const SHEEN_IBL_COLOR_MOD_NEW = `
+const SHEEN_IBL_COLOR_MOD = (albedoScaling: boolean): string =>
+    albedoScaling
+        ? `
 {
 color = (finalIrradiance
       + finalRadianceScaled
@@ -68,37 +69,8 @@ color = (finalIrradiance
       + sheenIblTerm
       + emissive;
 }
-`;
-
-const SHEEN_DIRECT_MOD_LEGACY = `
-{
-let shColor = sheenColorFinal;
-let shIntensity = material.sheenParams.a * (1.0 - dielectricF0);
-let shRoughness_clamped = max(sheenRoughnessAdjusted, AA_factor_x);
-let shColorScaled = shColor * shIntensity;
-let shAlphaG = shRoughness_clamped * shRoughness_clamped + 0.0005;
-let shD = normalDistributionFunction_CharlieSheen(NdotH, shAlphaG);
-let shV = visibility_Ashikhmin(NdotL, NdotV);
-sheenDirectTerm = shColorScaled * shD * shV * NdotL * lightColor * lightAtten * material.directIntensity;
-}
-`;
-
-const SHEEN_IBL_MOD_LEGACY = `
-{
-let shColor_ibl = sheenColorFinal;
-let shIntensity_ibl = material.sheenParams.a * (1.0 - dielectricF0);
-let shRoughness_ibl = sheenRoughnessAdjusted;
-let shAlphaG_ibl = shRoughness_ibl * shRoughness_ibl + 0.0005 + AA_factor_y;
-var shSpecLod = log2(cubemapDim * shAlphaG_ibl) * scene.lodGenerationScale;
-let shEnvRadiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * material.environmentIntensity;
-let shBrdf = textureSampleLevel(brdfLUT, brdfSampler_, vec2<f32>(NdotV, shRoughness_ibl), 0.0);
-let shColorScaled = shColor_ibl * shIntensity_ibl;
-let shEnvReflectance = shColorScaled * shBrdf.b;
-sheenIblTerm = shEnvRadiance * shEnvReflectance;
-}
-`;
-
-const SHEEN_IBL_COLOR_MOD_LEGACY = `
+`
+        : `
 {
 color = finalIrradiance
       + finalRadianceScaled
@@ -145,13 +117,14 @@ sheenRoughnessAdjusted *= sheenMapData.a;
 }`;
     }
 
+    const intensityExpr = hasAlbedoScaling ? "material.sheenParams.a" : "material.sheenParams.a * (1.0 - dielectricF0)";
     const slots: Partial<Record<string, string>> = {
         SV: scopeVars,
-        AD: hasAlbedoScaling ? SHEEN_DIRECT_MOD_NEW : SHEEN_DIRECT_MOD_LEGACY,
+        AD: SHEEN_DIRECT_MOD(intensityExpr),
     };
     // AI and NI are mutually exclusive — only one path runs
     if (hasIbl) {
-        slots.AI = hasAlbedoScaling ? SHEEN_IBL_MOD_NEW + SHEEN_IBL_COLOR_MOD_NEW : SHEEN_IBL_MOD_LEGACY + SHEEN_IBL_COLOR_MOD_LEGACY;
+        slots.AI = SHEEN_IBL_MOD(intensityExpr, hasAlbedoScaling) + SHEEN_IBL_COLOR_MOD(hasAlbedoScaling);
     } else {
         slots.NI = SHEEN_NON_IBL_MOD;
     }

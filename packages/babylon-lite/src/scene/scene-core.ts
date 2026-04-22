@@ -90,6 +90,8 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     _materialSwapQueue: Mesh[];
     /** Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
     _renderableVersion: number;
+    /** Lazily-loaded processor; populated on first material reassignment. */
+    _processSwaps?: (scene: SceneContext) => void;
 
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     _skybox?: SkyboxData;
@@ -124,6 +126,11 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
                 if (!mi._materialDirty) {
                     mi._materialDirty = true;
                     scene._materialSwapQueue.push(mesh);
+                    if (!scene._processSwaps) {
+                        void import("./scene-material-swap.js").then((m) => {
+                            scene._processSwaps = m.processMaterialSwaps;
+                        });
+                    }
                 }
             }
         },
@@ -178,7 +185,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
                 cb(d);
             }
             if (ctx._materialSwapQueue.length > 0) {
-                processMaterialSwaps(ctx);
+                ctx._processSwaps?.(ctx);
             }
             for (const light of ctx.lights) {
                 if (light.shadowGenerator) {
@@ -408,48 +415,4 @@ export function unregisterScene(engine: EngineContext, scene: SceneContext): voi
     if (i >= 0) {
         eng._renderingContexts.splice(i, 1);
     }
-}
-
-/** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
-export function processMaterialSwaps(scene: SceneContext): void {
-    const ctx = scene as SceneContextInternal;
-    const q = ctx._materialSwapQueue;
-    for (const mesh of q) {
-        (mesh as MeshInternal)._materialDirty = false;
-        const old = ctx._meshDisposables.get(mesh);
-        if (old) {
-            for (const fn of old) {
-                fn();
-            }
-            ctx._meshDisposables.delete(mesh);
-        }
-
-        const mat = mesh.material;
-        const builder = mat ? (mat as any)._buildGroup : undefined;
-        if (!builder) {
-            continue;
-        }
-        const rebuild = builder._rebuildSingle;
-        if (rebuild) {
-            const renderable = rebuild(ctx, mesh);
-            if (renderable.isTransparent) {
-                ctx._transparentRenderables.push(renderable);
-            } else {
-                const arr = renderable.isTransmissive ? ctx._transmissiveRenderables : ctx._opaqueRenderables;
-                let i = arr.length;
-                while (i > 0 && arr[i - 1]!.order > renderable.order) {
-                    i--;
-                }
-                arr.splice(i, 0, renderable);
-            }
-        } else if (builder._loadRebuildSingle) {
-            builder._loadRebuildSingle().then((mod: any) => {
-                builder._rebuildSingle = mod.buildSinglePbrRenderable ?? mod.buildSingleStandardRenderable;
-                (mesh as MeshInternal)._materialDirty = true;
-                ctx._materialSwapQueue.push(mesh);
-            });
-        }
-    }
-    q.length = 0;
-    ctx._renderableVersion++;
 }

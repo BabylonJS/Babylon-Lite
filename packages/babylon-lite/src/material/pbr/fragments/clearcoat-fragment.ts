@@ -42,7 +42,17 @@ let num = ccA + ccB * sf0;
 let den = ccB + ccA * sf0;
 return saturate((num / den) * (num / den));
 }
+fn ccSchlick(f0: f32, cosTheta: f32) -> f32 {
+let t = 1.0 - cosTheta;
+let t2 = t * t;
+return f0 + (1.0 - f0) * (t2 * t2 * t);
+}
 `;
+
+const CC_INT_TEX = `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, input.uv).r`;
+const CC_INT_PLAIN = `material.ccParams.x`;
+const CC_ROUGH_TEX = `clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, input.uv).g, 0.0, 1.0)`;
+const CC_ROUGH_PLAIN = `material.ccParams.y`;
 
 // WGSL fragment: coat-layer normal. Computes ccN (coat world-space normal)
 // using a locally-derived cotangent frame from world-position and UV derivatives.
@@ -64,33 +74,18 @@ let ccNormScale = material.ccParams.z;
 var ccN = normalize(cc_frame * normalize(ccNormSampleRaw * vec3<f32>(ccNormScale, ccNormScale, 1.0)));
 `;
 
-function makeF0Remap(hasIntensityMap: boolean): string {
-    const intensityExpr = hasIntensityMap ? `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, input.uv).r` : `material.ccParams.x`;
+function makeF0Remap(intensityExpr: string): string {
     return `
 {
 let ccInt_r = ${intensityExpr};
-let ccA_r = material.ccRefractionParams.z;
-let ccB_r = material.ccRefractionParams.w;
-let remappedF0 = getR0RemappedForClearCoat(colorF0, ccA_r, ccB_r);
+let remappedF0 = getR0RemappedForClearCoat(colorF0, material.ccRefractionParams.z, material.ccRefractionParams.w);
 colorF0 = mix(colorF0, remappedF0, ccInt_r);
 }
 `;
 }
 
-function makeDirectMod(hasIntensityMap: boolean, hasRoughnessMap: boolean, hasNormalMap: boolean): string {
-    const intensityExpr = hasIntensityMap ? `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, input.uv).r` : `material.ccParams.x`;
-    const roughnessExpr = hasRoughnessMap ? `clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, input.uv).g, 0.0, 1.0)` : `material.ccParams.y`;
-    // If coat has its own normal, compute NdotL/NdotH/VdotH using ccN. Otherwise use geometric normal
-    // (BJS: clearCoatNormalW defaults to geometricNormalW).
-    const ccAngles = hasNormalMap
-        ? `let ccNdotL_dl = saturate(dot(ccN, L));
-let ccH_dl = normalize(V + L);
-let ccNdotH_dl = clamp(dot(ccN, ccH_dl), 0.0000001, 1.0);
-let ccVdotH_dl = saturate(dot(V, ccH_dl));`
-        : `let ccNdotL_dl = saturate(dot(N_geom, L));
-let ccH_dl = normalize(V + L);
-let ccNdotH_dl = clamp(dot(N_geom, ccH_dl), 0.0000001, 1.0);
-let ccVdotH_dl = saturate(dot(V, ccH_dl));`;
+function makeDirectMod(intensityExpr: string, roughnessExpr: string, hasNormalMap: boolean): string {
+    const N = hasNormalMap ? "ccN" : "N_geom";
     return `
 var ccDirectAttenuation = 1.0;
 var ccDirectSpecularTerm = vec3<f32>(0.0);
@@ -99,12 +94,13 @@ let ccInt_dl = ${intensityExpr};
 let ccRough_dl = ${roughnessExpr};
 let ccF0_dl = material.ccRefractionParams.x;
 let ccAlphaG_dl = ccRough_dl * ccRough_dl + 0.0005;
-${ccAngles}
+let ccNdotL_dl = saturate(dot(${N}, L));
+let ccH_dl = normalize(V + L);
+let ccNdotH_dl = clamp(dot(${N}, ccH_dl), 0.0000001, 1.0);
+let ccVdotH_dl = saturate(dot(V, ccH_dl));
 let ccD_dl = distributionGGX(ccNdotH_dl, ccAlphaG_dl);
 let ccVis_dl = visibility_Kelemen(ccVdotH_dl);
-let cc_t_dl = 1.0 - ccVdotH_dl;
-let cc_t2_dl = cc_t_dl * cc_t_dl;
-let ccFresnel_dl = ccF0_dl + (1.0 - ccF0_dl) * (cc_t2_dl * cc_t2_dl * cc_t_dl);
+let ccFresnel_dl = ccSchlick(ccF0_dl, ccVdotH_dl);
 let ccTerm = ccFresnel_dl * ccD_dl * ccVis_dl * ccNdotL_dl;
 ccDirectSpecularTerm = vec3<f32>(ccTerm) * lightColor * lightAtten * material.directIntensity * ccInt_dl;
 ccDirectAttenuation = 1.0 - ccFresnel_dl * ccInt_dl;
@@ -112,46 +108,31 @@ ccDirectAttenuation = 1.0 - ccFresnel_dl * ccInt_dl;
 `;
 }
 
-function makeIblMod(hasIntensityMap: boolean, hasRoughnessMap: boolean, hasNormalMap: boolean, hasSpecularAA: boolean, hasBaseNormalMap: boolean): string {
-    const intensityExpr = hasIntensityMap ? `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, input.uv).r` : `material.ccParams.x`;
-    const roughnessExpr = hasRoughnessMap ? `clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, input.uv).g, 0.0, 1.0)` : `material.ccParams.y`;
-    // Use coat's own normal for reflection when ccNormal map is present.
-    // Otherwise, use geometric normal (matches BJS: clearCoatNormalW = geometricNormalW).
-    const reflDir = hasNormalMap
-        ? `let ccR_raw = reflect(-V, ccN);
-let ccR_ibl = rotateY(ccR_raw, scene.envRotationY);
-let ccNdotV_ibl = abs(dot(ccN, V)) + 0.0000001;`
-        : `let ccR_raw = reflect(-V, N_geom);
-let ccR_ibl = rotateY(ccR_raw, scene.envRotationY);
-let ccNdotV_ibl = abs(dot(N_geom, V)) + 0.0000001;`;
-    const ccNormalForAA = hasNormalMap ? "ccN" : "N_geom";
+function makeIblMod(intensityExpr: string, roughnessExpr: string, hasNormalMap: boolean, hasSpecularAA: boolean, hasBaseNormalMap: boolean): string {
+    const N = hasNormalMap ? "ccN" : "N_geom";
     const alphaG = hasSpecularAA
         ? `let ccAlphaG_ibl_base = ccRough_ibl * ccRough_ibl + 0.0005;
-let cc_nDfdx_AA = dpdx(${ccNormalForAA});
-let cc_nDfdy_AA = dpdy(${ccNormalForAA});
+let cc_nDfdx_AA = dpdx(${N});
+let cc_nDfdy_AA = dpdy(${N});
 let cc_slopeSquare_AA = max(dot(cc_nDfdx_AA, cc_nDfdx_AA), dot(cc_nDfdy_AA, cc_nDfdy_AA));
 let ccAlphaG_ibl = ccAlphaG_ibl_base + sqrt(cc_slopeSquare_AA) * 0.75;`
         : `let ccAlphaG_ibl = ccRough_ibl * ccRough_ibl + 0.0005;`;
-    // Horizon occlusion: BJS attenuates the clearcoat environment reflectance by EHO when
-    // the base material has a normal map (the BUMP define). Matches pbrBlockClearcoat.fx.
-    // When the coat normal equals the geometric normal, eho≈1 (no effect).
-    const ccNormalForEho = hasNormalMap ? "ccN" : "N_geom";
-    const ehoLine = hasBaseNormalMap ? `let ccEho_ibl = environmentHorizonOcclusion(-V, ${ccNormalForEho}, N_geom);` : `let ccEho_ibl = 1.0;`;
+    const ehoLine = hasBaseNormalMap ? `let ccEho_ibl = environmentHorizonOcclusion(-V, ${N}, N_geom);` : `let ccEho_ibl = 1.0;`;
     return `
 {
 let ccInt_ibl = ${intensityExpr};
 let ccRough_ibl = ${roughnessExpr};
 let ccF0_ibl = material.ccRefractionParams.x;
-${reflDir}
+let ccR_raw = reflect(-V, ${N});
+let ccR_ibl = rotateY(ccR_raw, scene.envRotationY);
+let ccNdotV_ibl = abs(dot(${N}, V)) + 0.0000001;
 ${alphaG}
 var ccSpecLod_ibl = log2(cubemapDim * ccAlphaG_ibl) * scene.lodGenerationScale;
 let ccEnvRadiance_ibl = textureSampleLevel(iblTexture, iblSampler, ccR_ibl, clamp(ccSpecLod_ibl, 0.0, maxLod)).rgb * material.environmentIntensity;
 let ccBrdf_ibl = textureSample(brdfLUT, brdfSampler_, vec2<f32>(ccNdotV_ibl, ccRough_ibl)).rgb;
 ${ehoLine}
 let ccSpecEnvRefl = (vec3<f32>(ccF0_ibl) * ccBrdf_ibl.y + (vec3<f32>(1.0) - vec3<f32>(ccF0_ibl)) * ccBrdf_ibl.x) * ccInt_ibl * ccEho_ibl;
-let cc_t_ibl = 1.0 - ccNdotV_ibl;
-let cc_t2_ibl = cc_t_ibl * cc_t_ibl;
-let ccFresnelIBL = ccF0_ibl + (1.0 - ccF0_ibl) * (cc_t2_ibl * cc_t2_ibl * cc_t_ibl);
+let ccFresnelIBL = ccSchlick(ccF0_ibl, ccNdotV_ibl);
 let ccConservation_ibl = 1.0 - ccFresnelIBL * ccInt_ibl;
 let ccFinalRadiance_ibl = ccEnvRadiance_ibl * ccSpecEnvRefl;
 color = finalIrradiance * ccConservation_ibl
@@ -165,18 +146,14 @@ color = finalIrradiance * ccConservation_ibl
 `;
 }
 
-function makeNonIblMod(hasIntensityMap: boolean): string {
-    const intensityExpr = hasIntensityMap ? `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, input.uv).r` : `material.ccParams.x`;
+function makeNonIblMod(intensityExpr: string): string {
     return `
 {
 let ccF0_noIbl = material.ccRefractionParams.x;
 let ccInt_noIbl = ${intensityExpr};
-let cc_t_noIbl = 1.0 - NdotV;
-let cc_t2_noIbl = cc_t_noIbl * cc_t_noIbl;
-let ccFresnelNoIbl = ccF0_noIbl + (1.0 - ccF0_noIbl) * (cc_t2_noIbl * cc_t2_noIbl * cc_t_noIbl);
+let ccFresnelNoIbl = ccSchlick(ccF0_noIbl, NdotV);
 let ccCons_noIbl = 1.0 - ccFresnelNoIbl * ccInt_noIbl;
-let attColor = (color - emissive) * ccCons_noIbl + emissive + ccDirectSpecularTerm;
-color = attColor;
+color = (color - emissive) * ccCons_noIbl + emissive + ccDirectSpecularTerm;
 }
 `;
 }
@@ -190,9 +167,11 @@ export function createClearcoatFragment(features: number, features2: number, has
     const hasRoughnessMap = (features2 & PBR2_CC_ROUGH_MAP) !== 0;
     const hasNormalMap = (features2 & PBR2_CC_NORMAL_MAP) !== 0;
     const disableF0Remap = (features2 & PBR2_CC_F0_REMAP_OFF) !== 0;
+    const intensityExpr = hasIntensityMap ? CC_INT_TEX : CC_INT_PLAIN;
+    const roughnessExpr = hasRoughnessMap ? CC_ROUGH_TEX : CC_ROUGH_PLAIN;
     const slots: Partial<Record<string, string>> = {
-        MF: disableF0Remap ? "" : makeF0Remap(hasIntensityMap),
-        AD: makeDirectMod(hasIntensityMap, hasRoughnessMap, hasNormalMap),
+        MF: disableF0Remap ? "" : makeF0Remap(intensityExpr),
+        AD: makeDirectMod(intensityExpr, roughnessExpr, hasNormalMap),
         BL: `var ccDirectAttenuation = 1.0;\nvar ccDirectSpecularTerm = vec3<f32>(0.0);`,
     };
     if (hasNormalMap) {
@@ -200,9 +179,9 @@ export function createClearcoatFragment(features: number, features2: number, has
     }
     // AI and NI are mutually exclusive — only one path runs
     if (hasIbl) {
-        slots.AI = makeIblMod(hasIntensityMap, hasRoughnessMap, hasNormalMap, hasSpecularAA, hasBaseNormalMap);
+        slots.AI = makeIblMod(intensityExpr, roughnessExpr, hasNormalMap, hasSpecularAA, hasBaseNormalMap);
     } else {
-        slots.NI = makeNonIblMod(hasIntensityMap);
+        slots.NI = makeNonIblMod(intensityExpr);
     }
     const deps: string[] = [];
     if (hasIbl) {
