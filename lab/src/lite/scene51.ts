@@ -24,7 +24,11 @@ async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
-    const engine = await createEngine(canvas);
+    // MSAA 1 by default (sprite edges come from texture alpha, not geometry).
+    // Parity tests pass `?msaa=4` to match the BJS oracle's default 4x MSAA.
+    const msaaParam = new URLSearchParams(window.location.search).get("msaa");
+    const msaaSamples: 1 | 4 = msaaParam === "4" ? 4 : 1;
+    const engine = await createEngine(canvas, { msaaSamples });
     const atlas = await loadSpriteAtlas(engine, getSoftSpriteAtlasDataUrl(), {
         gridSize: [SOFT_SPRITE_ATLAS_INFO.cellWidthPx, SOFT_SPRITE_ATLAS_INFO.cellHeightPx],
         sampling: "linear",

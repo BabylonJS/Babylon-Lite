@@ -20,7 +20,8 @@ test("Scene 50 — Sprite Grid matches Babylon.js reference", async ({ page }, t
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 50 });
 
-    await page.goto("/scene50.html");
+    // Force MSAA 4 to match BJS oracle's default; lab demo defaults to MSAA 1 for perf.
+    await page.goto("/scene50.html?msaa=4");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

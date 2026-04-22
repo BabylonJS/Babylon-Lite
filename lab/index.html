@@ -3109,8 +3109,18 @@
                         var madClass = result.mad <= threshold ? "pass" : "fail";
                         var w5Class = result.within5Pct >= 90 ? "pass" : result.within5Pct >= 80 ? "warn" : "fail";
                         statsEl.innerHTML =
-                            'MAD: <span class="' + madClass + '">' + result.mad.toFixed(2) + " / " + threshold + "</span> \u00b7 " +
-                            'W5: <span class="' + w5Class + '">' + result.within5Pct.toFixed(1) + "%</span>";
+                            'MAD: <span class="' +
+                            madClass +
+                            '">' +
+                            result.mad.toFixed(2) +
+                            " / " +
+                            threshold +
+                            "</span> \u00b7 " +
+                            'W5: <span class="' +
+                            w5Class +
+                            '">' +
+                            result.within5Pct.toFixed(1) +
+                            "%</span>";
                     }
                 });
             }
@@ -3427,8 +3437,10 @@
             function pollSignature() {
                 if (document.hidden) return;
                 fetch("/lab-api/signature", { cache: "no-store" })
-                    .then(function(r) { return r.ok ? r.json() : null; })
-                    .then(function(sig) {
+                    .then(function (r) {
+                        return r.ok ? r.json() : null;
+                    })
+                    .then(function (sig) {
                         if (!sig) return;
                         var prev = _lastSig;
                         _lastSig = sig;
@@ -3441,17 +3453,19 @@
                         }
                         var parityScenes = window.__PARITY_SCENES__ || [];
                         var byId = {};
-                        parityScenes.forEach(function(s) { byId["scene" + s.n] = s; });
+                        parityScenes.forEach(function (s) {
+                            byId["scene" + s.n] = s;
+                        });
                         var newPar = sig.parity || {};
                         var oldPar = prev.parity || {};
                         var reloads = [];
-                        Object.keys(newPar).forEach(function(k) {
+                        Object.keys(newPar).forEach(function (k) {
                             if (newPar[k] !== oldPar[k] && byId[k]) {
                                 reloads.push(loadParityDiff(byId[k]));
                             }
                         });
                         if (reloads.length) {
-                            Promise.all(reloads).then(function() {
+                            Promise.all(reloads).then(function () {
                                 var activeBtn = document.querySelector(".parity-sort-btn.active");
                                 if (activeBtn && activeBtn.dataset.sort !== "num") {
                                     sortParityGrid(activeBtn.dataset.sort, true);
@@ -3467,7 +3481,7 @@
                             });
                         }
                     })
-                    .catch(function() {});
+                    .catch(function () {});
             }
 
             /** Load an image from URL, return Image or null */

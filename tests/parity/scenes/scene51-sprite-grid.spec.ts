@@ -25,7 +25,8 @@ test("Scene 51 — Soft-Edged Sprites (Premultiplied) matches Babylon.js referen
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 51 });
 
-    await page.goto("/scene51.html");
+    // Force MSAA 4 to match BJS oracle's default; lab demo defaults to MSAA 1 for perf.
+    await page.goto("/scene51.html?msaa=4");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 
