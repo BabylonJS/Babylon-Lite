@@ -10,7 +10,56 @@ import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
 import { createMappedBuffer } from "../../resource/gpu-buffers.js";
-import { WGSL_SCENE_UNIFORMS_PBR, WGSL_SCENE_UNIFORMS_PBR_SH, WGSL_IMAGE_PROCESSING, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+
+// ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
+//    don't pay for the SH struct + image processing in the shared wgsl-helpers chunk). ──
+
+/** PBR SceneUniforms with spherical harmonics + image processing fields.
+ *  Superset of WGSL_SCENE_UNIFORMS_PBR. */
+const WGSL_SCENE_UNIFORMS_PBR_SH = `
+struct SceneUniforms {
+viewProj: mat4x4<f32>,
+cameraPosition: vec3<f32>, _pad0: f32,
+lightDirection: vec3<f32>, lightIntensity: f32,
+lightDiffuseColor: vec3<f32>, _pad1: f32,
+lightGroundColor: vec3<f32>, _pad2: f32,
+vSphericalL00: vec3<f32>, _sh0: f32,
+vSphericalL1_1: vec3<f32>, _sh1: f32,
+vSphericalL10: vec3<f32>, _sh2: f32,
+vSphericalL11: vec3<f32>, _sh3: f32,
+vSphericalL2_2: vec3<f32>, _sh4: f32,
+vSphericalL2_1: vec3<f32>, _sh5: f32,
+vSphericalL20: vec3<f32>, _sh6: f32,
+vSphericalL21: vec3<f32>, _sh7: f32,
+vSphericalL22: vec3<f32>, _sh8: f32,
+exposureLinear: f32,
+contrast: f32,
+_imgPad0: f32,
+_imgPad1: f32,
+};
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+`;
+
+/** Image processing: exposure → Reinhard tonemap → gamma → contrast. */
+const WGSL_IMAGE_PROCESSING = `
+fn applyImageProcessing(result: vec4<f32>) -> vec4<f32> {
+var rgb = result.rgb;
+rgb *= scene.exposureLinear;
+const tonemappingCalibration: f32 = 1.590579;
+rgb = 1.0 - exp2(-tonemappingCalibration * rgb);
+rgb = pow(rgb, vec3<f32>(1.0 / 2.2));
+rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+let highContrast = rgb * rgb * (3.0 - 2.0 * rgb);
+if (scene.contrast < 1.0) {
+rgb = mix(vec3<f32>(0.5), rgb, scene.contrast);
+} else {
+rgb = mix(rgb, highContrast, scene.contrast - 1.0);
+}
+rgb = max(rgb, vec3<f32>(0.0));
+return vec4<f32>(rgb, result.a);
+}
+`;
 
 const BG_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + alpha + backgroundCenter vec3 + pad
 
