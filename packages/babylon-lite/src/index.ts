@@ -3,6 +3,7 @@
 
 // ─── Core ────────────────────────────────────────────────────────────
 export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
+export type { EngineContext, EngineOptions } from "./engine/engine.js";
 export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene, registerScene, unregisterScene } from "./scene/scene.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
@@ -67,7 +68,6 @@ export { addThinInstance, removeThinInstance, setThinInstanceMatrix, setThinInst
 export type { ThinInstanceData } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
-export type { EngineContext } from "./engine/engine.js";
 export type { SceneContext, ImageProcessingConfig } from "./scene/scene.js";
 export type { ArcRotateCamera } from "./camera/arc-rotate.js";
 export type { Camera } from "./camera/camera.js";

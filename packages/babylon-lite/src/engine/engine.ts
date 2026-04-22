@@ -54,16 +54,28 @@ export interface EngineContextInternal extends EngineContext {
 }
 
 interface RenderTargets {
-    msaaTexture: GPUTexture;
-    msaaView: GPUTextureView;
+    // Null when MSAA is disabled (sampleCount === 1): we render directly into the
+    // swapchain texture without a resolve step.
+    msaaTexture: GPUTexture | null;
+    msaaView: GPUTextureView | null;
     depthTexture: GPUTexture;
     depthView: GPUTextureView;
     width: number;
     height: number;
 }
 
+/**
+ * Options for `createEngine`.
+ * - `msaaSamples`: number of MSAA samples to use for the main render pass.
+ *   WebGPU only permits `1` (no MSAA) or `4` (4x MSAA) per the spec
+ *   (2x is not a valid WebGPU sample count). Defaults to `4`.
+ */
+export interface EngineOptions {
+    msaaSamples?: 1 | 4;
+}
+
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
-export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineContext> {
+export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOptions): Promise<EngineContext> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
@@ -94,7 +106,7 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
         canvas.setAttribute("data-engine", versionToLog);
     }
 
-    const msaaSamples = 4;
+    const msaaSamples: 1 | 4 = options?.msaaSamples === 1 ? 1 : 4;
 
     const targets = createRenderTargets(device, canvas.width, canvas.height, format, msaaSamples);
     const engine: EngineContextInternal = {
@@ -125,7 +137,9 @@ export function resizeEngine(engine: EngineContext): void {
     canvas.width = w;
     canvas.height = h;
     eng.context.configure({ device: eng.device, format: eng.format, alphaMode: "opaque" });
-    eng._targets.msaaTexture.destroy();
+    if (eng._targets.msaaTexture) {
+        eng._targets.msaaTexture.destroy();
+    }
     eng._targets.depthTexture.destroy();
     eng._targets = createRenderTargets(eng.device, w, h, eng.format, eng.msaaSamples);
 }
@@ -170,19 +184,24 @@ export function disposeEngine(engine: EngineContext): void {
     const eng = engine as EngineContextInternal;
     stopEngine(engine);
     eng._renderingContexts.length = 0;
-    eng._targets.msaaTexture.destroy();
+    if (eng._targets.msaaTexture) {
+        eng._targets.msaaTexture.destroy();
+    }
     eng._targets.depthTexture.destroy();
     eng.context.unconfigure();
     eng.device.destroy();
 }
 
 function createRenderTargets(device: GPUDevice, width: number, height: number, format: GPUTextureFormat, sampleCount: number): RenderTargets {
-    const msaaTexture = device.createTexture({
-        size: { width, height },
-        format,
-        sampleCount,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
+    const msaaTexture =
+        sampleCount > 1
+            ? device.createTexture({
+                  size: { width, height },
+                  format,
+                  sampleCount,
+                  usage: GPUTextureUsage.RENDER_ATTACHMENT,
+              })
+            : null;
     const depthTexture = device.createTexture({
         size: { width, height },
         format: "depth24plus-stencil8",
@@ -191,7 +210,7 @@ function createRenderTargets(device: GPUDevice, width: number, height: number, f
     });
     return {
         msaaTexture,
-        msaaView: msaaTexture.createView(),
+        msaaView: msaaTexture ? msaaTexture.createView() : null,
         depthTexture,
         depthView: depthTexture.createView(),
         width,
@@ -207,8 +226,9 @@ function renderFrame(engine: EngineContextInternal, delta: number): void {
     let drawCalls = 0;
     let rendered = 0;
 
+    const hasMsaa = targets.msaaView !== null;
     const colorAtt: GPURenderPassColorAttachment = {
-        view: targets.msaaView,
+        view: hasMsaa ? targets.msaaView! : (undefined as unknown as GPUTextureView),
         resolveTarget: undefined,
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: "clear",
@@ -232,7 +252,12 @@ function renderFrame(engine: EngineContextInternal, delta: number): void {
         encoder = s._update(encoder, delta);
         drawCalls += s._drawCallsPre;
         if (rendered === 0) {
-            colorAtt.resolveTarget = engine.context.getCurrentTexture().createView();
+            const swapView = engine.context.getCurrentTexture().createView();
+            if (hasMsaa) {
+                colorAtt.resolveTarget = swapView;
+            } else {
+                colorAtt.view = swapView;
+            }
             colorAtt.clearValue = s.clearColor;
         } else {
             colorAtt.loadOp = "load";
