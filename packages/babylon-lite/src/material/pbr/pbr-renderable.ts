@@ -62,6 +62,7 @@ import {
     PBR_HAS_SKYBOX,
 } from "./pbr-flags.js";
 import { computeMeshPbrFeatures } from "./pbr-mesh-features.js";
+import { detectPbrSceneFlags } from "./pbr-feature-detect.js";
 import { createPbrSceneUpdater } from "./pbr-scene-updater.js";
 import type { PbrPipelineVariant } from "./pbr-pipeline.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -140,46 +141,10 @@ export async function buildPbrRenderables(
         }
     }
 
-    // ── Dynamically import fragment creators based on scene capabilities ──
+    // ── Scan meshes once for all scene-wide feature flags ──
+    const flags = detectPbrSceneFlags(meshes);
 
-    // Single O(N) pass over meshes detecting every per-mesh / per-material feature flag used below.
-    // Replaces ~11 sequential meshes.some() loops (was O(11N)). Short-circuits once every flag is true.
-    let hasSkybox = false;
-    let hasMetallicReflectance = false;
-    let hasClearcoat = false;
-    let hasSheen = false;
-    let hasAnyAnisotropy = false;
-    let hasAnySubsurface = false;
-    let hasRefraction = false;
-    let needsEmissiveColor = false;
-    let hasSomeSkeletons = false;
-    let hasSomeMorphs = false;
-    let hasSomeThinInstances = false;
-    let hasAnyUnlit = false;
-    let hasAnyUvTransform = false;
-    let hasAnyUv2 = false;
-    let hasAnyVertexColor = false;
-    for (let i = 0; i < meshes.length; i++) {
-        const m = meshes[i]!;
-        const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
-        const mi = m as import("../../mesh/mesh.js").MeshInternal;
-        hasSkybox ||= !!mat.skyboxMode;
-        hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
-        hasClearcoat ||= !!mat.clearCoat?.isEnabled;
-        hasSheen ||= !!mat.sheen?.isEnabled;
-        hasAnyAnisotropy ||= !!mat.anisotropy?.isEnabled;
-        hasAnySubsurface ||= !!mat.subsurface?.translucency;
-        hasRefraction ||= (mat.subsurface?.refraction?.intensity ?? 0) > 0;
-        needsEmissiveColor ||= !!mat.emissiveColor;
-        hasSomeSkeletons ||= !!m.skeleton;
-        hasSomeMorphs ||= !!m.morphTargets;
-        hasSomeThinInstances ||= !!m.thinInstances;
-        hasAnyUnlit ||= !!mat.unlit;
-        hasAnyUvTransform ||= !!mat._hasUvTx;
-        // UV2 only counts when occlusion is on texcoord 1 (matches pbr-mesh-features.ts).
-        hasAnyUv2 ||= !!mi._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
-        hasAnyVertexColor ||= !!mi._gpu.colorBuffer;
-    }
+    // ── Dynamically import fragment creators based on scene capabilities ──
 
     // IBL fragment
     let _iblSkyboxCalc = "";
@@ -187,7 +152,7 @@ export async function buildPbrRenderables(
         const mod = await import("./fragments/ibl-fragment.js");
         _registerPbrExt(mod.iblExt);
         // Skybox-mode WGSL is only loaded when at least one mesh in the scene needs it.
-        if (hasSkybox) {
+        if (flags.hasSkybox) {
             const sky = await import("./fragments/ibl-skybox-wgsl.js");
             _iblSkyboxCalc = sky.IBL_SKYBOX_CALCULATION;
         }
@@ -215,67 +180,44 @@ export async function buildPbrRenderables(
         }
     }
 
-    // Per-mesh fragment creators (imported if any mesh needs them — flags populated by single pass above)
-    if (hasMetallicReflectance) {
-        const mod = await import("./fragments/reflectance-fragment.js");
-        _registerPbrExt(mod.reflectanceExt);
+    // ── Simple "import + register" extensions ──
+    // Each descriptor has a scene-flag gate and a loader that returns the PbrExt
+    // to register. Registration runs sequentially in array order, which is the
+    // iteration order consumed by `_getPbrExts().values()` in the hot paths
+    // (composePbr, writeMaterialData, collectPbrBoundTextures, computeMeshPbrFeatures).
+    // Keeping the awaits sequential guarantees deterministic registration order
+    // independent of network/chunk load timing.
+    const simpleExts: ReadonlyArray<{ needs: boolean; load: () => Promise<import("./pbr-flags.js").PbrExt> }> = [
+        { needs: flags.hasMetallicReflectance, load: () => import("./fragments/reflectance-fragment.js").then((m) => m.reflectanceExt) },
+        { needs: flags.hasClearcoat, load: () => import("./fragments/clearcoat-fragment.js").then((m) => m.clearcoatExt) },
+        { needs: flags.hasSheen, load: () => import("./fragments/sheen-fragment.js").then((m) => m.sheenExt) },
+        { needs: flags.hasAnySubsurface, load: () => import("./fragments/subsurface-fragment.js").then((m) => m.subsurfaceExt) },
+        { needs: flags.hasRefraction, load: () => import("./fragments/refraction-fragment.js").then((m) => m.refractionExt) },
+        { needs: flags.needsEmissiveColor, load: () => import("./fragments/emissive-fragment.js").then((m) => m.emissiveColorExt) },
+        { needs: flags.hasAnyUnlit, load: () => import("./fragments/unlit-fragment.js").then((m) => m.unlitExt) },
+        { needs: flags.hasSomeSkeletons, load: () => import("./fragments/skeleton-fragment.js").then((m) => m.skeletonExt) },
+        { needs: flags.hasSomeMorphs, load: () => import("./fragments/morph-fragment.js").then((m) => m.morphExt) },
+        { needs: flags.hasAnyUvTransform, load: () => import("./fragments/uv-transform-fragment.js").then((m) => m.uvTransformExt) },
+    ];
+    for (const d of simpleExts) {
+        if (d.needs) {
+            _registerPbrExt(await d.load());
+        }
     }
 
-    if (hasClearcoat) {
-        const mod = await import("./fragments/clearcoat-fragment.js");
-        _registerPbrExt(mod.clearcoatExt);
-    }
-
-    if (hasSheen) {
-        const mod = await import("./fragments/sheen-fragment.js");
-        _registerPbrExt(mod.sheenExt);
-    }
-
+    // Anisotropy needs its module reference retained (for ANISO_BRDF_FUNCTIONS /
+    // makeAnisotropyTBBlock / ANISO_DIRECT_DG / ANISO_BENT_NORMAL strings consumed
+    // by the template below), so it stays outside the simple-ext loop.
     let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
-    if (hasAnyAnisotropy) {
+    if (flags.hasAnyAnisotropy) {
         _anisoExt = await import("./fragments/anisotropy-fragment.js");
         _registerPbrExt(_anisoExt.anisotropyExt);
-    }
-
-    if (hasAnySubsurface) {
-        const mod = await import("./fragments/subsurface-fragment.js");
-        _registerPbrExt(mod.subsurfaceExt);
-    }
-
-    if (hasRefraction) {
-        const mod = await import("./fragments/refraction-fragment.js");
-        _registerPbrExt(mod.refractionExt);
-    }
-
-    if (needsEmissiveColor) {
-        const mod = await import("./fragments/emissive-fragment.js");
-        _registerPbrExt(mod.emissiveColorExt);
-    }
-
-    if (hasAnyUnlit) {
-        const mod = await import("./fragments/unlit-fragment.js");
-        _registerPbrExt(mod.unlitExt);
-    }
-
-    if (hasSomeSkeletons) {
-        const mod = await import("./fragments/skeleton-fragment.js");
-        _registerPbrExt(mod.skeletonExt);
-    }
-
-    if (hasSomeMorphs) {
-        const mod = await import("./fragments/morph-fragment.js");
-        _registerPbrExt(mod.morphExt);
-    }
-
-    if (hasAnyUvTransform) {
-        const mod = await import("./fragments/uv-transform-fragment.js");
-        _registerPbrExt(mod.uvTransformExt);
     }
 
     // Lazy-load pbr-template-ext when any advanced features are present.
     // Scene1 has none of these, so it won't pay the ~1.5KB cost.
     let _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null = null;
-    const hasAnyExt = hasAnyUvTransform || hasAnyVertexColor || hasAnyUv2;
+    const hasAnyExt = flags.hasAnyUvTransform || flags.hasAnyVertexColor || flags.hasAnyUv2;
     if (hasAnyExt) {
         const extMod = await import("./pbr-template-ext.js");
         _createPbrTemplateExt = extMod.createPbrTemplateExt;
@@ -285,7 +227,7 @@ export async function buildPbrRenderables(
     let _syncThinInstanceBuffers:
         | ((engine: EngineContextInternal, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
         | null = null;
-    if (hasSomeThinInstances) {
+    if (flags.hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
         const gpuMod = await import("../../mesh/thin-instance-gpu.js");
