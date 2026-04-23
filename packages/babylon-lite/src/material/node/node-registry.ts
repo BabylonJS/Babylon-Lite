@@ -52,7 +52,12 @@ function getTable(): Map<string, BlockLoader> {
     t.set("ImageSourceBlock", () => import("./blocks/image-source.js"));
     t.set("FrontFacingBlock", () => import("./blocks/front-facing.js"));
     t.set("ViewDirectionBlock", () => import("./blocks/view-direction.js"));
-    // Block loaders are added here as they land. Phase 1c–1e populate this list further.
+    // Lighting blocks (phase 1c):
+    t.set("LightBlock", () => import("./blocks/light-block.js"));
+    t.set("LightInformationBlock", () => import("./blocks/light-information.js"));
+    t.set("FogBlock", () => import("./blocks/fog-block.js"));
+    t.set("PerturbNormalBlock", () => import("./blocks/perturb-normal.js"));
+    // Block loaders are added here as they land. Phase 1d–1e populate this list further.
     // Each entry MUST use a literal string import so Rollup splits per-block chunks.
     _table = t;
     return t;
