@@ -59,6 +59,8 @@ export interface NodeCompileResult {
     readonly textureBindings: ReadonlyArray<{ readonly name: string; readonly texBinding: number; readonly sampBinding: number }>;
     /** The bind-group slot (within group 1) for the shared lights UBO, or `null` when no block uses lights. */
     readonly lightsBinding: number | null;
+    /** Slots for the morph-target texture + weights UBO, or `null` when no MorphTargetsBlock is present. */
+    readonly morphBindings: { readonly textureBinding: number; readonly uboBinding: number } | null;
 }
 
 // ─── Pipeline cache ─────────────────────────────────────────────────
@@ -161,6 +163,40 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         );
     }
 
+    // Morph-target bindings (vertex-only). Two slots: texture atlas + weights UBO.
+    let morphBindings: { textureBinding: number; uboBinding: number } | null = null;
+    const morphWgslDecls: string[] = [];
+    if (state.usesMorphTargets) {
+        const textureBinding = nextBinding++;
+        const uboBinding = nextBinding++;
+        morphBindings = { textureBinding, uboBinding };
+        morphWgslDecls.push(
+            `@group(1) @binding(${textureBinding}) var morphTargets: texture_2d<f32>;`,
+            `struct morphUniforms { weights: vec4<f32>, count: u32, texWidth: u32, rowsPerBand: u32, _p0: u32 };`,
+            `@group(1) @binding(${uboBinding}) var<uniform> morph: morphUniforms;`,
+            // Helpers are emitted inline (module-scope) so they can reference `morph` + `morphTargets`.
+            `fn nme_morph_coord(vi: u32) -> vec2<i32> { let col = i32(vi % morph.texWidth); let row = i32(vi / morph.texWidth); return vec2<i32>(col, row); }`,
+            `fn nme_morphPosition(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
+                `    var acc = base;\n` +
+                `    let co = nme_morph_coord(vi);\n` +
+                `    for (var i = 0u; i < morph.count; i = i + 1u) {\n` +
+                `        let posBase = i32(i * 2u) * i32(morph.rowsPerBand);\n` +
+                `        acc = acc + morph.weights[i] * textureLoad(morphTargets, vec2<i32>(co.x, posBase + co.y), 0).xyz;\n` +
+                `    }\n` +
+                `    return acc;\n` +
+                `}`,
+            `fn nme_morphNormal(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
+                `    var acc = base;\n` +
+                `    let co = nme_morph_coord(vi);\n` +
+                `    for (var i = 0u; i < morph.count; i = i + 1u) {\n` +
+                `        let normBase = i32(i * 2u + 1u) * i32(morph.rowsPerBand);\n` +
+                `        acc = acc + morph.weights[i] * textureLoad(morphTargets, vec2<i32>(co.x, normBase + co.y), 0).xyz;\n` +
+                `    }\n` +
+                `    return acc;\n` +
+                `}`
+        );
+    }
+
     // Module-scope helpers (function defs, struct defs) — dedupe across both
     // stages by key. Fail on same-key/different-source to avoid silent loss.
     const helperSources = new Map<string, string>();
@@ -191,14 +227,20 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     if (lightsWgslDecls.length > 0) {
         wgslParts.push(lightsWgslDecls.join("\n"));
     }
+    if (morphWgslDecls.length > 0) {
+        wgslParts.push(morphWgslDecls.join("\n"));
+    }
     wgslParts.push(vertexIn);
     wgslParts.push(vertexOut);
     for (const src of helperSources.values()) {
         wgslParts.push(src);
     }
 
+    const vsSig = state.usesMorphTargets
+        ? `(in: VertexIn, @builtin(vertex_index) vertexIndex: u32)`
+        : `(in: VertexIn)`;
     wgslParts.push(
-        `@vertex\nfn vs_main(in: VertexIn) -> VertexOut {\n` +
+        `@vertex\nfn vs_main${vsSig} -> VertexOut {\n` +
             `    var out: VertexOut;\n` +
             `    var ${SENTINEL_VTX_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);\n` +
             `${indent(vertexBody)}\n` +
@@ -239,6 +281,18 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         const lightsUboByteSize = 16 + MAX_LIGHTS * LIGHT_ENTRY_FLOATS * 4;
         meshBglEntries.push({ binding: lightsBinding, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform", minBindingSize: lightsUboByteSize } });
     }
+    if (morphBindings !== null) {
+        meshBglEntries.push({
+            binding: morphBindings.textureBinding,
+            visibility: GPUShaderStage.VERTEX,
+            texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+        });
+        meshBglEntries.push({
+            binding: morphBindings.uboBinding,
+            visibility: GPUShaderStage.VERTEX,
+            buffer: { type: "uniform", minBindingSize: 32 },
+        });
+    }
     const meshBGL = device.createBindGroupLayout({ label: "node-mesh", entries: meshBglEntries });
 
     // Vertex buffers: one GPUVertexBufferLayout per declared attribute, each at location=i.
@@ -276,6 +330,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         nodeUboBinding,
         textureBindings,
         lightsBinding,
+        morphBindings,
     };
     cache.set(cacheKey, result);
     return result;

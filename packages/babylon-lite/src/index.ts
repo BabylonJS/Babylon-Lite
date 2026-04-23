@@ -36,6 +36,8 @@ export {
     createTube,
     createExtrudeShape,
 } from "./mesh/mesh-factories.js";
+export { createSphereData } from "./mesh/create-sphere.js";
+export type { SphereMeshData } from "./mesh/create-sphere.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -74,6 +76,8 @@ export { createPcfShadowGenerator } from "./shadow/pcf-shadow-generator.js";
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { createMorphTargets } from "./morph/create-morph-targets.js";
+export type { MorphTargetData } from "./animation/types.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { mat4Translation, mat4Identity, mat4Scale, mat4Compose } from "./math/mat4.js";

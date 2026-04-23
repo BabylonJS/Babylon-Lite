@@ -99,6 +99,10 @@ export interface NodeBuildState {
      *  LightInformationBlock, …). The pipeline builder allocates a binding +
      *  struct decls + BGL entry when true. */
     usesLightsUbo: boolean;
+    /** Set by MorphTargetsBlock. The pipeline allocates two vertex-only
+     *  bindings (morph texture + morph UBO), declares the struct, and adds
+     *  a `@builtin(vertex_index)` param to vs_main. */
+    usesMorphTargets: boolean;
 }
 
 export interface NodeTextureBinding {

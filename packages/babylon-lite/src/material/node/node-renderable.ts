@@ -102,6 +102,17 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
             if (compile.lightsBinding !== null) {
                 entries.push({ binding: compile.lightsBinding, resource: { buffer: ensureLightsUBO() } });
             }
+            if (compile.morphBindings !== null) {
+                const mt = (mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } | null }).morphTargets;
+                if (!mt) {
+                    throw new Error(
+                        `NodeMaterial: material uses MorphTargetsBlock but mesh "${mesh.name ?? "(unnamed)"}" has no morphTargets. ` +
+                            `Assign mesh.morphTargets = createMorphTargets(engine, …) before rendering.`
+                    );
+                }
+                entries.push({ binding: compile.morphBindings.textureBinding, resource: mt.texture.createView() });
+                entries.push({ binding: compile.morphBindings.uboBinding, resource: { buffer: mt.weightsBuffer } });
+            }
             const meshBG = device.createBindGroup({ label: "node-mesh-bg", layout: meshBGL, entries });
 
             packets.push({ mesh, meshUBO, meshBG, _lastWorldVersion: mesh.worldMatrixVersion });

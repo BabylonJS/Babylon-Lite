@@ -37,6 +37,7 @@ export function createBuildState(): NodeBuildState {
         textures: [],
         nextTemp: 0,
         usesLightsUbo: false,
+        usesMorphTargets: false,
     };
 }
 
