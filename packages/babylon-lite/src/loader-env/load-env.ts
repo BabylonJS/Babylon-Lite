@@ -117,9 +117,7 @@ export async function loadEnvironment(
 
             if (!bgOptions.skipSkybox) {
                 const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
-                (scene as SceneContextInternal)._renderables.push(
-                    buildSolidSkyboxRenderable(scene, textures, bgl, bg, skyHalfSize, rootPosition, primaryColor)
-                );
+                (scene as SceneContextInternal)._renderables.push(buildSolidSkyboxRenderable(scene, textures, bgl, bg, skyHalfSize, rootPosition, primaryColor));
             }
             if (!bgOptions.skipGround) {
                 const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
