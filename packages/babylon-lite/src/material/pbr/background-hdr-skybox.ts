@@ -6,15 +6,50 @@
 import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
+import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
-import { createSkyboxBuffers, buildSkyboxWorldMatrix, computeSceneSize } from "./skybox-geometry.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxHdrFragSrc from "../../../shaders/skybox-hdr.fragment.wgsl?raw";
 import { WGSL_SCENE_UNIFORMS_PBR } from "../../shader/wgsl-helpers.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2
+
+function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+    // prettier-ignore
+    const positions = new Float32Array([
+     S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
+     S, S,-S, -S, S,-S, -S,-S,-S,  S,-S,-S,
+     S, S,-S,  S,-S,-S,  S,-S, S,  S, S, S,
+    -S, S, S, -S,-S, S, -S,-S,-S, -S, S,-S,
+    -S, S, S, -S, S,-S,  S, S,-S,  S, S, S,
+     S,-S, S,  S,-S,-S, -S,-S,-S, -S,-S, S,
+  ]);
+    // prettier-ignore
+    const indices = new Uint16Array([
+     2, 1, 0,  3, 2, 0,   6, 5, 4,  7, 6, 4,
+    10, 9, 8, 11,10, 8,  14,13,12, 15,14,12,
+    18,17,16, 19,18,16,  22,21,20, 23,22,20,
+  ]);
+    return {
+        posBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
+        idxBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
+        idxCount: 36,
+    };
+}
+
+function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
+    const world = new Float32Array(16) as Mat4;
+    world[0] = 1;
+    world[5] = 1;
+    world[10] = 1;
+    world[15] = 1;
+    world[12] = rootPosition[0];
+    world[13] = rootPosition[1];
+    world[14] = rootPosition[2];
+    return world;
+}
 
 /** Build an HDR cubemap skybox as a complete Renderable (order 0). */
 export function buildHdrSkyboxRenderable(
@@ -22,16 +57,15 @@ export function buildHdrSkyboxRenderable(
     envTextures: EnvironmentTextures,
     sceneBindGroupLayout: GPUBindGroupLayout,
     sceneBindGroup: GPUBindGroup,
-    skyboxSize?: number
+    skyHalfSize: number,
+    rootPosition: [number, number, number],
+    primaryColor: [number, number, number]
 ): Renderable {
     const engine = scene.engine as EngineContextInternal;
 
-    const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, skyboxSize);
-    const skyHalfSize = autoSkyboxSize / 2;
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 
     const cc = scene.clearColor;
-    const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const mat = createCubemapSkyboxMaterial(sceneBindGroupLayout, "skybox-hdr", WGSL_SCENE_UNIFORMS_PBR + skyboxVertSrc, skyboxHdrFragSrc);

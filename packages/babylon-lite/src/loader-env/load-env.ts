@@ -3,6 +3,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 import { mipLevelCount } from "../texture/mip-count.js";
+import { computeSceneSize } from "../material/pbr/scene-size.js";
 
 /** GPU-resident environment textures. */
 export interface EnvironmentTextures {
@@ -104,27 +105,36 @@ export async function loadEnvironment(
         skipSkybox: skyboxIsDds || skyboxIsEnv || options?.skipSkybox,
         skipGround: options?.skipGround,
     };
-    // Only pull in the background-renderable chunk if solid skybox or ground is
-    // actually required. Scenes passing skipSkybox+skipGround (with no DDS/HDR
-    // skybox) skip the import and chunk fetch entirely.
-    const needsBgRenderables = !bgOptions.skipSkybox || !bgOptions.skipGround;
+    // Only pull in the skybox/ground chunks if actually required. Scenes passing
+    // skipSkybox+skipGround (with no DDS/HDR skybox) skip the imports entirely.
     const envBgBuilder = async (): Promise<void> => {
         const bgl = (scene as SceneContextInternal)._pbrSceneBGL;
         const bg = (scene as SceneContextInternal)._pbrSceneBG;
         if (bgl && bg) {
-            if (needsBgRenderables) {
-                const { buildBackgroundRenderables } = await import("../material/pbr/background-renderable.js");
-                const bgRenderables = await buildBackgroundRenderables(scene, textures, bgl, bg, groundUrl, bgOptions, groundTexPromise);
-                (scene as SceneContextInternal)._renderables.push(...bgRenderables);
+            const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
+            const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+            const skyHalfSize = autoSkyboxSize / 2;
+
+            if (!bgOptions.skipSkybox) {
+                const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
+                (scene as SceneContextInternal)._renderables.push(
+                    buildSolidSkyboxRenderable(scene, textures, bgl, bg, skyHalfSize, rootPosition, primaryColor)
+                );
+            }
+            if (!bgOptions.skipGround) {
+                const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
+                (scene as SceneContextInternal)._renderables.push(
+                    await buildGroundRenderable(engine, bgl, engine.format, engine.msaaSamples, bg, groundSize, rootPosition, primaryColor, groundUrl, groundTexPromise)
+                );
             }
 
             if (skyboxIsDds) {
                 const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
-                (scene as SceneContextInternal)._renderables.push(await buildDdsSkyboxRenderable(scene, bgl, bg, skyboxUrl, options?.skyboxSize));
+                (scene as SceneContextInternal)._renderables.push(await buildDdsSkyboxRenderable(scene, bgl, bg, skyHalfSize, rootPosition, primaryColor, skyboxUrl));
             }
             if (skyboxIsEnv) {
                 const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-                (scene as SceneContextInternal)._renderables.push(buildHdrSkyboxRenderable(scene, textures, bgl, bg, options?.skyboxSize));
+                (scene as SceneContextInternal)._renderables.push(buildHdrSkyboxRenderable(scene, textures, bgl, bg, skyHalfSize, rootPosition, primaryColor));
             }
         } else {
             (scene as SceneContextInternal)._deferredBuilders.push(envBgBuilder);

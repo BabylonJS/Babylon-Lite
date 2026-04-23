@@ -3,11 +3,11 @@
 
 import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
+import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { computeSceneSize, createSkyboxBuffers, buildSkyboxWorldMatrix } from "./skybox-geometry.js";
-import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
+import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
 import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 import ddsSkyboxVertSrc from "../../../shaders/skybox-dds.vertex.wgsl?raw";
 import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
@@ -15,28 +15,94 @@ import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
 const SKY_DDS_UNIFORM_SIZE = 96;
 const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 
+const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
+
+function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+    // prettier-ignore
+    const positions = new Float32Array([
+     S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
+     S, S,-S, -S, S,-S, -S,-S,-S,  S,-S,-S,
+     S, S,-S,  S,-S,-S,  S,-S, S,  S, S, S,
+    -S, S, S, -S,-S, S, -S,-S,-S, -S, S,-S,
+    -S, S, S, -S, S,-S,  S, S,-S,  S, S, S,
+     S,-S, S,  S,-S,-S, -S,-S,-S, -S,-S, S,
+  ]);
+    // prettier-ignore
+    const indices = new Uint16Array([
+     2, 1, 0,  3, 2, 0,   6, 5, 4,  7, 6, 4,
+    10, 9, 8, 11,10, 8,  14,13,12, 15,14,12,
+    18,17,16, 19,18,16,  22,21,20, 23,22,20,
+  ]);
+    return {
+        posBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
+        idxBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
+        idxCount: 36,
+    };
+}
+
+function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
+    const world = new Float32Array(16) as Mat4;
+    world[0] = 1;
+    world[5] = 1;
+    world[10] = 1;
+    world[15] = 1;
+    world[12] = rootPosition[0];
+    world[13] = rootPosition[1];
+    world[14] = rootPosition[2];
+    return world;
+}
+
 /** Build a DDS cube skybox as a complete Renderable (order 0). */
 export async function buildDdsSkyboxRenderable(
     scene: SceneContext,
     sceneBindGroupLayout: GPUBindGroupLayout,
     sceneBindGroup: GPUBindGroup,
-    skyboxTextureUrl?: string,
-    skyboxSize?: number
+    skyHalfSize: number,
+    rootPosition: [number, number, number],
+    primaryColor: [number, number, number],
+    skyboxTextureUrl?: string
 ): Promise<Renderable> {
     const engine = scene.engine as EngineContextInternal;
+    const device = engine.device;
 
-    const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, skyboxSize);
-    const skyHalfSize = autoSkyboxSize / 2;
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
-    const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
 
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
-    const mat = createCubemapSkyboxMaterial(sceneBindGroupLayout, "skybox-dds", WGSL_SCENE_UNIFORMS_PBR + ddsSkyboxVertSrc, WGSL_DITHER + ddsSkyboxFragSrc);
+    const matLayout = device.createBindGroupLayout({
+        label: "skybox-dds-material",
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+        ],
+    });
+    const vertModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR + ddsSkyboxVertSrc, label: "skybox-dds-vert" });
+    const fragModule = device.createShaderModule({ code: WGSL_DITHER + ddsSkyboxFragSrc, label: "skybox-dds-frag" });
+    const pipeline = device.createRenderPipeline(
+        createStandardPipelineDescriptor({
+            label: "skybox-dds-pipeline",
+            engine,
+            bgls: [sceneBindGroupLayout, matLayout],
+            vertModule,
+            fragModule,
+            vertexBuffers: SKYBOX_POS_BUFFER,
+            format: engine.format,
+            msaaSamples: engine.msaaSamples,
+            depthWriteEnabled: false,
+        })
+    );
+
     const ubo = createDdsMeshUBO(engine, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
-    const pipeline = mat.getPipeline(engine, engine.format, engine.msaaSamples);
-    const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
+    const bindGroup = device.createBindGroup({
+        layout: matLayout,
+        entries: [
+            { binding: 0, resource: { buffer: ubo } },
+            { binding: 1, resource: cubeView },
+            { binding: 2, resource: sampler },
+        ],
+    });
 
     return {
         order: 0,
