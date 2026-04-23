@@ -361,5 +361,14 @@
         "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
         "tags": ["std", "procedural", "physics"],
         "skipPerf": true
+    },
+    {
+        "id": 60,
+        "slug": "scene60-nme-flat",
+        "name": "Scene 60 — NME Flat Colour",
+        "maxMad": 0.5,
+        "maxRawKB": 100,
+        "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
+        "tags": ["nme", "procedural"]
     }
 ]

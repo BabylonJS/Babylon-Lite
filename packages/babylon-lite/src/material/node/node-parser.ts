@@ -131,7 +131,11 @@ export function parseNodeMaterialSource(source: unknown): NodeGraph {
         }
         const mode = (b.serialized["mode"] ?? b.serialized["_mode"]) as number | undefined;
         // 0 = Uniform, 1 = Attribute, 2 = Varying. Only Uniform is user-overridable.
+        // System-value InputBlocks (mode 0 with a `systemValue`) are scene-provided and NOT overridable.
         if (mode === 0 || mode === undefined) {
+            if (typeof b.serialized["systemValue"] === "number") {
+                continue;
+            }
             if (b.name) {
                 namedInputs.set(b.name, b.id);
             }

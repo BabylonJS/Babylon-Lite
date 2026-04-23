@@ -105,6 +105,35 @@ function emitAttribute(block: NodeBlock, stage: Stage, state: NodeBuildState): N
     return { expr: `in.${vname}`, type };
 }
 
+// BJS NodeMaterialSystemValues enum (Babylon.js master).
+// We map the commonly used ones to WGSL expressions sourced from scene/mesh UBOs.
+// For matrices not present in Lite's scene UBO (`projection` alone), we fall
+// back to the closest valid expression (or throw — caller decides).
+function emitSystemValue(block: NodeBlock, stage: Stage, state: NodeBuildState): NodeExpr {
+    const sv = block.serialized["systemValue"] as number | undefined;
+    // Only sensible in the vertex stage for matrix types; for CameraPosition/FogColor either stage is fine.
+    switch (sv) {
+        case 1: // World
+            return { expr: "meshU.world", type: "mat4f" };
+        case 2: // View
+            return { expr: "sceneU.view", type: "mat4f" };
+        case 3: // WorldView
+            return { expr: "(sceneU.view * meshU.world)", type: "mat4f" };
+        case 5: // ViewProjection
+            return { expr: "sceneU.viewProjection", type: "mat4f" };
+        case 6: // WorldViewProjection
+            return { expr: "(sceneU.viewProjection * meshU.world)", type: "mat4f" };
+        case 7: // CameraPosition
+            return { expr: "sceneU.vEyePosition.xyz", type: "vec3f" };
+        case 8: // FogColor
+            return { expr: "sceneU.vFogColor.xyz", type: "vec3f" };
+        default:
+            throw new Error(`InputBlock: unsupported systemValue ${sv} on block "${block.name}"`);
+    }
+    void stage;
+    void state;
+}
+
 function emitUniform(block: NodeBlock, state: NodeBuildState): NodeExpr {
     // Determine the WGSL type. BJS serializes the port type under `type`.
     const portType = (block.serialized["type"] as BjsType | undefined) ?? 0x10;
@@ -132,6 +161,12 @@ export const emitter: BlockEmitter = {
         const mode = (block.serialized["mode"] ?? block.serialized["_mode"]) as number | undefined;
         if (mode === 1) {
             return emitAttribute(block, stage, state);
+        }
+        // System-value uniforms (World, WVP, CameraPosition, …) come from scene/mesh UBOs
+        // rather than the material's node UBO, so they never appear in `nodeUboFields`.
+        const sv = block.serialized["systemValue"];
+        if (typeof sv === "number") {
+            return emitSystemValue(block, stage, state);
         }
         // Default to Uniform (mode 0 or unspecified).
         return emitUniform(block, state);
