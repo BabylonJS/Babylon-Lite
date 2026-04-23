@@ -28,6 +28,9 @@ function bjsTypeToNodeType(t: BjsType): NodeValueType {
     if (t === 0x10 || t === 0x40) {
         return "vec4f";
     }
+    if (t === 0x80) {
+        return "mat4f";
+    }
     throw new Error(`InputBlock: unsupported BJS connection point type 0x${t.toString(16)}`);
 }
 

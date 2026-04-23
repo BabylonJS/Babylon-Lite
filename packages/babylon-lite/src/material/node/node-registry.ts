@@ -25,7 +25,29 @@ function getTable(): Map<string, BlockLoader> {
     t.set("InputBlock", () => import("./blocks/input-block.js"));
     t.set("VectorMergerBlock", () => import("./blocks/vector-merger.js"));
     t.set("FragmentOutputBlock", () => import("./blocks/fragment-output.js"));
-    // Block loaders are added here as they land. Phase 1a–1e populate this list.
+    // Math blocks (phase 1a):
+    t.set("AddBlock", () => import("./blocks/add-block.js"));
+    t.set("SubtractBlock", () => import("./blocks/subtract-block.js"));
+    t.set("MultiplyBlock", () => import("./blocks/multiply-block.js"));
+    t.set("MinBlock", () => import("./blocks/min-block.js"));
+    t.set("MaxBlock", () => import("./blocks/max-block.js"));
+    t.set("PowBlock", () => import("./blocks/pow-block.js"));
+    t.set("StepBlock", () => import("./blocks/step-block.js"));
+    t.set("DotBlock", () => import("./blocks/dot-block.js"));
+    t.set("ScaleBlock", () => import("./blocks/scale-block.js"));
+    t.set("OneMinusBlock", () => import("./blocks/oneminus-block.js"));
+    t.set("NegateBlock", () => import("./blocks/negate-block.js"));
+    t.set("NormalizeBlock", () => import("./blocks/normalize-block.js"));
+    t.set("LerpBlock", () => import("./blocks/lerp-block.js"));
+    t.set("ClampBlock", () => import("./blocks/clamp-block.js"));
+    t.set("SmoothStepBlock", () => import("./blocks/smoothstep-block.js"));
+    t.set("RemapBlock", () => import("./blocks/remap-block.js"));
+    t.set("TrigonometryBlock", () => import("./blocks/trigonometry-block.js"));
+    t.set("VectorSplitterBlock", () => import("./blocks/vector-splitter.js"));
+    t.set("ColorSplitterBlock", () => import("./blocks/color-splitter.js"));
+    t.set("TransformBlock", () => import("./blocks/transform-block.js"));
+    t.set("VertexOutputBlock", () => import("./blocks/vertex-output.js"));
+    // Block loaders are added here as they land. Phase 1b–1e populate this list further.
     // Each entry MUST use a literal string import so Rollup splits per-block chunks.
     _table = t;
     return t;
