@@ -13,7 +13,7 @@ import { NodeMaterial } from "@babylonjs/core/Materials/Node/nodeMaterial";
 import { MorphTarget } from "@babylonjs/core/Morph/morphTarget";
 import { MorphTargetManager } from "@babylonjs/core/Morph/morphTargetManager";
 import "@babylonjs/core/Materials/Node/Blocks";
-import { SCENE64_NME_JSON, SCENE64_MORPH_DELTA_Y } from "../shared/scene64-nme.js";
+import { SCENE64_NME_JSON, SCENE64_MORPH_DELTA_Y, SCENE64_MORPH_PERIOD_MS } from "../shared/scene64-nme.js";
 
 (async function () {
     const __initStart = performance.now();
@@ -43,13 +43,19 @@ import { SCENE64_NME_JSON, SCENE64_MORPH_DELTA_Y } from "../shared/scene64-nme.j
         abs[i + 2] = basePositions[i + 2]!;
     }
     const mgr = new MorphTargetManager(scene);
-    const target = new MorphTarget("m", 1.0, scene);
+    const freeze = new URLSearchParams(location.search).has("freeze");
+    const target = new MorphTarget("m", freeze ? 1.0 : 0, scene);
     target.setPositions(abs);
     mgr.addTarget(target);
     sphere.morphTargetManager = mgr;
 
+    const t0 = performance.now();
     const eng = engine as any;
     scene.onBeforeRenderObservable.add(() => {
+        if (!freeze) {
+            const t = (performance.now() - t0) / SCENE64_MORPH_PERIOD_MS;
+            target.influence = 0.5 - 0.5 * Math.cos(t * Math.PI * 2);
+        }
         if (eng._drawCalls) eng._drawCalls.fetchNewFrame();
     });
     scene.onAfterRenderObservable.add(() => {

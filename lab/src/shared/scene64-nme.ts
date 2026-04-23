@@ -181,3 +181,5 @@ export const SCENE64_NME_JSON = {
 /** Uniform +Y morph offset applied to every vertex at weight=1.
  *  Kept as a named constant so BJS and Lite sides use the identical value. */
 export const SCENE64_MORPH_DELTA_Y = 0.5;
+/** Animation period in milliseconds for the morph weight cycle. */
+export const SCENE64_MORPH_PERIOD_MS = 2000;

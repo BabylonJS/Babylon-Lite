@@ -10,11 +10,12 @@ import {
     createSphereData,
     createMorphTargets,
     attachControl,
+    onBeforeRender,
     registerScene,
     parseNodeMaterialFromSnippet,
 } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
-import { SCENE64_NME_JSON, SCENE64_MORPH_DELTA_Y } from "../shared/scene64-nme.js";
+import { SCENE64_NME_JSON, SCENE64_MORPH_DELTA_Y, SCENE64_MORPH_PERIOD_MS } from "../shared/scene64-nme.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -37,9 +38,24 @@ async function main(): Promise<void> {
         deltas[i * 3 + 1] = SCENE64_MORPH_DELTA_Y;
     }
     const sphere = createSphere(engine) as Mesh & { morphTargets?: unknown };
-    sphere.morphTargets = createMorphTargets(engine, [{ positions: deltas, normals: null }], vertexCount, [1.0]);
+    const freeze = new URLSearchParams(location.search).has("freeze");
+    const morph = createMorphTargets(engine, [{ positions: deltas, normals: null }], vertexCount, [freeze ? 1.0 : 0]);
+    sphere.morphTargets = morph;
     (sphere as { material?: unknown }).material = material;
     addToScene(scene, sphere);
+
+    // Animate the morph weight with a cosine loop so the sphere visibly
+    // pulses between base and morphed shape. Parity tests append ?freeze=1
+    // to pin the weight at 1.0 for a deterministic capture.
+    if (!freeze) {
+        const t0 = performance.now();
+        const weightBuf = new Float32Array([0]);
+        onBeforeRender(scene, () => {
+            const t = (performance.now() - t0) / SCENE64_MORPH_PERIOD_MS;
+            weightBuf[0] = 0.5 - 0.5 * Math.cos(t * Math.PI * 2);
+            engine.device.queue.writeBuffer(morph.weightsBuffer, 0, weightBuf);
+        });
+    }
 
     await registerScene(engine, scene);
     await startEngine(engine);
