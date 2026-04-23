@@ -115,7 +115,6 @@ function makeMockAtlas(): SpriteAtlas {
             { uvMin: [0, 0], uvMax: [0.25, 0.25], sourceSizePx: [32, 32], pivot: [0.5, 0.5] },
             { uvMin: [0.25, 0], uvMax: [0.5, 0.25], sourceSizePx: [32, 32], pivot: [0.5, 0.5] },
         ],
-        clips: [],
         premultipliedAlpha: true,
     };
 }

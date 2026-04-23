@@ -1,14 +1,18 @@
 /**
  * Sprite atlas — shared foundation for `Sprite2DLayer` (and, in later PRs,
  * billboards). A `SpriteAtlas` is a pure data record: a `Texture2D` plus
- * an immutable list of `SpriteFrame`s and an optional clip table. The same
- * atlas may back multiple layers / scenes; lifetime is governed by the
- * underlying `Texture2D`.
+ * an immutable list of `SpriteFrame`s. The same atlas may back multiple
+ * layers / scenes; lifetime is governed by the underlying `Texture2D`.
  *
  * PR 1 ships only the grid-based atlas constructor and the loader. Frames
  * are addressed by **integer index only**; a string-keyed wrapper type
  * (analogous to a future `NamedSpriteAtlas`) will land alongside the
- * TexturePacker JSON loader in a later PR. Clips are placeholder-only.
+ * TexturePacker JSON loader in a later PR.
+ *
+ * NOT YET IMPLEMENTED (intentionally omitted, see
+ * `docs/sprites/pr1-pure-2d-sprites-scope.md`):
+ *   - `SpriteClip` / `clips` field on the atlas (animation playback). Will
+ *     land as an additive change to `SpriteAtlas` in a follow-up PR.
  */
 import type { EngineContext } from "../../engine/engine.js";
 import type { Texture2D, Texture2DOptions } from "../../texture/texture-2d.js";
@@ -29,20 +33,11 @@ export interface SpriteFrame {
     readonly pivot: readonly [number, number];
 }
 
-/** Forward-compat shape; clip animation lands in a later PR. */
-export interface SpriteClip {
-    readonly name: string;
-    readonly frames: readonly number[];
-    readonly fps: number;
-    readonly loop: boolean;
-}
-
 /** A loaded sprite atlas — pure data, no methods. Frames are addressed by integer index. */
 export interface SpriteAtlas {
     readonly texture: Texture2D;
     readonly textureSizePx: readonly [number, number];
     readonly frames: readonly SpriteFrame[];
-    readonly clips: readonly SpriteClip[];
     readonly premultipliedAlpha: boolean;
 }
 
@@ -59,8 +54,6 @@ export interface GridAtlasOptions {
     /** Default `[0.5, 0.5]`. */
     pivot?: readonly [number, number];
     premultipliedAlpha?: boolean;
-    /** Forward-compat; ignored in PR 1. */
-    clips?: readonly SpriteClip[];
 }
 
 /** Options for `loadSpriteAtlas`. PR 1 supports the `gridSize` path only. */
@@ -82,11 +75,7 @@ export interface LoadAtlasOptions {
      *  Pair with `premultipliedAlpha: true` for the premultiplied blend pipeline. */
     premultiplyOnLoad?: boolean;
     textureOptions?: Texture2DOptions;
-    /** Forward-compat; ignored in PR 1. */
-    clips?: readonly SpriteClip[];
 }
-
-const EMPTY_CLIPS: readonly SpriteClip[] = [];
 
 /**
  * Build a `SpriteAtlas` from a uniform grid over an existing texture. All
@@ -122,7 +111,6 @@ export function createGridSpriteAtlas(texture: Texture2D, options: GridAtlasOpti
         texture,
         textureSizePx: [tw, th],
         frames,
-        clips: options.clips ?? EMPTY_CLIPS,
         premultipliedAlpha: options.premultipliedAlpha ?? false,
     };
 }
@@ -165,7 +153,6 @@ export async function loadSpriteAtlas(engine: EngineContext, textureUrl: string,
         // Callers wanting premultiplied blending should pass `premultiplyOnLoad: true`
         // *and* `premultipliedAlpha: true` together so storage and blend factors agree.
         premultipliedAlpha: options.premultipliedAlpha ?? false,
-        clips: options.clips,
     });
 }
 

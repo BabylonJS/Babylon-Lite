@@ -76,7 +76,7 @@ export type { SpriteAtlas, SpriteFrame, SpriteBlendMode, SpriteSampling, GridAtl
 export { createGridSpriteAtlas, loadSpriteAtlas, resolveSpriteFrame } from "./sprite/shared/sprite-atlas.js";
 
 // Sprite 2D layer + Index API
-export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DInit, Sprite2DView, Sprite2DDepthMode } from "./sprite/sprite-2d.js";
+export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode } from "./sprite/sprite-2d.js";
 export { createSprite2DLayer, addSprite2DIndex, updateSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex } from "./sprite/sprite-2d.js";
 
 // Sprite renderer
@@ -94,7 +94,7 @@ The full spec in 26-sprites.md describes a rich system. PR 1 ships **only this s
 - `loadSpriteAtlas(engine, url, options)` — **grid-only** in PR 1. `options.gridSize` required; `metadataUrl` path throws "not implemented in PR 1".
 - `createGridSpriteAtlas(texture, options)` — full implementation.
 - `resolveSpriteFrame(atlas, index)` — index-only bounds check; throws if out of range.
-- `clips` field on atlas — accept in types but ignore in PR 1 (empty array default).
+- `clips` field on atlas — **removed from PR 1**. Originally planned as a forward-compat empty-array placeholder; dropped to keep the surface honest. Will return as an additive change to `SpriteAtlas` when sprite clip animation lands (see "Deferred follow-ups" below).
 
 #### Decision: frame names live in a wrapper, not in `SpriteAtlas`
 
@@ -102,7 +102,7 @@ The original spec proposed `SpriteFrameRef = number | string` and a `_frameByNam
 baked into every atlas. PR 1 ships **integer frame indices only**:
 
 - `SpriteAtlas` carries no `_frameByName` / `_clipByName` maps.
-- `Sprite2DInit.frame` is `number | undefined`; same for `setSprite2DFrameIndex`.
+- `Sprite2DProps.frame` is `number | undefined`; same for `setSprite2DFrameIndex`.
 - `createNamedSpriteAtlas` is **not exported** (was a forward-compat stub; deleted).
 
 When the TexturePacker JSON loader lands, names will be added via a wrapper type
@@ -120,8 +120,8 @@ caller for a feature they don't use, and the engine doesn't need to own the name
 - `blendMode` — support `"alpha"` and `"premultiplied"` only. Throw on `"additive"`/`"multiply"`/`"cutout"` with "lands in a later PR" message.
 - `addSprite2DIndex` / `updateSprite2DIndex` / `removeSprite2DIndex` / `setSprite2DFrameIndex` — full PR 1 implementation.
 - `playSprite2DClipIndex` / `stopSprite2DClipIndex` — **not in PR 1**. Not exported.
-- `pickable` field on `Sprite2DInit` — accept in types, no-op (picking is PR 5).
-- `clip` field on `Sprite2DInit` — accept in types, no-op (clips are a later PR).
+- `pickable` field on `Sprite2DProps` — accept in types, no-op (picking is PR 5).
+- `clip` field on `Sprite2DProps` — accept in types, no-op (clips are a later PR).
 
 ### `SpriteRenderer`
 
@@ -129,12 +129,11 @@ caller for a feature they don't use, and the engine doesn't need to own the name
     - `_drawCallsPre: 0` (sprites have no pre-pass work in PR 1).
     - `clearColor` — from `opts.clearValue` or default `{ r: 0, g: 0, b: 0, a: 1 }`.
     - `_update(encoder, deltaMs)` — uploads dirty per-instance data to the GPU instance buffer, returns encoder unchanged.
-    - `_record(pass)` — sorts layers by `(order, layerZ, insertion)`, binds pipeline + atlas bind group per layer, issues one `drawIndexed(6, instanceCount)` per layer. Returns total draw calls.
+    - `_record(pass)` — sorts layers by `(order, insertion)`, binds pipeline + atlas bind group per layer, issues one `drawIndexed(6, instanceCount)` per layer. Returns total draw calls.
 - `SpriteRendererOptions`:
     - `layers` required.
-    - `target` — thunk or view. Default: `() => engine._renderingTarget` (swap-chain view). **Engine passes the pass target to `_record` now, so this field is primarily for future HUD-to-offscreen use.** For PR 1, ignore `target`/`depthView`/`resolveTarget`/`loadOp`/`clearValue`/`sampleCount` inside `_record` — the engine's shared pass handles those.
-    - `sampleCount` — accept but ignore (engine decides).
-    - **Important:** the `SpriteRendererOptions` target/loadOp/depth fields are primarily a future-PR surface. For PR 1, the sprite renderer draws **into the engine's shared pass** (same as scenes). Document in the source that these options exist for forward-compat and are not wired in PR 1.
+    - `clearValue` optional (default `{ r: 0, g: 0, b: 0, a: 1 }`).
+    - **Off-screen / per-renderer attachment options (`target`, `depthView`, `resolveTarget`, `loadOp`, `sampleCount`) are intentionally not on this interface in PR 1.** The renderer draws into the engine's shared pass (same as scenes), so these fields would be dead weight today. They will be added back when HUD-to-offscreen / per-context MSAA / depth-hosted rendering land — see the deferred-items table below.
 - `createSpriteRenderer(engine, opts)` — constructs the renderer, builds the pipeline for the one `(sampleCount=engineMsaa, hasDepth=false)` key.
 - `registerSpriteRenderer(engine, sr)` — pushes onto `engine._renderingContexts`. Idempotent (double-register is a no-op).
 - `unregisterSpriteRenderer(engine, sr)` — splices out.
@@ -142,7 +141,7 @@ caller for a feature they don't use, and the engine doesn't need to own the name
 
 ### WGSL
 
-- Single shader. Vertex: reads instance data (positionPx, sizePx, rotation, pivot, frame UVs, color) + layer UBO (view, atlas size, screen size, opacity). Fragment: samples atlas, multiplies by color, applies opacity.
+- Single shader. Vertex: reads instance data (positionPx, sizePx, uvMin, uvMax, rotation, color) + layer UBO (view, screen size, pivot, opacity). Fragment: samples atlas, multiplies by color, applies opacity. Pivot is per-layer (in the UBO) for PR 1; per-sprite / per-frame override is deferred.
 - Pipeline cache: `Map<number, GPURenderPipeline>` keyed on `(sampleCount << 8) | (blendMode << 4) | (hasDepth ? 1 : 0)`. PR 1 will only populate two keys: alpha / premultiplied, both with hasDepth=0 and engine's MSAA.
 - Index buffer: 6 indices `[0,1,2, 0,2,3]`, one per engine, shared across sprite layers.
 - Vertex shader uses `@builtin(vertex_index)` for the quad corner; no vertex buffer for positions.
@@ -232,22 +231,23 @@ Cases (each uses a stub engine / mocked `GPUDevice`; follow the pattern of exist
 
 ## Deferred to later PRs (explicitly OUT of PR 1)
 
-| Item                                              | Lands in                           |
-| ------------------------------------------------- | ---------------------------------- |
-| `addToScene` `"sprite-2d-layer"` branch           | PR 2                               |
-| `_hudSpriteLayers` bucket + auto-HUD registration | PR 2                               |
-| `depth: "test"` / `"test-write"`                  | PR 3                               |
-| Depth-hosted routing into `_opaqueRenderables`    | PR 3                               |
-| Billboards (anchored / camera-facing)             | PR 4                               |
-| `AnchorSource` adapter                            | PR 4                               |
-| Sprite picking                                    | PR 5                               |
-| `Sprite2DHandle` + `BillboardSpriteHandle`        | PR 6                               |
-| Named atlases (frame-by-name wrapper)             | with TexturePacker loader          |
-| Sprite clip animation                             | later                              |
-| `blendMode` additive/multiply/cutout              | later                              |
-| `pixelSnap`                                       | later                              |
-| `pivot` (non-default)                             | later                              |
-| `order` interaction across multiple layers        | PR 2 or later (PR 1 has one layer) |
+| Item                                                                                                                                                  | Lands in                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `addToScene` `"sprite-2d-layer"` branch                                                                                                               | PR 2                                         |
+| `_hudSpriteLayers` bucket + auto-HUD registration                                                                                                     | PR 2                                         |
+| `depth: "test"` / `"test-write"`                                                                                                                      | PR 3                                         |
+| Depth-hosted routing into `_opaqueRenderables`                                                                                                        | PR 3                                         |
+| Billboards (anchored / camera-facing)                                                                                                                 | PR 4                                         |
+| `AnchorSource` adapter                                                                                                                                | PR 4                                         |
+| Sprite picking                                                                                                                                        | PR 5                                         |
+| `Sprite2DHandle` + `BillboardSpriteHandle`                                                                                                            | PR 6                                         |
+| Named atlases (frame-by-name wrapper)                                                                                                                 | with TexturePacker loader                    |
+| Sprite clip animation (re-adds `SpriteClip` interface + `clips` field on `SpriteAtlas`; both were dropped from PR 1 to keep the surface honest)       | later                                        |
+| `blendMode` additive/multiply/cutout                                                                                                                  | later                                        |
+| `pixelSnap`                                                                                                                                           | later                                        |
+| Per-sprite / per-frame `pivot` override (PR 1 ships per-layer pivot only)                                                                             | later                                        |
+| `SpriteRendererOptions.target` / `depthView` / `resolveTarget` / `loadOp` / `sampleCount` (off-screen / per-renderer attachments + per-renderer MSAA) | PR 2 – PR 4 (HUD-to-offscreen, depth-hosted) |
+| `order` interaction across multiple layers                                                                                                            | PR 2 or later (PR 1 has one layer)           |
 
 ## Open questions (resolve during implementation, don't block)
 
