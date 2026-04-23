@@ -367,8 +367,17 @@
         "slug": "scene60-nme-flat",
         "name": "Scene 60 — NME Flat Colour",
         "maxMad": 0.5,
-        "maxRawKB": 100,
+        "maxRawKB": 60,
         "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 61,
+        "slug": "scene61-nme-normal",
+        "name": "Scene 61 — NME Normal As Color",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Node Material with a vertex→fragment varying: normal attribute remapped as `normal * 0.5 + 0.5` → FragmentOutput.rgb. Exercises ScaleBlock, AddBlock, and attribute-to-fragment bridging.",
         "tags": ["nme", "procedural"]
     }
 ]
