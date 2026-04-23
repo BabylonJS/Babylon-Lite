@@ -47,7 +47,12 @@ function getTable(): Map<string, BlockLoader> {
     t.set("ColorSplitterBlock", () => import("./blocks/color-splitter.js"));
     t.set("TransformBlock", () => import("./blocks/transform-block.js"));
     t.set("VertexOutputBlock", () => import("./blocks/vertex-output.js"));
-    // Block loaders are added here as they land. Phase 1b–1e populate this list further.
+    // Texture + utility blocks (phase 1b):
+    t.set("TextureBlock", () => import("./blocks/texture-block.js"));
+    t.set("ImageSourceBlock", () => import("./blocks/image-source.js"));
+    t.set("FrontFacingBlock", () => import("./blocks/front-facing.js"));
+    t.set("ViewDirectionBlock", () => import("./blocks/view-direction.js"));
+    // Block loaders are added here as they land. Phase 1c–1e populate this list further.
     // Each entry MUST use a literal string import so Rollup splits per-block chunks.
     _table = t;
     return t;
