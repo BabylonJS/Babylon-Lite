@@ -1433,6 +1433,119 @@
                 padding: 1rem;
                 color: #f85149;
             }
+
+            /* ── Compact mode ── */
+            body.compact .grid {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                gap: 0.75rem;
+                padding: 1rem 1.5rem;
+            }
+            body.compact .parity-grid {
+                grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+                gap: 0.75rem;
+                padding: 0.5rem 1.5rem 1.5rem;
+            }
+            body.compact .perf-grid {
+                grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+                gap: 0.75rem;
+                padding: 0.5rem 1.5rem 1.5rem;
+            }
+            body.compact .card-body {
+                padding: 0.5rem 0.6rem;
+            }
+            body.compact .card-body h2 {
+                font-size: 0.78rem;
+            }
+            body.compact .card-body p {
+                display: none;
+            }
+            body.compact .card-body .badge {
+                font-size: 0.6rem;
+                padding: 0.05rem 0.35rem;
+                margin-top: 0.3rem;
+            }
+            body.compact .card-body .size-info {
+                font-size: 0.7rem;
+            }
+            body.compact .card-body .size-info .size-gzip,
+            body.compact .card-body .size-info .size-ratio,
+            body.compact .card-body .size-info .size-row:has(.size-label-bjs) {
+                display: none;
+            }
+            body.compact .diff-card-header {
+                padding: 0.4rem 0.6rem;
+            }
+            body.compact .diff-card-header h3 {
+                font-size: 0.8rem;
+            }
+            body.compact .diff-slot-label {
+                font-size: 0.6rem;
+            }
+            body.compact .perf-scene-header {
+                padding: 0.4rem 0.6rem;
+            }
+            body.compact .perf-scene-header h3 {
+                font-size: 0.75rem;
+            }
+            body.compact .card-note {
+                font-size: 0.65rem;
+                padding: 0.3rem 0.4rem;
+            }
+
+            /* ── Hide / Restore buttons ── */
+            .card-hide-btn {
+                position: absolute;
+                top: 0.5rem;
+                left: 0.5rem;
+                z-index: 3;
+                background: rgba(13, 17, 23, 0.82);
+                backdrop-filter: blur(4px);
+                border: 1px solid rgba(48, 54, 61, 0.8);
+                color: #e6edf3;
+                font-size: 0.75rem;
+                line-height: 1;
+                padding: 0.3rem 0.45rem;
+                border-radius: 4px;
+                cursor: pointer;
+                opacity: 0;
+                transition: opacity 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+                font-family: inherit;
+            }
+            .card:hover .card-hide-btn,
+            .diff-card:hover .card-hide-btn,
+            .perf-scene-card:hover .card-hide-btn {
+                opacity: 1;
+            }
+            .card-hide-btn:hover {
+                background: #3d1117;
+                border-color: #f85149;
+                color: #f85149;
+            }
+
+            .scene-hidden {
+                display: none !important;
+            }
+            body.show-hidden .scene-hidden {
+                display: block !important;
+                opacity: 0.4;
+                filter: grayscale(0.6);
+            }
+            body.show-hidden .scene-hidden .card-hide-btn {
+                opacity: 1;
+                background: #0d3117;
+                border-color: #3fb950;
+                color: #3fb950;
+            }
+            body.show-hidden .scene-hidden .card-hide-btn:hover {
+                background: #1a4a28;
+                color: #56d364;
+            }
+
+            .docs-toggle.active-toggle {
+                background: #1f6feb;
+                border-color: #1f6feb;
+                color: #fff;
+            }
         </style>
     </head>
     <body>
@@ -1441,6 +1554,8 @@
             <p>WebGPU rendering engine · pixel-perfect parity with Babylon.js</p>
             <button class="docs-toggle" id="docs-toggle" onclick="toggleDocs()">📖 Architecture &amp; Features</button>
             <button class="docs-toggle" id="pitch-toggle" onclick="togglePitch()" style="margin-left: 0.5rem">📊 Performance Summary</button>
+            <button class="docs-toggle" id="compact-toggle" onclick="toggleCompact()" style="margin-left: 0.5rem" title="Toggle small card layout">🔳 Compact</button>
+            <button class="docs-toggle" id="show-hidden-toggle" onclick="toggleShowHidden()" style="margin-left: 0.5rem" title="Show hidden cards so you can restore them">👁 Show Hidden <span id="hidden-count" style="font-size: 0.65rem; opacity: 0.7"></span></button>
         </header>
 
         <div id="docs-panel" class="docs-panel">
@@ -2941,7 +3056,9 @@
             function initSourceGrid(config) {
                 var grid = document.getElementById("source-grid");
                 grid.innerHTML = config.map(function(s) {
-                    return '<a class="card" href="/scene' + s.id + '.html" data-tags="' + s.tags.join(" ") + '">' +
+                    var sceneKey = "scene" + s.id;
+                    return '<a class="card" href="/scene' + s.id + '.html" data-scene="' + sceneKey + '" data-tags="' + s.tags.join(" ") + '">' +
+                        renderHideBtn(sceneKey) +
                         '<div class="card-image">' +
                         '<img src="/reference/' + s.slug + '/test-actual.png" alt="' + s.name + '" />' +
                         renderNote(s) +
@@ -2962,10 +3079,116 @@
                 return '<div class="card-note" title="' + s.note.replace(/"/g, "&quot;") + '">' + s.note + '</div>';
             }
 
+            // ── Hide / Restore / Compact (all persisted to localStorage) ──
+            var HIDDEN_KEY = "lab-hidden-scenes";
+            var COMPACT_KEY = "lab-compact";
+            var SHOW_HIDDEN_KEY = "lab-show-hidden";
+
+            function getHiddenScenes() {
+                try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || "{}") || {}; }
+                catch (e) { return {}; }
+            }
+            function saveHiddenScenes(set) {
+                localStorage.setItem(HIDDEN_KEY, JSON.stringify(set));
+            }
+
+            function renderHideBtn(sceneKey) {
+                return '<button class="card-hide-btn" data-hide-for="' + sceneKey + '" onclick="toggleHideScene(\'' + sceneKey + '\', event)" title="Hide this scene">\u2715</button>';
+            }
+
+            function applyHiddenState() {
+                var hidden = getHiddenScenes();
+                var count = 0;
+                // Apply across every grid. Elements mark themselves with data-scene.
+                document.querySelectorAll("[data-scene]").forEach(function(el) {
+                    var key = el.dataset.scene;
+                    if (hidden[key]) {
+                        el.classList.add("scene-hidden");
+                    } else {
+                        el.classList.remove("scene-hidden");
+                    }
+                });
+                for (var k in hidden) { if (hidden[k]) count++; }
+                // Update hide-btn icon based on hidden state (✕ vs ↩)
+                document.querySelectorAll(".card-hide-btn").forEach(function(btn) {
+                    var key = btn.dataset.hideFor;
+                    if (hidden[key]) {
+                        btn.textContent = "\u21a9";
+                        btn.title = "Restore this scene";
+                    } else {
+                        btn.textContent = "\u2715";
+                        btn.title = "Hide this scene";
+                    }
+                });
+                var counter = document.getElementById("hidden-count");
+                if (counter) counter.textContent = count > 0 ? "(" + count + ")" : "";
+                var showHiddenBtn = document.getElementById("show-hidden-toggle");
+                if (showHiddenBtn) {
+                    if (count === 0) {
+                        showHiddenBtn.disabled = true;
+                        showHiddenBtn.style.opacity = "0.5";
+                        showHiddenBtn.style.cursor = "default";
+                        if (document.body.classList.contains("show-hidden")) {
+                            document.body.classList.remove("show-hidden");
+                            showHiddenBtn.classList.remove("active-toggle");
+                            localStorage.setItem(SHOW_HIDDEN_KEY, "0");
+                        }
+                    } else {
+                        showHiddenBtn.disabled = false;
+                        showHiddenBtn.style.opacity = "";
+                        showHiddenBtn.style.cursor = "";
+                    }
+                }
+            }
+
+            function toggleHideScene(sceneKey, ev) {
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                var hidden = getHiddenScenes();
+                if (hidden[sceneKey]) {
+                    delete hidden[sceneKey];
+                } else {
+                    hidden[sceneKey] = true;
+                }
+                saveHiddenScenes(hidden);
+                applyHiddenState();
+            }
+
+            function toggleCompact() {
+                var on = !document.body.classList.contains("compact");
+                document.body.classList.toggle("compact", on);
+                document.getElementById("compact-toggle").classList.toggle("active-toggle", on);
+                localStorage.setItem(COMPACT_KEY, on ? "1" : "0");
+            }
+
+            function toggleShowHidden() {
+                var btn = document.getElementById("show-hidden-toggle");
+                if (btn.disabled) return;
+                var on = !document.body.classList.contains("show-hidden");
+                document.body.classList.toggle("show-hidden", on);
+                btn.classList.toggle("active-toggle", on);
+                localStorage.setItem(SHOW_HIDDEN_KEY, on ? "1" : "0");
+            }
+
+            // Restore compact / show-hidden preferences immediately.
+            (function restoreViewPrefs() {
+                if (localStorage.getItem(COMPACT_KEY) === "1") {
+                    document.body.classList.add("compact");
+                    var btn = document.getElementById("compact-toggle");
+                    if (btn) btn.classList.add("active-toggle");
+                }
+                if (localStorage.getItem(SHOW_HIDDEN_KEY) === "1") {
+                    document.body.classList.add("show-hidden");
+                    var sbtn = document.getElementById("show-hidden-toggle");
+                    if (sbtn) sbtn.classList.add("active-toggle");
+                }
+            })();
+
             function initBundleGrid(config) {
                 var grid = document.getElementById("bundle-grid");
                 grid.innerHTML = config.map(function(s) {
-                    return '<a class="card" href="/bundle-scene' + s.id + '.html" data-scene="scene' + s.id + '" data-tags="' + s.tags.join(" ") + '">' +
+                    var sceneKey = "scene" + s.id;
+                    return '<a class="card" href="/bundle-scene' + s.id + '.html" data-scene="' + sceneKey + '" data-tags="' + s.tags.join(" ") + '">' +
+                        renderHideBtn(sceneKey) +
                         '<div class="card-image">' +
                         '<img src="/reference/' + s.slug + '/test-actual.png" alt="' + s.name + '" />' +
                         '<div class="card-overlay">' +
@@ -2987,7 +3210,9 @@
             function initPerfGrid(config) {
                 var grid = document.getElementById("perf-grid");
                 grid.innerHTML = config.map(function(s) {
-                    return '<div id="perf-scene' + s.id + '" class="perf-scene-card" data-tags="' + s.tags.join(" ") + '">' +
+                    var sceneKey = "scene" + s.id;
+                    return '<div id="perf-scene' + s.id + '" class="perf-scene-card" data-scene="' + sceneKey + '" data-tags="' + s.tags.join(" ") + '" style="position: relative">' +
+                        renderHideBtn(sceneKey) +
                         '<div class="perf-scene-header">' +
                         '<h3>' + s.name + '</h3>' +
                         renderBadges(s.tags) +
@@ -3049,8 +3274,10 @@
 
                 var grid = document.getElementById("parity-grid");
                 grid.innerHTML = parityScenes.map(function (s) {
+                    var sceneKey = "scene" + s.n;
                     return (
-                        '<div class="diff-card" id="diff-card-' + s.n + '" data-scene-num="' + s.n + '" data-max-mad="' + s.maxMad + '">' +
+                        '<div class="diff-card" id="diff-card-' + s.n + '" data-scene="' + sceneKey + '" data-scene-num="' + s.n + '" data-max-mad="' + s.maxMad + '" style="position: relative">' +
+                        renderHideBtn(sceneKey) +
                         '<div class="diff-card-header">' +
                         "<h3>" + s.name + "</h3>" +
                         '<span class="diff-stats" id="diff-stats-' + s.n + '">loading\u2026</span>' +
@@ -3274,6 +3501,7 @@
                     initPerfGrid(config);
                     initParityGrid(config);
                     restoreLabState();
+                    applyHiddenState();
                     loadBundleManifest();
                     loadPerfManifest();
                     // Restore scroll position now that content is rendered
