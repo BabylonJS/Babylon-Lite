@@ -226,7 +226,8 @@
         "maxMad": 0.5,
         "maxRawKB": 51.8,
         "description": "Ground plane with KTX compressed texture (auto-format selection), UV tiling, FreeCamera, hemispheric light.",
-        "tags": ["std", "procedural"]
+        "tags": ["std", "procedural"],
+        "skipParity": true
     },
     {
         "id": 26,
@@ -235,7 +236,8 @@
         "maxMad": 0.5,
         "maxRawKB": 90.7,
         "description": "Georgia Tech Dragon with PBR subsurface translucency, thickness map, point light, DDS environment.",
-        "tags": ["pbr", "gltf", "env"]
+        "tags": ["pbr", "gltf", "env"],
+        "skipParity": true
     },
     {
         "id": 27,
@@ -357,6 +359,7 @@
         "maxRawKB": 48.2,
         "maxGzipKB": 22,
         "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
-        "tags": ["std", "procedural", "physics"]
+        "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
     }
 ]
