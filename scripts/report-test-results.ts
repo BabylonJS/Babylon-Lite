@@ -49,7 +49,8 @@ for (const file of files) {
 
         const failMatch = cBody.match(/<failure[^>]*?(?:message="([^"]*)")?[^>]*>([\s\S]*?)<\/failure>/);
         const errMatch = cBody.match(/<error[^>]*?(?:message="([^"]*)")?[^>]*>([\s\S]*?)<\/error>/);
-        const skipMatch = cBody.match(/<skipped[^>]*\/?>/);
+        // <skipped> can be self-closing (<skipped/>) or have a body (<skipped message="…">…</skipped>)
+        const skipMatch = cBody.match(/<skipped\b([^>]*?)(?:\/>|>([\s\S]*?)<\/skipped>)/);
 
         if (failMatch || errMatch) {
             const name = attr(cAttrs, "name");
@@ -59,16 +60,22 @@ for (const file of files) {
             const raw = bodyText || msgAttr || "Test failed";
             console.log(`##vso[task.logissue type=error]${name}: ${sanitize(raw)}`);
         } else if (skipMatch) {
-            // Surface Playwright annotations (emitted as <properties>/<property>) from
-            // skipped tests. Any "warning"-typed annotation (e.g. perf suite's
-            // [NOT A PERFORMANCE ISSUE] skip) is reported as a pipeline warning.
-            const warnings = extractWarningAnnotations(cBody);
-            if (warnings.length > 0) {
-                const name = attr(cAttrs, "name");
-                for (const w of warnings) {
-                    totalWarnings++;
-                    console.log(`##vso[task.logissue type=warning]${name}: ${sanitize(w)}`);
-                }
+            // Prefer the skip reason (test.skip(true, "[NOT A PERFORMANCE ISSUE] …") stores
+            // this in <skipped message="…"> or inside the body). Fall back to annotation
+            // <properties> for older Playwright versions.
+            const name = attr(cAttrs, "name");
+            const skipAttrs = skipMatch[1] ?? "";
+            const skipBody = (skipMatch[2] ?? "").trim();
+            const skipMessage = attr(skipAttrs, "message") || skipBody;
+            const warnings: string[] = [];
+            if (skipMessage && /\[NOT A PERFORMANCE ISSUE\]|\bwarning\b/i.test(skipMessage)) {
+                warnings.push(skipMessage);
+            }
+            // Also consider Playwright annotation properties
+            warnings.push(...extractWarningAnnotations(cBody));
+            for (const w of warnings) {
+                totalWarnings++;
+                console.log(`##vso[task.logissue type=warning]${name}: ${sanitize(w)}`);
             }
         }
     }
