@@ -287,13 +287,5 @@
         "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
         "tags": ["std", "procedural", "physics"],
         "skipPerf": true
-    },
-    {
-        "id": 41,
-        "slug": "scene41-perf-smoke",
-        "name": "Scene 41 — Perf Smoke (no baseline)",
-        "description": "Minimal sphere scene used to exercise the perf-suite's missing-baseline warning path. Parity and bundle-size checks are skipped; only perf regression runs against it.",
-        "tags": ["std", "procedural"],
-        "skipParity": true
     }
 ]
