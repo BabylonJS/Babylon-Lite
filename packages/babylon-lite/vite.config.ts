@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import dts from 'vite-plugin-dts';
 
 export default defineConfig(({ mode }) => ({
   build: {
@@ -15,5 +16,11 @@ export default defineConfig(({ mode }) => ({
     sourcemap: true,
     minify: mode === 'prod' ? 'esbuild' : false,
   },
-  plugins: [],
+  plugins: [
+    dts({
+      rollupTypes: true,
+      tsconfigPath: resolve(__dirname, 'tsconfig.json'),
+      outDir: mode === 'prod' ? 'dist/prod' : 'dist',
+    }),
+  ],
 }));

@@ -1,7 +1,7 @@
 // Per-frame skeleton animation — evaluates clips and uploads bone matrices.
 // Zero per-frame allocation: all scratch buffers pre-allocated at init.
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { GltfAnimationData, AnimationClip } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
@@ -49,7 +49,7 @@ function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int
 
 export interface AnimationController {
     /** Advance animation by deltaMs and update bone textures. */
-    tick(deltaMs: number, engine: EngineContextInternal): void;
+    tick(deltaMs: number, engine: EngineContext): void;
     /** Current playback time in seconds. */
     time: number;
     /** True if playing. */
