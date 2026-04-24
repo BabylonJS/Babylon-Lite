@@ -34,6 +34,23 @@ import depthVertSrc from "../../shaders/shadow-pcf-depth.vertex.wgsl?raw";
 import { registerPcfShadowShader, registerPcfShadowBgl } from "../material/standard/standard-pipeline.js";
 import { WGSL_SCENE_UNIFORMS_SHADOW } from "../shader/wgsl-helpers.js";
 
+// Morph-aware depth vertex shader — inlined to avoid a separate import that
+// would bloat non-morph scenes. Only used when a caster has morphTargets.
+const DEPTH_VERT_MORPH = `struct MeshUniforms { world: mat4x4<f32> };
+@group(1) @binding(0) var<uniform> mesh: MeshUniforms;
+@group(1) @binding(1) var morphTargets: texture_2d<f32>;
+struct morphUniforms { weights: vec4<f32>, count: u32, texWidth: u32, rowsPerBand: u32, _p0: u32 };
+@group(1) @binding(2) var<uniform> morph: morphUniforms;
+@vertex fn main(@location(0) position: vec3<f32>, @builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
+  var pos = position;
+  let co = vec2<i32>(i32(vertexIndex % morph.texWidth), i32(vertexIndex / morph.texWidth));
+  for (var i = 0u; i < morph.count; i = i + 1u) {
+    let posBase = i32(i * 2u) * i32(morph.rowsPerBand);
+    pos = pos + morph.weights[i] * textureLoad(morphTargets, vec2<i32>(co.x, posBase + co.y), 0).xyz;
+  }
+  return scene.viewProjection * (mesh.world * vec4<f32>(pos, 1.0));
+}`;
+
 // ─── Shared PCF WGSL fragments (copy of pcf-shadow-generator.ts) ───
 
 const PCF_DECLARATIONS = `
@@ -74,7 +91,9 @@ const PCF_CALL = `  shadow = computeShadowWithPCF(input.vPositionFromLight, inpu
 
 let _pcfRegistered = false;
 function ensurePcfRegistered(): void {
-    if (_pcfRegistered) return;
+    if (_pcfRegistered) {
+        return;
+    }
     _pcfRegistered = true;
     registerPcfShadowShader({ declarations: PCF_DECLARATIONS, fn: PCF_FN, call: PCF_CALL });
     registerPcfShadowBgl({ textureSampleType: "depth", samplerType: "comparison" });
@@ -142,7 +161,12 @@ export interface PcfDirectionalShadowGeneratorConfig {
     orthoMaxZ?: number;
 }
 
-export function createPcfDirectionalShadowGenerator(engine: EngineContext, light: DirectionalLight, casterMeshes: Mesh[], cfg: PcfDirectionalShadowGeneratorConfig = {}): ShadowGenerator {
+export function createPcfDirectionalShadowGenerator(
+    engine: EngineContext,
+    light: DirectionalLight,
+    casterMeshes: Mesh[],
+    cfg: PcfDirectionalShadowGeneratorConfig = {}
+): ShadowGenerator {
     const eng = engine as EngineContextInternal;
     const device = eng.device;
     ensurePcfRegistered();
@@ -155,14 +179,68 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, light
 
     const { viewProj } = computeDirectionalMatrix(light, casterMeshes, orthoMinZ, orthoMaxZ);
 
-    const { depthMeshBGL, depthSceneUBO, depthPipeline, depthSceneBG, casters } = createShadowDepthInfra(eng, {
-        label: "shadow-pcf-dir",
-        viewProj,
-        casterMeshes,
-        vertCode: WGSL_SCENE_UNIFORMS_SHADOW + depthVertSrc,
-        depthBias: Math.round(bias * 1e7),
-        depthBiasSlopeScale: normalBias > 0 ? normalBias : 2,
-    });
+    // Split casters into static (no morphs) and morphed groups so the shadow
+    // depth pass applies morph target deformation to get correct shadow shapes.
+    const staticMeshes: Mesh[] = [];
+    const morphMeshes: Mesh[] = [];
+    for (const m of casterMeshes) {
+        const mt = (m as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } | null }).morphTargets;
+        if (mt) {
+            morphMeshes.push(m);
+        } else {
+            staticMeshes.push(m);
+        }
+    }
+
+    const depthBias = Math.round(bias * 1e7);
+    const depthBiasSlopeScale = normalBias > 0 ? normalBias : 2;
+
+    // Static (non-morphed) depth infra — standard position-only vertex shader.
+    const staticInfra =
+        staticMeshes.length > 0
+            ? createShadowDepthInfra(eng, {
+                  label: "shadow-pcf-dir",
+                  viewProj,
+                  casterMeshes: staticMeshes,
+                  vertCode: WGSL_SCENE_UNIFORMS_SHADOW + depthVertSrc,
+                  depthBias,
+                  depthBiasSlopeScale,
+              })
+            : null;
+
+    // Morphed depth infra — vertex shader samples the morph atlas texture.
+    // Each morphed caster gets its own depth infra since each needs its own
+    // morph texture/UBO bindings in group 1.
+    const morphInfra =
+        morphMeshes.length > 0
+            ? (() => {
+                  const morphBglEntries: GPUBindGroupLayoutEntry[] = [
+                      { binding: 1, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+                      { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform", minBindingSize: 32 } },
+                  ];
+                  return morphMeshes.map((mesh) => {
+                      const mt = (mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } }).morphTargets!;
+                      const inf = createShadowDepthInfra(eng, {
+                          label: "shadow-pcf-dir-morph",
+                          viewProj,
+                          casterMeshes: [mesh],
+                          vertCode: WGSL_SCENE_UNIFORMS_SHADOW + DEPTH_VERT_MORPH,
+                          depthBias,
+                          depthBiasSlopeScale,
+                          extraMeshBglEntries: morphBglEntries,
+                          extraMeshEntries: [
+                              { binding: 1, resource: mt.texture.createView() },
+                              { binding: 2, resource: { buffer: mt.weightsBuffer } },
+                          ],
+                      });
+                      return inf;
+                  });
+              })()
+            : [];
+
+    // Unified caster list for dirty tracking and matrix sync.
+    const allCasters = [...(staticInfra?.casters ?? []), ...morphInfra.flatMap((m) => m.casters)];
+    const depthSceneUBO = staticInfra?.depthSceneUBO ?? morphInfra[0]!.depthSceneUBO;
 
     const depthTexture = device.createTexture({
         label: "shadow-pcf-dir-depth",
@@ -191,15 +269,23 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, light
         blurredTexture: depthTexture,
         blurredSampler: comparisonSampler,
         renderShadowMap(encoder: GPUCommandEncoder): number {
-            const { dirty, lightChanged } = dirtyTracker.check(light, casters);
-            if (!dirty) return 0;
+            const { dirty, lightChanged } = dirtyTracker.check(light, allCasters);
+            if (!dirty) {
+                return 0;
+            }
             if (lightChanged) {
                 const updated = computeDirectionalMatrix(light, casterMeshes, orthoMinZ, orthoMaxZ);
                 updateShadowLightMatrix(eng, sg, depthSceneUBO, updated.viewProj, shadowUboData);
+                // Also update scene UBOs for morphed infras if they have their own.
+                for (const mi of morphInfra) {
+                    if (mi.depthSceneUBO !== depthSceneUBO) {
+                        eng.device.queue.writeBuffer(mi.depthSceneUBO, 0, updated.viewProj as Float32Array<ArrayBuffer>);
+                    }
+                }
             }
-            dirtyTracker.commit(light, casters);
+            dirtyTracker.commit(light, allCasters);
 
-            syncCasterMatrices(eng, casters);
+            syncCasterMatrices(eng, allCasters);
             const dp = encoder.beginRenderPass({
                 colorAttachments: [],
                 depthStencilAttachment: {
@@ -209,16 +295,25 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, light
                     depthClearValue: 1.0,
                 },
             });
-            dp.setPipeline(depthPipeline);
-            dp.setBindGroup(0, depthSceneBG);
-            drawCasters(dp, casters);
+            // Draw static casters with the standard depth pipeline.
+            if (staticInfra) {
+                dp.setPipeline(staticInfra.depthPipeline);
+                dp.setBindGroup(0, staticInfra.depthSceneBG);
+                drawCasters(dp, staticInfra.casters);
+            }
+            // Draw morphed casters with the morph-aware depth pipeline.
+            for (const mi of morphInfra) {
+                dp.setPipeline(mi.depthPipeline);
+                dp.setBindGroup(0, mi.depthSceneBG);
+                drawCasters(dp, mi.casters);
+            }
             dp.end();
-            return casters.length;
+            return allCasters.length;
         },
         lightMatrix,
         shadowsInfo,
         depthValues: depthValuesArr,
-        depthMeshBGL,
+        depthMeshBGL: staticInfra?.depthMeshBGL ?? morphInfra[0]!.depthMeshBGL,
         shadowParamsUBO,
         shadowUBO: sharedShadowUBO,
         config: {

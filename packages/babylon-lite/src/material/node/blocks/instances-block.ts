@@ -14,7 +14,10 @@ import type { BlockEmitter } from "../node-types.js";
 export const emitter: BlockEmitter = {
     className: "InstancesBlock",
     stage: "vertex",
-    emit(_block, _outputName, _stage, _state, _ctx) {
-        return { expr: "_NME_WORLD_MATRIX_", type: "mat4f" };
+    emit(_block, _outputName, _stage, state, _ctx) {
+        if (state.hasInstances) {
+            // TODO: wire per-instance world attributes. For now passthrough.
+        }
+        return { expr: "meshU.world", type: "mat4f" };
     },
 };

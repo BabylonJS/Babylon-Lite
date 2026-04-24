@@ -14,10 +14,11 @@ const HELPER_KEY = "nme_perturbNormal";
 const HELPER_WGSL = `
 fn nme_perturbNormal(worldPos: vec3<f32>, worldNormal: vec3<f32>, uv: vec2<f32>, sampled: vec3<f32>, strength: f32) -> vec3<f32> {
     // Construct ad-hoc TBN from screen-space derivatives.
+    // BJS negates dpdy to correct for WebGPU's framebuffer Y direction.
     let dp1 = dpdx(worldPos);
-    let dp2 = dpdy(worldPos);
+    let dp2 = -dpdy(worldPos);
     let duv1 = dpdx(uv);
-    let duv2 = dpdy(uv);
+    let duv2 = -dpdy(uv);
     let dp2perp = cross(dp2, worldNormal);
     let dp1perp = cross(worldNormal, dp1);
     let T = dp2perp * duv1.x + dp1perp * duv2.x;

@@ -39,6 +39,8 @@ export function createBuildState(): NodeBuildState {
         usesLightsUbo: false,
         usesMorphTargets: false,
         shadowLights: [],
+        hasSkeleton: false,
+        hasInstances: false,
     };
 }
 
@@ -136,7 +138,7 @@ function makeContext(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>
             if (targetStage !== stage) {
                 const vname = `v_${producer.id}_${outputName}`;
                 bridgeVarying(state, vname, result, targetStage, stage);
-                const bridged: NodeExpr = { expr: vname, type: result.type };
+                const bridged: NodeExpr = { expr: `in.${vname}`, type: result.type };
                 stageState.memo.set(key, bridged);
                 return bridged;
             }
@@ -188,11 +190,26 @@ export interface EmitResult {
  *  and emit the pair of WGSL shader strings. The caller is responsible for
  *  wrapping the result with the pipeline's bind-group / entry-point scaffolding
  *  (done by `node-pipeline.ts`). */
-export function emitGraph(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>, fragmentRootId: number, vertexRootId: number | null, shadowLights?: readonly { lightIndex: number; shadowType: "esm" | "pcf" }[]): EmitResult {
+export function emitGraph(
+    graph: NodeGraph,
+    loadedEmitters: Map<string, BlockEmitter>,
+    fragmentRootId: number,
+    vertexRootId: number | null,
+    shadowLights?: readonly { lightIndex: number; shadowType: "esm" | "pcf" }[],
+    meshCaps?: { hasSkeleton?: boolean; hasInstances?: boolean }
+): EmitResult {
     const state = createBuildState();
     if (shadowLights) {
         for (const sl of shadowLights) {
             state.shadowLights.push(sl);
+        }
+    }
+    if (meshCaps) {
+        if (meshCaps.hasSkeleton) {
+            state.hasSkeleton = true;
+        }
+        if (meshCaps.hasInstances) {
+            state.hasInstances = true;
         }
     }
     const ctx = makeContext(graph, loadedEmitters);

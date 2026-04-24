@@ -52,32 +52,24 @@ export const emitter: BlockEmitter = {
         const memoKey = `_refl_${block.id}_rgb`;
         let sample = state.fragment.memo.get(memoKey);
         if (!sample) {
-            const wp = block.inputs.get("worldPosition")?.source
-                ? ctx.cast(ctx.resolve(block, "worldPosition", stage, state), "vec3f").expr
-                : `vec3<f32>(0.0)`;
-            const wn = block.inputs.get("worldNormal")?.source
-                ? ctx.cast(ctx.resolve(block, "worldNormal", stage, state), "vec3f").expr
-                : `vec3<f32>(0.0, 1.0, 0.0)`;
-            const cp = block.inputs.get("cameraPosition")?.source
-                ? ctx.cast(ctx.resolve(block, "cameraPosition", stage, state), "vec3f").expr
-                : `_NME_CAMERA_POS_`;
+            const wp = block.inputs.get("worldPosition")?.source ? ctx.cast(ctx.resolve(block, "worldPosition", stage, state), "vec3f").expr : `vec3<f32>(0.0)`;
+            const wn = block.inputs.get("worldNormal")?.source ? ctx.cast(ctx.resolve(block, "worldNormal", stage, state), "vec3f").expr : `vec3<f32>(0.0, 1.0, 0.0)`;
+            const cp = block.inputs.get("cameraPosition")?.source ? ctx.cast(ctx.resolve(block, "cameraPosition", stage, state), "vec3f").expr : `_NME_CAMERA_POS_`;
 
             const t = ctx.temp(state, "refl");
             const body: string[] = [
                 `let _v${t} = normalize(${cp} - ${wp});`,
                 `let _r${t} = reflect(-_v${t}, normalize(${wn}));`,
-                `let _uv${t} = vec2<f32>(atan2(_r${t}.z, _r${t}.x) * ${RECIPROCAL_PI2} + 0.5, acos(clamp(_r${t}.y, -1.0, 1.0)) * ${RECIPROCAL_PI});`,
+                // BJS flips the V coordinate after computing equirectangular UVs.
+                `let _uv${t} = vec2<f32>(atan2(_r${t}.z, _r${t}.x) * ${RECIPROCAL_PI2} + 0.5, 1.0 - acos(clamp(_r${t}.y, -1.0, 1.0)) * ${RECIPROCAL_PI});`,
                 `let _s${t} = textureSample(nodeTex_${bindingName}, nodeSamp_${bindingName}, _uv${t});`,
             ];
-            const gamma = (block.serialized["gammaSpace"] as boolean | undefined) ?? true;
-            if (gamma) {
-                body.push(`let _lin${t} = pow(max(_s${t}.xyz, vec3<f32>(0.0)), vec3<f32>(2.2));`);
-                state.fragment.body.push(body.join("\n"));
-                sample = { expr: `_lin${t}`, type: "vec3f" };
-            } else {
-                state.fragment.body.push(body.join("\n"));
-                sample = { expr: `_s${t}.xyz`, type: "vec3f" };
-            }
+            // BJS's NME ReflectionTextureBlock does NOT apply gamma conversion
+            // in the shader — it samples and uses raw values regardless of gammaSpace.
+            // The NME expression graph operates in gamma space (textures are non-sRGB),
+            // so the reflection must stay in gamma space too.
+            state.fragment.body.push(body.join("\n"));
+            sample = { expr: `_s${t}.xyz`, type: "vec3f" };
             state.fragment.memo.set(memoKey, sample);
         }
 

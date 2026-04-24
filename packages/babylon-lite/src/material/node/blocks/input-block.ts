@@ -117,10 +117,12 @@ function emitSystemValue(block: NodeBlock, stage: Stage, state: NodeBuildState):
             return { expr: "meshU.world", type: "mat4f" };
         case 2: // View
             return { expr: "sceneU.view", type: "mat4f" };
-        case 3: // WorldView
-            return { expr: "(sceneU.view * meshU.world)", type: "mat4f" };
-        case 5: // ViewProjection
+        case 3: // Projection
+            return { expr: "sceneU.projection", type: "mat4f" };
+        case 4: // ViewProjection
             return { expr: "sceneU.viewProjection", type: "mat4f" };
+        case 5: // WorldView
+            return { expr: "(sceneU.view * meshU.world)", type: "mat4f" };
         case 6: // WorldViewProjection
             return { expr: "(sceneU.viewProjection * meshU.world)", type: "mat4f" };
         case 7: // CameraPosition

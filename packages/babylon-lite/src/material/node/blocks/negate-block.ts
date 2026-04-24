@@ -1,2 +1,2 @@
 import { unaryEmitter } from "./_math-factory.js";
-export const emitter = unaryEmitter("NegateBlock", (v) => `-${v}`);
+export const emitter = unaryEmitter("NegateBlock", (v) => `-${v}`, undefined, "value");

@@ -9,6 +9,7 @@ import { formatFloat } from "./_math-factory.js";
 
 export const emitter: BlockEmitter = {
     className: "TransformBlock",
+    stage: "vertex",
     emit(block, _outputName, stage, state, ctx) {
         const vector = ctx.resolve(block, "vector", stage, state);
         const transform = ctx.resolve(block, "transform", stage, state);

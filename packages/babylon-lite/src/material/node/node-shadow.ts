@@ -49,9 +49,7 @@ export function emitShadow(
         varyings.push({ name: `vPosFromLight${suf}`, type: "vec4<f32>" });
         varyings.push({ name: `vDepthMetric${suf}`, type: "f32" });
     }
-    const vertLines: string[] = [
-        `let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`,
-    ];
+    const vertLines: string[] = [`let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`];
     const dispatchLines: string[] = [`var _sf = vec4<f32>(1.0);`];
     let nextBinding = startBinding;
     for (const sl of shadowLights) {
@@ -69,6 +67,7 @@ export function emitShadow(
                 `@group(1) @binding(${texBinding}) var shadowTex${suf}: texture_depth_2d;`,
                 `@group(1) @binding(${sampBinding}) var shadowComp${suf}: sampler_comparison;`,
                 `fn computeShadowPCF${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+    if (depthMetric < 0.0 || depthMetric > 1.0) { return 1.0; }
     let clipSpace = posFromLight.xyz / posFromLight.w;
     let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }

@@ -7,7 +7,10 @@
         "maxRegionMad": 0.03,
         "maxRawKB": 93,
         "description": "glTF PBR model, IBL environment, hemispheric light, arc-rotate camera.",
-        "tags": ["pbr", "gltf"]
+        "tags": [
+            "pbr",
+            "gltf"
+        ]
     },
     {
         "id": 2,
@@ -17,7 +20,10 @@
         "maxRegionMad": 0.01,
         "maxRawKB": 46.2,
         "description": "StandardMaterial sphere with Blinn-Phong, directional light, ground plane.",
-        "tags": ["std", "procedural"]
+        "tags": [
+            "std",
+            "procedural"
+        ]
     },
     {
         "id": 3,
@@ -26,7 +32,11 @@
         "maxMad": 0.01,
         "maxRawKB": 53.5,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
-        "tags": ["fog", "procedural", "std"]
+        "tags": [
+            "fog",
+            "procedural",
+            "std"
+        ]
     },
     {
         "id": 4,
@@ -35,7 +45,11 @@
         "maxMad": 0.08,
         "maxRawKB": 72.4,
         "description": "DirectionalLight, ESM shadow map with blur, heightmap ground, torus caster.",
-        "tags": ["shadow", "procedural", "std"]
+        "tags": [
+            "shadow",
+            "procedural",
+            "std"
+        ]
     },
     {
         "id": 5,
@@ -45,7 +59,10 @@
         "maxRegionMad": 0.08,
         "maxRawKB": 88.6,
         "description": "glTF Alien model with PBR, skeleton/bones, normal map, hemispheric light.",
-        "tags": ["pbr", "gltf"]
+        "tags": [
+            "pbr",
+            "gltf"
+        ]
     },
     {
         "id": 6,
@@ -54,7 +71,10 @@
         "maxMad": 0.5,
         "maxRawKB": 74,
         "description": "Procedural sphere with PBR specular-glossiness, environment IBL, no direct light.",
-        "tags": ["pbr", "procedural"]
+        "tags": [
+            "pbr",
+            "procedural"
+        ]
     },
     {
         "id": 7,
@@ -64,7 +84,11 @@
         "maxRegionMad": 0.66,
         "maxRawKB": 104.5,
         "description": "Animated dinosaur, PBR materials, IBL environment, skeletal animation.",
-        "tags": ["pbr", "gltf", "anim"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "anim"
+        ]
     },
     {
         "id": 8,
@@ -73,7 +97,11 @@
         "maxMad": 0.027,
         "maxRawKB": 74.2,
         "description": "Glass sphere with HDR environment, alpha transparency, and custom exposure.",
-        "tags": ["pbr", "procedural", "env"]
+        "tags": [
+            "pbr",
+            "procedural",
+            "env"
+        ]
     },
     {
         "id": 9,
@@ -82,7 +110,10 @@
         "maxMad": 0.01,
         "maxRawKB": 59.9,
         "description": "Sponza palace loaded from .babylon format. Standard materials with diffuse textures, point lights.",
-        "tags": ["std", "babylon"]
+        "tags": [
+            "std",
+            "babylon"
+        ]
     },
     {
         "id": 10,
@@ -91,7 +122,10 @@
         "maxMad": 0.011,
         "maxRawKB": 54.1,
         "description": "PBR metallic-roughness sphere: golden base, metallic=0, roughness=1, hemispheric light only.",
-        "tags": ["pbr", "procedural"]
+        "tags": [
+            "pbr",
+            "procedural"
+        ]
     },
     {
         "id": 11,
@@ -100,7 +134,10 @@
         "maxMad": 0.01,
         "maxRawKB": 83.4,
         "description": "Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
-        "tags": ["pbr", "gltf"]
+        "tags": [
+            "pbr",
+            "gltf"
+        ]
     },
     {
         "id": 12,
@@ -109,7 +146,10 @@
         "maxMad": 0.027,
         "maxRawKB": 99.6,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
-        "tags": ["pbr", "gltf"]
+        "tags": [
+            "pbr",
+            "gltf"
+        ]
     },
     {
         "id": 13,
@@ -118,7 +158,10 @@
         "maxMad": 0.008,
         "maxRawKB": 88.9,
         "description": "12 spheres with varying metallic/roughness baseColorFactor, default environment.",
-        "tags": ["pbr", "gltf"]
+        "tags": [
+            "pbr",
+            "gltf"
+        ]
     },
     {
         "id": 14,
@@ -127,7 +170,10 @@
         "maxMad": 0.42,
         "maxRawKB": 93.2,
         "description": "glTF Flight Helmet with PBR materials, DDS cube skybox, default environment.",
-        "tags": ["pbr", "gltf"]
+        "tags": [
+            "pbr",
+            "gltf"
+        ]
     },
     {
         "id": 15,
@@ -136,7 +182,10 @@
         "maxMad": 0.01,
         "maxRawKB": 46.5,
         "description": "Two SpotLights (red + green) with different exponents on a ground plane. Multi-light support.",
-        "tags": ["std", "procedural"]
+        "tags": [
+            "std",
+            "procedural"
+        ]
     },
     {
         "id": 16,
@@ -145,7 +194,10 @@
         "maxMad": 0.01,
         "maxRawKB": 47.4,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
-        "tags": ["std", "procedural"]
+        "tags": [
+            "std",
+            "procedural"
+        ]
     },
     {
         "id": 17,
@@ -154,7 +206,10 @@
         "maxMad": 0.021,
         "maxRawKB": 89.8,
         "description": "Mixed PBR + Standard materials with thin instances and per-instance color. Env IBL, negative scale.",
-        "tags": ["pbr", "procedural"]
+        "tags": [
+            "pbr",
+            "procedural"
+        ]
     },
     {
         "id": 18,
@@ -163,7 +218,11 @@
         "maxMad": 0.011,
         "maxRawKB": 60.6,
         "description": "FreeCamera + SpotLight PCF shadow generator. Ground receives hard shadows from box.",
-        "tags": ["std", "procedural", "shadow"]
+        "tags": [
+            "std",
+            "procedural",
+            "shadow"
+        ]
     },
     {
         "id": 19,
@@ -172,7 +231,10 @@
         "maxMad": 0.031,
         "maxRawKB": 69.2,
         "description": "Sphere with PBR clearcoat layer (IOR=2.0). DDS environment for glossy reflections.",
-        "tags": ["pbr", "env"]
+        "tags": [
+            "pbr",
+            "env"
+        ]
     },
     {
         "id": 20,
@@ -181,7 +243,10 @@
         "maxMad": 0.49,
         "maxRawKB": 80.1,
         "description": "2500 PBR spheres with random emissive colors, parent hierarchy, per-frame rotation.",
-        "tags": ["pbr", "env"]
+        "tags": [
+            "pbr",
+            "env"
+        ]
     },
     {
         "id": 21,
@@ -190,7 +255,10 @@
         "maxMad": 0.01,
         "maxRawKB": 89.3,
         "description": "Cloth mesh with PBR sheen layer, blue albedo + fire texture. Country environment.",
-        "tags": ["pbr", "env"]
+        "tags": [
+            "pbr",
+            "env"
+        ]
     },
     {
         "id": 22,
@@ -199,7 +267,12 @@
         "maxMad": 0.07,
         "maxRawKB": 101.8,
         "description": "Scene 4 variant with PBR ground material. Tests PBR multi-light shadow receiving (ESM + PCF).",
-        "tags": ["pbr", "shadow", "procedural", "multilight"]
+        "tags": [
+            "pbr",
+            "shadow",
+            "procedural",
+            "multilight"
+        ]
     },
     {
         "id": 23,
@@ -208,7 +281,10 @@
         "maxMad": 0.12,
         "maxRawKB": 78.5,
         "description": "PBR metallic sphere with anisotropic reflections. DDS environment, no direct light.",
-        "tags": ["pbr", "env"]
+        "tags": [
+            "pbr",
+            "env"
+        ]
     },
     {
         "id": 24,
@@ -217,7 +293,10 @@
         "maxMad": 0.06,
         "maxRawKB": 59.7,
         "description": "Hill Valley town loaded from .babylon format. Pre-baked lighting, standard materials, free camera.",
-        "tags": ["std", "babylon"]
+        "tags": [
+            "std",
+            "babylon"
+        ]
     },
     {
         "id": 25,
@@ -246,7 +325,11 @@
         "maxMad": 1,
         "maxRawKB": 79.4,
         "description": "glTF refrigerator with KHR_materials_variants, White variant selected. ArcRotate camera, hemispheric light.",
-        "tags": ["pbr", "gltf", "variants"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "variants"
+        ]
     },
     {
         "id": 28,
@@ -255,7 +338,12 @@
         "maxMad": 0.02,
         "maxRawKB": 84,
         "description": "ClearCoatTest.gltf (6×3 grid: clearcoat variants) with default environment (IBL only). Matches PG #YG3BBF#33.",
-        "tags": ["pbr", "gltf", "env", "clearcoat"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "clearcoat"
+        ]
     },
     {
         "id": 29,
@@ -264,17 +352,29 @@
         "maxMad": 0.015,
         "maxRawKB": 87.4,
         "description": "SheenCloth.gltf (KHR_materials_sheen + KHR_texture_transform 30× tiling) with default environment (IBL only). Matches PG #YG3BBF#2.",
-        "tags": ["pbr", "gltf", "env", "sheen", "texture-transform"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "sheen",
+            "texture-transform"
+        ]
     },
     {
         "id": 30,
         "slug": "scene30-volume-testing",
         "name": "Scene 30 — KHR_materials_volume_testing",
-        "maxMad": 20.0,
+        "maxMad": 20,
         "maxRawKB": 88.4,
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment. V1 env-only refraction. Matches PG #YG3BBF#16.",
         "note": "MAD ceiling temporarily relaxed (18.59 actual vs 0.02 target). Env-only refraction cannot show scene-behind-the-glass; full parity requires opaque-scene RTT, deferred to land with the frame-graph.",
-        "tags": ["pbr", "gltf", "env", "transmission", "volume"],
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "transmission",
+            "volume"
+        ],
         "skipParity": true,
         "skipPerf": true
     },
@@ -285,7 +385,12 @@
         "maxMad": 0.01,
         "maxRawKB": 78.2,
         "description": "EmissiveStrengthTest.glb (grid of materials with varying emissive_strength) against default IBL environment. Matches PG #YG3BBF#52.",
-        "tags": ["pbr", "gltf", "env", "emissive"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "emissive"
+        ]
     },
     {
         "id": 32,
@@ -294,7 +399,12 @@
         "maxMad": 0.01,
         "maxRawKB": 78.1,
         "description": "UnlitTest.glb (KHR_materials_unlit) against default IBL environment. Base color output directly with no lighting. Matches PG #YG3BBF#53.",
-        "tags": ["pbr", "gltf", "env", "unlit"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "unlit"
+        ]
     },
     {
         "id": 33,
@@ -304,7 +414,13 @@
         "maxRawKB": 88.7,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "note": "MAD ceiling temporarily relaxed (0.5 actual vs 0.02 target). Glass lampshade needs correct transmission parity (see scene 30) to tighten maxMad below 0.5.",
-        "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "lights-punctual",
+            "transmission"
+        ]
     },
     {
         "id": 34,
@@ -313,7 +429,13 @@
         "maxMad": 0.02,
         "maxRawKB": 88.5,
         "description": "CubeVisibility.glb — three cubes: green always-visible, blue blinking via KHR_animation_pointer on its visibility flag, two reds hidden via KHR_node_visibility. Default IBL env. Matches PG #YG3BBF#55.",
-        "tags": ["pbr", "gltf", "env", "node-visibility", "animation-pointer"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "node-visibility",
+            "animation-pointer"
+        ]
     },
     {
         "id": 35,
@@ -322,7 +444,12 @@
         "maxMad": 0.02,
         "maxRawKB": 81.1,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
-        "tags": ["pbr", "gltf", "env", "gpu-instancing"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "gpu-instancing"
+        ]
     },
     {
         "id": 36,
@@ -331,7 +458,11 @@
         "maxMad": 0.5,
         "maxRawKB": 51.1,
         "description": "Box with a .basis texture as diffuse+emissive. Transcoder fetched from the BJS CDN; auto-selects BC7/ASTC/ETC2/BC3/RGBA32 per device. Matches PG #4RN0VF.",
-        "tags": ["std", "procedural", "basis"]
+        "tags": [
+            "std",
+            "procedural",
+            "basis"
+        ]
     },
     {
         "id": 37,
@@ -340,7 +471,15 @@
         "maxMad": 0.02,
         "maxRawKB": 92.9,
         "description": "SheenWoodLeatherSofa.glb (KHR_materials_sheen + KHR_materials_specular + KHR_texture_transform + EXT_texture_webp) with default IBL environment (no skybox, no ground). Matches PG #YG3BBF#58.",
-        "tags": ["pbr", "gltf", "env", "sheen", "specular", "texture-transform", "webp"]
+        "tags": [
+            "pbr",
+            "gltf",
+            "env",
+            "sheen",
+            "specular",
+            "texture-transform",
+            "webp"
+        ]
     },
     {
         "id": 38,
@@ -349,7 +488,10 @@
         "maxMad": 0.02,
         "maxRawKB": 62.3,
         "description": "Cylinder, cone, plane, disc, ring, polyhedron, ribbon, tube, and extruded shape rendered with StandardMaterial. Parity check against BJS MeshBuilder.",
-        "tags": ["std", "procedural"]
+        "tags": [
+            "std",
+            "procedural"
+        ]
     },
     {
         "id": 40,
@@ -369,7 +511,10 @@
         "maxMad": 0.5,
         "maxRawKB": 60,
         "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
-        "tags": ["nme", "procedural"]
+        "tags": [
+            "nme",
+            "procedural"
+        ]
     },
     {
         "id": 61,
@@ -378,25 +523,34 @@
         "maxMad": 0.5,
         "maxRawKB": 60,
         "description": "Node Material with a vertex→fragment varying: normal attribute remapped as `normal * 0.5 + 0.5` → FragmentOutput.rgb. Exercises ScaleBlock, AddBlock, and attribute-to-fragment bridging.",
-        "tags": ["nme", "procedural"]
+        "tags": [
+            "nme",
+            "procedural"
+        ]
     },
     {
         "id": 62,
         "slug": "scene62-nme-texture",
         "name": "Scene 62 — NME Diffuse Texture",
         "maxMad": 0.5,
-        "maxRawKB": 60,
+        "maxRawKB": 62,
         "description": "Node Material sampling a 2D texture (crate.png) through a TextureBlock driven by the UV attribute. Exercises texture/sampler BGL slot allocation and `NodeInputHandle.texture` pass-through.",
-        "tags": ["nme", "procedural"]
+        "tags": [
+            "nme",
+            "procedural"
+        ]
     },
     {
         "id": 63,
         "slug": "scene63-nme-light",
         "name": "Scene 63 — NME Directional Light",
         "maxMad": 0.5,
-        "maxRawKB": 60,
+        "maxRawKB": 63,
         "description": "Node Material with one DirectionalLight: position/normal world-transformed, driven through LightBlock (Blinn-Phong) to FragmentOutput.rgb. Exercises the shared lights UBO binding + module-scope helper assembly.",
-        "tags": ["nme", "procedural"]
+        "tags": [
+            "nme",
+            "procedural"
+        ]
     },
     {
         "id": 64,
@@ -405,15 +559,36 @@
         "maxMad": 0.5,
         "maxRawKB": 65,
         "description": "Node Material with a MorphTargetsBlock: one morph target shifts every vertex along +Y at weight=1.0 so the sphere renders translated upward. Proves morph-texture + weights-UBO binding and the @builtin(vertex_index) plumbing.",
-        "tags": ["nme", "procedural"]
+        "tags": [
+            "nme",
+            "procedural"
+        ]
     },
     {
         "id": 65,
         "slug": "scene65-nme-shadow",
         "name": "Scene 65 — NME Shadow Receive",
         "maxMad": 0.1,
-        "maxRawKB": 78,
+        "maxRawKB": 79,
         "description": "Node Material with shadow receive: sphere casts onto ground plane, both lit by one DirectionalLight with an ESM shadow generator. Only meshes with receiveShadows=true are attenuated; the sphere stays fully lit. Same JSON graph as scene 63 — shadow integration is externally driven via parseNodeMaterialFromSnippet({ shadowGenerators }).",
-        "tags": ["nme", "procedural", "shadows"]
+        "tags": [
+            "nme",
+            "procedural",
+            "shadows"
+        ]
+    },
+    {
+        "id": 66,
+        "slug": "scene66-nme-big",
+        "name": "Scene 66 — NME Full Playground (AT7YY5#6)",
+        "maxMad": 0.1,
+        "description": "Full NME playground integration test. Fetches the AT7YY5#6 snippet at runtime (136 blocks, PBR-style with diffuse/ambient/specular/emissive/normal/opacity/lightmap textures + equirect reflection, plus instances/bones/morph/discard/fog/front-facing and PCF directional shadow receive).",
+        "tags": [
+            "nme",
+            "procedural",
+            "shadows",
+            "morph",
+            "reflection"
+        ]
     }
 ]

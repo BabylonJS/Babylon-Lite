@@ -80,6 +80,12 @@ interface RawSource {
     outputNodes?: number[];
 }
 
+interface RawWithAlpha {
+    alphaMode?: number;
+    _needAlphaBlending?: boolean;
+    forceAlphaBlending?: boolean;
+}
+
 // ─── Parse ───────────────────────────────────────────────────────────
 
 /** Parse a deserialized NME JSON root into the internal NodeGraph model. */
@@ -99,17 +105,21 @@ export function parseNodeMaterialSource(source: unknown): NodeGraph {
 
         const inputs = new Map<string, NodeConnection>();
         for (const ri of rb.inputs ?? []) {
+            // BJS serializes some composite input names with trailing whitespace
+            // (e.g. "xyz ", "rgb ") to avoid collisions with same-named outputs. Normalize.
+            const inName = (ri.name ?? "").trim();
+            const outName = typeof ri.targetConnectionName === "string" ? ri.targetConnectionName.trim() : undefined;
             const source: NodeConnectionRef | null =
-                typeof ri.targetBlockId === "number" && typeof ri.targetConnectionName === "string" ? { blockId: ri.targetBlockId, outputName: ri.targetConnectionName } : null;
-            inputs.set(ri.name, {
-                name: ri.name,
+                typeof ri.targetBlockId === "number" && typeof outName === "string" ? { blockId: ri.targetBlockId, outputName: outName } : null;
+            inputs.set(inName, {
+                name: inName,
                 source,
             });
         }
 
         const outputs = new Set<string>();
         for (const ro of rb.outputs ?? []) {
-            outputs.add(ro.name);
+            outputs.add((ro.name ?? "").trim());
         }
 
         blocks.set(rb.id, {
@@ -142,7 +152,24 @@ export function parseNodeMaterialSource(source: unknown): NodeGraph {
         }
     }
 
-    return { blocks, namedInputs };
+    // Alpha mode + blending determination.
+    // Priority: forceAlphaBlending > explicit _needAlphaBlending > graph-derived.
+    const rawAlpha = raw as RawWithAlpha;
+    const alphaMode: number = typeof rawAlpha.alphaMode === "number" ? rawAlpha.alphaMode : 0;
+    let needsAlphaBlending: boolean;
+    if (rawAlpha.forceAlphaBlending === true) {
+        needsAlphaBlending = true;
+    } else if (typeof rawAlpha._needAlphaBlending === "boolean") {
+        needsAlphaBlending = rawAlpha._needAlphaBlending;
+    } else {
+        // Derive from graph: blending is needed when FragmentOutputBlock's `a`
+        // input is connected AND alphaMode > 0 (non-disabled).
+        const fragOut = findBlockByClassName({ blocks, namedInputs, alphaMode, needsAlphaBlending: false }, "FragmentOutputBlock");
+        const aConn = fragOut?.inputs.get("a");
+        needsAlphaBlending = alphaMode > 0 && !!aConn?.source;
+    }
+
+    return { blocks, namedInputs, alphaMode, needsAlphaBlending };
 }
 
 function stripBabylonPrefix(customType: string): string {

@@ -47,6 +47,11 @@ export interface ParseNodeMaterialOptions {
     /** For each entry in shadowGenerators, the index of the owning light in
      *  scene.lights. When omitted, defaults to [0, 1, …] (first N lights). */
     readonly shadowLightIndices?: readonly number[];
+    /** When true, BonesBlock produces a skinned world matrix (requires all
+     *  meshes using this material to have a skeleton). Default false. */
+    readonly hasSkeleton?: boolean;
+    /** When true, InstancesBlock wires per-instance attributes. Default false. */
+    readonly hasInstances?: boolean;
 }
 
 // ─── Internal shape (what the renderable + updater read) ────────────
@@ -58,6 +63,8 @@ export interface NodeMaterialInternal extends NodeMaterial {
     /** Ordered list of vertex attribute names that the pipeline's vertex buffers expect. */
     readonly _vertexAttrNames: readonly string[];
     readonly _shadowGenerators: readonly import("../../shadow/shadow-generator.js").ShadowGenerator[];
+    /** Whether this material requires alpha blending (derived from graph + JSON flags). */
+    readonly _needsAlphaBlending: boolean;
     _sceneUBO: GPUBuffer | null;
     _nodeUBO: GPUBuffer | null;
     _uboDirty: boolean;
@@ -76,7 +83,8 @@ interface UniformSlot {
 // ─── Parse entry point ──────────────────────────────────────────────
 
 export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippetId: string, options: ParseNodeMaterialOptions = {}): Promise<NodeMaterial> {
-    const source = options.json !== undefined ? (typeof options.json === "string" ? JSON.parse(options.json) : options.json) : await fetchSnippetSource(snippetId, options.snippetServer);
+    const source =
+        options.json !== undefined ? (typeof options.json === "string" ? JSON.parse(options.json) : options.json) : await fetchSnippetSource(snippetId, options.snippetServer);
 
     const graph = parseNodeMaterialSource(source);
     const emitters = await loadGraphEmitters(graph);
@@ -100,7 +108,10 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         }
     }
 
-    const { vertexWgsl, fragmentWgsl, state } = emitGraph(graph, emitters, fragRoot.id, vertRoot ? vertRoot.id : null, shadowLightsPre);
+    const { vertexWgsl, fragmentWgsl, state } = emitGraph(graph, emitters, fragRoot.id, vertRoot ? vertRoot.id : null, shadowLightsPre, {
+        hasSkeleton: options.hasSkeleton ?? false,
+        hasInstances: options.hasInstances ?? false,
+    });
 
     // Dynamic import: the PCF/ESM WGSL helpers live in node-shadow.ts and
     // are only loaded when the caller supplied shadowGenerators. Scenes
@@ -115,6 +126,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         engine: engineInternal,
         format: engineInternal.format,
         msaaSamples: engineInternal.msaaSamples,
+        alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
         shadowEmitter,
     });
 
@@ -161,6 +173,32 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         inputs[name] = handle;
     }
 
+    // Second pass: write defaults for unnamed / constant InputBlocks whose
+    // values exist in the UBO but were skipped by the namedInputs loop above
+    // (e.g. blocks with empty names or isConstant=true).
+    for (const block of graph.blocks.values()) {
+        if (block.className !== "InputBlock") {
+            continue;
+        }
+        const fieldName = sanitize(block.name || `input${block.id}`);
+        if (uniformValues.has(fieldName)) {
+            continue;
+        } // already handled above
+        const offset = compile.nodeUboOffsets.get(fieldName);
+        if (offset === undefined) {
+            continue;
+        }
+        const type = bjsTypeToNodeType((block.serialized["type"] as number | undefined) ?? 0x10);
+        if (type === "mat4f") {
+            continue;
+        }
+        const len = floatCount(type);
+        const defaultValues = extractDefault(block.serialized["value"], type);
+        const arr = new Float32Array(len);
+        arr.set(defaultValues);
+        uniformValues.set(fieldName, { name: fieldName, type, offsetBytes: offset, values: arr });
+    }
+
     const attrNames = state.vertexAttributes.map((a) => a.name);
 
     // Per-texture handles (populated from options.textures, then exposed via inputs).
@@ -193,6 +231,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _graph: graph,
         _vertexAttrNames: attrNames,
         _shadowGenerators: options.shadowGenerators ?? [],
+        _needsAlphaBlending: graph.needsAlphaBlending,
         _sceneUBO: null,
         _nodeUBO: null,
         _uboDirty: false,
@@ -209,11 +248,21 @@ function sanitize(name: string): string {
 }
 
 function bjsTypeToNodeType(t: number): NodeValueType {
-    if (t === 0x1 || t === 0x2) return "f32";
-    if (t === 0x4) return "vec2f";
-    if (t === 0x8 || t === 0x20) return "vec3f";
-    if (t === 0x10 || t === 0x40) return "vec4f";
-    if (t === 0x80) return "mat4f";
+    if (t === 0x1 || t === 0x2) {
+        return "f32";
+    }
+    if (t === 0x4) {
+        return "vec2f";
+    }
+    if (t === 0x8 || t === 0x20) {
+        return "vec3f";
+    }
+    if (t === 0x10 || t === 0x40) {
+        return "vec4f";
+    }
+    if (t === 0x80) {
+        return "mat4f";
+    }
     throw new Error(`NodeMaterial: unsupported BJS connection point type 0x${t.toString(16)}`);
 }
 
@@ -248,7 +297,9 @@ function extractDefault(raw: unknown, type: NodeValueType): number[] {
     }
     if (Array.isArray(raw)) {
         const out = raw.slice(0, n).map((v) => (typeof v === "number" ? v : 0));
-        while (out.length < n) out.push(0);
+        while (out.length < n) {
+            out.push(0);
+        }
         return out;
     }
     if (raw && typeof raw === "object") {
@@ -260,7 +311,9 @@ function extractDefault(raw: unknown, type: NodeValueType): number[] {
             }
         }
         if (picks.length > 0) {
-            while (picks.length < n) picks.push(0);
+            while (picks.length < n) {
+                picks.push(0);
+            }
             return picks.slice(0, n);
         }
         const rgba: number[] = [];
@@ -270,7 +323,9 @@ function extractDefault(raw: unknown, type: NodeValueType): number[] {
             }
         }
         if (rgba.length > 0) {
-            while (rgba.length < n) rgba.push(1);
+            while (rgba.length < n) {
+                rgba.push(1);
+            }
             return rgba.slice(0, n);
         }
     }

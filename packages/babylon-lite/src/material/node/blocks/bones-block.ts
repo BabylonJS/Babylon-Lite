@@ -28,10 +28,14 @@ export const emitter: BlockEmitter = {
     className: "BonesBlock",
     stage: "vertex",
     emit(block, _outputName, stage, state, ctx) {
+        const world = ctx.resolve(block, "world", stage, state);
+        if (!state.hasSkeleton) {
+            // No skeleton on any bound mesh — pass-through the world matrix.
+            return world;
+        }
         state.vertex.helpers.set(HELPER_KEY, HELPER_WGSL);
         const indices = ctx.cast(ctx.resolve(block, "matricesIndices", stage, state), "vec4f").expr;
         const weights = ctx.cast(ctx.resolve(block, "matricesWeights", stage, state), "vec4f").expr;
-        const world = ctx.resolve(block, "world", stage, state).expr;
-        return { expr: `(${world} * nme_skinningMatrix(${indices}, ${weights}))`, type: "mat4f" };
+        return { expr: `(${world.expr} * nme_skinningMatrix(${indices}, ${weights}))`, type: "mat4f" };
     },
 };

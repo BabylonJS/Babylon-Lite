@@ -47,7 +47,7 @@ fn nme_computeLighting(
             let diff = mix(L.vLightDirection.xyz, L.vLightDiffuse.rgb, nl);
             result.diffuse = result.diffuse + diff * diffuseColor * sh;
             let H = normalize(viewDir + normalize(L.vLightData.xyz));
-            let sf = pow(max(0.0, dot(N, H)), max(1.0, glossiness * 255.0));
+            let sf = pow(max(0.0, dot(N, H)), max(1.0, glossiness));
             result.specular = result.specular + sf * L.vLightSpecular.rgb * specularColor * sh;
             aggShadow = aggShadow + sh;
             numLights = numLights + 1.0;
@@ -75,7 +75,7 @@ fn nme_computeLighting(
         result.diffuse = result.diffuse + L.vLightDiffuse.rgb * diffuseColor * NdotL * atten * sh;
         let H = normalize(lv + viewDir);
         let NdotH = max(0.0, dot(N, H));
-        let specFactor = pow(NdotH, max(1.0, glossiness * 255.0));
+        let specFactor = pow(NdotH, max(1.0, glossiness));
         result.specular = result.specular + L.vLightSpecular.rgb * specularColor * specFactor * atten * sh;
         aggShadow = aggShadow + sh;
         numLights = numLights + 1.0;
@@ -88,4 +88,3 @@ fn nme_computeLighting(
     return result;
 }
 `;
-

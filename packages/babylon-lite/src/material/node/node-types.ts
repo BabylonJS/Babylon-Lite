@@ -43,6 +43,12 @@ export interface NodeGraph {
     readonly blocks: ReadonlyMap<number, NodeBlock>;
     /** Named overridable inputs (uniform InputBlocks) — name → block id. */
     readonly namedInputs: ReadonlyMap<string, number>;
+    /** BJS alpha mode (0=DISABLE, 2=COMBINE, …). Determines the GPU blend equation. */
+    readonly alphaMode: number;
+    /** Whether the material requires alpha blending at runtime.
+     *  Derived from the graph (FragmentOutputBlock.a is connected) plus
+     *  JSON-level overrides (`_needAlphaBlending`, `forceAlphaBlending`). */
+    readonly needsAlphaBlending: boolean;
 }
 
 // ─── WGSL value types ───────────────────────────────────────────────
@@ -110,6 +116,13 @@ export interface NodeBuildState {
      *  lighting loop. Zero entries = no bindings, no WGSL — invisible to scenes
      *  without shadows. */
     shadowLights: { lightIndex: number; shadowType: "esm" | "pcf" }[];
+    /** When false (default), BonesBlock emits a pass-through of its `world`
+     *  input — no skeleton binding is required. Set to true only when every
+     *  mesh using this material has a skeleton. */
+    hasSkeleton: boolean;
+    /** When false (default), InstancesBlock passes through the uniform world
+     *  matrix. Set to true when thin-instance attributes are bound. */
+    hasInstances: boolean;
 }
 
 export interface NodeTextureBinding {

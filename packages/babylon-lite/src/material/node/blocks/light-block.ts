@@ -38,7 +38,7 @@ export const emitter: BlockEmitter = {
         state.usesLightsUbo = true;
 
         const memoKey = `_light_${block.id}_call`;
-        let callExpr = state.fragment.memo.get(memoKey);
+        const callExpr = state.fragment.memo.get(memoKey);
         let callVar: string;
         if (!callExpr) {
             const wp = resolveOptional(block, "worldPosition", "vec3<f32>(0.0)", stage, state, ctx, "vec3f");
@@ -46,10 +46,12 @@ export const emitter: BlockEmitter = {
             const cp = resolveOptional(block, "cameraPosition", "_NME_CAMERA_POS_", stage, state, ctx, "vec3f");
             const dc = resolveOptional(block, "diffuseColor", "vec3<f32>(1.0)", stage, state, ctx, "vec3f");
             const sc = resolveOptional(block, "specularColor", "vec3<f32>(1.0)", stage, state, ctx, "vec3f");
-            const gl = resolveOptional(block, "glossiness", "0.5", stage, state, ctx, "f32");
+            const gl = resolveOptional(block, "glossiness", "1.0", stage, state, ctx, "f32");
+            // BJS multiplies glossiness * glossPower; default glossPower is 1024 when unconnected.
+            const gp = resolveOptional(block, "glossPower", "1024.0", stage, state, ctx, "f32");
             const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `vec4<f32>(1.0)`;
             callVar = `_lt${ctx.temp(state, "light")}`;
-            state.fragment.body.push(`let ${callVar} = nme_computeLighting(${wp}, ${wn}, ${cp}, ${dc}, ${sc}, ${gl}, ${sf});`);
+            state.fragment.body.push(`let ${callVar} = nme_computeLighting(${wp}, ${wn}, ${cp}, ${dc}, ${sc}, (${gl}) * (${gp}), ${sf});`);
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         } else {
             callVar = callExpr.expr;
