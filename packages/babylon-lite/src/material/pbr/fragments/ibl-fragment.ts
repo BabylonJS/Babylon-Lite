@@ -79,8 +79,8 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
     return {
         id: "ibl",
 
-        // SH coefficients live in the unified SceneUniforms struct
-        // (shaders/scene-uniforms.wgsl); no per-fragment scene UBO contribution needed.
+        // SH coefficients are in the PBR template's baseSceneUboFields (not here)
+        // to preserve fixed scene UBO layout compatibility.
 
         bindings: [
             { name: "brdfLUT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },

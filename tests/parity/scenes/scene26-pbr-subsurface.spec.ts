@@ -15,6 +15,8 @@ const sceneConfig = getSceneConfig(26);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene26-pbr-subsurface");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 26 skipped via skipParity in scene-config.json");
+
 test("Scene 26 — PBR Subsurface matches Babylon.js reference", async ({ page }) => {
     test.setTimeout(90_000);
 

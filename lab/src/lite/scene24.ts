@@ -1,7 +1,7 @@
 // Scene 24: Hill Valley (.babylon) — pre-baked lighting, standard materials
 // Based on playground #TJIGQ1#349
 
-import { addToScene, startEngine, createEngine, createSceneContext, attachFreeControl, loadBabylon } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, attachFreeControl, loadBabylon, registerScene } from "babylon-lite";
 import type { FreeCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -15,7 +15,8 @@ async function main(): Promise<void> {
 
     attachFreeControl(scene.camera as FreeCamera, canvas, scene);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

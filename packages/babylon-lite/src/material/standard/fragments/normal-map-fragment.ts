@@ -8,7 +8,7 @@
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { StandardMaterialProps } from "../standard-material.js";
-import type { SampledTexture } from "../../../texture/texture-2d.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-pipeline.js";
 import { HAS_BUMP_TEXTURE } from "../standard-pipeline.js";
 import { WGSL_PERTURB_NORMAL } from "../../../shader/wgsl-helpers.js";
@@ -47,7 +47,7 @@ export const bumpStdExt: StdExt = {
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: SampledTexture[]): void {
+    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.bumpTexture) {
             out.push(mat.bumpTexture);
         }

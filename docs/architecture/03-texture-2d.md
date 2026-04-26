@@ -1,4 +1,4 @@
-# Module: SampledTexture + KTX Loader
+# Module: Texture2D + KTX Loader
 > Package paths:
 > - `packages/babylon-lite/src/texture/texture-2d.ts` — Image-based texture loading
 > - `packages/babylon-lite/src/texture/ktx-loader.ts` — KTX1 compressed texture loading
@@ -11,7 +11,7 @@ Loads textures into WebGPU from two sources:
 1. **Image textures** (`loadTexture2D`) — Loads PNG/JPG from URL via `ImageBitmap` → `rgba8unorm` GPU texture with optional mipmap generation.
 2. **KTX1 compressed textures** (`loadKtxTexture2D`) — Loads GPU-compressed textures (ASTC, BC/DXT, ETC2) from KTX1 files with automatic format selection and PNG fallback. Fully tree-shakable: zero bytes if unused.
 
-Both return the same `SampledTexture` interface — callers can't tell whether they got compressed or uncompressed.
+Both return the same `Texture2D` interface — callers can't tell whether they got compressed or uncompressed.
 
 ---
 
@@ -20,13 +20,15 @@ Both return the same `SampledTexture` interface — callers can't tell whether t
 ### Interfaces
 
 ```typescript
-export interface SampledTexture {
+export interface Texture2D {
   texture: GPUTexture;
   view: GPUTextureView;
   sampler: GPUSampler;
+  width: number;
+  height: number;
 }
 
-export interface SampledTextureOptions {
+export interface Texture2DOptions {
   /** Generate mipmaps. Default true. */
   mipMaps?: boolean;
   /** Address mode U. Default 'repeat'. */
@@ -51,8 +53,8 @@ export interface SampledTextureOptions {
 export async function loadTexture2D(
   engine: Engine,
   url: string,
-  opts?: SampledTextureOptions,
-): Promise<SampledTexture>;
+  opts?: Texture2DOptions,
+): Promise<Texture2D>;
 
 /**
  * Load a texture with KTX compressed format auto-selection and fallback.
@@ -66,8 +68,8 @@ export async function loadKtxTexture2D(
   engine: Engine,
   baseUrl: string,
   suffixes: string[],
-  opts?: SampledTextureOptions,
-): Promise<SampledTexture>;
+  opts?: Texture2DOptions,
+): Promise<Texture2D>;
 ```
 
 ### Imports
@@ -227,7 +229,7 @@ loadTexture2D(device, url, opts)
   └─ 8. Return { texture, view: texture.createView(), sampler, width, height }
 ```
 
-**No cleanup/dispose API** — the returned `SampledTexture` is an immutable value object. GPU resources are released by garbage collection or manual `texture.destroy()` by the caller.
+**No cleanup/dispose API** — the returned `Texture2D` is an immutable value object. GPU resources are released by garbage collection or manual `texture.destroy()` by the caller.
 
 ---
 
@@ -236,11 +238,11 @@ loadTexture2D(device, url, opts)
 | Babylon Lite                        | Babylon.js                                                |
 |-------------------------------------|-----------------------------------------------------------|
 | `loadTexture2D(device, url, opts)` | `new Texture(url, scene, ...options)`                     |
-| `SampledTexture` interface              | `Texture` class (internal GPU texture + sampler)          |
-| `SampledTextureOptions.mipMaps`         | `Texture.noMipmap` (inverted: `mipMaps = !noMipmap`)     |
-| `SampledTextureOptions.addressModeU`    | `Texture.wrapU` (enum values differ)                      |
-| `SampledTextureOptions.addressModeV`    | `Texture.wrapV`                                           |
-| `SampledTextureOptions.invertY`         | `Texture.invertY` (default true in both)                  |
+| `Texture2D` interface              | `Texture` class (internal GPU texture + sampler)          |
+| `Texture2DOptions.mipMaps`         | `Texture.noMipmap` (inverted: `mipMaps = !noMipmap`)     |
+| `Texture2DOptions.addressModeU`    | `Texture.wrapU` (enum values differ)                      |
+| `Texture2DOptions.addressModeV`    | `Texture.wrapV`                                           |
+| `Texture2DOptions.invertY`         | `Texture.invertY` (default true in both)                  |
 | `maxAnisotropy: 4`                | `Texture.anisotropicFilteringLevel` (default 4)           |
 | `format: 'rgba8unorm'`            | Standard RGBA format for loaded images                     |
 | `generateMipmaps()` (render-based) | `Engine.generateMipmaps()` (may use compute or render)    |
@@ -294,7 +296,7 @@ loadKtxTexture2D(engine, "grid.png", ["-astc.ktx", "-dxt.ktx", "-etc2.ktx"])
   ├─ For each supported suffix (try all, not just first):
   │   ├─ Rewrite URL: "grid.png" → "grid-dxt.ktx"
   │   ├─ fetch → ArrayBuffer → parseKtx1 → uploadCompressed
-  │   └─ On success: return SampledTexture
+  │   └─ On success: return Texture2D
   │   └─ On failure: warn, try next suffix
   └─ Fallback: loadTexture2D(engine, "grid.png")
 ```

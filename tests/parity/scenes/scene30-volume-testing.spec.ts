@@ -15,6 +15,8 @@ const sceneConfig = getSceneConfig(30);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene30-volume-testing");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 30 skipped via skipParity in scene-config.json");
+
 test("Scene 30 — KHR_materials_volume_testing matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 30 });

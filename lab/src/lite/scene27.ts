@@ -1,7 +1,7 @@
 // Scene 27: Material Variants — matches playground #C1QH9J#78
 // Loads a refrigerator glTF with KHR_materials_variants, selects "White" variant.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, loadGltf, attachControl, selectVariant } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, loadGltf, attachControl, selectVariant, registerScene } from "babylon-lite";
 
 const MODEL_URL = "https://brave-engine-bucket.s3.ap-southeast-1.amazonaws.com/s3-public/assets/models/props/var_Refrigerator.glb";
 
@@ -23,7 +23,8 @@ async function main(): Promise<void> {
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 5));
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

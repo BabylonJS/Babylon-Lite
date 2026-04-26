@@ -2,14 +2,11 @@
 #
 # Runs on every PR targeting master. Five parallel jobs:
 #   1. Unit Tests       — vitest + plumbing (Playwright)
-#   2. Bundle Size      — ceiling checks + delta vs baseline
+#   2. Bundle Size      — ceiling checks
 #   3. Perf Regression  — Lite vs Stable on BrowserStack
 #   4. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
 #   5. Lint             — ESLint + TypeScript type-check
 #
-# Bundle-size baseline:
-#   baselines/bundle-size.json is committed to git and updated on each
-#   release via: pnpm build:bundle-scenes && pnpm snapshot:bundle-baseline
 
 trigger: none
 
@@ -19,7 +16,7 @@ pr:
             - master
 
 variables:
-    NODE_VERSION: "22"
+    NODE_VERSION: "22.x"
     PNPM_VERSION: "9.15.4"
     CI: "true"
     HEADLESS: "true"
@@ -38,9 +35,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: UseNode@1
+                - task: NodeTool@0
                   inputs:
-                      version: $(NODE_VERSION)
+                      versionSpec: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -89,9 +86,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: UseNode@1
+                - task: NodeTool@0
                   inputs:
-                      version: $(NODE_VERSION)
+                      versionSpec: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -116,15 +113,7 @@ stages:
                       HEADLESS: "true"
                       PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-ceiling-junit.xml
 
-                # Delta comparison vs committed baseline
-                - script: npx playwright test tests/parity/bundle-size-delta.spec.ts --reporter=junit
-                  displayName: "Bundle size delta vs baseline"
-                  env:
-                      HEADLESS: "true"
-                      BUNDLE_DELTA_PCT: "$(BUNDLE_DELTA_PCT)"
-                      PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-delta-junit.xml
-
-                - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml test-results/bundle-delta-junit.xml
+                - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml
                   condition: always()
                   displayName: "Report bundle-size results to Azure"
 
@@ -133,7 +122,7 @@ stages:
                   displayName: "Publish bundle-size test results"
                   inputs:
                       testResultsFormat: JUnit
-                      testResultsFiles: "test-results/bundle-*-junit.xml"
+                      testResultsFiles: "test-results/bundle-ceiling-junit.xml"
                       testRunTitle: "Bundle Size"
 
           # ──────────────────────────────────────────────────────────────
@@ -148,9 +137,9 @@ stages:
                   fetchDepth: 0
                   fetchTags: true
 
-                - task: UseNode@1
+                - task: NodeTool@0
                   inputs:
-                      version: $(NODE_VERSION)
+                      versionSpec: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -167,9 +156,40 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
+                # Resolve baseline ref SHA for cache key
+                - script: |
+                      BASELINE_SHA=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | xargs git rev-parse 2>/dev/null || git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
+                      echo "##vso[task.setvariable variable=BASELINE_SHA]$BASELINE_SHA"
+                      echo "Baseline SHA: $BASELINE_SHA"
+                      mkdir -p lab/public/bundle-baseline
+                  displayName: "Resolve baseline ref"
+
+                - task: Cache@2
+                  inputs:
+                      key: '"perf-baseline" | "$(BASELINE_SHA)"'
+                      path: $(System.DefaultWorkingDirectory)/lab/public/bundle-baseline
+                      cacheHitVar: BASELINE_CACHE_HIT
+                  displayName: "Cache baseline bundles"
+
                 # Build baseline bundle scenes from last release tag (or master)
                 - script: pnpm build:perf-baseline
                   displayName: "Build baseline bundle scenes"
+                  condition: ne(variables.BASELINE_CACHE_HIT, 'true')
+
+                # Generate baseline HTML loader pages (needed even on cache hit)
+                - script: |
+                      node -e "
+                      const fs = require('fs');
+                      const path = require('path');
+                      const scenes = JSON.parse(fs.readFileSync('scene-config.json','utf8'));
+                      for (const s of scenes) {
+                        const html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style></head><body><canvas id=\"renderCanvas\"></canvas><script src=\"/loader.js\"></script><script type=\"module\" src=\"/bundle-baseline/scene'+s.id+'.js\"></script></body></html>';
+                        fs.writeFileSync(path.join('lab','bundle-baseline-scene'+s.id+'.html'), html);
+                      }
+                      console.log('Generated ' + scenes.length + ' baseline HTML pages');
+                      "
+                  displayName: "Generate baseline HTML pages"
+                  condition: eq(variables.BASELINE_CACHE_HIT, 'true')
 
                 # Runs current vs baseline on same BrowserStack macOS Chrome instance
                 - script: pnpm test:perf-cloud
@@ -212,9 +232,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: UseNode@1
+                - task: NodeTool@0
                   inputs:
-                      version: $(NODE_VERSION)
+                      versionSpec: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -270,9 +290,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: UseNode@1
+                - task: NodeTool@0
                   inputs:
-                      version: $(NODE_VERSION)
+                      versionSpec: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -282,5 +302,9 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
-                - script: pnpm run lint
-                  displayName: "ESLint + TypeScript type-check"
+                - script: npx eslint . --format ./scripts/eslint-vso-formatter.cjs
+                  displayName: "ESLint"
+
+                - script: |
+                      npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check"

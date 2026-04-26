@@ -8,7 +8,7 @@
  */
 
 import type { EngineContextInternal } from "../engine/engine.js";
-import type { SampledTexture } from "../texture/texture-2d.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 
 // ── Texture ref counting ─────────────────────────────────────
 
@@ -21,18 +21,18 @@ function texRefs(): WeakMap<GPUTexture, number> {
     return _texRefs;
 }
 
-/** Increment ref count on a SampledTexture. First acquire sets count to 1. */
-export function acquireTexture(tex: SampledTexture): void {
+/** Increment ref count on a Texture2D. First acquire sets count to 1. */
+export function acquireTexture(tex: Texture2D): void {
     const m = texRefs();
     m.set(tex.texture, (m.get(tex.texture) ?? 0) + 1);
 }
 
 /**
- * Decrement ref count on a SampledTexture.
+ * Decrement ref count on a Texture2D.
  * Calls `tex.texture.destroy()` when count reaches 0.
  * Returns true if the texture was destroyed.
  */
-export function releaseTexture(tex: SampledTexture): boolean {
+export function releaseTexture(tex: Texture2D): boolean {
     const m = texRefs();
     const c = (m.get(tex.texture) ?? 1) - 1;
     if (c <= 0) {
@@ -95,25 +95,4 @@ export function getOrCreateSampler(engine: EngineContextInternal, desc: GPUSampl
 export function clearSamplerCache(engine: EngineContextInternal): void {
     const device = engine.device;
     _samplerCache?.delete(device);
-}
-
-// Static descriptors for the canned sampler helpers — declared once at module
-// scope so each call to getXxxSampler reuses the same object (no per-call alloc).
-const _nearestDesc: GPUSamplerDescriptor = { magFilter: "nearest", minFilter: "nearest" };
-const _bilinearDesc: GPUSamplerDescriptor = { magFilter: "linear", minFilter: "linear" };
-const _trilinearDesc: GPUSamplerDescriptor = { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" };
-
-/** Nearest-neighbor sampler (mag/min: nearest, no mipmap). All other descriptor fields use WebGPU defaults. */
-export function getNearestSampler(engine: EngineContextInternal): GPUSampler {
-    return getOrCreateSampler(engine, _nearestDesc);
-}
-
-/** Bilinear sampler (mag/min: linear, no mipmap). All other descriptor fields use WebGPU defaults. */
-export function getBilinearSampler(engine: EngineContextInternal): GPUSampler {
-    return getOrCreateSampler(engine, _bilinearDesc);
-}
-
-/** Trilinear sampler (mag/min/mipmap: linear). All other descriptor fields use WebGPU defaults. */
-export function getTrilinearSampler(engine: EngineContextInternal): GPUSampler {
-    return getOrCreateSampler(engine, _trilinearDesc);
 }

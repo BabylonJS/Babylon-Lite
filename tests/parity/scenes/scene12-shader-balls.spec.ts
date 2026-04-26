@@ -17,6 +17,8 @@ const sceneConfig = getSceneConfig(12);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene12-shader-balls");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 12 skipped via skipParity in scene-config.json");
+
 test("Scene 12 — PBR Shader Balls matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
 

@@ -20,7 +20,7 @@ import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getBilinearSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import {
     syncCasterMatrices,
@@ -237,7 +237,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         primitive: { topology: "triangle-list", cullMode: "none" },
     });
 
-    const blurSampler = getBilinearSampler(eng);
+    const blurSampler = getOrCreateSampler(eng, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
 
     // Blur H params — delta in output (blurSize) texel space, matching BJS PostProcess
     const blurHData = new Float32Array([1.0 / blurSize, 0, 0, 0]);
@@ -263,7 +263,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         ],
     });
 
-    const outputSampler = getBilinearSampler(eng);
+    const outputSampler = getOrCreateSampler(eng, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
 
     const lightMatrix = viewProj;
     const shadowsInfo = new Float32Array([darkness, 0, depthScale, frustumEdgeFalloff]);

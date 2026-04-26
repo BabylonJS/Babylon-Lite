@@ -10,7 +10,7 @@
  */
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
-import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import type { PbrTemplateExt } from "./pbr-template-ext.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -37,6 +37,8 @@ return F0 + (F90 - F0) * (t2 * t2 * t);
 `;
 
 export interface PbrLightConfig {
+    /** Scene UBO fields for light data */
+    readonly sceneUboFields: readonly UboField[];
     /** WGSL: compute L, NdotL, lightAtten from N + scene data */
     readonly lightVectorCode: string;
     /** WGSL: compute directDiffuse from surfaceAlbedo, NdotL, lightColor, etc. */
@@ -95,6 +97,53 @@ export interface PbrTemplateConfig {
     readonly anisoTBBlock?: string;
     /** Anisotropy WGSL: direct lighting D/G replacement (dynamically imported). */
     readonly anisoDirectDG?: string;
+    /** Optional extension config for advanced features (UV transforms, UV2, vertex colors).
+     *  When undefined, base template defaults to master-like behavior (no feature strings). */
+    readonly ext?: PbrTemplateExt;
+}
+
+/**
+ * Return the scene UBO field list used by the PBR base template.
+ * Cheap list-building only — no WGSL assembly. Exposed so callers that only
+ * need the UBO layout (e.g. scene UBO spec computation) can avoid paying the
+ * full createPbrTemplate cost.
+ */
+export function getPbrBaseSceneUboFields(light: PbrLightConfig | null, hasMultiLight: boolean, hasIbl: boolean): readonly UboField[] {
+    // When hasMultiLight, light data comes from the lights UBO — scene UBO fields
+    // are kept as reserved padding for layout compatibility with background shaders.
+    const lightUboFields: readonly UboField[] =
+        hasMultiLight || !light
+            ? [
+                  { name: "lightDirection", type: "vec3<f32>" },
+                  { name: "lightIntensity", type: "f32" },
+                  { name: "lightDiffuseColor", type: "vec3<f32>" },
+                  { name: "_pad1", type: "f32" },
+                  { name: "lightGroundColor", type: "vec3<f32>" },
+              ]
+            : light.sceneUboFields;
+
+    // SH coefficients are included in the base template (not the IBL fragment)
+    // because the scene UBO writer uses fixed offsets for SH data.
+    const SH_NAMES = ["L00", "L1_1", "L10", "L11", "L2_2", "L2_1", "L20", "L21", "L22"] as const;
+    const shFields: UboField[] = hasIbl
+        ? SH_NAMES.flatMap((n, i) => [
+              { name: `vSpherical${n}`, type: "vec3<f32>" as const },
+              { name: `_shPad${i}`, type: "f32" as const },
+          ])
+        : [];
+
+    return [
+        { name: "viewProj", type: "mat4x4<f32>" },
+        { name: "cameraPosition", type: "vec3<f32>" },
+        { name: "_pad0", type: "f32" },
+        ...lightUboFields,
+        { name: "envRotationY", type: "f32" },
+        ...shFields,
+        { name: "exposureLinear", type: "f32" },
+        { name: "contrast", type: "f32" },
+        { name: "lodGenerationScale", type: "f32" },
+        { name: "_imgPad1", type: "f32" },
+    ];
 }
 
 /**
@@ -121,10 +170,12 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         hasOcclusion = false,
         hasEmissiveColor = false,
         hasReflectanceExt = false,
+        hasIbl = false,
         hasAnisotropy = false,
         anisoBrdfFunctions = "",
         anisoTBBlock = "",
         anisoDirectDG = "",
+        ext,
     } = config;
     const hasNormal = normalMode === "tangent";
     const hasCotangentNormal = normalMode === "cotangent";
@@ -139,6 +190,9 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         baseVertexAttributes.push({ name: "tangent", type: "vec4<f32>", gpuFormat: "float32x4", arrayStride: 16 });
     }
     baseVertexAttributes.push({ name: "uv", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+    if (ext) {
+        baseVertexAttributes.push(...ext.extraVertexAttributes);
+    }
 
     // ── Base varyings ───────────────────────────────────────────
     const baseVaryings: Varying[] = [
@@ -149,12 +203,13 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         baseVaryings.push({ name: "worldTangent", type: "vec3<f32>" }, { name: "worldBitangent", type: "vec3<f32>" });
     }
     baseVaryings.push({ name: "uv", type: "vec2<f32>" });
+    if (ext) {
+        baseVaryings.push(...ext.extraVaryings);
+    }
 
-    // ── Base mesh UBO fields (transform + uv transform) ────────────
-    const baseMeshUboFields: UboField[] = [
-        { name: "world", type: "mat4x4<f32>" },
-        { name: "uvTransformST", type: "vec4<f32>" },
-    ];
+    // ── Base mesh UBO fields (world matrix only — UV transforms are
+    // per-texture now, emitted on the material UBO when hasUvTransform). ─
+    const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
 
     // ── Base material UBO fields ────────────────────────────────────
     const baseMaterialUboFields: UboField[] = [
@@ -165,13 +220,14 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         // glTF metallicFactor / roughnessFactor (default 1.0) — applied over MR texture channels.
         { name: "metallicFactor", type: "f32" },
         { name: "roughnessFactor", type: "f32" },
-        { name: "_mrfPad0", type: "f32" },
+        { name: "normalScale", type: "f32" },
         { name: "_mrfPad1", type: "f32" },
-        // Anisotropy UBO field kept here because its registration path does not
-        // yet flow through the composer fragment pipeline (see pbr-renderable:
-        // _registerPbrMaterialUboWriter). The reflectance/emissive/clearcoat/sheen
-        // UBO fields are now contributed by their own fragments.
+        // Anisotropy UBO field stays on the base template because anisotropy is
+        // template-only (no ShaderFragment) — the anisotropyExt just writes its
+        // slice through the unified ext.writeUbo hook.
         ...(hasAnisotropy ? [{ name: "anisotropyParams", type: "vec4<f32>" as const }] : []),
+        // ── Extension fields (per-texture UV transforms, etc.) ─
+        ...(ext ? ext.extraMaterialUboFields : []),
     ];
 
     // ── Helper: texture + sampler binding pair ────────────────────
@@ -180,12 +236,18 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         { name: sampler, type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
     ];
 
+    // ── Base scene UBO fields ───────────────────────────────────
+    const baseSceneUboFields: readonly UboField[] = getPbrBaseSceneUboFields(hasMultiLight || !light ? null : light, hasMultiLight, hasIbl);
+
     // ── Base bindings (always-present textures) ─────────────────
     const baseBindings: BindingDecl[] = [...tex2d("baseColorTexture", "baseColorSampler")];
     if (hasAnyNormal) {
         baseBindings.push(...tex2d("normalTexture", "normalSampler_"));
     }
     baseBindings.push(...tex2d("ormTexture", "ormSampler"));
+    if (ext) {
+        baseBindings.push(...ext.extraBindings);
+    }
     if (hasEmissiveTexture) {
         baseBindings.push(...tex2d("emissiveTexture", "emissiveSampler"));
     }
@@ -213,7 +275,8 @@ out.worldTangent = (finalWorld * vec4<f32>(T_local, 0.0)).xyz;
 out.worldBitangent = (finalWorld * vec4<f32>(B_local, 0.0)).xyz;`
         : "";
 
-    const vertexTemplate = `${SCENE_UBO_WGSL}
+    const vertexTemplate = `/*SU*/
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*VH*/
@@ -228,31 +291,35 @@ var finalWorld = mesh.world;
 /*VW*/
 let worldPos4 = finalWorld * vec4<f32>(${posVar}, 1.0);
 out.worldPos = worldPos4.xyz;
-out.clipPos = scene.viewProjection * worldPos4;
+out.clipPos = scene.viewProj * worldPos4;
 out.worldNormal = (finalWorld * vec4<f32>(normalize(${normVar}), 0.0)).xyz;
 ${tangentBlock}
-out.uv = uv * mesh.uvTransformST.xy + mesh.uvTransformST.zw;
-/*VB*/
+out.uv = uv;
+${ext ? ext.vertexBodyExtra : ""}/*VB*/
 return out;
 }`;
 
     // ── Fragment template ────────────────────────────────────────
 
     // Normal handling block
+    const normalUV = ext?.uvForNormal ?? "input.uv";
+    const normalScaleMod = ext?.normalScaleMod ?? "";
+    const normalRef = ext?.normalScaleMod ? "scaledNormal" : "normalMapRaw";
+    const normalRefCt = ext?.normalScaleMod ? "scaledNormalCT" : "normalMapSample";
     let normalBlock: string;
     if (hasNormal) {
-        normalBlock = `let normalMapRaw = textureSample(normalTexture, normalSampler_, input.uv).rgb * 2.0 - 1.0;
-let normalMapNorm = normalize(normalMapRaw);
+        normalBlock = `let normalMapRaw = textureSample(normalTexture, normalSampler_, ${normalUV}).rgb * 2.0 - 1.0;
+${normalScaleMod}let normalMapNorm = normalize(${normalRef});
 let N_geom = normalize(input.worldNormal);
 let TBN = mat3x3<f32>(input.worldTangent, input.worldBitangent, input.worldNormal);
 var N = normalize(TBN * normalMapNorm);`;
     } else if (hasCotangentNormal) {
-        normalBlock = `let normalMapSample = textureSample(normalTexture, normalSampler_, input.uv).rgb * 2.0 - 1.0;
-let N_geom = normalize(input.worldNormal);
+        normalBlock = `let normalMapSample = textureSample(normalTexture, normalSampler_, ${normalUV}).rgb * 2.0 - 1.0;
+${normalScaleMod.replace(/normalMapRaw/g, "normalMapSample").replace(/scaledNormal/g, "scaledNormalCT")}let N_geom = normalize(input.worldNormal);
 let dp1 = dpdx(input.worldPos);
 let dp2 = dpdy(input.worldPos);
-let duv1 = dpdx(input.uv);
-let duv2 = dpdy(input.uv);
+let duv1 = dpdx(${normalUV});
+let duv2 = dpdy(${normalUV});
 let dp2perp = cross(dp2, N_geom);
 let dp1perp = cross(N_geom, dp1);
 let tangent_ct = dp2perp * duv1.x + dp1perp * duv2.x;
@@ -260,7 +327,7 @@ let bitangent_ct = -(dp2perp * duv1.y + dp1perp * duv2.y);
 let det = max(dot(tangent_ct, tangent_ct), dot(bitangent_ct, bitangent_ct));
 let invmax = select(inverseSqrt(det), 0.0, det == 0.0);
 let cotangentFrame = mat3x3<f32>(tangent_ct * invmax, bitangent_ct * invmax, N_geom);
-var N = normalize(cotangentFrame * normalize(normalMapSample));`;
+var N = normalize(cotangentFrame * normalize(${normalRefCt}));`;
     } else {
         normalBlock = `let N_geom = normalize(input.worldNormal);
 var N = N_geom;`;
@@ -270,29 +337,32 @@ var N = N_geom;`;
     const anisotropyTBBlock = hasAnisotropy ? anisoTBBlock : "";
 
     // Base color decoding
+    const vertexColorMod = ext?.baseColorMod ?? "";
     const baseColorDecode = hasGammaAlbedo
         ? `var baseColor = pow(baseColorSample.rgb, vec3<f32>(2.2));
-var alpha = baseColorSample.a;`
+var alpha = baseColorSample.a;${vertexColorMod}`
         : `var baseColor = baseColorSample.rgb;
-var alpha = baseColorSample.a;`;
+var alpha = baseColorSample.a;${vertexColorMod}`;
 
     // Roughness / metallic
+    const specGlossUV = ext?.uvForSpecGloss ?? "input.uv";
     const roughnessMetallic = hasSpecGloss
-        ? `let specGloss = textureSample(specGlossTexture, specGlossSampler, input.uv);
+        ? `let specGloss = textureSample(specGlossTexture, specGlossSampler, ${specGlossUV});
 let roughness = clamp(1.0 - specGloss.a, 0.0, 1.0);
 let metallic = 0.0;`
         : `let roughness = clamp(orm.g * material.roughnessFactor, 0.0, 1.0);
 let metallic = orm.b * material.metallicFactor;`;
 
     // Emissive default (overridden by emissive-color fragment's AT slot)
+    const emissiveUV = ext?.uvForEmissive ?? "input.uv";
     const emissiveDefault = hasEmissiveColor
         ? ``
         : hasEmissiveTexture
-          ? `let emissive = textureSample(emissiveTexture, emissiveSampler, input.uv).rgb;`
+          ? `let emissive = textureSample(emissiveTexture, emissiveSampler, ${emissiveUV}).rgb;`
           : `let emissive = vec3<f32>(0.0);`;
 
-    // Occlusion default (overridden by reflectance fragment's AT slot)
-    const occlusionDefault = hasReflectanceExt ? `` : hasOcclusion ? `let occlusion = orm.r;` : `let occlusion = 1.0;`;
+    // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
+    const occlusionDefault = hasReflectanceExt ? `` : ext?.occlusionOverride ? ext.occlusionOverride : hasOcclusion ? `let occlusion = orm.r;` : `let occlusion = 1.0;`;
 
     // F0 computation (overridden by reflectance fragment's MF slot)
     const f0Default = hasReflectanceExt
@@ -383,7 +453,13 @@ return vec4<f32>(color, finalAlpha);`
 
     const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
 
-    const fragmentTemplate = `${SCENE_UBO_WGSL}
+    const fragmentHelpers = ext?.fragmentHelpers ?? "";
+    const fragmentPrelude = ext?.fragmentPrelude ?? "";
+    const baseColorUV = ext?.uvForBaseColor ?? "input.uv";
+    const ormUV = ext?.uvForOrm ?? "input.uv";
+
+    const fragmentTemplate = `/*SU*/
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*HF*/
@@ -393,11 +469,12 @@ ${BRDF_FUNCTIONS}
 ${acesBlock}
 ${anisoBrdfBlock}
 ${multiLightDecls}
+${fragmentHelpers}
 ${doubleSidedEntry}
-/*SV*/
-let baseColorSample = textureSample(baseColorTexture, baseColorSampler, input.uv);
+${fragmentPrelude}/*SV*/
+let baseColorSample = textureSample(baseColorTexture, baseColorSampler, ${baseColorUV});
 ${baseColorDecode}
-let orm = textureSample(ormTexture, ormSampler, input.uv).rgb;
+let orm = textureSample(ormTexture, ormSampler, ${ormUV}).rgb;
 ${occlusionDefault}
 ${roughnessMetallic}
 ${emissiveDefault}
@@ -406,7 +483,7 @@ ${normalBlock}
 ${doubleSidedFlip}
 ${anisotropyTBBlock}
 /*AC*/
-let V = normalize(scene.vEyePosition.xyz - input.worldPos);
+let V = normalize(scene.cameraPosition - input.worldPos);
 let NdotVUnclamped = dot(N, V);
 let NdotV = abs(NdotVUnclamped) + 0.0000001;
 ${f0Default}
@@ -433,6 +510,7 @@ ${alphaBlock}
         fragmentTemplate,
         baseMeshUboFields,
         baseMaterialUboFields,
+        baseSceneUboFields,
         baseVertexAttributes,
         baseVaryings,
         baseBindings,

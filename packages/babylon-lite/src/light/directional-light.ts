@@ -32,9 +32,9 @@ export function createDirectionalLight(direction: [number, number, number], inte
             specular: [1, 1, 1] as [number, number, number],
             intensity,
 
-            _registerExtension: async () => {
-                const { registerDirectionalLightExtension } = await import("./directional-light-extension.js");
-                registerDirectionalLightExtension();
+            _registerPbr: async () => {
+                const { registerDirectionalPbrLight } = await import("./directional-pbr.js");
+                registerDirectionalPbrLight();
             },
             _writeStandardLightUbo: (data: Float32Array, offset: number) => {
                 const o = offset;

@@ -22,11 +22,7 @@ export function mat4Identity(): Mat4 {
 /** Multiply two Mat4: out = a * b (column-major). */
 export function mat4Multiply(a: Mat4, b: Mat4): Mat4 {
     const out = new Float32Array(16) as Mat4;
-    for (let col = 0; col < 4; col++) {
-        for (let row = 0; row < 4; row++) {
-            out[col * 4 + row] = a[row]! * b[col * 4]! + a[4 + row]! * b[col * 4 + 1]! + a[8 + row]! * b[col * 4 + 2]! + a[12 + row]! * b[col * 4 + 3]!;
-        }
-    }
+    mat4MultiplyInto(out, 0, a, 0, b, 0);
     return out;
 }
 
@@ -65,24 +61,24 @@ export function mat4LookAtLH(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
         z: zAxis.x * xAxis.y - zAxis.y * xAxis.x,
     };
 
-    const out = new Float32Array(16) as Mat4;
-    out[0] = xAxis.x;
-    out[1] = yAxis.x;
-    out[2] = zAxis.x;
-    out[3] = 0;
-    out[4] = xAxis.y;
-    out[5] = yAxis.y;
-    out[6] = zAxis.y;
-    out[7] = 0;
-    out[8] = xAxis.z;
-    out[9] = yAxis.z;
-    out[10] = zAxis.z;
-    out[11] = 0;
-    out[12] = -(xAxis.x * eye.x + xAxis.y * eye.y + xAxis.z * eye.z);
-    out[13] = -(yAxis.x * eye.x + yAxis.y * eye.y + yAxis.z * eye.z);
-    out[14] = -(zAxis.x * eye.x + zAxis.y * eye.y + zAxis.z * eye.z);
-    out[15] = 1;
-    return out;
+    return new Float32Array([
+        xAxis.x,
+        yAxis.x,
+        zAxis.x,
+        0,
+        xAxis.y,
+        yAxis.y,
+        zAxis.y,
+        0,
+        xAxis.z,
+        yAxis.z,
+        zAxis.z,
+        0,
+        -(xAxis.x * eye.x + xAxis.y * eye.y + xAxis.z * eye.z),
+        -(yAxis.x * eye.x + yAxis.y * eye.y + yAxis.z * eye.z),
+        -(zAxis.x * eye.x + zAxis.y * eye.y + zAxis.z * eye.z),
+        1,
+    ]) as Mat4;
 }
 
 /** Perspective projection (left-handed, zero-to-one depth). Matches Babylon.js. */
@@ -100,63 +96,7 @@ export function mat4PerspectiveLH(fov: number, aspect: number, near: number, far
     return out;
 }
 
-/** Compute inverse of a Mat4. Returns null if singular. */
-export function mat4Invert(m: Mat4): Mat4 | null {
-    const a00 = m[0]!,
-        a01 = m[1]!,
-        a02 = m[2]!,
-        a03 = m[3]!;
-    const a10 = m[4]!,
-        a11 = m[5]!,
-        a12 = m[6]!,
-        a13 = m[7]!;
-    const a20 = m[8]!,
-        a21 = m[9]!,
-        a22 = m[10]!,
-        a23 = m[11]!;
-    const a30 = m[12]!,
-        a31 = m[13]!,
-        a32 = m[14]!,
-        a33 = m[15]!;
-
-    const b00 = a00 * a11 - a01 * a10;
-    const b01 = a00 * a12 - a02 * a10;
-    const b02 = a00 * a13 - a03 * a10;
-    const b03 = a01 * a12 - a02 * a11;
-    const b04 = a01 * a13 - a03 * a11;
-    const b05 = a02 * a13 - a03 * a12;
-    const b06 = a20 * a31 - a21 * a30;
-    const b07 = a20 * a32 - a22 * a30;
-    const b08 = a20 * a33 - a23 * a30;
-    const b09 = a21 * a32 - a22 * a31;
-    const b10 = a21 * a33 - a23 * a31;
-    const b11 = a22 * a33 - a23 * a32;
-
-    let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-    if (Math.abs(det) < 1e-10) {
-        return null;
-    }
-    det = 1 / det;
-
-    const out = new Float32Array(16) as Mat4;
-    out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
-    out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
-    out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
-    out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
-    out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
-    out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
-    out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
-    out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
-    out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
-    out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
-    out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
-    out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
-    out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
-    out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
-    out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
-    out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-    return out;
-}
+export { mat4Invert } from "./mat4-invert.js";
 
 /** Create a scaling matrix. */
 export function mat4Scale(x: number, y: number, z: number): Mat4 {
@@ -179,47 +119,16 @@ export function mat4Translation(x: number, y: number, z: number): Mat4 {
 
 /** Create a rotation matrix from a quaternion. */
 export function mat4FromQuat(qx: number, qy: number, qz: number, qw: number): Mat4 {
-    const xx = qx * qx,
-        yy = qy * qy,
-        zz = qz * qz;
-    const xy = qx * qy,
-        xz = qx * qz,
-        yz = qy * qz;
-    const wx = qw * qx,
-        wy = qw * qy,
-        wz = qw * qz;
-
     const out = new Float32Array(16) as Mat4;
-    out[0] = 1 - 2 * (yy + zz);
-    out[1] = 2 * (xy + wz);
-    out[2] = 2 * (xz - wy);
-    out[4] = 2 * (xy - wz);
-    out[5] = 1 - 2 * (xx + zz);
-    out[6] = 2 * (yz + wx);
-    out[8] = 2 * (xz + wy);
-    out[9] = 2 * (yz - wx);
-    out[10] = 1 - 2 * (xx + yy);
-    out[15] = 1;
+    mat4ComposeInto(out, 0, 0, 0, 0, qx, qy, qz, qw, 1, 1, 1);
     return out;
 }
 
 /** Compose TRS (translation * rotation * scale) into a single Mat4. */
 export function mat4Compose(tx: number, ty: number, tz: number, qx: number, qy: number, qz: number, qw: number, sx: number, sy: number, sz: number): Mat4 {
-    const rot = mat4FromQuat(qx, qy, qz, qw);
-    // Apply scale to rotation columns, then set translation
-    rot[0]! *= sx;
-    rot[1]! *= sx;
-    rot[2]! *= sx;
-    rot[4]! *= sy;
-    rot[5]! *= sy;
-    rot[6]! *= sy;
-    rot[8]! *= sz;
-    rot[9]! *= sz;
-    rot[10]! *= sz;
-    rot[12] = tx;
-    rot[13] = ty;
-    rot[14] = tz;
-    return rot;
+    const out = new Float32Array(16) as Mat4;
+    mat4ComposeInto(out, 0, tx, ty, tz, qx, qy, qz, qw, sx, sy, sz);
+    return out;
 }
 
 // ─── Zero-allocation helpers for per-frame animation ─────────────────

@@ -18,8 +18,8 @@
 |-----|--------|-------|
 | [00-overview.md](00-overview.md) | Overview | Repository structure, public API |
 | [01-shadow-generator.md](01-shadow-generator.md) | Shadow Generator | ESM + PCF shadows, depth pass, Gaussian blur |
-| [03-texture-2d.md](03-texture-2d.md) | SampledTexture | Image upload, mipmap gen, invertY |
-| [04-mesh-generators.md](04-mesh-generators.md) | Mesh Generators | Ground/heightmap, torus, sphere, box |
+| [03-texture-2d.md](03-texture-2d.md) | Texture2D | Image upload, mipmap gen, invertY |
+| [04-mesh-generators.md](04-mesh-generators.md) | Mesh Generators | Ground/heightmap, torus, sphere, box, cylinder, plane, disc, polyhedron, ribbon, tube, extrude |
 | [05-lights.md](05-lights.md) | Lights | Hemispheric, directional, point, spot + PBR variants, multi-light UBO |
 | [06-engine.md](06-engine.md) | Engine | GPU init, MSAA, render loop, swap chain |
 | [07-scene.md](07-scene.md) | Scene | SceneContext, one-way ownership |
@@ -149,7 +149,8 @@ babylon-lite/
 │   │   │   └── lights-ubo.ts     # Multi-light UBO packing
 │   │   ├── mesh/
 │   │   │   ├── mesh.ts            # Mesh type and GPU upload
-│   │   │   ├── mesh-factories.ts  # High-level createSphere/Box/Torus/Ground
+│   │   │   ├── mesh-factories.ts  # High-level createSphere/Box/Torus/Ground/Cylinder/Plane/Disc/Polyhedron/Ribbon/Tube/Extrude
+│   │   │   ├── path3d.ts          # Path3D parallel-transport frames (used by tube/extrude)
 │   │   │   ├── thin-instance.ts   # Thin instance CPU data model + public API
 │   │   │   ├── thin-instance-gpu.ts # GPU buffer sync (lazy-loaded by renderable)
 │   │   │   ├── create-sphere.ts   # Sphere geometry generator
@@ -262,11 +263,11 @@ loadEnvironment(scene: SceneContext, url: string, options: {
 }): Promise<EnvironmentTextures>
 loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures>
 loadBabylon(engine: Engine, url: string, opts?: LoadBabylonOptions): Promise<AssetContainer>
-loadTexture2D(engine: Engine, url: string, options?: SampledTextureOptions): Promise<SampledTexture>
+loadTexture2D(engine: Engine, url: string, options?: Texture2DOptions): Promise<Texture2D>
 loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size?: number): Promise<void>
 
 // Texture factories
-createSolidTexture2D(engine: Engine, r: number, g: number, b: number, a?: number): SampledTexture
+createSolidTexture2D(engine: Engine, r: number, g: number, b: number, a?: number): Texture2D
 
 // Lights
 createHemisphericLight(direction?: [number,number,number], intensity?: number): HemisphericLight
@@ -284,6 +285,13 @@ createSpotLight(
 createSphere(engine: Engine, options?: SphereOptions): Mesh
 createBox(engine: Engine, size?: number): Mesh
 createTorus(engine: Engine, options?: TorusOptions): Mesh
+createCylinder(engine: Engine, options?: CylinderOptions): Mesh
+createPlane(engine: Engine, options?: PlaneOptions): Mesh
+createDisc(engine: Engine, options?: DiscOptions): Mesh
+createPolyhedron(engine: Engine, options?: PolyhedronOptions): Mesh
+createRibbon(engine: Engine, options: RibbonOptions): Mesh
+createTube(engine: Engine, options: TubeOptions): Mesh
+createExtrudeShape(engine: Engine, options: ExtrudeShapeOptions): Mesh
 createGround(engine: Engine, options?: GroundOptions): Mesh
 createGroundFromHeightMap(engine: Engine, url: string, options: GroundOptions): Promise<Mesh>
 
@@ -454,12 +462,12 @@ interface SpotLight extends LightBase {
 
 // ─── Materials ───────────────────────────────────────────────────────
 interface PbrMaterialProps {
-  baseColorTexture?: SampledTexture;
-  normalTexture?: SampledTexture;
-  ormTexture?: SampledTexture;                               // R=occ, G=rough, B=metal
-  emissiveTexture?: SampledTexture;
+  baseColorTexture?: Texture2D;
+  normalTexture?: Texture2D;
+  ormTexture?: Texture2D;                               // R=occ, G=rough, B=metal
+  emissiveTexture?: Texture2D;
   emissiveColor?: [number, number, number];             // Linear RGB emissive (no texture)
-  specGlossTexture?: SampledTexture;                         // KHR_materials_pbrSpecularGlossiness
+  specGlossTexture?: Texture2D;                         // KHR_materials_pbrSpecularGlossiness
   doubleSided?: boolean;
   alpha?: number;                                        // Overall material alpha (default 1.0)
   alphaBlend?: boolean;                                  // Enable alpha blending (glTF BLEND)
@@ -469,8 +477,8 @@ interface PbrMaterialProps {
   occlusionStrength?: number;                            // AO strength from ORM R channel (default 1.0)
   metallicF0Factor?: number;                             // Dielectric F0 scale (default 1.0)
   metallicReflectanceColor?: [number, number, number];  // Tints dielectric reflectance (default [1,1,1])
-  metallicReflectanceTexture?: SampledTexture;               // RGB=reflectance tint, A=F0 scalar
-  reflectanceTexture?: SampledTexture;                       // RGB=reflectance tint only
+  metallicReflectanceTexture?: Texture2D;               // RGB=reflectance tint, A=F0 scalar
+  reflectanceTexture?: Texture2D;                       // RGB=reflectance tint only
   useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
   enableSpecularAA?: boolean;                            // Specular anti-aliasing on IBL alphaG
   gammaAlbedo?: boolean;                                 // Apply pow(2.2) sRGB→linear in shader
@@ -490,7 +498,7 @@ interface SheenProps {
   color?: [number, number, number];
   roughness?: number;
   intensity?: number;
-  texture?: SampledTexture;         // Sheen tint texture (modulates color)
+  texture?: Texture2D;         // Sheen tint texture (modulates color)
 }
 
 interface StandardMaterialProps {
@@ -500,24 +508,24 @@ interface StandardMaterialProps {
   specularPower: number;
   emissiveColor: [number, number, number];
   ambientColor: [number, number, number];
-  diffuseTexture: SampledTexture | null;
+  diffuseTexture: Texture2D | null;
   diffuseCoordIndex: 0 | 1;
-  emissiveTexture: SampledTexture | null;
-  bumpTexture: SampledTexture | null;
+  emissiveTexture: Texture2D | null;
+  bumpTexture: Texture2D | null;
   bumpLevel: number;
-  specularTexture: SampledTexture | null;
+  specularTexture: Texture2D | null;
   specularCoordIndex: 0 | 1;
-  ambientTexture: SampledTexture | null;
+  ambientTexture: Texture2D | null;
   ambientTexLevel: number;
   ambientCoordIndex: 0 | 1;
-  lightmapTexture: SampledTexture | null;
+  lightmapTexture: Texture2D | null;
   lightmapLevel: number;
   lightmapCoordIndex: 0 | 1;
-  opacityTexture: SampledTexture | null;
+  opacityTexture: Texture2D | null;
   opacityLevel: number;
   opacityFromRGB: boolean;
   alphaCutOff: number;
-  reflectionTexture: SampledTexture | null;
+  reflectionTexture: Texture2D | null;
   reflectionLevel: number;
   reflectionCoordMode: 1 | 2;
   uvScale: [number, number];
@@ -546,8 +554,8 @@ interface Mesh {
 interface MeshGPU { /* internal GPU state */ }
 
 // ─── Textures ────────────────────────────────────────────────────────
-interface SampledTexture { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler; }
-interface SampledTextureOptions {
+interface Texture2D { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler; width: number; height: number; }
+interface Texture2DOptions {
   mipMaps?: boolean;         // Generate mipmaps (default true)
   addressModeU?: GPUAddressMode;  // Default 'repeat'
   addressModeV?: GPUAddressMode;  // Default 'repeat'
@@ -832,7 +840,7 @@ interface SceneUniformUpdater { update(engine): void; }
 Parses GLB containers (binary glTF 2.0). Not a general-purpose loader — optimized for
 the meshes we encounter in reference scenes. Returns `Mesh[]` (not `GpuMesh[]` — that interface no longer exists).
 
-**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. Uses a `Map<string, SampledTexture>` with key format `${bitmapId}:${srgb?1:0}`.
+**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. Uses a `Map<string, Texture2D>` with key format `${bitmapId}:${srgb?1:0}`.
 
 **Animation extraction**: Creates `AnimationGroup[]` from glTF animations via `createAnimationGroups()`, registers `_beforeRender` callbacks on the scene for playback.
 

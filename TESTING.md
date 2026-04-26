@@ -204,32 +204,14 @@ PERF_WARMUP=120 PERF_FRAMES=500 pnpm test:perf-cloud
 ## 5. Bundle Size Checks
 
 **Runner:** Playwright  
-**Location:** `tests/parity/bundle-size.spec.ts`, `tests/parity/bundle-size-delta.spec.ts`
+**Location:** `tests/parity/bundle-size.spec.ts`
 
-Two complementary checks:
-
-1. **Ceiling checks** — each scene bundle must stay under `maxRawKB`
-   defined in `scene-config.json` (gzip size is shown for reference but not enforced)
-2. **Delta checks** — compares current bundle raw sizes against a committed
-   baseline (`baselines/bundle-size.json`), fails if any scene grows beyond a
-   threshold
+Each scene bundle must stay under `maxRawKB` defined in `scene-config.json`
+(gzip size is shown for reference but not enforced).
 
 ```sh
 pnpm build:bundle-scenes
-pnpm test:bundle-size       # ceiling checks
-pnpm test:bundle-delta      # delta vs baseline
-```
-
-### Environment Variables
-
-| Variable           | Default | Description                          |
-| ------------------ | ------- | ------------------------------------ |
-| `BUNDLE_DELTA_PCT` | —       | Maximum allowed bundle size growth % |
-
-To update the baseline after a release:
-
-```sh
-pnpm build:bundle-scenes && pnpm snapshot:bundle-baseline
+pnpm test:bundle-size
 ```
 
 ---

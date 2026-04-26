@@ -15,6 +15,8 @@ const sceneConfig = getSceneConfig(13);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene13-pbr-spheres");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 13 skipped via skipParity in scene-config.json");
+
 test("Scene 13 — PBR Spheres grid matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
 

@@ -132,12 +132,12 @@ interface BabylonLight {
 // ─── Standard-material texture-slot table ───────────────────────────
 // Declarative description of .babylon -> StandardMaterialProps texture mapping.
 // Each slot maps a source texture field on BabylonMaterial to a destination
-// SampledTexture field on StandardMaterialProps, plus optional level/coordIndex/extras.
+// Texture2D field on StandardMaterialProps, plus optional level/coordIndex/extras.
 type BabylonTexField = "diffuseTexture" | "bumpTexture" | "specularTexture" | "ambientTexture" | "lightmapTexture" | "opacityTexture" | "reflectionTexture";
 
 interface BabylonTexSlot {
     readonly src: BabylonTexField;
-    /** Destination SampledTexture field on StandardMaterialProps. */
+    /** Destination Texture2D field on StandardMaterialProps. */
     readonly dst: string;
     /** StandardMaterialProps field receiving `t.level`, if present. */
     readonly level?: string;

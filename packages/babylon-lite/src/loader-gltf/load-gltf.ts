@@ -5,24 +5,26 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
 import { createTransformNode } from "../scene/transform-node.js";
-import type { SampledTexture } from "../texture/texture-2d.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
 import type { Mesh, MeshGPU, MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { parseGlbContainer, resolveAccessor, buildParentMap, computeNodeWorldMatrix } from "./gltf-parser.js";
+import { parseGlbContainer, resolveAccessor, buildParentMap, computeNodeWorldMatrix, getTextureImageIndex } from "./gltf-parser.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
-import { assemblePbrProps, buildDefaultPbrTextures, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
-
+import type { TextureWrapFn } from "./gltf-pbr-builder.js";
+import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
     positions: Float32Array;
     normals: Float32Array;
     tangents: Float32Array | null;
     uvs: Float32Array;
+    uv2s: Float32Array | null;
+    colors: Float32Array | null;
     indices: Uint16Array | Uint32Array;
     vertexCount: number;
     indexCount: number;
@@ -60,6 +62,11 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // mesh extraction. Core loader knows zero feature names.
     const features = await loadGltfFeatures(json);
     const matExts: GltfFeature[] = features.filter((f) => f.applyMaterial);
+    // Compose every feature's wrapTexture hook into a single function. Identity
+    // when no feature contributes one (common case) — keeps the hot path free
+    // of per-texture work and lets bundlers tree-shake the helpers.
+    const texWraps = features.filter((f) => f.wrapTexture).map((f) => f.wrapTexture!);
+    const wrapTex: TextureWrapFn = texWraps.length === 0 ? identityTexWrap : (tex, ti) => texWraps.reduce((acc, w) => w(acc, ti), tex);
 
     // Run every feature's pre-mesh hook (e.g. Draco decompression) and merge
     // their primitive-keyed decode caches. Features without `preMesh` contribute
@@ -81,19 +88,29 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
         parentMap,
         worldMatrixCache,
         matExts,
+        wrapTex,
     };
 
     const meshes = await uploadMeshes(meshDatas, features, ctx);
 
-    // Build TransformNode hierarchy from glTF nodes.
-    const root = buildNodeHierarchy(json, meshes, meshDatas);
+    // Build TransformNode hierarchy from glTF nodes. Returns both the synthetic root
+    // and a glTF-node-index → SceneNode map (used by node-visibility + animation-pointer).
+    const { root, nodeMap } = buildNodeHierarchy(json, meshes, meshDatas);
+    ctx.nodeMap = nodeMap;
 
     // Run every feature's per-asset hook (animations, variants, …) and merge
-    // the returned AssetContainer fragments.
+    // the returned AssetContainer fragments. `entities` is appended (never
+    // overwritten) so features like KHR_lights_punctual can contribute lights
+    // without trampling the root TransformNode.
     const assetFragments = await Promise.all(features.flatMap((f) => (f.applyAsset ? [f.applyAsset(meshes, root, ctx)] : [])));
     const container: AssetContainer = { entities: [root] };
     for (const frag of assetFragments) {
-        Object.assign(container, frag);
+        if (frag.entities?.length) {
+            container.entities.push(...frag.entities);
+        }
+        const { entities: _ignored, ...rest } = frag;
+        void _ignored;
+        Object.assign(container, rest);
     }
     return container;
 }
@@ -143,6 +160,10 @@ const hasMatExt =
     (suffix: string) =>
     (json: any): boolean =>
         json.extensionsUsed?.includes(_MAT_EXT + suffix);
+const hasExt =
+    (name: string) =>
+    (json: any): boolean =>
+        json.extensionsUsed?.includes(name);
 
 /** Asset has at least one material that needs ORM compositing
  *  (separate metallicRoughnessTexture + occlusionTexture pointing at different images). */
@@ -152,7 +173,7 @@ function needsOrmComposite(json: any): boolean {
     for (const m of mats) {
         const mr = m.pbrMetallicRoughness?.metallicRoughnessTexture;
         const occ = m.occlusionTexture;
-        if (mr && occ && textures[mr.index]?.source !== textures[occ.index]?.source) {
+        if (mr && occ && textures[mr.index] && textures[occ.index] && getTextureImageIndex(textures[mr.index]) !== getTextureImageIndex(textures[occ.index])) {
             return true;
         }
     }
@@ -161,23 +182,29 @@ function needsOrmComposite(json: any): boolean {
 
 const _features: GltfFeatureLoader[] = [
     // Pre-mesh features (geometry decompression)
-    [(j) => j.extensionsUsed?.includes("KHR_draco_mesh_compression"), () => import("./gltf-feature-draco.js")],
+    [hasExt("KHR_draco_mesh_compression"), () => import("./gltf-feature-draco.js")],
     // Material extensions
     [hasMatExt("clearcoat"), () => import("./gltf-ext-clearcoat.js")],
+    [hasMatExt("emissive_strength"), () => import("./gltf-ext-emissive-strength.js")],
     [hasMatExt("sheen"), () => import("./gltf-ext-sheen.js")],
     [hasMatExt("anisotropy"), () => import("./gltf-ext-anisotropy.js")],
+    [hasMatExt("unlit"), () => import("./gltf-ext-unlit.js")],
     [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
     // Dielectric cluster (ior/specular/transmission/volume) — any of the four triggers the loader;
     // refraction render path is wired via fragments/refraction-fragment.ts (env-only V1).
     [(j) => ["transmission", "volume", "ior", "specular"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
-    [(j) => j.extensionsUsed?.includes("KHR_texture_transform"), () => import("./gltf-ext-uv-transform.js")],
+    [hasExt("KHR_texture_transform"), () => import("./gltf-ext-uv-transform.js")],
     [needsOrmComposite, () => import("./gltf-ext-orm.js")],
     // Per-mesh features (predicates inlined to avoid eager imports)
     [(json) => !!json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined), () => import("./gltf-feature-skeleton.js")],
     [(json) => anyPrimitive(json, (p) => !!p.targets?.length), () => import("./gltf-feature-morph.js")],
     // Per-asset features
+    [hasExt("KHR_lights_punctual"), () => import("./gltf-feature-lights-punctual.js")],
     [(json) => !!json.animations?.length, () => import("./gltf-feature-animations.js")],
     [hasMatExt("variants"), () => import("./gltf-feature-variants.js")],
+    [hasExt("KHR_node_visibility"), () => import("./gltf-ext-node-visibility.js")],
+    [hasExt("KHR_animation_pointer"), () => import("./gltf-feature-animation-pointer.js")],
+    [hasExt("EXT_mesh_gpu_instancing"), () => import("./gltf-feature-gpu-instancing.js")],
 ];
 
 /** Dynamic-import every feature the asset triggers. */
@@ -191,8 +218,10 @@ async function loadGltfFeatures(json: any): Promise<GltfFeature[]> {
 /** Build a TransformNode tree mirroring the glTF node hierarchy.
  *  Meshes are attached as children. Non-mesh nodes become
  *  pure TransformNodes preserving TRS for cloning/repositioning.
- *  Parent links are set by addToScene() when the tree is added to the scene. */
-function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]): TransformNode {
+ *  Parent links are set by addToScene() when the tree is added to the scene.
+ *  Also returns a glTF-node-index → SceneNode map used by per-asset features
+ *  (KHR_node_visibility, KHR_animation_pointer) to address specific nodes. */
+function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]): { root: TransformNode; nodeMap: (TransformNode | undefined)[] } {
     // Map nodeIndex → uploaded Mesh[]
     const nodeToMeshes = new Map<number, Mesh[]>();
     for (let i = 0; i < meshDatas.length; i++) {
@@ -205,6 +234,8 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
         arr.push(meshes[i]!);
     }
 
+    const nodeMap: (TransformNode | undefined)[] = new Array(json.nodes?.length ?? 0);
+
     // Recursive builder
     function buildNode(nodeIdx: number): TransformNode {
         const node = json.nodes[nodeIdx];
@@ -212,6 +243,7 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
         const r = node.rotation ?? [0, 0, 0, 1];
         const s = node.scale ?? [1, 1, 1];
         const tn = createTransformNode(node.name ?? `node_${nodeIdx}`, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
+        nodeMap[nodeIdx] = tn;
         if (node.children) {
             for (const childIdx of node.children) {
                 tn.children.push(buildNode(childIdx));
@@ -228,7 +260,7 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
     const rootChildren = sceneRoots.map((ni: number) => buildNode(ni));
     const root = createTransformNode("__root__", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
     root.children.push(...rootChildren);
-    return root;
+    return { root, nodeMap };
 }
 
 // --- Mesh Extraction ---
@@ -284,7 +316,9 @@ async function extractAllMeshes(
             const posData = resolveAttr("POSITION")!;
             const normData = resolveAttr("NORMAL")!;
             const uvData = resolveAttr("TEXCOORD_0");
+            const uv2Data = resolveAttr("TEXCOORD_1");
             const tanData = resolveAttr("TANGENT");
+            const colorData = resolveAttr("COLOR_0");
             const idxData = decoded
                 ? { data: decoded.indices, count: decoded.indexCount, componentCount: 1 }
                 : primitive.indices !== undefined
@@ -295,7 +329,9 @@ async function extractAllMeshes(
             const indices = idxData
                 ? idxData.data instanceof Uint32Array
                     ? new Uint32Array(idxData.data as Uint32Array)
-                    : new Uint16Array(idxData.data.buffer, idxData.data.byteOffset, idxData.count)
+                    : idxData.data instanceof Uint8Array
+                      ? Uint16Array.from(idxData.data as Uint8Array)
+                      : new Uint16Array(idxData.data.buffer, idxData.data.byteOffset, idxData.count)
                 : new Uint16Array(0);
 
             // Fire material fetch without awaiting — all materials load in parallel
@@ -306,6 +342,8 @@ async function extractAllMeshes(
                 normals: normData.data as Float32Array,
                 tangents: tanData ? (tanData.data as Float32Array) : null,
                 uvs: uvData ? (uvData.data as Float32Array) : new Float32Array(posData.count * 2),
+                uv2s: uv2Data ? (uv2Data.data as Float32Array) : null,
+                colors: colorData ? (colorData.data as Float32Array) : null,
                 indices: idxData ? indices : new Uint16Array(0),
                 vertexCount: posData.count,
                 indexCount: idxData?.count ?? 0,
@@ -333,12 +371,12 @@ async function ensureMipmapModule(): Promise<void> {
     }
 }
 
-function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): SampledTexture {
+function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): Texture2D {
     return uploadTex(engine, bitmap, srgb, sampler, _generateMipmaps!, fallbackBytes);
 }
 
 async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], ctx: GltfLoadCtx): Promise<Mesh[]> {
-    const { engine, json, binChunk, baseUrl, matExts } = ctx;
+    const { engine, json, binChunk, baseUrl, matExts, wrapTex } = ctx;
     const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
@@ -352,11 +390,11 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     const meshFeatures = features.filter((f) => f.applyMesh);
 
     // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb)
-    const texCache = new Map<string, SampledTexture>();
+    const texCache = new Map<string, Texture2D>();
     let texId = 0;
     const bitmapIds = new Map<ImageBitmap, number>();
 
-    function getCachedTexture(bitmap: ImageBitmap | null, srgb: boolean): SampledTexture {
+    function getCachedTexture(bitmap: ImageBitmap | null, srgb: boolean): Texture2D {
         if (!bitmap) {
             return uploadTextureSynced(engine, null, srgb, sampler);
         }
@@ -383,12 +421,27 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 return undefined;
             }
             const img = await extFetchImg(texInfo);
-            return img ? getCachedTexture(img, sRGB) : undefined;
+            if (!img) {
+                return undefined;
+            }
+            return wrapTex(getCachedTexture(img, sRGB), texInfo);
         },
         uploadImage(bitmap, sRGB) {
             return uploadTextureSynced(engine, bitmap, sRGB, sampler);
         },
     };
+
+    // Slow-path trigger: per-texture UV wrapping (KHR_texture_transform)
+    // or any core texture declaring texCoord=1. Scene1 stays identity→fast path.
+    let _needsPbrExt = wrapTex !== identityTexWrap;
+    if (!_needsPbrExt) {
+        const mats = (json as { materials?: unknown[] }).materials;
+        if (mats && JSON.stringify(mats).includes('"texCoord":1')) {
+            _needsPbrExt = true;
+        }
+    }
+    let _pbrExtPromise: Promise<typeof import("./gltf-pbr-builder-ext.js")> | null = null;
+    const _ensurePbrExt = () => (_pbrExtPromise ??= import("./gltf-pbr-builder-ext.js"));
 
     /** Default ORM upload: single MR-or-occlusion image, or 1×1 fallback baked from
      *  metallicFactor/roughnessFactor. The composite case (MR+occlusion separate) is
@@ -403,8 +456,13 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             return cached;
         }
         cached = (async () => {
-            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
             const extLayers = await runMatExts(mat, matExts, extCtx);
+            if (_needsPbrExt) {
+                const extMod = await _ensurePbrExt();
+                const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex);
+                return extMod.assemblePbrPropsExt(mat, tex, extLayers);
+            }
+            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
             return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
         })();
         builtMaterialCache.set(mat, cached);
@@ -422,6 +480,8 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 normalBuffer: createMappedBuffer(engine, m.normals, GPUBufferUsage.VERTEX),
                 tangentBuffer: m.tangents ? createMappedBuffer(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
                 uvBuffer: createMappedBuffer(engine, m.uvs, GPUBufferUsage.VERTEX),
+                uv2Buffer: m.uv2s ? createMappedBuffer(engine, m.uv2s, GPUBufferUsage.VERTEX) : null,
+                colorBuffer: m.colors ? createMappedBuffer(engine, m.colors, GPUBufferUsage.VERTEX) : null,
                 indexBuffer: createMappedBuffer(engine, m.indices, GPUBufferUsage.INDEX),
                 indexCount: m.indexCount,
                 indexFormat: (m.indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,

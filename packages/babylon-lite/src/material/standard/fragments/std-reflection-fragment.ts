@@ -39,7 +39,7 @@ reflectionColor = textureSample(reflectionTex, reflectionSampler, reflCoords).rg
 }
 
 import type { StandardMaterialProps } from "../standard-material.js";
-import type { SampledTexture } from "../../../texture/texture-2d.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-pipeline.js";
 import { HAS_REFLECTION_TEXTURE } from "../standard-pipeline.js";
 
@@ -54,7 +54,7 @@ export const stdReflectionExt: StdExt = {
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: SampledTexture[]): void {
+    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.reflectionTexture) {
             out.push(mat.reflectionTexture);
         }

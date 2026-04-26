@@ -19,6 +19,9 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera {
         if (!m.boundMin || !m.boundMax) {
             continue;
         }
+        if (m.visible === false) {
+            continue;
+        }
         if (m.boundMin[0]! < minX) {
             minX = m.boundMin[0]!;
         }

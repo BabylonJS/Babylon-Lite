@@ -1,18 +1,7 @@
 // Scene 20: PBR Emissive Spheres Grid — 2500 spheres with random emissive colors
 // Based on playground #6HWS9M#85 (without performancePriority)
 
-import { onBeforeRender, addToScene, startEngine,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    attachControl,
-    createSphere,
-    createPbrMaterial,
-    createSolidTexture2D,
-    loadEnvironment,
-    createHemisphericLight,
-    setParent,
-} from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, createSphere, createPbrMaterial, createSolidTexture2D, loadEnvironment, createHemisphericLight, setParent, registerScene } from "babylon-lite";
 
 // Seeded PRNG for deterministic positions/colors across BJS and Lite
 function seededRandom(seed: number): () => number {
@@ -135,7 +124,8 @@ async function main(): Promise<void> {
         }
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

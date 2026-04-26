@@ -138,10 +138,7 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
         }
     }
 
-    // Use real frame delta for the step (matches BJS default _useDeltaForWorldStep=true).
-    // SetIdealStepTime tells Havok what step rate to expect, which impacts damping/sleep behavior.
-    hknp.HP_World_SetIdealStepTime(hkWorld, dt);
-    hknp.HP_World_Step(hkWorld, dt);
+    hknp.HP_World_Step(hkWorld, world._timestep);
 
     // Post-step: sync DYNAMIC bodies from Havok → node
     for (let i = 0; i < bodies.length; i++) {
@@ -284,11 +281,9 @@ export function setPhysicsBodyShape(world: PhysicsWorld, body: PhysicsBody, shap
 
 export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape, friction: number, restitution: number): void {
     // Material array: [staticFriction, dynamicFriction, restitution, frictionCombine, restitutionCombine]
-    // Combine modes are runtime-defined wasm enum values — must read from hknp.MaterialCombine.
-    // BJS defaults: friction=MINIMUM, restitution=MAXIMUM (see havokPlugin.ts setMaterial).
-    const hknp = world._hknp;
-    const material = [friction, friction, restitution, hknp.MaterialCombine.MINIMUM, hknp.MaterialCombine.MAXIMUM];
-    hknp.HP_Shape_SetMaterial(shape._hkShape, material);
+    // Combine modes: 0 = GEOMETRIC_MEAN, 1 = MINIMUM, 2 = MAXIMUM
+    const material = [friction, friction, restitution, 0, 2];
+    world._hknp.HP_Shape_SetMaterial(shape._hkShape, material);
 }
 
 // ─── Mass ────────────────────────────────────────────────────────────

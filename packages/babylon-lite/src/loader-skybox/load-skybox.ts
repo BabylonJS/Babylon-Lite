@@ -2,7 +2,6 @@
  *  Loads a cube texture and registers a skybox for the auto-builder. */
 
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import { addRenderable } from "../scene/scene.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { loadCubeTexture } from "../texture/cube-texture.js";
 import { createBoxData } from "../mesh/create-box.js";
@@ -54,8 +53,22 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
     };
     (scene as SceneContextInternal)._skybox = skyboxData;
 
-    // Build the skybox renderable immediately. No scene-state ordering dependency.
-    // Group(0) is bound by the render pass, so no need to wait for any shared scene UBO.
-    const { buildSkyboxRenderable } = await import("./skybox-renderable.js");
-    addRenderable(scene, buildSkyboxRenderable(scene, skyboxData));
+    // Register deferred builder — skybox renderable built at startEngine() time.
+    // Must run AFTER the standard mesh builder (which stashes _standardSceneUBO).
+    // If the UBO isn't ready yet (parallel execution), re-enqueue for the next pass.
+    (scene as SceneContextInternal)._deferredBuilders.push(async () => {
+        const { buildSkyboxRenderable } = await import("./skybox-renderable.js");
+        const sceneUBO = (scene as SceneContextInternal)._standardSceneUBO;
+        if (sceneUBO) {
+            (scene as SceneContextInternal)._renderables.push(buildSkyboxRenderable(scene, skyboxData, sceneUBO));
+        } else {
+            // UBO not yet created — re-enqueue so _build() picks us up in the next pass
+            (scene as SceneContextInternal)._deferredBuilders.push(async () => {
+                const ubo = (scene as SceneContextInternal)._standardSceneUBO;
+                if (ubo) {
+                    (scene as SceneContextInternal)._renderables.push(buildSkyboxRenderable(scene, skyboxData, ubo));
+                }
+            });
+        }
+    });
 }

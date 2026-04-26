@@ -16,6 +16,8 @@ const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene11-shark"
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 const SEEK_TIME = "1.91";
 
+test.skip(!!sceneConfig.skipParity, "Scene 11 skipped via skipParity in scene-config.json");
+
 test("Scene 11 — Shark GLB matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
 

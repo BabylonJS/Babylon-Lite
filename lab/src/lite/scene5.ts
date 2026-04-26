@@ -1,4 +1,4 @@
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadGltf, createHemisphericLight, attachControl, goToFrame, pauseAnimation } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadGltf, createHemisphericLight, attachControl, goToFrame, pauseAnimation, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -50,7 +50,8 @@ async function main(): Promise<void> {
         }
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

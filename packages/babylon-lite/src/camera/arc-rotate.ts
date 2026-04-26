@@ -1,6 +1,6 @@
 import type { Vec3, Mat4 } from "../math/types.js";
 import { Vec3Up } from "../math/vec3.js";
-import { mat4LookAtLH, mat4Identity } from "../math/mat4.js";
+import { mat4LookAtLH } from "../math/mat4.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
@@ -62,30 +62,15 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
 
     function cameraLocalWorldMatrix(): Mat4 {
         const eye = localEyePosition();
-        const view = mat4LookAtLH(eye, cam.target, Vec3Up);
-        // Transpose upper 3×3 of view = camera-to-world rotation
-        const m = mat4Identity();
-        m[0] = view[0]!;
-        m[1] = view[4]!;
-        m[2] = view[8]!;
-        m[4] = view[1]!;
-        m[5] = view[5]!;
-        m[6] = view[9]!;
-        m[8] = view[2]!;
-        m[9] = view[6]!;
-        m[10] = view[10]!;
-        m[12] = eye.x;
-        m[13] = eye.y;
-        m[14] = eye.z;
-        return m;
+        const v = mat4LookAtLH(eye, cam.target, Vec3Up);
+        // Transpose upper 3×3 of view = camera-to-world rotation; translation = eye.
+        return new Float32Array([v[0]!, v[4]!, v[8]!, 0, v[1]!, v[5]!, v[9]!, 0, v[2]!, v[6]!, v[10]!, 0, eye.x, eye.y, eye.z, 1]) as Mat4;
     }
 
     const wm = createWorldMatrixState(cameraLocalWorldMatrix);
-    const onDirty = () => wm.markLocalDirty();
+    const onDirty = (): void => wm.markLocalDirty();
 
-    let _alpha = alpha,
-        _beta = beta,
-        _radius = radius;
+    const scalars = { alpha, beta, radius };
 
     const cam: ArcRotateCamera = {
         alpha: 0 as number, // placeholder — overridden by defineProperty below
@@ -119,46 +104,20 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         },
     };
 
-    // Push-based dirty tracking for scalar camera params that affect worldMatrix
-    Object.defineProperty(cam, "alpha", {
-        get() {
-            return _alpha;
-        },
-        set(v: number) {
-            if (_alpha !== v) {
-                _alpha = v;
-                onDirty();
-            }
-        },
-        configurable: true,
-        enumerable: true,
-    });
-    Object.defineProperty(cam, "beta", {
-        get() {
-            return _beta;
-        },
-        set(v: number) {
-            if (_beta !== v) {
-                _beta = v;
-                onDirty();
-            }
-        },
-        configurable: true,
-        enumerable: true,
-    });
-    Object.defineProperty(cam, "radius", {
-        get() {
-            return _radius;
-        },
-        set(v: number) {
-            if (_radius !== v) {
-                _radius = v;
-                onDirty();
-            }
-        },
-        configurable: true,
-        enumerable: true,
-    });
+    // Push-based dirty tracking for scalar camera params that affect worldMatrix.
+    for (const key of ["alpha", "beta", "radius"] as const) {
+        Object.defineProperty(cam, key, {
+            get: () => scalars[key],
+            set: (v: number) => {
+                if (scalars[key] !== v) {
+                    scalars[key] = v;
+                    onDirty();
+                }
+            },
+            configurable: true,
+            enumerable: true,
+        });
+    }
 
     return cam;
 }

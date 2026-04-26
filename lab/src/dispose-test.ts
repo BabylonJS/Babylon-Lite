@@ -1,7 +1,7 @@
 /** Dispose test — creates a scene, renders one frame, disposes everything,
  *  then recreates to prove no stale state. Tracks GPU errors via error scopes. */
 
-import { disposeScene, addToScene, disposeEngine, stopEngine, startEngine, createEngine, createSceneContext, createDefaultCamera, createSphere, createStandardMaterial } from "babylon-lite";
+import { disposeScene, addToScene, disposeEngine, stopEngine, startEngine, createEngine, createSceneContext, createDefaultCamera, createSphere, createStandardMaterial, registerScene } from "babylon-lite";
 import type { EngineContextInternal } from "babylon-lite/engine/engine";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -21,7 +21,8 @@ async function createAndRender() {
     createDefaultCamera(scene);
 
     // Render one frame
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
 
     // Stop and wait a tick for GPU work to complete
     stopEngine(engine);
@@ -57,7 +58,8 @@ async function run() {
         sphere2.material = createStandardMaterial();
         addToScene(scene2, sphere2);
         createDefaultCamera(scene2);
-        await startEngine(engine2, scene2);
+        await registerScene(engine2, scene2);
+    await startEngine(engine2);
         stopEngine(engine2);
         await new Promise((r) => setTimeout(r, 100));
         const err2 = await (engine2 as EngineContextInternal).device.popErrorScope();

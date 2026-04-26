@@ -4,16 +4,16 @@
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { GltfAnimationData, AnimationClip } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
-import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
+import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
 import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto, mat4MultiplyInto } from "../math/mat4.js";
 
 // RH→LH root transform (same as load-gltf.ts): diag(-1, 1, 1, 1)
-const RH_TO_LH = new Float32Array(16);
-RH_TO_LH[0] = -1;
-RH_TO_LH[5] = 1;
-RH_TO_LH[10] = 1;
-RH_TO_LH[15] = 1;
+// prettier-ignore
+const RH_TO_LH = new Float32Array([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+
+// Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
+const _boneTmp = new Float32Array(16);
 
 /** TRS layout per node in the scratch buffer: 12 floats.
  *  [0..2] = translation, [3..6] = rotation (xyzw), [7..9] = scale, [10..11] = padding */
@@ -70,7 +70,8 @@ export interface AnimationController {
  */
 export function createAnimationController(animData: GltfAnimationData): AnimationController {
     const { clips, nodes, skeletons, morphBindings } = animData;
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0)) {
+    const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
+    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer)) {
         return { tick() {}, time: 0, playing: false, speedRatio: 1, loop: true };
     }
 
@@ -99,6 +100,9 @@ export function createAnimationController(animData: GltfAnimationData): Animatio
     const morphWeightScratch = new Float32Array(8); // supports up to 8 weights evaluation
     // Only write first 16 bytes (weights vec4) — count/texWidth/rowsPerBand are immutable
     const morphUploadF32 = new Float32Array(4);
+    // Pointer-channel scratch (sized to largest registered pointer arity).
+    // Current registered writers need at most 4 (quaternion/color4). Keep 16 for headroom.
+    const pointerScratch = new Float32Array(16);
 
     let _hasTickedOnce = false;
 
@@ -183,6 +187,13 @@ export function createAnimationController(animData: GltfAnimationData): Animatio
                         }
                         break;
                     }
+                    case PATH_POINTER: {
+                        if (ch.pointerArity && ch.pointerWriter) {
+                            evaluateSampler(sampler, t, ch.pointerArity, false, pointerScratch, 0);
+                            ch.pointerWriter(pointerScratch, 0);
+                        }
+                        break;
+                    }
                 }
             }
 
@@ -223,38 +234,8 @@ export function createAnimationController(animData: GltfAnimationData): Animatio
                     const jointIdx = skel.jointNodes[bi]!;
                     const ibmOff = bi * 16;
                     // boneMatrix = invMeshWorld * jointWorld * IBM
-                    // Step 1: temp = invMeshWorld * jointWorld
-                    mat4MultiplyInto(boneData, bi * 16, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
-                    // Step 2: bone = temp * IBM (in-place: read temp from boneData, multiply with IBM slice)
-                    // We need a temp for the intermediate result
-                    const t0 = boneData[bi * 16]!,
-                        t1 = boneData[bi * 16 + 1]!,
-                        t2 = boneData[bi * 16 + 2]!,
-                        t3 = boneData[bi * 16 + 3]!;
-                    const t4 = boneData[bi * 16 + 4]!,
-                        t5 = boneData[bi * 16 + 5]!,
-                        t6 = boneData[bi * 16 + 6]!,
-                        t7 = boneData[bi * 16 + 7]!;
-                    const t8 = boneData[bi * 16 + 8]!,
-                        t9 = boneData[bi * 16 + 9]!,
-                        t10 = boneData[bi * 16 + 10]!,
-                        t11 = boneData[bi * 16 + 11]!;
-                    const t12 = boneData[bi * 16 + 12]!,
-                        t13 = boneData[bi * 16 + 13]!,
-                        t14 = boneData[bi * 16 + 14]!,
-                        t15 = boneData[bi * 16 + 15]!;
-
-                    const ibm = skel.inverseBindMatrices;
-                    for (let col = 0; col < 4; col++) {
-                        const b0 = ibm[ibmOff + col * 4]!,
-                            b1 = ibm[ibmOff + col * 4 + 1]!,
-                            b2 = ibm[ibmOff + col * 4 + 2]!,
-                            b3 = ibm[ibmOff + col * 4 + 3]!;
-                        boneData[bi * 16 + col * 4] = t0 * b0 + t4 * b1 + t8 * b2 + t12 * b3;
-                        boneData[bi * 16 + col * 4 + 1] = t1 * b0 + t5 * b1 + t9 * b2 + t13 * b3;
-                        boneData[bi * 16 + col * 4 + 2] = t2 * b0 + t6 * b1 + t10 * b2 + t14 * b3;
-                        boneData[bi * 16 + col * 4 + 3] = t3 * b0 + t7 * b1 + t11 * b2 + t15 * b3;
-                    }
+                    mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
+                    mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
                 }
 
                 // Upload to GPU

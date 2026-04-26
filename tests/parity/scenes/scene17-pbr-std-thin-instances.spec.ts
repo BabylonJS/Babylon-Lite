@@ -12,6 +12,8 @@ const sceneConfig = getSceneConfig(17);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene17-pbr-std-thin-instances");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 17 skipped via skipParity in scene-config.json");
+
 test("Scene 17 — PBR + Std Thin Instances matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 17 });

@@ -12,7 +12,7 @@ import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { loadTexture2D } from "./texture-2d.js";
-import type { SampledTexture, SampledTextureOptions } from "./texture-2d.js";
+import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
 import { getCompressedFormat, suffixToFeature } from "./compressed-formats.js";
 import type { CompressedFormatInfo } from "./compressed-formats.js";
 
@@ -129,7 +129,7 @@ function parseKtx1(buffer: ArrayBuffer): KtxParseResult {
 
 // ── GPU upload ──────────────────────────────────────────────────────
 
-function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult, opts: SampledTextureOptions): SampledTexture {
+function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
     const device = engine.device;
     const fmt = parsed.format;
     const texture = device.createTexture({
@@ -159,10 +159,12 @@ function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult,
         maxAnisotropy: allLinear ? 4 : 1,
     });
 
-    const tex2d: SampledTexture = {
+    const tex2d: Texture2D = {
         texture,
         view: texture.createView(),
         sampler,
+        width: parsed.width,
+        height: parsed.height,
     };
     acquireTexture(tex2d);
     return tex2d;
@@ -196,9 +198,9 @@ function rewriteUrl(baseUrl: string, suffix: string): string {
  * @param baseUrl  - The fallback image URL (e.g. "textures/grid.png").
  * @param suffixes - KTX suffixes to try in priority order (e.g. ["-astc.ktx", "-dxt.ktx", "-etc2.ktx"]).
  * @param opts     - Texture options (sampler, address mode, etc.). `mipMaps` is ignored — KTX mips are used as-is.
- * @returns A SampledTexture (same interface whether compressed or fallback).
+ * @returns A Texture2D (same interface whether compressed or fallback).
  */
-export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, suffixes: string[], opts: SampledTextureOptions = {}): Promise<SampledTexture> {
+export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, suffixes: string[], opts: Texture2DOptions = {}): Promise<Texture2D> {
     const device = (engine as EngineContextInternal).device;
 
     // Collect all suffixes whose feature the device supports

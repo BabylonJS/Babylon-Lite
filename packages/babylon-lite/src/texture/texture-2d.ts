@@ -11,13 +11,46 @@ import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 
-export interface SampledTexture {
+export interface Texture2D {
     texture: GPUTexture;
     view: GPUTextureView;
     sampler: GPUSampler;
+    width: number;
+    height: number;
+    /** Per-texture UV transform fields. All optional; defaults make identity.
+     *  Match BJS Texture.uScale/vScale/uOffset/vOffset/uAng semantics. These
+     *  fields are **build-time**: they are sampled when a material pipeline
+     *  is first compiled. Mutating them after the pipeline is built requires
+     *  a material rebuild (flag-based rebuild path). If a cached texture
+     *  wrapper needs a different transform than another use site, create a
+     *  fresh wrapper via `cloneTexture2D()`. */
+    uScale?: number;
+    vScale?: number;
+    uOffset?: number;
+    vOffset?: number;
+    /** Rotation in radians around the (0,0) UV corner. */
+    uAng?: number;
+    /** True if the texel data is stored with origin at the top (y-down) and
+     *  must be flipped in V when sampled with standard (y-up) UVs. Applied at
+     *  UV-transform time in the material, so compressed-format textures (where
+     *  in-place row flipping is impractical) remain correct. */
+    invertY?: boolean;
 }
 
-export interface SampledTextureOptions {
+/** Create a fresh Texture2D wrapper that shares GPU resources with `base`
+ *  but carries its own UV transform. Use this when the same underlying image
+ *  is referenced with different transforms (e.g. glTF KHR_texture_transform
+ *  on different textureInfos pointing at the same source). The caller is
+ *  responsible for acquireTexture/release pairing if the wrapper outlives
+ *  the base. */
+export function cloneTexture2D(
+    base: Texture2D,
+    transform: Partial<Pick<Texture2D, "uScale" | "vScale" | "uOffset" | "vOffset" | "uAng">> & { _texCoord?: 0 | 1; _hasTx?: true }
+): Texture2D {
+    return { ...base, ...transform } as Texture2D;
+}
+
+export interface Texture2DOptions {
     /** Generate mipmaps. Default true. */
     mipMaps?: boolean;
     /** Address mode U. Default 'repeat'. */
@@ -35,9 +68,9 @@ export interface SampledTextureOptions {
     srgb?: boolean;
 }
 
-// Per-device URL cache: same (url + options) → shared SampledTexture promise.
+// Per-device URL cache: same (url + options) → shared Texture2D promise.
 // WeakMap ensures the cache is GC'd when the device is collected.
-let _tex2dCache: WeakMap<GPUDevice, Map<string, Promise<SampledTexture>>> | null = null;
+let _tex2dCache: WeakMap<GPUDevice, Map<string, Promise<Texture2D>>> | null = null;
 
 /** Clear the texture cache for a device, releasing cache-held refs. */
 export function clearTexture2DCache(engine: EngineContextInternal): void {
@@ -45,7 +78,7 @@ export function clearTexture2DCache(engine: EngineContextInternal): void {
     _tex2dCache?.delete(device);
 }
 
-export function loadTexture2D(engine: EngineContext, url: string, opts: SampledTextureOptions = {}): Promise<SampledTexture> {
+export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
     const device = (engine as EngineContextInternal).device;
     if (!_tex2dCache) {
         _tex2dCache = new WeakMap();
@@ -63,13 +96,13 @@ export function loadTexture2D(engine: EngineContext, url: string, opts: SampledT
     }
 
     const map = dc;
-    const p = loadSampledTextureImpl(engine as EngineContextInternal, url, opts);
+    const p = loadTexture2DImpl(engine as EngineContextInternal, url, opts);
     map.set(key, p);
     p.catch(() => map.delete(key));
     return p;
 }
 
-async function loadSampledTextureImpl(engine: EngineContextInternal, url: string, opts: SampledTextureOptions): Promise<SampledTexture> {
+async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opts: Texture2DOptions): Promise<Texture2D> {
     const device = engine.device;
     const mipMaps = opts.mipMaps ?? true;
     const addressModeU = opts.addressModeU ?? "repeat";
@@ -114,7 +147,7 @@ async function loadSampledTextureImpl(engine: EngineContextInternal, url: string
         maxAnisotropy: allLinear ? 4 : 1,
     });
 
-    const tex2d: SampledTexture = { texture, view: texture.createView(), sampler };
+    const tex2d: Texture2D = { texture, view: texture.createView(), sampler, width, height };
     acquireTexture(tex2d);
     return tex2d;
 }

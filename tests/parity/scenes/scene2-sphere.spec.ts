@@ -16,6 +16,8 @@ const sceneConfig = getSceneConfig(2);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene2-sphere");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 2 skipped via skipParity in scene-config.json");
+
 test("Scene 2 — Sphere + DirectionalLight matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 2 });

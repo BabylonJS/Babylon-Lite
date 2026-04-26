@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Procedural mesh generation for four primitive shapes: ground (with heightmap support), torus, UV sphere, and box. Each generator produces CPU-side vertex data (positions, normals, UVs, indices) and provides a companion function to upload the data to GPU buffers. All generators match Babylon.js `MeshBuilder` output exactly.
+Procedural mesh generation for the core BabylonJS `MeshBuilder` shape set: ground (with heightmap support), torus, UV sphere, box, cylinder/cone, plane, disc/ring, polyhedron, ribbon, tube, and extruded shape. Each generator produces CPU-side vertex data (positions, normals, UVs, indices) and — where applicable — a companion upload helper. All generators match Babylon.js `MeshBuilder` output exactly; parity is enforced pixel-perfect by scene 38 (MAD = 0.000).
 
 ---
 
@@ -123,6 +123,123 @@ export interface BoxGPU {
 
 export function createBoxData(size?: number): BoxData; // Default: size = 1
 export function uploadBoxToGPU(device: GPUDevice, data: BoxData): BoxGPU;
+```
+
+### Cylinder (`create-cylinder.ts`)
+
+```typescript
+export interface CylinderOptions {
+    height?: number;          // Default: 2
+    diameter?: number;         // Default: 1 (overrides diameterTop / diameterBottom)
+    diameterTop?: number;      // Default: 1 (0 → cone)
+    diameterBottom?: number;   // Default: 1
+    tessellation?: number;     // Default: 24
+    subdivisions?: number;     // Default: 1
+    arc?: number;              // Default: 1 (partial wedge)
+}
+
+export function createCylinderData(opts?: CylinderOptions): MeshData;
+```
+
+### Plane (`create-plane.ts`)
+
+```typescript
+export interface PlaneOptions {
+    size?: number;   // Default: 1 (shorthand for width + height)
+    width?: number;
+    height?: number;
+}
+
+export function createPlaneData(opts?: PlaneOptions): MeshData;
+```
+
+### Disc / Ring (`create-disc.ts`)
+
+```typescript
+export interface DiscOptions {
+    radius?: number;       // Default: 0.5
+    tessellation?: number; // Default: 64
+    arc?: number;          // Default: 1 (<1 → pie slice / ring)
+}
+
+export function createDiscData(opts?: DiscOptions): MeshData;
+```
+
+### Polyhedron (`create-polyhedron.ts`)
+
+```typescript
+export interface PolyhedronOptions {
+    type?: number;   // 0-14 (0=tetra, 3=icosahedron, …)
+    size?: number;   // Default: 1 (uniform scale)
+    sizeX?: number;
+    sizeY?: number;
+    sizeZ?: number;
+    flat?: boolean;  // Default: true (duplicate verts per face)
+}
+
+export function createPolyhedronData(opts?: PolyhedronOptions): MeshData;
+```
+
+### Ribbon (`create-ribbon.ts`)
+
+```typescript
+export interface RibbonOptions {
+    pathArray: Vec3[][];
+    closeArray?: boolean; // Default: false
+    closePath?: boolean;  // Default: false
+    offset?: number;      // Default: pathArray[0].length / 2
+    sideOrientation?: number;
+}
+
+export function createRibbonData(opts: RibbonOptions): MeshData;
+```
+
+### Tube (`create-tube.ts`)
+
+```typescript
+export const CAP_NONE = 0;
+export const CAP_START = 1;
+export const CAP_END = 2;
+export const CAP_ALL = 3;
+
+export interface TubeOptions {
+    path: Vec3[];
+    radius?: number;       // Default: 1
+    tessellation?: number; // Default: 64
+    radiusFunction?: (i: number, distance: number) => number;
+    cap?: number;          // Default: CAP_NONE
+    arc?: number;          // Default: 1
+}
+
+export function createTubeData(opts: TubeOptions): MeshData;
+```
+
+### Extrude Shape (`create-extrude.ts`)
+
+```typescript
+export interface ExtrudeShapeOptions {
+    shape: Vec3[];
+    path: Vec3[];
+    scale?: number;     // Default: 1
+    rotation?: number;  // Default: 0 (radians accumulated per path step)
+    cap?: number;       // Default: CAP_NONE
+    closeShape?: boolean;
+    closePath?: boolean;
+}
+
+export function createExtrudeShapeData(opts: ExtrudeShapeOptions): MeshData;
+```
+
+### Shared types
+
+```typescript
+// All new builders return this common shape.
+export interface MeshData {
+    positions: Float32Array;
+    normals: Float32Array;
+    uvs: Float32Array;
+    indices: Uint32Array;
+}
 ```
 
 ---
@@ -336,6 +453,65 @@ Complete indices:
 
 **Scaling:** When `size ≠ 1`, all position coordinates are multiplied by `size`. Normals remain unchanged. When `size = 1`, the pre-computed `BOX_POSITIONS` constant is returned directly (no allocation).
 
+### Cylinder
+
+Ported from BJS `VertexData.CreateCylinder`. Builds `subdivisions + 1` radial rings interpolated between `diameterBottom` and `diameterTop`, plus CAP_ALL triangle fans at both ends. Normals are computed from the slant angle so cones and prisms shade correctly. `arc < 1` produces a partial wedge with a seam.
+
+### Plane
+
+Single quad in the XY plane; normal `(0, 0, -1)`; UVs `[0,1]`; index order `(0,1,2),(0,2,3)` → winding matches `frontFace: "ccw"` with the -Z normal.
+
+### Disc / Ring
+
+Triangle fan from the center, `tessellation` outer vertices around `2π · arc` radians. Normal is hard-coded `(0, 0, -1)`. With `arc < 1`, the fan forms a pie slice; mesh thickness-of-zero rings are produced by sampling the same shape at two radii (extrude path).
+
+### Polyhedron
+
+BJS preset tables (`polyhedron-data.ts`) contain vertex positions and face index lists for 15 polyhedra. The builder scales by `sizeX/Y/Z` then tessellates each face:
+
+- **`flat = true` (default):** each face contributes independent vertices with a single face normal (cross product of two edge vectors). No vertex sharing across faces.
+- **`flat = false`:** face vertices are shared; normals are averaged via `compute-normals.ts` for smooth shading.
+
+### Ribbon
+
+The base primitive that powers `tube` and `extrude`. Given a `pathArray` (rows of equal-length 3D paths), it:
+
+1. Concatenates all rows into one positions buffer (row-major).
+2. Emits two triangles per quad stitched between consecutive paths.
+3. Normalizes UVs via cumulative edge distances along each row and column (matches BJS).
+4. Computes per-vertex normals via `compute-normals.ts`.
+5. If `closePath`, duplicates each row's first vertex at the end and averages the seam normal.
+6. If `closeArray`, stitches the last path back to the first and averages those seam normals too.
+
+### Tube
+
+Builds a ribbon where each row is a circle of `tessellation` vertices around `path[i]`, radius `radius` (or `radiusFunction(i, distance)`):
+
+1. Computes Path3D frames → `tangents[i]`, `normals[i]`, `binormals[i]`.
+2. For each `path[i]`, starts from `normals[i] * radius` and rotates it around `tangents[i]` by `2π · arc / tessellation` via Rodrigues' rotation formula to build the ring.
+3. Always sets `closePath = true` so the ring seals.
+4. `cap` inserts extra rows at the start/end: a barycenter vertex plus a duplicate ring at zero scale (matches BJS cap geometry).
+
+### Extrude Shape
+
+Sweeps a 2D `shape` (XY) along a 3D `path`:
+
+1. Computes Path3D frames.
+2. For each `path[i]`, transforms each `shape[k]`: `p = tangent[i] * sz + normal[i] * sx + binormal[i] * sy` (reinterprets shape Z as tangent offset).
+3. Applies cumulative `rotation` around `tangent[i]` (Rodrigues) and `scale`.
+4. Translates to `path[i]`.
+5. Builds ribbon rows from the transformed rings, with optional start/end caps via barycenter + zero-scale duplicate ring.
+
+### Path3D (`path3d.ts`)
+
+Port of BJS's parallel-transport frame computation:
+
+- First tangent: `normalize(curve[1] - curve[0])` (or the first non-null diff for degenerate leading duplicates).
+- First normal: arbitrary perpendicular via `_normalVector(tangent, null)` — picks the most stable axis cross.
+- Subsequent frames: `tangent[i] = normalize(curve[i+1] - curve[i])`, then `normal[i] = normalize(cross(binormal[i-1], tangent[i]))`, `binormal[i] = cross(tangent[i], normal[i])`. This parallel-transports the frame along the curve without swing/roll discontinuities.
+- Last point copies the previous tangent.
+- `distances[i]` is the cumulative arc length, used for UV normalization.
+
 ### GPU Upload Pattern
 
 All generators follow the same GPU upload pattern:
@@ -437,6 +613,14 @@ All are single-call, synchronous generators (except `createGroundFromHeightMap` 
 | `totalY = 2 * totalZ`                  | Babylon's sphere azimuthal step count                           |
 | `createBoxData(size)`                  | `MeshBuilder.CreateBox(name, { size }, scene)`                  |
 | Face order: +Z,-Z,+X,-X,+Y,-Y          | Same face order in Babylon                                      |
+| `createCylinderData(opts)`             | `MeshBuilder.CreateCylinder(name, opts, scene)`                 |
+| `createPlaneData(opts)`                | `MeshBuilder.CreatePlane(name, opts, scene)`                    |
+| `createDiscData(opts)`                 | `MeshBuilder.CreateDisc(name, opts, scene)`                     |
+| `createPolyhedronData(opts)`           | `MeshBuilder.CreatePolyhedron(name, opts, scene)`               |
+| `createRibbonData(opts)`               | `MeshBuilder.CreateRibbon(name, opts, scene)`                   |
+| `createTubeData(opts)`                 | `MeshBuilder.CreateTube(name, opts, scene)`                     |
+| `createExtrudeShapeData(opts)`         | `MeshBuilder.ExtrudeShape(name, opts, scene)`                   |
+| `CAP_NONE/CAP_START/CAP_END/CAP_ALL`   | `Mesh.NO_CAP/CAP_START/CAP_END/CAP_ALL`                         |
 | Separate pos/normal/uv buffers         | Babylon uses `VertexBuffer` per kind                            |
 
 ---
@@ -489,7 +673,17 @@ All are single-call, synchronous generators (except `createGroundFromHeightMap` 
 
 | File                        | Role                                                                                         |
 | --------------------------- | -------------------------------------------------------------------------------------------- |
-| `src/mesh/create-ground.ts` | Ground plane with heightmap: flat generation, displacement, normal recomputation, GPU upload |
-| `src/mesh/create-torus.ts`  | Torus: parametric ring mesh generation, GPU upload                                           |
-| `src/mesh/create-sphere.ts` | UV sphere: parametric sphere generation, GPU upload                                          |
-| `src/mesh/create-box.ts`    | Box: static 6-face geometry from constant arrays, GPU upload                                 |
+| `src/mesh/create-ground.ts`     | Ground plane with heightmap: flat generation, displacement, normal recomputation, GPU upload |
+| `src/mesh/create-torus.ts`      | Torus: parametric ring mesh generation, GPU upload                                           |
+| `src/mesh/create-sphere.ts`     | UV sphere: parametric sphere generation, GPU upload                                          |
+| `src/mesh/create-box.ts`        | Box: static 6-face geometry from constant arrays, GPU upload                                 |
+| `src/mesh/create-cylinder.ts`   | Cylinder / cone / prism: height, diameterTop/Bottom, tessellation, subdivisions, CAP_ALL     |
+| `src/mesh/create-plane.ts`      | Plane: quad in XY with -Z normal (size or width/height)                                      |
+| `src/mesh/create-disc.ts`       | Disc / pie / ring: fan disc with configurable arc, -Z normal                                 |
+| `src/mesh/create-polyhedron.ts` | 15 BJS polyhedron presets (tetra/cube/octa/dodeca/icosa/etc), flat & smooth normals          |
+| `src/mesh/polyhedron-data.ts`   | Vertex / face tables for the 15 polyhedra (auto-generated from BJS `polyhedronData.js`)      |
+| `src/mesh/create-ribbon.ts`     | Parametric ribbon primitive: pathArray, closePath, closeArray, offset, sideOrientation       |
+| `src/mesh/create-tube.ts`       | Tube: closed-circle ribbon along a 3D path; CAP_NONE/START/END/ALL; Rodrigues rotation       |
+| `src/mesh/create-extrude.ts`    | ExtrudeShape: sweep a 2D shape along a 3D path using Frenet frames (tangent/normal/binormal) |
+| `src/mesh/path3d.ts`            | Path3D port: tangents, normals, binormals, cumulative distances (parallel-transport frames)  |
+| `src/mesh/compute-normals.ts`   | BJS-equivalent normal accumulator (Float64Array) for shapes that compute normals post-build  |

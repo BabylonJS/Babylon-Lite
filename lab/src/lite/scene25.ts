@@ -1,18 +1,7 @@
 // Scene 25: KTX Texture — matches Babylon #1SCH7H#182
 // Ground plane with KTX compressed texture (auto-format selection), UV tiling, FreeCamera, hemispheric light.
 
-import {
-    addToScene,
-    startEngine,
-    createEngine,
-    createSceneContext,
-    createFreeCamera,
-    attachFreeControl,
-    createHemisphericLight,
-    createGround,
-    createStandardMaterial,
-    loadKtxTexture2D,
-} from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createFreeCamera, attachFreeControl, createHemisphericLight, createGround, createStandardMaterial, loadKtxTexture2D, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -43,7 +32,8 @@ async function main(): Promise<void> {
 
     addToScene(scene, ground);
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

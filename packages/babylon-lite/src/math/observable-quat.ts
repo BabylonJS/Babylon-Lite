@@ -71,11 +71,7 @@ export class ObservableQuat implements Quat {
 
     /** Copy values from another quaternion. */
     copyFrom(q: Quat): void {
-        this._x = q.x;
-        this._y = q.y;
-        this._z = q.z;
-        this._w = q.w;
-        this._onDirty();
+        this.set(q.x, q.y, q.z, q.w);
     }
 
     /** Copy into a Float32Array at offset. */

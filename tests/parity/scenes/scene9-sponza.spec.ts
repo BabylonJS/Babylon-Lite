@@ -16,6 +16,8 @@ const sceneConfig = getSceneConfig(9);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene9-sponza");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 9 skipped via skipParity in scene-config.json");
+
 test("Scene 9 — Sponza (.babylon) matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(180_000);
 

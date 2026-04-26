@@ -13,12 +13,10 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
-import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import { MAX_LIGHTS } from "../../light/types.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
-
-const MAX_LIGHTS = 4;
 
 // ── Lighting function (always present unless disableLighting) ───
 
@@ -119,6 +117,15 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // ── Base UBO fields (mesh = world matrix only) ──────────────
     const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
 
+    // ── Scene UBO fields ────────────────────────────────────────
+    const baseSceneUboFields: UboField[] = [
+        { name: "viewProjection", type: "mat4x4<f32>" },
+        { name: "view", type: "mat4x4<f32>" },
+        { name: "vEyePosition", type: "vec4<f32>" },
+        { name: "vFogInfos", type: "vec4<f32>" },
+        { name: "vFogColor", type: "vec4<f32>" },
+    ];
+
     // ── Base bindings (group 1, starting after mesh UBO at 0) ───
     // Order: lights, material, diffuse*, shadow/UV*, emissive*, bump*, specular*, ambient*, lightmap*, opacity*, reflection*
     // The shadow/UV UBO is placed AFTER diffuse so its auto-assigned binding index
@@ -138,12 +145,6 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     if (hasShadow || needsUV) {
         baseBindings.push({ name: "uvParams", type: { kind: "uniform-buffer" }, visibility: STAGE_VERTEX });
     }
-    if (textures.emissive) {
-        baseBindings.push(
-            { name: "emissiveTex", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "emissiveSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
-        );
-    }
     // bump bindings are provided by the normal-map fragment (not baseBindings)
     // emissive, specular, ambient, lightmap, opacity, reflection bindings
     // are provided by their respective fragments (not baseBindings)
@@ -162,7 +163,8 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // Vertex UBO struct definitions (must be before binding declarations)
     const vertexUboStructs = hasShadow || needsUV ? `struct uvParamsUniforms { uvScaleOffset: vec4<f32>, }` : "";
 
-    const vertexTemplate = `${SCENE_UBO_WGSL}
+    const vertexTemplate = `/*SU*/
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 ${vertexUboStructs}
@@ -260,7 +262,7 @@ var baseColor = _ds.rgb * mat.tl;`
         lightingBlock = `var glossiness = mat.sc.a;
 var diffuseBase = vec3<f32>(0.0);
 var specularBase = vec3<f32>(0.0);
-var shadowFactors = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
+var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
 let lc = min(lights.count, ${MAX_LIGHTS}u);
@@ -278,7 +280,8 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
         lightingBlock = `var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
     }
 
-    const fragmentTemplate = `${SCENE_UBO_WGSL}
+    const fragmentTemplate = `/*SU*/
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 ${lightsStructs}
 ${materialStruct}
 /*MU*/
@@ -313,6 +316,7 @@ return color;
         vertexTemplate,
         fragmentTemplate,
         baseMeshUboFields,
+        baseSceneUboFields,
         baseVertexAttributes,
         baseVaryings,
         baseBindings,

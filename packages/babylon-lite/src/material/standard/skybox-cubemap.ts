@@ -7,34 +7,35 @@
  */
 
 import type { EngineContextInternal } from "../../engine/engine.js";
-import type { RenderTargetSignature } from "../../render/renderable.js";
 import skyVertSrc from "../../../shaders/skybox-cubemap.vertex.wgsl?raw";
 import skyFragSrc from "../../../shaders/skybox-cubemap.fragment.wgsl?raw";
 import { getSceneBindGroupLayout, createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
-import { WGSL_FOG, getWgslSceneUniformsUnified } from "../../shader/wgsl-helpers.js";
+import { WGSL_SCENE_UNIFORMS_STD, WGSL_FOG } from "../../shader/wgsl-helpers.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 
-export interface SkyboxCubeMapResources {
+export interface SkyboxCubeMapGPU {
+    pipeline: GPURenderPipeline;
+    sceneBindGroup: GPUBindGroup;
     meshBindGroup: GPUBindGroup;
+    sceneUBO: GPUBuffer;
     meshUBO: GPUBuffer;
-    /** Bind group layouts + shader modules needed to (re)build a pipeline per target. */
-    _meshBGL: GPUBindGroupLayout;
-    _vertModule: GPUShaderModule;
-    _fragModule: GPUShaderModule;
-    /** Target-keyed pipeline cache — pipelines depend on color format/sample count. */
-    _pipelines: Map<string, GPURenderPipeline>;
 }
 
-/** Legacy alias — kept for callers that only need the 3 "hot" fields. */
-export type SkyboxCubeMapGPU = SkyboxCubeMapResources;
-
 /**
- * Build target-independent GPU resources for rendering a cube-mapped skybox.
- * Pipelines are built lazily per-target via `getSkyboxCubeMapPipeline`.
- * Group(0) (scene UBO) is bound by the render pass.
+ * Build GPU pipeline for rendering a cube-mapped skybox.
+ * Shares the scene UBO from StandardMaterial (same layout).
  */
-export function buildSkyboxCubeMapGPU(engine: EngineContextInternal, worldMatrix: Float32Array, cubeView: GPUTextureView, cubeSampler: GPUSampler): SkyboxCubeMapResources {
+export function buildSkyboxCubeMapGPU(
+    engine: EngineContextInternal,
+    format: GPUTextureFormat,
+    msaaSamples: number,
+    sceneUBO: GPUBuffer,
+    worldMatrix: Float32Array,
+    cubeView: GPUTextureView,
+    cubeSampler: GPUSampler
+): SkyboxCubeMapGPU {
     const device = engine.device;
+    const sceneBindGroupLayout = getSceneBindGroupLayout(engine);
 
     const meshBindGroupLayout = device.createBindGroupLayout({
         label: "skybox-cm-mesh",
@@ -45,10 +46,32 @@ export function buildSkyboxCubeMapGPU(engine: EngineContextInternal, worldMatrix
         ],
     });
 
-    const vertModule = device.createShaderModule({ code: getWgslSceneUniformsUnified() + skyVertSrc, label: "skybox-cm-vert" });
-    const fragModule = device.createShaderModule({ code: getWgslSceneUniformsUnified() + WGSL_FOG + skyFragSrc, label: "skybox-cm-frag" });
+    const vertModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_STD + skyVertSrc, label: "skybox-cm-vert" });
+    const fragModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_STD + WGSL_FOG + skyFragSrc, label: "skybox-cm-frag" });
+
+    const pipeline = device.createRenderPipeline(
+        createStandardPipelineDescriptor({
+            label: "skybox-cubemap-pipeline",
+            engine,
+            bgls: [sceneBindGroupLayout, meshBindGroupLayout],
+            vertModule,
+            fragModule,
+            vertexBuffers: [
+                { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] },
+                { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" as GPUVertexFormat }] },
+            ],
+            format,
+            msaaSamples,
+            cullMode: "none",
+        })
+    );
 
     const meshUBO = createUniformBuffer(engine, worldMatrix as Float32Array);
+
+    const sceneBindGroup = device.createBindGroup({
+        layout: sceneBindGroupLayout,
+        entries: [{ binding: 0, resource: { buffer: sceneUBO } }],
+    });
 
     const meshBindGroup = device.createBindGroup({
         layout: meshBindGroupLayout,
@@ -59,39 +82,5 @@ export function buildSkyboxCubeMapGPU(engine: EngineContextInternal, worldMatrix
         ],
     });
 
-    return {
-        meshBindGroup,
-        meshUBO,
-        _meshBGL: meshBindGroupLayout,
-        _vertModule: vertModule,
-        _fragModule: fragModule,
-        _pipelines: new Map(),
-    };
-}
-
-/** Get or create the skybox cubemap pipeline for a specific render target signature. */
-export function getSkyboxCubeMapPipeline(engine: EngineContextInternal, res: SkyboxCubeMapResources, target: RenderTargetSignature): GPURenderPipeline {
-    const key = `${target.colorFormat}|${target.sampleCount}|${target.depthStencilFormat ?? ""}`;
-    let pipeline = res._pipelines.get(key);
-    if (pipeline) {
-        return pipeline;
-    }
-    pipeline = engine.device.createRenderPipeline(
-        createStandardPipelineDescriptor({
-            label: `skybox-cubemap-pipeline:${key}`,
-            engine,
-            bgls: [getSceneBindGroupLayout(engine), res._meshBGL],
-            vertModule: res._vertModule,
-            fragModule: res._fragModule,
-            vertexBuffers: [
-                { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] },
-                { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" as GPUVertexFormat }] },
-            ],
-            format: target.colorFormat,
-            msaaSamples: target.sampleCount,
-            cullMode: "none",
-        })
-    );
-    res._pipelines.set(key, pipeline);
-    return pipeline;
+    return { pipeline, sceneBindGroup, meshBindGroup, sceneUBO, meshUBO };
 }

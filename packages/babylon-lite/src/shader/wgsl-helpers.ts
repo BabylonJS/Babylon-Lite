@@ -60,27 +60,6 @@ return clamp(fogCoeff, 0.0, 1.0);
 }
 `;
 
-/** Image processing: exposure → Reinhard tonemap → gamma → contrast.
- *  Requires: `scene.exposureLinear` and `scene.contrast` in scope. */
-export const WGSL_IMAGE_PROCESSING = `
-fn applyImageProcessing(result: vec4<f32>) -> vec4<f32> {
-var rgb = result.rgb;
-rgb *= scene.exposureLinear;
-const tonemappingCalibration: f32 = 1.590579;
-rgb = 1.0 - exp2(-tonemappingCalibration * rgb);
-rgb = pow(rgb, vec3<f32>(1.0 / 2.2));
-rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-let highContrast = rgb * rgb * (3.0 - 2.0 * rgb);
-if (scene.contrast < 1.0) {
-rgb = mix(vec3<f32>(0.5), rgb, scene.contrast);
-} else {
-rgb = mix(rgb, highContrast, scene.contrast - 1.0);
-}
-rgb = max(rgb, vec3<f32>(0.0));
-return vec4<f32>(rgb, result.a);
-}
-`;
-
 /** Dither noise function.
  *  Pure math — no UBO dependency. */
 export const WGSL_DITHER = `
@@ -91,12 +70,31 @@ return mix(-normVariance, normVariance, rand);
 }
 `;
 
-import { SCENE_UBO_WGSL } from "./scene-uniforms-fields.js";
+/** PBR background SceneUniforms (128 bytes) + binding.
+ *  Used by skybox, DDS skybox, and ground vertex shaders. */
+export const WGSL_SCENE_UNIFORMS_PBR = `
+struct SceneUniforms {
+viewProj: mat4x4<f32>,
+cameraPosition: vec3<f32>, _pad0: f32,
+lightDirection: vec3<f32>, lightIntensity: f32,
+lightDiffuseColor: vec3<f32>, _pad1: f32,
+lightGroundColor: vec3<f32>, _pad2: f32,
+};
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+`;
 
-/** Unified SceneUniforms struct + binding for all non-shadow shaders. */
-export function getWgslSceneUniformsUnified(): string {
-    return SCENE_UBO_WGSL;
-}
+/** Standard material SceneUniforms with fog fields + binding.
+ *  Used by skybox-cubemap (Standard material skybox). */
+export const WGSL_SCENE_UNIFORMS_STD = `
+struct SceneUniforms {
+viewProjection: mat4x4<f32>,
+view: mat4x4<f32>,
+vEyePosition: vec4<f32>,
+vFogInfos: vec4<f32>,
+vFogColor: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+`;
 
 /** Shadow-only SceneUniforms (minimal: just viewProjection) + binding.
  *  Used by shadow depth shaders. */

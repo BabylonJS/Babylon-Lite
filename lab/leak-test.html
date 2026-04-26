@@ -21,7 +21,7 @@
      * renders a few frames, then disposes everything. Exposes lifecycle hooks
      * on window so Playwright can drive the cadence and measure heap between cycles.
      */
-    import { createEngine, startEngine, stopEngine, disposeEngine,
+    import { createEngine, startEngine, stopEngine, disposeEngine, registerScene,
              createSceneContext, createDefaultCamera, addToScene, disposeScene,
              createSphere, createArcRotateCamera, createDirectionalLight,
              createHemisphericLight, createPointLight, loadGltf, loadEnvironment,
@@ -48,7 +48,8 @@
 
           await setupScene(engine, scene, sceneNum);
 
-          await startEngine(engine, scene);
+          await registerScene(engine, scene);
+          await startEngine(engine);
 
           // Render a few extra frames
           for (let i = 0; i < RENDER_FRAMES; i++) {

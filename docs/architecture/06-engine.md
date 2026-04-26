@@ -1,191 +1,195 @@
 # Module: Engine
-
 > Package path: `packages/babylon-lite/src/engine/engine.ts`
 
 ## Purpose
 
-The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU
-adapter and device, configures the swap chain on a canvas, and drives the
-per-frame render loop via `requestAnimationFrame`. It does **not** own any
-render targets — those are owned by the **frame graph** (each task owns its
-target), which the engine asks to build/execute every frame.
+The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adapter and device, configures the swap chain on an HTML canvas, creates MSAA and depth/stencil render targets, and drives the per-frame render loop via `requestAnimationFrame`. All other modules depend on the Engine for GPU device access and frame orchestration.
 
 ## Public API Surface
 
 ```typescript
-/** Handle to the WebGPU engine — pure state, no attached methods. */
+/** Handle to the WebGPU engine — public API surface.
+ *  GPU internals (device, context, format) are @internal (EngineContextInternal) — not user-facing. */
 export interface EngineContext {
-    readonly canvas: HTMLCanvasElement;
-    readonly msaaSamples: number;          // always 4
-    /** Preferred swapchain texture format. Use as the `colorFormat` for
-     *  offscreen RTs that are sampled by main-pass materials. */
-    readonly format: GPUTextureFormat;
+  readonly canvas: HTMLCanvasElement;
+  readonly msaaSamples: number;           // always 4
 
-    /** GPU draw calls executed in the last rendered frame. */
-    drawCallCount: number;
+  /** GPU draw calls executed in the last rendered frame. */
+  drawCallCount: number;
 }
 
-/** Acquire GPU adapter + device, configure swapchain, return engine handle. */
-export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineContext>;
-
-/** Start the render loop. Resolves after the first frame has been rendered. */
+/** Start the render loop for the given scene. Resolves after the first frame renders. */
 export function startEngine(engine: EngineContext, scene: SceneContext): Promise<void>;
-
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
+/** Resize render targets to match canvas size. */
+export function resizeEngine(engine: EngineContext): void;
+/** Release all engine-owned GPU resources (render targets, device). */
+export function disposeEngine(engine: EngineContext): void;
 
-/** Render a single frame outside the rAF loop and await GPU completion.
- *  Useful for tests / one-shot captures. */
-export function renderOneFrame(engine: EngineContext, scene: SceneContext): Promise<void>;
-
-/** Release engine + scene GPU resources. */
-export function disposeEngine(engine: EngineContext, scene?: SceneContext): void;
+/** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
+export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineContext>;
 ```
 
-### Internal types (not exported)
+### Internal Types (not exported)
 
 ```typescript
-/** @internal — GPU internals + frame-graph hooks. */
+/** @internal — GPU internals accessible only to renderable/loader code. */
 interface EngineContextInternal extends EngineContext {
-    readonly device: GPUDevice;
-    readonly context: GPUCanvasContext;
-    /** Swapchain view for the current frame. Refreshed at the top of each frame.
-     *  Frame graph render-pass tasks bound to the swapchain RT read this. */
-    _swapChainView: GPUTextureView | null;
-    _animFrameId: number;
-    _renderFn: ((now: number) => void) | null;
-    /** True when the frame graph needs to be (re)built before next execute().
-     *  Initially true; set true on canvas resize and when builders run. */
-    _needsBuild: boolean;
+  readonly device: GPUDevice;
+  readonly context: GPUCanvasContext;
+  readonly format: GPUTextureFormat;
+}
+
+interface RenderTargets {
+  msaaTexture: GPUTexture;
+  msaaView: GPUTextureView;
+  depthTexture: GPUTexture;
+  depthView: GPUTextureView;
+  width: number;
+  height: number;
 }
 ```
 
-## Initialisation (`createEngine`)
+## Internal Architecture
 
-1. Request a high-performance adapter; abort if WebGPU is unavailable.
-2. Request a device, opportunistically enabling `float32-filterable` and the
-   ASTC / BC / ETC2 texture-compression features when the adapter exposes them.
-3. Acquire the canvas WebGPU context; configure with the preferred format
-   (`navigator.gpu.getPreferredCanvasFormat()`) and `alphaMode: 'opaque'`.
-4. Set `msaaSamples = 4` (hard-coded).
-5. Return the `EngineContextInternal` struct. The engine **does not allocate
-   any render targets** — the frame graph creates the main MSAA + depth
-   target inside `createSceneContext` (see [07-scene.md](./07-scene.md)) and
-   any extra RTTs are created by user-authored tasks.
+### Initialization Sequence (`createEngine`)
 
-## Resize
+1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
+2. **Device request**: `adapter.requestDevice({ requiredFeatures })` — optionally enables `float32-filterable` if supported.
+3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
+4. **Swap chain configure**: `context.configure({ device, format, alphaMode: 'opaque' })` where `format = navigator.gpu.getPreferredCanvasFormat()`.
+5. **MSAA**: Hard-coded to `msaaSamples = 4`.
+6. **Render targets**: Creates initial MSAA color and depth/stencil textures matching canvas dimensions.
 
-`handleResize(eng)` runs at the top of every frame. It compares the canvas's
-DPR-scaled client size to the current backing-store size and, on mismatch,
-updates `canvas.width`/`canvas.height` and flips `_needsBuild = true`. The
-frame graph's `build()` then reallocates any `size: "canvas"` render targets
-on the next frame.
+### Render Targets (`createRenderTargets`)
 
-## Frame loop
+| Texture | Format | SampleCount | Usage |
+|---|---|---|---|
+| `msaaTexture` | `navigator.gpu.getPreferredCanvasFormat()` (e.g. `bgra8unorm`) | 4 | `RENDER_ATTACHMENT` |
+| `depthTexture` | `depth24plus-stencil8` | 4 | `RENDER_ATTACHMENT` |
 
-`startEngine(engine, scene)` returns a `Promise<void>` that resolves after the
-first frame has been encoded. The render function:
+Both textures are sized to `(width, height)` and views are created immediately.
+
+### Resize Logic
+
+Called at the **start of every frame** (inside the rAF callback), not on a resize event:
 
 ```
-renderFn(now):
-    delta = firstFrame ? 0
-            : sc._fixedDeltaMs > 0 ? sc._fixedDeltaMs
-            : (lastTime > 0 ? now - lastTime : 16.667)
-    renderFrame(eng, sc, delta).then(() => {
-        if (firstFrame) {
-            firstFrame = false
-            canvas.dataset.loaded = "true"   // hides the lab loader overlay
-            resolve()
-        }
-        _animFrameId = requestAnimationFrame(renderFn)
-    })
+w = canvas.clientWidth * devicePixelRatio | 0
+h = canvas.clientHeight * devicePixelRatio | 0
+if (w == targets.width && h == targets.height) return;
+canvas.width = w; canvas.height = h;
+context.configure({ device, format, alphaMode: 'opaque' });
+targets.msaaTexture.destroy();
+targets.depthTexture.destroy();
+targets = createRenderTargets(device, w, h, format, msaaSamples);
 ```
 
-`renderFrame(eng, sc, deltaMs)` is the engine's only per-frame entry point:
+The bitwise OR with 0 (`| 0`) truncates to integer.
 
-1. **Drain scene builders** — if `sc._builders` is non-empty, await
-   `drainSceneBuilders(sc)` (see [07-scene.md](./07-scene.md)). New builders
-   may invalidate the frame graph, so this also sets `_needsBuild = true`.
-2. **Resize** — see above.
-3. **Build frame graph if dirty** — `await sc._frameGraph.build()`.
-4. **Acquire swapchain view** — `eng._swapChainView = context.getCurrentTexture().createView()`.
-5. **Run user `_beforeRender` callbacks** with `deltaMs`.
-6. **Drain `_materialSwapQueue`** via `processMaterialSwaps` (rebuilds any
-   renderables whose material was swapped since the last frame).
-7. **Run internal `_perFrameCallbacks`** (e.g. light UBO refresh, mesh-group
-   GPU updates) — strictly after the user hook so user mutations are visible.
-8. **Execute the frame graph** — `sc._frameGraph.execute()` records all task
-   passes (shadows → main → any RTT tasks) into a single command encoder and
-   submits.
+### Render Loop
 
-The engine never directly creates render passes or draws meshes — it only
-asks the frame graph to execute. See the frame-graph implementation in
-`packages/babylon-lite/src/frame-graph/` for task ordering and recording.
-
-### `data-loaded` signal
-
-After the first frame paints, the engine sets
-`canvas.dataset.loaded = "true"`. The lab loader overlay
-(`lab/public/loader.js`) listens for this attribute and dismisses, so users
-see the canvas as soon as content is being rendered — even when scenes
-deliberately delay `data-ready` (e.g. scene 40 waits for physics to settle).
-Tests still wait for `data-ready`.
-
-### `renderOneFrame`
-
-`renderOneFrame(engine, scene)` runs `renderFrame` once outside the rAF loop
-and then awaits `device.queue.onSubmittedWorkDone()`. Stop the loop with
-`stopEngine` first if it's running.
-
-## State machine / lifecycle
+`startEngine(engine, scene)` returns a `Promise<void>` that resolves after the first frame has been rendered:
 
 ```
-[Created]
-   │ startEngine(engine, scene)
-   ▼
-[Running] —— each frame: renderFrame(engine, scene, delta)
-   │            (drain builders → resize → build FG → execute FG)
-   │ stopEngine(engine)
-   ▼
-[Stopped] —— startEngine(engine, scene) → [Running]
-   │
-   │ disposeEngine(engine, scene?)  →  device.destroy()
-   ▼
-[Disposed]
+startEngine(engine, scene):
+  await buildScene(scene)          // runs all deferred builders
+  sort scene._renderables by order
+  return new Promise(resolve => {
+    renderFn = (now) => {
+      resizeEngine(engine);
+      deltaMs = now - prev (or scene._fixedDeltaMs if set)
+      call scene._beforeRender callbacks with deltaMs
+      renderFrame(engine, targets, scene);
+      resolve()                  // first frame only
+      prev = now
+      animFrameId = requestAnimationFrame(renderFn);
+    };
+    animFrameId = requestAnimationFrame(renderFn);
+  })
+
+stopEngine(engine):
+  cancelAnimationFrame(animFrameId);
+  animFrameId = 0; renderFn = null;
 ```
 
-## Babylon.js equivalence
+The `_beforeRender` callbacks receive `deltaMs` (milliseconds since the previous frame). If `scene._fixedDeltaMs` is set, that value is used instead — useful for deterministic animation playback.
+
+### Frame Rendering (`renderFrame`)
+
+Each frame consists of:
+
+1. **Obtain swap chain view**: `engine.context.getCurrentTexture().createView()`.
+2. **Create command encoder**: `device.createCommandEncoder()`.
+3. **Pre-render passes**: Iterate `scene._prePasses` — call each `execute(encoder, engine)`. Used for shadow depth passes, blur passes, compute, etc.
+4. **Begin main render pass**:
+   - Color attachment: `view = targets.msaaView`, `resolveTarget = swapChainView`, `clearValue = scene.clearColor`, `loadOp = 'clear'`, `storeOp = 'store'`.
+   - Depth/stencil attachment: `view = targets.depthView`, `depthClearValue = 1.0`, `depthLoadOp = 'clear'`, `depthStoreOp = 'store'`, `stencilClearValue = 0`, `stencilLoadOp = 'clear'`, `stencilStoreOp = 'store'`.
+5. **Set viewport**: `pass.setViewport(0, 0, targets.width, targets.height, 0, 1)`.
+6. **Update uniforms**: Iterate `scene._uniformUpdaters` — call each `update(engine)`. Writes camera, light, fog data to UBOs.
+7. **Draw calls**: Iterate `scene._renderables` (sorted by `order` at start) — call each `draw(pass, engine)`. Each renderable dispatches its own draw calls.
+8. **End pass and submit**: `pass.end()`, `device.queue.submit([encoder.finish()])`.
+
+### Deferred Builder Execution
+
+When `startEngine(engine, scene)` is called:
+1. **Await** `buildScene(scene)` — runs all deferred builders (creates pipelines, bind groups, renderables). This is async because builders may perform async work.
+2. Sort `scene._renderables` by `order` (ascending)
+3. Begin the rAF render loop
+4. The returned Promise resolves after the first `renderFrame()` call completes
+
+The 4× MSAA texture (`targets.msaaView`) is automatically resolved to the swap chain texture (`swapChainView`) by the WebGPU runtime because `resolveTarget` is set in the color attachment.
+
+## State Machine / Lifecycle
+
+```
+[Created] --startEngine(engine, scene)--> [Building (await buildScene)] --> [Running (rAF loop)]
+                                                          |
+                                                      resizeEngine(engine) each frame
+                                                      _beforeRender(deltaMs) each frame
+                                                      renderFrame() each frame
+                                                          |
+                                          --stopEngine(engine)----> [Stopped]
+                                                          |
+                                          --startEngine(engine, scene)----> [Building] --> [Running]
+```
+
+## Babylon.js Equivalence Map
 
 | Babylon Lite | Babylon.js |
 |---|---|
-| `createEngine(canvas)` | `new WebGPUEngine(canvas)` + `await engine.initAsync()` |
-| `startEngine(engine, scene)` | `engine.runRenderLoop(() => scene.render())` (returned promise ≈ `scene.whenReadyAsync()`) |
+| `createEngine(canvas)` | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()` |
+| `engine.device` | `engine._device` |
+| `engine.format` | `engine._textureHelper._glslang.getPreferredFormat()` |
+| `engine.msaaSamples` (always 4) | `engine._samples` (configurable) |
+| `startEngine(engine, scene)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
 | `stopEngine(engine)` | `engine.stopRenderLoop()` |
-| `renderOneFrame(engine, scene)` | `scene.render()` outside the loop |
-| Swapchain MSAA target | `engine._mainTexture` (managed internally) |
-| `_frameGraph.execute()` | `scene.render()`'s render-loop body |
+| `resizeEngine(engine)` | `engine.resize()` |
+| MSAA render targets | Engine internally manages MSAA framebuffers |
+| `scene._prePasses` iteration | `scene.onBeforeRenderObservable` |
+| `scene._uniformUpdaters` iteration | Internal UBO update during frame |
+| `scene._renderables` iteration | Internal draw list dispatch |
 
 ## Dependencies
 
-- **Imports**: `SceneContext`/`SceneContextInternal` from `../scene/scene.js`,
-  `processMaterialSwaps`/`drainSceneBuilders` from the same.
-- **No render-target / pipeline / material code** — all GPU state belongs to
-  the frame graph and the renderables it executes.
+- **Imports**: `SceneContext` from `../scene/scene.js` (type-only, for `start()` parameter).
+- **External**: WebGPU API (`navigator.gpu`, `GPUDevice`, `GPUCanvasContext`, etc.).
+- **No other internal dependencies.**
 
-## Test specification
+## Test Specification
 
 | Test | Description |
 |---|---|
-| `createEngine returns valid handle` | Mock `navigator.gpu`, verify `device`, `context`, `format`, `msaaSamples = 4` |
-| `resize flags _needsBuild` | Change canvas client size, verify next frame rebuilds |
-| `startEngine resolves after first frame` | Promise resolves only once the first `renderFrame` has completed |
-| `data-loaded set after first frame` | `canvas.dataset.loaded === "true"` after `startEngine` resolves |
-| `renderFrame drains builders` | Push a builder; verify it ran and `_needsBuild` was set |
-| `material swap queue drained per frame` | Assign `mesh.material = X`; verify `processMaterialSwaps` runs |
-| `disposeEngine releases device + scene FG` | Spy on `device.destroy()` and `frameGraph.dispose()` |
+| `createEngine returns valid Engine` | Mock `navigator.gpu`, verify all interface fields are populated |
+| `resize only recreates targets when size changes` | Call resize with same dimensions → targets unchanged; change `clientWidth` → targets recreated |
+| `start/stop manages rAF` | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop |
+| `renderFrame calls scene callbacks` | Verify pre-passes → updaters → renderables order |
+| `MSAA resolve target is swap chain view` | Inspect color attachment `resolveTarget` in render pass descriptor |
+| `depth format is depth24plus-stencil8` | Verify `depthTexture.format` |
 
-## File manifest
+## File Manifest
 
-| File | Purpose |
-|---|---|
-| `src/engine/engine.ts` | Engine handle, RAF loop, frame-graph driver |
+| File | Size | Purpose |
+|---|---|---|
+| `src/engine/engine.ts` | ~150 lines | Engine interface, creation, render loop, MSAA targets |

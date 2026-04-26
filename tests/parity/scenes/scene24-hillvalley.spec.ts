@@ -15,6 +15,8 @@ const sceneConfig = getSceneConfig(24);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene24-hillvalley");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 24 skipped via skipParity in scene-config.json");
+
 test("Scene 24 — Hill Valley matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
 

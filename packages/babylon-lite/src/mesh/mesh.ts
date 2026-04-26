@@ -23,6 +23,7 @@ export interface MeshGPU {
     readonly tangentBuffer?: GPUBuffer | null;
     readonly uvBuffer: GPUBuffer;
     readonly uv2Buffer?: GPUBuffer | null;
+    readonly colorBuffer?: GPUBuffer | null;
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;

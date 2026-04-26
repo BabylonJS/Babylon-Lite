@@ -10,12 +10,12 @@ Provides GPU resource lifecycle management: reference-counted texture ownership 
 ### Texture Ref Counting
 
 ```typescript
-/** Increment ref count on a SampledTexture. First acquire sets count to 1. */
-export function acquireTexture(tex: SampledTexture): void;
+/** Increment ref count on a Texture2D. First acquire sets count to 1. */
+export function acquireTexture(tex: Texture2D): void;
 
 /** Decrement ref count. Calls tex.texture.destroy() when count reaches 0.
  *  Returns true if the texture was destroyed. */
-export function releaseTexture(tex: SampledTexture): boolean;
+export function releaseTexture(tex: Texture2D): boolean;
 
 /** Increment ref count on a raw GPUTexture (for env textures). */
 export function acquireGPUTexture(tex: GPUTexture): void;
@@ -44,13 +44,13 @@ Uses `WeakMap<GPUTexture, number>` for ref counts:
 - **`_texRefs`**: Maps `GPUTexture` → reference count (number)
 - `acquireTexture(tex)` / `acquireGPUTexture(tex)`: Increments count (defaults to 0 if not present, so first acquire → 1)
 - `releaseTexture(tex)` / `releaseGPUTexture(tex)`: Decrements count (defaults to 1 if not present, so first release → 0 → destroy)
-- At count 0: calls `tex.texture.destroy()` (SampledTexture) or `tex.destroy()` (raw GPUTexture), deletes from WeakMap
+- At count 0: calls `tex.texture.destroy()` (Texture2D) or `tex.destroy()` (raw GPUTexture), deletes from WeakMap
 - Returns `true` if destroyed, `false` if still referenced
 
 **WeakMap rationale**: No memory leaks — if the `GPUTexture` object itself is GC'd (impossible while alive), the entry is automatically cleaned up. More importantly, WeakMap avoids needing explicit cleanup of the tracking map.
 
 Two API variants:
-- `acquireTexture` / `releaseTexture`: Takes `SampledTexture` (the public API type), accesses `.texture` property for the underlying `GPUTexture`
+- `acquireTexture` / `releaseTexture`: Takes `Texture2D` (the public API type), accesses `.texture` property for the underlying `GPUTexture`
 - `acquireGPUTexture` / `releaseGPUTexture`: Takes raw `GPUTexture` directly (used internally for environment cubemaps, BRDF LUTs, etc.)
 
 ### Sampler Deduplication
@@ -131,7 +131,7 @@ clearSamplerCache(device)
 
 ## Dependencies
 
-- `../texture/texture-2d.js` — `SampledTexture` type (for `acquireTexture`/`releaseTexture` overloads)
+- `../texture/texture-2d.js` — `Texture2D` type (for `acquireTexture`/`releaseTexture` overloads)
 
 ## Test Specification
 

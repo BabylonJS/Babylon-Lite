@@ -17,8 +17,12 @@ const WORKTREE_DIR = resolve(ROOT, ".perf-baseline-worktree");
 const BASELINE_OUT = resolve(ROOT, "lab/public/bundle-baseline");
 const BASELINE_HTML_DIR = resolve(ROOT, "lab");
 
-function run(cmd: string, opts?: { cwd?: string }): string {
-    return execSync(cmd, { encoding: "utf-8", cwd: opts?.cwd ?? ROOT }).trim();
+function run(cmd: string, opts?: { cwd?: string; env?: Record<string, string> }): string {
+    return execSync(cmd, {
+        encoding: "utf-8",
+        cwd: opts?.cwd ?? ROOT,
+        env: opts?.env ? { ...process.env, ...opts.env } : undefined,
+    }).trim();
 }
 
 // ── 1. Determine baseline ref ──────────────────────────────────────
@@ -106,8 +110,11 @@ try {
     run("pnpm install", { cwd: WORKTREE_DIR });
 }
 
-console.log("\nBuilding bundle scenes from baseline...");
-run("pnpm build:bundle-scenes", { cwd: WORKTREE_DIR });
+console.log("\nBuilding bundle scenes from baseline (Lite only, skip measurement)...");
+run("pnpm build:bundle-scenes", {
+    cwd: WORKTREE_DIR,
+    env: { SKIP_BJS: "true", SKIP_MEASURE: "true" },
+});
 
 // ── 4. Copy baseline bundles to lab/public/bundle-baseline/ ────────
 

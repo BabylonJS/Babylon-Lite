@@ -11,10 +11,10 @@
  *  - Energy conservation: albedo scaled by (1 - maxSheenColor * brdf.b)
  */
 
-import type { ShaderFragment, BindingDecl } from "../../../shader/fragment-types.js";
+import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SheenProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING } from "../pbr-flags.js";
+import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING, PBR2_HAS_SHEEN_UV_TX } from "../pbr-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -30,9 +30,9 @@ return 1.0 / (4.0 * (NdotL_sh + NdotV_sh - NdotL_sh * NdotV_sh));
 }
 `;
 
-const SHEEN_DIRECT_MOD_NEW = `
+const SHEEN_DIRECT_MOD = (intensityExpr: string): string => `
 {
-let shIntensity = material.sheenParams.a;
+let shIntensity = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity;
 let shRoughness_clamped = max(sheenRoughnessAdjusted, AA_factor_x);
 let shAlphaG = shRoughness_clamped * shRoughness_clamped + 0.0005;
@@ -42,23 +42,24 @@ sheenDirectTerm = shColorScaled * shD * shV * NdotL * lightColor * lightAtten * 
 }
 `;
 
-const SHEEN_IBL_MOD_NEW = `
+const SHEEN_IBL_MOD = (intensityExpr: string, albedoScaling: boolean): string => `
 {
-let shIntensity_ibl = material.sheenParams.a;
+let shIntensity_ibl = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity_ibl;
 let shRoughness_ibl = sheenRoughnessAdjusted;
 let shAlphaG_ibl = shRoughness_ibl * shRoughness_ibl + 0.0005 + AA_factor_y;
 var shSpecLod = log2(cubemapDim * shAlphaG_ibl) * scene.lodGenerationScale;
 let shEnvRadiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * material.environmentIntensity;
 let shBrdf = textureSampleLevel(brdfLUT, brdfSampler_, vec2<f32>(NdotV, shRoughness_ibl), 0.0);
-let shEnvReflectance = shColorScaled * shBrdf.b;
+let shEnvReflectance = shColorScaled * shBrdf.b${albedoScaling ? " * seo * eho" : ""};
 sheenIblTerm = shEnvRadiance * shEnvReflectance;
-let shMax = max(shColorScaled.r, max(shColorScaled.g, shColorScaled.b));
-sheenAlbedoScaling = 1.0 - shMax * shBrdf.b;
+${albedoScaling ? "let shMax = max(shColorScaled.r, max(shColorScaled.g, shColorScaled.b));\nsheenAlbedoScaling = 1.0 - shMax * shBrdf.b;" : ""}
 }
 `;
 
-const SHEEN_IBL_COLOR_MOD_NEW = `
+const SHEEN_IBL_COLOR_MOD = (albedoScaling: boolean): string =>
+    albedoScaling
+        ? `
 {
 color = (finalIrradiance
       + finalRadianceScaled
@@ -68,37 +69,8 @@ color = (finalIrradiance
       + sheenIblTerm
       + emissive;
 }
-`;
-
-const SHEEN_DIRECT_MOD_LEGACY = `
-{
-let shColor = sheenColorFinal;
-let shIntensity = material.sheenParams.a * (1.0 - dielectricF0);
-let shRoughness_clamped = max(sheenRoughnessAdjusted, AA_factor_x);
-let shColorScaled = shColor * shIntensity;
-let shAlphaG = shRoughness_clamped * shRoughness_clamped + 0.0005;
-let shD = normalDistributionFunction_CharlieSheen(NdotH, shAlphaG);
-let shV = visibility_Ashikhmin(NdotL, NdotV);
-sheenDirectTerm = shColorScaled * shD * shV * NdotL * lightColor * lightAtten * material.directIntensity;
-}
-`;
-
-const SHEEN_IBL_MOD_LEGACY = `
-{
-let shColor_ibl = sheenColorFinal;
-let shIntensity_ibl = material.sheenParams.a * (1.0 - dielectricF0);
-let shRoughness_ibl = sheenRoughnessAdjusted;
-let shAlphaG_ibl = shRoughness_ibl * shRoughness_ibl + 0.0005 + AA_factor_y;
-var shSpecLod = log2(cubemapDim * shAlphaG_ibl) * scene.lodGenerationScale;
-let shEnvRadiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * material.environmentIntensity;
-let shBrdf = textureSampleLevel(brdfLUT, brdfSampler_, vec2<f32>(NdotV, shRoughness_ibl), 0.0);
-let shColorScaled = shColor_ibl * shIntensity_ibl;
-let shEnvReflectance = shColorScaled * shBrdf.b;
-sheenIblTerm = shEnvRadiance * shEnvReflectance;
-}
-`;
-
-const SHEEN_IBL_COLOR_MOD_LEGACY = `
+`
+        : `
 {
 color = finalIrradiance
       + finalRadianceScaled
@@ -125,7 +97,7 @@ color = color + sheenDirectTerm;
  *   as sRGB so the sampler does the conversion). When false (legacy), applies
  *   pow(rgb, 2.2) to the texture and uses (1-F0) as the sheen intensity scalar.
  */
-export function createSheenFragment(hasSheenTexture: boolean, hasIbl: boolean = false, hasAlbedoScaling: boolean = false): ShaderFragment {
+export function createSheenFragment(hasSheenTexture: boolean, hasIbl: boolean = false, hasAlbedoScaling: boolean = false, hasSheenUvTx: boolean = false): ShaderFragment {
     let scopeVars = `var sheenDirectTerm = vec3<f32>(0.0);
 var sheenIblTerm = vec3<f32>(0.0);
 var sheenAlbedoScaling = 1.0;
@@ -133,21 +105,26 @@ var sheenColorFinal = material.sheenParams.rgb;
 var sheenRoughnessAdjusted = material.sheenParams2.x;`;
     if (hasSheenTexture) {
         const gammaStmt = hasAlbedoScaling ? "sheenMapData.rgb" : "pow(sheenMapData.rgb, vec3<f32>(2.2))";
+        const sheenUvDecl = hasSheenUvTx
+            ? "let sheenUV = vec2<f32>(dot(material.sheenUVm.xy, input.uv), dot(material.sheenUVm.zw, input.uv)) + material.sheenUVt.xy;"
+            : "let sheenUV = input.uv;";
         scopeVars += `
 {
-let sheenMapData = textureSample(sheenTexture_, sheenSampler_, input.uv);
+${sheenUvDecl}
+let sheenMapData = textureSample(sheenTexture_, sheenSampler_, sheenUV);
 sheenColorFinal *= ${gammaStmt};
 sheenRoughnessAdjusted *= sheenMapData.a;
 }`;
     }
 
+    const intensityExpr = hasAlbedoScaling ? "material.sheenParams.a" : "material.sheenParams.a * (1.0 - dielectricF0)";
     const slots: Partial<Record<string, string>> = {
         SV: scopeVars,
-        AD: hasAlbedoScaling ? SHEEN_DIRECT_MOD_NEW : SHEEN_DIRECT_MOD_LEGACY,
+        AD: SHEEN_DIRECT_MOD(intensityExpr),
     };
     // AI and NI are mutually exclusive — only one path runs
     if (hasIbl) {
-        slots.AI = hasAlbedoScaling ? SHEEN_IBL_MOD_NEW + SHEEN_IBL_COLOR_MOD_NEW : SHEEN_IBL_MOD_LEGACY + SHEEN_IBL_COLOR_MOD_LEGACY;
+        slots.AI = SHEEN_IBL_MOD(intensityExpr, hasAlbedoScaling) + SHEEN_IBL_COLOR_MOD(hasAlbedoScaling);
     } else {
         slots.NI = SHEEN_NON_IBL_MOD;
     }
@@ -160,14 +137,19 @@ sheenRoughnessAdjusted *= sheenMapData.a;
         );
     }
 
+    const uboFields: UboField[] = [
+        { name: "sheenParams", type: "vec4<f32>" },
+        { name: "sheenParams2", type: "vec4<f32>" },
+    ];
+    if (hasSheenUvTx) {
+        uboFields.push({ name: "sheenUVm", type: "vec4<f32>" }, { name: "sheenUVt", type: "vec4<f32>" });
+    }
+
     return {
         id: "sheen",
         dependencies: hasIbl ? ["ibl"] : undefined,
 
-        uboFields: [
-            { name: "sheenParams", type: "vec4<f32>" },
-            { name: "sheenParams2", type: "vec4<f32>" },
-        ],
+        uboFields,
 
         bindings,
 
@@ -177,7 +159,7 @@ sheenRoughnessAdjusted *= sheenMapData.a;
     };
 }
 
-/** Write the sheen material-UBO slice (sheenParams). */
+/** Write the sheen material-UBO slice (sheenParams, sheenParams2, optional UV transform). */
 export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
     const sh = material.sheen as SheenProps | undefined;
     if (!sh?.isEnabled || !offsets.has("sheenParams")) {
@@ -191,6 +173,38 @@ export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, of
     data[off + 3] = sh.intensity ?? 1.0;
     data[off + 4] = sh.roughness ?? 0.0;
     data[off + 5] = sh.texture ? 1.0 : 0.0;
+
+    // Optional per-texture UV transform (KHR_texture_transform on sheenColorTexture).
+    const mOff = offsets.get("sheenUVm");
+    const tOff = offsets.get("sheenUVt");
+    if (mOff === undefined || tOff === undefined) {
+        return;
+    }
+    const tex = sh.texture;
+    const sx = tex?.uScale ?? 1;
+    const sy = tex?.vScale ?? 1;
+    const ang = tex?.uAng ?? 0;
+    const ox = tex?.uOffset ?? 0;
+    const oy = tex?.vOffset ?? 0;
+    const mi = mOff / 4;
+    const ti = tOff / 4;
+    if (ang === 0) {
+        data[mi] = sx;
+        data[mi + 1] = 0;
+        data[mi + 2] = 0;
+        data[mi + 3] = sy;
+    } else {
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        data[mi] = c * sx;
+        data[mi + 1] = -s * sy;
+        data[mi + 2] = s * sx;
+        data[mi + 3] = c * sy;
+    }
+    data[ti] = ox;
+    data[ti + 1] = oy;
+    data[ti + 2] = 0;
+    data[ti + 3] = 0;
 }
 
 export const sheenExt: PbrExt = {
@@ -202,19 +216,28 @@ export const sheenExt: PbrExt = {
             return { f: 0, f2: 0 };
         }
         let f = PBR_HAS_SHEEN;
+        let f2 = 0;
         if (sh.texture) {
             f |= PBR_HAS_SHEEN_TEXTURE;
+            if ((sh.texture as { _hasTx?: boolean })._hasTx) {
+                f2 |= PBR2_HAS_SHEEN_UV_TX;
+            }
         }
         if (sh.albedoScaling) {
             f |= PBR_HAS_SHEEN_ALBEDO_SCALING;
         }
-        return { f, f2: 0 };
+        return { f, f2 };
     },
     frag(ctx) {
         if (!(ctx.features & PBR_HAS_SHEEN)) {
             return null;
         }
-        return createSheenFragment((ctx.features & PBR_HAS_SHEEN_TEXTURE) !== 0, ctx.hasIbl, (ctx.features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0);
+        return createSheenFragment(
+            (ctx.features & PBR_HAS_SHEEN_TEXTURE) !== 0,
+            ctx.hasIbl,
+            (ctx.features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
+            (ctx.features2 & PBR2_HAS_SHEEN_UV_TX) !== 0
+        );
     },
     writeUbo: writeSheenUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {

@@ -16,6 +16,8 @@ const sceneConfig = getSceneConfig(1);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene1-boombox");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 1 skipped via skipParity in scene-config.json");
+
 test("Scene 1 — BoomBox PBR matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 1 });

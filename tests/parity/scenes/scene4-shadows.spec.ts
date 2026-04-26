@@ -17,6 +17,8 @@ const sceneConfig = getSceneConfig(4);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene4-shadows");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 4 skipped via skipParity in scene-config.json");
+
 test("Scene 4 — Shadows matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 4 });

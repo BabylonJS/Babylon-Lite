@@ -4,16 +4,7 @@
 // clearcoat enabled with IOR=2.0. No direct light — only IBL from DDS env +
 // default hemispheric light from createDefaultCamera equivalent.
 
-import { addToScene, startEngine,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    createHemisphericLight,
-    createSphere,
-    createPbrMaterial,
-    createSolidTexture2D,
-    attachControl,
-} from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, registerScene } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 
 async function main(): Promise<void> {
@@ -57,7 +48,8 @@ async function main(): Promise<void> {
     });
 
     addToScene(scene, sphere);
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

@@ -29,9 +29,9 @@ export function createPointLight(position: [number, number, number], intensity =
             intensity,
             range: Number.MAX_VALUE,
 
-            _registerExtension: async () => {
-                const { registerPointLightExtension } = await import("./point-light-extension.js");
-                registerPointLightExtension();
+            _registerPbr: async () => {
+                const { registerPointPbrLight } = await import("./point-pbr.js");
+                registerPointPbrLight();
             },
             _writeStandardLightUbo: (data: Float32Array, offset: number) => {
                 const o = offset;

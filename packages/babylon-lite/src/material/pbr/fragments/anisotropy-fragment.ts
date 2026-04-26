@@ -7,6 +7,7 @@
  */
 
 import type { PbrMaterialProps } from "../pbr-material.js";
+import type { PbrExt } from "../pbr-flags.js";
 
 export const ANISO_BRDF_FUNCTIONS = `
 const RECIPROCAL_PI: f32 = 0.3183098861837907;
@@ -83,15 +84,20 @@ let anisoA = anisoSq * anisoSq * anisoSq * anisoSq;
 anisoBentNormal = normalize(mix(anisoBentNormal, N, anisoA));
 let R_raw = reflect(-V, anisoBentNormal);`;
 
-/** Write the anisotropy material-UBO slice (anisotropyParams). */
-export function writeAnisotropyUBO(data: Float32Array, material: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
-    const aniso = material.anisotropy;
-    if (!aniso?.isEnabled || !offsets.has("anisotropyParams")) {
-        return;
-    }
-    const off = offsets.get("anisotropyParams")! / 4;
-    const dir = aniso.direction ?? [1, 0];
-    data[off] = aniso.intensity ?? 1.0;
-    data[off + 1] = dir[0]!;
-    data[off + 2] = dir[1]!;
-}
+/** Anisotropy extension — template-only (contributes no ShaderFragment or bindings);
+ *  present solely to write its material-UBO slice through the unified ext registry. */
+export const anisotropyExt: PbrExt = {
+    id: "anisotropy",
+    phase: "fragment",
+    writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {
+        const aniso = (material as PbrMaterialProps).anisotropy;
+        if (!aniso?.isEnabled || !offsets.has("anisotropyParams")) {
+            return;
+        }
+        const off = offsets.get("anisotropyParams")! / 4;
+        const dir = aniso.direction ?? [1, 0];
+        data[off] = aniso.intensity ?? 1.0;
+        data[off + 1] = dir[0]!;
+        data[off + 2] = dir[1]!;
+    },
+};

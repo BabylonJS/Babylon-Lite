@@ -139,7 +139,7 @@ extractAllMeshes(json, binChunk)       // for each node with mesh
 GltfMeshData[]
   ↓
 uploadMeshes(device, meshDatas)
-  ├── uploadTexture() × 4              // → SampledTexture objects (cached per bitmap + sRGB)
+  ├── uploadTexture() × 4              // → Texture2D objects (cached per bitmap + sRGB)
   ├── createBufferFromData() × 5       // pos, norm, tan, uv, idx
   ├── computeWorldBounds()             // world-space AABB
   └── assemble PbrMaterialProps        // { baseColorTexture, normalTexture, ormTexture, emissiveTexture?, _buildGroup: pbrGroupBuilder }
@@ -152,7 +152,7 @@ LoaderResult { entities: [root], animationGroups }
   → returned to caller; scene.add() dispatches entities + registers animation ticks
 ```
 
-**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. Uses a `Map<string, SampledTexture>` with key format `${bitmapId}:${srgb?1:0}`.
+**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. Uses a `Map<string, Texture2D>` with key format `${bitmapId}:${srgb?1:0}`.
 
 **Animation support**: `loadGltf` extracts glTF animations, creates `AnimationGroup[]` via `createAnimationGroups()`, and returns them in `LoaderResult.animationGroups`. `scene.add()` registers `_beforeRender` callbacks for playback.
 
@@ -216,7 +216,7 @@ Parent lookup is done by linear scan (`findParent`): iterates all nodes checking
 
 ### Texture Upload
 
-`uploadTexture(device, bitmap, srgb, sampler)` returns a `SampledTexture` (with `texture`, `view`, `sampler`).
+`uploadTexture(device, bitmap, srgb, sampler)` returns a `Texture2D` (with `texture`, `view`, `sampler`, `width`, `height`).
 
 | Texture | sRGB | Format | Created when |
 |---|---|---|---|
@@ -248,7 +248,7 @@ for each vertex (lx, ly, lz):
 
 ### Shared Sampler
 
-One sampler is created and shared across all `SampledTexture` objects within a single `uploadMeshes()` call: `magFilter: linear, minFilter: linear, mipmapFilter: linear, addressMode: repeat` (both U and V). The sampler is stored inside each `SampledTexture.sampler`.
+One sampler is created and shared across all `Texture2D` objects within a single `uploadMeshes()` call: `magFilter: linear, minFilter: linear, mipmapFilter: linear, addressMode: repeat` (both U and V). The sampler is stored inside each `Texture2D.sampler`.
 
 ---
 
@@ -452,7 +452,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 ## Dependencies
 
-- **`load-gltf.ts` imports**: `Engine` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `SampledTexture` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `LoaderResult` from `../loader-results.js`.
+- **`load-gltf.ts` imports**: `Engine` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `LoaderResult` from `../loader-results.js`.
 - **`load-env.ts` imports**: `SceneContext` from `../scene/scene.js`.
 - **`load-dds-env.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `EnvironmentTextures` from `./load-env.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `./env-helpers.js`; dynamic import of `./brdf-rgbd-decode.js`.
 - **`env-helpers.ts` imports**: `EnvironmentTextures`, `polynomialToPreScaledHarmonics` from `./load-env.js`; `getOrCreateSampler` from `../resource/gpu-pool.js`.

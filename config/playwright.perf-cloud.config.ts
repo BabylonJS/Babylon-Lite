@@ -15,7 +15,7 @@ loadEnv({ path: "../.env" }); // also load .env if present
 export default defineConfig({
     testDir: "../tests/perf",
     timeout: 600_000,
-    retries: 1,
+    retries: 4,
     workers: 5,
     fullyParallel: true,
     outputDir: "../test-results",

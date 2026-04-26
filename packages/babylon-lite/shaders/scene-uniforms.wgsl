@@ -1,45 +1,16 @@
-// Unified SceneUniforms — shared by every non-shadow render pass.
-// Layout total: 416 bytes. Offsets are mirrored in scene-uniforms-fields.ts;
-// keep both sides in sync if you change this struct.
+// Scene-level uniforms: shared across all draw calls in a frame.
+// Bind Group 0 for all pipelines.
+
 struct SceneUniforms {
-    viewProjection: mat4x4<f32>,
-    view: mat4x4<f32>,
-    vEyePosition: vec4<f32>,
-    lightDirection: vec3<f32>,
-    lightIntensity: f32,
-    lightDiffuseColor: vec3<f32>,
-    _padLD: f32,
-    lightGroundColor: vec3<f32>,
-    _padLG: f32,
-    lightPosition: vec3<f32>,
-    lightRange: f32,
-    envRotationY: f32,
-    _envPad0: f32,
-    _envPad1: f32,
-    _envPad2: f32,
-    vSphericalL00: vec3<f32>,
-    _shPad0: f32,
-    vSphericalL1_1: vec3<f32>,
-    _shPad1: f32,
-    vSphericalL10: vec3<f32>,
-    _shPad2: f32,
-    vSphericalL11: vec3<f32>,
-    _shPad3: f32,
-    vSphericalL2_2: vec3<f32>,
-    _shPad4: f32,
-    vSphericalL2_1: vec3<f32>,
-    _shPad5: f32,
-    vSphericalL20: vec3<f32>,
-    _shPad6: f32,
-    vSphericalL21: vec3<f32>,
-    _shPad7: f32,
-    vSphericalL22: vec3<f32>,
-    _shPad8: f32,
-    exposureLinear: f32,
-    contrast: f32,
-    lodGenerationScale: f32,
-    _imgPad: f32,
-    vFogInfos: vec4<f32>,
-    vFogColor: vec4<f32>,
-};
+  viewProj: mat4x4<f32>,          // offset 0   (64 bytes)
+  cameraPosition: vec3<f32>,      // offset 64  (12 bytes)
+  _pad0: f32,                     // offset 76  (4 bytes) — alignment
+  lightDirection: vec3<f32>,      // offset 80  (12 bytes)
+  lightIntensity: f32,            // offset 92  (4 bytes)
+  lightDiffuseColor: vec3<f32>,   // offset 96  (12 bytes)
+  _pad1: f32,                     // offset 108 (4 bytes)
+  lightGroundColor: vec3<f32>,    // offset 112 (12 bytes)
+  _pad2: f32,                     // offset 124 (4 bytes)
+};                                // total: 128 bytes
+
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;

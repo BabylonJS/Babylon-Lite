@@ -12,6 +12,8 @@ const sceneConfig = getSceneConfig(5);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene5-alien");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 5 skipped via skipParity in scene-config.json");
+
 test("Scene 5 — Alien PBR + Skeleton Animation matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 5, seekTime: 2 });

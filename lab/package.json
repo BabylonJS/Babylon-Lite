@@ -11,9 +11,10 @@
     "babylon-lite": "workspace:*"
   },
   "devDependencies": {
-    "@babylonjs/core": "^8.56.2",
+    "@babylonjs/core": "^9.3.4",
     "@babylonjs/havok": "^1.3.12",
-    "@babylonjs/loaders": "^8.56.2",
+    "@babylonjs/loaders": "^9.3.4",
+    "babylonjs-gltf2interface": "^9.3.4",
     "@webgpu/types": "^0.1.52",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"

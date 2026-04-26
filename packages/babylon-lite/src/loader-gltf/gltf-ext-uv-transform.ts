@@ -1,49 +1,65 @@
-/** glTF KHR_texture_transform — collapses per-textureInfo scale/offset into a
- *  single material-wide ST quad. Lite supports only the case where every
- *  textureInfo in the material agrees on scale + offset and uses no rotation.
- *  Inconsistent or rotated transforms are silently ignored (return null). */
+/** Per-textureInfo UV customization: KHR_texture_transform and/or texCoord=1.
+ *
+ *  - Attaches `uScale/vScale/uOffset/vOffset/uAng` + `_hasTx=true` when the
+ *    textureInfo carries a KHR_texture_transform.
+ *  - Attaches `_texCoord=1` when the textureInfo (or its transform extension)
+ *    selects UV set 1. Spec: KHR_texture_transform.texCoord overrides
+ *    textureInfo.texCoord.
+ *
+ *  Downstream the PBR material detects these fields and compiles a shader
+ *  with per-texture `txfUV` wrapping and per-texture UV selection. Identity
+ *  (no transform, texCoord=0) returns the base texture unchanged so the
+ *  cache reuses the same wrapper.
+ *
+ *  Lazy-loaded: pulled into bundles whose glTF declares KHR_texture_transform
+ *  in `extensionsUsed` OR uses `texCoord:1` on any textureInfo. */
+import type { Texture2D } from "../texture/texture-2d.js";
+import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { GltfFeature } from "./gltf-feature.js";
+
+interface KtInfo {
+    texCoord?: number;
+    extensions?: {
+        KHR_texture_transform?: {
+            scale?: [number, number];
+            offset?: [number, number];
+            rotation?: number;
+            texCoord?: number;
+        };
+    };
+}
 
 const ext: GltfFeature = {
     id: "KHR_texture_transform",
-    async applyMaterial(mat) {
-        const m = mat._rawMatDef;
-        if (!m) {
-            return null;
+    wrapTexture(tex: Texture2D, texInfo: unknown): Texture2D {
+        const info = texInfo as KtInfo | null | undefined;
+        if (!info) {
+            return tex;
         }
-        const pbr = m.pbrMetallicRoughness;
-        const e = m.extensions;
-        const sg = e?.KHR_materials_pbrSpecularGlossiness;
-        const cc = e?.KHR_materials_clearcoat;
-        const sh = e?.KHR_materials_sheen;
-        const texInfos: any[] = [
-            sg?.diffuseTexture ?? pbr?.baseColorTexture,
-            pbr?.metallicRoughnessTexture,
-            m.normalTexture,
-            m.occlusionTexture,
-            m.emissiveTexture,
-            sg?.specularGlossinessTexture,
-            cc?.clearcoatTexture,
-            cc?.clearcoatRoughnessTexture,
-            cc?.clearcoatNormalTexture,
-            sh?.sheenColorTexture,
-            sh?.sheenRoughnessTexture,
-        ];
-        let st: [number, number, number, number] | undefined;
-        for (const ti of texInfos) {
-            const kt = ti?.extensions?.KHR_texture_transform;
-            if (!kt || kt.rotation) {
-                continue;
+        const kt = info.extensions?.KHR_texture_transform;
+        const patch: { uScale?: number; vScale?: number; uOffset?: number; vOffset?: number; uAng?: number; _hasTx?: true; _texCoord?: 0 | 1 } = {};
+        if (kt) {
+            if (kt.scale) {
+                patch.uScale = kt.scale[0];
+                patch.vScale = kt.scale[1];
             }
-            const s = kt.scale ?? [1, 1];
-            const o = kt.offset ?? [0, 0];
-            if (!st) {
-                st = [s[0], s[1], o[0], o[1]];
-            } else if (s[0] !== st[0] || s[1] !== st[1] || o[0] !== st[2] || o[1] !== st[3]) {
-                return null;
+            if (kt.offset) {
+                patch.uOffset = kt.offset[0];
+                patch.vOffset = kt.offset[1];
+            }
+            if (kt.rotation) {
+                patch.uAng = kt.rotation;
+            }
+            if (Object.keys(patch).length) {
+                patch._hasTx = true;
             }
         }
-        return st ? { uvTransformST: st } : null;
+        // Spec: KHR_texture_transform.texCoord overrides textureInfo.texCoord.
+        const tc = kt?.texCoord ?? info.texCoord;
+        if (tc === 1) {
+            patch._texCoord = 1;
+        }
+        return Object.keys(patch).length ? cloneTexture2D(tex, patch) : tex;
     },
 };
 export default ext;

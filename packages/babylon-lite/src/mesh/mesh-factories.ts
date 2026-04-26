@@ -18,6 +18,20 @@ import { createTorusData } from "./create-torus.js";
 import type { TorusOptions } from "./create-torus.js";
 import { createFlatGroundData, createGroundFromHeightMap as createGroundCPU } from "./create-ground.js";
 import type { GroundOptions } from "./create-ground.js";
+import { createCylinderData } from "./create-cylinder.js";
+import type { CylinderOptions } from "./create-cylinder.js";
+import { createPlaneData } from "./create-plane.js";
+import type { PlaneOptions } from "./create-plane.js";
+import { createDiscData } from "./create-disc.js";
+import type { DiscOptions } from "./create-disc.js";
+import { createPolyhedronData } from "./create-polyhedron.js";
+import type { PolyhedronOptions } from "./create-polyhedron.js";
+import { createRibbonData } from "./create-ribbon.js";
+import type { RibbonOptions } from "./create-ribbon.js";
+import { createTubeData } from "./create-tube.js";
+import type { TubeOptions } from "./create-tube.js";
+import { createExtrudeShapeData } from "./create-extrude.js";
+import type { ExtrudeShapeOptions } from "./create-extrude.js";
 
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
@@ -71,4 +85,46 @@ export async function createGroundFromHeightMap(engine: EngineContext, url: stri
 export function createGround(engine: EngineContext, options?: GroundOptions): Mesh {
     const data = createFlatGroundData(options);
     return createMeshFromData(engine as EngineContextInternal, "ground", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a cylinder (or cone / truncated cone / prism) mesh. Caller must assign material. */
+export function createCylinder(engine: EngineContext, options?: CylinderOptions): Mesh {
+    const data = createCylinderData(options);
+    return createMeshFromData(engine as EngineContextInternal, "cylinder", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a plane (unit quad facing -Z). Caller must assign material. */
+export function createPlane(engine: EngineContext, options?: PlaneOptions): Mesh {
+    const data = createPlaneData(options);
+    return createMeshFromData(engine as EngineContextInternal, "plane", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a disc (or ring / pie slice via `arc`). Caller must assign material. */
+export function createDisc(engine: EngineContext, options?: DiscOptions): Mesh {
+    const data = createDiscData(options);
+    return createMeshFromData(engine as EngineContextInternal, "disc", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a polyhedron (15 presets). Caller must assign material. */
+export function createPolyhedron(engine: EngineContext, options?: PolyhedronOptions): Mesh {
+    const data = createPolyhedronData(options);
+    return createMeshFromData(engine as EngineContextInternal, "polyhedron", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a ribbon from an array of parallel Vec3 paths. Caller must assign material. */
+export function createRibbon(engine: EngineContext, options: RibbonOptions): Mesh {
+    const data = createRibbonData(options);
+    return createMeshFromData(engine as EngineContextInternal, "ribbon", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a tube (circular cross-section swept along a path). Caller must assign material. */
+export function createTube(engine: EngineContext, options: TubeOptions): Mesh {
+    const data = createTubeData(options);
+    return createMeshFromData(engine as EngineContextInternal, "tube", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create an extruded shape (2D shape swept along a path). Caller must assign material. */
+export function createExtrudeShape(engine: EngineContext, options: ExtrudeShapeOptions): Mesh {
+    const data = createExtrudeShapeData(options);
+    return createMeshFromData(engine as EngineContextInternal, "extrude", data.positions, data.normals, data.indices, data.uvs);
 }

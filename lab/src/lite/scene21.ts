@@ -2,17 +2,7 @@
 // Matches BJS playground: cloth mesh with PBR sheen material.
 // Static model, no animation.
 
-import { addToScene, startEngine,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    attachControl,
-    loadEnvironment,
-    loadGltf,
-    createPbrMaterial,
-    createSolidTexture2D,
-    loadTexture2D,
-} from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, loadEnvironment, loadGltf, createPbrMaterial, createSolidTexture2D, loadTexture2D, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -65,7 +55,8 @@ async function main(): Promise<void> {
         m.material = sheenMat;
     }
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

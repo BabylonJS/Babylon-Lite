@@ -1,13 +1,43 @@
 /**
  *  Lazy-loaded animation/skin parsing for glTF.
  *  Dynamically imported by load-gltf.ts only when a glTF contains animations or skins.
+ *
+ *  This module is pointer-feature agnostic: KHR_animation_pointer (and the
+ *  non-Float32 sampler conversion that CubeVisibility-style assets need) are
+ *  installed via the registration seam below, so scenes that don't declare
+ *  the extension pay zero bytes for it.
  */
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding } from "../animation/types.js";
 import { INTERP_LINEAR, INTERP_STEP, INTERP_CUBICSPLINE, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
-import { mat4Invert, mat4Identity, mat4Multiply } from "../math/mat4.js";
+import { mat4Invert, mat4Identity, mat4MultiplyInto } from "../math/mat4.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
+import type { SceneNode } from "../scene/scene-node.js";
+
+/** Registration seam for KHR_animation_pointer. The pointer feature module
+ *  calls `_installPointerHandlers` on side-effect import; if never called,
+ *  pointer channels are skipped and non-Float32 samplers fall back to the
+ *  aliasing fast path (which throws on misaligned/short accessors). */
+export type PointerChannelParser = (ptr: string, channel: any, nodeMap: readonly (SceneNode | undefined)[] | undefined) => AnimationChannel | null;
+export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
+let _parsePointerChannel: PointerChannelParser | null = null;
+let _convertSampler: SamplerConverter | null = null;
+export function _installPointerHandlers(parser: PointerChannelParser, converter: SamplerConverter): void {
+    _parsePointerChannel = parser;
+    _convertSampler = converter;
+}
+
+/** Convert sampler input/output to Float32Array. Default: reinterpret existing
+ *  Float32 accessor as Float32Array (legacy behaviour; fast but requires
+ *  aligned Float32 data). KHR_animation_pointer installs a converter that
+ *  additionally handles non-Float32 / normalized accessors. */
+function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: boolean): Float32Array {
+    if (_convertSampler) {
+        return _convertSampler(src, length, normalized);
+    }
+    return new Float32Array(src.buffer, src.byteOffset, length);
+}
 
 /** Parsed skin/skeleton data. */
 export interface GltfSkinData {
@@ -23,6 +53,21 @@ export interface GltfSkinData {
 
 // ─── Skin / Skeleton Extraction ─────────────────────────────────────
 
+/** Resolve a skin's inverse-bind matrices, filling with identities when absent. */
+function resolveIBMs(json: any, binChunk: DataView, skin: any): Float32Array {
+    const jointCount = skin.joints.length;
+    if (skin.inverseBindMatrices !== undefined) {
+        const ibmData = resolveAccessor(json, binChunk, skin.inverseBindMatrices);
+        return new Float32Array(ibmData.data.buffer, ibmData.data.byteOffset, jointCount * 16);
+    }
+    const out = new Float32Array(jointCount * 16);
+    for (let i = 0; i < jointCount; i++) {
+        const o = i * 16;
+        out[o] = out[o + 5] = out[o + 10] = out[o + 15] = 1;
+    }
+    return out;
+}
+
 export function extractSkin(
     json: any,
     binChunk: DataView,
@@ -33,26 +78,8 @@ export function extractSkin(
 ): GltfSkinData {
     const skin = json.skins[skinIdx];
     const jointNodes: number[] = skin.joints;
-
-    // Resolve inverse bind matrices
-    let inverseBindMatrices: Float32Array;
-    if (skin.inverseBindMatrices !== undefined) {
-        const ibmData = resolveAccessor(json, binChunk, skin.inverseBindMatrices);
-        inverseBindMatrices = new Float32Array(ibmData.data.buffer, ibmData.data.byteOffset, jointNodes.length * 16);
-    } else {
-        // Default: identity for each joint
-        inverseBindMatrices = new Float32Array(jointNodes.length * 16);
-        for (let i = 0; i < jointNodes.length; i++) {
-            inverseBindMatrices[i * 16 + 0] = 1;
-            inverseBindMatrices[i * 16 + 5] = 1;
-            inverseBindMatrices[i * 16 + 10] = 1;
-            inverseBindMatrices[i * 16 + 15] = 1;
-        }
-    }
-
-    // Compute world matrices for each joint at rest pose
+    const inverseBindMatrices = resolveIBMs(json, binChunk, skin);
     const jointWorldMatrices: Mat4[] = jointNodes.map((nodeIdx) => computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache));
-
     return { jointNodes, inverseBindMatrices, jointWorldMatrices, meshWorldMatrix };
 }
 
@@ -61,25 +88,13 @@ export function extractSkin(
  *  At rest pose this simplifies to identity for each bone. */
 export function computeBoneTextureData(skin: GltfSkinData): Float32Array {
     const numBones = skin.jointNodes.length;
-    // 4 floats per texel (rgba32float), 4 texels per bone = 16 floats per bone
     const data = new Float32Array(numBones * 16);
-
-    // Compute inverse mesh world matrix
     const invMeshWorld = mat4Invert(skin.meshWorldMatrix) ?? mat4Identity();
-
+    const tmp = new Float32Array(16);
     for (let i = 0; i < numBones; i++) {
-        const jointWorld = skin.jointWorldMatrices[i]!;
-        const ibmOffset = i * 16;
-        const ibm = new Float32Array(skin.inverseBindMatrices.buffer, skin.inverseBindMatrices.byteOffset + ibmOffset * 4, 16) as Mat4;
-
-        // boneMatrix = inverse(meshWorld) * jointWorld * IBM
-        const temp = mat4Multiply(invMeshWorld, jointWorld);
-        const boneMatrix = mat4Multiply(temp, ibm);
-
-        // Store column-major (GPU reads 4 texels = 4 columns)
-        data.set(boneMatrix, i * 16);
+        mat4MultiplyInto(tmp, 0, invMeshWorld, 0, skin.jointWorldMatrices[i]!, 0);
+        mat4MultiplyInto(data, i * 16, tmp, 0, skin.inverseBindMatrices, i * 16);
     }
-
     return data;
 }
 
@@ -100,12 +115,25 @@ const PATH_MAP: Record<string, 0 | 1 | 2 | 3> = {
 
 /**
  * Parse glTF animation data: clips, node hierarchy, and skeleton bindings.
- * Returns null if no animations or no skeletons present.
+ * Returns null if no animations, or no drivable state at all (no skeletons,
+ * no morphs, no pointer channels).
+ *
+ * `nodeMap` (optional) maps glTF node index → SceneNode. It's required to
+ * resolve KHR_animation_pointer targets that write to node properties.
  */
-export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[], parentMap: Map<number, number>, worldMatrixCache: Map<number, Mat4>): GltfAnimationData | null {
+export function parseAnimationData(
+    json: any,
+    binChunk: DataView,
+    meshes: Mesh[],
+    parentMap: Map<number, number>,
+    worldMatrixCache: Map<number, Mat4>,
+    nodeMap?: readonly (SceneNode | undefined)[]
+): GltfAnimationData | null {
     if (!json.animations || json.animations.length === 0) {
         return null;
     }
+
+    let pointerChannelCount = 0;
 
     // Parse animation clips
     const clips: AnimationClip[] = [];
@@ -114,15 +142,31 @@ export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[]
         for (const s of anim.samplers) {
             const inputAcc = resolveAccessor(json, binChunk, s.input);
             const outputAcc = resolveAccessor(json, binChunk, s.output);
+            const inNorm = json.accessors[s.input]?.normalized === true;
+            const outNorm = json.accessors[s.output]?.normalized === true;
             samplers.push({
-                input: new Float32Array(inputAcc.data.buffer, inputAcc.data.byteOffset, inputAcc.count),
-                output: new Float32Array(outputAcc.data.buffer, outputAcc.data.byteOffset, outputAcc.count * outputAcc.componentCount),
+                input: toSamplerFloat32(inputAcc.data, inputAcc.count, inNorm),
+                output: toSamplerFloat32(outputAcc.data, outputAcc.count * outputAcc.componentCount, outNorm),
                 interpolation: INTERP_MAP[s.interpolation ?? "LINEAR"] ?? INTERP_LINEAR,
             });
         }
 
         const channels: AnimationChannel[] = [];
         for (const c of anim.channels) {
+            // KHR_animation_pointer: delegated to the registered pointer parser
+            // (installed by gltf-feature-animation-pointer on side-effect import).
+            const ptr = c.target?.extensions?.KHR_animation_pointer?.pointer;
+            if (ptr) {
+                if (!_parsePointerChannel) {
+                    continue;
+                }
+                const ch = _parsePointerChannel(ptr, c, nodeMap);
+                if (ch) {
+                    channels.push(ch);
+                    pointerChannelCount++;
+                }
+                continue;
+            }
             if (c.target.node === undefined) {
                 continue;
             }
@@ -200,20 +244,7 @@ export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[]
 
         const skin = json.skins[node.skin];
         const jointNodes: number[] = skin.joints;
-
-        let inverseBindMatrices: Float32Array;
-        if (skin.inverseBindMatrices !== undefined) {
-            const ibmData = resolveAccessor(json, binChunk, skin.inverseBindMatrices);
-            inverseBindMatrices = new Float32Array(ibmData.data.buffer, ibmData.data.byteOffset, jointNodes.length * 16);
-        } else {
-            inverseBindMatrices = new Float32Array(jointNodes.length * 16);
-            for (let i = 0; i < jointNodes.length; i++) {
-                inverseBindMatrices[i * 16] = 1;
-                inverseBindMatrices[i * 16 + 5] = 1;
-                inverseBindMatrices[i * 16 + 10] = 1;
-                inverseBindMatrices[i * 16 + 15] = 1;
-            }
-        }
+        const inverseBindMatrices = resolveIBMs(json, binChunk, skin);
 
         const meshWorldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
         const invMeshWorld = mat4Invert(meshWorldMatrix) ?? mat4Identity();
@@ -264,7 +295,7 @@ export function parseAnimationData(json: any, binChunk: DataView, meshes: Mesh[]
         }
     }
 
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0)) {
+    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && pointerChannelCount === 0)) {
         return null;
     }
     return { clips, nodes, skeletons, morphBindings };

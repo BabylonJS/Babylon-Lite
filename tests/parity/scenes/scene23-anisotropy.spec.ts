@@ -17,6 +17,8 @@ const sceneConfig = getSceneConfig(23);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene23-anisotropy");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 23 skipped via skipParity in scene-config.json");
+
 test("Scene 23 — PBR Anisotropy matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(60_000);
 

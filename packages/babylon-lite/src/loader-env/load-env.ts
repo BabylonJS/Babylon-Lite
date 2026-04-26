@@ -1,9 +1,9 @@
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import { addRenderable, addRenderables, addDeferredBuilder } from "../scene/scene.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 import { mipLevelCount } from "../texture/mip-count.js";
+import { computeSceneSize } from "../material/pbr/scene-size.js";
 
 /** GPU-resident environment textures. */
 export interface EnvironmentTextures {
@@ -14,18 +14,10 @@ export interface EnvironmentTextures {
     cubeSampler: GPUSampler;
     brdfSampler: GPUSampler;
     irradianceSH: Float32Array;
-    /** Pre-scaled SH (9 vec3s in L00,L1_1,L10,L11,L2_2,L2_1,L20,L21,L22 order, for shader) */
-    sphericalHarmonics: {
-        l00: Float32Array;
-        l1_1: Float32Array;
-        l10: Float32Array;
-        l11: Float32Array;
-        l2_2: Float32Array;
-        l2_1: Float32Array;
-        l20: Float32Array;
-        l21: Float32Array;
-        l22: Float32Array;
-    };
+    /** Pre-scaled SH coefficients for shader, 36 floats in stride-4 layout:
+     *  [L00.rgb, 0, L1_1.rgb, 0, L10.rgb, 0, L11.rgb, 0, L2_2.rgb, 0,
+     *   L2_1.rgb, 0, L20.rgb, 0, L21.rgb, 0, L22.rgb, 0] */
+    sphericalHarmonics: Float32Array;
     /** LOD generation scale for specular IBL sampling. Default 0.8 (matches BJS BaseTexture). */
     lodGenerationScale: number;
 }
@@ -113,27 +105,40 @@ export async function loadEnvironment(
         skipSkybox: skyboxIsDds || skyboxIsEnv || options?.skipSkybox,
         skipGround: options?.skipGround,
     };
-    // Only pull in the background-renderable chunk if solid skybox or ground is
-    // actually required. Scenes passing skipSkybox+skipGround (with no DDS/HDR
-    // skybox) skip the import and chunk fetch entirely.
-    const needsBgRenderables = !bgOptions.skipSkybox || !bgOptions.skipGround;
+    // Only pull in the skybox/ground chunks if actually required. Scenes passing
+    // skipSkybox+skipGround (with no DDS/HDR skybox) skip the imports entirely.
     const envBgBuilder = async (): Promise<void> => {
-        if (needsBgRenderables) {
-            const { buildBackgroundRenderables } = await import("../material/pbr/background-renderable.js");
-            const bgRenderables = await buildBackgroundRenderables(scene, textures, groundUrl, bgOptions, groundTexPromise);
-            addRenderables(scene, bgRenderables);
-        }
+        const bgl = (scene as SceneContextInternal)._pbrSceneBGL;
+        const bg = (scene as SceneContextInternal)._pbrSceneBG;
+        if (bgl && bg) {
+            const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
+            const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+            const skyHalfSize = autoSkyboxSize / 2;
 
-        if (skyboxIsDds) {
-            const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
-            addRenderable(scene, await buildDdsSkyboxRenderable(scene, skyboxUrl, options?.skyboxSize));
-        }
-        if (skyboxIsEnv) {
-            const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-            addRenderable(scene, buildHdrSkyboxRenderable(scene, textures, options?.skyboxSize));
+            if (!bgOptions.skipSkybox) {
+                const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
+                (scene as SceneContextInternal)._renderables.push(buildSolidSkyboxRenderable(scene, textures, bgl, bg, skyHalfSize, rootPosition, primaryColor));
+            }
+            if (!bgOptions.skipGround) {
+                const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
+                (scene as SceneContextInternal)._renderables.push(
+                    await buildGroundRenderable(engine, bgl, engine.format, engine.msaaSamples, bg, groundSize, rootPosition, primaryColor, groundUrl, groundTexPromise)
+                );
+            }
+
+            if (skyboxIsDds) {
+                const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
+                (scene as SceneContextInternal)._renderables.push(await buildDdsSkyboxRenderable(scene, bgl, bg, skyHalfSize, rootPosition, primaryColor, skyboxUrl));
+            }
+            if (skyboxIsEnv) {
+                const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
+                (scene as SceneContextInternal)._renderables.push(buildHdrSkyboxRenderable(scene, textures, bgl, bg, skyHalfSize, rootPosition, primaryColor));
+            }
+        } else {
+            (scene as SceneContextInternal)._deferredBuilders.push(envBgBuilder);
         }
     };
-    addDeferredBuilder(scene, envBgBuilder);
+    (scene as SceneContextInternal)._deferredBuilders.push(envBgBuilder);
 
     return textures;
 }
@@ -198,68 +203,39 @@ function parseEnvFile(buffer: ArrayBuffer): ParsedEnv {
 // Matches Babylon.js: SphericalHarmonics.FromPolynomial() + preScaleForRendering()
 
 /** @internal — exported only for env-helpers.ts; not part of the public API. */
-export function polynomialToPreScaledHarmonics(poly: Float32Array): EnvironmentTextures["sphericalHarmonics"] {
-    // poly layout: [x0,x1,x2, y0,y1,y2, z0,z1,z2, xx0..., yy..., zz..., yz..., zx..., xy...]
-    const x = poly.subarray(0, 3);
-    const y = poly.subarray(3, 6);
-    const z = poly.subarray(6, 9);
-    const xx = poly.subarray(9, 12);
-    const yy = poly.subarray(12, 15);
-    const zz = poly.subarray(15, 18);
-    const yz = poly.subarray(18, 21);
-    const zx = poly.subarray(21, 24);
-    const xy = poly.subarray(24, 27);
+export function polynomialToPreScaledHarmonics(poly: Float32Array): Float32Array {
+    // poly layout (3 floats per group): x, y, z, xx, yy, zz, yz, zx, xy
+    // Constants = K_fromPoly * PI * B_basis (pre-computed; signs folded in).
+    // Matches Babylon.js SphericalHarmonics.FromPolynomial() + preScaleForRendering().
+    const C00xy = 0.3333338747897695;
+    const C00z = 0.33333298856284405;
+    const C1 = 1.4999984284682104;
+    const C2 = 3.999982863580422;
+    const C20zz = 1.3333326611423701;
+    const C20xy = 0.6666653397393608;
+    const C22 = 1.999991431790211;
 
-    const PI = Math.PI;
-
-    // FromPolynomial constants
-    const K00 = 0.376127;
-    const K1 = 0.977204;
-    const K2 = 1.16538;
-    const K20_zz = 1.34567;
-    const K20_xy = 0.672834;
-
-    // preScaleForRendering basis constants
-    const B00 = Math.sqrt(1 / (4 * PI));
-    const B1m = -Math.sqrt(3 / (4 * PI));
-    const B1p = Math.sqrt(3 / (4 * PI));
-    const B2_2 = Math.sqrt(15 / (4 * PI));
-    const B2_1 = -Math.sqrt(15 / (4 * PI));
-    const B20 = Math.sqrt(5 / (16 * PI));
-    const B21 = -Math.sqrt(15 / (4 * PI));
-    const B22 = Math.sqrt(15 / (16 * PI));
-
-    const scale = (a: Float32Array, s: number): Float32Array => {
-        return new Float32Array([a[0]! * s, a[1]! * s, a[2]! * s]);
-    };
-    const add3 = (a: Float32Array, b: Float32Array, c: Float32Array): Float32Array => {
-        return new Float32Array([a[0]! + b[0]! + c[0]!, a[1]! + b[1]! + c[1]!, a[2]! + b[2]! + c[2]!]);
-    };
-    const sub = (a: Float32Array, b: Float32Array): Float32Array => {
-        return new Float32Array([a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!]);
-    };
-
-    // Step 1: FromPolynomial (includes sign corrections and ×π)
-    const raw_l00 = scale(add3(scale(xx, K00), scale(yy, K00), scale(zz, 0.376126)), PI);
-    const raw_l1_1 = scale(y, -K1 * PI); // sign correction: -1
-    const raw_l10 = scale(z, K1 * PI);
-    const raw_l11 = scale(x, -K1 * PI); // sign correction: -1
-    const raw_l2_2 = scale(xy, K2 * PI);
-    const raw_l2_1 = scale(yz, -K2 * PI); // sign correction: -1
-    const raw_l20 = scale(sub(scale(zz, K20_zz), add3(scale(xx, K20_xy), scale(yy, K20_xy), new Float32Array(3))), PI);
-    const raw_l21 = scale(zx, -K2 * PI); // sign correction: -1
-    const raw_l22 = scale(sub(scale(xx, K2), scale(yy, K2)), PI);
-
-    // Step 2: preScaleForRendering
-    return {
-        l00: scale(raw_l00, B00),
-        l1_1: scale(raw_l1_1, B1m),
-        l10: scale(raw_l10, B1p),
-        l11: scale(raw_l11, B1m),
-        l2_2: scale(raw_l2_2, B2_2),
-        l2_1: scale(raw_l2_1, B2_1),
-        l20: scale(raw_l20, B20),
-        l21: scale(raw_l21, B21),
-        l22: scale(raw_l22, B22),
-    };
+    // Stride-4 layout matching shader UBO (9 vec3s + pad f32 each)
+    const out = new Float32Array(36);
+    for (let i = 0; i < 3; i++) {
+        const x = poly[i]!;
+        const y = poly[3 + i]!;
+        const z = poly[6 + i]!;
+        const xx = poly[9 + i]!;
+        const yy = poly[12 + i]!;
+        const zz = poly[15 + i]!;
+        const yz = poly[18 + i]!;
+        const zx = poly[21 + i]!;
+        const xy = poly[24 + i]!;
+        out[i] = (xx + yy) * C00xy + zz * C00z; // L00
+        out[4 + i] = y * C1; // L1_1
+        out[8 + i] = z * C1; // L10
+        out[12 + i] = x * C1; // L11
+        out[16 + i] = xy * C2; // L2_2
+        out[20 + i] = yz * C2; // L2_1
+        out[24 + i] = zz * C20zz - (xx + yy) * C20xy; // L20
+        out[28 + i] = zx * C2; // L21
+        out[32 + i] = (xx - yy) * C22; // L22
+    }
+    return out;
 }

@@ -46,7 +46,7 @@
 
 - **All public interfaces are pure state — no attached methods.**
 - `EngineContext`, `SceneContext`, `Camera`, `ArcRotateCamera`, `FreeCamera`, `Mesh`, `LightBase`, etc. are plain data objects.
-- Behaviour is provided by standalone functions that accept the interface as their first argument: `startEngine(engine, scene)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
+- Behaviour is provided by standalone functions that accept the interface as their first argument: `registerScene(engine, scene)`, `startEngine(engine)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
 - This maximises tree-shakability: unused functions are fully eliminated. Methods on interfaces cannot be tree-shaken.
 - Internal interfaces (`SceneContextInternal`, `EngineContextInternal`) follow the same rule — no methods.
 
@@ -110,7 +110,8 @@ async function main(): Promise<void> {
     camera.alpha += Math.PI;
 
     // Materials own their renderable builders — no explicit pipeline building
-    await startEngine(engine, scene); // resolves after first frame rendered
+    await registerScene(engine, scene); // builds deferred work, partitions renderables
+    await startEngine(engine); // resolves after first frame rendered; renders all registered scenes
 }
 ```
 
@@ -130,6 +131,15 @@ async function main(): Promise<void> {
 - **Before committing, delete ALL temporary/debug files** created during the session: isolated test scenes, debug screenshots, amplified diff images, pixel comparison scripts, Spector JSON captures, and any other artifacts not part of the final deliverable.
 - **Remove debug code**: `console.warn`/`console.log` diagnostics, `(window as any).__bjsScene` exposures, and shader debug overrides (e.g. `color = vec4(reflectionColor * 10, 1)`) must be reverted before commit.
 - **Run `git status --short`** and verify every untracked file (`??`) belongs in the commit. If it's a temp file, delete it.
+
+### 0c. Agent Test Commands (Strict)
+
+- **Agents MUST NOT run `pnpm test:perf`.** Performance tests are machine-sensitive and reserved for the user / CI; running them from an agent session wastes time and produces unreliable signal.
+- **Agents run only:** `pnpm build:bundle-scenes` and `pnpm test:parity` (or the individual spec via `npx playwright test tests/parity/scenes/<spec>.spec.ts`). These cover parity MAD + bundle-size ceilings, which are the agent-enforceable guardrails.
+- `pnpm test` chains build + parity (no perf), which is acceptable.
+- **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `npx playwright test tests/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
+- If perf validation is needed, ask the user to run `pnpm test:perf` locally.
+
 
 ### 1. Live Inspection Tooling (Zero Guesswork)
 

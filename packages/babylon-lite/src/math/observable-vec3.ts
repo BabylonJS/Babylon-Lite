@@ -58,10 +58,7 @@ export class ObservableVec3 implements Vec3 {
 
     /** Copy values from another vector. */
     copyFrom(v: Vec3): void {
-        this._x = v.x;
-        this._y = v.y;
-        this._z = v.z;
-        this._onDirty();
+        this.set(v.x, v.y, v.z);
     }
 
     /** Copy into a Float32Array at offset. */

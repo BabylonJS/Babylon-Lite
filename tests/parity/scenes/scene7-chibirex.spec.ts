@@ -14,6 +14,8 @@ const sceneConfig = getSceneConfig(7);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene7-chibirex");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 7 skipped via skipParity in scene-config.json");
+
 test("Scene 7 — ChibiRex Animated matches Babylon.js reference", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
 

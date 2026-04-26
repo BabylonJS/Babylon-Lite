@@ -151,6 +151,11 @@ export interface ShaderFragment {
 
     /** Code injected at named fragment slots */
     readonly fragmentSlots?: Partial<Record<FragmentSlot, string>>;
+
+    // ── Scene UBO ──
+
+    /** Fields appended to SceneUniforms (e.g. SH coefficients for IBL) */
+    readonly sceneUboFields?: readonly UboField[];
 }
 
 // ── Shader template ─────────────────────────────────────────────
@@ -170,6 +175,8 @@ export interface ShaderTemplate {
     readonly fragmentTemplate: string;
     /** Base mesh UBO fields (e.g. world matrix for PBR, or mesh+lights+material for Standard) */
     readonly baseMeshUboFields: readonly UboField[];
+    /** Base scene UBO fields (e.g. viewProj, cameraPosition) */
+    readonly baseSceneUboFields: readonly UboField[];
     /** Base vertex attributes (e.g. position, normal) */
     readonly baseVertexAttributes: readonly VertexAttribute[];
     /** Base varyings (e.g. worldPos, worldNormal, uv) */
@@ -212,6 +219,8 @@ export interface ComposedShader {
     readonly meshUboSpec: UboSpec;
     /** Material UBO spec (present when template provides baseMaterialUboFields) */
     readonly materialUboSpec?: UboSpec;
+    /** Scene UBO spec */
+    readonly sceneUboSpec: UboSpec;
     /** Sorted fragment IDs joined with "|" — used as part of pipeline cache key */
     readonly fragmentKey: string;
     /** Per-fragment UBO pack info: fragment ID → float offset in mesh UBO */

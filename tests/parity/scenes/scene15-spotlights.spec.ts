@@ -15,6 +15,8 @@ const sceneConfig = getSceneConfig(15);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene15-spotlights");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 15 skipped via skipParity in scene-config.json");
+
 test("Scene 15 — SpotLights + Ground matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 15 });

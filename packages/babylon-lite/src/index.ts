@@ -2,17 +2,9 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, disposeEngine, renderOneFrame, VERSION } from "./engine/engine.js";
-export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, getFrameGraph, disposeScene } from "./scene/scene.js";
-
-// ─── Frame Graph (multi-pass authoring) ──────────────────────────────
-export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { addRenderPassTask, addRenderPassTaskAtStart, addRenderPassTaskBefore } from "./frame-graph/frame-graph.js";
-export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
-export { createRenderTarget } from "./engine/render-target.js";
-export type { RenderPassTask, RenderPassTaskConfig } from "./frame-graph/render-pass-task.js";
-export { createRenderPassTask } from "./frame-graph/render-pass-task.js";
-export { createRenderTargetTexture } from "./texture/rtt.js";
+export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
+export type { EngineContext, EngineOptions } from "./engine/engine.js";
+export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene, registerScene, unregisterScene } from "./scene/scene.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -27,13 +19,28 @@ export { createPointLight } from "./light/point-light.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export type { LightBase } from "./light/types.js";
+export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 
 // ─── Mesh Factories (high-level) ─────────────────────────────────────
-export { createSphere, createBox, createTorus, createGround, createGroundFromHeightMap } from "./mesh/mesh-factories.js";
+export {
+    createSphere,
+    createBox,
+    createTorus,
+    createGround,
+    createGroundFromHeightMap,
+    createCylinder,
+    createPlane,
+    createDisc,
+    createPolyhedron,
+    createRibbon,
+    createTube,
+    createExtrudeShape,
+} from "./mesh/mesh-factories.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
+export { loadBasisTexture2D } from "./texture/basis-loader.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/standard-material.js";
@@ -74,7 +81,6 @@ export { addThinInstance, removeThinInstance, setThinInstanceMatrix, setThinInst
 export type { ThinInstanceData } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
-export type { EngineContext } from "./engine/engine.js";
 export type { SceneContext, ImageProcessingConfig } from "./scene/scene.js";
 export type { ArcRotateCamera } from "./camera/arc-rotate.js";
 export type { Camera } from "./camera/camera.js";
@@ -97,7 +103,7 @@ export type {
 export type { PointLight } from "./light/point-light.js";
 export type { DirectionalLight } from "./light/directional-light.js";
 export type { SpotLight } from "./light/spot-light.js";
-export type { SampledTexture, SampledTextureOptions } from "./texture/texture-2d.js";
+export type { Texture2D, Texture2DOptions } from "./texture/texture-2d.js";
 export type { ShadowGenerator, ShadowGeneratorConfig } from "./shadow/shadow-generator.js";
 export type { PcfShadowGeneratorConfig } from "./shadow/pcf-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
@@ -106,6 +112,14 @@ export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";
+export type { CylinderOptions } from "./mesh/create-cylinder.js";
+export type { PlaneOptions } from "./mesh/create-plane.js";
+export type { DiscOptions } from "./mesh/create-disc.js";
+export type { PolyhedronOptions } from "./mesh/create-polyhedron.js";
+export type { RibbonOptions } from "./mesh/create-ribbon.js";
+export type { TubeOptions } from "./mesh/create-tube.js";
+export type { ExtrudeShapeOptions } from "./mesh/create-extrude.js";
+export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
@@ -116,7 +130,7 @@ export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 
 // ─── Low-level (for advanced/custom rendering) ──────────────────────
 export type { EnvironmentTextures } from "./loader-env/load-env.js";
-export type { Renderable, PrePassRenderable } from "./render/renderable.js";
+export type { Renderable, PrePassRenderable, SceneUniformUpdater } from "./render/renderable.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {

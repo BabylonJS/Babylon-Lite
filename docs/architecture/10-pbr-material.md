@@ -80,7 +80,7 @@ Pipelines are cached per `(features, format, msaaSamples)` tuple. Key format: `p
 ### Material Props (`pbr-material.ts`)
 
 ```typescript
-import type { SampledTexture } from '../../texture/texture-2d.js';
+import type { Texture2D } from '../../texture/texture-2d.js';
 import type { MeshGroupBuilder } from '../../render/renderable.js';
 
 /** Clearcoat layer properties. */
@@ -97,19 +97,19 @@ export interface SheenProps {
   color?: [number, number, number];
   roughness?: number;
   intensity?: number;
-  texture?: SampledTexture;
+  texture?: Texture2D;
 }
 
 /** User-facing PBR material properties. */
 export interface PbrMaterialProps {
-  baseColorTexture?: SampledTexture;
-  normalTexture?: SampledTexture;
+  baseColorTexture?: Texture2D;
+  normalTexture?: Texture2D;
   /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
-  ormTexture?: SampledTexture;
-  emissiveTexture?: SampledTexture;
-  specGlossTexture?: SampledTexture;
-  metallicReflectanceTexture?: SampledTexture;
-  reflectanceTexture?: SampledTexture;
+  ormTexture?: Texture2D;
+  emissiveTexture?: Texture2D;
+  specGlossTexture?: Texture2D;
+  metallicReflectanceTexture?: Texture2D;
+  reflectanceTexture?: Texture2D;
   emissiveColor?: [number, number, number];
   doubleSided?: boolean;
   alpha?: number;
@@ -135,7 +135,7 @@ export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMateria
 export const pbrGroupBuilder: MeshGroupBuilder;
 
 /** Collect all non-null textures for acquire/release tracking. */
-export function collectPbrBoundTextures(mat: PbrMaterialProps): SampledTexture[];
+export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[];
 ```
 
 Usage:
@@ -606,7 +606,7 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 
 ## Dependencies
 
-- **`pbr-material.ts`**: Imports `SampledTexture` from texture-2d, `MeshGroupBuilder` from renderable.
+- **`pbr-material.ts`**: Imports `Texture2D` from texture-2d, `MeshGroupBuilder` from renderable.
 - **`pbr-flags.ts`**: Imports `PbrLightExtension` from light types. No other dependencies (pure constants).
 - **`pbr-template.ts`**: Imports `ShaderTemplate`, `UboField`, `VertexAttribute`, `Varying`, `BindingDecl` from fragment-types.
 - **`pbr-pipeline.ts`**: Imports `PbrMaterialProps` from pbr-material, `ComposedShader` from shader-composer, `createPipelineCache` from pipeline-cache, feature flags from pbr-flags.

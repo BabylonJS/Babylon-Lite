@@ -2,7 +2,7 @@
 // Animated shark model, rotated camera to show the side profile.
 // Only plays the "swimming" animation for deterministic parity.
 
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, createHemisphericLight, loadGltf, attachControl, stopAnimation, goToFrame, pauseAnimation } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, createHemisphericLight, loadGltf, attachControl, stopAnimation, goToFrame, pauseAnimation, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -57,7 +57,8 @@ async function main(): Promise<void> {
         }
     });
 
-    await startEngine(engine, scene);
+    await registerScene(engine, scene);
+    await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

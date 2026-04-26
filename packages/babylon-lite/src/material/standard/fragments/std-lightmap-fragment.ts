@@ -1,7 +1,7 @@
 /** Standard Lightmap Fragment — additively blends lightmap into final color. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { StandardMaterialProps } from "../standard-material.js";
-import type { SampledTexture } from "../../../texture/texture-2d.js";
+import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-pipeline.js";
 import { HAS_LIGHTMAP_TEXTURE, LIGHTMAP_USES_UV2 } from "../standard-pipeline.js";
 
@@ -32,7 +32,7 @@ export const stdLightmapExt: StdExt = {
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: SampledTexture[]): void {
+    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.lightmapTexture) {
             out.push(mat.lightmapTexture);
         }

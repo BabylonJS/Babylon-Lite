@@ -27,5 +27,5 @@ export const stdCubeReflectionExt: StdExt = {
         entries.push({ binding: b++, resource: cube.sampler });
         return b;
     },
-    // Cube textures are tracked separately; no SampledTexture[] contribution.
+    // Cube textures are tracked separately; no Texture2D[] contribution.
 };

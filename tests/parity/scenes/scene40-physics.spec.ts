@@ -14,6 +14,8 @@ const sceneConfig = getSceneConfig(40);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene40-physics");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 40 skipped via skipParity in scene-config.json");
+
 test("Scene 40 — Physics matches Babylon.js reference", async ({ page }) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 40 });
