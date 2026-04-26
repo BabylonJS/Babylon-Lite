@@ -1,7 +1,6 @@
 import type { SceneContext } from "../scene/scene.js";
 import type { SceneContextInternal } from "../scene/scene.js";
-import { buildScene, processMaterialSwaps } from "../scene/scene.js";
-import type { Renderable } from "../render/renderable.js";
+import { processMaterialSwaps, drainSceneBuilders } from "../scene/scene.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -10,6 +9,9 @@ export const VERSION = "0.1.0";
 export interface EngineContext {
     readonly canvas: HTMLCanvasElement;
     readonly msaaSamples: number;
+    /** Preferred GPU texture format for the swapchain. Use as the `colorFormat`
+     *  for offscreen RTs that are sampled by main-pass materials. */
+    readonly format: GPUTextureFormat;
 
     /** Number of GPU draw calls in the last rendered frame. */
     drawCallCount: number;
@@ -19,21 +21,13 @@ export interface EngineContext {
 export interface EngineContextInternal extends EngineContext {
     readonly device: GPUDevice;
     readonly context: GPUCanvasContext;
-    readonly format: GPUTextureFormat;
-    _targets: RenderTargets;
+    /** Swapchain texture view for the current frame. Refreshed at the start of each RAF. */
+    _swapChainView: GPUTextureView | null;
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
-    _opaqueBundle: GPURenderBundle | null;
-    _bundleVersion: number;
-}
-
-interface RenderTargets {
-    msaaTexture: GPUTexture;
-    msaaView: GPUTextureView;
-    depthTexture: GPUTexture;
-    depthView: GPUTextureView;
-    width: number;
-    height: number;
+    /** True when the frame graph needs to be (re)built before the next execute().
+     *  Initially true so the first frame builds; set true on canvas resize. */
+    _needsBuild: boolean;
 }
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
@@ -70,7 +64,6 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
 
     const msaaSamples = 4;
 
-    const targets = createRenderTargets(device, canvas.width, canvas.height, format, msaaSamples);
     const engine: EngineContextInternal = {
         device,
         context,
@@ -78,31 +71,64 @@ export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineCon
         canvas,
         msaaSamples,
         drawCallCount: 0,
-        _targets: targets,
+        _swapChainView: null,
         _animFrameId: 0,
         _renderFn: null,
-        _opaqueBundle: null,
-        _bundleVersion: -1,
+        _needsBuild: true,
     };
 
     return engine;
 }
 
-/** Resize render targets to match canvas size. */
-export function resizeEngine(engine: EngineContext): void {
-    const eng = engine as EngineContextInternal;
+/** If the canvas has been resized, reconfigure the swapchain backing-store size and
+ *  flag the engine for a frame graph rebuild on the next renderFrame. */
+function handleResize(eng: EngineContextInternal): void {
     const canvas = eng.canvas;
     const w = (canvas.clientWidth * devicePixelRatio) | 0;
     const h = (canvas.clientHeight * devicePixelRatio) | 0;
-    if (w === eng._targets.width && h === eng._targets.height) {
+    if (w === canvas.width && h === canvas.height) {
         return;
     }
     canvas.width = w;
     canvas.height = h;
-    eng.context.configure({ device: eng.device, format: eng.format, alphaMode: "opaque" });
-    eng._targets.msaaTexture.destroy();
-    eng._targets.depthTexture.destroy();
-    eng._targets = createRenderTargets(eng.device, w, h, eng.format, eng.msaaSamples);
+    eng._needsBuild = true;
+}
+
+/** Encode + submit a single frame: drain scene builders, resize, build if needed,
+ *  acquire swapchain, run scene callbacks, execute the frame graph. */
+async function renderFrame(eng: EngineContextInternal, sc: SceneContextInternal, deltaMs: number): Promise<void> {
+    // Scene authoring may have queued builders (mesh-group batch builds, env background
+    // setup, addToPass overrides). Drain them BEFORE building the frame graph so that
+    // task.record() sees a fully populated scene._renderables.
+    if (sc._builders.length > 0) {
+        await drainSceneBuilders(sc);
+        eng._needsBuild = true;
+    }
+
+    handleResize(eng);
+
+    if (eng._needsBuild) {
+        await sc._frameGraph.build();
+        eng._needsBuild = false;
+    }
+
+    // Acquire the swapchain view for this frame and expose it on the engine
+    // context so frame graph tasks can read it without explicit threading.
+    eng._swapChainView = eng.context.getCurrentTexture().createView();
+
+    for (const cb of sc._beforeRender) {
+        cb(deltaMs);
+    }
+    if (sc._materialSwapQueue.length > 0) {
+        processMaterialSwaps(sc);
+    }
+    // Internal per-frame callbacks (lights UBO refresh, mesh-group GPU updates, etc.) —
+    // run after user-facing _beforeRender (which may have mutated transforms/lights)
+    // and before the frame graph executes.
+    for (const cb of sc._perFrameCallbacks) {
+        cb();
+    }
+    sc._frameGraph.execute();
 }
 
 /** Start the render loop for the given scene. Resolves after the first frame has been rendered. */
@@ -110,44 +136,28 @@ export function startEngine(engine: EngineContext, scene: SceneContext): Promise
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;
     return new Promise<void>((resolve) => {
-        const boot = async () => {
-            // Run deferred builders (entities register these at add/load time)
-            await buildScene(scene);
-            // Split renderables: transparent → back-to-front each frame, transmissive → opaque but sampled,
-            // everything else → opaque-opaque.
-            for (const r of sc._renderables) {
-                const bucket = r.isTransparent ? sc._transparentRenderables : r.isTransmissive ? sc._transmissiveRenderables : sc._opaqueRenderables;
-                bucket.push(r);
-            }
-            sc._opaqueRenderables.sort((a, b) => a.order - b.order);
-            sc._transmissiveRenderables.sort((a, b) => a.order - b.order);
-            // Also keep _renderables sorted for pre-passes and legacy consumers
-            sc._renderables.sort((a, b) => a.order - b.order);
+        let lastTime = 0;
+        let firstFrame = true;
+        eng._renderFn = (now: number) => {
+            // First frame: delta=0 (matches Babylon.js _localDelayOffset which
+            // absorbs the first accumulated deltaTime, so frame 1 evaluates at t=0)
+            const delta = firstFrame ? 0 : sc._fixedDeltaMs > 0 ? sc._fixedDeltaMs : lastTime > 0 ? now - lastTime : 16.667;
+            lastTime = now;
 
-            let lastTime = 0;
-            let firstFrame = true;
-            eng._renderFn = (now: number) => {
-                // First frame: delta=0 (matches Babylon.js _localDelayOffset which
-                // absorbs the first accumulated deltaTime, so frame 1 evaluates at t=0)
-                const delta = firstFrame ? 0 : sc._fixedDeltaMs > 0 ? sc._fixedDeltaMs : lastTime > 0 ? now - lastTime : 16.667;
-                lastTime = now;
-                resizeEngine(engine);
-                for (const cb of sc._beforeRender) {
-                    cb(delta);
-                }
-                if (sc._materialSwapQueue.length > 0) {
-                    processMaterialSwaps(scene);
-                }
-                renderFrame(eng, eng._targets, sc);
+            void renderFrame(eng, sc, delta).then(() => {
                 if (firstFrame) {
                     firstFrame = false;
+                    // Signal first-frame paint to the lab loader overlay so it can dismiss
+                    // even when scenes delay data-ready (e.g. physics settling).
+                    if (eng.canvas && eng.canvas.dataset) {
+                        eng.canvas.dataset.loaded = "true";
+                    }
                     resolve();
                 }
                 eng._animFrameId = requestAnimationFrame(eng._renderFn!);
-            };
-            eng._animFrameId = requestAnimationFrame(eng._renderFn);
+            });
         };
-        void boot();
+        eng._animFrameId = requestAnimationFrame(eng._renderFn);
     });
 }
 
@@ -172,175 +182,17 @@ export function stopEngine(engine: EngineContext): void {
 export async function renderOneFrame(engine: EngineContext, scene: SceneContext): Promise<void> {
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;
-    resizeEngine(engine);
-    for (const cb of sc._beforeRender) {
-        cb(0);
-    }
-    if (sc._materialSwapQueue.length > 0) {
-        processMaterialSwaps(scene);
-    }
-    renderFrame(eng, eng._targets, sc);
+    await renderFrame(eng, sc, 0);
     await eng.device.queue.onSubmittedWorkDone();
 }
 
 /** Release all engine-owned GPU resources (render targets, device). */
-export function disposeEngine(engine: EngineContext): void {
+export function disposeEngine(engine: EngineContext, scene?: SceneContext): void {
     const eng = engine as EngineContextInternal;
     stopEngine(engine);
-    eng._targets.msaaTexture.destroy();
-    eng._targets.depthTexture.destroy();
+    if (scene) {
+        (scene as SceneContextInternal)._frameGraph.dispose();
+    }
     eng.context.unconfigure();
-    // Pipeline caches auto-clear on device change (no side-effect registry needed)
     eng.device.destroy();
-}
-
-function createRenderTargets(device: GPUDevice, width: number, height: number, format: GPUTextureFormat, sampleCount: number): RenderTargets {
-    const msaaTexture = device.createTexture({
-        size: { width, height },
-        format,
-        sampleCount,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    const depthTexture = device.createTexture({
-        size: { width, height },
-        format: "depth24plus-stencil8",
-        sampleCount,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    return {
-        msaaTexture,
-        msaaView: msaaTexture.createView(),
-        depthTexture,
-        depthView: depthTexture.createView(),
-        width,
-        height,
-    };
-}
-
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly Renderable[], engine: EngineContextInternal): number {
-    let lp: GPURenderPipeline | null = null;
-    let lb: GPUBindGroup | null = null;
-    let draws = 0;
-    for (const r of list) {
-        if (r._pipeline && r._pipeline !== lp) {
-            enc.setPipeline(r._pipeline);
-            lp = r._pipeline;
-        }
-        if (r._sceneBG && r._sceneBG !== lb) {
-            enc.setBindGroup(0, r._sceneBG);
-            lb = r._sceneBG;
-        }
-        draws += r.draw(enc, engine);
-        // Renderables without a declared pipeline/sceneBG set their own state internally
-        // (e.g. PBR drawPackets cycles through multiple variants). Invalidate the trackers
-        // so the next renderable correctly re-binds even if it happens to match our record.
-        if (!r._pipeline) {
-            lp = null;
-        }
-        if (!r._sceneBG) {
-            lb = null;
-        }
-    }
-    return draws;
-}
-
-function renderFrame(engine: EngineContextInternal, targets: RenderTargets, scene: SceneContextInternal): void {
-    let encoder = engine.device.createCommandEncoder();
-
-    // Pre-passes: shadow maps from lights that have shadow generators
-    let drawCalls = 0;
-    for (const light of scene.lights) {
-        const sg = light.shadowGenerator;
-        if (sg) {
-            drawCalls += sg.renderShadowMap(encoder);
-        }
-    }
-    // Additional pre-passes (compute, etc.)
-    for (const pp of scene._prePasses) {
-        drawCalls += pp.execute(encoder, engine);
-    }
-
-    // Update scene uniforms (one per shared UBO)
-    for (const u of scene._uniformUpdaters) {
-        u.update(engine);
-    }
-
-    // Update per-mesh UBOs (world matrices) for dynamic transforms — iterates the
-    // pre-built renderables union so we pay one loop regardless of opaque/transmissive/transparent split.
-    for (const r of scene._renderables) {
-        if (r.updateUBOs) {
-            r.updateUBOs();
-        }
-    }
-
-    // Per-frame transparent sort by camera distance (back-to-front)
-    const cam = scene.camera;
-    if (scene._transparentRenderables.length > 1 && cam) {
-        const w = cam.worldMatrix;
-        const cx = w[12]!,
-            cy = w[13]!,
-            cz = w[14]!;
-        for (const r of scene._transparentRenderables) {
-            if (r._worldCenter) {
-                const [wx, wy, wz] = r._worldCenter;
-                r._sortDistance = (wx - cx) ** 2 + (wy - cy) ** 2 + (wz - cz) ** 2;
-            }
-        }
-        scene._transparentRenderables.sort((a, b) => (b._sortDistance ?? 0) - (a._sortDistance ?? 0) || a.order - b.order);
-    }
-
-    // Lazy hook: refraction/transmission module inserts the opaque-scene RTT + mipmap submit here,
-    // then hands back a fresh encoder that the main pass uses. Also lets the hook decide when to
-    // acquire the swap-chain view (late, after mid-frame submit).
-    if (scene._beforeMain) {
-        encoder = scene._beforeMain(engine, scene, encoder);
-    }
-    const swapChainView = engine.context.getCurrentTexture().createView();
-
-    const pass = encoder.beginRenderPass({
-        colorAttachments: [
-            {
-                view: targets.msaaView,
-                resolveTarget: swapChainView,
-                clearValue: scene.clearColor,
-                loadOp: "clear",
-                storeOp: "store",
-            },
-        ],
-        depthStencilAttachment: {
-            view: targets.depthView,
-            depthClearValue: 1.0,
-            depthLoadOp: "clear",
-            depthStoreOp: "store",
-            stencilClearValue: 0,
-            stencilLoadOp: "clear",
-            stencilStoreOp: "store",
-        },
-    });
-
-    pass.setViewport(0, 0, targets.width, targets.height, 0, 1);
-
-    // ─── Opaque pass: use cached render bundle when renderable list is unchanged ───
-    if (engine._bundleVersion !== scene._renderableVersion || !engine._opaqueBundle) {
-        const bundleEncoder = engine.device.createRenderBundleEncoder({
-            colorFormats: [engine.format],
-            depthStencilFormat: "depth24plus-stencil8",
-            sampleCount: engine.msaaSamples,
-        });
-        drawList(bundleEncoder, scene._opaqueRenderables, engine);
-        engine._opaqueBundle = bundleEncoder.finish();
-        engine._bundleVersion = scene._renderableVersion;
-    }
-    drawCalls += scene._opaqueRenderables.length;
-    pass.executeBundles([engine._opaqueBundle]);
-
-    // ─── Transmissive pass: direct-encoded after opaque, before transparent ───
-    drawCalls += drawList(pass, scene._transmissiveRenderables, engine);
-
-    // ─── Transparent pass: direct-encoded (re-sorted every frame) ───
-    drawCalls += drawList(pass, scene._transparentRenderables, engine);
-
-    pass.end();
-    engine.device.queue.submit([encoder.finish()]);
-    engine.drawCallCount = drawCalls;
 }

@@ -199,7 +199,6 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     const hasMaterialUbo = !!(template.baseMaterialUboFields && template.baseMaterialUboFields.length > 0);
     const meshFields = [...template.baseMeshUboFields];
     const materialFields = hasMaterialUbo ? [...template.baseMaterialUboFields] : [];
-    const sceneFields = [...template.baseSceneUboFields];
     const fragUboOffsets = new Map<string, number>();
     for (const f of sorted) {
         if (f.uboFields?.length) {
@@ -211,13 +210,9 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
                 meshFields.push(...f.uboFields);
             }
         }
-        if (f.sceneUboFields?.length) {
-            sceneFields.push(...f.sceneUboFields);
-        }
     }
     const meshUboSpec = computeUboLayout(meshFields);
     const materialUboSpec = hasMaterialUbo ? computeUboLayout(materialFields) : undefined;
-    const sceneUboSpec = computeUboLayout(sceneFields);
     const uboSpecForFragOffsets = hasMaterialUbo ? materialUboSpec! : meshUboSpec;
     const fragFields = hasMaterialUbo ? materialFields : meshFields;
     const fragmentUboOffsets = new Map<string, number>();
@@ -281,12 +276,10 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
 
     const fragKey = sorted.map((f) => f.id).join("|");
     const vParams = (vBuiltins.length ? vBuiltins.join("\n") + "\n" : "") + inputLines.join("\n");
-    const sceneStruct = `struct SceneUniforms {\n${sceneUboSpec.structBody}\n}`;
     const meshStruct = `struct MeshUniforms {\n${meshUboSpec.structBody}\n}`;
     const materialStruct = materialUboSpec ? `\nstruct MaterialUniforms {\n${materialUboSpec.structBody}\n}\n@group(1) @binding(1) var<uniform> material: MaterialUniforms;` : "";
 
     let vertexWGSL = template.vertexTemplate;
-    vertexWGSL = vertexWGSL.replace("/*SU*/", sceneStruct);
     vertexWGSL = vertexWGSL.replace("/*MU*/", meshStruct);
     vertexWGSL = vertexWGSL.replace("/*VI*/", `struct VertexInput {\n${inputLines.join("\n")}\n}`);
     vertexWGSL = vertexWGSL.replace("/*VO*/", `struct VertexOutput {\n${varyBody}\n}`);
@@ -296,7 +289,6 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     vertexWGSL = injectSlots(vertexWGSL, sorted, "vertexSlots");
 
     let fragmentWGSL = template.fragmentTemplate;
-    fragmentWGSL = fragmentWGSL.replace("/*SU*/", sceneStruct);
     fragmentWGSL = fragmentWGSL.replace("/*MU*/", meshStruct + materialStruct);
     fragmentWGSL = fragmentWGSL.replace("/*FI*/", `struct FragmentInput {\n${varyBody}\n}`);
     fragmentWGSL = fragmentWGSL.replace("/*HF*/", helpers.join("\n"));
@@ -311,7 +303,6 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
         vertexBufferLayouts: layouts,
         meshUboSpec,
         materialUboSpec,
-        sceneUboSpec,
         fragmentKey: fragKey,
         fragmentUboOffsets,
         fragmentBindingOffsets: fragBindOff,

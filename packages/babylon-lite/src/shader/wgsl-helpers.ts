@@ -91,57 +91,12 @@ return mix(-normVariance, normVariance, rand);
 }
 `;
 
-/** PBR background SceneUniforms (128 bytes) + binding.
- *  Used by skybox, DDS skybox, and ground vertex shaders. */
-export const WGSL_SCENE_UNIFORMS_PBR = `
-struct SceneUniforms {
-viewProj: mat4x4<f32>,
-cameraPosition: vec3<f32>, _pad0: f32,
-lightDirection: vec3<f32>, lightIntensity: f32,
-lightDiffuseColor: vec3<f32>, _pad1: f32,
-lightGroundColor: vec3<f32>, _pad2: f32,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;
+import { SCENE_UBO_WGSL } from "./scene-uniforms-fields.js";
 
-/** PBR SceneUniforms with spherical harmonics + image processing fields.
- *  Superset of WGSL_SCENE_UNIFORMS_PBR. */
-export const WGSL_SCENE_UNIFORMS_PBR_SH = `
-struct SceneUniforms {
-viewProj: mat4x4<f32>,
-cameraPosition: vec3<f32>, _pad0: f32,
-lightDirection: vec3<f32>, lightIntensity: f32,
-lightDiffuseColor: vec3<f32>, _pad1: f32,
-lightGroundColor: vec3<f32>, _pad2: f32,
-vSphericalL00: vec3<f32>, _sh0: f32,
-vSphericalL1_1: vec3<f32>, _sh1: f32,
-vSphericalL10: vec3<f32>, _sh2: f32,
-vSphericalL11: vec3<f32>, _sh3: f32,
-vSphericalL2_2: vec3<f32>, _sh4: f32,
-vSphericalL2_1: vec3<f32>, _sh5: f32,
-vSphericalL20: vec3<f32>, _sh6: f32,
-vSphericalL21: vec3<f32>, _sh7: f32,
-vSphericalL22: vec3<f32>, _sh8: f32,
-exposureLinear: f32,
-contrast: f32,
-_imgPad0: f32,
-_imgPad1: f32,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;
-
-/** Standard material SceneUniforms with fog fields + binding.
- *  Used by skybox-cubemap (Standard material skybox). */
-export const WGSL_SCENE_UNIFORMS_STD = `
-struct SceneUniforms {
-viewProjection: mat4x4<f32>,
-view: mat4x4<f32>,
-vEyePosition: vec4<f32>,
-vFogInfos: vec4<f32>,
-vFogColor: vec4<f32>,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;
+/** Unified SceneUniforms struct + binding for all non-shadow shaders. */
+export function getWgslSceneUniformsUnified(): string {
+    return SCENE_UBO_WGSL;
+}
 
 /** Shadow-only SceneUniforms (minimal: just viewProjection) + binding.
  *  Used by shadow depth shaders. */

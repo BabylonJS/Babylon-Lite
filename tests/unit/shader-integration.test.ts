@@ -20,13 +20,6 @@ import { createNormalMapFragment } from "../../packages/babylon-lite/src/materia
 import type { PbrLightConfig } from "../../packages/babylon-lite/src/material/pbr/pbr-template";
 
 const hemisphericLight: PbrLightConfig = {
-    sceneUboFields: [
-        { name: "lightDirection", type: "vec3<f32>" },
-        { name: "lightIntensity", type: "f32" },
-        { name: "lightDiffuseColor", type: "vec3<f32>" },
-        { name: "_pad1", type: "f32" },
-        { name: "lightGroundColor", type: "vec3<f32>" },
-    ],
     lightVectorCode: `let L = normalize(scene.lightDirection);\nlet NdotL = dot(N, L) * 0.5 + 0.5;\nlet lightAtten = 1.0;`,
     directDiffuseCode: `surfaceAlbedo * (1.0 / PI) * NdotL * lightColor * mesh.directIntensity;`,
     geometricAACode: "",
@@ -103,8 +96,6 @@ describe("PBR template + fragments integration", () => {
         expect(result.fragmentWGSL).toContain("vSphericalL00");
         // 4 IBL bindings in group 1
         expect(result.meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(5); // mesh UBO + base textures + 4 IBL
-        // Scene UBO should include SH coefficients
-        expect(result.sceneUboSpec.offsets.has("vSphericalL00")).toBe(true);
     });
 
     it("composes PBR + skeleton (4-bone)", () => {

@@ -2,8 +2,17 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, renderOneFrame, VERSION } from "./engine/engine.js";
-export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene } from "./scene/scene.js";
+export { createEngine, startEngine, stopEngine, disposeEngine, renderOneFrame, VERSION } from "./engine/engine.js";
+export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, getFrameGraph, disposeScene } from "./scene/scene.js";
+
+// ─── Frame Graph (multi-pass authoring) ──────────────────────────────
+export type { FrameGraph } from "./frame-graph/frame-graph.js";
+export { addRenderPassTask, addRenderPassTaskAtStart, addRenderPassTaskBefore } from "./frame-graph/frame-graph.js";
+export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
+export { createRenderTarget } from "./engine/render-target.js";
+export type { RenderPassTask, RenderPassTaskConfig } from "./frame-graph/render-pass-task.js";
+export { createRenderPassTask } from "./frame-graph/render-pass-task.js";
+export { createRenderTargetTexture } from "./texture/rtt.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -88,7 +97,7 @@ export type {
 export type { PointLight } from "./light/point-light.js";
 export type { DirectionalLight } from "./light/directional-light.js";
 export type { SpotLight } from "./light/spot-light.js";
-export type { Texture2D, Texture2DOptions } from "./texture/texture-2d.js";
+export type { SampledTexture, SampledTextureOptions } from "./texture/texture-2d.js";
 export type { ShadowGenerator, ShadowGeneratorConfig } from "./shadow/shadow-generator.js";
 export type { PcfShadowGeneratorConfig } from "./shadow/pcf-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
@@ -107,7 +116,7 @@ export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 
 // ─── Low-level (for advanced/custom rendering) ──────────────────────
 export type { EnvironmentTextures } from "./loader-env/load-env.js";
-export type { Renderable, PrePassRenderable, SceneUniformUpdater } from "./render/renderable.js";
+export type { Renderable, PrePassRenderable } from "./render/renderable.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {

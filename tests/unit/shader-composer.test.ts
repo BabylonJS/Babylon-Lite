@@ -107,7 +107,7 @@ describe("computeUboLayout", () => {
 function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
     return {
         vertexTemplate: [
-            "/*SU*/",
+            "struct SceneUniforms { viewProj: mat4x4<f32>, };",
             "@group(0) @binding(0) var<uniform> scene: SceneUniforms;",
             "/*MU*/",
             "@group(1) @binding(0) var<uniform> mesh: MeshUniforms;",
@@ -123,7 +123,7 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
             "}",
         ].join("\n"),
         fragmentTemplate: [
-            "/*SU*/",
+            "struct SceneUniforms { viewProj: mat4x4<f32>, };",
             "@group(0) @binding(0) var<uniform> scene: SceneUniforms;",
             "/*MU*/",
             "@group(1) @binding(0) var<uniform> mesh: MeshUniforms;",
@@ -146,7 +146,6 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
             "}",
         ].join("\n"),
         baseMeshUboFields: [{ name: "world", type: "mat4x4<f32>" }],
-        baseSceneUboFields: [{ name: "viewProj", type: "mat4x4<f32>" }],
         baseVertexAttributes: [
             { name: "position", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
             { name: "normal", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
@@ -169,7 +168,6 @@ describe("composeShader", () => {
         expect(result.vertexWGSL).toContain("struct VertexOutput");
         expect(result.fragmentWGSL).toContain("struct FragmentInput");
         expect(result.meshUboSpec.totalBytes).toBe(64); // just world mat4
-        expect(result.sceneUboSpec.totalBytes).toBe(64); // just viewProj mat4
     });
 
     it("generates correct fragment key from sorted fragment IDs", () => {
@@ -192,19 +190,6 @@ describe("composeShader", () => {
         expect(result.meshUboSpec.offsets.get("ccParams")).toBe(64);
         expect(result.meshUboSpec.offsets.get("ccRefraction")).toBe(80);
         expect(result.fragmentUboOffsets.get("clearcoat")).toBe(16); // 64 / 4 = float offset 16
-    });
-
-    it("appends fragment scene UBO fields", () => {
-        const frag: ShaderFragment = {
-            id: "ibl",
-            sceneUboFields: [
-                { name: "shCoeff0", type: "vec4<f32>" },
-                { name: "shCoeff1", type: "vec4<f32>" },
-            ],
-        };
-        const result = composeShader(makeTemplate(), [frag]);
-        expect(result.sceneUboSpec.totalBytes).toBe(96); // 64 (viewProj) + 16 + 16
-        expect(result.sceneUboSpec.offsets.get("shCoeff0")).toBe(64);
     });
 
     it("injects fragment slot code into the template", () => {

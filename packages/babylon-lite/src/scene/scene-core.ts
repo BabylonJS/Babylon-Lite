@@ -8,13 +8,17 @@ import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
-import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder } from "../render/renderable.js";
+import type { Renderable, PrePassRenderable, MeshGroupBuilder } from "../render/renderable.js";
 import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { SkyboxData } from "../loader-skybox/load-skybox.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
-import type { ComposedShader } from "../shader/fragment-types.js";
 import type { AssetContainer } from "../asset-container.js";
+import type { FrameGraph } from "../frame-graph/frame-graph.js";
+import { createFrameGraph, addRenderPassTask } from "../frame-graph/frame-graph.js";
+import { createRenderTarget } from "../engine/render-target.js";
+import type { RenderPassTask } from "../frame-graph/render-pass-task.js";
+import { createRenderPassTask, addRenderableToTask, removeMeshFromTask } from "../frame-graph/render-pass-task.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -57,26 +61,24 @@ export interface SceneContext {
 
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
 export interface SceneContextInternal extends SceneContext {
-    /** Sorted list of renderables. Built lazily by startEngine(). */
-    _renderables: Renderable[];
-    /** Opaque renderables — sorted by order at build time. */
-    _opaqueRenderables: Renderable[];
-    /** Transmissive renderables — opaque (write-depth) but need the opaque-scene RTT as input.
-     *  Rendered after _opaqueRenderables and before _transparentRenderables in the main pass;
-     *  when non-empty the engine also runs the opaque-scene pre-pass. */
-    _transmissiveRenderables: Renderable[];
-    /** Transparent renderables — sorted per-frame by camera distance (back-to-front). */
-    _transparentRenderables: Renderable[];
     /** Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
-    /** Scene uniform updaters (one per shared UBO). */
-    _uniformUpdaters: SceneUniformUpdater[];
     /** Fixed delta time in ms for deterministic animation. 0 = use real rAF delta. */
     _fixedDeltaMs: number;
     /** Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
-    /** Deferred builders — registered by loaders/factories, run once at startEngine(). */
-    _deferredBuilders: (() => void | Promise<void>)[];
+    /** Internal per-frame callbacks run by the engine just before executing the frame graph
+     *  (lights UBO updates, mesh-group GPU updates, etc.). Distinct from `_beforeRender`
+     *  which is the user-facing pre-render hook with `deltaMs`. */
+    _perFrameCallbacks: (() => void)[];
+    /** Scene-level renderables — populated by entity adders (`addToScene`) and loaders.
+     *  Render pass tasks with `autoFromScene = true` mirror this list at `record()` time. */
+    _renderables: Renderable[];
+    /** Scene-level deferred builders. Drained by the engine at the top of each `renderFrame`
+     *  BEFORE any frame graph build. Builders may push more builders (multi-round trampoline)
+     *  to enforce ordering between batched/group builders and consumers (e.g. env background
+     *  needs PBR ctx that the PBR mesh-group builder installs). */
+    _builders: (() => void | Promise<void>)[];
     /** Mesh group registry — maps builder to its mesh list (internal bookkeeping). */
     _groups: Map<MeshGroupBuilder, Mesh[]>;
 
@@ -87,27 +89,27 @@ export interface SceneContextInternal extends SceneContext {
     _meshDisposables: Map<Mesh, (() => void)[]>;
     /** Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
+    /** Cache: Renderable per (mesh, material) pair, shared across all passes that include it.
+     *  Same mesh + same material in N passes → one Renderable. Different material → distinct
+     *  Renderables (each with its own meshUBO/materialUBO/BG). Evicted on material swap and
+     *  on `removeFromScene` / `disposeScene`. */
+    _meshRenderable: WeakMap<Mesh, Map<unknown, Renderable>>;
     /** Whether this scene has been disposed. */
     _disposed: boolean;
-    /** Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
-    _renderableVersion: number;
 
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     _skybox?: SkyboxData;
     _envTextures?: EnvironmentTextures;
     _irradianceSH?: Float32Array;
-    _pbrSceneBGL?: GPUBindGroupLayout;
-    _pbrSceneBG?: GPUBindGroup;
-    _composePbr?: (features: number, features2?: number) => ComposedShader;
-    _standardSceneUBO?: GPUBuffer;
-    _pbrLightsUBO?: GPUBuffer;
-    _pbrLightsUBOScratch?: Float32Array;
 
     /** Lazy render-hook inserted between pre-passes and the main render pass. The hook may
      *  finish & submit `enc`, do extra GPU work (e.g., opaque-scene RTT + mipmap), and must
      *  return the encoder that the main pass should record into. Installed by the lazy
      *  refraction module only; core renderFrame is hook-free for non-transmissive scenes. */
     _beforeMain?: (engine: EngineContext, scene: SceneContextInternal, enc: GPUCommandEncoder) => GPUCommandEncoder;
+
+    /** Frame graph — automatically created and managed. Drives all GPU rendering. */
+    _frameGraph: FrameGraph;
 }
 
 /** Install a property setter on mesh.material that sets _materialDirty
@@ -135,9 +137,36 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
 
 /** Create an empty scene context bound to the given engine. */
 export function createSceneContext(engine: EngineContext): SceneContext {
+    const eng = engine as EngineContextInternal;
+
+    // Build the main render target. The render pass task and frame graph need
+    // the scene context (to capture engine + scene), so they're created after ctx.
+    const mainRT = createRenderTarget({
+        label: "main",
+        colorFormat: eng.format,
+        depthStencilFormat: "depth24plus-stencil8",
+        sampleCount: eng.msaaSamples,
+        size: "canvas",
+        resolveToSwapchain: true,
+    });
+
+    // Stable backing object for clearColor — mutated in place by the setter so any
+    // task holding a reference (e.g. the main render pass task) sees user updates
+    // even when the user assigns `scene.clearColor = { ... }` (which would otherwise
+    // replace the reference and leave tasks pointing at stale values).
+    const clearColorBacking: GPUColorDict = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
+
     const ctx: SceneContextInternal = {
         engine,
-        clearColor: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
+        get clearColor(): GPUColorDict {
+            return clearColorBacking;
+        },
+        set clearColor(v: GPUColorDict) {
+            clearColorBacking.r = v.r;
+            clearColorBacking.g = v.g;
+            clearColorBacking.b = v.b;
+            clearColorBacking.a = v.a;
+        },
         camera: null,
         lights: [],
         meshes: [],
@@ -145,12 +174,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         fog: null,
         shadowGenerators: [],
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
-        _renderables: [],
-        _opaqueRenderables: [],
-        _transmissiveRenderables: [],
-        _transparentRenderables: [],
         _prePasses: [],
-        _uniformUpdaters: [],
         _fixedDeltaMs: 0,
         get fixedDeltaMs(): number {
             return ctx._fixedDeltaMs;
@@ -159,15 +183,82 @@ export function createSceneContext(engine: EngineContext): SceneContext {
             ctx._fixedDeltaMs = v;
         },
         _beforeRender: [],
-        _deferredBuilders: [],
+        _perFrameCallbacks: [],
+        _renderables: [],
+        _builders: [],
         _groups: new Map(),
         _disposables: [],
         _meshDisposables: new Map(),
         _materialSwapQueue: [],
+        _meshRenderable: new WeakMap(),
         _disposed: false,
-        _renderableVersion: 0,
+        // _frameGraph assigned just below — needs ctx to exist so it can capture it as its scene reference.
+        _frameGraph: null as unknown as FrameGraph,
     };
+
+    ctx._frameGraph = createFrameGraph(eng, ctx);
+    // Main pass auto-mirrors scene._renderables at record() time when its own list is empty.
+    const mainTask = createRenderPassTask({ name: "main", renderTarget: mainRT, autoFromScene: true }, eng, ctx);
+    mainTask.clearColor = ctx.clearColor;
+    addRenderPassTask(ctx._frameGraph, mainTask);
+
     return ctx;
+}
+
+/** Get the scene's frame graph. Exposed for multi-pass authoring (adding RTT
+ *  passes via `addRenderPassTask` / `addRenderPassTaskAtStart`). */
+export function getFrameGraph(scene: SceneContext): FrameGraph {
+    return (scene as SceneContextInternal)._frameGraph;
+}
+
+/** @internal Push a renderable into the scene-level renderables list. Render pass tasks
+ *  with `autoFromScene = true` mirror this list when they record. */
+export function addRenderable(scene: SceneContext, r: Renderable): void {
+    (scene as SceneContextInternal)._renderables.push(r);
+}
+
+/** @internal Push multiple renderables into the scene-level renderables list. */
+export function addRenderables(scene: SceneContext, rs: readonly Renderable[]): void {
+    (scene as SceneContextInternal)._renderables.push(...rs);
+}
+
+/** @internal Get the cached Renderable for `(mesh, material)`, or build it via `factory` and cache it.
+ *  The cache lives on the scene, so the same `(mesh, material)` pair shared across multiple passes
+ *  produces ONE Renderable (and therefore one mesh UBO + one material UBO/BG). Evicted on material
+ *  swap and mesh removal. */
+export function getOrBuildMeshRenderable(scene: SceneContext, mesh: Mesh, material: unknown, factory: (s: SceneContext, m: Mesh, mat: unknown) => Renderable): Renderable {
+    const ctx = scene as SceneContextInternal;
+    let inner = ctx._meshRenderable.get(mesh);
+    if (!inner) {
+        inner = new Map();
+        ctx._meshRenderable.set(mesh, inner);
+    }
+    let r = inner.get(material);
+    if (!r) {
+        r = factory(scene, mesh, material);
+        inner.set(material, r);
+    }
+    return r;
+}
+
+/** @internal Register a per-frame callback run by the engine just before executing the frame graph. */
+export function addPerFrameCallback(scene: SceneContext, cb: () => void): void {
+    (scene as SceneContextInternal)._perFrameCallbacks.push(cb);
+}
+
+/** @internal Register a deferred builder on the scene. Drained by the engine in `renderFrame`
+ *  before any frame graph build. Builders may push more builders to enforce ordering. */
+export function addDeferredBuilder(scene: SceneContext, builder: () => void | Promise<void>): void {
+    (scene as SceneContextInternal)._builders.push(builder);
+}
+
+/** @internal Drain scene-level builders. Loops until the queue is empty so that builders
+ *  that push more builders (multi-round trampoline) are fully resolved. */
+export async function drainSceneBuilders(scene: SceneContextInternal): Promise<void> {
+    while (scene._builders.length > 0) {
+        const builders = scene._builders.splice(0);
+        await Promise.all(builders.map(async (b) => b()));
+    }
 }
 
 /** Register a callback to run before each rendered frame. */
@@ -214,10 +305,10 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             if (!group) {
                 group = [];
                 ctx._groups.set(build, group);
-                ctx._deferredBuilders.push(async () => {
+                addDeferredBuilder(scene, async () => {
                     const result = await build(ctx, group!);
-                    ctx._renderables.push(...result.renderables);
-                    ctx._uniformUpdaters.push(result.updater);
+                    addRenderables(scene, result.renderables);
+                    addPerFrameCallback(scene, result.update);
                 });
             }
             group.push(mesh);
@@ -255,14 +346,11 @@ export function disposeScene(scene: SceneContext): void {
         disposeMeshGpu(mesh);
     }
     ctx.meshes.length = 0;
-    ctx._renderables.length = 0;
-    ctx._opaqueRenderables.length = 0;
-    ctx._transmissiveRenderables.length = 0;
-    ctx._transparentRenderables.length = 0;
     ctx._prePasses.length = 0;
-    ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
-    ctx._deferredBuilders.length = 0;
+    ctx._perFrameCallbacks.length = 0;
+    ctx._renderables.length = 0;
+    ctx._builders.length = 0;
     ctx._disposables.length = 0;
     ctx._materialSwapQueue.length = 0;
     ctx.lights.length = 0;
@@ -271,27 +359,39 @@ export function disposeScene(scene: SceneContext): void {
     ctx.camera = null;
 }
 
-/** @internal Run all deferred builders (called by startEngine before the render loop). */
-export async function buildScene(scene: SceneContext): Promise<void> {
-    const ctx = scene as SceneContextInternal;
-    while (ctx._deferredBuilders.length > 0) {
-        const builders = [...ctx._deferredBuilders];
-        ctx._deferredBuilders = [];
-        await Promise.all(builders.map(async (b) => b()));
-    }
-    for (const mesh of ctx._materialSwapQueue) {
-        (mesh as MeshInternal)._materialDirty = false;
-    }
-    ctx._materialSwapQueue.length = 0;
-    ctx._renderableVersion++;
-}
-
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
 export function processMaterialSwaps(scene: SceneContext): void {
     const ctx = scene as SceneContextInternal;
+    const eng = ctx.engine as EngineContextInternal;
     const q = ctx._materialSwapQueue;
     for (const mesh of q) {
         (mesh as MeshInternal)._materialDirty = false;
+
+        // Fast path: the mesh's cached renderable is already for the current material
+        // (the swap was queued before any renderable was built — drainSceneBuilders has
+        // since built the renderable directly for the new material). Nothing to do.
+        const innerMap = ctx._meshRenderable.get(mesh);
+        const currentMat = mesh.material;
+        if (currentMat && innerMap?.has(currentMat)) {
+            continue;
+        }
+
+        // Evict the old renderable from scene._renderables and from every render pass task.
+        if (innerMap) {
+            for (const r of innerMap.values()) {
+                const idx = ctx._renderables.indexOf(r);
+                if (idx >= 0) {
+                    ctx._renderables.splice(idx, 1);
+                }
+            }
+        }
+        for (const t of ctx._frameGraph._tasks) {
+            if ("renderTarget" in t) {
+                removeMeshFromTask(t as RenderPassTask, mesh);
+            }
+        }
+        ctx._meshRenderable.delete(mesh);
+
         const old = ctx._meshDisposables.get(mesh);
         if (old) {
             for (const fn of old) {
@@ -302,30 +402,18 @@ export function processMaterialSwaps(scene: SceneContext): void {
 
         const mat = mesh.material;
         const builder = mat ? (mat as any)._buildGroup : undefined;
-        if (!builder) {
-            continue;
-        }
-        const rebuild = builder._rebuildSingle;
-        if (rebuild) {
-            const renderable = rebuild(ctx, mesh);
-            if (renderable.isTransparent) {
-                ctx._transparentRenderables.push(renderable);
-            } else {
-                const arr = renderable.isTransmissive ? ctx._transmissiveRenderables : ctx._opaqueRenderables;
-                let i = arr.length;
-                while (i > 0 && arr[i - 1]!.order > renderable.order) {
-                    i--;
+        const rebuild = builder?._rebuildSingle;
+        if (rebuild && mat) {
+            const renderable = getOrBuildMeshRenderable(ctx, mesh, mat, rebuild);
+            ctx._renderables.push(renderable);
+            // Mirror into auto-from-scene tasks so this frame's execute sees the new renderable
+            // (auto-mirror is sticky — it only refills empty task lists at record() time).
+            for (const t of ctx._frameGraph._tasks) {
+                if ("renderTarget" in t && (t as RenderPassTask).autoFromScene) {
+                    addRenderableToTask(t as RenderPassTask, eng, renderable);
                 }
-                arr.splice(i, 0, renderable);
             }
-        } else if (builder._loadRebuildSingle) {
-            builder._loadRebuildSingle().then((mod: any) => {
-                builder._rebuildSingle = mod.buildSinglePbrRenderable ?? mod.buildSingleStandardRenderable;
-                (mesh as MeshInternal)._materialDirty = true;
-                ctx._materialSwapQueue.push(mesh);
-            });
         }
     }
     q.length = 0;
-    ctx._renderableVersion++;
 }
