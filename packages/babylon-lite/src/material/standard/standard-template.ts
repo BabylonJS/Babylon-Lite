@@ -13,6 +13,7 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -118,15 +119,6 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // ── Base UBO fields (mesh = world matrix only) ──────────────
     const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
 
-    // ── Scene UBO fields ────────────────────────────────────────
-    const baseSceneUboFields: UboField[] = [
-        { name: "viewProjection", type: "mat4x4<f32>" },
-        { name: "view", type: "mat4x4<f32>" },
-        { name: "vEyePosition", type: "vec4<f32>" },
-        { name: "vFogInfos", type: "vec4<f32>" },
-        { name: "vFogColor", type: "vec4<f32>" },
-    ];
-
     // ── Base bindings (group 1, starting after mesh UBO at 0) ───
     // Order: lights, material, diffuse*, shadow/UV*, emissive*, bump*, specular*, ambient*, lightmap*, opacity*, reflection*
     // The shadow/UV UBO is placed AFTER diffuse so its auto-assigned binding index
@@ -170,8 +162,7 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // Vertex UBO struct definitions (must be before binding declarations)
     const vertexUboStructs = hasShadow || needsUV ? `struct uvParamsUniforms { uvScaleOffset: vec4<f32>, }` : "";
 
-    const vertexTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+    const vertexTemplate = `${SCENE_UBO_WGSL}
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 ${vertexUboStructs}
@@ -287,8 +278,7 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
         lightingBlock = `var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
     }
 
-    const fragmentTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+    const fragmentTemplate = `${SCENE_UBO_WGSL}
 ${lightsStructs}
 ${materialStruct}
 /*MU*/
@@ -323,7 +313,6 @@ return color;
         vertexTemplate,
         fragmentTemplate,
         baseMeshUboFields,
-        baseSceneUboFields,
         baseVertexAttributes,
         baseVaryings,
         baseBindings,

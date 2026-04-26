@@ -1,13 +1,13 @@
 import type { EnvironmentTextures } from "./load-env.js";
 import { polynomialToPreScaledHarmonics } from "./load-env.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler, getTrilinearSampler } from "../resource/gpu-pool.js";
 
 /** Create the standard sampler pair used by all environment loaders */
 export function createEnvSamplers(engine: EngineContextInternal): { cubeSampler: GPUSampler; brdfSampler: GPUSampler } {
     return {
-        cubeSampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" }),
-        brdfSampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" }),
+        cubeSampler: getTrilinearSampler(engine),
+        brdfSampler: getBilinearSampler(engine),
     };
 }
 

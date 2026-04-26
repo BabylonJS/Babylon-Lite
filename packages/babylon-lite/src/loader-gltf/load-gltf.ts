@@ -5,7 +5,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
 import { createTransformNode } from "../scene/transform-node.js";
-import type { Texture2D } from "../texture/texture-2d.js";
+import type { SampledTexture } from "../texture/texture-2d.js";
 import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
 import type { Mesh, MeshGPU, MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
@@ -333,7 +333,7 @@ async function ensureMipmapModule(): Promise<void> {
     }
 }
 
-function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): Texture2D {
+function uploadTextureSynced(engine: EngineContextInternal, bitmap: ImageBitmap | null, srgb: boolean, sampler: GPUSampler, fallbackBytes?: Uint8Array): SampledTexture {
     return uploadTex(engine, bitmap, srgb, sampler, _generateMipmaps!, fallbackBytes);
 }
 
@@ -352,11 +352,11 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     const meshFeatures = features.filter((f) => f.applyMesh);
 
     // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb)
-    const texCache = new Map<string, Texture2D>();
+    const texCache = new Map<string, SampledTexture>();
     let texId = 0;
     const bitmapIds = new Map<ImageBitmap, number>();
 
-    function getCachedTexture(bitmap: ImageBitmap | null, srgb: boolean): Texture2D {
+    function getCachedTexture(bitmap: ImageBitmap | null, srgb: boolean): SampledTexture {
         if (!bitmap) {
             return uploadTextureSynced(engine, null, srgb, sampler);
         }

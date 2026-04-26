@@ -7,16 +7,16 @@
  * are handled by separate `gltf-ext-*.ts` modules driven by the GltfFeature
  * registry in load-gltf.ts. This core file knows ZERO extension names.
  */
-import type { Texture2D } from "../texture/texture-2d.js";
+import type { SampledTexture } from "../texture/texture-2d.js";
 import { resolveImage } from "./gltf-parser.js";
 
 /** Per-load context handed to each material extension's `applyMaterial()`. */
 export interface GltfMatExtCtx {
     /** Fetch + upload a texture from a glTF textureInfo object.
      *  Returns undefined if texInfo is null/undefined. */
-    texture(texInfo: unknown, sRGB: boolean): Promise<Texture2D | undefined>;
+    texture(texInfo: unknown, sRGB: boolean): Promise<SampledTexture | undefined>;
     /** Upload an arbitrary ImageBitmap (e.g. composited bitmap from an ext). */
-    uploadImage(bitmap: ImageBitmap, sRGB: boolean): Texture2D;
+    uploadImage(bitmap: ImageBitmap, sRGB: boolean): SampledTexture;
 }
 
 /** Parsed core PBR material data. */

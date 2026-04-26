@@ -32,10 +32,7 @@ const feature: GltfFeature = {
         const joints1 = resolveAttr("JOINTS_1", primitive, decoded, json, binChunk) as Uint16Array | Uint8Array | null;
         const weights1 = resolveAttr("WEIGHTS_1", primitive, decoded, json, binChunk) as Float32Array | null;
 
-        const [{ extractSkin, computeBoneTextureData }, { createSkeleton }] = await Promise.all([
-            import("./gltf-animation.js"),
-            import("../skeleton/create-skeleton.js"),
-        ]);
+        const [{ extractSkin, computeBoneTextureData }, { createSkeleton }] = await Promise.all([import("./gltf-animation.js"), import("../skeleton/create-skeleton.js")]);
         const skin = extractSkin(json, binChunk, node.skin, meshData.worldMatrix, parentMap, worldMatrixCache);
         const boneData = computeBoneTextureData(skin);
         mesh.skeleton = createSkeleton(ctx.engine, joints, weights, skin.jointNodes.length, boneData, joints1, weights1);

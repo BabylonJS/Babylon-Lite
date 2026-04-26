@@ -10,6 +10,7 @@
  */
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -36,8 +37,6 @@ return F0 + (F90 - F0) * (t2 * t2 * t);
 `;
 
 export interface PbrLightConfig {
-    /** Scene UBO fields for light data */
-    readonly sceneUboFields: readonly UboField[];
     /** WGSL: compute L, NdotL, lightAtten from N + scene data */
     readonly lightVectorCode: string;
     /** WGSL: compute directDiffuse from surfaceAlbedo, NdotL, lightColor, etc. */
@@ -99,50 +98,6 @@ export interface PbrTemplateConfig {
 }
 
 /**
- * Return the scene UBO field list used by the PBR base template.
- * Cheap list-building only — no WGSL assembly. Exposed so callers that only
- * need the UBO layout (e.g. scene UBO spec computation) can avoid paying the
- * full createPbrTemplate cost.
- */
-export function getPbrBaseSceneUboFields(light: PbrLightConfig | null, hasMultiLight: boolean, hasIbl: boolean): readonly UboField[] {
-    // When hasMultiLight, light data comes from the lights UBO — scene UBO fields
-    // are kept as reserved padding for layout compatibility with background shaders.
-    const lightUboFields: readonly UboField[] =
-        hasMultiLight || !light
-            ? [
-                  { name: "lightDirection", type: "vec3<f32>" },
-                  { name: "lightIntensity", type: "f32" },
-                  { name: "lightDiffuseColor", type: "vec3<f32>" },
-                  { name: "_pad1", type: "f32" },
-                  { name: "lightGroundColor", type: "vec3<f32>" },
-              ]
-            : light.sceneUboFields;
-
-    // SH coefficients are included in the base template (not the IBL fragment)
-    // because the scene UBO writer uses fixed offsets for SH data.
-    const SH_NAMES = ["L00", "L1_1", "L10", "L11", "L2_2", "L2_1", "L20", "L21", "L22"] as const;
-    const shFields: UboField[] = hasIbl
-        ? SH_NAMES.flatMap((n, i) => [
-              { name: `vSpherical${n}`, type: "vec3<f32>" as const },
-              { name: `_shPad${i}`, type: "f32" as const },
-          ])
-        : [];
-
-    return [
-        { name: "viewProj", type: "mat4x4<f32>" },
-        { name: "cameraPosition", type: "vec3<f32>" },
-        { name: "_pad0", type: "f32" },
-        ...lightUboFields,
-        { name: "envRotationY", type: "f32" },
-        ...shFields,
-        { name: "exposureLinear", type: "f32" },
-        { name: "contrast", type: "f32" },
-        { name: "lodGenerationScale", type: "f32" },
-        { name: "_imgPad1", type: "f32" },
-    ];
-}
-
-/**
  * Create a PBR ShaderTemplate from the given configuration.
  * The template contains slot markers that the composer fills with fragment code.
  */
@@ -166,7 +121,6 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         hasOcclusion = false,
         hasEmissiveColor = false,
         hasReflectanceExt = false,
-        hasIbl = false,
         hasAnisotropy = false,
         anisoBrdfFunctions = "",
         anisoTBBlock = "",
@@ -226,9 +180,6 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         { name: sampler, type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
     ];
 
-    // ── Base scene UBO fields ───────────────────────────────────
-    const baseSceneUboFields: readonly UboField[] = getPbrBaseSceneUboFields(hasMultiLight || !light ? null : light, hasMultiLight, hasIbl);
-
     // ── Base bindings (always-present textures) ─────────────────
     const baseBindings: BindingDecl[] = [...tex2d("baseColorTexture", "baseColorSampler")];
     if (hasAnyNormal) {
@@ -262,8 +213,7 @@ out.worldTangent = (finalWorld * vec4<f32>(T_local, 0.0)).xyz;
 out.worldBitangent = (finalWorld * vec4<f32>(B_local, 0.0)).xyz;`
         : "";
 
-    const vertexTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+    const vertexTemplate = `${SCENE_UBO_WGSL}
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*VH*/
@@ -278,7 +228,7 @@ var finalWorld = mesh.world;
 /*VW*/
 let worldPos4 = finalWorld * vec4<f32>(${posVar}, 1.0);
 out.worldPos = worldPos4.xyz;
-out.clipPos = scene.viewProj * worldPos4;
+out.clipPos = scene.viewProjection * worldPos4;
 out.worldNormal = (finalWorld * vec4<f32>(normalize(${normVar}), 0.0)).xyz;
 ${tangentBlock}
 out.uv = uv * mesh.uvTransformST.xy + mesh.uvTransformST.zw;
@@ -433,8 +383,7 @@ return vec4<f32>(color, finalAlpha);`
 
     const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
 
-    const fragmentTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
+    const fragmentTemplate = `${SCENE_UBO_WGSL}
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*HF*/
@@ -457,7 +406,7 @@ ${normalBlock}
 ${doubleSidedFlip}
 ${anisotropyTBBlock}
 /*AC*/
-let V = normalize(scene.cameraPosition - input.worldPos);
+let V = normalize(scene.vEyePosition.xyz - input.worldPos);
 let NdotVUnclamped = dot(N, V);
 let NdotV = abs(NdotVUnclamped) + 0.0000001;
 ${f0Default}
@@ -484,7 +433,6 @@ ${alphaBlock}
         fragmentTemplate,
         baseMeshUboFields,
         baseMaterialUboFields,
-        baseSceneUboFields,
         baseVertexAttributes,
         baseVaryings,
         baseBindings,

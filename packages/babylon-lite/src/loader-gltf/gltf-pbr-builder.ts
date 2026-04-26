@@ -3,7 +3,7 @@
  *  (`gltf-variants.ts`) so they can't drift. */
 
 import type { EngineContextInternal } from "../engine/engine.js";
-import type { Texture2D } from "../texture/texture-2d.js";
+import type { SampledTexture } from "../texture/texture-2d.js";
 import type { PbrMaterialProps, PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
 import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
@@ -20,7 +20,7 @@ export function uploadTex(
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
     fallback?: Uint8Array
-): Texture2D {
+): SampledTexture {
     const device = engine.device;
     const w = bitmap?.width ?? 1;
     const h = bitmap?.height ?? 1;
@@ -38,7 +38,7 @@ export function uploadTex(
     } else {
         device.queue.writeTexture({ texture: tex }, (fallback ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
     }
-    return { texture: tex, view: tex.createView(), sampler, width: w, height: h };
+    return { texture: tex, view: tex.createView(), sampler };
 }
 
 /** Assemble a PbrMaterialPropsInternal from parsed glTF material data + already-uploaded
@@ -46,10 +46,10 @@ export function uploadTex(
  *  (or factor fallback); the gltf-ext-orm extension overrides via `extLayers`. */
 export function assemblePbrProps(
     mat: GltfMaterialData,
-    baseColorTexture: Texture2D,
-    ormTexture: Texture2D,
-    normalTexture: Texture2D | undefined,
-    emissiveTexture: Texture2D | undefined,
+    baseColorTexture: SampledTexture,
+    ormTexture: SampledTexture,
+    normalTexture: SampledTexture | undefined,
+    emissiveTexture: SampledTexture | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
 ): PbrMaterialPropsInternal {
     return {
@@ -75,8 +75,8 @@ export function buildDefaultPbrTextures(
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
-    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
-): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
+    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => SampledTexture
+): { baseColorTexture: SampledTexture; ormTexture: SampledTexture; normalTexture: SampledTexture | undefined; emissiveTexture: SampledTexture | undefined } {
     const baseColorTexture = mat.baseColorImage
         ? getCachedTex(mat.baseColorImage, true)
         : (() => {
@@ -94,7 +94,7 @@ export function buildDefaultPbrTextures(
     const emissiveTexture = mat.emissiveImage ? getCachedTex(mat.emissiveImage, true) : undefined;
 
     const single = mat.metallicRoughnessImage ?? mat.occlusionImage;
-    let ormTexture: Texture2D;
+    let ormTexture: SampledTexture;
     if (single && (!mat.metallicRoughnessImage || !mat.occlusionImage || mat.metallicRoughnessImage === mat.occlusionImage)) {
         ormTexture = getCachedTex(single, false);
     } else if (!single) {

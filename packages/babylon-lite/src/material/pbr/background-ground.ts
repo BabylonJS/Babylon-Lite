@@ -4,30 +4,28 @@
 
 import type { Mat4 } from "../../math/types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
-import type { Renderable } from "../../render/renderable.js";
-import { getOrCreateSampler } from "../../resource/gpu-pool.js";
+import type { Renderable, RenderTargetSignature } from "../../render/renderable.js";
+import { getBilinearSampler } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
 import { createMappedBuffer } from "../../resource/gpu-buffers.js";
-import { WGSL_SCENE_UNIFORMS_PBR, WGSL_SCENE_UNIFORMS_PBR_SH, WGSL_IMAGE_PROCESSING, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { WGSL_IMAGE_PROCESSING, WGSL_DITHER, getWgslSceneUniformsUnified } from "../../shader/wgsl-helpers.js";
 
 const BG_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + alpha + backgroundCenter vec3 + pad
 
-/** Build the ground renderable for a PBR environment scene. */
+/** Build the ground renderable for a PBR environment scene.
+ *  Group(0) is bound by the render pass. */
 export async function buildGroundRenderable(
     engine: EngineContextInternal,
-    sceneBindGroupLayout: GPUBindGroupLayout,
-    format: GPUTextureFormat,
-    msaaSamples: number,
-    sceneBindGroup: GPUBindGroup,
     groundSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
     groundTextureUrl?: string,
     groundImagePromise?: Promise<ImageBitmap>
 ): Promise<Renderable> {
-    const gndMat = createGroundMaterial(sceneBindGroupLayout);
+    const gndMat = createGroundMaterial();
 
     // Ground world: rotated 90° X (XY→XZ), translated to rootPosition
     // Column-major for WGSL: ground quad in XY plane, normal +Z → world +Y
@@ -46,41 +44,48 @@ export async function buildGroundRenderable(
 
     const gndBufs = createGroundBuffers(engine, groundSize);
     const gndUBO = createBgMeshUBO(engine, groundWorld, primaryColor);
-    const gndPipeline = gndMat.getPipeline(engine, format, msaaSamples);
 
     const groundTex = await loadGroundTexture(engine, groundTextureUrl, groundImagePromise);
     const groundTexView = groundTex.createView();
-    const groundSamp = getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" });
+    const groundSamp = getBilinearSampler(engine);
     const gndBG = gndMat.createBindGroup(engine, gndUBO, groundTexView, groundSamp);
 
-    return {
+    const r: Renderable = {
         order: 200, // ground renders last (transparent)
         isTransparent: true,
-        draw(pass) {
-            pass.setBindGroup(0, sceneBindGroup);
-            pass.setPipeline(gndPipeline);
-            pass.setBindGroup(1, gndBG);
-            pass.setVertexBuffer(0, gndBufs.posBuffer);
-            pass.setVertexBuffer(1, gndBufs.normBuffer);
-            pass.setVertexBuffer(2, gndBufs.uvBuffer);
-            pass.setIndexBuffer(gndBufs.idxBuffer, "uint16");
-            pass.drawIndexed(gndBufs.idxCount);
-            return 1;
+        bind(eng, target) {
+            const gndPipeline = gndMat.getPipeline(eng as EngineContextInternal, target);
+            return {
+                renderable: r,
+                pipeline: gndPipeline,
+                draw(pass) {
+                    pass.setBindGroup(1, gndBG);
+                    pass.setVertexBuffer(0, gndBufs.posBuffer);
+                    pass.setVertexBuffer(1, gndBufs.normBuffer);
+                    pass.setVertexBuffer(2, gndBufs.uvBuffer);
+                    pass.setIndexBuffer(gndBufs.idxBuffer, "uint16");
+                    pass.drawIndexed(gndBufs.idxCount);
+                    return 1;
+                },
+            };
         },
     };
+    return r;
 }
 
 // ─── Ground Material ────────────────────────────────────────────────────────
 
 interface GroundMaterial {
-    getPipeline(engine: EngineContextInternal, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    getPipeline(engine: EngineContextInternal, target: RenderTargetSignature): GPURenderPipeline;
     createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler): GPUBindGroup;
 }
 
-function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundMaterial {
-    let pipeline: GPURenderPipeline | null = null;
+function createGroundMaterial(): GroundMaterial {
+    const pipelines = new Map<string, GPURenderPipeline>();
     let layout: GPUBindGroupLayout | null = null;
     let _cachedDevice: GPUDevice | null = null;
+    let _vertModule: GPUShaderModule | null = null;
+    let _fragModule: GPUShaderModule | null = null;
 
     function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
         const device = engine.device;
@@ -98,24 +103,38 @@ function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundM
         return layout;
     }
 
+    function ensureModules(engine: EngineContextInternal): void {
+        const device = engine.device;
+        if (_cachedDevice !== device) {
+            pipelines.clear();
+            layout = null;
+            _vertModule = null;
+            _fragModule = null;
+            _cachedDevice = device;
+        }
+        if (!_vertModule) {
+            _vertModule = device.createShaderModule({ code: getWgslSceneUniformsUnified() + groundVertSrc, label: "ground-vert" });
+        }
+        if (!_fragModule) {
+            _fragModule = device.createShaderModule({ code: getWgslSceneUniformsUnified() + WGSL_IMAGE_PROCESSING + WGSL_DITHER + groundFragSrc, label: "ground-frag" });
+        }
+    }
+
     return {
-        getPipeline(engine, format, msaaSamples) {
-            const device = engine.device;
-            if (pipeline && _cachedDevice === device) {
+        getPipeline(engine, target) {
+            ensureModules(engine);
+            const key = `${target.colorFormat}|${target.sampleCount}|${target.depthStencilFormat ?? ""}`;
+            let pipeline = pipelines.get(key);
+            if (pipeline) {
                 return pipeline;
             }
-            pipeline = null;
-            layout = null;
-            _cachedDevice = device;
-            const vertModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR + groundVertSrc, label: "ground-vert" });
-            const fragModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR_SH + WGSL_IMAGE_PROCESSING + WGSL_DITHER + groundFragSrc, label: "ground-frag" });
-
+            const device = engine.device;
             // Matches BJS rp_8: premultiplied alpha blend, depthWrite=false
             pipeline = device.createRenderPipeline({
-                label: "ground-pipeline",
-                layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBindGroupLayout, getLayout(engine)] }),
+                label: `ground-pipeline:${key}`,
+                layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), getLayout(engine)] }),
                 vertex: {
-                    module: vertModule,
+                    module: _vertModule!,
                     entryPoint: "main",
                     buffers: [
                         { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] },
@@ -124,11 +143,11 @@ function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundM
                     ],
                 },
                 fragment: {
-                    module: fragModule,
+                    module: _fragModule!,
                     entryPoint: "main",
                     targets: [
                         {
-                            format,
+                            format: target.colorFormat,
                             blend: {
                                 color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                                 alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -137,13 +156,14 @@ function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundM
                     ],
                 },
                 depthStencil: {
-                    format: "depth24plus-stencil8",
+                    format: target.depthStencilFormat ?? "depth24plus-stencil8",
                     depthCompare: "less-equal",
                     depthWriteEnabled: false,
                 },
-                multisample: { count: msaaSamples },
+                multisample: { count: target.sampleCount },
                 primitive: { topology: "triangle-list", cullMode: "back", frontFace: "ccw" },
             });
+            pipelines.set(key, pipeline);
             return pipeline;
         },
 

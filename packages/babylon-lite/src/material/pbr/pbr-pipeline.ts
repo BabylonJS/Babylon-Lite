@@ -8,9 +8,11 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { ComposedShader } from "../../shader/fragment-types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
+import type { RenderTargetSignature } from "../../render/renderable.js";
 import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
 import type { PipelineCache } from "../pipeline-cache.js";
-import { _getPbrLightExtension, _getPbrExtsSorted } from "./pbr-flags.js";
+import { targetSignatureKey } from "../../engine/render-target.js";
+import { _getPbrExtsSorted } from "./pbr-flags.js";
 import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_EMISSIVE,
@@ -64,74 +66,106 @@ export function computePbrFeatures(
 
 // ─── Pipeline Variant ───────────────────────────────────────────────
 
-export interface PbrPipelineVariant {
+/**
+ * Target-independent PBR material bindings — shaders, BGLs, feature key.
+ * Cached by (features, features2) only. A single bindings instance can produce
+ * multiple GPURenderPipelines, one per render-target signature the material is
+ * drawn into — stored in the `pipelines` child map and keyed by
+ * `targetSignatureKey(target)`.
+ */
+export interface PbrBindings {
     features: number;
     features2: number;
-    pipeline: GPURenderPipeline;
-    sceneBGL: GPUBindGroupLayout;
+    composed: ComposedShader;
     meshBGL: GPUBindGroupLayout;
     shadowBGL: GPUBindGroupLayout | null;
+    /** Target-specific pipelines. Lifetime follows the bindings. */
+    pipelines: Map<string, GPURenderPipeline>;
     refCount: number;
 }
 
 // ─── Scene BGL (shared) ─────────────────────────────────────────────
 
-// Re-export from shared scene-helpers for backward compatibility
-export { getSceneBindGroupLayout as createSceneBindGroupLayout } from "../../render/scene-helpers.js";
+import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
-// ─── Pipeline Cache ─────────────────────────────────────────────────
+// ─── Bindings Cache ─────────────────────────────────────────────────
 
-const cache: PipelineCache<PbrPipelineVariant> = createPipelineCache();
+const bindingsCache: PipelineCache<PbrBindings> = createPipelineCache();
 
-/** Clear the pipeline cache. Must be called when a GPU device is destroyed. */
+/** Clear the PBR bindings cache (and the child pipelines). Must be called when a GPU device is destroyed. */
 export function clearPbrPipelineCache(): void {
-    cache.clear();
+    bindingsCache.clear();
 }
 
-export function releasePbrPipelineVariant(variant: PbrPipelineVariant): void {
-    releaseVariant(variant);
-    cache.evictUnused();
+export function releasePbrBindings(bindings: PbrBindings): void {
+    releaseVariant(bindings);
+    bindingsCache.evictUnused();
 }
 
-function cacheKey(features: number, features2: number, format: GPUTextureFormat, msaa: number): string {
-    return `pbr:${features}:${features2}:${format}:${msaa}`;
+function bindingsCacheKey(features: number, features2: number): string {
+    return `pbrbindings:${features}:${features2}`;
 }
 
-export function getOrCreatePbrPipeline(
-    engine: EngineContextInternal,
-    format: GPUTextureFormat,
-    msaaSamples: number,
-    features: number,
-    features2: number,
-    sceneBGL: GPUBindGroupLayout,
-    composed: ComposedShader
-): PbrPipelineVariant {
+/**
+ * Get or create target-independent PBR bindings (shaders + BGLs) for a feature set.
+ * Does NOT create a render pipeline — call getOrCreatePbrPipeline(bindings, target) for that.
+ */
+export function getOrCreatePbrBindings(engine: EngineContextInternal, features: number, features2: number, composed: ComposedShader): PbrBindings {
     const device = engine.device;
-    cache.ensureDevice(engine);
-    const key = cacheKey(features, features2, format, msaaSamples);
-    const cached = cache.getOrIncRef(key);
+    bindingsCache.ensureDevice(engine);
+    const key = bindingsCacheKey(features, features2);
+    const cached = bindingsCache.getOrIncRef(key);
     if (cached) {
         return cached;
     }
 
-    const hasAlpha = (features & PBR_HAS_ALPHA_BLEND) !== 0;
-    const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
-
-    // BGLs from composer output
     const meshBGL = device.createBindGroupLayout({ label: `pbr-mesh-f${features}`, ...composed.meshBGLDescriptor });
 
     let shadowBGL: GPUBindGroupLayout | null = null;
-    const bgls: GPUBindGroupLayout[] = [sceneBGL, meshBGL];
     if (composed.shadowBGLDescriptor) {
         shadowBGL = device.createBindGroupLayout({ label: `pbr-shadow-f${features}`, ...composed.shadowBGLDescriptor });
+    }
+
+    const bindings: PbrBindings = {
+        features,
+        features2,
+        composed,
+        meshBGL,
+        shadowBGL,
+        pipelines: new Map(),
+        refCount: 1,
+    };
+    bindingsCache.set(key, bindings);
+    return bindings;
+}
+
+/**
+ * Get or create a GPURenderPipeline for the given bindings and render-target signature.
+ * Pipelines live on the bindings object (no separate cache) — their lifetime follows
+ * the bindings'. The pipeline is created lazily per unique target signature the material
+ * is drawn into.
+ */
+export function getOrCreatePbrPipeline(engine: EngineContextInternal, bindings: PbrBindings, target: RenderTargetSignature): GPURenderPipeline {
+    const key = targetSignatureKey(target);
+    const existing = bindings.pipelines.get(key);
+    if (existing) {
+        return existing;
+    }
+
+    const device = engine.device;
+    const { features, composed, meshBGL, shadowBGL } = bindings;
+    const hasAlpha = (features & PBR_HAS_ALPHA_BLEND) !== 0;
+    const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
+
+    const bgls: GPUBindGroupLayout[] = [getSceneBindGroupLayout(engine), meshBGL];
+    if (shadowBGL) {
         bgls.push(shadowBGL);
     }
 
-    // Shader modules from composer output
     const vertModule = device.createShaderModule({ code: composed.vertexWGSL, label: `pbr-vert-f${features}` });
     const fragModule = device.createShaderModule({ code: composed.fragmentWGSL, label: `pbr-frag-f${features}` });
 
-    const fragTarget: GPUColorTargetState = { format, writeMask: GPUColorWrite.ALL };
+    const fragTarget: GPUColorTargetState = { format: target.colorFormat, writeMask: GPUColorWrite.ALL };
     if (hasAlpha) {
         fragTarget.blend = {
             color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -139,26 +173,28 @@ export function getOrCreatePbrPipeline(
         };
     }
 
-    const pipeline = device.createRenderPipeline({
-        label: `pbr-pipeline-f${features}`,
+    const pipelineDesc: GPURenderPipelineDescriptor = {
+        label: `pbr-pipeline-f${features}-${key}`,
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed.vertexBufferLayouts },
         fragment: { module: fragModule, entryPoint: "main", targets: [fragTarget] },
-        depthStencil: { format: "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: !hasAlpha },
-        multisample: { count: msaaSamples },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
-    });
+        multisample: { count: target.sampleCount },
+        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: target.flipY ? "cw" : "ccw" },
+    };
+    if (target.depthStencilFormat) {
+        pipelineDesc.depthStencil = { format: target.depthStencilFormat, depthCompare: "less-equal", depthWriteEnabled: !hasAlpha };
+    }
 
-    const variant: PbrPipelineVariant = { features, features2, pipeline, sceneBGL, meshBGL, shadowBGL, refCount: 1 };
-    cache.set(key, variant);
-    return variant;
+    const pipeline = device.createRenderPipeline(pipelineDesc);
+    bindings.pipelines.set(key, pipeline);
+    return pipeline;
 }
 
 // ─── Per-Mesh Bind Group ────────────────────────────────────────────
 
 export function createPbrMeshBindGroup(
     engine: EngineContextInternal,
-    variant: PbrPipelineVariant,
+    bindings: PbrBindings,
     composed: ComposedShader,
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
@@ -168,8 +204,8 @@ export function createPbrMeshBindGroup(
     lightsUBO?: GPUBuffer
 ): GPUBindGroup {
     const device = engine.device;
-    const features = variant.features;
-    const features2 = variant.features2;
+    const features = bindings.features;
+    const features2 = bindings.features2;
     const hasNormal = (features & PBR_HAS_NORMAL_MAP) !== 0;
     const hasCotangentNormal = (features & PBR_HAS_COTANGENT_NORMAL) !== 0;
     const hasAnyNormal = hasNormal || hasCotangentNormal;
@@ -247,5 +283,5 @@ export function createPbrMeshBindGroup(
         b = ext.bind(ctx, entries, b);
     }
 
-    return device.createBindGroup({ layout: variant.meshBGL, entries });
+    return device.createBindGroup({ layout: bindings.meshBGL, entries });
 }

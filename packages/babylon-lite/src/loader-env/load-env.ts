@@ -1,4 +1,5 @@
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
+import { addRenderable, addRenderables, addDeferredBuilder } from "../scene/scene.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
@@ -117,28 +118,22 @@ export async function loadEnvironment(
     // skybox) skip the import and chunk fetch entirely.
     const needsBgRenderables = !bgOptions.skipSkybox || !bgOptions.skipGround;
     const envBgBuilder = async (): Promise<void> => {
-        const bgl = (scene as SceneContextInternal)._pbrSceneBGL;
-        const bg = (scene as SceneContextInternal)._pbrSceneBG;
-        if (bgl && bg) {
-            if (needsBgRenderables) {
-                const { buildBackgroundRenderables } = await import("../material/pbr/background-renderable.js");
-                const bgRenderables = await buildBackgroundRenderables(scene, textures, bgl, bg, groundUrl, bgOptions, groundTexPromise);
-                (scene as SceneContextInternal)._renderables.push(...bgRenderables);
-            }
+        if (needsBgRenderables) {
+            const { buildBackgroundRenderables } = await import("../material/pbr/background-renderable.js");
+            const bgRenderables = await buildBackgroundRenderables(scene, textures, groundUrl, bgOptions, groundTexPromise);
+            addRenderables(scene, bgRenderables);
+        }
 
-            if (skyboxIsDds) {
-                const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
-                (scene as SceneContextInternal)._renderables.push(await buildDdsSkyboxRenderable(scene, bgl, bg, skyboxUrl, options?.skyboxSize));
-            }
-            if (skyboxIsEnv) {
-                const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-                (scene as SceneContextInternal)._renderables.push(buildHdrSkyboxRenderable(scene, textures, bgl, bg, options?.skyboxSize));
-            }
-        } else {
-            (scene as SceneContextInternal)._deferredBuilders.push(envBgBuilder);
+        if (skyboxIsDds) {
+            const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
+            addRenderable(scene, await buildDdsSkyboxRenderable(scene, skyboxUrl, options?.skyboxSize));
+        }
+        if (skyboxIsEnv) {
+            const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
+            addRenderable(scene, buildHdrSkyboxRenderable(scene, textures, options?.skyboxSize));
         }
     };
-    (scene as SceneContextInternal)._deferredBuilders.push(envBgBuilder);
+    addDeferredBuilder(scene, envBgBuilder);
 
     return textures;
 }

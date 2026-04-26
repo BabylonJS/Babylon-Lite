@@ -19,8 +19,8 @@ fn main(@location(0) position: vec3<f32>) -> VertexOutput {
   output.positionUVW = position;
   // Infinite distance: strip translation (w=0), center at camera.
   // Matches BJS skybox.infiniteDistance = true.
-  let worldPos = (mesh.world * vec4<f32>(position, 0.0)).xyz + scene.cameraPosition;
+  let worldPos = (mesh.world * vec4<f32>(position, 0.0)).xyz + scene.vEyePosition.xyz;
   output.positionW = worldPos;
-  output.clipPos = scene.viewProj * vec4<f32>(worldPos, 1.0);
+  output.clipPos = scene.viewProjection * vec4<f32>(worldPos, 1.0);
   return output;
 }

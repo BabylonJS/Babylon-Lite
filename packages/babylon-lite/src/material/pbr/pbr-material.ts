@@ -3,32 +3,33 @@
  *  Same role as StandardMaterialProps for the standard pipeline.
  *  Users can create a PbrMaterialProps manually or let loadGltf() build one. */
 
-import type { Texture2D } from "../../texture/texture-2d.js";
-import type { MeshGroupBuilder } from "../../render/renderable.js";
-import type { SceneContextInternal } from "../../scene/scene.js";
+import type { SampledTexture } from "../../texture/texture-2d.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { MeshGroupBuilder, Renderable } from "../../render/renderable.js";
+import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
 import { _getPbrExts } from "./pbr-flags.js";
 
 /** Lazy-imports the PBR renderable builder and builds the pipeline.
  *  Thin instances are handled by the fragment composer automatically. */
-export const pbrGroupBuilder: MeshGroupBuilder & { _loadRebuildSingle?: () => Promise<any> } = async (scene, meshes) => {
+export const pbrGroupBuilder: MeshGroupBuilder & { _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: unknown) => Renderable } = async (scene, meshes) => {
     const envTex = (scene as SceneContextInternal)._envTextures;
-    const { buildPbrRenderables } = await import("./pbr-renderable.js");
-    return buildPbrRenderables(scene, meshes, envTex);
+    const mod = await import("./pbr-renderable.js");
+    // Expose the single-mesh rebuild path for material-swap handling.
+    pbrGroupBuilder._rebuildSingle = mod.buildSinglePbrRenderable;
+    return mod.buildPbrRenderables(scene, meshes, envTex);
 };
-// Lazy loader for the single-mesh rebuild function — loaded only when a material swap happens
-pbrGroupBuilder._loadRebuildSingle = () => import("./pbr-single-rebuild.js");
 
 export interface PbrMaterialProps {
-    baseColorTexture?: Texture2D;
-    normalTexture?: Texture2D;
+    baseColorTexture?: SampledTexture;
+    normalTexture?: SampledTexture;
     /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
-    ormTexture?: Texture2D;
-    emissiveTexture?: Texture2D;
+    ormTexture?: SampledTexture;
+    emissiveTexture?: SampledTexture;
     /** Emissive color as float uniform (linear RGB). Used when no emissiveTexture.
      *  If both set, emissiveColor multiplies emissiveTexture. */
     emissiveColor?: [number, number, number];
     /** KHR_materials_pbrSpecularGlossiness: RGB=specular, A=glossiness. */
-    specGlossTexture?: Texture2D;
+    specGlossTexture?: SampledTexture;
     /** Whether material is double-sided (disables back-face culling). */
     doubleSided?: boolean;
     /** Overall material alpha (0=fully transparent, 1=opaque). Default 1.0. */
@@ -52,9 +53,9 @@ export interface PbrMaterialProps {
     /** Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor. */
     metallicReflectanceColor?: [number, number, number];
     /** Texture whose RGB tints reflectance and A scales F0. Maps to BJS metallicReflectanceTexture. */
-    metallicReflectanceTexture?: Texture2D;
+    metallicReflectanceTexture?: SampledTexture;
     /** Texture whose RGB tints reflectance only. Maps to BJS reflectanceTexture. */
-    reflectanceTexture?: Texture2D;
+    reflectanceTexture?: SampledTexture;
     /** When true + both reflectance textures set, metallicReflectanceTexture only contributes A (F0 scalar). */
     useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
     /** Enable specular anti-aliasing on IBL alphaG (matches BJS SPECULARAA). Default false.
@@ -110,12 +111,12 @@ export interface ClearCoatProps {
     /** Index of refraction of the clearcoat layer. Default 1.5. */
     indexOfRefraction?: number;
     /** Optional clearcoat intensity texture (R channel). Multiplies `intensity`. */
-    texture?: Texture2D;
+    texture?: SampledTexture;
     /** Optional clearcoat roughness texture (G channel). Multiplies `roughness`. */
-    roughnessTexture?: Texture2D;
+    roughnessTexture?: SampledTexture;
     /** Optional clearcoat normal map (tangent-space). Used to perturb the coat
      *  layer normal independently of the base layer. */
-    bumpTexture?: Texture2D;
+    bumpTexture?: SampledTexture;
     /** Clearcoat normal texture scale (glTF normalTexture.scale). Default 1.0. */
     bumpTextureScale?: number;
     /** Whether to remap base F0 across the clearcoat interface (CLEARCOAT_REMAP_F0).
@@ -135,7 +136,7 @@ export interface SheenProps {
     /** Sheen intensity (0=off, 1=full). Default 1.0. */
     intensity?: number;
     /** Optional sheen tint texture (modulates sheen color). Loaded via loadTexture2D(). */
-    texture?: Texture2D;
+    texture?: SampledTexture;
     /** When true (recommended for glTF), applies proper sheen albedo scaling
      *  on the base layer and treats the sheen texture as already-linear (no pow).
      *  When false (default, legacy), applies pow(rgb, 2.2) to the sheen texture
@@ -179,7 +180,7 @@ export interface ThicknessProps {
     /** Thickness map texture. R channel is sampled by default (matches
      *  existing BJS non-glTF path). Set `useGlTFChannel=true` for G-channel
      *  sampling as specified by KHR_materials_volume. */
-    texture?: Texture2D;
+    texture?: SampledTexture;
     /** When true, sample the thickness texture's G channel (KHR_materials_volume).
      *  Default false — samples R channel (BJS default). Set by the glTF loader. */
     useGlTFChannel?: boolean;
@@ -196,7 +197,7 @@ export interface RefractionProps {
      *  Maps to KHR_materials_transmission.transmissionFactor. */
     intensity?: number;
     /** Optional transmission texture (R channel). Multiplies `intensity`. */
-    texture?: Texture2D;
+    texture?: SampledTexture;
     /** Index of refraction (KHR_materials_ior.ior). Default 1.5 (glass). */
     indexOfRefraction?: number;
     /** When true, the thickness value is also used as the refracted
@@ -238,8 +239,8 @@ export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMateria
 }
 
 /** Collect all non-null textures referenced by a PBR material (for acquire/release). */
-export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[] {
-    const t: Texture2D[] = [];
+export function collectPbrBoundTextures(mat: PbrMaterialProps): SampledTexture[] {
+    const t: SampledTexture[] = [];
     if (mat.baseColorTexture) {
         t.push(mat.baseColorTexture);
     }

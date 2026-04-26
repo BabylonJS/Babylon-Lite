@@ -1,8 +1,7 @@
 /** Per-mesh PBR feature-flag computation.
  *
- *  Pure function shared by pbr-renderable (initial build) and
- *  pbr-single-rebuild (material swap) so the feature detection logic
- *  lives in exactly one place.
+ *  Pure function shared by pbr-renderable's batch and single build paths
+ *  so the feature detection logic lives in exactly one place.
  */
 
 import type { Mesh } from "../../mesh/mesh.js";
@@ -26,9 +25,11 @@ export interface PbrFeatureCtx {
     hasSomeShadows: boolean;
 }
 
-/** Compute the `(features, features2)` bit pair for a single PBR mesh. */
-export function computeMeshPbrFeatures(mesh: Mesh, scene: SceneContext, ctx: PbrFeatureCtx): { features: number; features2: number } {
-    const mat = mesh.material as PbrMaterialProps;
+/** Compute the `(features, features2)` bit pair for a single PBR mesh. The optional
+ *  `materialOverride` lets callers (e.g. `addToPass` with a per-pass material) compute
+ *  features for a material distinct from `mesh.material`. */
+export function computeMeshPbrFeatures(mesh: Mesh, scene: SceneContext, ctx: PbrFeatureCtx, materialOverride?: PbrMaterialProps): { features: number; features2: number } {
+    const mat = materialOverride ?? (mesh.material as PbrMaterialProps);
     const mi = mesh as import("../../mesh/mesh.js").MeshInternal;
     const hasTangents = !!mi._gpu.tangentBuffer;
     const hasSkeleton = !!mesh.skeleton;

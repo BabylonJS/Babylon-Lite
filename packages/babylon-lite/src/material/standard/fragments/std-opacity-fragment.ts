@@ -1,7 +1,7 @@
 /** Standard Opacity Texture Fragment — modulates alpha by opacity texture. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { StandardMaterialProps } from "../standard-material.js";
-import type { Texture2D } from "../../../texture/texture-2d.js";
+import type { SampledTexture } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-pipeline.js";
 import { HAS_OPACITY_TEXTURE, OPACITY_FROM_RGB } from "../standard-pipeline.js";
 
@@ -34,7 +34,7 @@ export const stdOpacityExt: StdExt = {
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    textures(mat: StandardMaterialProps, out: SampledTexture[]): void {
         if (mat.opacityTexture) {
             out.push(mat.opacityTexture);
         }

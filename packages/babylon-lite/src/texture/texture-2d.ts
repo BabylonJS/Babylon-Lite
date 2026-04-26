@@ -11,15 +11,13 @@ import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 
-export interface Texture2D {
+export interface SampledTexture {
     texture: GPUTexture;
     view: GPUTextureView;
     sampler: GPUSampler;
-    width: number;
-    height: number;
 }
 
-export interface Texture2DOptions {
+export interface SampledTextureOptions {
     /** Generate mipmaps. Default true. */
     mipMaps?: boolean;
     /** Address mode U. Default 'repeat'. */
@@ -37,9 +35,9 @@ export interface Texture2DOptions {
     srgb?: boolean;
 }
 
-// Per-device URL cache: same (url + options) → shared Texture2D promise.
+// Per-device URL cache: same (url + options) → shared SampledTexture promise.
 // WeakMap ensures the cache is GC'd when the device is collected.
-let _tex2dCache: WeakMap<GPUDevice, Map<string, Promise<Texture2D>>> | null = null;
+let _tex2dCache: WeakMap<GPUDevice, Map<string, Promise<SampledTexture>>> | null = null;
 
 /** Clear the texture cache for a device, releasing cache-held refs. */
 export function clearTexture2DCache(engine: EngineContextInternal): void {
@@ -47,7 +45,7 @@ export function clearTexture2DCache(engine: EngineContextInternal): void {
     _tex2dCache?.delete(device);
 }
 
-export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
+export function loadTexture2D(engine: EngineContext, url: string, opts: SampledTextureOptions = {}): Promise<SampledTexture> {
     const device = (engine as EngineContextInternal).device;
     if (!_tex2dCache) {
         _tex2dCache = new WeakMap();
@@ -65,13 +63,13 @@ export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2
     }
 
     const map = dc;
-    const p = loadTexture2DImpl(engine as EngineContextInternal, url, opts);
+    const p = loadSampledTextureImpl(engine as EngineContextInternal, url, opts);
     map.set(key, p);
     p.catch(() => map.delete(key));
     return p;
 }
 
-async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opts: Texture2DOptions): Promise<Texture2D> {
+async function loadSampledTextureImpl(engine: EngineContextInternal, url: string, opts: SampledTextureOptions): Promise<SampledTexture> {
     const device = engine.device;
     const mipMaps = opts.mipMaps ?? true;
     const addressModeU = opts.addressModeU ?? "repeat";
@@ -116,7 +114,7 @@ async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opt
         maxAnisotropy: allLinear ? 4 : 1,
     });
 
-    const tex2d: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    const tex2d: SampledTexture = { texture, view: texture.createView(), sampler };
     acquireTexture(tex2d);
     return tex2d;
 }

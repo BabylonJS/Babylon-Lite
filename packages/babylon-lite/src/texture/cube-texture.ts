@@ -1,5 +1,5 @@
 /** CubeTexture — loads 6 face images into a GPU cube texture with mipmaps. */
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getTrilinearSampler } from "../resource/gpu-pool.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { EngineContextInternal } from "../engine/engine.js";
@@ -48,7 +48,7 @@ export function loadCubeTexture(engine: EngineContextInternal, baseUrl: string, 
         return {
             texture: tex,
             view: tex.createView({ dimension: "cube", format: "rgba8unorm" }),
-            sampler: getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" }),
+            sampler: getTrilinearSampler(engine),
         };
     })();
     dc.set(key, p);

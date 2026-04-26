@@ -19,12 +19,11 @@ export interface BackgroundRenderableOptions {
     skyboxSize?: number;
 }
 
-/** Build background renderables (skybox + ground) for a PBR environment scene. */
+/** Build background renderables (skybox + ground) for a PBR environment scene.
+ *  Group(0) is bound by the render pass; only the BGL is needed here. */
 export async function buildBackgroundRenderables(
     scene: SceneContext,
     envTextures: EnvironmentTextures,
-    sceneBindGroupLayout: GPUBindGroupLayout,
-    sceneBindGroup: GPUBindGroup,
     groundTextureUrl?: string,
     options?: BackgroundRenderableOptions,
     groundImagePromise?: Promise<ImageBitmap>
@@ -39,24 +38,13 @@ export async function buildBackgroundRenderables(
     // ─── Skybox ────────────────────────────────────────────────
     if (!options?.skipSkybox) {
         const { buildSolidSkyboxRenderable } = await import("./background-solid-skybox.js");
-        renderables.push(buildSolidSkyboxRenderable(scene, envTextures, sceneBindGroupLayout, sceneBindGroup, skyboxSize / 2, rootPosition, primaryColor));
+        renderables.push(buildSolidSkyboxRenderable(scene, envTextures, skyboxSize / 2, rootPosition, primaryColor));
     }
 
     // ─── Ground ────────────────────────────────────────────────
     if (!options?.skipGround) {
         const { buildGroundRenderable } = await import("./background-ground.js");
-        const groundRenderable = await buildGroundRenderable(
-            engine,
-            sceneBindGroupLayout,
-            engine.format,
-            engine.msaaSamples,
-            sceneBindGroup,
-            groundSize,
-            rootPosition,
-            primaryColor,
-            groundTextureUrl,
-            groundImagePromise
-        );
+        const groundRenderable = await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor, groundTextureUrl, groundImagePromise);
         renderables.push(groundRenderable);
     }
 

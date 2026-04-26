@@ -1,9 +1,9 @@
 /** PBR feature flag constants + light extension registry.
  *  Tiny shared module imported by both pbr-pipeline and light extensions. */
 
-import type { PbrLightExtension } from "../../light/types.js";
+import { _getLightExtension } from "../../light/extension-registry.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
-import type { Texture2D } from "../../texture/texture-2d.js";
+import type { SampledTexture } from "../../texture/texture-2d.js";
 
 export const PBR_HAS_NORMAL_MAP = 1 << 0;
 export const PBR_HAS_EMISSIVE = 1 << 1;
@@ -52,16 +52,9 @@ export const PBR2_HAS_REFRACTION_MAP = 1 << 6;
 /** Thickness texture samples the G channel (KHR_materials_volume). */
 export const PBR2_HAS_THICKNESS_GLTF_CHANNEL = 1 << 7;
 
-let _lightExt: PbrLightExtension | null = null;
-/** @internal */ export function _setPbrLightExtension(ext: PbrLightExtension): void {
-    _lightExt = ext;
-}
-/** @internal */ export function _getPbrLightExtension(): PbrLightExtension | null {
-    return _lightExt;
-}
 const _lightTagToType: Record<string, number> = { hemispheric: 1, directional: 2, point: 3 };
 /** @internal */ export function getLightTypeFeatureBits(): number {
-    return (_lightTagToType[_lightExt?.tag ?? ""] ?? 0) << PBR_LIGHT_TYPE_SHIFT;
+    return (_lightTagToType[_getLightExtension()?.tag ?? ""] ?? 0) << PBR_LIGHT_TYPE_SHIFT;
 }
 
 // ─── Material UBO Writer Registry ───────────────────────────────────
@@ -130,7 +123,7 @@ export interface PbrExt {
     /** Push group-1 bind entries starting at binding `b`; return new b. */
     bind?(ctx: PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number;
     /** Enumerate textures for acquire/release. */
-    textures?(mat: unknown, out: Texture2D[]): void;
+    textures?(mat: unknown, out: SampledTexture[]): void;
 }
 
 const _pbrExts = new Map<string, PbrExt>();

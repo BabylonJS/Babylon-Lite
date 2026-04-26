@@ -2,7 +2,7 @@
  *
  *  Each light type provides pipeline integration through these interfaces.
  *  The render pipeline never checks light type — it calls the registered
- *  extension, which the light's factory sets up via _registerPbr. */
+ *  extension, which the light's factory sets up via _registerExtension. */
 
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
@@ -27,7 +27,9 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
 
 /** @internal LightBase with internal pipeline integration callbacks. Not re-exported from index.ts. */
 export interface LightBaseInternal extends LightBase {
-    readonly _registerPbr: () => Promise<void>;
+    /** Lazily install this light's WGSL+UBO extension into the global light extension
+     *  registry. Called by render pipelines on first use. */
+    readonly _registerExtension: () => Promise<void>;
     readonly _writeStandardLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
     /** Monotonically increasing version — bumped when any UBO-relevant property changes. */
     readonly _lightVersion: number;
@@ -43,19 +45,25 @@ export const MAX_LIGHTS = 4;
 /** Bytes per light entry in the lights UBO (4 × vec4 = 64 bytes). */
 export const LIGHT_ENTRY_FLOATS = 16;
 
-/** PBR light extension — provides WGSL shader snippets + UBO writer.
- *  Registered globally (like PbrEnvExtension). One active at a time. */
-export interface PbrLightExtension {
+/** Light pipeline-integration extension — provides WGSL shader snippets + UBO writer.
+ *  Registered globally via `_setLightExtension`. One active at a time.
+ *
+ *  WGSL emit hooks (`emitLightVector`, `emitDirectDiffuse`, `emitGeometricAA`) are
+ *  consumed by PBR templates. The data written by `writeSceneUbo` lands in
+ *  material-orthogonal slots of the scene UBO (`lightDirection`, `lightDiffuseColor`,
+ *  `lightGroundColor`, `lightPosition`, `lightRange`) — any material may read them. */
+export interface LightExtension {
     /** Human-readable tag for pipeline cache key differentiation. */
     readonly tag: string;
-    /** Structured scene UBO field descriptors for the template composer. */
-    readonly pbrSceneUboFields: readonly { readonly name: string; readonly type: "f32" | "vec3<f32>" | "vec4<f32>" }[];
     /** WGSL: compute L vector + NdotL. Assumes N, scene are in scope. */
     emitLightVector(): string;
     /** WGSL: compute direct diffuse. Assumes NdotL, surfaceAlbedo, lightColor, mesh in scope. */
     emitDirectDiffuse(): string;
     /** WGSL: geometric AA for specular roughness. Empty string if not needed. */
     emitGeometricAA(): string;
-    /** Write light data into PBR scene UBO float array starting at baseOffset. */
-    writeSceneUbo(data: Float32Array, baseOffset: number, light: LightBase): void;
+    /** Write light data into the unified scene UBO at the hard-coded float
+     *  indices that match shaders/scene-uniforms.wgsl (lightDirection @ 36,
+     *  lightIntensity @ 39, lightDiffuseColor @ 40, lightGroundColor @ 44,
+     *  lightPosition @ 48, lightRange @ 51). */
+    writeSceneUbo(data: Float32Array, light: LightBase): void;
 }

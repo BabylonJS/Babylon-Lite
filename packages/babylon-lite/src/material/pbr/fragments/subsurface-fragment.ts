@@ -13,7 +13,7 @@
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
-import type { Texture2D } from "../../../texture/texture-2d.js";
+import type { SampledTexture } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP, PBR2_HAS_THICKNESS_GLTF_CHANNEL } from "../pbr-flags.js";
 
@@ -188,7 +188,7 @@ export const subsurfaceExt: PbrExt = {
     },
     bind(ctx, entries, b) {
         if ((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0) {
-            const tex = (ctx.material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+            const tex = (ctx.material as PbrMaterialProps).subsurface?.thickness?.texture as SampledTexture | undefined;
             if (tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });
