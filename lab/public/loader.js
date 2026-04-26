@@ -57,7 +57,10 @@
 
   function checkReady() {
     var canvas = document.getElementById('renderCanvas');
-    if (canvas && canvas.dataset.ready === 'true') {
+    // Dismiss as soon as the scene has rendered at least one frame (data-loaded),
+    // OR the test-level ready signal is set (data-ready). data-loaded lets users
+    // see physics/animation play out instead of being hidden until the test settles.
+    if (canvas && (canvas.dataset.loaded === 'true' || canvas.dataset.ready === 'true')) {
       dismiss();
       return true;
     }
@@ -70,7 +73,7 @@
     var observer = new MutationObserver(function () {
       if (checkReady()) observer.disconnect();
     });
-    observer.observe(canvas, { attributes: true, attributeFilter: ['data-ready'] });
+    observer.observe(canvas, { attributes: true, attributeFilter: ['data-ready', 'data-loaded'] });
   }
   var poll = setInterval(function () { if (checkReady()) clearInterval(poll); }, 200);
 
