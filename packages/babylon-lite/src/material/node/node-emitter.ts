@@ -41,6 +41,8 @@ export function createBuildState(): NodeBuildState {
         usesEnv: false,
         usesClearcoat: false,
         usesSheen: false,
+        usesAnisotropy: false,
+        usesSubsurface: false,
         shadowLights: [],
         hasSkeleton: false,
         hasInstances: false,

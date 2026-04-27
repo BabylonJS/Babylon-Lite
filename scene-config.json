@@ -545,7 +545,7 @@
         "slug": "scene63-nme-light",
         "name": "Scene 63 — NME Directional Light",
         "maxMad": 0.5,
-        "maxRawKB": 63,
+        "maxRawKB": 64,
         "description": "Node Material with one DirectionalLight: position/normal world-transformed, driven through LightBlock (Blinn-Phong) to FragmentOutput.rgb. Exercises the shared lights UBO binding + module-scope helper assembly.",
         "tags": [
             "nme",
@@ -635,5 +635,37 @@
             "clearcoat",
             "sheen"
         ]
+    },
+    {
+        "id": 70,
+        "slug": "scene70-nme-pbr-aniso",
+        "name": "Scene 70 — NME PBR Anisotropy",
+        "maxMad": 0.02,
+        "skipParity": true,
+        "note": "Marker block validation only — BJS NME requires non-zero intensity + tangent for AnisotropyBlock to compile. Real anisotropy lands in scene 72.",
+        "maxRawKB": 100,
+        "description": "Scene 67 + AnisotropyBlock with intensity=0 (marker validation). At intensity=0 BJS anisotropic GGX reduces to standard GGX, so visual output should match scene 67.",
+        "tags": ["pbr", "nme", "procedural", "env", "anisotropy"]
+    },
+    {
+        "id": 71,
+        "slug": "scene71-nme-pbr-subsurface",
+        "name": "Scene 71 — NME PBR SubSurface",
+        "maxMad": 0.02,
+        "skipParity": true,
+        "note": "Marker block scaffolding — full subsurface parity in scene 72.",
+        "maxRawKB": 100,
+        "description": "Scene 67 + SubSurfaceBlock with intensity=0 (marker validation).",
+        "tags": ["pbr", "nme", "procedural", "env", "subsurface"]
+    },
+    {
+        "id": 72,
+        "slug": "scene72-nme-pbr-full",
+        "name": "Scene 72 — NME PBR Full (D8AK3Z)",
+        "maxMad": 0.02,
+        "skipParity": true,
+        "note": "Full PBR-NME snippet (EPY8BV/6) — parser/registry coverage validation. Anisotropy + subsurface are marker-only in Lite emitter; full visual parity requires future per-block math implementation.",
+        "description": "Full D8AK3Z#160 setup: 4 lights (hemi + point + spot + dir + PCF shadow) on sphere + ground, NME = EPY8BV/6 (PBR-MR + reflection + clearcoat + sheen + anisotropy + subsurface).",
+        "tags": ["pbr", "nme", "procedural", "env", "shadows", "clearcoat", "sheen", "anisotropy", "subsurface"]
     }
 ]

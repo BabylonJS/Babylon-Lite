@@ -130,6 +130,12 @@ export interface NodeBuildState {
     /** Set by SheenBlock; tells PBRMetallicRoughnessBlock to add the Charlie
      *  NDF + Ashikhmin visibility sheen layer (cloth/velvet look). */
     usesSheen: boolean;
+    /** Set by AnisotropyBlock; reserved for future anisotropic GGX path.
+     *  Currently used only to validate marker plumbing in scene 70 — at
+     *  intensity=0 the BJS anisotropic path reduces to standard GGX. */
+    usesAnisotropy: boolean;
+    /** Set by SubSurfaceBlock; reserved for future SS path. Marker only. */
+    usesSubsurface: boolean;
     /** When false (default), BonesBlock emits a pass-through of its `world`
      *  input — no skeleton binding is required. Set to true only when every
      *  mesh using this material has a skeleton. */
