@@ -472,6 +472,10 @@ fn nme_pbr_colorAtDistance(color: vec3<f32>, distance: f32) -> vec3<f32> {
     diffuseInd: vec3<f32>,
     specularInd: vec3<f32>,
     shadow: f32,
+    // Pre-gamma luminance of bright specular components (radiance + specular + clearcoat).
+    // FragmentOutput uses this when the material has SPECULAROVERALPHA / RADIANCEOVERALPHA on,
+    // boosting alpha so highlights stay opaque even when base opacity is low.
+    lumOverAlpha: f32,
 };
 const NME_PBR_PI: f32 = 3.14159265358979323846;
 fn nme_pbr_distGGX(NdotH: f32, alphaG: f32) -> f32 {
@@ -612,6 +616,23 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     r.diffuseDir = diffuseAcc;
     r.specularDir = specAcc;
 ${iblBlock}
+    // RadianceOverAlpha + SpecularOverAlpha: BJS NME PBR-MR has both flags on for this snippet.
+    // Alpha gets boosted by the luminance² of bright specular components so highlights stay
+    // opaque even when base opacity is low (BJS pbrBlockFinalLitComponents.fx ~line 92).
+    ${
+        useEnv
+            ? `let _radLum = dot(finalRadianceScaled, vec3<f32>(0.3, 0.59, 0.11));
+    let _specLum = dot(finalSpecularScaledDirect, vec3<f32>(0.3, 0.59, 0.11));${
+        useClearcoat
+            ? `
+    let _ccLum = dot(ccFinalRadiance, vec3<f32>(0.3, 0.59, 0.11));
+    r.lumOverAlpha = max(_radLum + _specLum + _ccLum, 0.0);`
+            : `
+    r.lumOverAlpha = max(_radLum + _specLum, 0.0);`
+    }`
+            : `let _specLum = dot(specAcc, vec3<f32>(0.3, 0.59, 0.11));
+    r.lumOverAlpha = max(_specLum, 0.0);`
+    }
     // BJS PBR-MR applies image processing at the very end. Default config:
     // no exposure, no contrast, no tonemap (TONEMAPPING != 1/2/3), no vignette,
     // no color-grading. Net effect: saturate(toGammaSpace(rgb)) where
@@ -834,11 +855,18 @@ export const emitter: BlockEmitter = {
             case "shadow":
                 return { expr: `${callVar}.shadow`, type: "f32" };
             case "alpha": {
+                // BJS PBR-MR honors useRadianceOverAlpha + useSpecularOverAlpha at material-config
+                // time. When both are on (this snippet's case), the alpha is boosted by the squared
+                // luminance of bright specular components so highlights stay opaque even when base
+                // opacity is low (BJS pbrBlockFinalLitComponents.fx ~lines 92-108).
+                const cfg = block.serialized as { useSpecularOverAlpha?: boolean; useRadianceOverAlpha?: boolean };
+                const useOverAlpha = cfg.useSpecularOverAlpha === true || cfg.useRadianceOverAlpha === true;
                 const op = block.inputs.get("opacity");
-                if (op?.source) {
-                    return ctx.cast(ctx.resolve(block, "opacity", stage, state), "f32");
+                const baseAlpha = op?.source ? ctx.cast(ctx.resolve(block, "opacity", stage, state), "f32").expr : "1.0";
+                if (useOverAlpha) {
+                    return { expr: `clamp(${baseAlpha} + ${callVar}.lumOverAlpha * ${callVar}.lumOverAlpha, 0.0, 1.0)`, type: "f32" };
                 }
-                return { expr: `1.0`, type: "f32" };
+                return { expr: baseAlpha, type: "f32" };
             }
             case "ambientClr":
             case "clearcoatDir":
