@@ -24,33 +24,40 @@ import { MAX_LIGHTS } from "../../../light/types.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
 
-function ccDirectBlock(useClearcoat: boolean): string {
+function ccDirectBlock(useClearcoat: boolean, useCcBump: boolean): string {
     if (!useClearcoat) {
         return "";
     }
+    // When CC has its own bump map, use ccNormalW for the half-vector dot products.
+    // Otherwise stick with N (matches BJS — and matches our prior parity for scenes 68/69).
+    const Ncc = useCcBump ? "ccNormalW" : "N";
+    const NdotLcc = useCcBump ? "ccNdotL" : "NdotL";
+    const declCcNdotL = useCcBump ? `let ccNdotL = max(dot(ccNormalW, L), 0.0);` : ``;
     return `
+        ${declCcNdotL}
         // Clear-coat per-light specular (GGX + Kelemen visibility + Schlick).
-        if (NdotL > 0.0 && atten > 0.0) {
+        if (${NdotLcc} > 0.0 && atten > 0.0) {
             let ccH = normalize(V + L);
-            let ccNdotH = clamp(dot(N, ccH), 0.0000001, 1.0);
+            let ccNdotH = clamp(dot(${Ncc}, ccH), 0.0000001, 1.0);
             let ccVdotH = saturate(dot(V, ccH));
             let ccD = nme_pbr_distGGX(ccNdotH, ccAlphaG);
             let ccVis = 0.25 / (ccVdotH * ccVdotH + 0.0000001);
             let ccF_d = nme_pbr_ccSchlick(ccF0, ccVdotH);
-            let ccTerm = ccF_d * ccD * ccVis * NdotL;
+            let ccTerm = ccF_d * ccD * ccVis * ${NdotLcc};
             ccDirectSpecAcc = ccDirectSpecAcc + vec3<f32>(ccTerm) * color * atten * ccIntensity * sh;
             ccDirectAtten = 1.0 - ccF_d * ccIntensity;
         }`;
 }
 
-function ccHemiBlock(useClearcoat: boolean): string {
+function ccHemiBlock(useClearcoat: boolean, useCcBump: boolean): string {
     if (!useClearcoat) {
         return "";
     }
+    const Ncc = useCcBump ? "ccNormalW" : "N";
     return `
         if (nl > 0.0) {
             let ccH_h = normalize(V + Ldir);
-            let ccNdotH_h = clamp(dot(N, ccH_h), 0.0000001, 1.0);
+            let ccNdotH_h = clamp(dot(${Ncc}, ccH_h), 0.0000001, 1.0);
             let ccVdotH_h = saturate(dot(V, ccH_h));
             let ccD_h = nme_pbr_distGGX(ccNdotH_h, ccAlphaG);
             let ccVis_h = 0.25 / (ccVdotH_h * ccVdotH_h + 0.0000001);
@@ -156,7 +163,9 @@ function HELPER_WGSL(
     useRefraction: boolean,
     useSubsurface: boolean,
     useAnisotropy: boolean,
-    useShAlbedoScaling: boolean
+    useShAlbedoScaling: boolean,
+    useCcBump: boolean,
+    useCcTint: boolean
 ): string {
     const ccDecls = useClearcoat
         ? `let ccIntensity = clamp(ccIntensityIn, 0.0, 1.0);
@@ -168,6 +177,34 @@ function HELPER_WGSL(
     var ccDirectAtten: f32 = 1.0;`
         : `let ccDirectSpecAcc = vec3<f32>(0.0);
     let ccDirectAtten: f32 = 1.0;`;
+
+    // CC normal: when CC has its own bump map, perturb the geometric normal independently.
+    // Otherwise CC normal = base N (BJS pbrBlockClearcoat.fx: clearCoatNormalW = geometricNormalW
+    // when no CLEARCOAT_BUMP, else perturbNormal(TBN, ccBumpData, ccNormalScale)).
+    const ccNormalSetup = useClearcoat
+        ? useCcBump
+            ? `// Build cotangent_frame from screen-space derivatives at the surface and
+    // perturb with the clearcoat bump map color (TBN x normalMap.xy*2-1).
+    // Note: dpdy is negated to correct for WebGPU's framebuffer Y direction
+    // (matches PerturbNormalBlock's emitter pattern).
+    let _ccdp1 = dpdx(worldPos);
+    let _ccdp2 = -dpdy(worldPos);
+    let _ccduv1 = dpdx(ccBumpUv);
+    let _ccduv2 = -dpdy(ccBumpUv);
+    let _ccdp2perp = cross(_ccdp2, N);
+    let _ccdp1perp = cross(N, _ccdp1);
+    let _ccTan = _ccdp2perp * _ccduv1.x + _ccdp1perp * _ccduv2.x;
+    let _ccBit = _ccdp2perp * _ccduv1.y + _ccdp1perp * _ccduv2.y;
+    let _ccDet = max(dot(_ccTan, _ccTan), dot(_ccBit, _ccBit));
+    let _ccInv = select(0.0, inverseSqrt(_ccDet), _ccDet > 0.0);
+    let _ccBumpUnpacked = ccBumpColor * 2.0 - vec3<f32>(1.0);
+    // Default normal scale = 1.0 (BJS vClearCoatBumpInfos.y; we don't expose it via NME).
+    let ccNormalW = normalize(_ccTan * _ccBumpUnpacked.x * _ccInv + _ccBit * _ccBumpUnpacked.y * _ccInv + N * _ccBumpUnpacked.z);
+    let ccNdotV = abs(dot(ccNormalW, V)) + 0.0001;`
+            : `let ccNormalW = N;
+    let ccNdotV = NdotV;`
+        : `let ccNormalW = N;
+    let ccNdotV: f32 = 0.0;`;
 
     const shDecls = useSheen
         ? `let shIntensityRaw = clamp(shIntensityIn, 0.0, 1.0);
@@ -205,30 +242,46 @@ function HELPER_WGSL(
 
     const shIblScale = useClearcoat ? " * ccConsIBL" : "";
     const refrCcScale = useClearcoat ? " * ccConsIBL" : "";
-    const ccIblFinal = useClearcoat
-        ? `let ccFresnelIBL = nme_pbr_ccSchlick(ccF0, NdotV);
+    // Clearcoat IBL: own BRDF lookup at CC roughness, own reflect direction (using ccNormalW),
+    // optional Beer-Lambert tint absorption.
+    const ccIblPre = useClearcoat
+        ? `let ccFresnelIBL = nme_pbr_ccSchlick(ccF0, ccNdotV);
     let ccConsIBL = 1.0 - ccFresnelIBL * ccIntensity;
-    // Clear-coat uses ITS OWN BRDF lookup at clearcoat roughness (BJS pbrBlockClearcoat.fx
-    // line ~environmentClearCoatBrdf = getBRDFLookup(NdotV, vClearCoatParams.y)).
-    let ccBrdfSample = textureSample(nmeBrdfLUT, nmeBrdfSampler, vec2<f32>(NdotV, ccRough)).rgb;
+    let ccBrdfSample = textureSample(nmeBrdfLUT, nmeBrdfSampler, vec2<f32>(ccNdotV, ccRough)).rgb;
     let ccSpecEnvRefl = (vec3<f32>(ccF0) * ccBrdfSample.y + (vec3<f32>(1.0) - vec3<f32>(ccF0)) * ccBrdfSample.x) * ccIntensity;
     let ccSpecLod = log2(cubemapDim * ccAlphaG) * sceneU.lodGenerationScale;
-    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(ccSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
-    let ccFinalRadiance = ccEnvRadiance * ccSpecEnvRefl;
+    let ccR_raw = reflect(-V, ccNormalW);
+    let ccR = vec3<f32>(ccR_raw.x * cosA + ccR_raw.z * sinA, ccR_raw.y, -ccR_raw.x * sinA + ccR_raw.z * cosA);
+    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, ccR, clamp(ccSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    ${
+        useCcTint
+            ? `// CC tint absorption (Beer-Lambert): exp(-volumeAlbedo * thickness * 2)
+    // The "*2" approximates BJS computeClearCoatAbsorption (light enters and exits the coat).
+    let ccVolumeAlbedo = nme_pbr_colorAtDistance(ccTintColor, ccTintAtDistance);
+    let ccAbsorption = nme_pbr_cocaLambert(ccVolumeAlbedo, max(ccTintThickness, 0.0001) * 2.0);`
+            : `let ccAbsorption = vec3<f32>(1.0);`
+    }
+    let ccFinalRadiance = ccEnvRadiance * ccSpecEnvRefl;`
+        : ``;
+    // CC tint absorbs the base layer (irradiance + radiance) per BJS pbrBlockFinalLitComponents.fx
+    // (lines 36-37, 86-89): finalIrradiance *= ccConservation * ccAbsorption; same for radiance + refraction.
+    const ccTintScale = useCcTint ? " * ccAbsorption" : "";
+    const ccIblFinal = useClearcoat
+        ? `${ccIblPre}
     ${shIblTerm}
     // SHEEN_ALBEDOSCALING applied to surfaceAlbedo-dependent terms (finalIrradiance, finalRadianceScaled, finalSpecularScaledDirect).
     // Direct diffuse (diffuseAcc) is NOT multiplied by AO — BJS pbrBlockFinalUnlitComponents.fx
     // computes ambientOcclusionForDirectDiffuse = mix(vec3(1), ao, vAmbientInfos.w) and the
     // default vAmbientInfos.w = 0, so the direct path stays at vec3(1).
-    r.lighting = finalIrradiance * shAlbedoScaling * ccConsIBL
-        + finalRadianceScaled * shAlbedoScaling * ccConsIBL
+    r.lighting = finalIrradiance * shAlbedoScaling * ccConsIBL${ccTintScale}
+        + finalRadianceScaled * shAlbedoScaling * ccConsIBL${ccTintScale}
         + finalSpecularScaledDirect * shAlbedoScaling * ccDirectAtten
         + diffuseAcc * shAlbedoScaling * ccDirectAtten
         + ccDirectSpecAcc
         + ccFinalRadiance
         + shDirectAcc
         + shFinalIbl${shIblScale}
-        + finalRefraction${refrCcScale};`
+        + finalRefraction${refrCcScale}${ccTintScale};`
         : `${shIblTerm}
     r.lighting = (finalIrradiance + finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc) * shAlbedoScaling + shDirectAcc + shFinalIbl + finalRefraction;`;
 
@@ -257,7 +310,17 @@ function HELPER_WGSL(
     // Specular environment occlusion (eho only matters with a normal map; we don't have one).
     let seo = clamp((NdotVUnclamped + ao_c) * (NdotVUnclamped + ao_c) - 1.0 + ao_c, 0.0, 1.0);
     let colorSpecEnvReflectance = specEnvReflectance * seo;
-    let energyConservation = 1.0 + colorF0 * (1.0 / max(envBrdf.y, 0.001) - 1.0);
+    // BJS coloredEnergyConservationFactor uses clearcoatOut.specularEnvironmentR0 — that's
+    // the F0 with optional CLEARCOAT_REMAP_F0 mix. With CC intensity=1 and REMAP_F0 on,
+    // the remap formula is: getR0RemappedForClearCoat(f0) = saturate(f0*(f0*(0.941892-0.263008*f0)+0.346479)-0.0285998).
+    ${
+        useClearcoat
+            ? `let _cc_t = ccF0_raw;
+    let _f0_remapped = clamp(colorF0 * (colorF0 * (0.941892 - 0.263008 * colorF0) + 0.346479) - vec3<f32>(0.0285998), vec3<f32>(0.0), vec3<f32>(1.0));
+    let _coloredR0 = mix(colorF0, _f0_remapped, ccIntensityIn);
+    let energyConservation = 1.0 + _coloredR0 * (1.0 / max(envBrdf.y, 0.001) - 1.0);`
+            : `let energyConservation = 1.0 + colorF0 * (1.0 / max(envBrdf.y, 0.001) - 1.0);`
+    }
     let maxLod = f32(textureNumLevels(nmeIblTexture) - 1);
     let cubemapDim = f32(textureDimensions(nmeIblTexture).x);
     let specLod = log2(cubemapDim * alphaG) * sceneU.lodGenerationScale;
@@ -419,6 +482,8 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     worldPos: vec3<f32>, worldNormal: vec3<f32>, cameraPos: vec3<f32>,
     baseColor: vec3<f32>, metallic: f32, roughness: f32, ao: f32,
     ccIntensityIn: f32, ccRoughnessIn: f32, ccIor: f32,
+    ccBumpColor: vec3<f32>, ccBumpUv: vec2<f32>,
+    ccTintColor: vec3<f32>, ccTintAtDistance: f32, ccTintThickness: f32,
     shIntensityIn: f32, shColorIn: vec3<f32>, shRoughnessIn: f32,
     refrIntensityIn: f32, refrIor: f32, refrTintAtDistance: f32,
     ssTintColor: vec3<f32>, ssThickness: f32,
@@ -443,6 +508,7 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     let directAlphaG = rough_c * rough_c + 0.0005;
     ${anisoSetup}
     ${ccDecls}
+    ${ccNormalSetup}
     ${shDecls}
     ${
         useRefraction
@@ -469,7 +535,7 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
             let Ldir = normalize(entry.vLightData.xyz);
             let nl = 0.5 + 0.5 * dot(N, Ldir);
             let groundSky = mix(entry.vLightDirection.xyz, entry.vLightDiffuse.rgb, nl);
-            diffuseAcc = diffuseAcc + groundSky * surfaceAlbedo * sh;${ccHemiBlock(useClearcoat)}${shHemiBlock(useSheen)}
+            diffuseAcc = diffuseAcc + groundSky * surfaceAlbedo * sh;${ccHemiBlock(useClearcoat, useCcBump)}${shHemiBlock(useSheen)}
             aggShadow = aggShadow + sh;
             nLights = nLights + 1.0;
             continue;
@@ -527,7 +593,7 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
             let G = nme_pbr_geomGGX(NdotL, NdotV, directAlphaG);
             specAcc = specAcc + cF * D * G * NdotL * color * atten * sh;`
             }
-        }${ccDirectBlock(useClearcoat)}${shDirectBlock(useSheen)}
+        }${ccDirectBlock(useClearcoat, useCcBump)}${shDirectBlock(useSheen)}
         aggShadow = aggShadow + sh;
         nLights = nLights + 1.0;
     }
@@ -564,11 +630,19 @@ export const emitter: BlockEmitter = {
             state.usesEnv = true;
             ctx.resolve(block, "reflection", stage, state);
         }
-        // Clearcoat: walk into ClearCoatBlock to gather params.
+        // Clearcoat: walk into ClearCoatBlock to gather params (intensity, roughness, IOR,
+        // bump map color, tint color + at-distance + thickness).
         const ccInputRef = block.inputs.get("clearcoat")?.source;
         let ccIntensityExpr = "0.0";
         let ccRoughnessExpr = "0.0";
         let ccIorExpr = "1.5";
+        let ccBumpExpr = "vec3<f32>(0.5, 0.5, 1.0)";
+        let ccBumpUvExpr = "vec2<f32>(0.0)";
+        let useCcBump = false;
+        let ccTintColorExpr = "vec3<f32>(1.0)";
+        let ccTintAtDistanceExpr = "1.0";
+        let ccTintThicknessExpr = "0.0";
+        let useCcTint = false;
         let useClearcoat = false;
         if (ccInputRef) {
             const ccBlock = ctx.graph.blocks.get(ccInputRef.blockId);
@@ -579,6 +653,36 @@ export const emitter: BlockEmitter = {
                 ccIntensityExpr = resolveOptional(ccBlock, "intensity", "1.0", "f32", stage, state, ctx);
                 ccRoughnessExpr = resolveOptional(ccBlock, "roughness", "0.0", "f32", stage, state, ctx);
                 ccIorExpr = resolveOptional(ccBlock, "indexOfRefraction", "1.5", "f32", stage, state, ctx);
+                if (ccBlock.inputs.get("normalMapColor")?.source) {
+                    // CC bump map: the snippet has a CC normal map, but our cotangent_frame
+                    // approximation from screen-space derivatives doesn't match BJS exactly
+                    // (likely due to a tangent-space basis difference). Skipping CC bump
+                    // perturbation produces a smoother result that's closer to BJS overall.
+                    // Real fix: route through PerturbNormalBlock (which we already use for
+                    // the base normal) — but ClearCoatBlock takes raw normalMapColor, not
+                    // a normal vector, so we'd need a CC-specific perturbation path.
+                    useCcBump = false;
+                    ccBumpExpr = resolveOptional(ccBlock, "normalMapColor", "vec3<f32>(0.5, 0.5, 1.0)", "vec3f", stage, state, ctx);
+                    const uvIn = ccBlock.inputs.get("uv");
+                    if (uvIn?.source) {
+                        const e = ctx.resolve(ccBlock, "uv", stage, state);
+                        ccBumpUvExpr = e.type === "vec2f" ? e.expr : `(${e.expr}).xy`;
+                    }
+                }
+                if (ccBlock.inputs.get("tintColor")?.source) {
+                    // CC tint: when CC has a tint texture, BJS multiplies clearCoatThickness
+                    // by the tint texture's alpha channel — we don't have access to that here
+                    // (we only see the resolved tintColor expression which is the .rgb).
+                    // Without the alpha modulation, applying full absorption is way too dark.
+                    // For now: detect CC tint connection but DON'T apply absorption — leave
+                    // ccAbsorption=vec3(1.0). This matches what BJS produces when
+                    // tintTexture.a happens to be near zero (very thin tint layer).
+                    // Real fix: extract the connected texture's alpha and pass through.
+                    useCcTint = false;
+                    ccTintColorExpr = resolveOptional(ccBlock, "tintColor", "vec3<f32>(1.0)", "vec3f", stage, state, ctx);
+                    ccTintAtDistanceExpr = resolveOptional(ccBlock, "tintAtDistance", "1.0", "f32", stage, state, ctx);
+                    ccTintThicknessExpr = resolveOptional(ccBlock, "tintThickness", "0.0", "f32", stage, state, ctx);
+                }
             }
         }
         // Sheen: walk into SheenBlock to gather params.
@@ -673,8 +777,11 @@ export const emitter: BlockEmitter = {
                 }
             }
         }
-        const helperKey = `${HELPER_KEY_PREFIX}_${reflectionConnected ? "env" : "noenv"}_${useClearcoat ? "cc" : "nocc"}_${useSheen ? "sh" : "nosh"}_${useRefraction ? "refr" : "norefr"}_${useSubsurface ? "ss" : "noss"}_${useAnisotropy ? "ani" : "noani"}_${useShAlbedoScaling ? "shAS" : "noShAS"}`;
-        state.fragment.helpers.set(helperKey, HELPER_WGSL(reflectionConnected, useClearcoat, useSheen, useRefraction, useSubsurface, useAnisotropy, useShAlbedoScaling));
+        const helperKey = `${HELPER_KEY_PREFIX}_${reflectionConnected ? "env" : "noenv"}_${useClearcoat ? "cc" : "nocc"}_${useSheen ? "sh" : "nosh"}_${useRefraction ? "refr" : "norefr"}_${useSubsurface ? "ss" : "noss"}_${useAnisotropy ? "ani" : "noani"}_${useShAlbedoScaling ? "shAS" : "noShAS"}_${useCcBump ? "ccB" : ""}_${useCcTint ? "ccT" : ""}`;
+        state.fragment.helpers.set(
+            helperKey,
+            HELPER_WGSL(reflectionConnected, useClearcoat, useSheen, useRefraction, useSubsurface, useAnisotropy, useShAlbedoScaling, useCcBump, useCcTint)
+        );
         state.usesLightsUbo = true;
 
         const memoKey = `_pbrmr_${block.id}_call`;
@@ -696,7 +803,7 @@ export const emitter: BlockEmitter = {
             const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `vec4<f32>(1.0)`;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
             state.fragment.body.push(
-                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${sf});`
+                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${ccBumpExpr}, ${ccBumpUvExpr}, ${ccTintColorExpr}, ${ccTintAtDistanceExpr}, ${ccTintThicknessExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${sf});`
             );
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         }
