@@ -233,6 +233,8 @@ export interface CaptureGoldenOptions {
     sceneId: number;
     /** seekTime query param for animated scenes (omit for static) */
     seekTime?: number;
+    /** Extra query string (without leading '?') appended to the ref page URL. */
+    queryParams?: string;
     /** Page load timeout in ms (default: 60_000) */
     timeout?: number;
     /** GPU settle delay in ms (default: 1500) */
@@ -265,7 +267,7 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     // Open BJS ref page in a fresh context to avoid interfering with Lite page
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await context.newPage();
-    const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}` : "";
+    const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
     await bjsPage.goto(`/babylon-ref-scene${opts.sceneId}.html${urlParams}`);
 
     // Wait for BJS scene ready

@@ -270,7 +270,7 @@
         "id": 30,
         "slug": "scene30-volume-testing",
         "name": "Scene 30 — KHR_materials_volume_testing",
-        "maxMad": 20.0,
+        "maxMad": 20,
         "maxRawKB": 88.4,
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment. V1 env-only refraction. Matches PG #YG3BBF#16.",
         "note": "MAD ceiling temporarily relaxed (18.59 actual vs 0.02 target). Env-only refraction cannot show scene-behind-the-glass; full parity requires opaque-scene RTT, deferred to land with the frame-graph.",
@@ -381,5 +381,67 @@
         "description": "25×10 grid of radial-gradient sprites with anti-aliased edges, rendered via the premultiplied sprite codepath. BJS SpriteRenderer with ALPHA_PREMULTIPLIED blendMode + pre-baked premultiplied atlas as the parity oracle.",
         "tags": ["sprites", "2d", "premultiplied"],
         "skipPerf": true
+    },
+    {
+        "id": 60,
+        "slug": "scene60-nme-flat",
+        "name": "Scene 60 — NME Flat Colour",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 61,
+        "slug": "scene61-nme-normal",
+        "name": "Scene 61 — NME Normal As Color",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Node Material with a vertex→fragment varying: normal attribute remapped as `normal * 0.5 + 0.5` → FragmentOutput.rgb. Exercises ScaleBlock, AddBlock, and attribute-to-fragment bridging.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 62,
+        "slug": "scene62-nme-texture",
+        "name": "Scene 62 — NME Diffuse Texture",
+        "maxMad": 0.5,
+        "maxRawKB": 62,
+        "description": "Node Material sampling a 2D texture (crate.png) through a TextureBlock driven by the UV attribute. Exercises texture/sampler BGL slot allocation and `NodeInputHandle.texture` pass-through.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 63,
+        "slug": "scene63-nme-light",
+        "name": "Scene 63 — NME Directional Light",
+        "maxMad": 0.5,
+        "maxRawKB": 63,
+        "description": "Node Material with one DirectionalLight: position/normal world-transformed, driven through LightBlock (Blinn-Phong) to FragmentOutput.rgb. Exercises the shared lights UBO binding + module-scope helper assembly.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 64,
+        "slug": "scene64-nme-morph",
+        "name": "Scene 64 — NME Morph Targets",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Node Material with a MorphTargetsBlock: one morph target shifts every vertex along +Y at weight=1.0 so the sphere renders translated upward. Proves morph-texture + weights-UBO binding and the @builtin(vertex_index) plumbing.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 65,
+        "slug": "scene65-nme-shadow",
+        "name": "Scene 65 — NME Shadow Receive",
+        "maxMad": 0.1,
+        "maxRawKB": 79,
+        "description": "Node Material with shadow receive: sphere casts onto ground plane, both lit by one DirectionalLight with an ESM shadow generator. Only meshes with receiveShadows=true are attenuated; the sphere stays fully lit. Same JSON graph as scene 63 — shadow integration is externally driven via parseNodeMaterialFromSnippet({ shadowGenerators }).",
+        "tags": ["nme", "procedural", "shadows"]
+    },
+    {
+        "id": 66,
+        "slug": "scene66-nme-big",
+        "name": "Scene 66 — NME Full Playground (AT7YY5#6)",
+        "maxMad": 0.1,
+        "description": "Full NME playground integration test. Fetches the AT7YY5#6 snippet at runtime (136 blocks, PBR-style with diffuse/ambient/specular/emissive/normal/opacity/lightmap textures + equirect reflection, plus instances/bones/morph/discard/fog/front-facing and PCF directional shadow receive).",
+        "tags": ["nme", "procedural", "shadows", "morph", "reflection"]
     }
 ]

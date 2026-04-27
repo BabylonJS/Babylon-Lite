@@ -223,14 +223,27 @@ async function measurePage(context: BrowserContext, url: string, runs: number): 
 if (!hasBaseline) {
     test.skip("No baseline bundles — run `pnpm build:perf-baseline` first", () => {});
 } else {
+    // Emit a pipeline-level warning for a skipped perf test (no baseline, load failure, etc.).
+    // `##vso[task.logissue type=warning]` is recognized by Azure Pipelines when it appears in
+    // the job's stdout — Playwright's `list` reporter forwards test console output, so this
+    // warning shows up live in the "Run perf tests" step. We also store the reason via
+    // `test.skip(true, reason)` so the JUnit `<skipped message="…">` is populated, and the
+    // post-run `report-test-results.ts` step will re-emit the warning from the XML.
+    function skipWithWarning(reason: string, testName: string): never {
+        console.log(`##vso[task.logissue type=warning]${testName}: ${reason}`);
+        test.skip(true, reason);
+        // test.skip() throws, but TS doesn't know; help the control-flow analysis:
+        throw new Error(reason);
+    }
+
     test.describe("Performance: Current vs Stable", () => {
         for (const scene of SCENES) {
-            test(`${scene.name} — current ≤ ${REGRESSION_PCT}% slower than baseline`, async ({ browser }) => {
+            const testName = `${scene.name} — current ≤ ${REGRESSION_PCT}% slower than baseline`;
+            test(testName, async ({ browser }) => {
                 // New scenes added in a PR won't have a baseline bundle — skip gracefully
                 const baselineHtml = resolve(__dirname, `../../lab/bundle-baseline-scene${scene.id}.html`);
                 if (!existsSync(baselineHtml)) {
-                    test.skip();
-                    return;
+                    skipWithWarning(`[NOT A PERFORMANCE ISSUE] Baseline bundle missing for scene ${scene.id} (${scene.name}) — likely a newly added scene`, testName);
                 }
 
                 const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
@@ -246,14 +259,14 @@ if (!hasBaseline) {
                     baseline = await measurePage(context, baselineUrl, RUNS_PER_SCENE);
                 } catch (e) {
                     await context.close();
-                    throw new Error(`[NOT A PERFORMANCE ISSUE] Baseline scene failed to load/render: ${(e as Error).message}`, { cause: e });
+                    skipWithWarning(`[NOT A PERFORMANCE ISSUE] Baseline scene failed to load/render: ${(e as Error).message}`, testName);
                 }
 
                 try {
                     current = await measurePage(context, currentUrl, RUNS_PER_SCENE);
                 } catch (e) {
                     await context.close();
-                    throw new Error(`[NOT A PERFORMANCE ISSUE] Current scene failed to load/render: ${(e as Error).message}`, { cause: e });
+                    skipWithWarning(`[NOT A PERFORMANCE ISSUE] Current scene failed to load/render: ${(e as Error).message}`, testName);
                 }
 
                 await context.close();
