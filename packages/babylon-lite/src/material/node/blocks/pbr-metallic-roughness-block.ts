@@ -1,13 +1,14 @@
-/** PBRMetallicRoughnessBlock — direct lighting + optional IBL.
+/** PBRMetallicRoughnessBlock — direct lighting + optional IBL + optional clearcoat.
  *
  *  When the `reflection` input is connected (typically to a ReflectionBlock),
- *  this emitter runs the full GGX direct-lighting path PLUS a split-sum IBL
- *  contribution (specular cube + BRDF LUT + SH irradiance). When unconnected,
- *  only direct lighting runs (used by future minimal-IBL scenes).
+ *  this emitter runs the GGX direct-lighting path PLUS a split-sum IBL
+ *  contribution (specular cube + BRDF LUT + SH irradiance).
  *
- *  The IBL code path matches Lite's PBR ibl-fragment so output is comparable
- *  to BJS PBR (which always runs IBL even without env, so absence of env in
- *  scene 67 would produce divergence — every PBR-NME scene must wire env).
+ *  When the `clearcoat` input is connected (to a ClearCoatBlock), an extra
+ *  GGX clear-coat layer is added on top: per-light Schlick fresnel + Kelemen
+ *  visibility GGX specular, and the base layer (diffuse + specular + IBL)
+ *  is modulated by (1 - ccFresnel * ccIntensity). The clear-coat IBL
+ *  contribution samples the same env cube with a roughness-derived LOD.
  *
  *  Outputs implemented (others stub to vec3<f32>(0)):
  *    - lighting / diffuseDir / specularDir / shadow / alpha
@@ -17,9 +18,79 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } from "../node-types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 
-const HELPER_KEY = "nme_pbr_mr";
+const HELPER_KEY_PREFIX = "nme_pbr_mr";
 
-function HELPER_WGSL(useEnv: boolean): string {
+function ccDirectBlock(useClearcoat: boolean): string {
+    if (!useClearcoat) {
+        return "";
+    }
+    // Per-light clearcoat specular accumulation: GGX + Kelemen visibility +
+    // Schlick fresnel. Updates ccDirectSpecAcc (vec3) and ccDirectAtten (f32).
+    return `
+        // Clear-coat per-light specular.
+        if (NdotL > 0.0 && atten > 0.0) {
+            let ccH = normalize(V + L);
+            let ccNdotH = clamp(dot(N, ccH), 0.0000001, 1.0);
+            let ccVdotH = saturate(dot(V, ccH));
+            let ccD = nme_pbr_distGGX(ccNdotH, ccAlphaG);
+            let ccVis = 0.25 / (ccVdotH * ccVdotH + 0.0000001);
+            let ccF_d = nme_pbr_ccSchlick(ccF0, ccVdotH);
+            let ccTerm = ccF_d * ccD * ccVis * NdotL;
+            ccDirectSpecAcc = ccDirectSpecAcc + vec3<f32>(ccTerm) * color * atten * ccIntensity * sh;
+            ccDirectAtten = 1.0 - ccF_d * ccIntensity;
+        }`;
+}
+
+function ccHemiBlock(useClearcoat: boolean): string {
+    if (!useClearcoat) {
+        return "";
+    }
+    // Hemi clearcoat — use sky-half-vector as proxy.
+    return `
+        if (nl > 0.0) {
+            let ccH_h = normalize(V + Ldir);
+            let ccNdotH_h = clamp(dot(N, ccH_h), 0.0000001, 1.0);
+            let ccVdotH_h = saturate(dot(V, ccH_h));
+            let ccD_h = nme_pbr_distGGX(ccNdotH_h, ccAlphaG);
+            let ccVis_h = 0.25 / (ccVdotH_h * ccVdotH_h + 0.0000001);
+            let ccF_h = nme_pbr_ccSchlick(ccF0, ccVdotH_h);
+            let ccTerm_h = ccF_h * ccD_h * ccVis_h * nl;
+            ccDirectSpecAcc = ccDirectSpecAcc + vec3<f32>(ccTerm_h) * entry.vLightSpecular.rgb * ccIntensity * sh;
+            ccDirectAtten = 1.0 - ccF_h * ccIntensity;
+        }`;
+}
+
+function HELPER_WGSL(useEnv: boolean, useClearcoat: boolean): string {
+    const ccDecls = useClearcoat
+        ? `let ccIntensity = clamp(ccIntensityIn, 0.0, 1.0);
+    let ccRough = clamp(ccRoughnessIn, 0.0, 1.0);
+    let ccAlphaG = max(ccRough * ccRough, 0.0005);
+    let ccF0_raw = (ccIor - 1.0) / (ccIor + 1.0);
+    let ccF0 = ccF0_raw * ccF0_raw;
+    var ccDirectSpecAcc = vec3<f32>(0.0);
+    var ccDirectAtten: f32 = 1.0;`
+        : `let ccDirectSpecAcc = vec3<f32>(0.0);
+    let ccDirectAtten: f32 = 1.0;`;
+
+    const ccIblFinal = useClearcoat
+        ? `let ccFresnelIBL = nme_pbr_ccSchlick(ccF0, NdotV);
+    let ccConsIBL = 1.0 - ccFresnelIBL * ccIntensity;
+    let ccBrdfX = envBrdf.x;
+    let ccBrdfY = envBrdf.y;
+    let ccSpecEnvRefl = (vec3<f32>(ccF0) * ccBrdfY + (vec3<f32>(1.0) - vec3<f32>(ccF0)) * ccBrdfX) * ccIntensity;
+    let ccSpecLod = log2(cubemapDim * ccAlphaG) * sceneU.lodGenerationScale;
+    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(ccSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let ccFinalRadiance = ccEnvRadiance * ccSpecEnvRefl;
+    r.lighting = finalIrradiance * ccConsIBL
+        + finalRadianceScaled * ccConsIBL
+        + finalSpecularScaledDirect * ccDirectAtten
+        + diffuseAcc * ao_c * ccDirectAtten
+        + ccDirectSpecAcc
+        + ccFinalRadiance;`
+        : `r.lighting = finalIrradiance + finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc * ao_c;`;
+
+    const ccDirectFinal = useClearcoat ? `r.lighting = (diffuseAcc + specAcc) * ao_c * ccDirectAtten + ccDirectSpecAcc;` : `r.lighting = (diffuseAcc + specAcc) * ao_c;`;
+
     const iblBlock = useEnv
         ? `
     // ── Split-sum IBL ──
@@ -47,11 +118,21 @@ function HELPER_WGSL(useEnv: boolean): string {
     let finalSpecularScaledDirect = specAcc * energyConservation;
     r.diffuseInd = finalIrradiance;
     r.specularInd = finalRadianceScaled;
-    r.lighting = finalIrradiance + finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc * ao_c;`
+    ${ccIblFinal}`
         : `
     r.diffuseInd = vec3<f32>(0.0);
     r.specularInd = vec3<f32>(0.0);
-    r.lighting = (diffuseAcc + specAcc) * ao_c;`;
+    ${ccDirectFinal}`;
+
+    const ccSchlickFn = useClearcoat
+        ? `fn nme_pbr_ccSchlick(f0: f32, cosTheta: f32) -> f32 {
+    let t = 1.0 - cosTheta;
+    let t2 = t * t;
+    return f0 + (1.0 - f0) * (t2 * t2 * t);
+}
+`
+        : ``;
+
     return `struct NmePbrMrResult {
     lighting: vec3<f32>,
     diffuseDir: vec3<f32>,
@@ -77,9 +158,10 @@ fn nme_pbr_fresSchlick(c: f32, F0: vec3<f32>, F90: vec3<f32>) -> vec3<f32> {
     let t2 = t * t;
     return F0 + (F90 - F0) * (t2 * t2 * t);
 }
-fn nme_pbr_mr_compute(
+${ccSchlickFn}fn nme_pbr_mr_compute(
     worldPos: vec3<f32>, worldNormal: vec3<f32>, cameraPos: vec3<f32>,
     baseColor: vec3<f32>, metallic: f32, roughness: f32, ao: f32,
+    ccIntensityIn: f32, ccRoughnessIn: f32, ccIor: f32,
     shadowFactors: vec4<f32>
 ) -> NmePbrMrResult {
     var r: NmePbrMrResult;
@@ -94,6 +176,7 @@ fn nme_pbr_mr_compute(
     let colorF0 = mix(dielectricF0, baseColor, metallic_c);
     let colorF90 = vec3<f32>(1.0);
     let ao_c = clamp(ao, 0.0, 1.0);
+    ${ccDecls}
     var diffuseAcc = vec3<f32>(0.0);
     var specAcc = vec3<f32>(0.0);
     var aggShadow: f32 = 0.0;
@@ -114,7 +197,7 @@ fn nme_pbr_mr_compute(
             let D = nme_pbr_distGGX(NdotH, alphaG);
             let G = nme_pbr_geomGGX(max(nl, 0.0001), NdotV, alphaG);
             let cF = nme_pbr_fresSchlick(VdotH, colorF0, colorF90);
-            specAcc = specAcc + cF * D * G * max(nl, 0.0) * entry.vLightSpecular.rgb * sh;
+            specAcc = specAcc + cF * D * G * max(nl, 0.0) * entry.vLightSpecular.rgb * sh;${ccHemiBlock(useClearcoat)}
             aggShadow = aggShadow + sh;
             nLights = nLights + 1.0;
             continue;
@@ -149,7 +232,7 @@ fn nme_pbr_mr_compute(
             let G = nme_pbr_geomGGX(NdotL, NdotV, alphaG);
             let cF = nme_pbr_fresSchlick(VdotH, colorF0, colorF90);
             specAcc = specAcc + cF * D * G * NdotL * color * atten * sh;
-        }
+        }${ccDirectBlock(useClearcoat)}
         aggShadow = aggShadow + sh;
         nLights = nLights + 1.0;
     }
@@ -178,10 +261,28 @@ export const emitter: BlockEmitter = {
         const reflectionConnected = !!block.inputs.get("reflection")?.source;
         if (reflectionConnected) {
             state.usesEnv = true;
-            // Walk the reflection input so the upstream block runs (it may set flags).
             ctx.resolve(block, "reflection", stage, state);
         }
-        state.fragment.helpers.set(HELPER_KEY, HELPER_WGSL(reflectionConnected));
+        // Detect clearcoat connectivity and (if connected) walk into the
+        // ClearCoatBlock to gather its parameter inputs.
+        const ccInputRef = block.inputs.get("clearcoat")?.source;
+        let ccIntensityExpr = "0.0";
+        let ccRoughnessExpr = "0.0";
+        let ccIorExpr = "1.5";
+        let useClearcoat = false;
+        if (ccInputRef) {
+            const ccBlock = ctx.graph.blocks.get(ccInputRef.blockId);
+            if (ccBlock && ccBlock.className === "ClearCoatBlock") {
+                useClearcoat = true;
+                state.usesClearcoat = true;
+                ctx.resolveOutput(ccBlock, ccInputRef.outputName, stage, state);
+                ccIntensityExpr = resolveOptional(ccBlock, "intensity", "1.0", "f32", stage, state, ctx);
+                ccRoughnessExpr = resolveOptional(ccBlock, "roughness", "0.0", "f32", stage, state, ctx);
+                ccIorExpr = resolveOptional(ccBlock, "indexOfRefraction", "1.5", "f32", stage, state, ctx);
+            }
+        }
+        const helperKey = `${HELPER_KEY_PREFIX}_${reflectionConnected ? "env" : "noenv"}_${useClearcoat ? "cc" : "nocc"}`;
+        state.fragment.helpers.set(helperKey, HELPER_WGSL(reflectionConnected, useClearcoat));
         state.usesLightsUbo = true;
 
         const memoKey = `_pbrmr_${block.id}_call`;
@@ -202,7 +303,9 @@ export const emitter: BlockEmitter = {
             const ao = resolveOptional(block, "ambientOcc", "1.0", "f32", stage, state, ctx);
             const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `vec4<f32>(1.0)`;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
-            state.fragment.body.push(`let ${callVar} = nme_pbr_mr_compute(${wp}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${sf});`);
+            state.fragment.body.push(
+                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${sf});`
+            );
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         }
 

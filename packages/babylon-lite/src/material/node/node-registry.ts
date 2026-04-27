@@ -69,6 +69,7 @@ function getTable(): Map<string, BlockLoader> {
     // PBR blocks (scene 67+):
     t.set("PBRMetallicRoughnessBlock", () => import("./blocks/pbr-metallic-roughness-block.js"));
     t.set("ReflectionBlock", () => import("./blocks/reflection-block.js"));
+    t.set("ClearCoatBlock", () => import("./blocks/clearcoat-block.js"));
     // Each entry MUST use a literal string import so Rollup splits per-block chunks.
     _table = t;
     return t;

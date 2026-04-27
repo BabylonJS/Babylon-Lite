@@ -123,6 +123,10 @@ export interface NodeBuildState {
      *  lodGenerationScale + environmentIntensity. Materials without env
      *  pay zero — empty default. */
     usesEnv: boolean;
+    /** Set by ClearCoatBlock; tells PBRMetallicRoughnessBlock to walk into
+     *  the connected ClearCoatBlock and emit the clear-coat layer code path
+     *  (extra GGX layer + Fresnel modulation of the base specular). */
+    usesClearcoat: boolean;
     /** When false (default), BonesBlock emits a pass-through of its `world`
      *  input — no skeleton binding is required. Set to true only when every
      *  mesh using this material has a skeleton. */

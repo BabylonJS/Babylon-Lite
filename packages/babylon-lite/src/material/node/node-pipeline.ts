@@ -21,9 +21,10 @@ import type { NodeBuildState } from "./node-types.js";
 
 // ─── Shared WGSL preamble ───────────────────────────────────────────
 //
-//  Base scene UBO matches Lite's Standard scene UBO layout (176 B).
-//  When state.usesEnv is true we extend it with SH coefficients +
-//  env scalars (336 B total) so PBR blocks can sample IBL.
+//  Base scene UBO matches Lite's Standard scene UBO layout (176 B). Env
+//  IBL extension (extra 160 B = 9 SH vec4 + envRotationY/lodGenerationScale/
+//  environmentIntensity) is provided lazily by node-env.ts, dynamic-imported
+//  only when state.usesEnv is true.
 
 const WGSL_SCENE_STRUCT_BASE_FIELDS = `viewProjection: mat4x4<f32>,
     view: mat4x4<f32>,
@@ -31,30 +32,15 @@ const WGSL_SCENE_STRUCT_BASE_FIELDS = `viewProjection: mat4x4<f32>,
     vFogInfos: vec4<f32>,
     vFogColor: vec4<f32>,`;
 
-const WGSL_SCENE_STRUCT_ENV_FIELDS = `vSphericalL00: vec4<f32>,
-    vSphericalL1_1: vec4<f32>,
-    vSphericalL10: vec4<f32>,
-    vSphericalL11: vec4<f32>,
-    vSphericalL2_2: vec4<f32>,
-    vSphericalL2_1: vec4<f32>,
-    vSphericalL20: vec4<f32>,
-    vSphericalL21: vec4<f32>,
-    vSphericalL22: vec4<f32>,
-    envRotationY: f32,
-    lodGenerationScale: f32,
-    environmentIntensity: f32,
-    _envPad: f32,`;
-
-function buildSceneStruct(usesEnv: boolean): string {
-    const fields = usesEnv ? `${WGSL_SCENE_STRUCT_BASE_FIELDS}\n    ${WGSL_SCENE_STRUCT_ENV_FIELDS}` : WGSL_SCENE_STRUCT_BASE_FIELDS;
+function buildSceneStruct(envFields: string | null): string {
+    const fields = envFields ? `${WGSL_SCENE_STRUCT_BASE_FIELDS}\n    ${envFields}` : WGSL_SCENE_STRUCT_BASE_FIELDS;
     return `struct SceneU {\n    ${fields}\n};\n@group(0) @binding(0) var<uniform> sceneU: SceneU;`;
 }
 
-/** Byte size of the NME scene UBO (excluding env: 176; with env: 336). */
+/** Byte size of the NME scene UBO (excluding env: 176; with env tail: 336). */
 export const NME_SCENE_UBO_BASE_BYTES = 176;
-export const NME_SCENE_UBO_ENV_BYTES = 336;
-export function getNmeSceneUboBytes(usesEnv: boolean): number {
-    return usesEnv ? NME_SCENE_UBO_ENV_BYTES : NME_SCENE_UBO_BASE_BYTES;
+export function getNmeSceneUboBytes(envExtraBytes: number): number {
+    return NME_SCENE_UBO_BASE_BYTES + envExtraBytes;
 }
 
 const WGSL_MESH_STRUCT = `struct MeshU {
@@ -77,6 +63,9 @@ export interface NodeCompileResult {
     readonly meshBGL: GPUBindGroupLayout;
     readonly nodeUboSize: number;
     readonly nodeUboOffsets: ReadonlyMap<string, number>;
+    /** Total byte size of the NME scene UBO for this material (176 base, +160
+     *  when env IBL is enabled). */
+    readonly sceneUboBytes: number;
     /** The resolved bind-group slot (within group 1) for the node UBO. `null` if no uniforms. */
     readonly nodeUboBinding: number | null;
     /** Per-texture binding slots assigned by the pipeline builder. */
@@ -166,6 +155,17 @@ export interface CompileOpts {
     readonly backFaceCulling?: boolean;
     /** BJS alpha mode (0=DISABLE, 2=COMBINE). Determines blend state. */
     readonly alphaMode?: number;
+    /** When `state.usesEnv` is true, this factory produces the env IBL
+     *  bindings + WGSL. Loaded via `await import("./node-env.js")` from
+     *  node-material.ts only when `state.usesEnv` was set during emitGraph,
+     *  so non-env scenes never bundle the env helpers. */
+    readonly envEmitter?: typeof import("./node-env.js").emitEnv;
+    /** Extra bytes appended to the scene UBO when env is in use. Provided
+     *  by the same lazy node-env import (NME_SCENE_UBO_ENV_EXTRA_BYTES). */
+    readonly envExtraBytes?: number;
+    /** WGSL scene-struct field fragment to append to SceneU. Provided by
+     *  node-env.SCENE_STRUCT_ENV_FIELDS when env is in use. */
+    readonly envSceneStructFields?: string;
     /** When `state.shadowLights` is non-empty, this factory produces shadow
      *  bindings + WGSL. Loaded via `await import("./node-shadow.js")` from
      *  `node-material.ts` only when `shadowGenerators` was supplied, so
@@ -244,20 +244,19 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     }
 
     // Env IBL bindings (specular cube + sampler, BRDF LUT 2D + sampler).
+    // Allocated only when state.usesEnv was set during emitGraph AND the caller
+    // supplied envEmitter (lazy-imported by node-material.ts). All env-specific
+    // WGSL strings + BGL entries live in node-env.ts so non-env scenes never
+    // bundle them.
     let envBindings: { iblTexture: number; iblSampler: number; brdfLUT: number; brdfSampler: number } | null = null;
     const envWgslDecls: string[] = [];
-    if (state.usesEnv) {
-        const iblTexBinding = nextBinding++;
-        const iblSampBinding = nextBinding++;
-        const brdfTexBinding = nextBinding++;
-        const brdfSampBinding = nextBinding++;
-        envBindings = { iblTexture: iblTexBinding, iblSampler: iblSampBinding, brdfLUT: brdfTexBinding, brdfSampler: brdfSampBinding };
-        envWgslDecls.push(
-            `@group(1) @binding(${iblTexBinding}) var nmeIblTexture: texture_cube<f32>;`,
-            `@group(1) @binding(${iblSampBinding}) var nmeIblSampler: sampler;`,
-            `@group(1) @binding(${brdfTexBinding}) var nmeBrdfLUT: texture_2d<f32>;`,
-            `@group(1) @binding(${brdfSampBinding}) var nmeBrdfSampler: sampler;`
-        );
+    let envBglEntries: readonly GPUBindGroupLayoutEntry[] = [];
+    if (state.usesEnv && opts.envEmitter) {
+        const env = opts.envEmitter(nextBinding);
+        envBindings = env.bindings;
+        envWgslDecls.push(env.wgslDecls);
+        envBglEntries = env.bglEntries;
+        nextBinding += env.bindingCount;
     }
 
     // Shadow bindings (per shadow-casting light). Emission/WGSL live in the
@@ -289,7 +288,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     // Compose WGSL (node UBO struct inserted conditionally between mesh + VertexIn).
     const vertexIn = buildVertexIn(state);
     const vertexOut = buildVertexOut(state);
-    const wgslParts: string[] = ["// Auto-generated by NodeMaterial — DO NOT EDIT", buildSceneStruct(state.usesEnv), WGSL_MESH_STRUCT];
+    const wgslParts: string[] = ["// Auto-generated by NodeMaterial — DO NOT EDIT", buildSceneStruct(opts.envSceneStructFields ?? null), WGSL_MESH_STRUCT];
     if (nodeUbo) {
         wgslParts.push(nodeUbo.struct);
     }
@@ -380,12 +379,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         });
     }
     if (envBindings) {
-        meshBglEntries.push(
-            { binding: envBindings.iblTexture, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
-            { binding: envBindings.iblSampler, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
-            { binding: envBindings.brdfLUT, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
-            { binding: envBindings.brdfSampler, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
-        );
+        meshBglEntries.push(...envBglEntries);
     }
     if (shadowEmit) {
         meshBglEntries.push(...shadowEmit.bglEntries);
@@ -427,6 +421,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         meshBGL,
         nodeUboSize,
         nodeUboOffsets,
+        sceneUboBytes: getNmeSceneUboBytes(opts.envExtraBytes ?? 0),
         nodeUboBinding,
         textureBindings,
         lightsBinding,

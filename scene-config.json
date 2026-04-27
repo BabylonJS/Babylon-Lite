@@ -533,7 +533,7 @@
         "slug": "scene62-nme-texture",
         "name": "Scene 62 — NME Diffuse Texture",
         "maxMad": 0.5,
-        "maxRawKB": 62,
+        "maxRawKB": 63,
         "description": "Node Material sampling a 2D texture (crate.png) through a TextureBlock driven by the UV attribute. Exercises texture/sampler BGL slot allocation and `NodeInputHandle.texture` pass-through.",
         "tags": [
             "nme",
@@ -569,7 +569,7 @@
         "slug": "scene65-nme-shadow",
         "name": "Scene 65 — NME Shadow Receive",
         "maxMad": 0.1,
-        "maxRawKB": 79,
+        "maxRawKB": 80,
         "description": "Node Material with shadow receive: sphere casts onto ground plane, both lit by one DirectionalLight with an ESM shadow generator. Only meshes with receiveShadows=true are attenuated; the sphere stays fully lit. Same JSON graph as scene 63 — shadow integration is externally driven via parseNodeMaterialFromSnippet({ shadowGenerators }).",
         "tags": [
             "nme",
@@ -603,6 +603,21 @@
             "nme",
             "procedural",
             "env"
+        ]
+    },
+    {
+        "id": 68,
+        "slug": "scene68-nme-pbr-clearcoat",
+        "name": "Scene 68 — NME PBR Clearcoat",
+        "maxMad": 1.0,
+        "maxRawKB": 96,
+        "description": "Scene 67 plus a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0, IOR=1.5).",
+        "tags": [
+            "pbr",
+            "nme",
+            "procedural",
+            "env",
+            "clearcoat"
         ]
     }
 ]

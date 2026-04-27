@@ -16,7 +16,6 @@ import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../..
 import { writeLightsUBO, refreshLightsUBO, getLightsUboSize, computeLightsVersion } from "../../render/lights-ubo.js";
 import type { NodeMaterialInternal } from "./node-material.js";
 import { writeNodeUBO } from "./node-material.js";
-import { getNmeSceneUboBytes } from "./node-pipeline.js";
 
 // Per-engine cached no-op morph target: a 1×1 rgba32float texture + a UBO with
 // count=0 + sensible texWidth/rowsPerBand. Meshes without their own morph
@@ -97,7 +96,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
         const compile = material._compile;
         const sceneBGL = compile.sceneBGL;
         const meshBGL = compile.meshBGL;
-        const sceneUboBytes = getNmeSceneUboBytes(compile.envBindings !== null);
+        const sceneUboBytes = compile.sceneUboBytes;
 
         // One scene UBO per material (cheap; scenes are small).
         const sceneUBO = device.createBuffer({ label: "node-scene-ubo", size: sceneUboBytes, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -149,16 +148,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 entries.push({ binding: compile.morphBindings.uboBinding, resource: { buffer: mt.weightsBuffer } });
             }
             if (compile.envBindings) {
-                const env = (scene as unknown as { _envTextures?: import("../../loader-env/load-env.js").EnvironmentTextures })._envTextures;
-                if (!env) {
-                    throw new Error(
-                        "NodeMaterial: PBR/Reflection block requires scene environment but scene._envTextures is unset. Call loadEnvironment() before registerScene()."
-                    );
-                }
-                entries.push({ binding: compile.envBindings.iblTexture, resource: env.specularCubeView });
-                entries.push({ binding: compile.envBindings.iblSampler, resource: env.cubeSampler });
-                entries.push({ binding: compile.envBindings.brdfLUT, resource: env.brdfLutView });
-                entries.push({ binding: compile.envBindings.brdfSampler, resource: env.brdfSampler });
+                material._envHelpers!.pushEnvBindGroupEntries(scene, compile.envBindings, entries);
             }
             for (let si = 0; si < compile.shadowBindings.length; si++) {
                 const sb = compile.shadowBindings[si]!;
@@ -289,7 +279,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 }
                 updateSceneUniforms(engine, ubo, vp as Float32Array, v as Float32Array, eyeTuple);
                 if (material._compile.envBindings) {
-                    writeNmeEnvSceneTail(engine, ubo, scene);
+                    material._envHelpers!.writeEnvSceneTail(engine, ubo, scene);
                 }
             }
             if (nmeLightsUBO && nmeLightsScratch) {
@@ -303,28 +293,6 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
     };
 
     return { renderables, updater };
-}
-
-// Write the env-extension tail of the NME scene UBO (offset 176-335).
-// Layout: 9 vec4 SH coefficients (.xyz = SH RGB, .w = pad), then
-// vec4(envRotationY, lodGenerationScale, environmentIntensity, _pad).
-let _envScratch: Float32Array | null = null;
-function writeNmeEnvSceneTail(engine: EngineContextInternal, sceneUBO: GPUBuffer, scene: SceneContext): void {
-    const env = (scene as unknown as { _envTextures?: import("../../loader-env/load-env.js").EnvironmentTextures })._envTextures;
-    if (!env) {
-        return;
-    }
-    if (!_envScratch) {
-        _envScratch = new Float32Array(40);
-    }
-    const sh = env.sphericalHarmonics; // 36 floats, stride-4 layout (9 vec4)
-    _envScratch.set(sh, 0);
-    const envRot = (scene as unknown as { envRotationY?: number }).envRotationY ?? 0;
-    _envScratch[36] = envRot;
-    _envScratch[37] = env.lodGenerationScale;
-    _envScratch[38] = 1.0; // environmentIntensity (PBR-MR has its own intensity field too; keep 1 here)
-    _envScratch[39] = 0;
-    engine.device.queue.writeBuffer(sceneUBO, 176, _envScratch as Float32Array<ArrayBuffer>);
 }
 
 // Per-gpu-object cached zero buffers for attributes that a NodeMaterial's

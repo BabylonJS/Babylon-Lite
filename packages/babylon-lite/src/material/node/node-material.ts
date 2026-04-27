@@ -71,6 +71,9 @@ export interface NodeMaterialInternal extends NodeMaterial {
     _uniformValues: Map<string, UniformSlot>;
     /** Per-texture-binding Texture2D slot (populated from options.textures and/or inputs.*.texture). */
     _textureSlots: Map<string, { current: Texture2D | null }>;
+    /** Pre-loaded env helpers (only populated when state.usesEnv was set during emitGraph).
+     *  Forwarded to the renderable so it doesn't have to dynamic-import again. */
+    _envHelpers: typeof import("./node-env.js") | null;
 }
 
 interface UniformSlot {
@@ -113,6 +116,20 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         hasInstances: options.hasInstances ?? false,
     });
 
+    // Dynamic import: env IBL helpers in node-env.ts are only loaded when the
+    // graph emitted state.usesEnv. Scenes without ReflectionBlock+PBR-MR never
+    // bundle this module.
+    let envHelpers: typeof import("./node-env.js") | null = null;
+    let envEmitter: typeof import("./node-env.js").emitEnv | undefined;
+    let envExtraBytes = 0;
+    let envSceneStructFields: string | undefined;
+    if (state.usesEnv) {
+        envHelpers = await import("./node-env.js");
+        envEmitter = envHelpers.emitEnv;
+        envExtraBytes = envHelpers.NME_SCENE_UBO_ENV_EXTRA_BYTES;
+        envSceneStructFields = envHelpers.SCENE_STRUCT_ENV_FIELDS;
+    }
+
     // Dynamic import: the PCF/ESM WGSL helpers live in node-shadow.ts and
     // are only loaded when the caller supplied shadowGenerators. Scenes
     // without shadows never bundle this module.
@@ -127,6 +144,9 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         format: engineInternal.format,
         msaaSamples: engineInternal.msaaSamples,
         alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
+        envEmitter,
+        envExtraBytes,
+        envSceneStructFields,
         shadowEmitter,
     });
 
@@ -237,6 +257,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _uboDirty: false,
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,
+        _envHelpers: envHelpers,
     };
     return material;
 }
