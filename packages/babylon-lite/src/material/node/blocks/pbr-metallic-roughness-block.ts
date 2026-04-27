@@ -494,6 +494,35 @@ fn nme_pbr_fresSchlick(c: f32, F0: vec3<f32>, F90: vec3<f32>) -> vec3<f32> {
     let t2 = t * t;
     return F0 + (F90 - F0) * (t2 * t2 * t);
 }
+// EON diffuse BRDF (BJS pbrBRDFFunctions.fx — BASE_DIFFUSE_MODEL_EON, the default).
+// Includes single-scatter (f_ss) + multi-scatter (f_ms) terms with energy conservation.
+// BJS computeDiffuseLighting then divides by clampedAlbedo before the shader multiplies
+// by surfaceAlbedo at the end — we collapse that into a direct multiply here.
+fn nme_pbr_diffuseEON(albedo: vec3<f32>, sigma: f32, NdotL: f32, NdotV: f32, LdotV: f32) -> vec3<f32> {
+    let c1 = 0.5 - 2.0 / (3.0 * NME_PBR_PI);
+    let c2 = 2.0 / 3.0 - 28.0 / (15.0 * NME_PBR_PI);
+    let mu_i = NdotL;
+    let mu_o = NdotV;
+    let s = LdotV - mu_i * mu_o;
+    let sovertF = select(s, s / max(mu_i, mu_o), s > 0.0);
+    let AF = 1.0 / (1.0 + c1 * sigma);
+    let f_ss = (albedo * (1.0 / NME_PBR_PI)) * AF * (1.0 + sigma * sovertF);
+    // E_FON_approx
+    let mucomp_o = 1.0 - mu_o;
+    let mucomp2_o = mucomp_o * mucomp_o;
+    let GoverPi_o = (0.0571085289 * mucomp_o + 0.491881867 * mucomp2_o) * 1.0 + (-0.332181442 * mucomp_o + 0.0714429953 * mucomp2_o) * mucomp2_o;
+    let EFo = (1.0 + sigma * GoverPi_o) / (1.0 + c1 * sigma);
+    let mucomp_i = 1.0 - mu_i;
+    let mucomp2_i = mucomp_i * mucomp_i;
+    let GoverPi_i = (0.0571085289 * mucomp_i + 0.491881867 * mucomp2_i) * 1.0 + (-0.332181442 * mucomp_i + 0.0714429953 * mucomp2_i) * mucomp2_i;
+    let EFi = (1.0 + sigma * GoverPi_i) / (1.0 + c1 * sigma);
+    let avgEF = AF * (1.0 + c2 * sigma);
+    let rho_clamped = clamp(albedo, vec3<f32>(0.1), vec3<f32>(1.0));
+    let rho_ms = rho_clamped * rho_clamped * avgEF / (vec3<f32>(1.0) - rho_clamped * (1.0 - avgEF));
+    let eps = 1.0e-7;
+    let f_ms = (rho_ms * (1.0 / NME_PBR_PI)) * max(eps, 1.0 - EFo) * max(eps, 1.0 - EFi) / max(eps, 1.0 - avgEF);
+    return f_ss + f_ms;
+}
 ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     worldPos: vec3<f32>, worldNormal: vec3<f32>, cameraPos: vec3<f32>,
     baseColor: vec3<f32>, metallic: f32, roughness: f32, ao: f32,
@@ -588,7 +617,14 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
             }
         }
         let NdotL = max(dot(N, L), 0.0);
-        diffuseAcc = diffuseAcc + surfaceAlbedo * (1.0 / NME_PBR_PI) * NdotL * color * atten * sh;
+        // BJS BASE_DIFFUSE_MODEL_EON: per-light diffuse uses EON BRDF instead of Lambert.
+        // PBR-MR's effective diffuseRoughness is baseDiffuseRoughness (default 0). At sigma=0
+        // EON reduces to standard Lambert (rho/pi) — so the per-light term is unchanged from the
+        // simple form, but we use the EON helper to stay model-correct for any future block that
+        // wires a non-zero base diffuse roughness.
+        let _LdotV = dot(L, V);
+        let _eonDiffuse = nme_pbr_diffuseEON(surfaceAlbedo, 0.0, NdotL, NdotV, _LdotV);
+        diffuseAcc = diffuseAcc + _eonDiffuse * NdotL * color * atten * sh;
         if (NdotL > 0.0 && atten > 0.0) {
             let H = normalize(V + L);
             let NdotH = clamp(dot(N, H), 0.0000001, 1.0);
