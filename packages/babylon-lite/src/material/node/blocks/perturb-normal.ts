@@ -13,8 +13,10 @@ import type { BlockEmitter } from "../node-types.js";
 const HELPER_KEY = "nme_perturbNormal";
 const HELPER_WGSL = `
 fn nme_perturbNormal(worldPos: vec3<f32>, worldNormal: vec3<f32>, uv: vec2<f32>, sampled: vec3<f32>, strength: f32) -> vec3<f32> {
-    // Construct ad-hoc TBN from screen-space derivatives.
-    // BJS negates dpdy to correct for WebGPU's framebuffer Y direction.
+    // Construct ad-hoc TBN from screen-space derivatives. WebGPU's UV.y goes top-down
+    // (BJS GLSL UV is bottom-up), so dpdy and duv2 both end up with opposite sign vs BJS.
+    // Negating BOTH dp2 AND duv2 cancels the framebuffer Y-flip without flipping the
+    // tangent orientation. This produces the same TBN as BJS does at the same fragment.
     let dp1 = dpdx(worldPos);
     let dp2 = -dpdy(worldPos);
     let duv1 = dpdx(uv);
