@@ -595,7 +595,7 @@
         "id": 67,
         "slug": "scene67-nme-pbr-core",
         "name": "Scene 67 — NME PBR Core",
-        "maxMad": 0.02, "skipParity": true,
+        "maxMad": 0.02,
         "maxRawKB": 95,
         "description": "NME PBRMetallicRoughnessBlock + ReflectionBlock with IBL plumbing. Sphere lit by hemi + point + spot + directional lights with env reflection (no skybox/ground). Foundation for the scene 67-71 PBR-NME phase.",
         "tags": [
@@ -609,7 +609,7 @@
         "id": 68,
         "slug": "scene68-nme-pbr-clearcoat",
         "name": "Scene 68 — NME PBR Clearcoat",
-        "maxMad": 0.02, "skipParity": true,
+        "maxMad": 0.02,
         "maxRawKB": 96,
         "description": "Scene 67 plus a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0, IOR=1.5).",
         "tags": [
@@ -624,7 +624,7 @@
         "id": 69,
         "slug": "scene69-nme-pbr-sheen",
         "name": "Scene 69 — NME PBR Sheen",
-        "maxMad": 0.02, "skipParity": true,
+        "maxMad": 0.02,
         "maxRawKB": 98,
         "description": "Scene 68 plus a SheenBlock wired into PBRMetallicRoughnessBlock.sheen (intensity=1, color=warm orange, roughness=0.5). Validates clearcoat + sheen layer composition.",
         "tags": [

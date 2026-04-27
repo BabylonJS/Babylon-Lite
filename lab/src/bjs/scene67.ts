@@ -60,6 +60,10 @@ import { SCENE67_NME_JSON } from "../shared/scene67-nme.js";
     nm.build(false);
     sphere.material = nm;
 
+    (window as unknown as Record<string, unknown>).__scene = scene;
+    (window as unknown as Record<string, unknown>).__sphere = sphere;
+    (window as unknown as Record<string, unknown>).__nm = nm;
+
     const eng = engine as any;
     scene.onAfterRenderObservable.add(() => {
         canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);

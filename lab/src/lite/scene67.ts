@@ -59,6 +59,10 @@ async function main(): Promise<void> {
     (sphere as { material?: unknown }).material = material;
     addToScene(scene, sphere);
 
+    (window as unknown as Record<string, unknown>).__scene = scene;
+    (window as unknown as Record<string, unknown>).__sphere = sphere;
+    (window as unknown as Record<string, unknown>).__nm = material;
+
     await registerScene(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

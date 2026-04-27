@@ -131,17 +131,17 @@ function HELPER_WGSL(useEnv: boolean, useClearcoat: boolean, useSheen: boolean):
     r.lighting = finalIrradiance * ccConsIBL
         + finalRadianceScaled * ccConsIBL
         + finalSpecularScaledDirect * ccDirectAtten
-        + diffuseAcc * ao_c * ccDirectAtten
+        + diffuseAcc * ccDirectAtten
         + ccDirectSpecAcc
         + ccFinalRadiance
         + shDirectAcc
         + shFinalIbl;`
         : `${shIblTerm}
-    r.lighting = finalIrradiance + finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc * ao_c + shDirectAcc + shFinalIbl;`;
+    r.lighting = finalIrradiance + finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc + shDirectAcc + shFinalIbl;`;
 
     const ccDirectFinal = useClearcoat
-        ? `r.lighting = (diffuseAcc + specAcc) * ao_c * ccDirectAtten + ccDirectSpecAcc + shDirectAcc;`
-        : `r.lighting = (diffuseAcc + specAcc) * ao_c + shDirectAcc;`;
+        ? `r.lighting = (diffuseAcc + specAcc) * ccDirectAtten + ccDirectSpecAcc + shDirectAcc;`
+        : `r.lighting = diffuseAcc + specAcc + shDirectAcc;`;
 
     const iblBlock = useEnv
         ? `
@@ -167,7 +167,6 @@ function HELPER_WGSL(useEnv: boolean, useClearcoat: boolean, useSheen: boolean):
     let cubemapDim = f32(textureDimensions(nmeIblTexture).x);
     let specLod = log2(cubemapDim * alphaG) * sceneU.lodGenerationScale;
     var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
-    environmentRadiance = mix(environmentRadiance, environmentIrradiance, alphaG);
     let finalIrradiance = environmentIrradiance * surfaceAlbedo * ao_c;
     let finalRadianceScaled = environmentRadiance * colorSpecEnvReflectance * energyConservation;
     let finalSpecularScaledDirect = specAcc * energyConservation;
@@ -280,14 +279,16 @@ ${ccSchlickFn}${charlieFn}fn nme_pbr_mr_compute(
             L = toL / max(dist, 0.0001);
             let range = entry.vLightDiffuse.a;
             if (t == 2u) {
-                // Spot: linear range falloff + cone falloff (matches Lite multi-light).
-                atten = max(0.0, 1.0 - dist / range);
-                let c = max(0.0, dot(entry.vLightDirection.xyz, -L));
-                if (c >= entry.vLightDirection.w) {
-                    atten = atten * max(0.0, pow(c, entry.vLightSpecular.a));
-                } else {
-                    atten = 0.0;
-                }
+                // Spot: BJS USEPHYSICALLIGHTFALLOFF — distance = 1/d² (no range cutoff)
+                // and directional falloff = spherical gaussian:
+                //   κ = -log2(0.01) / (1 - cosHalfAngle)
+                //   falloff = exp2(κ * (cd - 1))   where cd = dot(spotForward, dirToLight)
+                let invD2 = 1.0 / max(d2, 0.0000001);
+                let cosHalfAngle = entry.vLightDirection.w;
+                let kappa = 6.64385618977 / max(1.0 - cosHalfAngle, 0.0001);
+                let cd = dot(-entry.vLightDirection.xyz, -L);
+                let dirFall = exp2(kappa * (cd - 1.0));
+                atten = invD2 * dirFall;
             } else {
                 // Point: glTF-compatible inverse-square with smooth range cutoff
                 // (matches BJS lightFalloff=Physical and Lite multilight-wgsl).
@@ -311,9 +312,16 @@ ${ccSchlickFn}${charlieFn}fn nme_pbr_mr_compute(
         aggShadow = aggShadow + sh;
         nLights = nLights + 1.0;
     }
-    r.diffuseDir = diffuseAcc * ao_c;
-    r.specularDir = specAcc * ao_c;
+    r.diffuseDir = diffuseAcc;
+    r.specularDir = specAcc;
 ${iblBlock}
+    // BJS PBR-MR applies image processing at the very end. Default config:
+    // no exposure, no contrast, no tonemap (TONEMAPPING != 1/2/3), no vignette,
+    // no color-grading. Net effect: saturate(toGammaSpace(rgb)) where
+    // toGammaSpace = pow(c, 1/2.2). Match that here so output is byte-equivalent.
+    let lin = max(r.lighting, vec3<f32>(0.0));
+    let gamma = pow(lin, vec3<f32>(0.45454545));
+    r.lighting = clamp(gamma, vec3<f32>(0.0), vec3<f32>(1.0));
     if (nLights > 0.0) { r.shadow = aggShadow / nLights; } else { r.shadow = 1.0; }
     return r;
 }
