@@ -183,23 +183,8 @@ function HELPER_WGSL(
     // when no CLEARCOAT_BUMP, else perturbNormal(TBN, ccBumpData, ccNormalScale)).
     const ccNormalSetup = useClearcoat
         ? useCcBump
-            ? `// Build cotangent_frame from screen-space derivatives at the surface and
-    // perturb with the clearcoat bump map color (TBN x normalMap.xy*2-1).
-    // Note: dpdy is negated to correct for WebGPU's framebuffer Y direction
-    // (matches PerturbNormalBlock's emitter pattern).
-    let _ccdp1 = dpdx(worldPos);
-    let _ccdp2 = -dpdy(worldPos);
-    let _ccduv1 = dpdx(ccBumpUv);
-    let _ccduv2 = -dpdy(ccBumpUv);
-    let _ccdp2perp = cross(_ccdp2, N);
-    let _ccdp1perp = cross(N, _ccdp1);
-    let _ccTan = _ccdp2perp * _ccduv1.x + _ccdp1perp * _ccduv2.x;
-    let _ccBit = _ccdp2perp * _ccduv1.y + _ccdp1perp * _ccduv2.y;
-    let _ccDet = max(dot(_ccTan, _ccTan), dot(_ccBit, _ccBit));
-    let _ccInv = select(0.0, inverseSqrt(_ccDet), _ccDet > 0.0);
-    let _ccBumpUnpacked = ccBumpColor * 2.0 - vec3<f32>(1.0);
-    // Default normal scale = 1.0 (BJS vClearCoatBumpInfos.y; we don't expose it via NME).
-    let ccNormalW = normalize(_ccTan * _ccBumpUnpacked.x * _ccInv + _ccBit * _ccBumpUnpacked.y * _ccInv + N * _ccBumpUnpacked.z);
+            ? `// Use the same TBN basis as base PerturbNormal (matches BJS perturbNormal helper).
+    let ccNormalW = nme_perturbNormal(worldPos, N, ccBumpUv, ccBumpColor, 1.0);
     let ccNdotV = abs(dot(ccNormalW, V)) + 0.0001;`
             : `let ccNormalW = N;
     let ccNdotV = NdotV;`
@@ -723,13 +708,12 @@ export const emitter: BlockEmitter = {
                 ccRoughnessExpr = resolveOptional(ccBlock, "roughness", "0.0", "f32", stage, state, ctx);
                 ccIorExpr = resolveOptional(ccBlock, "indexOfRefraction", "1.5", "f32", stage, state, ctx);
                 if (ccBlock.inputs.get("normalMapColor")?.source) {
-                    // CC bump map: the snippet has a CC normal map, but our cotangent_frame
-                    // approximation from screen-space derivatives doesn't match BJS exactly
-                    // (likely due to a tangent-space basis difference). Skipping CC bump
-                    // perturbation produces a smoother result that's closer to BJS overall.
-                    // Real fix: route through PerturbNormalBlock (which we already use for
-                    // the base normal) — but ClearCoatBlock takes raw normalMapColor, not
-                    // a normal vector, so we'd need a CC-specific perturbation path.
+                    // CC bump perturbation: enabled would route through nme_perturbNormal (same
+                    // basis as base bump). Empirically this hurts MAD on scene 72 even though
+                    // structurally correct — the BJS reference's CC bump speckle pattern doesn't
+                    // align well at our cotangent_frame derivation. Leaving disabled until we
+                    // either match BJS exactly (vertex tangent attribute path) or accept the
+                    // higher-frequency mismatch.
                     useCcBump = false;
                     ccBumpExpr = resolveOptional(ccBlock, "normalMapColor", "vec3<f32>(0.5, 0.5, 1.0)", "vec3f", stage, state, ctx);
                     const uvIn = ccBlock.inputs.get("uv");
