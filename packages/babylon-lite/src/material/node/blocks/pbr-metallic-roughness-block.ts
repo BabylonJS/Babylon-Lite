@@ -230,7 +230,9 @@ function HELPER_WGSL(
             ? `let shSpecLod = log2(cubemapDim * shAlphaG) * sceneU.lodGenerationScale;
     let shEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
     let shBrdfBlue = textureSample(nmeBrdfLUT, nmeBrdfSampler, vec2<f32>(NdotV, shRough)).b;
-    let shFinalIbl = shEnvRadiance * shColorScaled * shBrdfBlue;
+    // Sheen environment reflectance picks up the same SEO + EHO occlusion factors as base specular
+    // (BJS pbrBlockSheen.fx: sheenEnvironmentReflectance *= seo; *= eho when BUMP).
+    let shFinalIbl = shEnvRadiance * shColorScaled * shBrdfBlue * seo * eho;
     ${
         useShAlbedoScaling
             ? `// SHEEN_ALBEDOSCALING: surface albedo and base specular scale by (1 - shInt × max(shColor) × envSheenBrdf.b).
@@ -307,9 +309,19 @@ function HELPER_WGSL(
     let brdfSample = textureSample(nmeBrdfLUT, nmeBrdfSampler, vec2<f32>(NdotV, rough_c));
     let envBrdf = brdfSample.rgb;
     let specEnvReflectance = (colorF90 - colorF0) * envBrdf.x + colorF0 * envBrdf.y;
-    // Specular environment occlusion (eho only matters with a normal map; we don't have one).
+    // Specular environment occlusion (BJS pbrIBLFunctions.fx).
     let seo = clamp((NdotVUnclamped + ao_c) * (NdotVUnclamped + ao_c) - 1.0 + ao_c, 0.0, 1.0);
-    let colorSpecEnvReflectance = specEnvReflectance * seo;
+    // Horizon occlusion: when bump pushes the perturbed normal past the geometric tangent
+    // plane, reduce env reflection that would otherwise come from below the surface.
+    // BJS pbrIBLFunctions.fx: eho = saturate(1 + 1.1 * dot(reflect(-V, N), geometricNormal))^2.
+    // We approximate geometricNormal from screen-space derivatives of worldPos (faceted but
+    // close to the vertex normal for non-degenerate triangles).
+    let _geoN = normalize(cross(dpdx(worldPos), dpdy(worldPos)));
+    let _geoNF = select(-_geoN, _geoN, dot(_geoN, V) > 0.0);
+    let _ehoRefl = reflect(-V, N);
+    let _ehoT = clamp(1.0 + 1.1 * dot(_ehoRefl, _geoNF), 0.0, 1.0);
+    let eho = _ehoT * _ehoT;
+    let colorSpecEnvReflectance = specEnvReflectance * seo * eho;
     // BJS coloredEnergyConservationFactor uses clearcoatOut.specularEnvironmentR0 — that's
     // the F0 with optional CLEARCOAT_REMAP_F0 mix. With CC intensity=1 and REMAP_F0 on,
     // the remap formula is: getR0RemappedForClearCoat(f0) = saturate(f0*(f0*(0.941892-0.263008*f0)+0.346479)-0.0285998).
