@@ -381,14 +381,12 @@ function spriteRendererRecord(rr: SpriteRendererInternal, pass: GPURenderPassEnc
 
 /** Push the renderer onto its engine's `_renderingContexts`. Idempotent — a second call is a no-op. */
 export function registerSpriteRenderer(sr: SpriteRenderer): void {
-    const rr = sr as SpriteRendererInternal;
-    registerRenderingContext(rr._engine, sr);
+    registerRenderingContext((sr as SpriteRendererInternal)._engine, sr);
 }
 
 /** Splice the renderer out of its engine's `_renderingContexts`. No-op if not present. */
 export function unregisterSpriteRenderer(sr: SpriteRenderer): void {
-    const rr = sr as SpriteRendererInternal;
-    unregisterRenderingContext(rr._engine, sr);
+    unregisterRenderingContext((sr as SpriteRendererInternal)._engine, sr);
 }
 
 /** Destroy all GPU resources owned by the renderer, unregister it from the engine, and clear `layers`. */
