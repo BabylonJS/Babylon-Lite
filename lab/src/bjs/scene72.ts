@@ -1,4 +1,4 @@
-// BJS reference for scene 72 — fetches the same EPY8BV/6 snippet and
+// BJS reference for scene 72 — loads the same local EPY8BV#6 NME data and
 // runs it through BJS NodeMaterial.Parse on a 4-light scene + sphere +
 // ground with PCF directional shadow, mirroring playground D8AK3Z#160.
 
@@ -18,7 +18,7 @@ import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
 import "@babylonjs/core/Materials/Textures/Loaders/envTextureLoader";
 import { NodeMaterial } from "@babylonjs/core/Materials/Node/nodeMaterial";
 import "@babylonjs/core/Materials/Node/Blocks";
-import { fetchScene72Snippet } from "../shared/scene72.js";
+import { getScene72Nme } from "../shared/scene72-nme.js";
 
 (async function () {
     const __initStart = performance.now();
@@ -65,11 +65,8 @@ import { fetchScene72Snippet } from "../shared/scene72.js";
     ground.receiveShadows = true;
     sg.addShadowCaster(sphere);
 
-    const { json } = await fetchScene72Snippet();
-    const nm = NodeMaterial.Parse(json, scene);
+    const nm = NodeMaterial.Parse(await getScene72Nme(), scene);
     nm.build(false);
-    (window as unknown as { __nm: unknown; __scene: unknown }).__nm = nm;
-    (window as unknown as { __nm: unknown; __scene: unknown }).__scene = scene;
     sphere.material = nm;
     ground.material = nm;
 

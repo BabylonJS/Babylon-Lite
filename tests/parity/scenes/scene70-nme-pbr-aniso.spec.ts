@@ -1,8 +1,8 @@
 /**
  * Scene 70 — NME PBR Anisotropy Parity Test
  *
- * Same NME JSON parsed by both BJS and Lite. Adds a ClearCoatBlock on top
- * of scene 67's setup with intensity=1.0, roughness=0.0, IOR=1.5.
+ * Same NME JSON parsed by both BJS and Lite. Uses non-zero AnisotropyBlock
+ * intensity on a metallic sphere so the stretched highlight is visible.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

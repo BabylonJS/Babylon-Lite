@@ -1,6 +1,6 @@
 // BJS reference for scene 67 — mirrors the Lite scene exactly. Same NME JSON,
-// same 4-light setup (hemi + point + spot + directional, no shadows), same
-// sphere. Both engines parse SCENE67_NME_JSON and render the result.
+// same 4-light + env IBL setup (hemi + point + spot + directional, no shadows),
+// same teal matte sphere. Both engines parse SCENE67_NME_JSON and render the result.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
@@ -59,10 +59,6 @@ import { SCENE67_NME_JSON } from "../shared/scene67-nme.js";
     const nm = NodeMaterial.Parse(SCENE67_NME_JSON, scene);
     nm.build(false);
     sphere.material = nm;
-
-    (window as unknown as Record<string, unknown>).__scene = scene;
-    (window as unknown as Record<string, unknown>).__sphere = sphere;
-    (window as unknown as Record<string, unknown>).__nm = nm;
 
     const eng = engine as any;
     scene.onAfterRenderObservable.add(() => {

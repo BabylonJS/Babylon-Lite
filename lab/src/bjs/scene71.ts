@@ -1,5 +1,5 @@
 // BJS reference for Scene 71 — mirrors the Lite scene exactly. Same NME JSON,
-// same 4-light + env setup, plus a SheenBlock connected to PBR-MR.clearcoat.
+// same env setup with back-lighting, plus SubSurfaceBlock + RefractionBlock on a warm wax sphere.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
@@ -41,13 +41,13 @@ import { SCENE71_NME_JSON } from "../shared/scene71-nme.js";
     cam.maxZ = 1000;
 
     const hemi = new HemisphericLight("hemi", new Vector3(0, 1, 0), scene);
-    hemi.intensity = 1;
-    const point = new PointLight("point", new Vector3(0, 5, -2), scene);
-    point.intensity = 1;
-    const spot = new SpotLight("spot", new Vector3(-0.5, 0, -2), new Vector3(0, 0, 1), Math.PI / 2, 1, scene);
-    spot.intensity = 1;
-    const dir = new DirectionalLight("dir", new Vector3(1, -1, 1), scene);
-    dir.intensity = 10;
+    hemi.intensity = 0.35;
+    const point = new PointLight("point", new Vector3(0, 2, 4), scene);
+    point.intensity = 20;
+    const spot = new SpotLight("spot", new Vector3(0, 1.5, 4), new Vector3(0, -0.2, -1), Math.PI / 2, 1, scene);
+    spot.intensity = 8;
+    const dir = new DirectionalLight("dir", new Vector3(0, -0.5, -1), scene);
+    dir.intensity = 3;
 
     const sphere = MeshBuilder.CreateSphere("sphere", { segments: 32, diameter: 2 }, scene);
 

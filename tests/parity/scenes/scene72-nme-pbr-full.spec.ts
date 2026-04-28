@@ -1,13 +1,11 @@
 /**
  * Scene 72 — Full D8AK3Z PBR-NME Parity Test
  *
- * Fetches the EPY8BV/6 snippet (the full PBR-MR + Reflection + ClearCoat
+ * Uses checked-in EPY8BV#6 NME data (the full PBR-MR + Reflection + ClearCoat
  * + Sheen + Anisotropy + SubSurface NME graph from playground D8AK3Z#160)
  * and runs it through both BJS NodeMaterial.Parse and Lite's NME parser.
  *
- * Currently skipped (skipParity:true) — anisotropy and subsurface emitters
- * are marker-only in Lite, so visual parity diverges. Scene loads + renders
- * to validate parser/registry coverage.
+ * This is the full visual parity coverage scene for the PBR-MR NME stack.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

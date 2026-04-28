@@ -582,7 +582,8 @@
         "slug": "scene66-nme-big",
         "name": "Scene 66 — NME Full Playground (AT7YY5#6)",
         "maxMad": 0.1,
-        "description": "Full NME playground integration test. Fetches the AT7YY5#6 snippet at runtime (136 blocks, PBR-style with diffuse/ambient/specular/emissive/normal/opacity/lightmap textures + equirect reflection, plus instances/bones/morph/discard/fog/front-facing and PCF directional shadow receive).",
+        "maxRawKB": 99,
+        "description": "Full NME playground integration test using checked-in local AT7YY5#6 NME data plus local texture assets (136 blocks, PBR-style with diffuse/ambient/specular/emissive/normal/opacity/lightmap textures + equirect reflection, plus instances/bones/morph/discard/fog/front-facing and PCF directional shadow receive).",
         "tags": [
             "nme",
             "procedural",
@@ -597,7 +598,7 @@
         "name": "Scene 67 — NME PBR Core",
         "maxMad": 0.02,
         "maxRawKB": 95,
-        "description": "NME PBRMetallicRoughnessBlock + ReflectionBlock with IBL plumbing. Sphere lit by hemi + point + spot + directional lights with env reflection (no skybox/ground). Foundation for the scene 67-71 PBR-NME phase.",
+        "description": "NME PBRMetallicRoughnessBlock + ReflectionBlock with IBL plumbing on a saturated teal matte sphere. Hemi + point + spot + directional lights make the base material visible against a black background.",
         "tags": [
             "pbr",
             "nme",
@@ -611,7 +612,7 @@
         "name": "Scene 68 — NME PBR Clearcoat",
         "maxMad": 0.02,
         "maxRawKB": 96,
-        "description": "Scene 67 plus a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0, IOR=1.5).",
+        "description": "Dark navy PBR sphere with a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0.02, IOR=1.5) for an obvious glossy coat highlight.",
         "tags": [
             "pbr",
             "nme",
@@ -626,7 +627,7 @@
         "name": "Scene 69 — NME PBR Sheen",
         "maxMad": 0.02,
         "maxRawKB": 98,
-        "description": "Scene 68 plus a SheenBlock wired into PBRMetallicRoughnessBlock.sheen (intensity=1, color=warm orange, roughness=0.5). Validates clearcoat + sheen layer composition.",
+        "description": "Dark purple PBR sphere with softened clearcoat plus a hot magenta SheenBlock wired into PBRMetallicRoughnessBlock.sheen (intensity=1, roughness=0.55) for a visible fabric-like rim.",
         "tags": [
             "pbr",
             "nme",
@@ -642,7 +643,7 @@
         "name": "Scene 70 — NME PBR Anisotropy",
         "maxMad": 0.02,
         "maxRawKB": 100,
-        "description": "Scene 67 + AnisotropyBlock with intensity=0 (marker validation). At intensity=0 BJS anisotropic GGX reduces to standard GGX, so visual output should match scene 67.",
+        "description": "Metallic gold PBR sphere with AnisotropyBlock intensity=0.85 and diagonal direction, producing a visibly stretched anisotropic specular highlight.",
         "tags": ["pbr", "nme", "procedural", "env", "anisotropy"]
     },
     {
@@ -651,7 +652,7 @@
         "name": "Scene 71 — NME PBR SubSurface",
         "maxMad": 0.02,
         "maxRawKB": 100,
-        "description": "Scene 67 + SubSurfaceBlock with intensity=0 (marker validation).",
+        "description": "Warm wax-like PBR sphere with SubSurfaceBlock translucency and a modest RefractionBlock input, back-lit to show transmitted subsurface glow.",
         "tags": ["pbr", "nme", "procedural", "env", "subsurface"]
     },
     {
@@ -659,7 +660,8 @@
         "slug": "scene72-nme-pbr-full",
         "name": "Scene 72 — NME PBR Full (D8AK3Z)",
         "maxMad": 0.02,
-        "description": "Full D8AK3Z#160 setup: 4 lights (hemi + point + spot + dir + PCF shadow) on sphere + ground, NME = EPY8BV/6 (PBR-MR + reflection + clearcoat + sheen + anisotropy + subsurface).",
+        "maxRawKB": 115,
+        "description": "Full D8AK3Z#160 setup: 4 lights (hemi + point + spot + dir + PCF shadow) on sphere + ground, NME = checked-in local EPY8BV#6 data plus local texture assets (PBR-MR + reflection + clearcoat + sheen + anisotropy + subsurface).",
         "tags": ["pbr", "nme", "procedural", "env", "shadows", "clearcoat", "sheen", "anisotropy", "subsurface"]
     }
 ]

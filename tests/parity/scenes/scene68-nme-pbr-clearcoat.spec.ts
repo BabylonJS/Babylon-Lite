@@ -1,8 +1,8 @@
 /**
  * Scene 68 — NME PBR Clearcoat Parity Test
  *
- * Same NME JSON parsed by both BJS and Lite. Adds a ClearCoatBlock on top
- * of scene 67's setup with intensity=1.0, roughness=0.0, IOR=1.5.
+ * Same NME JSON parsed by both BJS and Lite. Adds a glossy ClearCoatBlock
+ * on a dark navy base with intensity=1.0, roughness=0.02, IOR=1.5.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

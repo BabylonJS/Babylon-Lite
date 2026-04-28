@@ -1,5 +1,5 @@
 // BJS reference for Scene 69 — mirrors the Lite scene exactly. Same NME JSON,
-// same 4-light + env setup, plus a SheenBlock connected to PBR-MR.clearcoat.
+// same 4-light + env setup, plus a hot magenta SheenBlock connected to PBR-MR.sheen.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";

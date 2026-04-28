@@ -1,8 +1,7 @@
-// Scene 67: NME PBR Metallic-Roughness core (no IBL, no extras).
+// Scene 67: NME PBR Metallic-Roughness core (IBL, no extras).
 //
 // 4-light setup mirroring the playground D8AK3Z but without shadows,
-// ground or environment — those layer in across scenes 68-72. A single
-// PBR sphere centered at origin renders against a black background.
+// ground or skybox. A single teal matte PBR sphere renders against a black background.
 
 import {
     addToScene,
@@ -58,10 +57,6 @@ async function main(): Promise<void> {
     const material = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE67_NME_JSON });
     (sphere as { material?: unknown }).material = material;
     addToScene(scene, sphere);
-
-    (window as unknown as Record<string, unknown>).__scene = scene;
-    (window as unknown as Record<string, unknown>).__sphere = sphere;
-    (window as unknown as Record<string, unknown>).__nm = material;
 
     await registerScene(engine, scene);
     await startEngine(engine);

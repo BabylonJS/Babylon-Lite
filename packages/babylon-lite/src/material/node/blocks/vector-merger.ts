@@ -15,13 +15,23 @@ function tryResolve(block: NodeBlock, inputName: string, stage: Stage, state: No
     return ctx.resolve(block, inputName, stage, state);
 }
 
+function tryResolveAny(block: NodeBlock, inputNames: string[], stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): NodeExpr | null {
+    for (const inputName of inputNames) {
+        const resolved = tryResolve(block, inputName, stage, state, ctx);
+        if (resolved) {
+            return resolved;
+        }
+    }
+    return null;
+}
+
 export const emitter: BlockEmitter = {
     className: "VectorMergerBlock",
     emit(block, outputName, stage, state, ctx) {
         // Resolve optional inputs. Prefer bundle (xyzIn/xyIn/zwIn) over scalar (x/y/z/w).
-        const xyzIn = tryResolve(block, "xyzIn", stage, state, ctx);
-        const xyIn = tryResolve(block, "xyIn", stage, state, ctx);
-        const zwIn = tryResolve(block, "zwIn", stage, state, ctx);
+        const xyzIn = tryResolveAny(block, ["xyzIn", "xyz"], stage, state, ctx);
+        const xyIn = tryResolveAny(block, ["xyIn", "xy"], stage, state, ctx);
+        const zwIn = tryResolveAny(block, ["zwIn", "zw"], stage, state, ctx);
         const x = tryResolve(block, "x", stage, state, ctx);
         const y = tryResolve(block, "y", stage, state, ctx);
         const z = tryResolve(block, "z", stage, state, ctx);

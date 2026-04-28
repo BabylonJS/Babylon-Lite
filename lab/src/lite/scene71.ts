@@ -1,6 +1,6 @@
-// Scene 71: NME PBR core + ClearCoatBlock.
+// Scene 71: NME PBR core + SubSurfaceBlock.
 // Same scene as 67 (4 lights + env IBL + sphere) but the NME graph adds
-// a clear-coat layer with intensity=1, roughness=0, IOR=1.5.
+// warm translucency/refraction with back-lighting so the transmitted glow is obvious.
 
 import {
     addToScene,
@@ -38,13 +38,13 @@ async function main(): Promise<void> {
         brdfUrl: "/brdf-lut.png",
     });
 
-    const hemi = createHemisphericLight([0, 1, 0], 1);
+    const hemi = createHemisphericLight([0, 1, 0], 0.35);
     addToScene(scene, hemi);
-    const point = createPointLight([0, 5, -2], 1);
+    const point = createPointLight([0, 2, 4], 20);
     addToScene(scene, point);
-    const spot = createSpotLight([-0.5, 0, -2], [0, 0, 1], Math.PI / 2, 1, 1);
+    const spot = createSpotLight([0, 1.5, 4], [0, -0.2, -1], Math.PI / 2, 1, 8);
     addToScene(scene, spot);
-    const dir = createDirectionalLight([1, -1, 1], 10);
+    const dir = createDirectionalLight([0, -0.5, -1], 3);
     addToScene(scene, dir);
 
     const sphere = createSphere(engine, { segments: 32, diameter: 2 });

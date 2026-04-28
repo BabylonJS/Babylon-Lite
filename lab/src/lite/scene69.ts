@@ -1,6 +1,6 @@
-// Scene 69: NME PBR core + ClearCoatBlock.
+// Scene 69: NME PBR core + ClearCoatBlock + SheenBlock.
 // Same scene as 67 (4 lights + env IBL + sphere) but the NME graph adds
-// a clear-coat layer with intensity=1, roughness=0, IOR=1.5.
+// a softened clearcoat and hot magenta sheen on a dark purple base.
 
 import {
     addToScene,

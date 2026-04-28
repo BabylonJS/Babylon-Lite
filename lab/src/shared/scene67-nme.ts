@@ -1,8 +1,8 @@
-/** Scene 67 — NME PBR Metallic-Roughness core (no reflection / no extras).
+/** Scene 67 — NME PBR Metallic-Roughness core (IBL + no extras).
  *
  *  The simplest PBR-via-NME graph: PBRMetallicRoughnessBlock with just
- *  baseColor + metallic + roughness inputs, fed by world-space position +
- *  normal from the standard transform chain.  No reflection texture, no
+ *  saturated teal baseColor + metallic + roughness inputs, fed by world-space position +
+ *  normal from the standard transform chain plus an environment ReflectionBlock. No
  *  clear-coat / sheen / anisotropy / subsurface, no perturbed normal — those
  *  are added in scenes 68-72.
  *
@@ -137,7 +137,7 @@ export const SCENE67_NME_JSON = {
             convertToGammaSpace: false,
             convertToLinearSpace: false,
         },
-        // id=6 baseColor uniform (Color3) — neutral gray-white default
+        // id=6 baseColor uniform (Color3) — saturated teal demo color
         {
             customType: "BABYLON.InputBlock",
             id: 6,
@@ -153,7 +153,7 @@ export const SCENE67_NME_JSON = {
             matrixMode: 0,
             isConstant: false,
             valueType: "BABYLON.Color3",
-            value: [0.8, 0.8, 0.85],
+            value: [0.05, 0.55, 0.85],
             convertToGammaSpace: false,
             convertToLinearSpace: false,
         },
@@ -197,7 +197,7 @@ export const SCENE67_NME_JSON = {
             matrixMode: 0,
             isConstant: false,
             valueType: "number",
-            value: 0.5,
+            value: 0.65,
             convertToGammaSpace: false,
             convertToLinearSpace: false,
         },

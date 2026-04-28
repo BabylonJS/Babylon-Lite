@@ -1,6 +1,6 @@
 // BJS reference for scene 66 — mirrors PG M5VQE9#45 but with deterministic
-// scramble deltas so parity is reproducible. Same snippet (AT7YY5#6) fetched
-// at runtime.
+// scramble deltas so parity is reproducible. Uses the same local AT7YY5#6 NME
+// data as the Lite scene.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
@@ -17,7 +17,7 @@ import { NodeMaterial } from "@babylonjs/core/Materials/Node/nodeMaterial";
 import { MorphTarget } from "@babylonjs/core/Morph/morphTarget";
 import { MorphTargetManager } from "@babylonjs/core/Morph/morphTargetManager";
 import "@babylonjs/core/Materials/Node/Blocks";
-import { SCENE66_MORPH_PERIOD_MS, SCENE66_SNIPPET_URL, sphereScrambleDeltas } from "../shared/scene66.js";
+import { SCENE66_MORPH_PERIOD_MS, getScene66Nme, sphereScrambleDeltas } from "../shared/scene66-nme.js";
 
 (async function () {
     const __initStart = performance.now();
@@ -55,11 +55,9 @@ import { SCENE66_MORPH_PERIOD_MS, SCENE66_SNIPPET_URL, sphereScrambleDeltas } fr
     sg.addShadowCaster(sphere);
     sg.addShadowCaster(box);
 
-    // Load + build the NME.
-    const resp = await fetch(SCENE66_SNIPPET_URL);
-    const outer = (await resp.json()) as { jsonPayload: string };
-    const inner = JSON.parse(outer.jsonPayload) as { nodeMaterial: string };
-    const nm = NodeMaterial.Parse(JSON.parse(inner.nodeMaterial), scene);
+    // Load + build the local NME.
+    const { json } = await getScene66Nme();
+    const nm = NodeMaterial.Parse(json, scene);
     nm.build(false);
     sphere.material = nm;
     box.material = nm;

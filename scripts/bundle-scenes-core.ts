@@ -12,9 +12,9 @@
 import { build, type Plugin } from "vite";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { gzipSync } from "zlib";
 import { initialize as initMiniray, minify as minifyWgslMiniray } from "miniray";
 import { minify as terserMinify } from "terser";
+import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
 
 /**
  * Vite plugin: minify WGSL shader text using miniray (whitespace removal + comment stripping).
@@ -38,10 +38,97 @@ function wgslMinifyPlugin(): Plugin {
             const minified = typeof result === "string" ? result : result.code;
             return { code: `export default ${JSON.stringify(minified)}`, map: null };
         },
-        renderChunk(code: string) {
-            return { code: minifyTemplateWgsl(code), map: null };
+        renderChunk(code: string, chunk) {
+            const minified = minifyTemplateWgsl(code);
+            const isPbrChunk = chunk.fileName?.includes("pbr-metallic-roughness-block") || chunk.name?.includes("pbr-metallic-roughness-block");
+            return { code: isPbrChunk ? mangleInlineWgsl(minified) : minified, map: null };
         },
     };
+}
+
+function mangleInlineWgsl(code: string): string {
+    const replacements: [string, string][] = [
+        ["nme_pbr_transmittanceBurley", "pTB"],
+        ["nme_pbr_anisoBentNormal", "pAB"],
+        ["nme_pbr_anisoRoughness", "pAR"],
+        ["nme_pbr_colorAtDistance", "pCD"],
+        ["nme_pbr_visAnisoSmith", "pVS"],
+        ["nme_pbr_diffuseEON", "pDE"],
+        ["nme_pbr_cocaLambert", "pCL"],
+        ["nme_pbr_burleyAnisoD", "pBD"],
+        ["nme_pbr_fresSchlick", "pFS"],
+        ["nme_pbr_ccSchlick", "pCC"],
+        ["nme_pbr_charlieD", "pCH"],
+        ["nme_pbr_distGGX", "pDG"],
+        ["nme_pbr_geomGGX", "pGG"],
+        ["refractionSpecEnvReflectance", "rser"],
+        ["ccDirectAbsorption_h", "cdah"],
+        ["ccDirectAbsorption", "cda"],
+        ["ccAbsorptionColor", "cac"],
+        ["ccNdotLRefract_h", "cnlrh"],
+        ["ccNdotVRefract", "cnvr"],
+        ["ccNdotLRefract", "cnlr"],
+        ["ccTintThickness", "ctt"],
+        ["ccSpecEnvReflRaw", "cserr"],
+        ["ccSpecEnvRefl", "cse"],
+        ["ccFresnelIBL", "cfi"],
+        ["ccBrdfSample", "cbs"],
+        ["directDiffuseTranslucencyScale", "ddts"],
+        ["diffuseTransmissionAcc", "dta"],
+        ["ssRefractionIrradiance", "sri"],
+        ["finalSpecularScaledDirect", "fsd"],
+        ["colorSpecEnvReflectance", "cser"],
+        ["baseSpecEnvReflectance", "bser"],
+        ["ccEnergyConservation", "cec"],
+        ["finalRadianceScaled", "frs"],
+        ["environmentIrradiance", "eir"],
+        ["environmentRadiance", "era"],
+        ["translucencyIntensity", "tri"],
+        ["baseLayerAbsorption", "bla"],
+        ["NdotLUnclamped", "nlu"],
+        ["NdotVUnclamped", "nvu"],
+        ["ccDirectSpecAcc", "cdsa"],
+        ["ccRoughnessIn", "cri"],
+        ["ccIntensityIn", "cii"],
+        ["ccBumpColor", "cbc"],
+        ["ccBumpUv", "cbu"],
+        ["ccNormalW", "cnw"],
+        ["ccVRefract", "cvr"],
+        ["ccAlphaG", "cag"],
+        ["ccIorInv", "cii2"],
+        ["ccF0_raw", "cfrw"],
+        ["ccNdotH_h", "cnhh"],
+        ["ccVdotH_h", "cvhh"],
+        ["NdotH_h", "nhh"],
+        ["VdotH_h", "vhh"],
+        ["ccRough", "crg"],
+        ["finalIrradiance", "fir"],
+        ["finalRefractionRaw", "frr"],
+        ["baseLayerAtten", "blt"],
+        ["shAlbedoScaling", "sas"],
+        ["surfaceAlbedo", "sal"],
+        ["refractionOpacity", "rop"],
+        ["finalRefraction", "fre"],
+        ["ccFinalRadiance", "cfr"],
+        ["shadowFactors", "sfs"],
+        ["directSpecR0", "dsr"],
+        ["lumOverAlpha", "loa"],
+        ["geometricNormal", "gnm"],
+        ["ccAbsorption", "cab"],
+        ["shFinalIbl", "sfi"],
+        ["worldNormal", "wnm"],
+        ["diffuseAcc", "dac"],
+        ["specAcc", "sac"],
+        ["worldPos", "wpo"],
+        ["cameraPos", "cpo"],
+        ["NmePbrMrResult", "PMR"],
+        ["NME_PBR_PI", "PI"],
+    ];
+    let out = code;
+    for (const [from, to] of replacements) {
+        out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
+    }
+    return out.replace(/\b0\.0\b/g, "0.").replace(/\b1\.0\b/g, "1.").replace(/\b0\.0000001\b/g, "1e-7").replace(/\b0\.0005\b/g, "5e-4");
 }
 
 /** Strip spaces around WGSL operators inside template literal content. */
@@ -145,22 +232,22 @@ function processTemplateLiteral(code: string, i: number, len: number, out: strin
             continue;
         }
 
-        // Strip spaces around operators
-        if (ch === " ") {
+        // Collapse WGSL whitespace and strip it around punctuation/operators.
+        if (ch === " " || ch === "\n" || ch === "\t" || ch === "\r") {
             const prev = out.length > 0 ? out[out.length - 1]! : "";
             const prevCh = prev.length > 0 ? prev[prev.length - 1]! : "";
-            const next = i + 1 < len ? code[i + 1]! : "";
+            let j = i + 1;
+            while (j < len && (code[j] === " " || code[j] === "\n" || code[j] === "\t" || code[j] === "\r")) j++;
+            const next = j < len ? code[j]! : "";
             const ops = ":=,+-*/<>(){}[];";
             if (ops.includes(prevCh) || ops.includes(next)) {
-                i++;
+                i = j;
                 continue;
             }
-        }
-
-        // Replace newlines with space
-        if (ch === "\n") {
-            out.push(" ");
-            i++;
+            if (prevCh !== " " && prevCh !== "`" && next !== "`") {
+                out.push(" ");
+            }
+            i = j;
             continue;
         }
 
@@ -593,7 +680,7 @@ export async function buildBundleScenes(): Promise<void> {
 
     // Load existing manifest to check for cached BJS sizes
     const manifestPath = resolve(outDir, "manifest.json");
-    let existingManifest: Record<string, { rawKB: number; gzipKB: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }> = {};
+    let existingManifest: Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }> = {};
     if (existsSync(manifestPath)) {
         try {
             existingManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -673,13 +760,13 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
-async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipKB: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }>> {
+async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }>> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
     const manifestPath = resolve(outDir, "manifest.json");
 
     // Load existing manifest so we can update incrementally (UI can refresh mid-build)
-    let manifest: Record<string, { rawKB: number; gzipKB: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }> = {};
+    let manifest: Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }> = {};
     if (existsSync(manifestPath)) {
         try {
             manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -701,10 +788,11 @@ async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipK
         // Measure Lite scenes (write after each)
         for (const scene of SCENES) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, chunks } = await measurePage(browser, port, `bundle-${scene}.html`, "/bundle/");
-            manifest[scene] = { ...manifest[scene], rawKB, gzipKB, runtimeChunks: chunks };
+            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `bundle-${scene}.html`, "/bundle/");
+            manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flush();
-            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
+            const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
+            console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})`);
         }
 
         // Measure BJS scenes — skip if sizes already cached in manifest
@@ -715,7 +803,7 @@ async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipK
                 continue;
             }
             const tPage = performance.now();
-            const { rawKB, gzipKB } = await measurePage(browser, port, `bundle-${bjsScene}.html`, "/bundle/");
+            const { rawKB, gzipKB } = await measurePage(browser, port, bjsScene, `bundle-${bjsScene}.html`, "/bundle/");
             if (manifest[liteScene]) {
                 manifest[liteScene].bjsRawKB = rawKB;
                 manifest[liteScene].bjsGzipKB = gzipKB;
@@ -735,20 +823,21 @@ async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipK
 async function measurePage(
     browser: any,
     port: number,
+    scene: string,
     htmlFile: string,
     bundlePath: string
-): Promise<{ rawKB: number; gzipKB: number; chunks: string[] }> {
+): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
-    const jsPayloads: Buffer[] = [];
+    const jsPayloads: RuntimeJsPayload[] = [];
     const chunkFiles: string[] = [];
 
     page.on("response", async (resp: any) => {
         const url = resp.url();
         if (url.includes(bundlePath) && url.endsWith(".js") && resp.ok()) {
             try {
-                jsPayloads.push(await resp.body());
                 const idx = url.indexOf(bundlePath);
                 const fileName = url.slice(idx + bundlePath.length).split("?")[0];
+                jsPayloads.push({ file: fileName, body: await resp.body() });
                 chunkFiles.push(fileName);
             } catch {
                 /* page may close before body resolves */
@@ -763,17 +852,13 @@ async function measurePage(
         // BJS pages may not reach ready state without GPU — just measure fetched JS
     }
 
-    let rawTotal = 0;
-    let gzipTotal = 0;
-    for (const body of jsPayloads) {
-        rawTotal += body.length;
-        gzipTotal += gzipSync(body, { level: 9 }).length;
-    }
+    const summary = summarizeRuntimeBundle(jsPayloads, bundleInfoDir, scene);
 
     await page.close();
     return {
-        rawKB: Math.round((rawTotal / 1024) * 10) / 10,
-        gzipKB: Math.round((gzipTotal / 1024) * 10) / 10,
+        rawKB: bytesToRoundedKB(summary.rawBytes),
+        gzipKB: bytesToRoundedKB(summary.gzipBytes),
+        ignoredRawKB: bytesToRoundedKB(summary.ignoredRawBytes),
         chunks: Array.from(new Set(chunkFiles)).sort(),
     };
 }

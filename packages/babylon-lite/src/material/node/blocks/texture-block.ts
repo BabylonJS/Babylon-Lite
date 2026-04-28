@@ -18,6 +18,23 @@ const OUTPUT: Record<string, { swizzle: string; type: NodeValueType }> = {
     a: { swizzle: ".w", type: "f32" },
 };
 
+function applyColorSpace(expr: string, outputName: string, convertToLinear: boolean, convertToGamma: boolean): string {
+    if (!convertToLinear && !convertToGamma) {
+        return expr;
+    }
+    const power = convertToLinear ? "2.2" : "0.45454545";
+    if (outputName === "rgba") {
+        return `vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
+    }
+    if (outputName === "rgb") {
+        return `pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
+    }
+    if (outputName === "r" || outputName === "g" || outputName === "b") {
+        return `pow(max(${expr}${OUTPUT[outputName]!.swizzle}, 0.0), ${power})`;
+    }
+    return expr;
+}
+
 function sanitize(name: string): string {
     return name.replace(/[^A-Za-z0-9_]/g, "_");
 }
@@ -68,6 +85,8 @@ export const emitter: BlockEmitter = {
         }
 
         const out = OUTPUT[outputName] ?? OUTPUT.rgba!;
-        return { expr: `${sampleExpr.expr}${out.swizzle}`, type: out.type };
+        const serialized = block.serialized as { convertToLinearSpace?: boolean; convertToGammaSpace?: boolean };
+        const expr = applyColorSpace(sampleExpr.expr, outputName, serialized.convertToLinearSpace === true, serialized.convertToGammaSpace === true);
+        return { expr: expr === sampleExpr.expr ? `${sampleExpr.expr}${out.swizzle}` : expr, type: out.type };
     },
 };

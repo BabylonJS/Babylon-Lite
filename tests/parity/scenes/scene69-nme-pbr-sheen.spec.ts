@@ -1,8 +1,8 @@
 /**
  * Scene 69 — NME PBR Sheen Parity Test
  *
- * Same NME JSON parsed by both BJS and Lite. Adds a ClearCoatBlock on top
- * of scene 67's setup with intensity=1.0, roughness=0.0, IOR=1.5.
+ * Same NME JSON parsed by both BJS and Lite. Adds a hot magenta SheenBlock
+ * on a dark purple base while keeping softened clearcoat connected.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

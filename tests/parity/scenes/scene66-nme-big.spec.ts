@@ -4,8 +4,8 @@
  * The 136-block NME graph exercises the full runtime: diffuse/ambient/
  * specular/emissive/normal/opacity/lightmap textures + equirect reflection,
  * skinning, instances, morph targets, fog, discard, PCF shadow receive,
- * front-facing, and the lighting dispatcher. Both pages fetch the snippet
- * at runtime; textures are decoded from embedded base64 data URLs.
+ * front-facing, and the lighting dispatcher. Both pages use checked-in local
+ * NME data with extracted local texture assets.
  *
  * Morph scramble deltas come from a shared deterministic mulberry32 seed
  * and weight is pinned via `?freeze=1` for capture reproducibility.

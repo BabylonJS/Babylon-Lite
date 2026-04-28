@@ -1,6 +1,6 @@
-// Scene 70: NME PBR core + ClearCoatBlock.
+// Scene 70: NME PBR core + AnisotropyBlock.
 // Same scene as 67 (4 lights + env IBL + sphere) but the NME graph adds
-// a clear-coat layer with intensity=1, roughness=0, IOR=1.5.
+// non-zero anisotropy to stretch the metallic gold specular highlight.
 
 import {
     addToScene,

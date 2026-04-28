@@ -2,9 +2,8 @@
  * Scene 67 — NME PBR Metallic-Roughness Core Parity Test
  *
  * Same NME JSON parsed by both BJS and Lite. The PBRMetallicRoughnessBlock
- * runs direct lighting only (no IBL / reflection / extras), matching the
- * playground D8AK3Z core block. This is the foundation scene for the
- * scene67-72 PBR-NME phase.
+ * uses ReflectionBlock/IBL plus direct lights on a saturated matte base.
+ * This is the foundation scene for the scene67-72 PBR-NME phase.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

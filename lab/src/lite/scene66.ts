@@ -1,6 +1,6 @@
 // Scene 66: full NME playground (AT7YY5#6). Sphere + box casters, ground
-// receiver, all three share a 136-block NME material. Runtime fetch from the
-// snippet server, with embedded base64 textures decoded on the client.
+// receiver, all three share a 136-block local NME material with local texture
+// assets extracted out of the JSON to keep JS bundles small.
 
 import {
     addToScene,
@@ -22,7 +22,7 @@ import {
     parseNodeMaterialFromSnippet,
 } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
-import { SCENE66_MORPH_PERIOD_MS, fetchScene66Snippet, sanitizeName, sphereScrambleDeltas } from "../shared/scene66.js";
+import { SCENE66_MORPH_PERIOD_MS, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -67,8 +67,8 @@ async function main(): Promise<void> {
     });
     light.shadowGenerator = sg;
 
-    // Fetch + decode snippet textures.
-    const { json, textures } = await fetchScene66Snippet();
+    // Load local NME JSON + local texture assets.
+    const { json, textures } = await getScene66Nme();
     const textureOverrides: Record<string, Awaited<ReturnType<typeof loadTexture2D>>> = {};
     for (const t of textures) {
         // BJS snippet textures serialize coordinatesMode=7 (EQUIRECTANGULAR_MODE)
