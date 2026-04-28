@@ -21,25 +21,17 @@ export function processMaterialSwaps(scene: SceneContext): void {
             continue;
         }
         const rebuild = builder._rebuildSingle;
-        if (rebuild) {
-            const renderable = rebuild(ctx, mesh);
-            if (renderable.isTransparent) {
-                ctx._transparentRenderables.push(renderable);
-            } else {
-                const arr = renderable.isTransmissive ? ctx._transmissiveRenderables : ctx._opaqueRenderables;
-                let i = arr.length;
-                while (i > 0 && arr[i - 1]!.order > renderable.order) {
-                    i--;
-                }
-                arr.splice(i, 0, renderable);
-            }
-        } else if (builder._loadRebuildSingle) {
-            builder._loadRebuildSingle().then((mod: any) => {
-                builder._rebuildSingle = mod.buildSinglePbrRenderable ?? mod.buildSingleStandardRenderable;
-                (mesh as MeshInternal)._materialDirty = true;
-                ctx._materialSwapQueue.push(mesh);
-            });
+        if (!rebuild) {
+            continue;
         }
+        const renderable = rebuild(ctx, mesh);
+        // Insert by `order` so the renderable list stays sorted (frame-graph
+        // tasks bucket transparency/transmissive at bind time).
+        let i = ctx._renderables.length;
+        while (i > 0 && ctx._renderables[i - 1]!.order > renderable.order) {
+            i--;
+        }
+        ctx._renderables.splice(i, 0, renderable);
     }
     q.length = 0;
     ctx._renderableVersion++;

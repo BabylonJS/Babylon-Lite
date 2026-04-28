@@ -2,26 +2,36 @@
  *  BGL: binding 0 = uniform buffer, binding 1 = cube texture, binding 2 = sampler. */
 
 import type { EngineContextInternal } from "../../engine/engine.js";
-import { createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
+import type { RenderTargetSignature } from "../../engine/render-target.js";
+import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
+import { targetSignatureKey } from "../../engine/render-target.js";
 
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
 export interface CubemapSkyboxMaterial {
-    getPipeline(engine: EngineContextInternal, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    getPipeline(engine: EngineContextInternal, sig: RenderTargetSignature): GPURenderPipeline;
     createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
 }
 
-export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout, label: string, vertCode: string, fragCode: string): CubemapSkyboxMaterial {
-    let pipeline: GPURenderPipeline | null = null;
-    let layout: GPUBindGroupLayout | null = null;
-    let _cachedDevice: GPUDevice | null = null;
+/** Module-global pipeline + layout caches shared across all cubemap-skybox instances.
+ *  Keyed by `${label}|${sigKey}` so HDR and DDS variants don't collide. */
+const _cmPipelines = new Map<string, GPURenderPipeline>();
+const _cmLayouts = new Map<string, GPUBindGroupLayout>();
+let _cmCachedDevice: GPUDevice | null = null;
 
+export function createCubemapSkyboxMaterial(label: string, vertCode: string, fragCode: string): CubemapSkyboxMaterial {
     function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
         const device = engine.device;
-        if (layout && _cachedDevice === device) {
-            return layout;
+        if (_cmCachedDevice !== device) {
+            _cmPipelines.clear();
+            _cmLayouts.clear();
+            _cmCachedDevice = device;
         }
-        layout = device.createBindGroupLayout({
+        const cached = _cmLayouts.get(label);
+        if (cached) {
+            return cached;
+        }
+        const layout = device.createBindGroupLayout({
             label: `${label}-material`,
             entries: [
                 { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
@@ -29,34 +39,42 @@ export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLa
                 { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
             ],
         });
+        _cmLayouts.set(label, layout);
         return layout;
     }
 
     return {
-        getPipeline(engine, format, msaaSamples) {
+        getPipeline(engine, sig) {
             const device = engine.device;
-            if (pipeline && _cachedDevice === device) {
-                return pipeline;
+            if (_cmCachedDevice !== device) {
+                _cmPipelines.clear();
+                _cmLayouts.clear();
+                _cmCachedDevice = device;
             }
-            pipeline = null;
-            layout = null;
-            _cachedDevice = device;
+            const key = `${label}|${targetSignatureKey(sig)}`;
+            const cached = _cmPipelines.get(key);
+            if (cached) {
+                return cached;
+            }
             const vertModule = device.createShaderModule({ code: vertCode, label: `${label}-vert` });
             const fragModule = device.createShaderModule({ code: fragCode, label: `${label}-frag` });
 
-            pipeline = device.createRenderPipeline(
-                createStandardPipelineDescriptor({
+            const pipeline = device.createRenderPipeline(
+                createDefaultPipelineDescriptor({
                     label: `${label}-pipeline`,
                     engine,
-                    bgls: [sceneBindGroupLayout, getLayout(engine)],
+                    bgls: [getSceneBindGroupLayout(engine), getLayout(engine)],
                     vertModule,
                     fragModule,
                     vertexBuffers: SKYBOX_POS_BUFFER,
-                    format,
-                    msaaSamples,
+                    format: sig.colorFormat,
+                    depthStencilFormat: sig.depthStencilFormat,
+                    msaaSamples: sig.sampleCount,
                     depthWriteEnabled: false,
+                    flipY: sig.flipY,
                 })
             );
+            _cmPipelines.set(key, pipeline);
             return pipeline;
         },
 

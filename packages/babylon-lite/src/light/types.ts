@@ -62,14 +62,15 @@ export const LIGHT_ENTRY_FLOATS = 16;
 export interface PbrLightExtension {
     /** Human-readable tag for pipeline cache key differentiation. */
     readonly tag: string;
-    /** Structured scene UBO field descriptors for the template composer. */
-    readonly pbrSceneUboFields: readonly { readonly name: string; readonly type: "f32" | "vec3<f32>" | "vec4<f32>" }[];
     /** WGSL: compute L vector + NdotL. Assumes N, scene are in scope. */
     emitLightVector(): string;
     /** WGSL: compute direct diffuse. Assumes NdotL, surfaceAlbedo, lightColor, mesh in scope. */
     emitDirectDiffuse(): string;
     /** WGSL: geometric AA for specular roughness. Empty string if not needed. */
     emitGeometricAA(): string;
-    /** Write light data into PBR scene UBO float array starting at baseOffset. */
-    writeSceneUbo(data: Float32Array, baseOffset: number, light: LightBase): void;
+    /** Write light data into the canonical SceneUniforms float array.
+     *  The extension knows the canonical offsets of its fields
+     *  (lightDirection, lightPosition, lightDiffuseColor, etc.) and writes
+     *  directly to them. */
+    writeSceneUbo(data: Float32Array, light: LightBase): void;
 }

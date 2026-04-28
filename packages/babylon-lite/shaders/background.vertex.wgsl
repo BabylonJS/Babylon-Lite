@@ -26,7 +26,7 @@ fn main(input: VertexInput) -> VertexOutput {
   let finalWorld = mesh.world;
   let worldPos4 = finalWorld * vec4<f32>(input.position, 1.0);
   output.vPositionW = worldPos4.xyz;
-  output.clipPos = scene.viewProj * worldPos4;
+  output.clipPos = scene.viewProjection * worldPos4;
   let normalWorld = mat3x3<f32>(finalWorld[0].xyz, finalWorld[1].xyz, finalWorld[2].xyz);
   output.vNormalW = normalize(normalWorld * input.normal);
   output.vUV = input.uv;

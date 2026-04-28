@@ -8,23 +8,29 @@ import type { Renderable } from "../render/renderable.js";
 import { buildSkyboxCubeMapGPU } from "../material/standard/skybox-cubemap.js";
 
 /** Build a skybox Renderable from a SkyboxData (loaded via loadSkybox). */
-export function buildSkyboxRenderable(scene: SceneContext, skybox: SkyboxData, sceneUBO: GPUBuffer): Renderable {
+export function buildSkyboxRenderable(scene: SceneContext, skybox: SkyboxData): Renderable {
     const engine = scene.engine as EngineContextInternal;
 
-    const gpu = buildSkyboxCubeMapGPU(engine, engine.format, engine.msaaSamples, sceneUBO, skybox.worldMatrix, skybox.cubeView, skybox.cubeSampler);
+    const gpu = buildSkyboxCubeMapGPU(engine, skybox.worldMatrix, skybox.cubeView, skybox.cubeSampler);
 
-    return {
+    const r: Renderable = {
         order: 0, // skybox behind everything
         isTransparent: false,
-        draw(pass) {
-            pass.setBindGroup(0, gpu.sceneBindGroup);
-            pass.setPipeline(gpu.pipeline);
-            pass.setBindGroup(1, gpu.meshBindGroup);
-            pass.setVertexBuffer(0, skybox.posBuffer);
-            pass.setVertexBuffer(1, skybox.normBuffer);
-            pass.setIndexBuffer(skybox.idxBuffer, "uint32");
-            pass.drawIndexed(skybox.idxCount);
-            return 1;
+        bind(eng, sig) {
+            const pipeline = gpu.getPipeline(eng as EngineContextInternal, sig);
+            return {
+                renderable: r,
+                draw(pass) {
+                    pass.setPipeline(pipeline);
+                    pass.setBindGroup(1, gpu.meshBindGroup);
+                    pass.setVertexBuffer(0, skybox.posBuffer);
+                    pass.setVertexBuffer(1, skybox.normBuffer);
+                    pass.setIndexBuffer(skybox.idxBuffer, "uint32");
+                    pass.drawIndexed(skybox.idxCount);
+                    return 1;
+                },
+            };
         },
     };
+    return r;
 }

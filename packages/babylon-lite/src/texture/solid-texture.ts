@@ -4,7 +4,7 @@
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler } from "../resource/gpu-pool.js";
 
 export function createSolidTexture2D(engine: EngineContext, r: number, g: number, b: number, a: number = 1.0): Texture2D {
     const device = (engine as EngineContextInternal).device;
@@ -17,10 +17,7 @@ export function createSolidTexture2D(engine: EngineContext, r: number, g: number
     const data = new Uint8Array([Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), Math.round(a * 255)]);
     device.queue.writeTexture({ texture }, data, { bytesPerRow: 4, rowsPerImage: 1 }, { width: 1, height: 1 });
 
-    const sampler = getOrCreateSampler(engine as EngineContextInternal, {
-        minFilter: "linear",
-        magFilter: "linear",
-    });
+    const sampler = getBilinearSampler(engine as EngineContextInternal);
 
     return { texture, view: texture.createView(), sampler, width: 1, height: 1 };
 }

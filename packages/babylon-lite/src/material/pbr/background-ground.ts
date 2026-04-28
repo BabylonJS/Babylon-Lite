@@ -5,41 +5,19 @@
 import type { Mat4 } from "../../math/types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
-import { getOrCreateSampler } from "../../resource/gpu-pool.js";
+import type { RenderTargetSignature } from "../../engine/render-target.js";
+import { getBilinearSampler } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
+import { targetSignatureKey } from "../../engine/render-target.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
 import { createMappedBuffer } from "../../resource/gpu-buffers.js";
-import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
 
 // ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
-//    don't pay for the SH struct + image processing in the shared wgsl-helpers chunk). ──
-
-/** PBR SceneUniforms with spherical harmonics + image processing fields.
- *  Superset of WGSL_SCENE_UNIFORMS_PBR. */
-const WGSL_SCENE_UNIFORMS_PBR_SH = `
-struct SceneUniforms {
-viewProj: mat4x4<f32>,
-cameraPosition: vec3<f32>, _pad0: f32,
-lightDirection: vec3<f32>, lightIntensity: f32,
-lightDiffuseColor: vec3<f32>, _pad1: f32,
-lightGroundColor: vec3<f32>, _pad2: f32,
-vSphericalL00: vec3<f32>, _sh0: f32,
-vSphericalL1_1: vec3<f32>, _sh1: f32,
-vSphericalL10: vec3<f32>, _sh2: f32,
-vSphericalL11: vec3<f32>, _sh3: f32,
-vSphericalL2_2: vec3<f32>, _sh4: f32,
-vSphericalL2_1: vec3<f32>, _sh5: f32,
-vSphericalL20: vec3<f32>, _sh6: f32,
-vSphericalL21: vec3<f32>, _sh7: f32,
-vSphericalL22: vec3<f32>, _sh8: f32,
-exposureLinear: f32,
-contrast: f32,
-_imgPad0: f32,
-_imgPad1: f32,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;
+//    don't pay for the image-processing helper in the shared wgsl-helpers chunk). ──
 
 /** Image processing: exposure → Reinhard tonemap → gamma → contrast. */
 const WGSL_IMAGE_PROCESSING = `
@@ -66,17 +44,13 @@ const BG_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + alpha + backgro
 /** Build the ground renderable for a PBR environment scene. */
 export async function buildGroundRenderable(
     engine: EngineContextInternal,
-    sceneBindGroupLayout: GPUBindGroupLayout,
-    format: GPUTextureFormat,
-    msaaSamples: number,
-    sceneBindGroup: GPUBindGroup,
     groundSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
     groundTextureUrl?: string,
     groundImagePromise?: Promise<ImageBitmap>
 ): Promise<Renderable> {
-    const gndMat = createGroundMaterial(sceneBindGroupLayout);
+    const gndMat = createGroundMaterial();
 
     // Ground world: rotated 90° X (XY→XZ), translated to rootPosition
     // Column-major for WGSL: ground quad in XY plane, normal +Z → world +Y
@@ -95,48 +69,54 @@ export async function buildGroundRenderable(
 
     const gndBufs = createGroundBuffers(engine, groundSize);
     const gndUBO = createBgMeshUBO(engine, groundWorld, primaryColor);
-    const gndPipeline = gndMat.getPipeline(engine, format, msaaSamples);
 
     const groundTex = await loadGroundTexture(engine, groundTextureUrl, groundImagePromise);
     const groundTexView = groundTex.createView();
-    const groundSamp = getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" });
+    const groundSamp = getBilinearSampler(engine);
     const gndBG = gndMat.createBindGroup(engine, gndUBO, groundTexView, groundSamp);
 
-    return {
+    const r: Renderable = {
         order: 200, // ground renders last (transparent)
         isTransparent: true,
-        draw(pass) {
-            pass.setBindGroup(0, sceneBindGroup);
-            pass.setPipeline(gndPipeline);
-            pass.setBindGroup(1, gndBG);
-            pass.setVertexBuffer(0, gndBufs.posBuffer);
-            pass.setVertexBuffer(1, gndBufs.normBuffer);
-            pass.setVertexBuffer(2, gndBufs.uvBuffer);
-            pass.setIndexBuffer(gndBufs.idxBuffer, "uint16");
-            pass.drawIndexed(gndBufs.idxCount);
-            return 1;
+        bind(eng, sig) {
+            return {
+                renderable: r,
+                pipeline: gndMat.getPipeline(eng as EngineContextInternal, sig),
+                draw(pass) {
+                    pass.setBindGroup(1, gndBG);
+                    pass.setVertexBuffer(0, gndBufs.posBuffer);
+                    pass.setVertexBuffer(1, gndBufs.normBuffer);
+                    pass.setVertexBuffer(2, gndBufs.uvBuffer);
+                    pass.setIndexBuffer(gndBufs.idxBuffer, "uint16");
+                    pass.drawIndexed(gndBufs.idxCount);
+                    return 1;
+                },
+            };
         },
     };
+    return r;
 }
 
 // ─── Ground Material ────────────────────────────────────────────────────────
 
 interface GroundMaterial {
-    getPipeline(engine: EngineContextInternal, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    getPipeline(engine: EngineContextInternal, sig: RenderTargetSignature): GPURenderPipeline;
     createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler): GPUBindGroup;
 }
 
-function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundMaterial {
-    let pipeline: GPURenderPipeline | null = null;
-    let layout: GPUBindGroupLayout | null = null;
-    let _cachedDevice: GPUDevice | null = null;
+/** Module-global pipeline cache — keyed by full target signature (color/depth/samples/flipY).
+ *  All ground renderables share this cache. */
+const _gndPipelines = new Map<string, GPURenderPipeline>();
+let _gndLayout: GPUBindGroupLayout | null = null;
+let _gndCachedDevice: GPUDevice | null = null;
 
+function createGroundMaterial(): GroundMaterial {
     function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
         const device = engine.device;
-        if (layout && _cachedDevice === device) {
-            return layout;
+        if (_gndLayout && _gndCachedDevice === device) {
+            return _gndLayout;
         }
-        layout = device.createBindGroupLayout({
+        _gndLayout = device.createBindGroupLayout({
             label: "ground-material",
             entries: [
                 { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
@@ -144,25 +124,29 @@ function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundM
                 { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
             ],
         });
-        return layout;
+        return _gndLayout;
     }
 
     return {
-        getPipeline(engine, format, msaaSamples) {
+        getPipeline(engine, sig) {
             const device = engine.device;
-            if (pipeline && _cachedDevice === device) {
-                return pipeline;
+            if (_gndCachedDevice !== device) {
+                _gndPipelines.clear();
+                _gndLayout = null;
+                _gndCachedDevice = device;
             }
-            pipeline = null;
-            layout = null;
-            _cachedDevice = device;
-            const vertModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR + groundVertSrc, label: "ground-vert" });
-            const fragModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR_SH + WGSL_IMAGE_PROCESSING + WGSL_DITHER + groundFragSrc, label: "ground-frag" });
+            const key = targetSignatureKey(sig);
+            const cached = _gndPipelines.get(key);
+            if (cached) {
+                return cached;
+            }
+            const vertModule = device.createShaderModule({ code: SCENE_UBO_WGSL + groundVertSrc, label: "ground-vert" });
+            const fragModule = device.createShaderModule({ code: SCENE_UBO_WGSL + WGSL_IMAGE_PROCESSING + WGSL_DITHER + groundFragSrc, label: "ground-frag" });
 
             // Matches BJS rp_8: premultiplied alpha blend, depthWrite=false
-            pipeline = device.createRenderPipeline({
+            const pipeline = device.createRenderPipeline({
                 label: "ground-pipeline",
-                layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBindGroupLayout, getLayout(engine)] }),
+                layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), getLayout(engine)] }),
                 vertex: {
                     module: vertModule,
                     entryPoint: "main",
@@ -177,7 +161,7 @@ function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundM
                     entryPoint: "main",
                     targets: [
                         {
-                            format,
+                            format: sig.colorFormat,
                             blend: {
                                 color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                                 alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -186,13 +170,14 @@ function createGroundMaterial(sceneBindGroupLayout: GPUBindGroupLayout): GroundM
                     ],
                 },
                 depthStencil: {
-                    format: "depth24plus-stencil8",
+                    format: sig.depthStencilFormat ?? "depth24plus-stencil8",
                     depthCompare: "less-equal",
                     depthWriteEnabled: false,
                 },
-                multisample: { count: msaaSamples },
-                primitive: { topology: "triangle-list", cullMode: "back", frontFace: "ccw" },
+                multisample: { count: sig.sampleCount },
+                primitive: { topology: "triangle-list", cullMode: "back", frontFace: sig.flipY ? "cw" : "ccw" },
             });
+            _gndPipelines.set(key, pipeline);
             return pipeline;
         },
 

@@ -3,6 +3,7 @@
 
 import type { PbrLightExtension, LightBase } from "./types.js";
 import { _setPbrLightExtension } from "../material/pbr/pbr-flags.js";
+import { SCENE_UBO_OFFSETS } from "../shader/scene-uniforms-fields.js";
 
 interface PointLightData {
     position: { x: number; y: number; z: number };
@@ -13,14 +14,6 @@ interface PointLightData {
 
 const pointPbrExtension: PbrLightExtension = {
     tag: "point",
-
-    pbrSceneUboFields: [
-        { name: "lightPosition", type: "vec3<f32>" },
-        { name: "lightIntensity", type: "f32" },
-        { name: "lightDiffuseColor", type: "vec3<f32>" },
-        { name: "lightRange", type: "f32" },
-        { name: "_pointPad", type: "vec3<f32>" },
-    ],
 
     emitLightVector(): string {
         return `let lightToFrag = scene.lightPosition - input.worldPos;
@@ -38,16 +31,18 @@ let lightAtten = 1.0 / max(lightDist2, 0.0001);\n`;
         return "";
     },
 
-    writeSceneUbo(data: Float32Array, o: number, light: LightBase): void {
+    writeSceneUbo(data: Float32Array, light: LightBase): void {
         const p = light as unknown as PointLightData;
-        data[o] = p.position.x;
-        data[o + 1] = p.position.y;
-        data[o + 2] = p.position.z;
-        data[o + 3] = p.intensity;
-        data[o + 4] = p.diffuse[0] ?? 1;
-        data[o + 5] = p.diffuse[1] ?? 1;
-        data[o + 6] = p.diffuse[2] ?? 1;
-        data[o + 7] = p.range;
+        const oPos = SCENE_UBO_OFFSETS.lightPosition;
+        const oDiff = SCENE_UBO_OFFSETS.lightDiffuseColor;
+        data[oPos] = p.position.x;
+        data[oPos + 1] = p.position.y;
+        data[oPos + 2] = p.position.z;
+        data[SCENE_UBO_OFFSETS.lightIntensity] = p.intensity;
+        data[oDiff] = p.diffuse[0] ?? 1;
+        data[oDiff + 1] = p.diffuse[1] ?? 1;
+        data[oDiff + 2] = p.diffuse[2] ?? 1;
+        data[SCENE_UBO_OFFSETS.lightRange] = p.range;
     },
 };
 

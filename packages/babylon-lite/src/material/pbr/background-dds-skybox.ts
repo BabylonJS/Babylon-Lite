@@ -7,15 +7,14 @@ import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { createStandardPipelineDescriptor } from "../../render/scene-helpers.js";
-import { WGSL_SCENE_UNIFORMS_PBR, WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import ddsSkyboxVertSrc from "../../../shaders/skybox-dds.vertex.wgsl?raw";
 import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
 
 const SKY_DDS_UNIFORM_SIZE = 96;
 const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
-
-const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
 function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
     // prettier-ignore
@@ -55,68 +54,40 @@ function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
 /** Build a DDS cube skybox as a complete Renderable (order 0). */
 export async function buildDdsSkyboxRenderable(
     scene: SceneContext,
-    sceneBindGroupLayout: GPUBindGroupLayout,
-    sceneBindGroup: GPUBindGroup,
     skyHalfSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
     skyboxTextureUrl?: string
 ): Promise<Renderable> {
     const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
 
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
-    const matLayout = device.createBindGroupLayout({
-        label: "skybox-dds-material",
-        entries: [
-            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
-        ],
-    });
-    const vertModule = device.createShaderModule({ code: WGSL_SCENE_UNIFORMS_PBR + ddsSkyboxVertSrc, label: "skybox-dds-vert" });
-    const fragModule = device.createShaderModule({ code: WGSL_DITHER + ddsSkyboxFragSrc, label: "skybox-dds-frag" });
-    const pipeline = device.createRenderPipeline(
-        createStandardPipelineDescriptor({
-            label: "skybox-dds-pipeline",
-            engine,
-            bgls: [sceneBindGroupLayout, matLayout],
-            vertModule,
-            fragModule,
-            vertexBuffers: SKYBOX_POS_BUFFER,
-            format: engine.format,
-            msaaSamples: engine.msaaSamples,
-            depthWriteEnabled: false,
-        })
-    );
-
+    const mat = createCubemapSkyboxMaterial("skybox-dds", SCENE_UBO_WGSL + ddsSkyboxVertSrc, WGSL_DITHER + ddsSkyboxFragSrc);
     const ubo = createDdsMeshUBO(engine, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
-    const bindGroup = device.createBindGroup({
-        layout: matLayout,
-        entries: [
-            { binding: 0, resource: { buffer: ubo } },
-            { binding: 1, resource: cubeView },
-            { binding: 2, resource: sampler },
-        ],
-    });
+    const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 
-    return {
+    const r: Renderable = {
         order: 0,
         isTransparent: false,
-        draw(pass) {
-            pass.setBindGroup(0, sceneBindGroup);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(1, bindGroup);
-            pass.setVertexBuffer(0, skyBufs.posBuffer);
-            pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
-            pass.drawIndexed(skyBufs.idxCount);
-            return 1;
+        bind(eng, sig) {
+            return {
+                renderable: r,
+                pipeline: mat.getPipeline(eng as EngineContextInternal, sig),
+                draw(pass) {
+                    pass.setBindGroup(1, bindGroup);
+                    pass.setVertexBuffer(0, skyBufs.posBuffer);
+                    pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
+                    pass.drawIndexed(skyBufs.idxCount);
+                    return 1;
+                },
+            };
         },
     };
+    return r;
 }
 
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────

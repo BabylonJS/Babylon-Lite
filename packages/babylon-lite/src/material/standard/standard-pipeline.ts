@@ -13,16 +13,15 @@
  *  Shared scene UBO layout is identical across all variants (176 bytes). */
 
 import type { EngineContextInternal } from "../../engine/engine.js";
-import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
+import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO } from "../../render/lights-ubo.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { getSceneBindGroupLayout, clearSceneBGLCache } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
-import { createPipelineCache, releaseVariant } from "../pipeline-cache.js";
-import type { PipelineCache } from "../pipeline-cache.js";
-import { createEmptyUniformBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { targetSignatureKey } from "../../engine/render-target.js";
 // (flags imported from same file)
 
 // ─── Pluggable Shadow Shader Extensions (tree-shakable) ────────────
@@ -240,45 +239,26 @@ export function composeStandardShader(features: number, fragments: ShaderFragmen
     return composeShader(template, fragments);
 }
 
-// ─── Pipeline Variant ───────────────────────────────────────────────
+// ─── Shader Bindings (sig-independent) ──────────────────────────────
 
-/** Cached pipeline variant — pipeline + bind group layouts + scene resources. */
-export interface PipelineVariant {
+/** Cached per-(features, fragments) shader bindings: BGLs + composed shader +
+ *  per-sig pipeline cache. Created once at renderable build time, shared across
+ *  all sig-specific pipelines. */
+export interface StandardShaderBindings {
     features: number;
-    pipeline: GPURenderPipeline;
-    sceneBGL: GPUBindGroupLayout;
     meshBGL: GPUBindGroupLayout;
-    shadowBGL: GPUBindGroupLayout | null; // only if RECEIVE_SHADOWS
-    sceneUBO: GPUBuffer;
-    sceneBG: GPUBindGroup;
-    meshUboTotalBytes: number;
-    refCount: number;
+    shadowBGL: GPUBindGroupLayout | null;
+    composed: ComposedShader;
+    /** Per-sig pipeline cache. Key = `targetSignatureKey(sig)`. */
+    pipelines: Map<string, GPURenderPipeline>;
 }
 
-/** Per-mesh GPU resources — created per mesh, references a PipelineVariant. */
-export interface DynamicMeshGPU {
-    meshBG: GPUBindGroup;
-    shadowBG: GPUBindGroup | null; // only if RECEIVE_SHADOWS
-    meshUBO: GPUBuffer;
-    materialUBO: GPUBuffer;
-    /** textureLevel used at build time (1 if UV-mapped, 0 otherwise). */
-    textureLevel: number;
-    /** Shadow generators referenced by this mesh. */
-    shadowGens: ShadowGenerator[];
-}
+// ─── Caches ─────────────────────────────────────────────────────────
 
-// ─── Pipeline Cache ─────────────────────────────────────────────────
-
-let cache: PipelineCache<PipelineVariant> | null = null;
+/** Per-(features:fk) shader bindings cache (sig-independent). */
+const _bindingsCache = new Map<string, StandardShaderBindings>();
 let _composedCache: Map<string, ComposedShader> | null = null;
-let _sharedSceneUBO: GPUBuffer | null = null;
-
-function getCache(): PipelineCache<PipelineVariant> {
-    if (!cache) {
-        cache = createPipelineCache();
-    }
-    return cache;
-}
+let _cachedDevice: GPUDevice | null = null;
 
 function getComposedCache(): Map<string, ComposedShader> {
     if (!_composedCache) {
@@ -287,17 +267,21 @@ function getComposedCache(): Map<string, ComposedShader> {
     return _composedCache;
 }
 
-/** Clear the pipeline cache. Must be called when a GPU device is destroyed. */
-export function clearStandardPipelineCache(): void {
-    cache?.clear();
-    _composedCache?.clear();
-    clearSceneBGLCache();
-    _sharedSceneUBO = null;
+function ensureDevice(engine: EngineContextInternal): void {
+    if (_cachedDevice !== engine.device) {
+        _bindingsCache.clear();
+        _composedCache?.clear();
+        clearSceneBGLCache();
+        _cachedDevice = engine.device;
+    }
 }
 
-export function releaseStandardPipelineVariant(variant: PipelineVariant): void {
-    releaseVariant(variant);
-    getCache().evictUnused();
+/** Clear the pipeline cache. Must be called when a GPU device is destroyed. */
+export function clearStandardPipelineCache(): void {
+    _bindingsCache.clear();
+    _composedCache?.clear();
+    clearSceneBGLCache();
+    _cachedDevice = null;
 }
 
 function fragmentKey(fragments: ShaderFragment[]): string {
@@ -309,162 +293,114 @@ function fragmentKey(fragments: ShaderFragment[]): string {
               .join(",");
 }
 
-/** Get or create a pipeline variant for the given features. */
-export function getOrCreatePipeline(
-    engine: EngineContextInternal,
-    format: GPUTextureFormat,
-    msaaSamples: number,
-    features: number,
-    fragments: ShaderFragment[] = []
-): PipelineVariant {
-    const device = engine.device;
-    const c = getCache();
-    const cc = getComposedCache();
-    if (c.ensureDevice(engine)) {
-        cc.clear();
-        clearSceneBGLCache();
-        _sharedSceneUBO = null;
-    }
+/** Get-or-build the sig-independent shader bindings for a given feature/fragment set.
+ *  Used at renderable build time so per-mesh bind groups can be created BEFORE the
+ *  first bind() call (when sig is known). */
+export function getOrCreateStandardBindings(engine: EngineContextInternal, features: number, fragments: ShaderFragment[] = []): StandardShaderBindings {
+    ensureDevice(engine);
     const fk = fragmentKey(fragments);
-    const key = fk ? `${features}:${format}:${msaaSamples}:${fk}` : `${features}:${format}:${msaaSamples}`;
-    const cached = c.getOrIncRef(key);
+    const key = fk ? `${features}:${fk}` : `${features}`;
+    const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
     }
 
-    const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
-
-    // Compose shader via the generic composer — WGSL + BGL descriptors
-    const composedKey = fk ? `${features}:${fk}` : `${features}`;
-    let composed = cc.get(composedKey);
+    const cc = getComposedCache();
+    let composed = cc.get(key);
     if (!composed) {
         composed = composeStandardShader(features, fragments);
-        cc.set(composedKey, composed);
+        cc.set(key, composed);
     }
-    const vertSrc = composed.vertexWGSL;
-    const fragSrc = composed.fragmentWGSL;
 
-    // ─── Bind Group Layouts (from composer) ──────────────────
-
-    // Group 0: Scene (shared across all variants)
-    const sceneBGL = getSceneBindGroupLayout(engine);
-
-    // Group 1: Per-mesh (from composer's meshBGLDescriptor)
-    const meshBGL = device.createBindGroupLayout({
-        label: `std-mesh-f${features}`,
-        ...composed.meshBGLDescriptor,
-    });
-
-    // Group 2: Shadow map (from composer or fallback for PCF)
+    const device = engine.device;
+    const meshBGL = device.createBindGroupLayout({ label: `std-mesh-f${features}`, ...composed.meshBGLDescriptor });
     let shadowBGL: GPUBindGroupLayout | null = null;
-    const bgls: GPUBindGroupLayout[] = [sceneBGL, meshBGL];
-
+    const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
     if (hasShadow && composed.shadowBGLDescriptor) {
-        shadowBGL = device.createBindGroupLayout({
-            label: `std-shadow-f${features}`,
-            ...composed.shadowBGLDescriptor,
-        });
-        bgls.push(shadowBGL);
+        shadowBGL = device.createBindGroupLayout({ label: `std-shadow-f${features}`, ...composed.shadowBGLDescriptor });
     }
 
-    // ─── Vertex Buffers (from composer) ──────────────────────
+    const bindings: StandardShaderBindings = {
+        features,
+        meshBGL,
+        shadowBGL,
+        composed,
+        pipelines: new Map(),
+    };
+    _bindingsCache.set(key, bindings);
+    return bindings;
+}
 
-    const vertexBuffers = composed.vertexBufferLayouts;
+/** Get-or-build a sig-specific pipeline on top of a shader bindings. Called at bind() time. */
+export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
+    ensureDevice(engine);
+    const key = targetSignatureKey(sig);
+    const cached = bindings.pipelines.get(key);
+    if (cached) {
+        return cached;
+    }
 
-    // ─── Pipeline ────────────────────────────────────────────
+    const device = engine.device;
+    const composed = bindings.composed;
+    const features = bindings.features;
+    const sceneBGL = getSceneBindGroupLayout(engine);
+    const bgls: GPUBindGroupLayout[] = bindings.shadowBGL ? [sceneBGL, bindings.meshBGL, bindings.shadowBGL] : [sceneBGL, bindings.meshBGL];
 
-    const vertModule = device.createShaderModule({ code: vertSrc, label: `std-vert-f${features}` });
-    const fragModule = device.createShaderModule({ code: fragSrc, label: `std-frag-f${features}` });
+    const vertModule = device.createShaderModule({ code: composed.vertexWGSL, label: `std-vert-f${features}` });
+    const fragModule = device.createShaderModule({ code: composed.fragmentWGSL, label: `std-frag-f${features}` });
 
-    // Alpha blending for opacity-textured or material-level alpha < 1 (matches BJS transparent group)
     const needsBlend = (features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0;
     const colorTarget: GPUColorTargetState = needsBlend
         ? {
-              format,
+              format: sig.colorFormat,
               blend: {
                   color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
                   alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
               },
           }
-        : { format };
+        : { format: sig.colorFormat };
 
     const pipeline = device.createRenderPipeline({
         label: `standard-pipeline-f${features}`,
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
-        vertex: { module: vertModule, entryPoint: "main", buffers: vertexBuffers },
+        vertex: { module: vertModule, entryPoint: "main", buffers: composed.vertexBufferLayouts },
         fragment: { module: fragModule, entryPoint: "main", targets: [colorTarget] },
-        depthStencil: {
-            format: "depth24plus-stencil8",
-            depthCompare: "less-equal",
-            depthWriteEnabled: !needsBlend,
-        },
-        multisample: { count: msaaSamples },
-        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
+        ...(sig.depthStencilFormat ? { depthStencil: { format: sig.depthStencilFormat, depthCompare: "less-equal" as GPUCompareFunction, depthWriteEnabled: !needsBlend } } : {}),
+        multisample: { count: sig.sampleCount },
+        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: sig.flipY ? "cw" : "ccw" },
     });
 
-    // ─── Scene UBO + Bind Group (shared across all variants) ───
-
-    if (!_sharedSceneUBO) {
-        _sharedSceneUBO = createEmptyUniformBuffer(engine, composed.sceneUboSpec.totalBytes);
-    }
-    const sceneUBO = _sharedSceneUBO;
-
-    const sceneBG = device.createBindGroup({
-        layout: sceneBGL,
-        entries: [{ binding: 0, resource: { buffer: sceneUBO } }],
-    });
-
-    const variant: PipelineVariant = {
-        features,
-        pipeline,
-        sceneBGL,
-        meshBGL,
-        shadowBGL,
-        sceneUBO,
-        sceneBG,
-        meshUboTotalBytes: composed.meshUboSpec.totalBytes,
-        refCount: 1,
-    };
-
-    c.set(key, variant);
-    return variant;
+    bindings.pipelines.set(key, pipeline);
+    return pipeline;
 }
 
 // ─── Per-Mesh GPU Setup ─────────────────────────────────────────────
 
 export { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO };
 
-export function createDynamicMeshGPU(
+/** Build the per-mesh material/lights bind group (group 1). The mesh UBO,
+ *  material UBO, and lights buffer are created/owned by the caller — this
+ *  function only assembles the bind group entries that match the composer's
+ *  binding layout.
+ *
+ *  Mirrors `createPbrMeshBindGroup` in pbr-pipeline.ts. */
+export function createStandardMeshBindGroup(
     engine: EngineContextInternal,
-    variant: PipelineVariant,
-    opts: {
-        worldMatrix: Float32Array;
-        material: StandardMaterialProps;
-        lightsBuffer: GPUBuffer;
-        shadowGenerators?: ShadowGenerator[];
-        /** Optional cache shared across meshes in one scene build to dedupe identical shadow bind groups. */
-        shadowBGCache?: Map<GPUBindGroupLayout, GPUBindGroup>;
-    }
-): DynamicMeshGPU {
+    bindings: StandardShaderBindings,
+    meshUBO: GPUBuffer,
+    materialUBO: GPUBuffer,
+    lightsBuffer: GPUBuffer,
+    material: StandardMaterialProps
+): GPUBindGroup {
     const device = engine.device;
-    const { worldMatrix, material, lightsBuffer, shadowGenerators = [], shadowBGCache } = opts;
-    const features = variant.features;
+    const features = bindings.features;
     const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
 
-    // Mesh UBO — size from pipeline variant's composed shader spec
-    const meshUBO = createUniformBuffer(engine, worldMatrix);
-
-    // Material UBO
-    const textureLevel = needsUV ? 1.0 : 0;
-    const matData = new Float32Array(24);
-    writeStdMaterialData(matData, material, textureLevel);
-    const materialUBO = createUniformBuffer(engine, matData);
-
-    // Build mesh bind group entries — sequential numbering matching composer output
+    // Sequential numbering matches composer output.
     let nextBinding = 0;
-    const meshEntries: GPUBindGroupEntry[] = [
+    const entries: GPUBindGroupEntry[] = [
         { binding: nextBinding++, resource: { buffer: meshUBO } },
         { binding: nextBinding++, resource: { buffer: lightsBuffer } },
         { binding: nextBinding++, resource: { buffer: materialUBO } },
@@ -472,15 +408,14 @@ export function createDynamicMeshGPU(
 
     if (hasDiffuseTex) {
         const tex = material.diffuseTexture!;
-        meshEntries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
+        entries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
     }
 
-    // UV params UBO (always when UV or shadow is needed)
+    // UV params UBO (always when UV or shadow is needed).
     if (hasShadow || needsUV) {
         const uvData = new Float32Array(4);
         const scaleX = material.uvScale[0];
         let scaleY = material.uvScale[1];
-        const offsetX = 0;
         let offsetY = 0;
         // Flip V for y-down source data (e.g. basis/compressed textures).
         // uv * (sx, sy) + (ox, oy) with vFlip becomes uv.xy * (sx, -sy) + (ox, sy+oy).
@@ -490,9 +425,9 @@ export function createDynamicMeshGPU(
         }
         uvData[0] = scaleX;
         uvData[1] = scaleY;
-        uvData[2] = offsetX;
+        uvData[2] = 0;
         uvData[3] = offsetY;
-        meshEntries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
+        entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
     }
 
     // Fragment-contributed bindings — iterate ext registry in alphabetical id order
@@ -500,35 +435,11 @@ export function createDynamicMeshGPU(
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
         if (features & ext.feature && ext.bind) {
-            nextBinding = ext.bind(material, meshEntries, nextBinding);
+            nextBinding = ext.bind(material, entries, nextBinding);
         }
     }
 
-    const meshBG = device.createBindGroup({ layout: variant.meshBGL, entries: meshEntries });
-
-    // Shadow bind group (group 2) — per-light shadow entries
-    // Each shadow light contributes: texture + sampler + shared UBO from the ShadowGenerator.
-    // When shadowBGCache is provided, reuse one BG across all meshes (within one build
-    // all receiving meshes share the same shadow generators).
-    let shadowBG: GPUBindGroup | null = null;
-    if (hasShadow && variant.shadowBGL && shadowGenerators.length > 0) {
-        const cached = shadowBGCache?.get(variant.shadowBGL);
-        if (cached) {
-            shadowBG = cached;
-        } else {
-            const entries: GPUBindGroupEntry[] = [];
-            let b = 0;
-            for (const sg of shadowGenerators) {
-                entries.push({ binding: b++, resource: sg.blurredTexture.createView() });
-                entries.push({ binding: b++, resource: sg.blurredSampler });
-                entries.push({ binding: b++, resource: { buffer: sg.shadowUBO } });
-            }
-            shadowBG = device.createBindGroup({ layout: variant.shadowBGL, entries });
-            shadowBGCache?.set(variant.shadowBGL, shadowBG);
-        }
-    }
-
-    return { meshBG, shadowBG, meshUBO, materialUBO, textureLevel, shadowGens: shadowGenerators };
+    return device.createBindGroup({ layout: bindings.meshBGL, entries });
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────

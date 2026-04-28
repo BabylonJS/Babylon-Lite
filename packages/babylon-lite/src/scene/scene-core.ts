@@ -1,6 +1,5 @@
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { _vis } from "../engine/engine.js";
 import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -12,9 +11,11 @@ import type { FogConfig } from "../material/standard/standard-material.js";
 import type { Renderable, PrePassRenderable, SceneUniformUpdater, MeshGroupBuilder } from "../render/renderable.js";
 import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
-import type { SkyboxData } from "../loader-skybox/load-skybox.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
-import type { ComposedShader } from "../shader/fragment-types.js";
+import type { FrameGraph } from "../frame-graph/frame-graph.js";
+import { createFrameGraph, addTask } from "../frame-graph/frame-graph.js";
+import { createRenderPassTask } from "../frame-graph/render-pass-task.js";
+import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 
 /** Image processing configuration. */
@@ -58,16 +59,10 @@ export interface SceneContext {
 
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
 export interface SceneContextInternal extends SceneContext, RenderingContext {
-    /** Sorted list of renderables. Built lazily by registerScene(). */
+    /** All renderables in this scene. The active frame-graph tasks bucket them
+     *  (opaque / transmissive / transparent) at bind time based on each
+     *  renderable's `isTransparent` / `isTransmissive` flags. */
     _renderables: Renderable[];
-    /** Opaque renderables — sorted by order at build time. */
-    _opaqueRenderables: Renderable[];
-    /** Transmissive renderables — opaque (write-depth) but need the opaque-scene RTT as input.
-     *  Rendered after _opaqueRenderables and before _transparentRenderables in the main pass;
-     *  when non-empty the engine also runs the opaque-scene pre-pass. */
-    _transmissiveRenderables: Renderable[];
-    /** Transparent renderables — sorted per-frame by camera distance (back-to-front). */
-    _transparentRenderables: Renderable[];
     /** Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
     /** Scene uniform updaters (one per shared UBO). */
@@ -92,21 +87,13 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     _processSwaps?: (scene: SceneContext) => void;
 
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
-    _skybox?: SkyboxData;
     _envTextures?: EnvironmentTextures;
-    _irradianceSH?: Float32Array;
-    _pbrSceneBGL?: GPUBindGroupLayout;
-    _pbrSceneBG?: GPUBindGroup;
-    _composePbr?: (features: number, features2?: number) => ComposedShader;
-    _standardSceneUBO?: GPUBuffer;
-    _pbrLightsUBO?: GPUBuffer;
-    _pbrLightsUBOScratch?: Float32Array;
 
-    /** Lazy render-hook inserted between pre-passes and the main render pass. The hook may
-     *  finish & submit `enc`, do extra GPU work (e.g., opaque-scene RTT + mipmap), and must
-     *  return the encoder that the main pass should record into. Installed by the lazy
-     *  refraction module only; core renderFrame is hook-free for non-transmissive scenes. */
-    _beforeMain?: (engine: EngineContext, scene: SceneContextInternal, enc: GPUCommandEncoder) => GPUCommandEncoder;
+    /** Frame graph driving this scene's rendering. Created eagerly by
+     *  `createSceneContext` with a default `RenderPassTask` that mirrors
+     *  `_renderables` into the swapchain. User code may add additional tasks
+     *  (offscreen RTTs, post-FX, UI overlays, etc.). */
+    _frameGraph: FrameGraph;
 }
 
 /** Install a property setter on mesh.material that sets _materialDirty
@@ -140,11 +127,9 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
 /** Create an empty scene context bound to the given engine. */
 export function createSceneContext(engine: EngineContext): SceneContext {
     const eng = engine as EngineContextInternal;
-    let opaqueBundle: GPURenderBundle | null = null;
-    let bundleVersion = -1;
-    let bundleVis = 0;
 
-    const ctx: SceneContextInternal = {
+    // Closures below capture `ctx` by-reference via this object.
+    const ctxLocal: Omit<SceneContextInternal, "_frameGraph"> = {
         engine,
         clearColor: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
         camera: null,
@@ -155,9 +140,6 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         shadowGenerators: [],
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
         _renderables: [],
-        _opaqueRenderables: [],
-        _transmissiveRenderables: [],
-        _transparentRenderables: [],
         _prePasses: [],
         _uniformUpdaters: [],
         fixedDeltaMs: 0,
@@ -170,8 +152,9 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         _renderableVersion: 0,
         _drawCallsPre: 0,
 
-        _update(encoder: GPUCommandEncoder, delta: number): GPUCommandEncoder {
-            const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : delta;
+        _update(): void {
+            const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
+            const encoder = eng._currentEncoder!;
             let draws = 0;
             for (const cb of ctx._beforeRender) {
                 cb(d);
@@ -190,83 +173,60 @@ export function createSceneContext(engine: EngineContext): SceneContext {
             for (const u of ctx._uniformUpdaters) {
                 u.update(eng);
             }
-            for (const r of ctx._renderables) {
-                if (r.updateUBOs) {
-                    r.updateUBOs();
-                }
-            }
-            const cam = ctx.camera;
-            if (ctx._transparentRenderables.length > 1 && cam) {
-                const w = cam.worldMatrix;
-                const cx = w[12]!,
-                    cy = w[13]!,
-                    cz = w[14]!;
-                for (const r of ctx._transparentRenderables) {
-                    if (r._worldCenter) {
-                        const [wx, wy, wz] = r._worldCenter;
-                        r._sortDistance = (wx - cx) ** 2 + (wy - cy) ** 2 + (wz - cz) ** 2;
-                    }
-                }
-                ctx._transparentRenderables.sort((a, b) => (b._sortDistance ?? 0) - (a._sortDistance ?? 0) || a.order - b.order);
-            }
-            if (ctx._beforeMain) {
-                encoder = ctx._beforeMain(eng, ctx, encoder);
-            }
             ctx._drawCallsPre = draws;
-            return encoder;
         },
-        _record(pass: GPURenderPassEncoder): number {
-            if (bundleVersion !== ctx._renderableVersion || bundleVis !== _vis || !opaqueBundle) {
-                const be = eng.device.createRenderBundleEncoder({
-                    colorFormats: [eng.format],
-                    depthStencilFormat: "depth24plus-stencil8",
-                    sampleCount: eng.msaaSamples,
-                });
-                drawList(be, ctx._opaqueRenderables, eng);
-                opaqueBundle = be.finish();
-                bundleVersion = ctx._renderableVersion;
-                bundleVis = _vis;
-            }
-            let draws = ctx._opaqueRenderables.length;
-            pass.executeBundles([opaqueBundle]);
-            draws += drawList(pass, ctx._transmissiveRenderables, eng);
-            draws += drawList(pass, ctx._transparentRenderables, eng);
-            return draws;
+        _record(): number {
+            return ctx._frameGraph.execute();
+        },
+        _resize(): void {
+            // Canvas backing-store changed: rebuild the frame graph so canvas-sized
+            // render targets get re-allocated at the new pixel size. Build is async
+            // (a task may have async work) but render-pass-task records synchronously,
+            // so the rebuild typically finishes before the next frame.
+            void ctx._frameGraph.build();
         },
     };
-    return ctx;
-}
 
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly Renderable[], engine: EngineContextInternal): number {
-    let lp: GPURenderPipeline | null = null;
-    let lb: GPUBindGroup | null = null;
-    let draws = 0;
-    for (const r of list) {
-        if (r.mesh && r.mesh.visible === false) {
-            continue;
-        }
-        if (r._pipeline && r._pipeline !== lp) {
-            enc.setPipeline(r._pipeline);
-            lp = r._pipeline;
-        }
-        if (r._sceneBG && r._sceneBG !== lb) {
-            enc.setBindGroup(0, r._sceneBG);
-            lb = r._sceneBG;
-        }
-        draws += r.draw(enc, engine);
-        if (!r._pipeline) {
-            lp = null;
-        }
-        if (!r._sceneBG) {
-            lb = null;
-        }
-    }
-    return draws;
+    const ctx = ctxLocal as SceneContextInternal;
+    // Eagerly attach the frame graph + a default swapchain render-pass task. The
+    // graph drives all GPU work for this scene; user code can add more tasks
+    // (offscreen RTTs, post-FX, UI overlays) before/after.
+    const fg = createFrameGraph(eng, ctx);
+    ctx._frameGraph = fg;
+    const swapRT = createRenderTarget({
+        label: "scene-swapchain",
+        colorFormat: eng.format,
+        depthStencilFormat: "depth24plus-stencil8",
+        sampleCount: eng.msaaSamples,
+        size: "canvas",
+        resolveToSwapchain: true,
+    });
+    addTask(
+        fg,
+        createRenderPassTask(
+            {
+                name: "scene",
+                renderTarget: swapRT,
+                clearColor: ctx.clearColor,
+                autoFromScene: true,
+            },
+            eng,
+            ctx
+        )
+    );
+    void fg.build();
+    ctx._disposables.push(() => fg.dispose());
+    return ctx;
 }
 
 /** Register a callback to run before each rendered frame. */
 export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => void): void {
     (scene as SceneContextInternal)._beforeRender.unshift(cb);
+}
+
+/** Get the scene's frame graph. Always non-null — created in `createSceneContext`. */
+export function getFrameGraph(scene: SceneContext): FrameGraph {
+    return (scene as SceneContextInternal)._frameGraph;
 }
 
 /** Add an entity (mesh, light, camera, transform node, shadow generator, or asset container) to the scene. */
@@ -351,9 +311,6 @@ export function disposeScene(scene: SceneContext): void {
     }
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
-    ctx._opaqueRenderables.length = 0;
-    ctx._transmissiveRenderables.length = 0;
-    ctx._transparentRenderables.length = 0;
     ctx._prePasses.length = 0;
     ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
@@ -382,18 +339,12 @@ export async function buildScene(scene: SceneContext): Promise<void> {
 }
 
 /**
- * Register a scene with the engine. Builds deferred work, partitions renderables,
+ * Register a scene with the engine. Builds deferred work, sorts renderables by order,
  * and adds the scene to the engine's render list in overlay order.
  */
 export async function registerScene(engine: EngineContext, scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContextInternal;
     await buildScene(scene);
-    for (const r of ctx._renderables) {
-        const bucket = r.isTransparent ? ctx._transparentRenderables : r.isTransmissive ? ctx._transmissiveRenderables : ctx._opaqueRenderables;
-        bucket.push(r);
-    }
-    ctx._opaqueRenderables.sort(byOrder);
-    ctx._transmissiveRenderables.sort(byOrder);
     ctx._renderables.sort(byOrder);
     (engine as EngineContextInternal)._renderingContexts.push(ctx);
 }

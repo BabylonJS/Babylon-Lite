@@ -51,24 +51,8 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
         idxCount: boxData.indices.length,
         worldMatrix: world,
     };
-    (scene as SceneContextInternal)._skybox = skyboxData;
 
-    // Register deferred builder — skybox renderable built at startEngine() time.
-    // Must run AFTER the standard mesh builder (which stashes _standardSceneUBO).
-    // If the UBO isn't ready yet (parallel execution), re-enqueue for the next pass.
-    (scene as SceneContextInternal)._deferredBuilders.push(async () => {
-        const { buildSkyboxRenderable } = await import("./skybox-renderable.js");
-        const sceneUBO = (scene as SceneContextInternal)._standardSceneUBO;
-        if (sceneUBO) {
-            (scene as SceneContextInternal)._renderables.push(buildSkyboxRenderable(scene, skyboxData, sceneUBO));
-        } else {
-            // UBO not yet created — re-enqueue so _build() picks us up in the next pass
-            (scene as SceneContextInternal)._deferredBuilders.push(async () => {
-                const ubo = (scene as SceneContextInternal)._standardSceneUBO;
-                if (ubo) {
-                    (scene as SceneContextInternal)._renderables.push(buildSkyboxRenderable(scene, skyboxData, ubo));
-                }
-            });
-        }
-    });
+    // Build the skybox renderable inline — task supplies sceneBG at draw time, no ordering constraints.
+    const { buildSkyboxRenderable } = await import("./skybox-renderable.js");
+    (scene as SceneContextInternal)._renderables.push(buildSkyboxRenderable(scene, skyboxData));
 }

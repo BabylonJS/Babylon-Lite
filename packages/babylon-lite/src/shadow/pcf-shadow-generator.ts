@@ -34,7 +34,9 @@ import {
 import depthVertSrc from "../../shaders/shadow-pcf-depth.vertex.wgsl?raw";
 import { registerPcfShadowShader } from "../material/standard/standard-pipeline.js";
 import { registerPcfShadowBgl } from "../material/standard/standard-pipeline.js";
-import { WGSL_SCENE_UNIFORMS_SHADOW } from "../shader/wgsl-helpers.js";
+
+/** Shadow-pass UBO: just the light's view-projection matrix (64 bytes). */
+const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
 
 // ─── PCF Shader Fragments (bundled only when PCF is used) ──────────
 
@@ -138,7 +140,7 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
         label: "shadow-pcf",
         viewProj,
         casterMeshes,
-        vertCode: WGSL_SCENE_UNIFORMS_SHADOW + depthVertSrc,
+        vertCode: SHADOW_LIGHT_VIEW_WGSL + depthVertSrc,
         depthBias: Math.round(bias * 1e7),
         depthBiasSlopeScale: normalBias > 0 ? normalBias : 2,
     });

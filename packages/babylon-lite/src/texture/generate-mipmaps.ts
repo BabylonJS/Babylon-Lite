@@ -6,7 +6,7 @@
  */
 
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler } from "../resource/gpu-pool.js";
 
 // Compact fullscreen-triangle blit shader (inline WGSL — minimal whitespace per GUIDANCE.md)
 const BLIT_SHADER = `@group(0)@binding(0) var t:texture_2d<f32>;@group(0)@binding(1) var s:sampler;
@@ -41,7 +41,7 @@ function ensureResources(engine: EngineContextInternal): void {
         shaderModule = device.createShaderModule({ code: BLIT_SHADER });
     }
     if (!linearSampler) {
-        linearSampler = getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" });
+        linearSampler = getBilinearSampler(engine);
     }
     if (!bindGroupLayout) {
         bindGroupLayout = device.createBindGroupLayout({

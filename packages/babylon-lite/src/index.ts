@@ -6,6 +6,21 @@ export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VER
 export type { EngineContext, EngineOptions } from "./engine/engine.js";
 export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene, registerScene, unregisterScene } from "./scene/scene.js";
 
+// ─── Frame graph ─────────────────────────────────────────────────────
+// Step 1 scaffolding: scene-owned ordered list of tasks. Today only
+// offscreen RenderPassTasks exist; the engine still drives the main
+// pass. Subsequent steps will move main into the graph.
+export { getFrameGraph } from "./scene/scene.js";
+export type { FrameGraph } from "./frame-graph/frame-graph.js";
+export { addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph.js";
+export type { Task } from "./frame-graph/task.js";
+export type { RenderPassTask, RenderPassTaskConfig } from "./frame-graph/render-pass-task.js";
+export { createRenderPassTask, removeMeshFromTask } from "./frame-graph/render-pass-task.js";
+export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
+export { createRenderTarget } from "./engine/render-target.js";
+export { createRenderTargetTexture } from "./texture/rtt.js";
+export type { RenderTargetSampledTexture } from "./texture/rtt.js";
+
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl } from "./camera/arc-rotate-controls.js";
@@ -90,6 +105,7 @@ export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
+export type { Material } from "./material/material.js";
 export type {
     PbrMaterialProps,
     ClearCoatProps,
@@ -130,7 +146,8 @@ export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 
 // ─── Low-level (for advanced/custom rendering) ──────────────────────
 export type { EnvironmentTextures } from "./loader-env/load-env.js";
-export type { Renderable, PrePassRenderable, SceneUniformUpdater } from "./render/renderable.js";
+export type { Renderable, PrePassRenderable, SceneUniformUpdater, DrawBinding } from "./render/renderable.js";
+export type { RenderTargetSignature } from "./engine/render-target.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {

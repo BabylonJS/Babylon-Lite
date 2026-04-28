@@ -3,32 +3,14 @@
  *  Pipeline creation is handled by standard-pipeline.ts (dynamic permutation system).
  *  This module owns the shared types and the scene UBO update function.
  *
- *  Scene UBO (group 0, binding 0): 176 bytes = 44 floats
- *    viewProjection: mat4x4 (16 floats)
- *    view: mat4x4 (16 floats)
- *    vEyePosition: vec4 (4 floats)
- *    vFogInfos: vec4 (4 floats) — x=mode, y=start, z=end, w=density
- *    vFogColor: vec4 (4 floats) — rgb + pad
+ *  Scene UBO uses the canonical SCENE_UBO layout (shared with PBR).
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
-import { computeUboLayout } from "../../shader/ubo-layout.js";
-import { createStandardTemplate } from "./standard-template.js";
+import type { Material, MaterialInternal } from "../material.js";
 import { _getStdExts } from "./standard-pipeline.js";
-
-// ─── Shared Constants ────────────────────────────────────────────────
-
-// Scene UBO size derived from template's baseSceneUboFields (lazy-computed)
-let _sceneUboSize: number | null = null;
-function getSceneUboSize(): number {
-    if (_sceneUboSize === null) {
-        const tpl = createStandardTemplate({ textures: {}, needsUV: false, needsUV2: false, hasShadow: false });
-        _sceneUboSize = computeUboLayout(tpl.baseSceneUboFields).totalBytes;
-    }
-    return _sceneUboSize;
-}
 
 // ─── Standard Group Builder ──────────────────────────────────────────
 
@@ -49,7 +31,7 @@ const _STD_MAT_EXTS: ReadonlyArray<readonly [keyof StandardMaterialProps, () => 
     ["reflectionCubeTexture", () => import("./fragments/std-cube-reflection-fragment.js"), "stdCubeReflectionExt"],
 ];
 
-export const standardGroupBuilder: MeshGroupBuilder & { _loadRebuildSingle?: () => Promise<any> } = async (scene, meshes) => {
+export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     const hasTI = meshes.some((m) => !!m.thinInstances);
     const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
 
@@ -86,20 +68,21 @@ export const standardGroupBuilder: MeshGroupBuilder & { _loadRebuildSingle?: () 
         await Promise.all(imports);
     }
 
-    const { buildStandardMeshRenderables } = await import("./standard-renderable.js");
-    return buildStandardMeshRenderables(scene, meshes, {
+    const renderableMod = await import("./standard-renderable.js");
+    // Wire the per-mesh rebuild fn used by material swap + per-pass material override.
+    // Same module as the group build, so it's already in this chunk.
+    standardGroupBuilder._rebuildSingle = renderableMod.buildSingleStandardRenderable;
+    return renderableMod.buildStandardMeshRenderables(scene, meshes, {
         tiSync,
         tiFragment,
         shadowFragment,
     });
 };
-// Lazy loader for the single-mesh rebuild function — loaded only when a material swap happens
-standardGroupBuilder._loadRebuildSingle = () => import("./standard-single-rebuild.js");
 
 // ─── Shared Types ────────────────────────────────────────────────────
 
 /** StandardMaterial properties — plain data. */
-export interface StandardMaterialProps {
+export interface StandardMaterialProps extends Material {
     diffuseColor: [number, number, number];
     alpha: number;
     specularColor: [number, number, number];
@@ -155,6 +138,9 @@ export interface StandardMaterialProps {
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */
     disableLighting: boolean;
 }
+
+/** @internal Extended StandardMaterialProps with internal build group. */
+export interface StandardMaterialPropsInternal extends StandardMaterialProps, MaterialInternal {}
 
 /** Fog configuration — plain data. */
 export interface FogConfig {
@@ -212,45 +198,4 @@ export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[]
         ext.textures?.(mat, t);
     }
     return t;
-}
-
-// ─── Scene Uniforms Update ───────────────────────────────────────────
-
-// Pre-allocated scratch buffer for scene uniform writes (avoids per-frame allocation)
-let _sceneUniformScratch: Float32Array<ArrayBuffer> | null = null;
-
-/** Write per-frame scene uniforms to the given UBO.
- *  Identical layout across all pipeline variants. */
-export function updateSceneUniforms(
-    engine: EngineContextInternal,
-    sceneUBO: GPUBuffer,
-    viewProjection: Float32Array,
-    viewMatrix: Float32Array,
-    eyePosition: [number, number, number],
-    fog?: FogConfig
-): void {
-    const device = engine.device;
-    const size = getSceneUboSize() / 4;
-    if (!_sceneUniformScratch || _sceneUniformScratch.length !== size) {
-        _sceneUniformScratch = new Float32Array(size);
-    }
-    const data = _sceneUniformScratch;
-    data.fill(0);
-    data.set(viewProjection, 0); // 0-15: viewProjection
-    data.set(viewMatrix, 16); // 16-31: view
-    data[32] = eyePosition[0]; // 32-35: vEyePosition
-    data[33] = eyePosition[1];
-    data[34] = eyePosition[2];
-    data[35] = 0;
-    if (fog) {
-        data[36] = fog.mode; // 36-39: vFogInfos
-        data[37] = fog.start;
-        data[38] = fog.end;
-        data[39] = fog.density;
-        data[40] = fog.color[0]; // 40-43: vFogColor
-        data[41] = fog.color[1];
-        data[42] = fog.color[2];
-        data[43] = 0;
-    }
-    device.queue.writeBuffer(sceneUBO, 0, data);
 }

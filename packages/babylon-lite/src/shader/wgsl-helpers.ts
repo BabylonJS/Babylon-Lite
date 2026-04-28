@@ -69,38 +69,3 @@ let normVariance = varianceAmount / 255.0;
 return mix(-normVariance, normVariance, rand);
 }
 `;
-
-/** PBR background SceneUniforms (128 bytes) + binding.
- *  Used by skybox, DDS skybox, and ground vertex shaders. */
-export const WGSL_SCENE_UNIFORMS_PBR = `
-struct SceneUniforms {
-viewProj: mat4x4<f32>,
-cameraPosition: vec3<f32>, _pad0: f32,
-lightDirection: vec3<f32>, lightIntensity: f32,
-lightDiffuseColor: vec3<f32>, _pad1: f32,
-lightGroundColor: vec3<f32>, _pad2: f32,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;
-
-/** Standard material SceneUniforms with fog fields + binding.
- *  Used by skybox-cubemap (Standard material skybox). */
-export const WGSL_SCENE_UNIFORMS_STD = `
-struct SceneUniforms {
-viewProjection: mat4x4<f32>,
-view: mat4x4<f32>,
-vEyePosition: vec4<f32>,
-vFogInfos: vec4<f32>,
-vFogColor: vec4<f32>,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;
-
-/** Shadow-only SceneUniforms (minimal: just viewProjection) + binding.
- *  Used by shadow depth shaders. */
-export const WGSL_SCENE_UNIFORMS_SHADOW = `
-struct SceneUniforms {
-viewProjection: mat4x4<f32>,
-};
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
-`;

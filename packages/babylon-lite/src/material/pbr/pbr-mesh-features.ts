@@ -1,7 +1,7 @@
 /** Per-mesh PBR feature-flag computation.
  *
- *  Pure function shared by pbr-renderable (initial build) and
- *  pbr-single-rebuild (material swap) so the feature detection logic
+ *  Pure function shared by buildPbrRenderables (batch initial build) and
+ *  buildSinglePbrRenderable (material swap) so the feature detection logic
  *  lives in exactly one place.
  */
 

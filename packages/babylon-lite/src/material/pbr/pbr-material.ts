@@ -6,19 +6,20 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { SceneContextInternal } from "../../scene/scene.js";
+import type { Material, MaterialInternal } from "../material.js";
 import { _getPbrExts } from "./pbr-flags.js";
 
 /** Lazy-imports the PBR renderable builder and builds the pipeline.
  *  Thin instances are handled by the fragment composer automatically. */
-export const pbrGroupBuilder: MeshGroupBuilder & { _loadRebuildSingle?: () => Promise<any> } = async (scene, meshes) => {
+export const pbrGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     const envTex = (scene as SceneContextInternal)._envTextures;
-    const { buildPbrRenderables } = await import("./pbr-renderable.js");
-    return buildPbrRenderables(scene, meshes, envTex);
+    const renderableMod = await import("./pbr-renderable.js");
+    // Wire the per-mesh rebuild fn used by material swap + per-pass material override.
+    pbrGroupBuilder._rebuildSingle = renderableMod.buildSinglePbrRenderable;
+    return renderableMod.buildPbrRenderables(scene, meshes, envTex);
 };
-// Lazy loader for the single-mesh rebuild function — loaded only when a material swap happens
-pbrGroupBuilder._loadRebuildSingle = () => import("./pbr-single-rebuild.js");
 
-export interface PbrMaterialProps {
+export interface PbrMaterialProps extends Material {
     baseColorTexture?: Texture2D;
     normalTexture?: Texture2D;
     /** Normal map scale (glTF normalTexture.scale). Default 1.0. */
@@ -101,10 +102,7 @@ export interface PbrMaterialProps {
 }
 
 /** @internal Extended PbrMaterialProps with internal build group. */
-export interface PbrMaterialPropsInternal extends PbrMaterialProps {
-    readonly _buildGroup: MeshGroupBuilder;
-    /** Set to true when a UBO-relevant property changes. Cleared by the renderer after upload. */
-    _uboDirty?: boolean;
+export interface PbrMaterialPropsInternal extends PbrMaterialProps, MaterialInternal {
     /** @internal True when any of the material's textures carries `_hasTx=true`
      *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
      *  so the renderer doesn't re-scan 5 textures per mesh. */

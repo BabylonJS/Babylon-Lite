@@ -4,8 +4,7 @@
 import type { EngineContextInternal } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { mat4Compose, mat4Identity } from "../math/mat4.js";
-import type { StandardMaterialProps } from "../material/standard/standard-material.js";
-import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
@@ -37,7 +36,7 @@ export interface MeshGPU {
 export interface Mesh extends SceneNode {
     /** Unique ID from source file (e.g. .babylon). Used for light include/exclude filtering. */
     id?: string;
-    material: StandardMaterialProps | PbrMaterialProps;
+    material: Material;
     receiveShadows: boolean;
     /** World-space bounding box (set by loaders for camera framing). */
     boundMin?: [number, number, number];

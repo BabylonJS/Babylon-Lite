@@ -13,6 +13,9 @@ export function bumpVisibilityEpoch(): void {
 export interface EngineContext {
     readonly canvas: HTMLCanvasElement;
     readonly msaaSamples: number;
+    /** Preferred GPU texture format for the swapchain. Use as the `colorFormat`
+     *  for offscreen RTs that are sampled by main-pass materials. */
+    readonly format: GPUTextureFormat;
 
     /** Number of GPU draw calls in the last rendered frame. */
     drawCallCount: number;
@@ -34,34 +37,35 @@ export interface RenderingContext {
     /** Clear color used when this context is the first active one in a frame. */
     clearColor: GPUColorDict;
     /** Run per-frame update work (beforeRender hooks, shadow + pre-passes, UBO updates,
-     *  transparent sort, and any user _beforeMain hook). May finish+submit `encoder`
-     *  and return a new one. */
-    _update(encoder: GPUCommandEncoder, delta: number): GPUCommandEncoder;
-    /** Record main-pass draws into `pass`. Returns draw-call count. */
-    _record(pass: GPURenderPassEncoder): number;
+     *  transparent sort). Reads / mutates engine state via `engine._currentEncoder` and
+     *  `engine._currentDelta`. */
+    _update(): void;
+    /** Drive this context's GPU work — typically delegates to
+     *  `frameGraph.execute(engine._currentEncoder)`. Returns draw-call count. */
+    _record(): number;
+    /** Optional. Called by the engine when the canvas backing-store size changes.
+     *  Implementations should rebuild any canvas-sized GPU resources (e.g. ask
+     *  their frame graph to rebuild so render targets get re-allocated). */
+    _resize?(): void;
 }
 
 /** @internal Engine with GPU internals exposed. Not re-exported from index.ts. */
 export interface EngineContextInternal extends EngineContext {
     readonly device: GPUDevice;
     readonly context: GPUCanvasContext;
-    readonly format: GPUTextureFormat;
-    _targets: RenderTargets;
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
     /** Registered rendering contexts in render order (first clears; subsequent overlay). */
     _renderingContexts: RenderingContext[];
-}
 
-interface RenderTargets {
-    // Null when MSAA is disabled (sampleCount === 1): we render directly into the
-    // swapchain texture without a resolve step.
-    msaaTexture: GPUTexture | null;
-    msaaView: GPUTextureView | null;
-    depthTexture: GPUTexture;
-    depthView: GPUTextureView;
-    width: number;
-    height: number;
+    // ─── Per-frame transient state ─────────────────────────────────────
+    /** Encoder being filled this frame. Set by `renderFrame` before each context's
+     *  `_update`/`_record`; consumed by frame-graph tasks and pre-passes. */
+    _currentEncoder: GPUCommandEncoder | null;
+    /** Swapchain view acquired once per frame. Consumed by scene-render tasks. */
+    _swapchainView: GPUTextureView | null;
+    /** Frame delta in ms (read by scenes that don't override fixedDeltaMs). */
+    _currentDelta: number;
 }
 
 /**
@@ -108,7 +112,6 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
 
     const msaaSamples: 1 | 4 = options?.msaaSamples === 1 ? 1 : 4;
 
-    const targets = createRenderTargets(device, canvas.width, canvas.height, format, msaaSamples);
     const engine: EngineContextInternal = {
         device,
         context,
@@ -116,32 +119,33 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         canvas,
         msaaSamples,
         drawCallCount: 0,
-        _targets: targets,
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
+        _currentEncoder: null,
+        _swapchainView: null,
+        _currentDelta: 0,
     };
 
     return engine;
 }
 
-/** Resize render targets to match canvas size. */
+/** Resize the swapchain backing-store to match the canvas client size. When the size
+ *  changes, reconfigures the swapchain and asks every registered rendering context
+ *  to rebuild its canvas-sized GPU resources via the optional `_resize` hook. */
 export function resizeEngine(engine: EngineContext): void {
     const eng = engine as EngineContextInternal;
     const canvas = eng.canvas;
     const w = (canvas.clientWidth * devicePixelRatio) | 0;
     const h = (canvas.clientHeight * devicePixelRatio) | 0;
-    if (w === eng._targets.width && h === eng._targets.height) {
+    if (w === canvas.width && h === canvas.height) {
         return;
     }
     canvas.width = w;
     canvas.height = h;
-    eng.context.configure({ device: eng.device, format: eng.format, alphaMode: "opaque" });
-    if (eng._targets.msaaTexture) {
-        eng._targets.msaaTexture.destroy();
+    for (const c of eng._renderingContexts) {
+        c._resize?.();
     }
-    eng._targets.depthTexture.destroy();
-    eng._targets = createRenderTargets(eng.device, w, h, eng.format, eng.msaaSamples);
 }
 
 /**
@@ -179,96 +183,40 @@ export function stopEngine(engine: EngineContext): void {
     eng._renderFn = null;
 }
 
-/** Release all engine-owned GPU resources (render targets, device). */
+/** Release all engine-owned GPU resources (device + swapchain). Rendering contexts
+ *  own their own GPU resources (frame graphs, render targets) and dispose them
+ *  separately. */
 export function disposeEngine(engine: EngineContext): void {
     const eng = engine as EngineContextInternal;
     stopEngine(engine);
     eng._renderingContexts.length = 0;
-    if (eng._targets.msaaTexture) {
-        eng._targets.msaaTexture.destroy();
-    }
-    eng._targets.depthTexture.destroy();
     eng.context.unconfigure();
     eng.device.destroy();
 }
 
-function createRenderTargets(device: GPUDevice, width: number, height: number, format: GPUTextureFormat, sampleCount: number): RenderTargets {
-    const msaaTexture =
-        sampleCount > 1
-            ? device.createTexture({
-                  size: { width, height },
-                  format,
-                  sampleCount,
-                  usage: GPUTextureUsage.RENDER_ATTACHMENT,
-              })
-            : null;
-    const depthTexture = device.createTexture({
-        size: { width, height },
-        format: "depth24plus-stencil8",
-        sampleCount,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    return {
-        msaaTexture,
-        msaaView: msaaTexture ? msaaTexture.createView() : null,
-        depthTexture,
-        depthView: depthTexture.createView(),
-        width,
-        height,
-    };
-}
-
 function renderFrame(engine: EngineContextInternal, delta: number): void {
-    const targets = engine._targets;
     const ctxs = engine._renderingContexts;
-
-    let encoder = engine.device.createCommandEncoder();
-    let drawCalls = 0;
-    let rendered = 0;
-
-    const hasMsaa = targets.msaaView !== null;
-    const colorAtt: GPURenderPassColorAttachment = {
-        view: hasMsaa ? targets.msaaView! : (undefined as unknown as GPUTextureView),
-        resolveTarget: undefined,
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: "clear",
-        storeOp: "store",
-    };
-    const desc: GPURenderPassDescriptor = {
-        colorAttachments: [colorAtt],
-        depthStencilAttachment: {
-            view: targets.depthView,
-            depthClearValue: 1.0,
-            depthLoadOp: "clear",
-            depthStoreOp: "store",
-            stencilClearValue: 0,
-            stencilLoadOp: "clear",
-            stencilStoreOp: "store",
-        },
-    };
-
-    for (let i = 0; i < ctxs.length; i++) {
-        const s = ctxs[i]!;
-        encoder = s._update(encoder, delta);
-        drawCalls += s._drawCallsPre;
-        if (rendered === 0) {
-            const swapView = engine.context.getCurrentTexture().createView();
-            if (hasMsaa) {
-                colorAtt.resolveTarget = swapView;
-            } else {
-                colorAtt.view = swapView;
-            }
-            colorAtt.clearValue = s.clearColor;
-        } else {
-            colorAtt.loadOp = "load";
-        }
-        rendered++;
-
-        const pass = encoder.beginRenderPass(desc);
-        drawCalls += s._record(pass);
-        pass.end();
+    if (ctxs.length === 0) {
+        return;
     }
 
-    engine.device.queue.submit([encoder.finish()]);
+    const encoder = engine.device.createCommandEncoder();
+    engine._currentEncoder = encoder;
+    engine._currentDelta = delta;
+    engine._swapchainView = engine.context.getCurrentTexture().createView();
+
+    let drawCalls = 0;
+    for (let i = 0; i < ctxs.length; i++) {
+        const s = ctxs[i]!;
+        s._update();
+        drawCalls += s._drawCallsPre;
+        drawCalls += s._record();
+    }
+
+    const finalEncoder = engine._currentEncoder!;
+    engine.device.queue.submit([finalEncoder.finish()]);
     engine.drawCallCount = drawCalls;
+
+    engine._currentEncoder = null;
+    engine._swapchainView = null;
 }

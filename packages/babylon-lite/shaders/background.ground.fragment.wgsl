@@ -37,7 +37,7 @@ fn main(input: FragmentInput) -> @location(0) vec4<f32> {
   var finalAlpha = mesh.alpha * diffuseMap.a;
 
   // OPACITYFRESNEL — BJS shd_16 lines 367-370
-  let viewAngleToFloor = dot(normalW, normalize(scene.cameraPosition - mesh.backgroundCenter));
+  let viewAngleToFloor = dot(normalW, normalize(scene.vEyePosition.xyz - mesh.backgroundCenter));
   const startAngle: f32 = 0.1;
   let fadeFactor = clamp(viewAngleToFloor / startAngle, 0.0, 1.0);
   finalAlpha *= fadeFactor * fadeFactor;

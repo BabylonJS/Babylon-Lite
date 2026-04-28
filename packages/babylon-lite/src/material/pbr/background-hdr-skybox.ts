@@ -11,7 +11,7 @@ import type { Renderable } from "../../render/renderable.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxHdrFragSrc from "../../../shaders/skybox-hdr.fragment.wgsl?raw";
-import { WGSL_SCENE_UNIFORMS_PBR } from "../../shader/wgsl-helpers.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2
@@ -55,8 +55,6 @@ function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
 export function buildHdrSkyboxRenderable(
     scene: SceneContext,
     envTextures: EnvironmentTextures,
-    sceneBindGroupLayout: GPUBindGroupLayout,
-    sceneBindGroup: GPUBindGroup,
     skyHalfSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number]
@@ -68,25 +66,29 @@ export function buildHdrSkyboxRenderable(
     const cc = scene.clearColor;
 
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
-    const mat = createCubemapSkyboxMaterial(sceneBindGroupLayout, "skybox-hdr", WGSL_SCENE_UNIFORMS_PBR + skyboxVertSrc, skyboxHdrFragSrc);
+    const mat = createCubemapSkyboxMaterial("skybox-hdr", SCENE_UBO_WGSL + skyboxVertSrc, skyboxHdrFragSrc);
     const ubo = createSkyHdrMeshUBO(engine, skyboxWorld, primaryColor, [cc.r, cc.g, cc.b], scene.imageProcessing.exposure, scene.imageProcessing.contrast);
 
-    const pipeline = mat.getPipeline(engine, engine.format, engine.msaaSamples);
     const bindGroup = mat.createBindGroup(engine, ubo, envTextures.specularCubeView!, envTextures.cubeSampler);
 
-    return {
+    const r: Renderable = {
         order: 0,
         isTransparent: false,
-        draw(pass) {
-            pass.setBindGroup(0, sceneBindGroup);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(1, bindGroup);
-            pass.setVertexBuffer(0, skyBufs.posBuffer);
-            pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
-            pass.drawIndexed(skyBufs.idxCount);
-            return 1;
+        bind(eng, sig) {
+            return {
+                renderable: r,
+                pipeline: mat.getPipeline(eng as EngineContextInternal, sig),
+                draw(pass) {
+                    pass.setBindGroup(1, bindGroup);
+                    pass.setVertexBuffer(0, skyBufs.posBuffer);
+                    pass.setIndexBuffer(skyBufs.idxBuffer, "uint16");
+                    pass.drawIndexed(skyBufs.idxCount);
+                    return 1;
+                },
+            };
         },
     };
+    return r;
 }
 
 // ─── HDR Skybox UBO ─────────────────────────────────────────────────────────────

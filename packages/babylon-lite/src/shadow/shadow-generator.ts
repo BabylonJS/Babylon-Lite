@@ -20,7 +20,7 @@ import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler } from "../resource/gpu-pool.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import {
     syncCasterMatrices,
@@ -37,7 +37,10 @@ import depthVertSrc from "../../shaders/shadow-depth.vertex.wgsl?raw";
 import depthFragSrc from "../../shaders/shadow-depth.fragment.wgsl?raw";
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
 import blurFragSrc from "../../shaders/shadow-blur.fragment.wgsl?raw";
-import { WGSL_SCENE_UNIFORMS_SHADOW } from "../shader/wgsl-helpers.js";
+
+/** Shadow-pass UBO: just the light's view-projection matrix (64 bytes).
+ *  The shadow pass has its own per-light buffer — not the per-pass scene UBO. */
+const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
 
 export interface ShadowGeneratorConfig {
     mapSize?: number;
@@ -179,7 +182,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         label: "shadow",
         viewProj,
         casterMeshes,
-        vertCode: WGSL_SCENE_UNIFORMS_SHADOW + depthVertSrc,
+        vertCode: SHADOW_LIGHT_VIEW_WGSL + depthVertSrc,
         fragCode: depthFragSrc,
         colorTargets: [{ format: "rgba16float" }],
         extraMeshEntries: [{ binding: 1, resource: { buffer: shadowParamsUBO } }],
@@ -237,7 +240,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         primitive: { topology: "triangle-list", cullMode: "none" },
     });
 
-    const blurSampler = getOrCreateSampler(eng, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
+    const blurSampler = getBilinearSampler(eng);
 
     // Blur H params — delta in output (blurSize) texel space, matching BJS PostProcess
     const blurHData = new Float32Array([1.0 / blurSize, 0, 0, 0]);
@@ -263,7 +266,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         ],
     });
 
-    const outputSampler = getOrCreateSampler(eng, { minFilter: "linear", magFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
+    const outputSampler = getBilinearSampler(eng);
 
     const lightMatrix = viewProj;
     const shadowsInfo = new Float32Array([darkness, 0, depthScale, frustumEdgeFalloff]);

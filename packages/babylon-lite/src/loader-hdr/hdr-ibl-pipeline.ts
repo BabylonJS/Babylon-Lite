@@ -7,7 +7,7 @@
 
 import type { HdrImage } from "./hdr-parser.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler } from "../resource/gpu-pool.js";
 import { createUniformBuffer, createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?raw";
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";
@@ -82,7 +82,7 @@ export function prefilterCubemapGPU(engine: EngineContextInternal, srcCube: GPUT
     });
 
     const srcCubeView = srcCube.createView({ dimension: "cube" });
-    const srcSampler = getOrCreateSampler(engine, { magFilter: "linear", minFilter: "linear" });
+    const srcSampler = getBilinearSampler(engine);
 
     const pipeline = device.createComputePipeline({
         layout: "auto",

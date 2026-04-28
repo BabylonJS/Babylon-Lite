@@ -117,15 +117,6 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // ── Base UBO fields (mesh = world matrix only) ──────────────
     const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
 
-    // ── Scene UBO fields ────────────────────────────────────────
-    const baseSceneUboFields: UboField[] = [
-        { name: "viewProjection", type: "mat4x4<f32>" },
-        { name: "view", type: "mat4x4<f32>" },
-        { name: "vEyePosition", type: "vec4<f32>" },
-        { name: "vFogInfos", type: "vec4<f32>" },
-        { name: "vFogColor", type: "vec4<f32>" },
-    ];
-
     // ── Base bindings (group 1, starting after mesh UBO at 0) ───
     // Order: lights, material, diffuse*, shadow/UV*, emissive*, bump*, specular*, ambient*, lightmap*, opacity*, reflection*
     // The shadow/UV UBO is placed AFTER diffuse so its auto-assigned binding index
@@ -316,7 +307,6 @@ return color;
         vertexTemplate,
         fragmentTemplate,
         baseMeshUboFields,
-        baseSceneUboFields,
         baseVertexAttributes,
         baseVaryings,
         baseBindings,

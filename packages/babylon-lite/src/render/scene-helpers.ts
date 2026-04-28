@@ -61,23 +61,27 @@ export interface PipelineDescriptorOpts {
     fragModule: GPUShaderModule;
     vertexBuffers: GPUVertexBufferLayout[];
     format: GPUTextureFormat;
+    /** Depth-stencil format. Default: `"depth24plus-stencil8"` (matches the engine's default RT). */
+    depthStencilFormat?: GPUTextureFormat;
     msaaSamples: number;
     depthWriteEnabled?: boolean;
     cullMode?: GPUCullMode;
     blend?: GPUBlendState;
+    /** When true, build with `frontFace: "cw"` (offscreen RTT with Y-flipped projection). */
+    flipY?: boolean;
 }
 
-/** Build a standard render pipeline descriptor with consistent defaults:
- *  depth24plus-stencil8, less-equal, triangle-list, ccw front face. */
-export function createStandardPipelineDescriptor(opts: PipelineDescriptorOpts): GPURenderPipelineDescriptor {
+/** Build a render pipeline descriptor with the engine's default state:
+ *  depth24plus-stencil8, less-equal, triangle-list, ccw front face (cw if flipY). */
+export function createDefaultPipelineDescriptor(opts: PipelineDescriptorOpts): GPURenderPipelineDescriptor {
     const target: GPUColorTargetState = opts.blend ? { format: opts.format, blend: opts.blend } : { format: opts.format };
     return {
         label: opts.label,
         layout: opts.engine.device.createPipelineLayout({ bindGroupLayouts: opts.bgls }),
         vertex: { module: opts.vertModule, entryPoint: "main", buffers: opts.vertexBuffers },
         fragment: { module: opts.fragModule, entryPoint: "main", targets: [target] },
-        depthStencil: { format: "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: opts.depthWriteEnabled ?? true },
+        depthStencil: { format: opts.depthStencilFormat ?? "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: opts.depthWriteEnabled ?? true },
         multisample: { count: opts.msaaSamples },
-        primitive: { topology: "triangle-list", cullMode: opts.cullMode ?? "back", frontFace: "ccw" },
+        primitive: { topology: "triangle-list", cullMode: opts.cullMode ?? "back", frontFace: opts.flipY ? "cw" : "ccw" },
     };
 }
