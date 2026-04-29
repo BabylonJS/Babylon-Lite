@@ -68,6 +68,36 @@ export interface EngineContextInternal extends EngineContext {
     _currentDelta: number;
 }
 
+/** @internal Return true if `context` is already registered with `engine`. */
+export function isRenderingContextRegistered(engine: EngineContext, context: RenderingContext): boolean {
+    return (engine as EngineContextInternal)._renderingContexts.indexOf(context) !== -1;
+}
+
+/** @internal Register a rendering context with the engine. Returns false if already present. */
+export function registerRenderingContext(engine: EngineContext, context: RenderingContext): boolean {
+    if (isRenderingContextRegistered(engine, context)) {
+        return false;
+    }
+    (engine as EngineContextInternal)._renderingContexts.push(context);
+    return true;
+}
+
+/** @internal Unregister a rendering context from the engine. Returns false if not present. */
+export function unregisterRenderingContext(engine: EngineContext, context: RenderingContext): boolean {
+    const list = (engine as EngineContextInternal)._renderingContexts;
+    const i = list.indexOf(context);
+    if (i === -1) {
+        return false;
+    }
+    list.splice(i, 1);
+    return true;
+}
+
+export interface RenderTargetSize {
+    readonly width: number;
+    readonly height: number;
+}
+
 /**
  * Options for `createEngine`.
  * - `msaaSamples`: number of MSAA samples to use for the main render pass.
@@ -146,6 +176,15 @@ export function resizeEngine(engine: EngineContext): void {
     for (const c of eng._renderingContexts) {
         c._resize?.();
     }
+}
+
+/** @internal Return the canvas-backed render target dimensions. In the frame-graph
+ *  architecture, render targets are owned by `RenderingContext`s rather than the
+ *  engine itself; this helper exposes the canvas size for callers that just need
+ *  the swapchain dimensions (e.g. sprite renderer). */
+export function getRenderTargetSize(engine: EngineContext): RenderTargetSize {
+    const c = engine.canvas;
+    return { width: c.width, height: c.height };
 }
 
 /**

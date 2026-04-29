@@ -87,13 +87,13 @@ export function createFlatGroundData(opts: GroundOptions = {}): GroundData {
             const bottomLeft = (row + 1) * cols + col;
             const bottomRight = bottomLeft + 1;
 
-            indices[ii++] = topLeft;
-            indices[ii++] = bottomLeft;
-            indices[ii++] = bottomRight;
-
-            indices[ii++] = topLeft;
             indices[ii++] = bottomRight;
             indices[ii++] = topRight;
+            indices[ii++] = topLeft;
+
+            indices[ii++] = bottomLeft;
+            indices[ii++] = bottomRight;
+            indices[ii++] = topLeft;
         }
     }
 

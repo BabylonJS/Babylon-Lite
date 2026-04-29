@@ -1,5 +1,6 @@
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
+import { _vis, isRenderingContextRegistered, registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
 import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -292,11 +293,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void {
     const ctx = scene as SceneContextInternal;
-    const eng = ctx.engine as EngineContextInternal;
-    const i = eng._renderingContexts.indexOf(ctx);
-    if (i >= 0) {
-        eng._renderingContexts.splice(i, 1);
-    }
+    unregisterRenderingContext(ctx.engine, ctx);
     for (const fn of ctx._disposables) {
         fn();
     }
@@ -344,18 +341,17 @@ export async function buildScene(scene: SceneContext): Promise<void> {
  */
 export async function registerScene(engine: EngineContext, scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContextInternal;
+    if (isRenderingContextRegistered(engine, ctx)) {
+        return;
+    }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
-    (engine as EngineContextInternal)._renderingContexts.push(ctx);
+    registerRenderingContext(engine, ctx);
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
 
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources. */
 export function unregisterScene(engine: EngineContext, scene: SceneContext): void {
-    const eng = engine as EngineContextInternal;
-    const i = eng._renderingContexts.indexOf(scene as SceneContextInternal);
-    if (i >= 0) {
-        eng._renderingContexts.splice(i, 1);
-    }
+    unregisterRenderingContext(engine, scene as SceneContextInternal);
 }

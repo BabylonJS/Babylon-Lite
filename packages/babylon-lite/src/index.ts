@@ -51,6 +51,8 @@ export {
     createTube,
     createExtrudeShape,
 } from "./mesh/mesh-factories.js";
+export { createSphereData } from "./mesh/create-sphere.js";
+export type { SphereMeshData } from "./mesh/create-sphere.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -60,6 +62,8 @@ export { loadBasisTexture2D } from "./texture/basis-loader.js";
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/standard-material.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
+export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { markMaterialDirty } from "./material/material-dirty.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
@@ -83,10 +87,13 @@ export { loadSkybox } from "./loader-skybox/load-skybox.js";
 // ─── Shadows ─────────────────────────────────────────────────────────
 export { createShadowGenerator } from "./shadow/shadow-generator.js";
 export { createPcfShadowGenerator } from "./shadow/pcf-shadow-generator.js";
+export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
+export { createMorphTargets } from "./morph/create-morph-targets.js";
+export type { MorphTargetData } from "./animation/types.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { mat4Translation, mat4Identity, mat4Scale, mat4Compose } from "./math/mat4.js";
@@ -148,6 +155,14 @@ export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 export type { EnvironmentTextures } from "./loader-env/load-env.js";
 export type { Renderable, PrePassRenderable, SceneUniformUpdater, DrawBinding } from "./render/renderable.js";
 export type { RenderTargetSignature } from "./engine/render-target.js";
+
+// ─── Sprites (2D) ────────────────────────────────────────────────────
+export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
+export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
+export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
+export { createSprite2DLayer, addSprite2DIndex, updateSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex } from "./sprite/sprite-2d.js";
+export type { SpriteRenderer, SpriteRendererOptions } from "./sprite/sprite-renderer.js";
+export { createSpriteRenderer, registerSpriteRenderer, unregisterSpriteRenderer, disposeSpriteRenderer } from "./sprite/sprite-renderer.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {

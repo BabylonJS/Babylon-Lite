@@ -270,7 +270,7 @@
         "id": 30,
         "slug": "scene30-volume-testing",
         "name": "Scene 30 — KHR_materials_volume_testing",
-        "maxMad": 20.0,
+        "maxMad": 20,
         "maxRawKB": 88.4,
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment. V1 env-only refraction. Matches PG #YG3BBF#16.",
         "note": "MAD ceiling temporarily relaxed (18.59 actual vs 0.02 target). Env-only refraction cannot show scene-behind-the-glass; full parity requires opaque-scene RTT, deferred to land with the frame-graph.",
@@ -363,12 +363,173 @@
         "skipPerf": true
     },
     {
-        "id": 60,
+        "id": 52,
         "slug": "scene52-rtt-override",
         "name": "Scene 52 — RTT with material override",
         "maxMad": 0.01,
         "maxRawKB": 75,
         "description": "Frame-graph multi-pass authoring: sphere A (red) and box B in main; an offscreen 512×512 RTT renders A only, with a green override material from a different camera, and the RTT color is wired as B's diffuseTexture.",
         "tags": ["std", "procedural", "frame-graph", "rtt", "multi-pass"]
+    },
+    {
+        "id": 50,
+        "slug": "scene50-sprite-grid",
+        "name": "Scene 50 — Sprite Grid",
+        "maxMad": 0.1,
+        "maxRawKB": 21,
+        "description": "25×10 grid of icon sprites with cycled tints and rotated thirds, rendered via the pure-2D sprite API. BJS SpriteManager oracle.",
+        "tags": ["sprites", "2d"],
+        "skipPerf": true
+    },
+    {
+        "id": 51,
+        "slug": "scene51-sprite-grid",
+        "name": "Scene 51 — Soft-Edged Sprite Grid (Premultiplied)",
+        "maxMad": 0.5,
+        "maxRawKB": 21,
+        "description": "25×10 grid of radial-gradient sprites with anti-aliased edges, rendered via the premultiplied sprite codepath. BJS SpriteRenderer with ALPHA_PREMULTIPLIED blendMode + pre-baked premultiplied atlas as the parity oracle.",
+        "tags": ["sprites", "2d", "premultiplied"],
+        "skipPerf": true
+    },
+    {
+        "id": 60,
+        "slug": "scene60-nme-flat",
+        "name": "Scene 60 — NME Flat Colour",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 61,
+        "slug": "scene61-nme-normal",
+        "name": "Scene 61 — NME Normal As Color",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Node Material with a vertex→fragment varying: normal attribute remapped as `normal * 0.5 + 0.5` → FragmentOutput.rgb. Exercises ScaleBlock, AddBlock, and attribute-to-fragment bridging.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 62,
+        "slug": "scene62-nme-texture",
+        "name": "Scene 62 — NME Diffuse Texture",
+        "maxMad": 0.5,
+        "maxRawKB": 63,
+        "description": "Node Material sampling a 2D texture (crate.png) through a TextureBlock driven by the UV attribute. Exercises texture/sampler BGL slot allocation and `NodeInputHandle.texture` pass-through.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 63,
+        "slug": "scene63-nme-light",
+        "name": "Scene 63 — NME Directional Light",
+        "maxMad": 0.5,
+        "maxRawKB": 64,
+        "description": "Node Material with one DirectionalLight: position/normal world-transformed, driven through LightBlock (Blinn-Phong) to FragmentOutput.rgb. Exercises the shared lights UBO binding + module-scope helper assembly.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 64,
+        "slug": "scene64-nme-morph",
+        "name": "Scene 64 — NME Morph Targets",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Node Material with a MorphTargetsBlock: one morph target shifts every vertex along +Y at weight=1.0 so the sphere renders translated upward. Proves morph-texture + weights-UBO binding and the @builtin(vertex_index) plumbing.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 65,
+        "slug": "scene65-nme-shadow",
+        "name": "Scene 65 — NME Shadow Receive",
+        "maxMad": 0.1,
+        "maxRawKB": 80,
+        "description": "Node Material with shadow receive: sphere casts onto ground plane, both lit by one DirectionalLight with an ESM shadow generator. Only meshes with receiveShadows=true are attenuated; the sphere stays fully lit. Same JSON graph as scene 63 — shadow integration is externally driven via parseNodeMaterialFromSnippet({ shadowGenerators }).",
+        "tags": ["nme", "procedural", "shadows"]
+    },
+    {
+        "id": 66,
+        "slug": "scene66-nme-big",
+        "name": "Scene 66 — NME Full Playground (AT7YY5#6)",
+        "maxMad": 0.1,
+        "maxRawKB": 99,
+        "description": "Full NME playground integration test using checked-in local AT7YY5#6 NME data plus local texture assets (136 blocks, PBR-style with diffuse/ambient/specular/emissive/normal/opacity/lightmap textures + equirect reflection, plus instances/bones/morph/discard/fog/front-facing and PCF directional shadow receive).",
+        "tags": [
+            "nme",
+            "procedural",
+            "shadows",
+            "morph",
+            "reflection"
+        ]
+    },
+    {
+        "id": 67,
+        "slug": "scene67-nme-pbr-core",
+        "name": "Scene 67 — NME PBR Core",
+        "maxMad": 0.02,
+        "maxRawKB": 95,
+        "description": "NME PBRMetallicRoughnessBlock + ReflectionBlock with IBL plumbing on a saturated teal matte sphere. Hemi + point + spot + directional lights make the base material visible against a black background.",
+        "tags": [
+            "pbr",
+            "nme",
+            "procedural",
+            "env"
+        ]
+    },
+    {
+        "id": 68,
+        "slug": "scene68-nme-pbr-clearcoat",
+        "name": "Scene 68 — NME PBR Clearcoat",
+        "maxMad": 0.02,
+        "maxRawKB": 96,
+        "description": "Dark navy PBR sphere with a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0.02, IOR=1.5) for an obvious glossy coat highlight.",
+        "tags": [
+            "pbr",
+            "nme",
+            "procedural",
+            "env",
+            "clearcoat"
+        ]
+    },
+    {
+        "id": 69,
+        "slug": "scene69-nme-pbr-sheen",
+        "name": "Scene 69 — NME PBR Sheen",
+        "maxMad": 0.02,
+        "maxRawKB": 98,
+        "description": "Dark purple PBR sphere with softened clearcoat plus a hot magenta SheenBlock wired into PBRMetallicRoughnessBlock.sheen (intensity=1, roughness=0.55) for a visible fabric-like rim.",
+        "tags": [
+            "pbr",
+            "nme",
+            "procedural",
+            "env",
+            "clearcoat",
+            "sheen"
+        ]
+    },
+    {
+        "id": 70,
+        "slug": "scene70-nme-pbr-aniso",
+        "name": "Scene 70 — NME PBR Anisotropy",
+        "maxMad": 0.02,
+        "maxRawKB": 100,
+        "description": "Metallic gold PBR sphere with AnisotropyBlock intensity=0.85 and diagonal direction, producing a visibly stretched anisotropic specular highlight.",
+        "tags": ["pbr", "nme", "procedural", "env", "anisotropy"]
+    },
+    {
+        "id": 71,
+        "slug": "scene71-nme-pbr-subsurface",
+        "name": "Scene 71 — NME PBR SubSurface",
+        "maxMad": 0.02,
+        "maxRawKB": 100,
+        "description": "Warm wax-like PBR sphere with SubSurfaceBlock translucency and a modest RefractionBlock input, back-lit to show transmitted subsurface glow.",
+        "tags": ["pbr", "nme", "procedural", "env", "subsurface"]
+    },
+    {
+        "id": 72,
+        "slug": "scene72-nme-pbr-full",
+        "name": "Scene 72 — NME PBR Full (D8AK3Z)",
+        "maxMad": 0.02,
+        "maxRawKB": 115,
+        "description": "Full D8AK3Z#160 setup: 4 lights (hemi + point + spot + dir + PCF shadow) on sphere + ground, NME = checked-in local EPY8BV#6 data plus local texture assets (PBR-MR + reflection + clearcoat + sheen + anisotropy + subsurface).",
+        "tags": ["pbr", "nme", "procedural", "env", "shadows", "clearcoat", "sheen", "anisotropy", "subsurface"]
     }
 ]

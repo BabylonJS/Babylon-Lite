@@ -1,39 +1,43 @@
 {
-  "name": "babylon-lite",
-  "version": "0.1.0",
-  "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "exports": {
-    ".": {
-      "import": "./src/index.ts",
-      "types": "./src/index.ts"
+    "name": "babylon-lite",
+    "version": "0.1.0",
+    "type": "module",
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "exports": {
+        ".": {
+            "import": "./src/index.ts",
+            "types": "./src/index.ts"
+        },
+        "./material/pbr/background-dds-skybox": {
+            "import": "./src/material/pbr/background-dds-skybox.ts"
+        },
+        "./material/pbr/pbr-thin-instance-ext": {
+            "import": "./src/material/pbr/pbr-thin-instance-ext.ts"
+        },
+        "./loader-env/load-dds-env": {
+            "import": "./src/loader-env/load-dds-env.ts"
+        }
     },
-    "./material/pbr/background-dds-skybox": {
-      "import": "./src/material/pbr/background-dds-skybox.ts"
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "vite build",
+        "build:prod": "vite build --mode prod",
+        "dev": "vite build --watch"
     },
-    "./material/pbr/pbr-thin-instance-ext": {
-      "import": "./src/material/pbr/pbr-thin-instance-ext.ts"
+    "sideEffects": false,
+    "publishConfig": {
+        "types": "./dist/index.d.ts"
     },
-    "./loader-env/load-dds-env": {
-      "import": "./src/loader-env/load-dds-env.ts"
+    "devDependencies": {
+        "@webgpu/types": "^0.1.52",
+        "typescript": "^5.7.0",
+        "vite": "^6.0.0",
+        "vite-plugin-dts": "^4.5.4"
+    },
+    "dependencies": {
+        "draco3d": "^1.5.7"
     }
-  },
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "build": "vite build",
-    "build:prod": "vite build --mode prod",
-    "dev": "vite build --watch"
-  },
-  "sideEffects": false,
-  "devDependencies": {
-    "@webgpu/types": "^0.1.52",
-    "typescript": "^5.7.0",
-    "vite": "^6.0.0"
-  },
-  "dependencies": {
-    "draco3d": "^1.5.7"
-  }
 }

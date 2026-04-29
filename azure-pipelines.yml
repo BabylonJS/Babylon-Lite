@@ -35,9 +35,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: NodeTool@0
+                - task: UseNode@1
                   inputs:
-                      versionSpec: $(NODE_VERSION)
+                      version: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -86,9 +86,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: NodeTool@0
+                - task: UseNode@1
                   inputs:
-                      versionSpec: $(NODE_VERSION)
+                      version: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -137,9 +137,9 @@ stages:
                   fetchDepth: 0
                   fetchTags: true
 
-                - task: NodeTool@0
+                - task: UseNode@1
                   inputs:
-                      versionSpec: $(NODE_VERSION)
+                      version: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -232,9 +232,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: NodeTool@0
+                - task: UseNode@1
                   inputs:
-                      versionSpec: $(NODE_VERSION)
+                      version: $(NODE_VERSION)
 
                 - script: |
                       corepack enable
@@ -290,9 +290,9 @@ stages:
             steps:
                 - checkout: self
 
-                - task: NodeTool@0
+                - task: UseNode@1
                   inputs:
-                      versionSpec: $(NODE_VERSION)
+                      version: $(NODE_VERSION)
 
                 - script: |
                       corepack enable

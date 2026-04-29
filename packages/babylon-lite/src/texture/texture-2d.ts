@@ -66,6 +66,11 @@ export interface Texture2DOptions {
     /** Use sRGB format (rgba8unorm-srgb). Enables hardware sRGB→linear on sample.
      *  Use for color/albedo textures in PBR workflows. Default false. */
     srgb?: boolean;
+    /** Premultiply alpha at decode time. Default false (straight RGBA, matches PNG-on-disk).
+     *  Set true for sprite atlases that will be rendered with a premultiplied blend pipeline
+     *  (`srcFactor: ONE`); doing so produces mathematically correct soft edges and stacked
+     *  translucency. */
+    premultiplyAlpha?: boolean;
 }
 
 // Per-device URL cache: same (url + options) → shared Texture2D promise.
@@ -89,7 +94,7 @@ export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2
         _tex2dCache.set(device, dc);
     }
 
-    const key = `${url}\0${opts.mipMaps ?? true}\0${opts.addressModeU ?? "repeat"}\0${opts.addressModeV ?? "repeat"}\0${opts.minFilter ?? "linear"}\0${opts.magFilter ?? "linear"}\0${opts.invertY ?? true}\0${opts.srgb ?? false}`;
+    const key = `${url}\0${opts.mipMaps ?? true}\0${opts.addressModeU ?? "repeat"}\0${opts.addressModeV ?? "repeat"}\0${opts.minFilter ?? "linear"}\0${opts.magFilter ?? "linear"}\0${opts.invertY ?? true}\0${opts.srgb ?? false}\0${opts.premultiplyAlpha ?? false}`;
     const hit = dc.get(key);
     if (hit) {
         return hit;
@@ -109,11 +114,15 @@ async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opt
     const addressModeV = opts.addressModeV ?? "repeat";
     const invertY = opts.invertY ?? true;
     const srgb = opts.srgb ?? false;
+    const premultiplyAlpha = opts.premultiplyAlpha ?? false;
     const format: GPUTextureFormat = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
 
     const response = await fetch(url);
     const blob = await response.blob();
-    const imageBitmap = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    const imageBitmap = await createImageBitmap(blob, {
+        premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none",
+        colorSpaceConversion: "none",
+    });
 
     const width = imageBitmap.width;
     const height = imageBitmap.height;
@@ -126,7 +135,7 @@ async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opt
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     });
 
-    device.queue.copyExternalImageToTexture({ source: imageBitmap, flipY: invertY }, { texture, premultipliedAlpha: false }, { width, height });
+    device.queue.copyExternalImageToTexture({ source: imageBitmap, flipY: invertY }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });
     imageBitmap.close();
 
     if (mipMaps && mipLevelCount > 1) {

@@ -252,6 +252,14 @@
                 background: #1a2332;
                 color: #7d8da0;
             }
+            .badge-sprites {
+                background: #2c2438;
+                color: #d2a8ff;
+            }
+            .badge-2d {
+                background: #14333a;
+                color: #56d4dd;
+            }
             .badge-bjs {
                 background: #3d2200;
                 color: #d29922;
@@ -1083,7 +1091,8 @@
                 color: #484f58;
                 margin-top: 0.2rem;
             }
-            #pitch-table th, #pitch-table td {
+            #pitch-table th,
+            #pitch-table td {
                 font-size: 0.72rem;
                 white-space: nowrap;
             }
@@ -1508,7 +1517,11 @@
                 border-radius: 4px;
                 cursor: pointer;
                 opacity: 0;
-                transition: opacity 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+                transition:
+                    opacity 0.15s,
+                    background 0.15s,
+                    border-color 0.15s,
+                    color 0.15s;
                 font-family: inherit;
             }
             .card:hover .card-hide-btn,
@@ -1555,7 +1568,9 @@
             <button class="docs-toggle" id="docs-toggle" onclick="toggleDocs()">📖 Architecture &amp; Features</button>
             <button class="docs-toggle" id="pitch-toggle" onclick="togglePitch()" style="margin-left: 0.5rem">📊 Performance Summary</button>
             <button class="docs-toggle" id="compact-toggle" onclick="toggleCompact()" style="margin-left: 0.5rem" title="Toggle small card layout">🔳 Compact</button>
-            <button class="docs-toggle" id="show-hidden-toggle" onclick="toggleShowHidden()" style="margin-left: 0.5rem" title="Show hidden cards so you can restore them">👁 Show Hidden <span id="hidden-count" style="font-size: 0.65rem; opacity: 0.7"></span></button>
+            <button class="docs-toggle" id="show-hidden-toggle" onclick="toggleShowHidden()" style="margin-left: 0.5rem" title="Show hidden cards so you can restore them">
+                👁 Show Hidden <span id="hidden-count" style="font-size: 0.65rem; opacity: 0.7"></span>
+            </button>
         </header>
 
         <div id="docs-panel" class="docs-panel">
@@ -1589,15 +1604,22 @@
                     <div class="arch-modules">
                         <div class="arch-mod arch-mod-mat">
                             <div class="arch-mod-name">Materials</div>
-                            <div class="arch-mod-sub">PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · background/ground</div>
+                            <div class="arch-mod-sub">
+                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · background/ground
+                            </div>
                         </div>
                         <div class="arch-mod arch-mod-mesh">
                             <div class="arch-mod-name">Meshes</div>
-                            <div class="arch-mod-sub">Sphere · box · torus · ground · heightmap · cylinder · plane · disc · polyhedron · ribbon · tube · extrude · thin instances · GPU upload</div>
+                            <div class="arch-mod-sub">
+                                Sphere · box · torus · ground · heightmap · cylinder · plane · disc · polyhedron · ribbon · tube · extrude · thin instances · GPU upload
+                            </div>
                         </div>
                         <div class="arch-mod arch-mod-loader">
                             <div class="arch-mod-name">Loaders</div>
-                            <div class="arch-mod-sub">glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · Draco · KHR_materials_variants · _clearcoat · _sheen · _anisotropy · _ior · _specular · _volume · _transmission · _texture_transform</div>
+                            <div class="arch-mod-sub">
+                                glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · Draco · KHR_materials_variants · _clearcoat · _sheen · _anisotropy · _ior ·
+                                _specular · _volume · _transmission · _texture_transform
+                            </div>
                         </div>
                         <div class="arch-mod arch-mod-anim">
                             <div class="arch-mod-name">Animation</div>
@@ -1682,12 +1704,12 @@
             </div>
 
             <h3 class="docs-section-title" style="margin-top: 1.75rem">📊 <span>Feature Comparison</span> — Babylon Lite vs Babylon.js</h3>
-            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap">
                 <button class="feat-filter-btn active" data-filter="all" onclick="filterFeatures('all')">All</button>
                 <button class="feat-filter-btn" data-filter="implemented" onclick="filterFeatures('implemented')">✅ Implemented</button>
                 <button class="feat-filter-btn" data-filter="missing" onclick="filterFeatures('missing')">— Missing</button>
             </div>
-            <div style="margin-bottom: 0.75rem; font-size: 0.7rem; color: #8b949e; display: flex; gap: 1.2rem; flex-wrap: wrap;">
+            <div style="margin-bottom: 0.75rem; font-size: 0.7rem; color: #8b949e; display: flex; gap: 1.2rem; flex-wrap: wrap">
                 <span>✅ Supported</span>
                 <span>⚡ Partial</span>
                 <span>— Not available</span>
@@ -2938,12 +2960,12 @@
 
         <div id="pitch-panel" class="docs-panel">
             <h3 class="docs-section-title">📊 <span>Babylon Lite vs Babylon.js — At a Glance</span></h3>
-            <p style="color: #8b949e; font-size: 0.8rem; margin-bottom: 1.5rem;">
+            <p style="color: #8b949e; font-size: 0.8rem; margin-bottom: 1.5rem">
                 Averages computed from live benchmarks across all test scenes. Data from <code>bundle/manifest.json</code> and <code>perf-manifest.json</code>.
             </p>
-            <div id="pitch-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem;"></div>
+            <div id="pitch-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem"></div>
             <h3 class="docs-section-title" style="margin-top: 1.5rem">📋 <span>Per-Scene Breakdown</span></h3>
-            <div style="overflow-x: auto;">
+            <div style="overflow-x: auto">
                 <table class="feature-table" id="pitch-table">
                     <thead>
                         <tr>
@@ -2982,7 +3004,10 @@
         </div>
 
         <div id="panel-parity" class="tab-panel">
-            <div class="tab-hint">💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>; exceeding shown in <span style="color: #f85149">red</span>.</div>
+            <div class="tab-hint">
+                💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>; exceeding
+                shown in <span style="color: #f85149">red</span>.
+            </div>
             <div class="parity-toolbar">
                 <div style="flex: 1"></div>
                 <button class="btn parity-sort-btn active" onclick="sortParityGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
@@ -3007,7 +3032,10 @@
         </div>
 
         <div id="panel-perf" class="tab-panel">
-            <div class="tab-hint">💡 RAF callback CPU time per scene, measured via Playwright. Run <code>pnpm test:perf</code> to refresh. <span id="perf-manifest-status" style="color: #3fb950"></span></div>
+            <div class="tab-hint">
+                💡 RAF callback CPU time per scene, measured via Playwright. Run <code>pnpm test:perf</code> to refresh.
+                <span id="perf-manifest-status" style="color: #3fb950"></span>
+            </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="perf-filter-pills"></div>
                 <div style="flex: 1"></div>
@@ -3052,21 +3080,28 @@
                 fog: { label: "Fog", cls: "badge-fog" },
                 shadow: { label: "Shadows", cls: "badge-shadow" },
                 anim: { label: "Anim", cls: "badge-anim" },
-                env: { label: "HDR", cls: "badge-env" }
+                env: { label: "HDR", cls: "badge-env" },
+                sprites: { label: "Sprites", cls: "badge-sprites" },
+                "2d": { label: "2D", cls: "badge-2d" },
             };
 
             function renderBadges(tags) {
-                return tags.filter(function(t) { return TAG_LABELS[t]; }).map(function(t) {
-                    return '<span class="badge ' + TAG_LABELS[t].cls + '">' + TAG_LABELS[t].label + '</span>';
-                }).join("");
+                return tags
+                    .filter(function (t) {
+                        return TAG_LABELS[t];
+                    })
+                    .map(function (t) {
+                        return '<span class="badge ' + TAG_LABELS[t].cls + '">' + TAG_LABELS[t].label + "</span>";
+                    })
+                    .join("");
             }
 
             function renderFilterPills(containerId, toggleFnName) {
                 var el = document.getElementById(containerId);
                 if (!el) return;
-                var pills = Object.keys(TAG_LABELS).map(function(tag) {
+                var pills = Object.keys(TAG_LABELS).map(function (tag) {
                     var t = TAG_LABELS[tag];
-                    return '<span class="pill-toggle ' + t.cls + '" data-filter="' + tag + '" onclick="' + toggleFnName + '(this)">' + t.label + '</span>';
+                    return '<span class="pill-toggle ' + t.cls + '" data-filter="' + tag + '" onclick="' + toggleFnName + '(this)">' + t.label + "</span>";
                 });
                 el.innerHTML = '<span class="filter-label">Filter:</span>' + pills.join("");
             }
@@ -3074,28 +3109,47 @@
             // ── Init functions for each tab ──
             function initSourceGrid(config) {
                 var grid = document.getElementById("source-grid");
-                grid.innerHTML = config.map(function(s) {
-                    var sceneKey = "scene" + s.id;
-                    return '<a class="card" href="/scene' + s.id + '.html" data-scene="' + sceneKey + '" data-tags="' + s.tags.join(" ") + '">' +
-                        renderHideBtn(sceneKey) +
-                        '<div class="card-image">' +
-                        '<img src="/reference/' + s.slug + '/test-actual.png" alt="' + s.name + '" />' +
-                        renderNote(s) +
-                        '</div>' +
-                        '<div class="card-body">' +
-                        '<h2>' + s.name +
-                        ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/babylon-ref-scene' + s.id + '.html\',\'_blank\');">\u25b6 BJS Ref</span>' +
-                        '</h2>' +
-                        '<p>' + s.description + '</p>' +
-                        renderBadges(s.tags) +
-                        '</div></a>';
-                }).join("");
+                grid.innerHTML = config
+                    .map(function (s) {
+                        var sceneKey = "scene" + s.id;
+                        return (
+                            '<a class="card" href="/scene' +
+                            s.id +
+                            '.html" data-scene="' +
+                            sceneKey +
+                            '" data-tags="' +
+                            s.tags.join(" ") +
+                            '">' +
+                            renderHideBtn(sceneKey) +
+                            '<div class="card-image">' +
+                            '<img src="/reference/' +
+                            s.slug +
+                            '/test-actual.png" alt="' +
+                            s.name +
+                            '" />' +
+                            renderNote(s) +
+                            "</div>" +
+                            '<div class="card-body">' +
+                            "<h2>" +
+                            s.name +
+                            ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/babylon-ref-scene' +
+                            s.id +
+                            ".html','_blank');\">\u25b6 BJS Ref</span>" +
+                            "</h2>" +
+                            "<p>" +
+                            s.description +
+                            "</p>" +
+                            renderBadges(s.tags) +
+                            "</div></a>"
+                        );
+                    })
+                    .join("");
                 renderFilterPills("source-filter-pills", "toggleSourceTag");
             }
 
             function renderNote(s) {
                 if (!s.note) return "";
-                return '<div class="card-note" title="' + s.note.replace(/"/g, "&quot;") + '">' + s.note + '</div>';
+                return '<div class="card-note" title="' + s.note.replace(/"/g, "&quot;") + '">' + s.note + "</div>";
             }
 
             // ── Hide / Restore / Compact (all persisted to localStorage) ──
@@ -3104,22 +3158,27 @@
             var SHOW_HIDDEN_KEY = "lab-show-hidden";
 
             function getHiddenScenes() {
-                try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || "{}") || {}; }
-                catch (e) { return {}; }
+                try {
+                    return JSON.parse(localStorage.getItem(HIDDEN_KEY) || "{}") || {};
+                } catch (e) {
+                    return {};
+                }
             }
             function saveHiddenScenes(set) {
                 localStorage.setItem(HIDDEN_KEY, JSON.stringify(set));
             }
 
             function renderHideBtn(sceneKey) {
-                return '<button class="card-hide-btn" data-hide-for="' + sceneKey + '" onclick="toggleHideScene(\'' + sceneKey + '\', event)" title="Hide this scene">\u2715</button>';
+                return (
+                    '<button class="card-hide-btn" data-hide-for="' + sceneKey + '" onclick="toggleHideScene(\'' + sceneKey + '\', event)" title="Hide this scene">\u2715</button>'
+                );
             }
 
             function applyHiddenState() {
                 var hidden = getHiddenScenes();
                 var count = 0;
                 // Apply across every grid. Elements mark themselves with data-scene.
-                document.querySelectorAll("[data-scene]").forEach(function(el) {
+                document.querySelectorAll("[data-scene]").forEach(function (el) {
                     var key = el.dataset.scene;
                     if (hidden[key]) {
                         el.classList.add("scene-hidden");
@@ -3127,9 +3186,11 @@
                         el.classList.remove("scene-hidden");
                     }
                 });
-                for (var k in hidden) { if (hidden[k]) count++; }
+                for (var k in hidden) {
+                    if (hidden[k]) count++;
+                }
                 // Update hide-btn icon based on hidden state (✕ vs ↩)
-                document.querySelectorAll(".card-hide-btn").forEach(function(btn) {
+                document.querySelectorAll(".card-hide-btn").forEach(function (btn) {
                     var key = btn.dataset.hideFor;
                     if (hidden[key]) {
                         btn.textContent = "\u21a9";
@@ -3161,7 +3222,10 @@
             }
 
             function toggleHideScene(sceneKey, ev) {
-                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                if (ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                }
                 var hidden = getHiddenScenes();
                 if (hidden[sceneKey]) {
                     delete hidden[sceneKey];
@@ -3204,43 +3268,81 @@
 
             function initBundleGrid(config) {
                 var grid = document.getElementById("bundle-grid");
-                grid.innerHTML = config.map(function(s) {
-                    var sceneKey = "scene" + s.id;
-                    return '<a class="card" href="/bundle-scene' + s.id + '.html" data-scene="' + sceneKey + '" data-tags="' + s.tags.join(" ") + '">' +
-                        renderHideBtn(sceneKey) +
-                        '<div class="card-image">' +
-                        '<img src="/reference/' + s.slug + '/test-actual.png" alt="' + s.name + '" />' +
-                        '<div class="card-overlay">' +
-                        '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' + s.id + '\');" title="Show .ts files contributing to this bundle">\ud83d\udcc4 Files</span>' +
-                        '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/bundle-bjs-scene' + s.id + '.html\',\'_blank\');" title="Open Babylon.js reference">\u25b6 BJS Ref</span>' +
-                        '</div>' +
-                        renderNote(s) +
-                        '</div>' +
-                        '<div class="card-body">' +
-                        '<h2>' + s.name + '</h2>' +
-                        '<p>' + s.description + '</p>' +
-                        renderBadges(s.tags) +
-                        '<div class="size-info"></div>' +
-                        '</div></a>';
-                }).join("");
+                grid.innerHTML = config
+                    .map(function (s) {
+                        var sceneKey = "scene" + s.id;
+                        return (
+                            '<a class="card" href="/bundle-scene' +
+                            s.id +
+                            '.html" data-scene="' +
+                            sceneKey +
+                            '" data-tags="' +
+                            s.tags.join(" ") +
+                            '">' +
+                            renderHideBtn(sceneKey) +
+                            '<div class="card-image">' +
+                            '<img src="/reference/' +
+                            s.slug +
+                            '/test-actual.png" alt="' +
+                            s.name +
+                            '" />' +
+                            '<div class="card-overlay">' +
+                            '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' +
+                            s.id +
+                            '\');" title="Show .ts files contributing to this bundle">\ud83d\udcc4 Files</span>' +
+                            '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/bundle-bjs-scene' +
+                            s.id +
+                            ".html','_blank');\" title=\"Open Babylon.js reference\">\u25b6 BJS Ref</span>" +
+                            "</div>" +
+                            renderNote(s) +
+                            "</div>" +
+                            '<div class="card-body">' +
+                            "<h2>" +
+                            s.name +
+                            "</h2>" +
+                            "<p>" +
+                            s.description +
+                            "</p>" +
+                            renderBadges(s.tags) +
+                            '<div class="size-info"></div>' +
+                            "</div></a>"
+                        );
+                    })
+                    .join("");
                 renderFilterPills("bundle-filter-pills", "toggleBundleTag");
             }
 
             function initPerfGrid(config) {
                 var grid = document.getElementById("perf-grid");
-                grid.innerHTML = config.map(function(s) {
-                    var sceneKey = "scene" + s.id;
-                    return '<div id="perf-scene' + s.id + '" class="perf-scene-card" data-scene="' + sceneKey + '" data-tags="' + s.tags.join(" ") + '" style="position: relative">' +
-                        renderHideBtn(sceneKey) +
-                        '<div class="perf-scene-header">' +
-                        '<h3>' + s.name + '</h3>' +
-                        renderBadges(s.tags) +
-                        '</div>' +
-                        '<div class="perf-metrics" id="metrics-' + s.id + '"></div>' +
-                        '</div>';
-                }).join("");
+                grid.innerHTML = config
+                    .map(function (s) {
+                        var sceneKey = "scene" + s.id;
+                        return (
+                            '<div id="perf-scene' +
+                            s.id +
+                            '" class="perf-scene-card" data-scene="' +
+                            sceneKey +
+                            '" data-tags="' +
+                            s.tags.join(" ") +
+                            '" style="position: relative">' +
+                            renderHideBtn(sceneKey) +
+                            '<div class="perf-scene-header">' +
+                            "<h3>" +
+                            s.name +
+                            "</h3>" +
+                            renderBadges(s.tags) +
+                            "</div>" +
+                            '<div class="perf-metrics" id="metrics-' +
+                            s.id +
+                            '"></div>' +
+                            "</div>"
+                        );
+                    })
+                    .join("");
                 renderFilterPills("perf-filter-pills", "togglePerfTag");
-                config.forEach(function(s) { renderMetricsPlaceholder(s.id); });
+                config.forEach(function (s) {
+                    renderMetricsPlaceholder(s.id);
+                });
             }
 
             function loadParityDiff(s) {
@@ -3273,45 +3375,75 @@
                         var madClass = result.mad <= threshold ? "pass" : "fail";
                         var w5Class = result.within5Pct >= 90 ? "pass" : result.within5Pct >= 80 ? "warn" : "fail";
                         statsEl.innerHTML =
-                            'MAD: <span class="' + madClass + '">' + result.mad.toFixed(2) + " / " + threshold + "</span> \u00b7 " +
-                            'W5: <span class="' + w5Class + '">' + result.within5Pct.toFixed(1) + "%</span>";
+                            'MAD: <span class="' +
+                            madClass +
+                            '">' +
+                            result.mad.toFixed(2) +
+                            " / " +
+                            threshold +
+                            "</span> \u00b7 " +
+                            'W5: <span class="' +
+                            w5Class +
+                            '">' +
+                            result.within5Pct.toFixed(1) +
+                            "%</span>";
                     }
                 });
             }
 
             function initParityGrid(config) {
-                var parityScenes = config.map(function(s) {
+                var parityScenes = config.map(function (s) {
                     return {
                         n: s.id,
                         name: s.name,
                         maxMad: s.maxMad,
                         golden: "/reference/" + s.slug + "/babylon-ref-golden.png",
-                        actual: "/reference/" + s.slug + "/test-actual.png"
+                        actual: "/reference/" + s.slug + "/test-actual.png",
                     };
                 });
                 window.__PARITY_SCENES__ = parityScenes;
 
                 var grid = document.getElementById("parity-grid");
-                grid.innerHTML = parityScenes.map(function (s) {
-                    var sceneKey = "scene" + s.n;
-                    return (
-                        '<div class="diff-card" id="diff-card-' + s.n + '" data-scene="' + sceneKey + '" data-scene-num="' + s.n + '" data-max-mad="' + s.maxMad + '" style="position: relative">' +
-                        renderHideBtn(sceneKey) +
-                        '<div class="diff-card-header">' +
-                        "<h3>" + s.name + "</h3>" +
-                        '<span class="diff-stats" id="diff-stats-' + s.n + '">loading\u2026</span>' +
-                        "</div>" +
-                        '<div class="diff-images">' +
-                        '<div class="diff-slot"><div class="diff-slot-label">Babylon.js (target)</div>' +
-                        '<div class="placeholder" id="diff-bjs-' + s.n + '">Loading\u2026</div></div>' +
-                        '<div class="diff-slot"><div class="diff-slot-label">Babylon Lite</div>' +
-                        '<div class="placeholder" id="diff-lite-' + s.n + '">Loading\u2026</div></div>' +
-                        '<div class="diff-slot"><div class="diff-slot-label">Diff (10\u00d7 amplified)</div>' +
-                        '<div class="placeholder" id="diff-img-' + s.n + '">Loading\u2026</div></div>' +
-                        "</div>" +
-                        "</div>"
-                    );
-                }).join("");
+                grid.innerHTML = parityScenes
+                    .map(function (s) {
+                        var sceneKey = "scene" + s.n;
+                        return (
+                            '<div class="diff-card" id="diff-card-' +
+                            s.n +
+                            '" data-scene="' +
+                            sceneKey +
+                            '" data-scene-num="' +
+                            s.n +
+                            '" data-max-mad="' +
+                            s.maxMad +
+                            '" style="position: relative">' +
+                            renderHideBtn(sceneKey) +
+                            '<div class="diff-card-header">' +
+                            "<h3>" +
+                            s.name +
+                            "</h3>" +
+                            '<span class="diff-stats" id="diff-stats-' +
+                            s.n +
+                            '">loading\u2026</span>' +
+                            "</div>" +
+                            '<div class="diff-images">' +
+                            '<div class="diff-slot"><div class="diff-slot-label">Babylon.js (target)</div>' +
+                            '<div class="placeholder" id="diff-bjs-' +
+                            s.n +
+                            '">Loading\u2026</div></div>' +
+                            '<div class="diff-slot"><div class="diff-slot-label">Babylon Lite</div>' +
+                            '<div class="placeholder" id="diff-lite-' +
+                            s.n +
+                            '">Loading\u2026</div></div>' +
+                            '<div class="diff-slot"><div class="diff-slot-label">Diff (10\u00d7 amplified)</div>' +
+                            '<div class="placeholder" id="diff-img-' +
+                            s.n +
+                            '">Loading\u2026</div></div>' +
+                            "</div>" +
+                            "</div>"
+                        );
+                    })
+                    .join("");
 
                 // Load all diffs in parallel
                 var allDiffs = parityScenes.map(loadParityDiff);
@@ -3337,7 +3469,7 @@
                     parityFilterActive: parityFilterActive,
                     perfFilterActive: perfFilterActive,
                     pitchSortKey: pitchSortKey,
-                    pitchSortAsc: pitchSortAsc
+                    pitchSortAsc: pitchSortAsc,
                 };
                 var activeParityBtn = document.querySelector(".parity-sort-btn.active");
                 if (activeParityBtn) state.paritySort = activeParityBtn.dataset.sort;
@@ -3349,12 +3481,16 @@
             function restoreLabState() {
                 var raw = localStorage.getItem(LAB_STATE_KEY);
                 if (!raw) return;
-                try { var state = JSON.parse(raw); } catch (e) { return; }
+                try {
+                    var state = JSON.parse(raw);
+                } catch (e) {
+                    return;
+                }
 
                 // Restore source tag filters
                 if (state.sourceFilters) {
                     activeSourceTags = state.sourceFilters;
-                    document.querySelectorAll("#source-filter-pills .pill-toggle").forEach(function(el) {
+                    document.querySelectorAll("#source-filter-pills .pill-toggle").forEach(function (el) {
                         el.classList.toggle("active", !!activeSourceTags[el.dataset.filter]);
                     });
                     applySourceFilters();
@@ -3362,7 +3498,7 @@
                 // Restore bundle tag filters
                 if (state.bundleFilters) {
                     activeBundleTags = state.bundleFilters;
-                    document.querySelectorAll("#bundle-filter-pills .pill-toggle").forEach(function(el) {
+                    document.querySelectorAll("#bundle-filter-pills .pill-toggle").forEach(function (el) {
                         el.classList.toggle("active", !!activeBundleTags[el.dataset.filter]);
                     });
                     applyBundleFilters();
@@ -3370,7 +3506,7 @@
                 // Restore perf tag filters
                 if (state.perfFilters) {
                     activePerfTags = state.perfFilters;
-                    document.querySelectorAll("#perf-filter-pills .pill-toggle").forEach(function(el) {
+                    document.querySelectorAll("#perf-filter-pills .pill-toggle").forEach(function (el) {
                         el.classList.toggle("active", !!activePerfTags[el.dataset.filter]);
                     });
                 }
@@ -3408,8 +3544,12 @@
                 if (_currentTab && _currentTab !== tabName) {
                     localStorage.setItem("lab-scroll-" + _currentTab, String(window.scrollY));
                 }
-                document.querySelectorAll(".tab").forEach(function(t) { t.classList.remove("active"); });
-                document.querySelectorAll(".tab-panel").forEach(function(p) { p.classList.remove("active"); });
+                document.querySelectorAll(".tab").forEach(function (t) {
+                    t.classList.remove("active");
+                });
+                document.querySelectorAll(".tab-panel").forEach(function (p) {
+                    p.classList.remove("active");
+                });
                 var tab = document.querySelector('.tab[data-tab="' + tabName + '"]');
                 if (tab) tab.classList.add("active");
                 var panel = document.getElementById("panel-" + tabName);
@@ -3424,13 +3564,15 @@
             }
 
             // Persist scroll and filter/sort state on navigating away
-            window.addEventListener("beforeunload", function() {
+            window.addEventListener("beforeunload", function () {
                 localStorage.setItem("lab-scroll-" + _currentTab, String(window.scrollY));
                 saveLabState();
             });
 
-            document.querySelectorAll(".tab").forEach(function(tab) {
-                tab.addEventListener("click", function() { activateTab(tab.dataset.tab); });
+            document.querySelectorAll(".tab").forEach(function (tab) {
+                tab.addEventListener("click", function () {
+                    activateTab(tab.dataset.tab);
+                });
             });
 
             var saved = localStorage.getItem("lab-tab");
@@ -3441,8 +3583,10 @@
             // ── Consolidated config fetch + init ──
             function loadBundleManifest() {
                 fetch("/bundle/manifest.json")
-                    .then(function(r) { return r.json(); })
-                    .then(function(manifest) {
+                    .then(function (r) {
+                        return r.json();
+                    })
+                    .then(function (manifest) {
                         var bjsCount = 0;
                         for (var scene in manifest) {
                             if (!manifest.hasOwnProperty(scene)) continue;
@@ -3451,32 +3595,49 @@
                             if (!card) continue;
                             var html =
                                 '<div class="size-row"><span class="size-label">Lite</span>' +
-                                '<span><span class="size-value">' + sizes.rawKB + '</span> KB min</span>' +
-                                '<span class="size-gzip">' + sizes.gzipKB + ' KB gzip</span></div>';
-                            var cfg = (window.SCENE_CONFIG || []).find(function(c) { return "scene" + c.id === scene; });
+                                '<span><span class="size-value">' +
+                                sizes.rawKB +
+                                "</span> KB min</span>" +
+                                '<span class="size-gzip">' +
+                                sizes.gzipKB +
+                                " KB gzip</span></div>";
+                            var cfg = (window.SCENE_CONFIG || []).find(function (c) {
+                                return "scene" + c.id === scene;
+                            });
                             if (cfg && cfg.maxRawKB != null) {
                                 var rawHead = cfg.maxRawKB - sizes.rawKB;
-                                var lowCls = (rawHead < 0) ? " low" : "";
+                                var lowCls = rawHead < 0 ? " low" : "";
                                 html +=
                                     '<div class="size-row"><span class="size-label size-label-ceil">Ceil</span>' +
-                                    '<span><span class="size-value">' + cfg.maxRawKB + '</span> KB max</span>' +
-                                    '<span class="size-headroom' + lowCls + '" title="Headroom before ceiling">+' +
-                                    rawHead.toFixed(1) + ' KB</span></div>';
+                                    '<span><span class="size-value">' +
+                                    cfg.maxRawKB +
+                                    "</span> KB max</span>" +
+                                    '<span class="size-headroom' +
+                                    lowCls +
+                                    '" title="Headroom before ceiling">+' +
+                                    rawHead.toFixed(1) +
+                                    " KB</span></div>";
                             }
                             if (sizes.bjsRawKB != null) {
                                 bjsCount++;
                                 var ratio = (sizes.bjsGzipKB / sizes.gzipKB).toFixed(1);
                                 html +=
                                     '<div class="size-row"><span class="size-label size-label-bjs">BJS</span>' +
-                                    '<span><span class="size-value">' + sizes.bjsRawKB + '</span> KB min</span>' +
-                                    '<span class="size-gzip">' + sizes.bjsGzipKB + ' KB gzip</span>' +
-                                    '<span class="size-ratio">' + ratio + '\u00d7</span></div>';
+                                    '<span><span class="size-value">' +
+                                    sizes.bjsRawKB +
+                                    "</span> KB min</span>" +
+                                    '<span class="size-gzip">' +
+                                    sizes.bjsGzipKB +
+                                    " KB gzip</span>" +
+                                    '<span class="size-ratio">' +
+                                    ratio +
+                                    "\u00d7</span></div>";
                             }
                             card.innerHTML = html;
-                            card.closest('.card').dataset.rawKb = sizes.rawKB;
-                            card.closest('.card').dataset.gzipKb = sizes.gzipKB;
+                            card.closest(".card").dataset.rawKb = sizes.rawKB;
+                            card.closest(".card").dataset.gzipKb = sizes.gzipKB;
                             if (cfg && cfg.maxRawKB != null) {
-                                card.closest('.card').dataset.maxRawKb = cfg.maxRawKB;
+                                card.closest(".card").dataset.maxRawKb = cfg.maxRawKB;
                             }
                         }
                         // Re-apply stored sort now that size data is available
@@ -3485,13 +3646,15 @@
                             sortBundleGrid(activeBtn.dataset.sort, true);
                         }
                     })
-                    .catch(function() {});
+                    .catch(function () {});
             }
 
             function loadPerfManifest() {
                 fetch("/perf-manifest.json")
-                    .then(function(r) { return r.ok ? r.json() : null; })
-                    .then(function(manifest) {
+                    .then(function (r) {
+                        return r.ok ? r.json() : null;
+                    })
+                    .then(function (manifest) {
                         if (!manifest) {
                             document.getElementById("perf-status").textContent = "No data \u2014 run pnpm test:perf";
                             return;
@@ -3506,7 +3669,7 @@
                         var el = document.getElementById("perf-manifest-status");
                         if (el) el.textContent = "\ud83d\udcca " + count + " scenes (pnpm test:perf to refresh)";
                     })
-                    .catch(function() {
+                    .catch(function () {
                         document.getElementById("perf-status").textContent = "Failed to load perf-manifest.json";
                     });
             }
@@ -3598,8 +3761,10 @@
             }
 
             fetch("/scene-config.json?t=" + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(config) {
+                .then(function (r) {
+                    return r.json();
+                })
+                .then(function (config) {
                     window.SCENE_CONFIG = config;
                     initSourceGrid(config);
                     initBundleGrid(config);
@@ -3612,10 +3777,12 @@
                     loadPerfRegManifest();
                     // Restore scroll position now that content is rendered
                     var savedScroll = parseInt(localStorage.getItem("lab-scroll-" + _currentTab) || "0", 10);
-                    requestAnimationFrame(function() { window.scrollTo(0, savedScroll); });
+                    requestAnimationFrame(function () {
+                        window.scrollTo(0, savedScroll);
+                    });
                     startAutoRefresh();
                 })
-                .catch(function() {
+                .catch(function () {
                     console.warn("Failed to load scene-config.json");
                 });
 
@@ -3628,8 +3795,10 @@
             function pollSignature() {
                 if (document.hidden) return;
                 fetch("/lab-api/signature", { cache: "no-store" })
-                    .then(function(r) { return r.ok ? r.json() : null; })
-                    .then(function(sig) {
+                    .then(function (r) {
+                        return r.ok ? r.json() : null;
+                    })
+                    .then(function (sig) {
                         if (!sig) return;
                         var prev = _lastSig;
                         _lastSig = sig;
@@ -3642,17 +3811,19 @@
                         }
                         var parityScenes = window.__PARITY_SCENES__ || [];
                         var byId = {};
-                        parityScenes.forEach(function(s) { byId["scene" + s.n] = s; });
+                        parityScenes.forEach(function (s) {
+                            byId["scene" + s.n] = s;
+                        });
                         var newPar = sig.parity || {};
                         var oldPar = prev.parity || {};
                         var reloads = [];
-                        Object.keys(newPar).forEach(function(k) {
+                        Object.keys(newPar).forEach(function (k) {
                             if (newPar[k] !== oldPar[k] && byId[k]) {
                                 reloads.push(loadParityDiff(byId[k]));
                             }
                         });
                         if (reloads.length) {
-                            Promise.all(reloads).then(function() {
+                            Promise.all(reloads).then(function () {
                                 var activeBtn = document.querySelector(".parity-sort-btn.active");
                                 if (activeBtn && activeBtn.dataset.sort !== "num") {
                                     sortParityGrid(activeBtn.dataset.sort, true);
@@ -3668,7 +3839,7 @@
                             });
                         }
                     })
-                    .catch(function() {});
+                    .catch(function () {});
             }
 
             /** Load an image from URL, return Image or null */
@@ -3676,8 +3847,12 @@
                 return new Promise(function (resolve) {
                     var img = new Image();
                     img.crossOrigin = "anonymous";
-                    img.onload = function () { resolve(img); };
-                    img.onerror = function () { resolve(null); };
+                    img.onload = function () {
+                        resolve(img);
+                    };
+                    img.onerror = function () {
+                        resolve(null);
+                    };
                     img.src = url + "?t=" + Date.now();
                 });
             }
@@ -3778,7 +3953,7 @@
                         var gz = parseFloat(c.dataset.gzipKb || "0");
                         var maxRaw = parseFloat(c.dataset.maxRawKb || "Infinity");
                         var maxGz = parseFloat(c.dataset.maxGzipKb || "Infinity");
-                        c.style.display = (raw > maxRaw || gz > maxGz) ? "" : "none";
+                        c.style.display = raw > maxRaw || gz > maxGz ? "" : "none";
                     });
                 } else {
                     btn.style.background = "";
@@ -3816,16 +3991,20 @@
                 if (!el) return;
                 var metrics = ["Init Time (s) \u2193", "Draw Calls \u2193", "RAF CPU Avg (ms) \u2193", "RAF CPU P95 (ms) \u2193", "Memory (MB) \u2193"];
                 el.innerHTML = metrics
-                    .map(function(m) {
-                        return '<div class="metric-group">' +
-                            '<div class="metric-label">' + m + "</div>" +
+                    .map(function (m) {
+                        return (
+                            '<div class="metric-group">' +
+                            '<div class="metric-label">' +
+                            m +
+                            "</div>" +
                             '<div class="metric-bar-row"><span class="metric-engine engine-lite">Lite</span>' +
                             '<div class="metric-bar-track"><div class="metric-bar bar-lite" style="width:0"></div></div>' +
                             '<span class="metric-value metric-placeholder">\u2014</span></div>' +
                             '<div class="metric-bar-row"><span class="metric-engine engine-bjs">BJS</span>' +
                             '<div class="metric-bar-track"><div class="metric-bar bar-bjs" style="width:0"></div></div>' +
                             '<span class="metric-value metric-placeholder">\u2014</span></div>' +
-                            "</div>";
+                            "</div>"
+                        );
                     })
                     .join("");
             }
@@ -3842,7 +4021,7 @@
                 "Draw Calls \u2193": 0,
                 "RAF CPU Avg (ms) \u2193": 0.02,
                 "RAF CPU P95 (ms) \u2193": 0.1,
-                "Memory (MB) \u2193": 1
+                "Memory (MB) \u2193": 1,
             };
 
             function renderMetricBars(el, metrics) {
@@ -3864,13 +4043,30 @@
 
                         return (
                             '<div class="metric-group">' +
-                            '<div class="metric-label' + (liteLoses ? " regression" : "") + '">' + m.label + "</div>" +
+                            '<div class="metric-label' +
+                            (liteLoses ? " regression" : "") +
+                            '">' +
+                            m.label +
+                            "</div>" +
                             '<div class="metric-bar-row"><span class="metric-engine engine-lite">Lite</span>' +
-                            '<div class="metric-bar-track"><div class="metric-bar bar-lite" style="width:' + lPct + '%"></div></div>' +
-                            '<span class="metric-value' + (liteWins ? " winner" : "") + (liteLoses ? " loser" : "") + '">' + fmtVal(lv) + "</span></div>" +
+                            '<div class="metric-bar-track"><div class="metric-bar bar-lite" style="width:' +
+                            lPct +
+                            '%"></div></div>' +
+                            '<span class="metric-value' +
+                            (liteWins ? " winner" : "") +
+                            (liteLoses ? " loser" : "") +
+                            '">' +
+                            fmtVal(lv) +
+                            "</span></div>" +
                             '<div class="metric-bar-row"><span class="metric-engine engine-bjs">BJS</span>' +
-                            '<div class="metric-bar-track"><div class="metric-bar bar-bjs" style="width:' + bPct + '%"></div></div>' +
-                            '<span class="metric-value' + (bjsWins ? " winner" : "") + '">' + fmtVal(bv) + "</span></div>" +
+                            '<div class="metric-bar-track"><div class="metric-bar bar-bjs" style="width:' +
+                            bPct +
+                            '%"></div></div>' +
+                            '<span class="metric-value' +
+                            (bjsWins ? " winner" : "") +
+                            '">' +
+                            fmtVal(bv) +
+                            "</span></div>" +
                             "</div>"
                         );
                     })
@@ -3887,7 +4083,7 @@
                     { label: "Draw Calls \u2193", lv: lite.drawCalls, bv: bjs.drawCalls, higherBetter: false },
                     { label: "RAF CPU Avg (ms) \u2193", lv: lite.rafAvgMs, bv: bjs.rafAvgMs, higherBetter: false },
                     { label: "RAF CPU P95 (ms) \u2193", lv: lite.rafP95Ms, bv: bjs.rafP95Ms, higherBetter: false },
-                    { label: "Memory (MB) \u2193", lv: r2(lite.memoryMB), bv: r2(bjs.memoryMB), higherBetter: false }
+                    { label: "Memory (MB) \u2193", lv: r2(lite.memoryMB), bv: r2(bjs.memoryMB), higherBetter: false },
                 ];
 
                 renderMetricBars(el, metricList);
@@ -3906,7 +4102,9 @@
 
                 if (card) {
                     var header = card.querySelector(".perf-scene-header");
-                    header.querySelectorAll(".perf-factor").forEach(function (e) { e.remove(); });
+                    header.querySelectorAll(".perf-factor").forEach(function (e) {
+                        e.remove();
+                    });
 
                     var rafLite = lite.rafAvgMs,
                         rafBjs = bjs.rafAvgMs;
@@ -3949,14 +4147,20 @@
 
             function applySourceFilters() {
                 var cards = document.querySelectorAll("#source-grid .card");
-                var activeList = Object.keys(activeSourceTags).filter(function (k) { return activeSourceTags[k]; });
+                var activeList = Object.keys(activeSourceTags).filter(function (k) {
+                    return activeSourceTags[k];
+                });
                 cards.forEach(function (c) {
                     if (activeList.length === 0) {
                         c.style.display = "";
                         return;
                     }
                     var tags = (c.dataset.tags || "").split(" ");
-                    c.style.display = activeList.every(function (t) { return tags.indexOf(t) >= 0; }) ? "" : "none";
+                    c.style.display = activeList.every(function (t) {
+                        return tags.indexOf(t) >= 0;
+                    })
+                        ? ""
+                        : "none";
                 });
             }
 
@@ -3973,12 +4177,16 @@
 
             function applyPerfFilters() {
                 var cards = document.querySelectorAll(".perf-grid .perf-scene-card");
-                var activeList = Object.keys(activePerfTags).filter(function (k) { return activePerfTags[k]; });
+                var activeList = Object.keys(activePerfTags).filter(function (k) {
+                    return activePerfTags[k];
+                });
                 cards.forEach(function (c) {
                     var show = true;
                     if (activeList.length > 0) {
                         var tags = (c.dataset.tags || "").split(" ");
-                        show = activeList.every(function (t) { return tags.indexOf(t) >= 0; });
+                        show = activeList.every(function (t) {
+                            return tags.indexOf(t) >= 0;
+                        });
                     }
                     if (show && perfFilterActive) {
                         show = parseInt(c.dataset.regressions || "0", 10) > 0;
@@ -4013,12 +4221,16 @@
 
             function applyBundleFilters() {
                 var cards = document.querySelectorAll("#bundle-grid > .card");
-                var activeList = Object.keys(activeBundleTags).filter(function (k) { return activeBundleTags[k]; });
+                var activeList = Object.keys(activeBundleTags).filter(function (k) {
+                    return activeBundleTags[k];
+                });
                 cards.forEach(function (c) {
                     var show = true;
                     if (activeList.length > 0) {
                         var tags = (c.dataset.tags || "").split(" ");
-                        show = activeList.every(function (t) { return tags.indexOf(t) >= 0; });
+                        show = activeList.every(function (t) {
+                            return tags.indexOf(t) >= 0;
+                        });
                     }
                     c.style.display = show ? "" : "none";
                 });
@@ -4065,9 +4277,11 @@
 
             function filterFeatures(mode) {
                 var btns = document.querySelectorAll(".feat-filter-btn");
-                btns.forEach(function(b) { b.classList.toggle("active", b.dataset.filter === mode); });
+                btns.forEach(function (b) {
+                    b.classList.toggle("active", b.dataset.filter === mode);
+                });
                 var rows = document.querySelectorAll(".feature-table tbody tr");
-                rows.forEach(function(row) {
+                rows.forEach(function (row) {
                     if (row.classList.contains("feat-cat")) {
                         row.classList.remove("feat-hidden");
                         return;
@@ -4087,7 +4301,7 @@
                     }
                 });
                 var catRows = document.querySelectorAll(".feature-table tbody tr.feat-cat");
-                catRows.forEach(function(cat) {
+                catRows.forEach(function (cat) {
                     var next = cat.nextElementSibling;
                     var hasVisible = false;
                     while (next && !next.classList.contains("feat-cat")) {
@@ -4123,7 +4337,7 @@
             }
 
             var _origToggleDocs = toggleDocs;
-            toggleDocs = function() {
+            toggleDocs = function () {
                 var pitchPanel = document.getElementById("pitch-panel");
                 var pitchBtn = document.getElementById("pitch-toggle");
                 if (pitchPanel.classList.contains("open")) {
@@ -4145,20 +4359,46 @@
             }
 
             function renderPitchTable(data) {
-                var rows = data.map(function(d) {
-                    return "<tr>" +
-                        "<td><img class='pitch-thumb' src='" + pitchThumbSrc(d.sceneNum) + "' alt='Scene " + d.sceneNum + "' /></td>" +
-                        "<td>Scene " + d.sceneNum + "</td>" +
-                        "<td>" + d.liteKB.toFixed(1) + " KB</td>" +
-                        "<td>" + (d.bjsKB > 0 ? d.bjsKB.toFixed(0) + " KB" : "\u2014") + "</td>" +
-                        "<td style='color:#3fb950;font-weight:600'>" + (d.ratio > 0 ? d.ratio.toFixed(0) + "\u00d7 smaller" : "") + "</td>" +
-                        "<td>" + (d.liteRaf > 0 ? d.liteRaf.toFixed(3) + " ms" : "") + "</td>" +
-                        "<td>" + (d.bjsRaf > 0 ? d.bjsRaf.toFixed(3) + " ms" : "") + "</td>" +
-                        "<td style='color:#3fb950;font-weight:600'>" + (d.speedup > 0 ? d.speedup.toFixed(1) + "\u00d7" : "") + "</td>" +
-                        "<td>" + (d.liteMem > 0 ? d.liteMem.toFixed(0) + " MB" : "") + "</td>" +
-                        "<td>" + (d.bjsMem > 0 ? d.bjsMem.toFixed(0) + " MB" : "") + "</td>" +
-                        "<td style='color:#3fb950;font-weight:600'>" + (d.memSave > 0 ? "\u2212" + d.memSave.toFixed(0) + "%" : "") + "</td>" +
-                        "</tr>";
+                var rows = data.map(function (d) {
+                    return (
+                        "<tr>" +
+                        "<td><img class='pitch-thumb' src='" +
+                        pitchThumbSrc(d.sceneNum) +
+                        "' alt='Scene " +
+                        d.sceneNum +
+                        "' /></td>" +
+                        "<td>Scene " +
+                        d.sceneNum +
+                        "</td>" +
+                        "<td>" +
+                        d.liteKB.toFixed(1) +
+                        " KB</td>" +
+                        "<td>" +
+                        (d.bjsKB > 0 ? d.bjsKB.toFixed(0) + " KB" : "\u2014") +
+                        "</td>" +
+                        "<td style='color:#3fb950;font-weight:600'>" +
+                        (d.ratio > 0 ? d.ratio.toFixed(0) + "\u00d7 smaller" : "") +
+                        "</td>" +
+                        "<td>" +
+                        (d.liteRaf > 0 ? d.liteRaf.toFixed(3) + " ms" : "") +
+                        "</td>" +
+                        "<td>" +
+                        (d.bjsRaf > 0 ? d.bjsRaf.toFixed(3) + " ms" : "") +
+                        "</td>" +
+                        "<td style='color:#3fb950;font-weight:600'>" +
+                        (d.speedup > 0 ? d.speedup.toFixed(1) + "\u00d7" : "") +
+                        "</td>" +
+                        "<td>" +
+                        (d.liteMem > 0 ? d.liteMem.toFixed(0) + " MB" : "") +
+                        "</td>" +
+                        "<td>" +
+                        (d.bjsMem > 0 ? d.bjsMem.toFixed(0) + " MB" : "") +
+                        "</td>" +
+                        "<td style='color:#3fb950;font-weight:600'>" +
+                        (d.memSave > 0 ? "\u2212" + d.memSave.toFixed(0) + "%" : "") +
+                        "</td>" +
+                        "</tr>"
+                    );
                 });
                 document.getElementById("pitch-table-body").innerHTML = rows.join("");
             }
@@ -4170,8 +4410,9 @@
                     pitchSortKey = key;
                     pitchSortAsc = key === "sceneNum";
                 }
-                var sorted = pitchRowData.slice().sort(function(a, b) {
-                    var va = a[key] || 0, vb = b[key] || 0;
+                var sorted = pitchRowData.slice().sort(function (a, b) {
+                    var va = a[key] || 0,
+                        vb = b[key] || 0;
                     return pitchSortAsc ? va - vb : vb - va;
                 });
                 renderPitchTable(sorted);
@@ -4185,29 +4426,45 @@
                 saveLabState();
             }
 
-            document.querySelectorAll("#pitch-table th[data-sort-key]").forEach(function(th) {
-                th.addEventListener("click", function() {
+            document.querySelectorAll("#pitch-table th[data-sort-key]").forEach(function (th) {
+                th.addEventListener("click", function () {
                     sortPitchTable(th.getAttribute("data-sort-key"));
                 });
             });
 
             function loadPitchData() {
                 Promise.all([
-                    fetch("/bundle/manifest.json").then(function(r) { return r.json(); }),
-                    fetch("/perf-manifest.json").then(function(r) { return r.json(); })
-                ]).then(function(results) {
+                    fetch("/bundle/manifest.json").then(function (r) {
+                        return r.json();
+                    }),
+                    fetch("/perf-manifest.json").then(function (r) {
+                        return r.json();
+                    }),
+                ]).then(function (results) {
                     var bundle = results[0];
                     var perf = results[1];
-                    var sceneNames = Object.keys(bundle).filter(function(k) { return k.startsWith("scene"); })
-                        .sort(function(a, b) { return parseInt(a.replace("scene","")) - parseInt(b.replace("scene","")); });
+                    var sceneNames = Object.keys(bundle)
+                        .filter(function (k) {
+                            return k.startsWith("scene");
+                        })
+                        .sort(function (a, b) {
+                            return parseInt(a.replace("scene", "")) - parseInt(b.replace("scene", ""));
+                        });
 
-                    var totalLiteKB = 0, totalBjsKB = 0;
-                    var totalLiteRaf = 0, totalBjsRaf = 0, rafCount = 0;
-                    var totalLiteMem = 0, totalBjsMem = 0, memCount = 0;
-                    var totalLiteInit = 0, totalBjsInit = 0, initCount = 0;
+                    var totalLiteKB = 0,
+                        totalBjsKB = 0;
+                    var totalLiteRaf = 0,
+                        totalBjsRaf = 0,
+                        rafCount = 0;
+                    var totalLiteMem = 0,
+                        totalBjsMem = 0,
+                        memCount = 0;
+                    var totalLiteInit = 0,
+                        totalBjsInit = 0,
+                        initCount = 0;
 
                     pitchRowData = [];
-                    sceneNames.forEach(function(name) {
+                    sceneNames.forEach(function (name) {
                         var b = bundle[name];
                         var p = perf[name];
                         var liteKB = b.rawKB || 0;
@@ -4215,34 +4472,52 @@
                         totalLiteKB += liteKB;
                         if (bjsKB > 0) totalBjsKB += bjsKB;
 
-                        var liteRaf = 0, bjsRaf = 0, speedup = 0;
-                        var liteMem = 0, bjsMem = 0, memSave = 0;
+                        var liteRaf = 0,
+                            bjsRaf = 0,
+                            speedup = 0;
+                        var liteMem = 0,
+                            bjsMem = 0,
+                            memSave = 0;
                         if (p && p.lite && p.bjs) {
                             liteRaf = p.lite.rafAvgMs;
                             bjsRaf = p.bjs.rafAvgMs;
-                            totalLiteRaf += liteRaf; totalBjsRaf += bjsRaf; rafCount++;
+                            totalLiteRaf += liteRaf;
+                            totalBjsRaf += bjsRaf;
+                            rafCount++;
                             speedup = bjsRaf / liteRaf;
                             liteMem = p.lite.memoryMB;
                             bjsMem = p.bjs.memoryMB;
-                            totalLiteMem += liteMem; totalBjsMem += bjsMem; memCount++;
-                            totalLiteInit += p.lite.initTime; totalBjsInit += p.bjs.initTime; initCount++;
+                            totalLiteMem += liteMem;
+                            totalBjsMem += bjsMem;
+                            memCount++;
+                            totalLiteInit += p.lite.initTime;
+                            totalBjsInit += p.bjs.initTime;
+                            initCount++;
                             memSave = (1 - p.lite.memoryMB / p.bjs.memoryMB) * 100;
                         }
 
                         var ratio = bjsKB > 0 ? bjsKB / liteKB : 0;
                         var num = parseInt(name.replace("scene", ""));
                         pitchRowData.push({
-                            sceneNum: num, liteKB: liteKB, bjsKB: bjsKB, ratio: ratio,
-                            liteRaf: liteRaf, bjsRaf: bjsRaf, speedup: speedup,
-                            liteMem: liteMem, bjsMem: bjsMem, memSave: memSave
+                            sceneNum: num,
+                            liteKB: liteKB,
+                            bjsKB: bjsKB,
+                            ratio: ratio,
+                            liteRaf: liteRaf,
+                            bjsRaf: bjsRaf,
+                            speedup: speedup,
+                            liteMem: liteMem,
+                            bjsMem: bjsMem,
+                            memSave: memSave,
                         });
                     });
 
                     renderPitchTable(pitchRowData);
                     // Apply restored pitch sort or default
                     if (pitchSortKey !== "sceneNum" || !pitchSortAsc) {
-                        var sorted = pitchRowData.slice().sort(function(a, b) {
-                            var va = a[pitchSortKey] || 0, vb = b[pitchSortKey] || 0;
+                        var sorted = pitchRowData.slice().sort(function (a, b) {
+                            var va = a[pitchSortKey] || 0,
+                                vb = b[pitchSortKey] || 0;
                             return pitchSortAsc ? va - vb : vb - va;
                         });
                         renderPitchTable(sorted);
@@ -4264,20 +4539,52 @@
                     var avgInitSpeedup = initCount > 0 ? (totalBjsInit / totalLiteInit).toFixed(1) : "\u2014";
 
                     var cards = [
-                        { icon: "\ud83d\udce6", value: avgBundleRatio + "\u00d7", label: "Smaller Bundles", sub: "Avg " + (totalLiteKB / sceneNames.length).toFixed(0) + " KB vs " + (totalBjsKB / sceneNames.length).toFixed(0) + " KB" },
-                        { icon: "\u26a1", value: avgRafSpeedup + "\u00d7", label: "Faster Rendering", sub: "Avg RAF " + (totalLiteRaf / rafCount).toFixed(3) + " ms vs " + (totalBjsRaf / rafCount).toFixed(3) + " ms" },
-                        { icon: "\ud83e\udde0", value: "\u2212" + avgMemSave + "%", label: "Less Memory", sub: "Avg " + (totalLiteMem / memCount).toFixed(0) + " MB vs " + (totalBjsMem / memCount).toFixed(0) + " MB" },
-                        { icon: "\ud83d\ude80", value: avgInitSpeedup + "\u00d7", label: "Faster Startup", sub: "Avg " + (totalLiteInit / initCount).toFixed(2) + "s vs " + (totalBjsInit / initCount).toFixed(2) + "s" }
+                        {
+                            icon: "\ud83d\udce6",
+                            value: avgBundleRatio + "\u00d7",
+                            label: "Smaller Bundles",
+                            sub: "Avg " + (totalLiteKB / sceneNames.length).toFixed(0) + " KB vs " + (totalBjsKB / sceneNames.length).toFixed(0) + " KB",
+                        },
+                        {
+                            icon: "\u26a1",
+                            value: avgRafSpeedup + "\u00d7",
+                            label: "Faster Rendering",
+                            sub: "Avg RAF " + (totalLiteRaf / rafCount).toFixed(3) + " ms vs " + (totalBjsRaf / rafCount).toFixed(3) + " ms",
+                        },
+                        {
+                            icon: "\ud83e\udde0",
+                            value: "\u2212" + avgMemSave + "%",
+                            label: "Less Memory",
+                            sub: "Avg " + (totalLiteMem / memCount).toFixed(0) + " MB vs " + (totalBjsMem / memCount).toFixed(0) + " MB",
+                        },
+                        {
+                            icon: "\ud83d\ude80",
+                            value: avgInitSpeedup + "\u00d7",
+                            label: "Faster Startup",
+                            sub: "Avg " + (totalLiteInit / initCount).toFixed(2) + "s vs " + (totalBjsInit / initCount).toFixed(2) + "s",
+                        },
                     ];
 
-                    document.getElementById("pitch-cards").innerHTML = cards.map(function(c) {
-                        return '<div class="pitch-card">' +
-                            '<div class="pitch-card-icon">' + c.icon + '</div>' +
-                            '<div class="pitch-card-value">' + c.value + '</div>' +
-                            '<div class="pitch-card-label">' + c.label + '</div>' +
-                            '<div class="pitch-card-sub">' + c.sub + '</div>' +
-                            '</div>';
-                    }).join("");
+                    document.getElementById("pitch-cards").innerHTML = cards
+                        .map(function (c) {
+                            return (
+                                '<div class="pitch-card">' +
+                                '<div class="pitch-card-icon">' +
+                                c.icon +
+                                "</div>" +
+                                '<div class="pitch-card-value">' +
+                                c.value +
+                                "</div>" +
+                                '<div class="pitch-card-label">' +
+                                c.label +
+                                "</div>" +
+                                '<div class="pitch-card-sub">' +
+                                c.sub +
+                                "</div>" +
+                                "</div>"
+                            );
+                        })
+                        .join("");
                 });
             }
         </script>
@@ -4296,7 +4603,7 @@
         </div>
 
         <!-- Bundle Files modal -->
-        <div class="bf-overlay" id="bf-overlay" onclick="if(event.target===this)closeBundleFiles()">
+        <div class="bf-overlay" id="bf-overlay" onclick="if (event.target === this) closeBundleFiles();">
             <div class="bf-modal">
                 <div class="bf-header">
                     <h2 id="bf-title">Bundle Files</h2>
@@ -4309,13 +4616,16 @@
 
         <script>
             // ── Bundle Files modal ──
-            (function() {
+            (function () {
                 var state = {
-                    info: null, manifest: null, runtimeSet: {}, hasRuntime: false,
+                    info: null,
+                    manifest: null,
+                    runtimeSet: {},
+                    hasRuntime: false,
                     filter: "",
-                    groupByBundle: true,  // group by bundle vs flat list
-                    sortBy: "size",       // "size" | "path"
-                    sortDir: "desc",      // "asc" | "desc"
+                    groupByBundle: true, // group by bundle vs flat list
+                    sortBy: "size", // "size" | "path"
+                    sortDir: "desc", // "asc" | "desc"
                     hideUnloaded: true,
                 };
 
@@ -4332,12 +4642,12 @@
                     return "—";
                 }
                 function escapeHtml(s) {
-                    return String(s).replace(/[&<>"]/g, function(c) {
+                    return String(s).replace(/[&<>"]/g, function (c) {
                         return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
                     });
                 }
                 function normalizeExports(list) {
-                    return (Array.isArray(list) ? list : []).map(function(e) {
+                    return (Array.isArray(list) ? list : []).map(function (e) {
                         return typeof e === "string" ? { name: e, kind: "unknown" } : e;
                     });
                 }
@@ -4356,27 +4666,30 @@
                     var isVirtual = m.id.charCodeAt(0) === 0;
                     if (exports.length > 0) {
                         var groups = { function: [], class: [], enum: [], const: [], unknown: [] };
-                        exports.forEach(function(e) {
+                        exports.forEach(function (e) {
                             (groups[e.kind] || groups.unknown).push(e.name);
                         });
                         var groupDefs = [
-                            { key: "function", label: "fn",    cls: "bf-chip-fn" },
-                            { key: "class",    label: "class", cls: "bf-chip-class" },
-                            { key: "enum",     label: "enum",  cls: "bf-chip-enum" },
-                            { key: "const",    label: "const", cls: "bf-chip-const" },
-                            { key: "unknown",  label: "other", cls: "" }
+                            { key: "function", label: "fn", cls: "bf-chip-fn" },
+                            { key: "class", label: "class", cls: "bf-chip-class" },
+                            { key: "enum", label: "enum", cls: "bf-chip-enum" },
+                            { key: "const", label: "const", cls: "bf-chip-const" },
+                            { key: "unknown", label: "other", cls: "" },
                         ];
-                        var groupHtml = groupDefs.filter(function(g) {
-                            return groups[g.key].length > 0;
-                        }).map(function(g) {
-                            var chips = groups[g.key].map(function(name) {
-                                return '<span class="bf-chip ' + g.cls + '">' + escapeHtml(name) + '</span>';
-                            }).join("");
-                            return '<div class="bf-chip-group">' +
-                                   '<span class="bf-chip-group-label">' + g.label + '</span>' +
-                                   chips + '</div>';
-                        }).join("");
-                        return '<div class="bf-mod-exports">' + groupHtml + '</div>';
+                        var groupHtml = groupDefs
+                            .filter(function (g) {
+                                return groups[g.key].length > 0;
+                            })
+                            .map(function (g) {
+                                var chips = groups[g.key]
+                                    .map(function (name) {
+                                        return '<span class="bf-chip ' + g.cls + '">' + escapeHtml(name) + "</span>";
+                                    })
+                                    .join("");
+                                return '<div class="bf-chip-group">' + '<span class="bf-chip-group-label">' + g.label + "</span>" + chips + "</div>";
+                            })
+                            .join("");
+                        return '<div class="bf-mod-exports">' + groupHtml + "</div>";
                     }
                     if (isNonTs || isVirtual) {
                         return '<div class="bf-mod-exports"><div class="bf-chip-group"><span class="bf-chip bf-chip-whole">whole module</span></div></div>';
@@ -4384,27 +4697,37 @@
                     return '<div class="bf-mod-exports-empty">no named exports (side-effect only)</div>';
                 }
                 function renderModuleLi(m) {
-                    return '<div class="bf-mod-row">' +
-                           '<span class="bf-mod-path" title="' + modulePrefix(m.id) + '">' + escapeHtml(m.id) + '</span>' +
-                           '<span class="bf-mod-bytes">' + fmtBytes(m.bytes) + '</span>' +
-                           '</div>' +
-                           renderChipsHtml(m);
+                    return (
+                        '<div class="bf-mod-row">' +
+                        '<span class="bf-mod-path" title="' +
+                        modulePrefix(m.id) +
+                        '">' +
+                        escapeHtml(m.id) +
+                        "</span>" +
+                        '<span class="bf-mod-bytes">' +
+                        fmtBytes(m.bytes) +
+                        "</span>" +
+                        "</div>" +
+                        renderChipsHtml(m)
+                    );
                 }
 
                 function renderBundleGrouped(chunks, filter) {
                     var html = "";
                     var anyShown = false;
                     // Optionally filter out chunks that didn't load at runtime.
-                    var visibleChunks = chunks.filter(function(c) {
+                    var visibleChunks = chunks.filter(function (c) {
                         var loaded = !state.hasRuntime || state.runtimeSet[c.file];
                         return !(state.hideUnloaded && state.hasRuntime && !loaded);
                     });
                     // Sort chunks by current sort key.
                     var cmpChunk = makeChunkComparator();
                     visibleChunks = visibleChunks.slice().sort(cmpChunk);
-                    visibleChunks.forEach(function(c, idx) {
+                    visibleChunks.forEach(function (c, idx) {
                         var loaded = !state.hasRuntime || state.runtimeSet[c.file];
-                        var visibleMods = (c.modules || []).filter(function(m) { return matchesFilter(m, filter); });
+                        var visibleMods = (c.modules || []).filter(function (m) {
+                            return matchesFilter(m, filter);
+                        });
                         if (filter && visibleMods.length === 0) return;
                         // Sort modules within the chunk by current sort key.
                         visibleMods = visibleMods.slice().sort(makeModuleComparator());
@@ -4412,23 +4735,40 @@
                         var badges = "";
                         if (c.isEntry) badges += '<span class="bf-chunk-badge bf-badge-entry">entry</span> ';
                         if (state.hasRuntime) {
-                            badges += loaded
-                                ? '<span class="bf-chunk-badge bf-badge-runtime">loaded</span> '
-                                : '<span class="bf-chunk-badge bf-badge-stripped">not loaded</span> ';
+                            badges += loaded ? '<span class="bf-chunk-badge bf-badge-runtime">loaded</span> ' : '<span class="bf-chunk-badge bf-badge-stripped">not loaded</span> ';
                         }
                         var modsHtml = visibleMods.length
-                            ? visibleMods.map(function(m) { return '<li>' + renderModuleLi(m) + '</li>'; }).join("")
+                            ? visibleMods
+                                  .map(function (m) {
+                                      return "<li>" + renderModuleLi(m) + "</li>";
+                                  })
+                                  .join("")
                             : '<li class="bf-empty">(no module contributions recorded)</li>';
                         // Collapse chunks by default except the first visible one, unless filtering (then expand all).
                         var collapsed = !filter && idx > 0;
-                        html += '<div class="bf-chunk' + (loaded ? '' : ' stripped') + '">' +
-                                '<div class="bf-chunk-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">' +
-                                '<span class="bf-chunk-name">' + escapeHtml(c.file) + '</span>' +
-                                badges +
-                                '<span class="bf-chunk-size">' + fmtBytes(c.bytes) + ' · ' + c.modules.length + ' module' + (c.modules.length===1?'':'s') + '</span>' +
-                                '</div>' +
-                                '<ul class="bf-modules' + (collapsed ? ' collapsed' : '') + '">' + modsHtml + '</ul>' +
-                                '</div>';
+                        html +=
+                            '<div class="bf-chunk' +
+                            (loaded ? "" : " stripped") +
+                            '">' +
+                            '<div class="bf-chunk-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">' +
+                            '<span class="bf-chunk-name">' +
+                            escapeHtml(c.file) +
+                            "</span>" +
+                            badges +
+                            '<span class="bf-chunk-size">' +
+                            fmtBytes(c.bytes) +
+                            " · " +
+                            c.modules.length +
+                            " module" +
+                            (c.modules.length === 1 ? "" : "s") +
+                            "</span>" +
+                            "</div>" +
+                            '<ul class="bf-modules' +
+                            (collapsed ? " collapsed" : "") +
+                            '">' +
+                            modsHtml +
+                            "</ul>" +
+                            "</div>";
                     });
                     if (!anyShown) return '<div class="bf-empty">No modules match the current filters.</div>';
                     return html;
@@ -4437,39 +4777,55 @@
                 function makeChunkComparator() {
                     var dir = state.sortDir === "asc" ? 1 : -1;
                     if (state.sortBy === "path") {
-                        return function(a, b) { return a.file.localeCompare(b.file) * dir; };
+                        return function (a, b) {
+                            return a.file.localeCompare(b.file) * dir;
+                        };
                     }
-                    return function(a, b) { return (a.bytes - b.bytes) * dir; };
+                    return function (a, b) {
+                        return (a.bytes - b.bytes) * dir;
+                    };
                 }
                 function makeModuleComparator() {
                     var dir = state.sortDir === "asc" ? 1 : -1;
                     if (state.sortBy === "path") {
-                        return function(a, b) { return a.id.localeCompare(b.id) * dir; };
+                        return function (a, b) {
+                            return a.id.localeCompare(b.id) * dir;
+                        };
                     }
-                    return function(a, b) { return (a.bytes - b.bytes) * dir; };
+                    return function (a, b) {
+                        return (a.bytes - b.bytes) * dir;
+                    };
                 }
 
                 function renderFlat(chunks, filter) {
                     var items = [];
-                    chunks.forEach(function(c) {
+                    chunks.forEach(function (c) {
                         var loaded = !state.hasRuntime || state.runtimeSet[c.file];
                         if (state.hideUnloaded && state.hasRuntime && !loaded) return;
-                        (c.modules || []).forEach(function(m) {
+                        (c.modules || []).forEach(function (m) {
                             if (!matchesFilter(m, filter)) return;
                             items.push({ m: m, chunk: c, loaded: loaded });
                         });
                     });
                     var cmp = makeModuleComparator();
-                    items.sort(function(a, b) { return cmp(a.m, b.m); });
+                    items.sort(function (a, b) {
+                        return cmp(a.m, b.m);
+                    });
                     if (items.length === 0) return '<div class="bf-empty">No modules match the current filters.</div>';
                     var html = '<ul class="bf-flat-list">';
-                    items.forEach(function(it) {
-                        html += '<li' + (it.loaded ? '' : ' class="stripped"') + '>' +
-                                renderModuleLi(it.m) +
-                                '<span class="bf-flat-chunk-ref">in ' + escapeHtml(it.chunk.file) + (it.loaded ? '' : ' (not loaded)') + '</span>' +
-                                '</li>';
+                    items.forEach(function (it) {
+                        html +=
+                            "<li" +
+                            (it.loaded ? "" : ' class="stripped"') +
+                            ">" +
+                            renderModuleLi(it.m) +
+                            '<span class="bf-flat-chunk-ref">in ' +
+                            escapeHtml(it.chunk.file) +
+                            (it.loaded ? "" : " (not loaded)") +
+                            "</span>" +
+                            "</li>";
                     });
-                    html += '</ul>';
+                    html += "</ul>";
                     return html;
                 }
 
@@ -4488,28 +4844,32 @@
                 function wireToolbarButtons() {
                     function wireGroup(groupId, key, onChange) {
                         var group = document.getElementById(groupId);
-                        Array.prototype.forEach.call(group.querySelectorAll("button"), function(btn) {
-                            btn.addEventListener("click", function() {
+                        Array.prototype.forEach.call(group.querySelectorAll("button"), function (btn) {
+                            btn.addEventListener("click", function () {
                                 var val = btn.getAttribute("data-value");
                                 state[key] = val === "true" ? true : val === "false" ? false : val;
-                                Array.prototype.forEach.call(group.querySelectorAll("button"), function(b) { b.classList.remove("active"); });
+                                Array.prototype.forEach.call(group.querySelectorAll("button"), function (b) {
+                                    b.classList.remove("active");
+                                });
                                 btn.classList.add("active");
                                 if (onChange) onChange();
                                 render();
                             });
                         });
                     }
-                    wireGroup("bf-tg-group",  "groupByBundle");
+                    wireGroup("bf-tg-group", "groupByBundle");
                     wireGroup("bf-tg-sortby", "sortBy");
-                    wireGroup("bf-tg-sortdir","sortDir");
+                    wireGroup("bf-tg-sortdir", "sortDir");
                 }
 
-                window.closeBundleFiles = function() {
+                window.closeBundleFiles = function () {
                     document.getElementById("bf-overlay").classList.remove("active");
                 };
 
-                window.showBundleFiles = function(scene) {
-                    var cfg = (window.SCENE_CONFIG || []).filter(function(c){return "scene"+c.id===scene;})[0];
+                window.showBundleFiles = function (scene) {
+                    var cfg = (window.SCENE_CONFIG || []).filter(function (c) {
+                        return "scene" + c.id === scene;
+                    })[0];
                     var title = cfg ? cfg.name : scene;
                     document.getElementById("bf-title").textContent = title;
                     document.getElementById("bf-subtitle").textContent = "loading…";
@@ -4518,9 +4878,21 @@
                     document.getElementById("bf-overlay").classList.add("active");
 
                     Promise.all([
-                        fetch("/bundle/bundle-info/" + scene + ".json?t=" + Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
-                        fetch("/bundle/manifest.json?t=" + Date.now()).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
-                    ]).then(function(results) {
+                        fetch("/bundle/bundle-info/" + scene + ".json?t=" + Date.now())
+                            .then(function (r) {
+                                return r.ok ? r.json() : null;
+                            })
+                            .catch(function () {
+                                return null;
+                            }),
+                        fetch("/bundle/manifest.json?t=" + Date.now())
+                            .then(function (r) {
+                                return r.ok ? r.json() : null;
+                            })
+                            .catch(function () {
+                                return null;
+                            }),
+                    ]).then(function (results) {
                         var info = results[0];
                         var manifest = results[1] || {};
                         if (!info) {
@@ -4530,12 +4902,14 @@
                         }
                         var sceneManifest = manifest[scene] || {};
                         var runtimeSet = {};
-                        (sceneManifest.runtimeChunks || []).forEach(function(f){ runtimeSet[f] = true; });
+                        (sceneManifest.runtimeChunks || []).forEach(function (f) {
+                            runtimeSet[f] = true;
+                        });
                         var hasRuntime = Object.keys(runtimeSet).length > 0;
 
                         var chunks = info.chunks || [];
                         // Sort: entry first, runtime-loaded next, stripped last; within group by size desc.
-                        chunks.sort(function(a,b) {
+                        chunks.sort(function (a, b) {
                             var ar = !hasRuntime || runtimeSet[a.file] ? 1 : 0;
                             var br = !hasRuntime || runtimeSet[b.file] ? 1 : 0;
                             if (a.isEntry !== b.isEntry) return a.isEntry ? -1 : 1;
@@ -4543,15 +4917,21 @@
                             return b.bytes - a.bytes;
                         });
 
-                        var totalRuntimeBytes = 0, runtimeChunkCount = 0, strippedChunkCount = 0;
-                        chunks.forEach(function(c) {
+                        var totalRuntimeBytes = 0,
+                            runtimeChunkCount = 0,
+                            strippedChunkCount = 0;
+                        chunks.forEach(function (c) {
                             var loaded = !hasRuntime || runtimeSet[c.file];
-                            if (loaded) { totalRuntimeBytes += c.bytes; runtimeChunkCount++; }
-                            else { strippedChunkCount++; }
+                            if (loaded) {
+                                totalRuntimeBytes += c.bytes;
+                                runtimeChunkCount++;
+                            } else {
+                                strippedChunkCount++;
+                            }
                         });
 
-                        var sub = runtimeChunkCount + " chunk" + (runtimeChunkCount===1?"":"s") + " loaded at runtime · " + fmtBytes(totalRuntimeBytes) + " raw";
-                        if (strippedChunkCount) sub += " · " + strippedChunkCount + " chunk" + (strippedChunkCount===1?"":"s") + " built but not fetched";
+                        var sub = runtimeChunkCount + " chunk" + (runtimeChunkCount === 1 ? "" : "s") + " loaded at runtime · " + fmtBytes(totalRuntimeBytes) + " raw";
+                        if (strippedChunkCount) sub += " · " + strippedChunkCount + " chunk" + (strippedChunkCount === 1 ? "" : "s") + " built but not fetched";
                         if (!hasRuntime) sub = "runtime info unavailable — all built chunks shown";
                         document.getElementById("bf-subtitle").textContent = sub;
 
@@ -4566,41 +4946,48 @@
                         state.hideUnloaded = true;
 
                         function btn(group, value, label, active) {
-                            return '<button data-value="' + value + '"' + (active ? ' class="active"' : '') + '>' + label + '</button>';
+                            return '<button data-value="' + value + '"' + (active ? ' class="active"' : "") + ">" + label + "</button>";
                         }
                         body.innerHTML =
                             '<div class="bf-toolbar">' +
-                              '<input id="bf-filter" class="bf-filter" type="text" placeholder="Filter by file path or export name…" />' +
-                              '<div id="bf-tg-group" class="bf-toolbar-group" title="Grouping">' +
-                                btn("group","true","Group by bundle",true) +
-                                btn("group","false","Flat list",false) +
-                              '</div>' +
-                              '<div id="bf-tg-sortby" class="bf-toolbar-group" title="Sort by">' +
-                                btn("sortby","size","Size",true) +
-                                btn("sortby","path","Path",false) +
-                              '</div>' +
-                              '<div id="bf-tg-sortdir" class="bf-toolbar-group" title="Direction">' +
-                                btn("sortdir","desc","↓ Desc",true) +
-                                btn("sortdir","asc","↑ Asc",false) +
-                              '</div>' +
-                              (hasRuntime
+                            '<input id="bf-filter" class="bf-filter" type="text" placeholder="Filter by file path or export name…" />' +
+                            '<div id="bf-tg-group" class="bf-toolbar-group" title="Grouping">' +
+                            btn("group", "true", "Group by bundle", true) +
+                            btn("group", "false", "Flat list", false) +
+                            "</div>" +
+                            '<div id="bf-tg-sortby" class="bf-toolbar-group" title="Sort by">' +
+                            btn("sortby", "size", "Size", true) +
+                            btn("sortby", "path", "Path", false) +
+                            "</div>" +
+                            '<div id="bf-tg-sortdir" class="bf-toolbar-group" title="Direction">' +
+                            btn("sortdir", "desc", "↓ Desc", true) +
+                            btn("sortdir", "asc", "↑ Asc", false) +
+                            "</div>" +
+                            (hasRuntime
                                 ? '<label class="bf-toolbar-check" title="Hide chunks that were not actually fetched at runtime">' +
-                                    '<input type="checkbox" id="bf-hide-unloaded" checked /> Hide unloaded' +
-                                  '</label>'
-                                : '') +
-                            '</div>' +
+                                  '<input type="checkbox" id="bf-hide-unloaded" checked /> Hide unloaded' +
+                                  "</label>"
+                                : "") +
+                            "</div>" +
                             '<div class="bf-note">Chunk sizes are post-minification bytes. Module sizes are the rendered contribution of each <code>.ts</code> / <code>.wgsl</code> file. Chips show the exported symbols that survived tree-shaking.</div>' +
                             '<div id="bf-list"></div>';
 
                         var filterEl = document.getElementById("bf-filter");
-                        filterEl.addEventListener("input", function() { state.filter = filterEl.value; render(); });
+                        filterEl.addEventListener("input", function () {
+                            state.filter = filterEl.value;
+                            render();
+                        });
                         wireToolbarButtons();
                         var hideEl = document.getElementById("bf-hide-unloaded");
-                        if (hideEl) hideEl.addEventListener("change", function() { state.hideUnloaded = hideEl.checked; render(); });
+                        if (hideEl)
+                            hideEl.addEventListener("change", function () {
+                                state.hideUnloaded = hideEl.checked;
+                                render();
+                            });
                         render();
                     });
                 };
-                document.addEventListener("keydown", function(e) {
+                document.addEventListener("keydown", function (e) {
                     if (e.key === "Escape") {
                         var ov = document.getElementById("bf-overlay");
                         if (ov && ov.classList.contains("active")) closeBundleFiles();
@@ -4608,7 +4995,6 @@
                 });
             })();
         </script>
-
 
         <script>
             // ── Lightbox for parity diff images ──
