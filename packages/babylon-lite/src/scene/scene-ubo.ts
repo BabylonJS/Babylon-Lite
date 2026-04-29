@@ -17,7 +17,7 @@ import type { Camera } from "../camera/camera.js";
 import type { RenderPassTask } from "../frame-graph/render-pass-task.js";
 
 import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../camera/camera.js";
-import { SCENE_UBO_BYTES } from "../shader/scene-uniforms.js";
+import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 
 /** Per-task scratch buffer cache to avoid per-frame allocation. */
 const _scratchByTask = new WeakMap<RenderPassTask, Float32Array>();

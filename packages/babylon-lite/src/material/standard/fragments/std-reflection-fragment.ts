@@ -40,8 +40,8 @@ reflectionColor = textureSample(reflectionTex, reflectionSampler, reflCoords).rg
 
 import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
-import type { StdExt } from "../standard-pipeline.js";
-import { HAS_REFLECTION_TEXTURE } from "../standard-pipeline.js";
+import type { StdExt } from "../standard-flags.js";
+import { HAS_REFLECTION_TEXTURE } from "../standard-flags.js";
 
 export const stdReflectionExt: StdExt = {
     id: "std-reflection",

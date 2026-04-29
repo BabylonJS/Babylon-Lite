@@ -12,14 +12,13 @@ export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRende
 // pass. Subsequent steps will move main into the graph.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
-export { addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph.js";
+export { addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";
 export type { Task } from "./frame-graph/task.js";
 export type { RenderPassTask, RenderPassTaskConfig } from "./frame-graph/render-pass-task.js";
 export { createRenderPassTask, removeMeshFromTask } from "./frame-graph/render-pass-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
 export { createRenderTargetTexture } from "./texture/rtt.js";
-export type { RenderTargetSampledTexture } from "./texture/rtt.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";

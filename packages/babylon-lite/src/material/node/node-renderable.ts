@@ -283,7 +283,8 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 if (!ubo) {
                     continue;
                 }
-                // Inlined updateSceneUniforms: write vp (0..15) + view (16..31) + eye (32..34)
+                // Inlined updateSceneUniforms: write vp (0..15) + view (16..31),
+                // eye (32..34), and fog (36..43)
                 // into the NME material's per-material scene UBO. NME materials own their own
                 // scene UBO (custom struct generated from the NME node graph) and hence cannot
                 // share the canonical SCENE_UBO from the active RenderPassTask.
@@ -293,13 +294,23 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                     _nmeSceneScratch = new Float32Array(Math.max(sizeFloats, 64));
                 }
                 const data = _nmeSceneScratch;
-                data.fill(0);
+                data.fill(0, 0, sizeFloats);
                 data.set(vp as Float32Array, 0);
                 data.set(v as Float32Array, 16);
                 data[32] = eyeTuple[0];
                 data[33] = eyeTuple[1];
                 data[34] = eyeTuple[2];
-                engine.device.queue.writeBuffer(ubo, 0, data as Float32Array<ArrayBuffer>, 0, sizeFloats);
+                const fog = scene.fog;
+                if (fog) {
+                    data[36] = fog.mode;
+                    data[37] = fog.start;
+                    data[38] = fog.end;
+                    data[39] = fog.density;
+                    data[40] = fog.color[0];
+                    data[41] = fog.color[1];
+                    data[42] = fog.color[2];
+                }
+                engine.device.queue.writeBuffer(ubo, 0, data.subarray(0, sizeFloats) as Float32Array<ArrayBuffer>);
                 if (material._compile.envBindings) {
                     material._envHelpers!.writeEnvSceneTail(engine, ubo, scene);
                 }

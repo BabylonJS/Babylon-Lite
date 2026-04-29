@@ -9,7 +9,7 @@
 // per-pass material override, and that one Renderable per (mesh, material) is shared
 // across multiple passes.
 //
-// Note: id 60 (not 50) — id 50 is reserved by a co-worker.
+// Note: id 52 — id 50 is reserved by a co-worker.
 
 import {
     addToScene,
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     const meshB = createBox(engine, 2);
     meshB.position.x = 3;
     const matB = createStandardMaterial();
-    matB.diffuseTexture = { ...r1Tex, width: 512, height: 512 };
+    matB.diffuseTexture = r1Tex;
     meshB.material = matB;
     addToScene(scene, meshB);
 

@@ -5,19 +5,19 @@
  * against the golden reference (captured from Babylon.js using
  * RenderTargetTexture + setMaterialForRendering + per-RTT activeCamera).
  *
- * Scene id 60 (not 50) — id 50 is reserved by a co-worker.
+ * Scene id 52 — id 50 is reserved by a co-worker.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(60);
+const sceneConfig = getSceneConfig(52);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene52-rtt-override");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
 test("Scene 52 — RTT with material override matches Babylon.js reference", async ({ page }) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 60 });
+    await captureGolden(browser, { sceneId: 52 });
 
     await page.goto("/scene52.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });

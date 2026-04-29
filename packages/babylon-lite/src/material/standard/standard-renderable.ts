@@ -25,15 +25,9 @@ import {
     refreshLightsUBO,
     clearStandardPipelineCache,
     getLightsUboSize,
-    NEEDS_UV,
-    NEEDS_UV2,
-    RECEIVE_SHADOWS,
-    THIN_INSTANCES,
-    THIN_INSTANCE_COLOR,
-    HAS_OPACITY_TEXTURE,
-    _getStdExts,
     writeStdMaterialData,
 } from "./standard-pipeline.js";
+import { NEEDS_UV, NEEDS_UV2, RECEIVE_SHADOWS, THIN_INSTANCES, THIN_INSTANCE_COLOR, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
 import { computeLightsVersion } from "../../render/lights-ubo.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";

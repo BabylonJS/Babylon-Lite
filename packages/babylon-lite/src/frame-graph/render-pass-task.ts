@@ -39,7 +39,7 @@ import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
-import { SCENE_UBO_BYTES } from "../shader/scene-uniforms.js";
+import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { writePassSceneUBO } from "../scene/scene-ubo.js";
 import type { Task } from "./task.js";
 
@@ -129,7 +129,6 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
     const sceneBGL = getSceneBindGroupLayout(eng);
     const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
     const sceneBG = eng.device.createBindGroup({
-        label: `scene-bg:${config.name}`,
         layout: sceneBGL,
         entries: [{ binding: 0, resource: { buffer: sceneUBO } }],
     });
@@ -234,7 +233,7 @@ function resolvePendingMeshes(task: RenderPassTask, sc: SceneContextInternal): v
         const buildGroup = (material as MaterialInternal)._buildGroup;
         const rebuild = buildGroup?._rebuildSingle;
         if (!rebuild) {
-            throw new Error(`RenderPassTask.addToPass: material has no _rebuildSingle wired — register at least one mesh of this material family via addToScene first.`);
+            throw new Error("RenderPassTask.addToPass: material family is not registered");
         }
         const renderable = rebuild(sc, mesh, material);
         if (!task._renderables.includes(renderable)) {
@@ -245,9 +244,7 @@ function resolvePendingMeshes(task: RenderPassTask, sc: SceneContextInternal): v
 }
 
 function mirrorSceneBuckets(task: RenderPassTask, sc: SceneContextInternal): void {
-    for (const r of sc._renderables) {
-        task._renderables.push(r);
-    }
+    task._renderables.push(...sc._renderables);
 }
 
 /** Per-frame back-to-front sort for transparent bindings using the active camera. */

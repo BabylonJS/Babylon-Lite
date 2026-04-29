@@ -10,7 +10,7 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Material, MaterialInternal } from "../material.js";
-import { _getStdExts } from "./standard-pipeline.js";
+import { _getStdExts, _registerStdExt } from "./standard-flags.js";
 
 // ─── Standard Group Builder ──────────────────────────────────────────
 
@@ -38,8 +38,6 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     let tiSync: ((engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
     let tiFragment: any;
     let shadowFragment: any;
-
-    const { _registerStdExt } = await import("./standard-pipeline.js");
 
     const imports: Promise<any>[] = [];
     if (hasTI) {

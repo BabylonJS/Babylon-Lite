@@ -5,9 +5,7 @@
  *  light extensions). If the WGSL struct changes, update those offsets. */
 
 import sceneUniformsWgsl from "../../shaders/scene-uniforms.wgsl?raw";
-
-/** Total size of SceneUniforms in bytes (must equal the WGSL struct size). */
-export const SCENE_UBO_BYTES = 352;
+export { SCENE_UBO_BYTES } from "./scene-uniforms-size.js";
 
 /** Canonical WGSL declaration of the SceneUniforms struct + group(0) binding.
  *  Prepend to any standalone shader (skybox, ground, etc.) that samples the

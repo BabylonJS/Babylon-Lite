@@ -92,7 +92,6 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
 
     if (allocColor) {
         rt._colorTexture = device.createTexture({
-            label: desc.label ? `${desc.label}-color` : "rt-color",
             size: { width, height },
             format: desc.colorFormat,
             sampleCount: desc.sampleCount,
@@ -103,7 +102,6 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
 
     if (desc.depthStencilFormat) {
         rt._depthTexture = device.createTexture({
-            label: desc.label ? `${desc.label}-depth` : "rt-depth",
             size: { width, height },
             format: desc.depthStencilFormat,
             sampleCount: desc.sampleCount,

@@ -2,8 +2,8 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
-import type { StdExt } from "../standard-pipeline.js";
-import { HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2 } from "../standard-pipeline.js";
+import type { StdExt } from "../standard-flags.js";
+import { HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2 } from "../standard-flags.js";
 
 const STAGE_FRAGMENT = 0x2;
 

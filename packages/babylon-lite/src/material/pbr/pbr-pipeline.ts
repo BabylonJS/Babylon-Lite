@@ -59,10 +59,10 @@ export function getOrCreatePbrBindings(engine: EngineContextInternal, features: 
     }
 
     const device = engine.device;
-    const meshBGL = device.createBindGroupLayout({ label: `pbr-mesh-f${features}`, ...composed.meshBGLDescriptor });
+    const meshBGL = device.createBindGroupLayout(composed.meshBGLDescriptor);
     let shadowBGL: GPUBindGroupLayout | null = null;
     if (composed.shadowBGLDescriptor) {
-        shadowBGL = device.createBindGroupLayout({ label: `pbr-shadow-f${features}`, ...composed.shadowBGLDescriptor });
+        shadowBGL = device.createBindGroupLayout(composed.shadowBGLDescriptor);
     }
     const bindings: PbrShaderBindings = { features, features2, meshBGL, shadowBGL, composed, pipelines: new Map() };
     _bindingsCache.set(key, bindings);
@@ -86,8 +86,8 @@ export function getOrCreatePbrPipeline(engine: EngineContextInternal, sig: Rende
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings.shadowBGL ? [sceneBGL, bindings.meshBGL, bindings.shadowBGL] : [sceneBGL, bindings.meshBGL];
 
-    const vertModule = device.createShaderModule({ code: composed.vertexWGSL, label: `pbr-vert-f${features}` });
-    const fragModule = device.createShaderModule({ code: composed.fragmentWGSL, label: `pbr-frag-f${features}` });
+    const vertModule = device.createShaderModule({ code: composed.vertexWGSL });
+    const fragModule = device.createShaderModule({ code: composed.fragmentWGSL });
 
     const fragTarget: GPUColorTargetState = { format: sig.colorFormat, writeMask: GPUColorWrite.ALL };
     if (hasAlpha) {
@@ -98,7 +98,6 @@ export function getOrCreatePbrPipeline(engine: EngineContextInternal, sig: Rende
     }
 
     const pipeline = device.createRenderPipeline({
-        label: `pbr-pipeline-f${features}`,
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed.vertexBufferLayouts },
         fragment: { module: fragModule, entryPoint: "main", targets: [fragTarget] },

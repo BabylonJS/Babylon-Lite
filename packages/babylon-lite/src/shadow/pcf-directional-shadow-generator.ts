@@ -31,8 +31,10 @@ import {
     updateShadowLightMatrix,
 } from "./shadow-base.js";
 import depthVertSrc from "../../shaders/shadow-pcf-depth.vertex.wgsl?raw";
-import { registerPcfShadowShader, registerPcfShadowBgl } from "../material/standard/standard-pipeline.js";
-import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
+import { registerPcfShadowShader, registerPcfShadowBgl } from "../material/standard/standard-flags.js";
+
+/** Shadow-pass UBO: just the light's view-projection matrix (64 bytes). */
+const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
 
 // Morph-aware depth vertex shader — inlined to avoid a separate import that
 // would bloat non-morph scenes. Only used when a caster has morphTargets.
@@ -202,7 +204,7 @@ export function createPcfDirectionalShadowGenerator(
                   label: "shadow-pcf-dir",
                   viewProj,
                   casterMeshes: staticMeshes,
-                  vertCode: SCENE_UBO_WGSL + depthVertSrc,
+                  vertCode: SHADOW_LIGHT_VIEW_WGSL + depthVertSrc,
                   depthBias,
                   depthBiasSlopeScale,
               })
@@ -224,7 +226,7 @@ export function createPcfDirectionalShadowGenerator(
                           label: "shadow-pcf-dir-morph",
                           viewProj,
                           casterMeshes: [mesh],
-                          vertCode: SCENE_UBO_WGSL + DEPTH_VERT_MORPH,
+                          vertCode: SHADOW_LIGHT_VIEW_WGSL + DEPTH_VERT_MORPH,
                           depthBias,
                           depthBiasSlopeScale,
                           extraMeshBglEntries: morphBglEntries,

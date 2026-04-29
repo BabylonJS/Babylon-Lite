@@ -1,7 +1,7 @@
 /** Cube reflection fragment — dynamically imported for scenes with cube reflection textures. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
-import type { StdExt } from "../standard-pipeline.js";
-import { HAS_CUBE_REFLECTION } from "../standard-pipeline.js";
+import type { StdExt } from "../standard-flags.js";
+import { HAS_CUBE_REFLECTION } from "../standard-flags.js";
 
 export function createStdCubeReflectionFragment(): ShaderFragment {
     return {
