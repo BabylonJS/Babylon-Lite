@@ -69,14 +69,14 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     }
 
     const renderableMod = await import("./standard-renderable.js");
-    // Wire the per-mesh rebuild fn used by material swap + per-pass material override.
-    // Same module as the group build, so it's already in this chunk.
-    standardGroupBuilder._rebuildSingle = renderableMod.buildSingleStandardRenderable;
-    return renderableMod.buildStandardMeshRenderables(scene, meshes, {
+    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, {
         tiSync,
         tiFragment,
         shadowFragment,
     });
+    // Wire the per-mesh rebuild closure used by material swap + per-pass override.
+    standardGroupBuilder._rebuildSingle = result.rebuildSingle;
+    return result;
 };
 
 // ─── Shared Types ────────────────────────────────────────────────────

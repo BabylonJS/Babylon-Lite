@@ -83,6 +83,11 @@ export interface SceneUniformUpdater {
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater: SceneUniformUpdater;
+    /** Closure used to rebuild a single mesh — captures the per-scene context
+     *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
+     *  reuse the same setup. The group builder stores it on itself as
+     *  `_rebuildSingle` after the first run. */
+    rebuildSingle: (scene: any, mesh: any, materialOverride?: any) => Renderable;
 }
 
 /**

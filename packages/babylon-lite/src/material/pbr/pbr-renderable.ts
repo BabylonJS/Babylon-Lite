@@ -15,9 +15,8 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
-import type { Mat4 } from "../../math/types.js";
-import type { Renderable, SceneUniformUpdater } from "../../render/renderable.js";
-import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types.js";
+import type { Renderable, SceneUniformUpdater, MeshGroupBuildResult } from "../../render/renderable.js";
+import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { PbrLightConfig } from "./pbr-template.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
@@ -41,25 +40,6 @@ import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 
-/** Per-scene PBR build context — populated by `buildPbrRenderables`,
- *  read by `buildSinglePbrRenderable` for both initial build and material-swap
- *  rebuilds. Module-private so it doesn't pollute the public SceneContext type. */
-interface PbrBuildCtx {
-    composePbr: (features: number, features2: number) => ComposedShader;
-    envTextures: EnvironmentTextures | undefined;
-    /** Multi-light UBO (group 1 binding) — undefined for single-light scenes. */
-    lightsUBOBuffer: GPUBuffer | undefined;
-    shadowLights: { lightIndex: number; shadowType: "esm" | "pcf"; gen: ShadowGenerator }[];
-    shadowBGCache: Map<GPUBindGroupLayout, GPUBindGroup>;
-    /** Per-size scratch buffers for material UBO re-writes (zero allocation per frame). */
-    materialScratch: Map<number, Float32Array>;
-    syncThinInstanceBuffers:
-        | ((engine: EngineContextInternal, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
-        | null;
-    featureCtx: import("./pbr-mesh-features.js").PbrFeatureCtx;
-}
-const _pbrCtxByScene = new WeakMap<SceneContext, PbrBuildCtx>();
-
 /** Convert a PbrLightExtension to PbrLightConfig for the template. */
 function lightExtToConfig(ext: { emitLightVector(): string; emitDirectDiffuse(): string; emitGeometricAA(): string }): PbrLightConfig {
     return {
@@ -70,12 +50,9 @@ function lightExtToConfig(ext: { emitLightVector(): string; emitDirectDiffuse():
 }
 
 /** Build PBR Renderable(s) + a SceneUniformUpdater from PBR meshes. */
-export async function buildPbrRenderables(
-    scene: SceneContext,
-    meshes: Mesh[],
-    envTextures: EnvironmentTextures | undefined
-): Promise<{ renderables: Renderable[]; updater: SceneUniformUpdater }> {
+export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined): Promise<MeshGroupBuildResult> {
     const engine = scene.engine as EngineContextInternal;
+    const device = engine.device;
     // Per-size scratch buffers for material UBO re-writes (zero allocation per frame).
     const materialScratch = new Map<number, Float32Array>();
     const hasEnv = !!envTextures;
@@ -295,20 +272,163 @@ export async function buildPbrRenderables(
     // Shadow bind group cache — within one scene build, all receiving meshes share the
     // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
+    const syncThinInstanceBuffers = _syncThinInstanceBuffers;
 
-    // Stash all shared per-scene state in the ctx, then build per-mesh.
-    _pbrCtxByScene.set(scene, {
-        composePbr,
-        envTextures,
-        lightsUBOBuffer,
-        shadowLights,
-        shadowBGCache,
-        materialScratch,
-        syncThinInstanceBuffers: _syncThinInstanceBuffers,
-        featureCtx,
-    });
+    // Closure used both for the initial per-mesh build below AND for later
+    // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
+    // Captures the per-scene context — no separate WeakMap needed.
+    const rebuildSingle = (s: SceneContext, mesh: Mesh): Renderable => {
+        const mat = mesh.material as PbrMaterialProps;
+        const mi = mesh as MeshInternal;
 
-    const renderables = meshes.map((m) => buildSinglePbrRenderable(scene, m));
+        const { features, features2 } = computeMeshPbrFeatures(mesh, s, featureCtx);
+
+        const composed = composePbr(features, features2);
+        const bindings = getOrCreatePbrBindings(engine, features, features2, composed);
+
+        // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
+        const meshUboData = new Float32Array(composed.meshUboSpec.totalBytes / 4);
+        meshUboData.set(mesh.worldMatrix, 0);
+        const meshUBO = createUniformBuffer(engine, meshUboData);
+
+        // Material UBO.
+        const materialSpec = composed.materialUboSpec!;
+        const matInitData = new Float32Array(materialSpec.totalBytes / 4);
+        writeMaterialData(matInitData, mat, materialSpec);
+        const materialUBO = createUniformBuffer(engine, matInitData);
+
+        const materialBindGroup = createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, lightsUBOBuffer);
+
+        // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
+        let shadowBindGroup: GPUBindGroup | null = null;
+        const meshShadowLights = mesh.receiveShadows ? shadowLights : [];
+        if (meshShadowLights.length > 0 && bindings.shadowBGL) {
+            let cached = shadowBGCache.get(bindings.shadowBGL);
+            if (!cached) {
+                const entries: GPUBindGroupEntry[] = [];
+                let b = 0;
+                for (const sl of meshShadowLights) {
+                    const sg = sl.gen;
+                    entries.push({ binding: b++, resource: sg.blurredTexture.createView() });
+                    entries.push({ binding: b++, resource: sg.blurredSampler });
+                    entries.push({ binding: b++, resource: { buffer: sg.shadowUBO } });
+                }
+                cached = device.createBindGroup({ layout: bindings.shadowBGL, entries });
+                shadowBGCache.set(bindings.shadowBGL, cached);
+            }
+            shadowBindGroup = cached;
+        }
+
+        const boundTextures = collectPbrBoundTextures(mat);
+        for (const t of boundTextures) {
+            acquireTexture(t);
+        }
+        (s as SceneContextInternal)._meshDisposables.set(mesh, [
+            () => {
+                meshUBO.destroy();
+                materialUBO.destroy();
+            },
+            () => {
+                for (const t of boundTextures) {
+                    releaseTexture(t);
+                }
+            },
+        ]);
+
+        const isTransparent = (features & PBR_HAS_ALPHA_BLEND) !== 0;
+        const isTransmissive = !isTransparent && (features2 & PBR2_HAS_REFRACTION) !== 0;
+        const order = mesh.renderOrder ?? (isTransparent ? 150 : isTransmissive ? 140 : 100);
+
+        const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0;
+        const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0;
+        const hasVertexColor = (features2 & PBR2_HAS_VERTEX_COLOR) !== 0;
+        const hasTI = (features & PBR_HAS_THIN_INSTANCES) !== 0;
+        const hasTIColor = (features & PBR_HAS_INSTANCE_COLOR) !== 0;
+
+        let _lastWorldVersion = mesh.worldMatrixVersion;
+        const updateUBOs = (): void => {
+            if (mesh.worldMatrixVersion !== _lastWorldVersion) {
+                device.queue.writeBuffer(meshUBO, 0, mesh.worldMatrix as unknown as Float32Array<ArrayBuffer>);
+                _lastWorldVersion = mesh.worldMatrixVersion;
+            }
+            const m = mat as any;
+            if (m._uboDirty) {
+                m._uboDirty = false;
+                let data = materialScratch.get(materialSpec.totalBytes);
+                if (!data) {
+                    data = new Float32Array(materialSpec.totalBytes / 4);
+                    materialScratch.set(materialSpec.totalBytes, data);
+                } else {
+                    data.fill(0);
+                }
+                writeMaterialData(data, mat, materialSpec);
+                device.queue.writeBuffer(materialUBO, 0, data.buffer, 0, data.byteLength);
+            }
+        };
+
+        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
+            if (mesh.material !== mat) {
+                return 0;
+            }
+            const gpu = mi._gpu;
+            pass.setBindGroup(1, materialBindGroup);
+            if (shadowBindGroup) {
+                pass.setBindGroup(2, shadowBindGroup);
+            }
+            let slot = 0;
+            pass.setVertexBuffer(slot++, gpu.positionBuffer);
+            pass.setVertexBuffer(slot++, gpu.normalBuffer);
+            if (hasNormalMap && gpu.tangentBuffer) {
+                pass.setVertexBuffer(slot++, gpu.tangentBuffer);
+            }
+            pass.setVertexBuffer(slot++, gpu.uvBuffer);
+            if (hasUV2 && gpu.uv2Buffer) {
+                pass.setVertexBuffer(slot++, gpu.uv2Buffer);
+            }
+            if (hasVertexColor && gpu.colorBuffer) {
+                pass.setVertexBuffer(slot++, gpu.colorBuffer);
+            }
+            if (mesh.skeleton) {
+                pass.setVertexBuffer(slot++, mesh.skeleton.jointsBuffer);
+                pass.setVertexBuffer(slot++, mesh.skeleton.weightsBuffer);
+                if (mesh.skeleton.joints1Buffer && mesh.skeleton.weights1Buffer) {
+                    pass.setVertexBuffer(slot++, mesh.skeleton.joints1Buffer);
+                    pass.setVertexBuffer(slot++, mesh.skeleton.weights1Buffer);
+                }
+            }
+
+            const ti = hasTI ? mesh.thinInstances : null;
+            if (ti && syncThinInstanceBuffers) {
+                slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
+            }
+
+            pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
+            if (ti && ti.count > 0) {
+                pass.drawIndexed(gpu.indexCount, ti.count);
+            } else {
+                pass.drawIndexed(gpu.indexCount);
+            }
+            return 1;
+        };
+
+        const r: Renderable = {
+            order,
+            isTransparent,
+            isTransmissive,
+            mesh,
+            bind(eng, sig) {
+                return {
+                    renderable: r,
+                    pipeline: getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings),
+                    updateUBOs,
+                    draw,
+                };
+            },
+        };
+        return r;
+    };
+
+    const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
     // Per-frame lights UBO refresh (multi-light path only). The per-pass scene UBO
     // itself is written by the active RenderPassTask via writePassSceneUBO.
@@ -334,13 +454,7 @@ export async function buildPbrRenderables(
         () => clearSamplerCache(engine)
     );
 
-    return { renderables, updater };
-}
-
-function createMeshUBO(engine: EngineContextInternal, world: Mat4, composed: ComposedShader, _material: PbrMaterialProps): GPUBuffer {
-    const data = new Float32Array(composed.meshUboSpec.totalBytes / 4);
-    data.set(world, 0);
-    return createUniformBuffer(engine, data);
+    return { renderables, updater, rebuildSingle };
 }
 
 /** Write material properties into a pre-allocated Float32Array.
@@ -363,166 +477,4 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
             ext.writeUbo(data, material, spec.offsets);
         }
     }
-}
-
-/** Create a material UBO from the ComposedShader's materialUboSpec. */
-function createMaterialUBO(engine: EngineContextInternal, material: PbrMaterialProps, composed: ComposedShader): GPUBuffer {
-    const spec = composed.materialUboSpec!;
-    const data = new Float32Array(spec.totalBytes / 4);
-    writeMaterialData(data, material, spec);
-    return createUniformBuffer(engine, data);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Single-mesh build path — used by the batch builder (per mesh) and by the
-// material-swap rebuild path. Requires `_pbrCtxByScene` to be populated, which
-// `buildPbrRenderables` does as its first step.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Build a single Renderable for one PBR mesh. */
-export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Renderable {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
-    const ctx = _pbrCtxByScene.get(scene)!;
-    const { composePbr, envTextures, lightsUBOBuffer, shadowLights, shadowBGCache, materialScratch, syncThinInstanceBuffers, featureCtx } = ctx;
-
-    const mat = mesh.material as PbrMaterialProps;
-    const mi = mesh as MeshInternal;
-
-    const { features, features2 } = computeMeshPbrFeatures(mesh, scene, featureCtx);
-
-    const composed = composePbr(features, features2);
-    const bindings = getOrCreatePbrBindings(engine, features, features2, composed);
-    const meshUBO = createMeshUBO(engine, mesh.worldMatrix, composed, mat);
-    const materialUBO = createMaterialUBO(engine, mat, composed);
-    const materialBindGroup = createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, lightsUBOBuffer);
-
-    // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
-    let shadowBindGroup: GPUBindGroup | null = null;
-    const meshShadowLights = mesh.receiveShadows ? shadowLights : [];
-    if (meshShadowLights.length > 0 && bindings.shadowBGL) {
-        let cached = shadowBGCache.get(bindings.shadowBGL);
-        if (!cached) {
-            const entries: GPUBindGroupEntry[] = [];
-            let b = 0;
-            for (const sl of meshShadowLights) {
-                const sg = sl.gen;
-                entries.push({ binding: b++, resource: sg.blurredTexture.createView() });
-                entries.push({ binding: b++, resource: sg.blurredSampler });
-                entries.push({ binding: b++, resource: { buffer: sg.shadowUBO } });
-            }
-            cached = device.createBindGroup({ layout: bindings.shadowBGL, entries });
-            shadowBGCache.set(bindings.shadowBGL, cached);
-        }
-        shadowBindGroup = cached;
-    }
-
-    const boundTextures = collectPbrBoundTextures(mat);
-    for (const t of boundTextures) {
-        acquireTexture(t);
-    }
-    (scene as SceneContextInternal)._meshDisposables.set(mesh, [
-        () => {
-            meshUBO.destroy();
-            materialUBO.destroy();
-        },
-        () => {
-            for (const t of boundTextures) {
-                releaseTexture(t);
-            }
-        },
-    ]);
-
-    const isTransparent = (features & PBR_HAS_ALPHA_BLEND) !== 0;
-    const isTransmissive = !isTransparent && (features2 & PBR2_HAS_REFRACTION) !== 0;
-    const order = mesh.renderOrder ?? (isTransparent ? 150 : isTransmissive ? 140 : 100);
-
-    const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0;
-    const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0;
-    const hasVertexColor = (features2 & PBR2_HAS_VERTEX_COLOR) !== 0;
-    const hasTI = (features & PBR_HAS_THIN_INSTANCES) !== 0;
-    const hasTIColor = (features & PBR_HAS_INSTANCE_COLOR) !== 0;
-
-    let _lastWorldVersion = mesh.worldMatrixVersion;
-    const updateUBOs = (): void => {
-        if (mesh.worldMatrixVersion !== _lastWorldVersion) {
-            device.queue.writeBuffer(meshUBO, 0, mesh.worldMatrix as unknown as Float32Array<ArrayBuffer>);
-            _lastWorldVersion = mesh.worldMatrixVersion;
-        }
-        const m = mat as any;
-        if (m._uboDirty) {
-            m._uboDirty = false;
-            const spec = composed.materialUboSpec!;
-            let data = materialScratch.get(spec.totalBytes);
-            if (!data) {
-                data = new Float32Array(spec.totalBytes / 4);
-                materialScratch.set(spec.totalBytes, data);
-            } else {
-                data.fill(0);
-            }
-            writeMaterialData(data, mat, spec);
-            device.queue.writeBuffer(materialUBO, 0, data.buffer, 0, data.byteLength);
-        }
-    };
-
-    const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
-        if (mesh.material !== mat) {
-            return 0;
-        }
-        const gpu = mi._gpu;
-        pass.setBindGroup(1, materialBindGroup);
-        if (shadowBindGroup) {
-            pass.setBindGroup(2, shadowBindGroup);
-        }
-        let slot = 0;
-        pass.setVertexBuffer(slot++, gpu.positionBuffer);
-        pass.setVertexBuffer(slot++, gpu.normalBuffer);
-        if (hasNormalMap && gpu.tangentBuffer) {
-            pass.setVertexBuffer(slot++, gpu.tangentBuffer);
-        }
-        pass.setVertexBuffer(slot++, gpu.uvBuffer);
-        if (hasUV2 && gpu.uv2Buffer) {
-            pass.setVertexBuffer(slot++, gpu.uv2Buffer);
-        }
-        if (hasVertexColor && gpu.colorBuffer) {
-            pass.setVertexBuffer(slot++, gpu.colorBuffer);
-        }
-        if (mesh.skeleton) {
-            pass.setVertexBuffer(slot++, mesh.skeleton.jointsBuffer);
-            pass.setVertexBuffer(slot++, mesh.skeleton.weightsBuffer);
-            if (mesh.skeleton.joints1Buffer && mesh.skeleton.weights1Buffer) {
-                pass.setVertexBuffer(slot++, mesh.skeleton.joints1Buffer);
-                pass.setVertexBuffer(slot++, mesh.skeleton.weights1Buffer);
-            }
-        }
-
-        const ti = hasTI ? mesh.thinInstances : null;
-        if (ti && syncThinInstanceBuffers) {
-            slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
-        }
-
-        pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-        if (ti && ti.count > 0) {
-            pass.drawIndexed(gpu.indexCount, ti.count);
-        } else {
-            pass.drawIndexed(gpu.indexCount);
-        }
-        return 1;
-    };
-
-    const r: Renderable = {
-        order,
-        isTransparent,
-        isTransmissive,
-        mesh,
-        bind(eng, sig) {
-            return {
-                renderable: r,
-                pipeline: getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings),
-                updateUBOs,
-                draw,
-            };
-        },
-    };
-    return r;
 }

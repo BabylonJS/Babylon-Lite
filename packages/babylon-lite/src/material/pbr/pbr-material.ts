@@ -14,9 +14,10 @@ import { _getPbrExts } from "./pbr-flags.js";
 export const pbrGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     const envTex = (scene as SceneContextInternal)._envTextures;
     const renderableMod = await import("./pbr-renderable.js");
-    // Wire the per-mesh rebuild fn used by material swap + per-pass material override.
-    pbrGroupBuilder._rebuildSingle = renderableMod.buildSinglePbrRenderable;
-    return renderableMod.buildPbrRenderables(scene, meshes, envTex);
+    const result = await renderableMod.buildPbrRenderables(scene, meshes, envTex);
+    // Wire the per-mesh rebuild closure used by material swap + per-pass override.
+    pbrGroupBuilder._rebuildSingle = result.rebuildSingle;
+    return result;
 };
 
 export interface PbrMaterialProps extends Material {
