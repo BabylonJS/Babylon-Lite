@@ -1,4 +1,4 @@
-// Scene 60 — RTT with per-pass material override.
+// Scene 52 — RTT with per-pass material override.
 //
 // Two meshes A (sphere) and B (box) are added to the main pass with the standard pipeline.
 // A second render pass R1 renders mesh A *only*, with its own camera AND a different

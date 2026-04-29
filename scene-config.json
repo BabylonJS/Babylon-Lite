@@ -364,8 +364,8 @@
     },
     {
         "id": 60,
-        "slug": "scene60-rtt-override",
-        "name": "Scene 60 — RTT with material override",
+        "slug": "scene52-rtt-override",
+        "name": "Scene 52 — RTT with material override",
         "maxMad": 0.01,
         "maxRawKB": 75,
         "description": "Frame-graph multi-pass authoring: sphere A (red) and box B in main; an offscreen 512×512 RTT renders A only, with a green override material from a different camera, and the RTT color is wired as B's diffuseTexture.",
