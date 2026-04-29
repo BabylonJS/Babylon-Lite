@@ -11,7 +11,7 @@ import type { Renderable } from "../../render/renderable.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxHdrFragSrc from "../../../shaders/skybox-hdr.fragment.wgsl?raw";
-import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2

@@ -73,30 +73,33 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     scene.imageProcessing.exposure = 0.8;
     scene.imageProcessing.contrast = 1.2;
 
-    // Background renderables (skybox + ground) — task supplies sceneBG at draw time.
-    // No ordering constraints, so we build them inline (no deferred-builder needed).
+    // Background renderables (skybox + ground) — deferred so they run AFTER the user
+    // has finished tweaking `scene.imageProcessing.*` (skybox materials snapshot
+    // exposure/contrast at build time into their per-mesh UBO).
     const useHdr = !!options?.useCubemapSkybox;
     const skipGround = !!options?.skipGround;
-    if (useHdr && textures.specularCubeView) {
-        const { computeSceneSize } = await import("../material/pbr/scene-size.js");
-        const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
-        const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
-        const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-        s._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
-    }
-    if (!useHdr || !skipGround) {
-        const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
-        const { computeSceneSize } = await import("../material/pbr/scene-size.js");
-        const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
-        if (!useHdr) {
-            const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
-            s._renderables.push(buildSolidSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+    s._deferredBuilders.push(async () => {
+        if (useHdr && textures.specularCubeView) {
+            const { computeSceneSize } = await import("../material/pbr/scene-size.js");
+            const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+            const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
+            const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
+            s._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
         }
-        if (!skipGround) {
-            const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
-            s._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
+        if (!useHdr || !skipGround) {
+            const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
+            const { computeSceneSize } = await import("../material/pbr/scene-size.js");
+            const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+            if (!useHdr) {
+                const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
+                s._renderables.push(buildSolidSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+            }
+            if (!skipGround) {
+                const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
+                s._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
+            }
         }
-    }
+    });
 
     return textures;
 }

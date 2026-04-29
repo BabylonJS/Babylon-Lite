@@ -39,7 +39,7 @@ import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
-import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-fields.js";
+import { SCENE_UBO_BYTES } from "../shader/scene-uniforms.js";
 import { writePassSceneUBO } from "../scene/scene-ubo.js";
 import type { Task } from "./task.js";
 

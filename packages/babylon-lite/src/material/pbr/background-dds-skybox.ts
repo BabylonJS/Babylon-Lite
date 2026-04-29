@@ -8,7 +8,7 @@ import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
-import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import ddsSkyboxVertSrc from "../../../shaders/skybox-dds.vertex.wgsl?raw";
 import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";

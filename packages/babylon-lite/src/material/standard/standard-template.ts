@@ -155,7 +155,6 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     const vertexUboStructs = hasShadow || needsUV ? `struct uvParamsUniforms { uvScaleOffset: vec4<f32>, }` : "";
 
     const vertexTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 ${vertexUboStructs}
@@ -272,7 +271,6 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
     }
 
     const fragmentTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 ${lightsStructs}
 ${materialStruct}
 /*MU*/

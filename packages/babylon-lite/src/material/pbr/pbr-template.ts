@@ -226,7 +226,6 @@ out.worldBitangent = (finalWorld * vec4<f32>(B_local, 0.0)).xyz;`
         : "";
 
     const vertexTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*VH*/
@@ -409,7 +408,6 @@ return vec4<f32>(color, finalAlpha);`
     const ormUV = ext?.uvForOrm ?? "input.uv";
 
     const fragmentTemplate = `/*SU*/
-@group(0) @binding(0) var<uniform> scene: SceneUniforms;
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*HF*/

@@ -17,7 +17,7 @@ import skyboxFragSrc from "../../../shaders/skybox.fragment.wgsl?raw";
 import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
 import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
-import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { createSingleUniformBGL } from "../../shader/bgl-helpers.js";
 

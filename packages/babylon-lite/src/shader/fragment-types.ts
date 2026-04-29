@@ -212,8 +212,6 @@ export interface ComposedShader {
     readonly meshUboSpec: UboSpec;
     /** Material UBO spec (present when template provides baseMaterialUboFields) */
     readonly materialUboSpec?: UboSpec;
-    /** Scene UBO spec */
-    readonly sceneUboSpec: UboSpec;
     /** Sorted fragment IDs joined with "|" — used as part of pipeline cache key */
     readonly fragmentKey: string;
     /** Per-fragment UBO pack info: fragment ID → float offset in mesh UBO */

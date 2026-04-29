@@ -14,7 +14,7 @@ import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
 import { createMappedBuffer } from "../../resource/gpu-buffers.js";
 import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
-import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms-fields.js";
+import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 
 // ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
 //    don't pay for the image-processing helper in the shared wgsl-helpers chunk). ──

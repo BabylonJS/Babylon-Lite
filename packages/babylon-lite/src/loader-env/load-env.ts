@@ -104,29 +104,32 @@ export async function loadEnvironment(
         skipSkybox: skyboxIsDds || skyboxIsEnv || options?.skipSkybox,
         skipGround: options?.skipGround,
     };
-    // Background renderables (skybox + ground) — task supplies sceneBG at draw time.
-    // No ordering constraints, so we build them inline (no deferred-builder needed).
-    const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
-    const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
-    const skyHalfSize = autoSkyboxSize / 2;
     const sc = scene as SceneContextInternal;
+    // Background renderables (skybox + ground) — deferred so they run AFTER the user
+    // has finished tweaking `scene.imageProcessing.*` (skybox/ground/dds materials
+    // snapshot exposure/contrast at build time into their per-mesh UBO).
+    sc._deferredBuilders.push(async () => {
+        const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
+        const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
+        const skyHalfSize = autoSkyboxSize / 2;
 
-    if (!bgOptions.skipSkybox) {
-        const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
-        sc._renderables.push(buildSolidSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
-    }
-    if (!bgOptions.skipGround) {
-        const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
-        sc._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor, groundUrl, groundTexPromise));
-    }
-    if (skyboxIsDds) {
-        const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
-        sc._renderables.push(await buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxUrl));
-    }
-    if (skyboxIsEnv) {
-        const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-        sc._renderables.push(buildHdrSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
-    }
+        if (!bgOptions.skipSkybox) {
+            const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
+            sc._renderables.push(buildSolidSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
+        }
+        if (!bgOptions.skipGround) {
+            const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
+            sc._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor, groundUrl, groundTexPromise));
+        }
+        if (skyboxIsDds) {
+            const { buildDdsSkyboxRenderable } = await import("../material/pbr/background-dds-skybox.js");
+            sc._renderables.push(await buildDdsSkyboxRenderable(scene, skyHalfSize, rootPosition, primaryColor, skyboxUrl));
+        }
+        if (skyboxIsEnv) {
+            const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
+            sc._renderables.push(buildHdrSkyboxRenderable(scene, textures, skyHalfSize, rootPosition, primaryColor));
+        }
+    });
 
     return textures;
 }

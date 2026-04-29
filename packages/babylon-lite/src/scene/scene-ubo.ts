@@ -18,7 +18,7 @@ import type { RenderPassTask } from "../frame-graph/render-pass-task.js";
 
 import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../camera/camera.js";
 import { _getPbrLightExtension } from "../material/pbr/pbr-flags.js";
-import { SCENE_UBO_BYTES, SCENE_UBO_OFFSETS } from "../shader/scene-uniforms-fields.js";
+import { SCENE_UBO_BYTES } from "../shader/scene-uniforms.js";
 
 /** Per-task scratch buffer cache to avoid per-frame allocation. */
 const _scratchByTask = new WeakMap<RenderPassTask, Float32Array>();
@@ -42,37 +42,40 @@ export function writePassSceneUBO(task: RenderPassTask, eng: EngineContextIntern
     }
     data.fill(0);
 
-    const O = SCENE_UBO_OFFSETS;
     const aspect = eng.canvas.width / eng.canvas.height;
     const viewProj = getViewProjectionMatrix(camera, aspect);
     const viewMat = getViewMatrix(camera);
     const camPos = getCameraPosition(camera);
 
-    data.set(viewProj, O.viewProjection);
+    // SCENE_UBO float offsets (see shaders/scene-uniforms.wgsl):
+    //   viewProjection  = 0    view             = 16   vEyePosition    = 32
+    //   envRotationY    = 52   vSphericalL00    = 56   exposureLinear  = 92
+    //   contrast        = 93   lodGenerationScale = 94 vFogInfos       = 96
+    //   vFogColor       = 100
+    data.set(viewProj, 0);
     // Y-flip for offscreen passes — negate row 1 of the projection (the multiplied
     // view*proj matrix). Row 1 of a column-major mat4 lives at indices 1,5,9,13.
     if (task._targetSignature.flipY) {
-        const o = O.viewProjection;
-        data[o + 1] = -data[o + 1]!;
-        data[o + 5] = -data[o + 5]!;
-        data[o + 9] = -data[o + 9]!;
-        data[o + 13] = -data[o + 13]!;
+        data[1] = -data[1]!;
+        data[5] = -data[5]!;
+        data[9] = -data[9]!;
+        data[13] = -data[13]!;
     }
-    data.set(viewMat, O.view);
-    data[O.vEyePosition] = camPos.x;
-    data[O.vEyePosition + 1] = camPos.y;
-    data[O.vEyePosition + 2] = camPos.z;
+    data.set(viewMat, 16);
+    data[32] = camPos.x;
+    data[33] = camPos.y;
+    data[34] = camPos.z;
 
     // Fog (std uses; pbr ignores).
     const fog = scene.fog;
     if (fog) {
-        data[O.vFogInfos] = fog.mode;
-        data[O.vFogInfos + 1] = fog.start;
-        data[O.vFogInfos + 2] = fog.end;
-        data[O.vFogInfos + 3] = fog.density;
-        data[O.vFogColor] = fog.color[0]!;
-        data[O.vFogColor + 1] = fog.color[1]!;
-        data[O.vFogColor + 2] = fog.color[2]!;
+        data[96] = fog.mode;
+        data[97] = fog.start;
+        data[98] = fog.end;
+        data[99] = fog.density;
+        data[100] = fog.color[0]!;
+        data[101] = fog.color[1]!;
+        data[102] = fog.color[2]!;
     }
 
     // Light slot 0 (PBR uses; std uses its own lights UBO independently).
@@ -84,15 +87,15 @@ export function writePassSceneUBO(task: RenderPassTask, eng: EngineContextIntern
 
     // Environment / IBL.
     const envTextures = scene._envTextures;
-    data[O.envRotationY] = scene.envRotationY ?? 0;
+    data[52] = scene.envRotationY ?? 0;
     if (envTextures?.sphericalHarmonics) {
-        data.set(envTextures.sphericalHarmonics, O.vSphericalL00);
+        data.set(envTextures.sphericalHarmonics, 56);
     }
 
     // Image processing.
-    data[O.exposureLinear] = scene.imageProcessing.exposure;
-    data[O.contrast] = scene.imageProcessing.contrast;
-    data[O.lodGenerationScale] = envTextures?.lodGenerationScale ?? 0.8;
+    data[92] = scene.imageProcessing.exposure;
+    data[93] = scene.imageProcessing.contrast;
+    data[94] = envTextures?.lodGenerationScale ?? 0.8;
 
     eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }

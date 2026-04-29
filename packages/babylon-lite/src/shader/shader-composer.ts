@@ -5,7 +5,7 @@
  */
 import type { BindingDecl, ComposedShader, FragmentSlot, ShaderFragment, ShaderTemplate, VertexAttribute, VertexSlot, Varying } from "./fragment-types.js";
 import { computeUboLayout } from "./ubo-layout.js";
-import { SCENE_UBO_FIELDS } from "./scene-uniforms-fields.js";
+import { SCENE_UBO_WGSL } from "./scene-uniforms.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -200,7 +200,6 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     const hasMaterialUbo = !!(template.baseMaterialUboFields && template.baseMaterialUboFields.length > 0);
     const meshFields = [...template.baseMeshUboFields];
     const materialFields = hasMaterialUbo ? [...template.baseMaterialUboFields] : [];
-    const sceneFields = [...SCENE_UBO_FIELDS];
     const fragUboOffsets = new Map<string, number>();
     for (const f of sorted) {
         if (f.uboFields?.length) {
@@ -215,7 +214,6 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     }
     const meshUboSpec = computeUboLayout(meshFields);
     const materialUboSpec = hasMaterialUbo ? computeUboLayout(materialFields) : undefined;
-    const sceneUboSpec = computeUboLayout(sceneFields);
     const uboSpecForFragOffsets = hasMaterialUbo ? materialUboSpec! : meshUboSpec;
     const fragFields = hasMaterialUbo ? materialFields : meshFields;
     const fragmentUboOffsets = new Map<string, number>();
@@ -279,12 +277,11 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
 
     const fragKey = sorted.map((f) => f.id).join("|");
     const vParams = (vBuiltins.length ? vBuiltins.join("\n") + "\n" : "") + inputLines.join("\n");
-    const sceneStruct = `struct SceneUniforms {\n${sceneUboSpec.structBody}\n}`;
     const meshStruct = `struct MeshUniforms {\n${meshUboSpec.structBody}\n}`;
     const materialStruct = materialUboSpec ? `\nstruct MaterialUniforms {\n${materialUboSpec.structBody}\n}\n@group(1) @binding(1) var<uniform> material: MaterialUniforms;` : "";
 
     let vertexWGSL = template.vertexTemplate;
-    vertexWGSL = vertexWGSL.replace("/*SU*/", sceneStruct);
+    vertexWGSL = vertexWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
     vertexWGSL = vertexWGSL.replace("/*MU*/", meshStruct);
     vertexWGSL = vertexWGSL.replace("/*VI*/", `struct VertexInput {\n${inputLines.join("\n")}\n}`);
     vertexWGSL = vertexWGSL.replace("/*VO*/", `struct VertexOutput {\n${varyBody}\n}`);
@@ -294,7 +291,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     vertexWGSL = injectSlots(vertexWGSL, sorted, "vertexSlots");
 
     let fragmentWGSL = template.fragmentTemplate;
-    fragmentWGSL = fragmentWGSL.replace("/*SU*/", sceneStruct);
+    fragmentWGSL = fragmentWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
     fragmentWGSL = fragmentWGSL.replace("/*MU*/", meshStruct + materialStruct);
     fragmentWGSL = fragmentWGSL.replace("/*FI*/", `struct FragmentInput {\n${varyBody}\n}`);
     fragmentWGSL = fragmentWGSL.replace("/*HF*/", helpers.join("\n"));
@@ -309,7 +306,6 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
         vertexBufferLayouts: layouts,
         meshUboSpec,
         materialUboSpec,
-        sceneUboSpec,
         fragmentKey: fragKey,
         fragmentUboOffsets,
         fragmentBindingOffsets: fragBindOff,

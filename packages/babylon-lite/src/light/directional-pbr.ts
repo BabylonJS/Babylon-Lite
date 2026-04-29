@@ -3,7 +3,6 @@
 
 import type { PbrLightExtension, LightBase } from "./types.js";
 import { _setPbrLightExtension } from "../material/pbr/pbr-flags.js";
-import { SCENE_UBO_OFFSETS } from "../shader/scene-uniforms-fields.js";
 
 interface DirectionalLightData {
     direction: { x: number; y: number; z: number };
@@ -30,15 +29,14 @@ let lightAtten = 1.0;\n`;
 
     writeSceneUbo(data: Float32Array, light: LightBase): void {
         const d = light as unknown as DirectionalLightData;
-        const oDir = SCENE_UBO_OFFSETS.lightDirection;
-        const oDiff = SCENE_UBO_OFFSETS.lightDiffuseColor;
-        data[oDir] = d.direction.x;
-        data[oDir + 1] = d.direction.y;
-        data[oDir + 2] = d.direction.z;
-        data[SCENE_UBO_OFFSETS.lightIntensity] = d.intensity;
-        data[oDiff] = d.diffuse[0];
-        data[oDiff + 1] = d.diffuse[1];
-        data[oDiff + 2] = d.diffuse[2];
+        // SCENE_UBO float offsets: lightDirection=36, lightIntensity=39, lightDiffuseColor=40.
+        data[36] = d.direction.x;
+        data[37] = d.direction.y;
+        data[38] = d.direction.z;
+        data[39] = d.intensity;
+        data[40] = d.diffuse[0];
+        data[41] = d.diffuse[1];
+        data[42] = d.diffuse[2];
     },
 };
 

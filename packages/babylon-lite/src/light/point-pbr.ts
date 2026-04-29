@@ -3,7 +3,6 @@
 
 import type { PbrLightExtension, LightBase } from "./types.js";
 import { _setPbrLightExtension } from "../material/pbr/pbr-flags.js";
-import { SCENE_UBO_OFFSETS } from "../shader/scene-uniforms-fields.js";
 
 interface PointLightData {
     position: { x: number; y: number; z: number };
@@ -33,16 +32,16 @@ let lightAtten = 1.0 / max(lightDist2, 0.0001);\n`;
 
     writeSceneUbo(data: Float32Array, light: LightBase): void {
         const p = light as unknown as PointLightData;
-        const oPos = SCENE_UBO_OFFSETS.lightPosition;
-        const oDiff = SCENE_UBO_OFFSETS.lightDiffuseColor;
-        data[oPos] = p.position.x;
-        data[oPos + 1] = p.position.y;
-        data[oPos + 2] = p.position.z;
-        data[SCENE_UBO_OFFSETS.lightIntensity] = p.intensity;
-        data[oDiff] = p.diffuse[0] ?? 1;
-        data[oDiff + 1] = p.diffuse[1] ?? 1;
-        data[oDiff + 2] = p.diffuse[2] ?? 1;
-        data[SCENE_UBO_OFFSETS.lightRange] = p.range;
+        // SCENE_UBO float offsets: lightIntensity=39, lightDiffuseColor=40,
+        // lightRange=43, lightPosition=48.
+        data[48] = p.position.x;
+        data[49] = p.position.y;
+        data[50] = p.position.z;
+        data[39] = p.intensity;
+        data[40] = p.diffuse[0] ?? 1;
+        data[41] = p.diffuse[1] ?? 1;
+        data[42] = p.diffuse[2] ?? 1;
+        data[43] = p.range;
     },
 };
 
