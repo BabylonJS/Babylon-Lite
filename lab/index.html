@@ -3168,6 +3168,33 @@
                     .join("");
             }
 
+            function handleCardImageError(img) {
+                var fallbacks = ["/reference/" + img.dataset.refSlug + "/babylon-ref-golden.png", "/thumbnails/scene" + img.dataset.sceneId + ".png"];
+                var fallbackIndex = Number(img.dataset.fallbackIndex || "0");
+                if (fallbackIndex >= fallbacks.length) {
+                    img.onerror = null;
+                    return;
+                }
+                img.dataset.fallbackIndex = String(fallbackIndex + 1);
+                img.src = fallbacks[fallbackIndex];
+            }
+
+            function renderSceneCardImage(s, priorityAttrs) {
+                return (
+                    '<img src="/reference/' +
+                    s.slug +
+                    '/test-actual.png" data-ref-slug="' +
+                    s.slug +
+                    '" data-scene-id="' +
+                    s.id +
+                    '" data-fallback-index="0" onerror="handleCardImageError(this)" alt="' +
+                    s.name +
+                    '"' +
+                    priorityAttrs +
+                    ' decoding="async" />'
+                );
+            }
+
             function renderFilterPills(containerId, toggleFnName) {
                 var el = document.getElementById(containerId);
                 if (!el) return;
@@ -3195,13 +3222,7 @@
                             '">' +
                             renderHideBtn(sceneKey) +
                             '<div class="card-image">' +
-                            '<img src="/reference/' +
-                            s.slug +
-                            '/test-actual.png" alt="' +
-                            s.name +
-                            '"' +
-                            priorityAttrs +
-                            ' decoding="async" />' +
+                            renderSceneCardImage(s, priorityAttrs) +
                             renderNote(s) +
                             "</div>" +
                             '<div class="card-body">' +
@@ -3400,11 +3421,7 @@
                             '">' +
                             renderHideBtn(sceneKey) +
                             '<div class="card-image">' +
-                            '<img src="/reference/' +
-                            s.slug +
-                            '/test-actual.png" alt="' +
-                            s.name +
-                            '" loading="lazy" fetchpriority="auto" decoding="async" />' +
+                            renderSceneCardImage(s, ' loading="lazy" fetchpriority="auto"') +
                             '<div class="card-overlay">' +
                             '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' +
                             s.id +
