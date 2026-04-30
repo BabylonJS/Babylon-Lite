@@ -2,7 +2,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { getFrameGraph } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { FrameGraph } from "./frame-graph.js";
-import { appendTask } from "./frame-graph.js";
+import { _appendTask } from "./frame-graph.js";
 
 function resolveFg(target: FrameGraph | SceneContext): FrameGraph {
     return "_tasks" in (target as object) ? (target as FrameGraph) : getFrameGraph(target as SceneContext);
@@ -11,7 +11,7 @@ function resolveFg(target: FrameGraph | SceneContext): FrameGraph {
 /** Add a task at the END of execute order. Accepts the scene's frame graph directly,
  *  or a SceneContext (the scene's default frame graph is used). */
 export function addTask(target: FrameGraph | SceneContext, task: Task): void {
-    appendTask(resolveFg(target), task);
+    _appendTask(resolveFg(target), task);
 }
 
 /** Insert a task at the START of execute order. Accepts a FrameGraph or a SceneContext. */

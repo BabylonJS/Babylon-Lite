@@ -82,7 +82,7 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
 }
 
 /** Add a task at the END of execute order. */
-export function appendTask(fg: FrameGraph, task: Task): void {
+export function _appendTask(fg: FrameGraph, task: Task): void {
     fg._tasks.push(task);
     fg._ready = false;
 }

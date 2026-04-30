@@ -14,7 +14,7 @@ import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
-import { createFrameGraph, appendTask } from "../frame-graph/frame-graph.js";
+import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderPassTask } from "../frame-graph/render-pass-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
@@ -202,7 +202,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         size: "canvas",
         resolveToSwapchain: true,
     });
-    appendTask(
+    _appendTask(
         fg,
         createRenderPassTask(
             {
