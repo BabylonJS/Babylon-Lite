@@ -70,11 +70,10 @@ async function main(): Promise<void> {
     addToScene(scene, meshB);
 
     // R1 task — its own camera, only mesh A, runs BEFORE main so its texture is ready.
-    const r1Task = createRenderPassTask({ name: "r1", renderTarget: r1RT, clearColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 } }, engine, scene);
     const r1Cam = createFreeCamera({ x: 0, y: 0, z: -3 }, { x: 0, y: 0, z: 0 });
     r1Cam.nearPlane = 0.1;
     r1Cam.farPlane = 100;
-    r1Task.camera = r1Cam;
+    const r1Task = createRenderPassTask({ name: "r1", rt: r1RT, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cam: r1Cam }, engine, scene);
     addTaskAtStart(scene, r1Task);
 
     // Override material for A in R1 — green sphere on a blue background.

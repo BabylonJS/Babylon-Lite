@@ -207,9 +207,8 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         createRenderPassTask(
             {
                 name: "scene",
-                renderTarget: swapRT,
-                clearColor: ctx.clearColor,
-                autoFromScene: true,
+                rt: swapRT,
+                clrColor: ctx.clearColor,
             },
             eng,
             ctx

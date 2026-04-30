@@ -5,7 +5,7 @@
  * spherical harmonics, image processing.
  *
  * Called once per frame per RenderPassTask, with the task's resolved
- * camera (`task.camera ?? scene.camera`). When the task is offscreen
+ * camera (`task._config.cam ?? scene.camera`). When the task is offscreen
  * (not resolving to swapchain), the projection matrix's Y is flipped
  * so that subsequent sampling of the result texture appears upright;
  * pipelines compensate by inverting frontFace via `sig.flipY`.
