@@ -3,7 +3,6 @@ import {
     createArcRotateCamera,
     createEngine,
     createSceneContext,
-    enableCameraViewport,
     loadEnvironment,
     loadGltf,
     loadTexture2D,
@@ -103,8 +102,6 @@ async function main(): Promise<void> {
     right.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
     right.camera.nearPlane = 0.1;
     right.camera.viewport = { x: 0.5, y: 0, width: 0.5, height: 1 };
-    enableCameraViewport(left);
-    enableCameraViewport(right);
 
     await Promise.all([
         loadEnvironment(left, ENV_URL, { skipSkybox: true, skipGround: true, brdfUrl: "/brdf-lut.png" }),

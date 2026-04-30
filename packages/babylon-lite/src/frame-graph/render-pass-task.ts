@@ -61,11 +61,11 @@ export interface RenderPassTask extends Task {
     readonly name: string;
     readonly renderTarget: RenderTarget;
     /** Mutable. */
-    clearColor: GPUColorDict;
+    _clearColor: GPUColorDict;
     /** Mutable. */
     clear: boolean;
     /** See `RenderPassTaskConfig.autoFromScene`. */
-    autoFromScene: boolean;
+    _autoFromScene: boolean;
     /** Per-pass camera override. When null (default), uses `scene.camera`.
      *  Set this on a task to render the scene from a different POV (e.g. an
      *  RTT pass with a mirror/light/cube-face camera). */
@@ -138,9 +138,9 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         engine: eng,
         scene: sc,
         renderTarget: rt,
-        clearColor: config.clearColor ?? { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
+        _clearColor: config.clearColor ?? { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
         clear: config.clear !== false,
-        autoFromScene: config.autoFromScene ?? false,
+        _autoFromScene: config.autoFromScene ?? false,
         camera: null,
         _renderables: [],
         _opaqueBindings: [],
@@ -165,7 +165,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         },
         record(): void {
             resolvePendingMeshes(task, sc);
-            if (task.autoFromScene && task._renderables.length === 0) {
+            if (task._autoFromScene && task._renderables.length === 0) {
                 mirrorSceneBuckets(task, sc);
             }
             buildRenderTarget(task.renderTarget, eng);
@@ -174,7 +174,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         },
         execute(): number {
             // Auto-resync when the source scene mutates.
-            if (task.autoFromScene && task._lastVersion !== sc._renderableVersion) {
+            if (task._autoFromScene && task._lastVersion !== sc._renderableVersion) {
                 task._renderables.length = 0;
                 mirrorSceneBuckets(task, sc);
                 buildBindings(task, eng);
@@ -233,7 +233,7 @@ function resolvePendingMeshes(task: RenderPassTask, sc: SceneContextInternal): v
         const buildGroup = (material as MaterialInternal)._buildGroup;
         const rebuild = buildGroup?._rebuildSingle;
         if (!rebuild) {
-            throw new Error("addToPass unregistered");
+            throw new Error("addToPass");
         }
         const renderable = rebuild(sc, mesh, material);
         if (!task._renderables.includes(renderable)) {
@@ -305,7 +305,7 @@ function buildRenderPassDescriptor(task: RenderPassTask, swapchain: boolean): vo
     if (colorView || swapchain) {
         colorAttachment = {
             view: colorView!,
-            clearValue: task.clearColor,
+            clearValue: task._clearColor,
             loadOp: task.clear ? "clear" : "load",
             storeOp: "store",
         };
@@ -342,7 +342,7 @@ function patchPerFrame(task: RenderPassTask, eng: EngineContextInternal, swapcha
         // Read the live scene clearColor for autoFromScene tasks: scenes commonly do
         // `scene.clearColor = {...}` (assignment, not mutation), so the original
         // reference captured at task-creation goes stale.
-        att.clearValue = task.autoFromScene ? task.scene.clearColor : task.clearColor;
+        att.clearValue = task._autoFromScene ? task.scene.clearColor : task._clearColor;
         att.loadOp = task.clear ? "clear" : "load";
         if (swapchain) {
             const swapView = eng._swapchainView;
@@ -377,37 +377,37 @@ function executePass(task: RenderPassTask): number {
         return 0;
     }
     const rt = task.renderTarget;
+    const scene = task.scene;
+    const camera = task.camera ?? scene.camera;
 
     // Per-pass scene UBO write — uses task.camera if set, else scene.camera.
-    writePassSceneUBO(task, eng, task.scene, task.camera ?? task.scene.camera);
+    writePassSceneUBO(task, eng, scene, camera);
 
-    for (const b of task._opaqueBindings) {
-        if (b.updateUBOs) {
-            b.updateUBOs();
-        }
-    }
-    for (const b of task._transmissiveBindings) {
-        if (b.updateUBOs) {
-            b.updateUBOs();
-        }
-    }
-    for (const b of task._transparentBindings) {
-        if (b.updateUBOs) {
-            b.updateUBOs();
-        }
-    }
+    updateBindingUBOs(task._opaqueBindings);
+    updateBindingUBOs(task._transmissiveBindings);
+    updateBindingUBOs(task._transparentBindings);
 
     const pass = encoder.beginRenderPass(task._renderPassDescriptor);
-    if (rt.descriptor.resolveToSwapchain && task.scene._vp) {
-        task.scene._vp(pass, rt._width, rt._height);
+    const v = camera?.viewport;
+    let x = 0;
+    let y = 0;
+    let w = rt._width;
+    let h = rt._height;
+    if (v) {
+        x = Math.floor(v.x * w);
+        y = Math.floor((1 - v.y - v.height) * h);
+        w = Math.ceil((v.x + v.width) * w) - x;
+        h = Math.ceil((1 - v.y) * h) - y;
     }
+    pass.setViewport(x, y, w, h, 0, 1);
+    pass.setScissorRect(x, y, w, h);
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, task._sceneBG);
 
     // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion)
     // or visibility version (_vis). The bundle records group(0) at its start so it can
     // be replayed standalone (executeBundles inherits no inherited state).
-    if (task._lastVersion !== task.scene._renderableVersion || task._lastVis !== _vis || !task._opaqueBundle) {
+    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || !task._opaqueBundle) {
         const be = eng.device.createRenderBundleEncoder({
             colorFormats: [rt.descriptor.colorFormat],
             depthStencilFormat: rt.descriptor.depthStencilFormat,
@@ -416,7 +416,7 @@ function executePass(task: RenderPassTask): number {
         be.setBindGroup(0, task._sceneBG);
         drawList(be, task._opaqueBindings, eng);
         task._opaqueBundle = be.finish();
-        task._lastVersion = task.scene._renderableVersion;
+        task._lastVersion = scene._renderableVersion;
         task._lastVis = _vis;
     }
     let draws = task._opaqueBindings.length;
@@ -427,6 +427,14 @@ function executePass(task: RenderPassTask): number {
     draws += drawList(pass, task._transparentBindings, eng);
     pass.end();
     return draws;
+}
+
+function updateBindingUBOs(list: readonly DrawBinding[]): void {
+    for (const b of list) {
+        if (b.updateUBOs) {
+            b.updateUBOs();
+        }
+    }
 }
 
 /** Iterate DrawBindings, deduping setPipeline.

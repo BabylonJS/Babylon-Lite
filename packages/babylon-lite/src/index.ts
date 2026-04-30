@@ -107,7 +107,7 @@ export type { ArcRotateCamera } from "./camera/arc-rotate.js";
 export type { Camera, NormalizedViewport } from "./camera/camera.js";
 export { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix, getCameraPosition } from "./camera/camera.js";
 export { getEffectiveAspectRatio } from "./camera/camera.js";
-export { resolveCameraViewport, enableCameraViewport } from "./camera/viewport.js";
+export { resolveCameraViewport } from "./camera/viewport.js";
 export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
