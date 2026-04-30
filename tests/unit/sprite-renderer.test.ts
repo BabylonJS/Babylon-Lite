@@ -260,17 +260,63 @@ describe("pipeline cache", () => {
 });
 
 describe("createSprite2DLayer guards", () => {
-    it("throws on depth: 'test' (PR 3 territory)", () => {
-        expect(() => createSprite2DLayer(makeMockAtlas(), { depth: "test" })).toThrow(/PR 3/);
+    it("accepts depth: 'test' (PR 3 depth-hosted)", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test" });
+        expect(layer.depth).toBe("test");
     });
 
-    it("throws on depth: 'test-write' (PR 3 territory)", () => {
-        expect(() => createSprite2DLayer(makeMockAtlas(), { depth: "test-write" })).toThrow(/PR 3/);
+    it("accepts depth: 'test-write' (PR 3 depth-hosted)", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write" });
+        expect(layer.depth).toBe("test-write");
+    });
+
+    it("layerZ defaults to 0.5 and accepts an override", () => {
+        const def = createSprite2DLayer(makeMockAtlas());
+        expect(def.layerZ).toBe(0.5);
+        const custom = createSprite2DLayer(makeMockAtlas(), { layerZ: 0.25 });
+        expect(custom.layerZ).toBe(0.25);
     });
 
     it("throws on additive / multiply / cutout blend modes (later PR)", () => {
         expect(() => createSprite2DLayer(makeMockAtlas(), { blendMode: "additive" })).toThrow();
         expect(() => createSprite2DLayer(makeMockAtlas(), { blendMode: "multiply" })).toThrow();
         expect(() => createSprite2DLayer(makeMockAtlas(), { blendMode: "cutout" })).toThrow();
+    });
+});
+
+describe("per-instance Z (slot [10] of the per-instance vertex buffer)", () => {
+    it("addSprite2DIndex without `z` defaults to layer.layerZ", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { layerZ: 0.42 });
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10] });
+        // Slot 10 of instance #0. `toBeCloseTo` accommodates Float32Array precision rounding.
+        expect(layer._instanceData[10]).toBeCloseTo(0.42);
+    });
+
+    it("addSprite2DIndex with explicit `z` writes that value into slot [10]", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { layerZ: 0.5 });
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10], z: 0.91 });
+        expect(layer._instanceData[10]).toBeCloseTo(0.91);
+    });
+
+    it("each sprite carries its own `z` independently within the same layer", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { layerZ: 0.5 });
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10], z: 0.6 });
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10], z: 0.87 });
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10], z: 0.95 });
+        // Stride is 11 floats per sprite; slot [10] is at offsets 10, 21, 32.
+        expect(layer._instanceData[10]).toBeCloseTo(0.6);
+        expect(layer._instanceData[21]).toBeCloseTo(0.87);
+        expect(layer._instanceData[32]).toBeCloseTo(0.95);
+    });
+
+    it("mutating layer.layerZ does not retroactively change existing sprites' z", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { layerZ: 0.3 });
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10] });
+        layer.layerZ = 0.8;
+        // Existing sprite still at the original 0.3 default it inherited at add time.
+        expect(layer._instanceData[10]).toBeCloseTo(0.3);
+        // New sprite picks up the new layer default.
+        addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [10, 10] });
+        expect(layer._instanceData[21]).toBeCloseTo(0.8);
     });
 });

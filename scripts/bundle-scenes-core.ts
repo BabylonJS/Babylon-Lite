@@ -523,10 +523,14 @@ function writeBundleInfo(scene: string, result: unknown): void {
     writeFileSync(resolve(bundleInfoDir, `${scene}.json`), JSON.stringify({ scene, chunks }, null, 2));
 }
 
-const sceneConfig: { id: number }[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
+const sceneConfig: { id: number; skipBjs?: boolean }[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
 const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") : ALL_SCENES;
-const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.map((s) => `bjs-${s}`);
+// Per-scene `skipBjs: true` opts out of the BJS oracle bundle (used for scenes
+// like 52/53 that have no BJS-side comparable composition — the oracle would
+// just be an arbitrary BJS scene and wouldn't measure anything meaningful).
+const BJS_SKIP_IDS = new Set<string>(sceneConfig.filter((s) => s.skipBjs).map((s) => `scene${s.id}`));
+const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.filter((s) => !BJS_SKIP_IDS.has(s)).map((s) => `bjs-${s}`);
 
 function getAllJsFiles(dir: string): string[] {
     const results: string[] = [];

@@ -19,14 +19,20 @@ import { getRenderTargetSize, registerRenderingContext, unregisterRenderingConte
 import type { EngineContext, EngineContextInternal, RenderingContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
-import { INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 import {
+    LAYER_UBO_BYTES,
+    SHARED_SPRITE_INDEX_DATA,
+    buildSpriteLayerUbo,
     clearSpritePipelineCache,
+    createSpriteInstanceBuffer,
     createSpriteLayerBindGroup,
     createSpritePipelineCache,
+    ensureSpriteInstanceBuffer,
     getOrCreateSpritePipeline,
     getSpritePipelineCacheSize,
     isSpritePipelineEntryCurrent,
+    uploadSpriteInstances,
+    writeSpriteLayerUboIfDirty,
 } from "./sprite-pipeline.js";
 import type { SpritePipelineCache, SpritePipelineEntry } from "./sprite-pipeline.js";
 
@@ -45,6 +51,23 @@ export interface SpriteRendererOptions {
  * A `SpriteRenderer` — pure data, plugs into `engine._renderingContexts`.
  * Inherits `clearColor`, `_drawCallsPre`, `_update`, `_record` from `RenderingContext`;
  * adds only its discriminator tag and the mutable layer list.
+ *
+ * **Lifecycle.** A `SpriteRenderer` is independent of any `SceneContext` — it is
+ * registered directly on the engine, draws into the engine's shared pass, and
+ * must be disposed by the caller. Two patterns:
+ *
+ *   1. **Standalone** (no scene, or one or more renderers alongside a scene):
+ *      `registerSpriteRenderer` after `createSpriteRenderer`, `disposeSpriteRenderer`
+ *      on shutdown. Caller owns the lifetime end-to-end.
+ *   2. **HUD-on-3D** (renderer overlaid on a scene): same `register` step,
+ *      then tie disposal to the scene with
+ *      `onSceneDispose(scene, () => disposeSpriteRenderer(hud))` —
+ *      `disposeScene` then cleans it up automatically. Register the renderer
+ *      *after* `registerScene` so it draws on top.
+ *
+ * Scene 52 demonstrates pattern (2). For depth-hosted sprites that should
+ * sort against 3D meshes, use `addToScene(scene, layer)` with a depth-enabled
+ * `Sprite2DLayer` instead — that route is fully owned by the scene.
  */
 export interface SpriteRenderer extends RenderingContext {
     readonly _kind: typeof KIND;
@@ -95,12 +118,9 @@ interface SpriteRendererInternal extends SpriteRenderer {
     _disposed: boolean;
 }
 
-const LAYER_UBO_BYTES = 48;
-const SHARED_INDEX_DATA: Readonly<Uint16Array> = new Uint16Array([0, 1, 2, 0, 2, 3]);
-
 /**
  * Lazy GPU-resource provisioner for one layer. On first sight: allocates the per-instance
- * vertex buffer + the 48 B layer UBO and stashes a `LayerGpu` record in `_layerGpu`. On
+ * vertex buffer + the 64 B layer UBO and stashes a `LayerGpu` record in `_layerGpu`. On
  * subsequent calls where the layer's CPU `_capacity` outgrew the GPU buffer (after
  * `growCapacity` doubled the array): destroys + reallocates the instance buffer at the
  * new size and forces a full re-upload via `uploadedVersion = -1`. The bind group is
@@ -111,10 +131,7 @@ function ensureLayerGpu(rr: SpriteRendererInternal, layer: Sprite2DLayer): Layer
     let lg = rr._layerGpu.get(layer);
     if (!lg) {
         const cap = layer._capacity;
-        const instanceBuffer = rr._engine.device.createBuffer({
-            size: cap * INSTANCE_STRIDE_BYTES,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        });
+        const instanceBuffer = createSpriteInstanceBuffer(rr._engine.device, cap, "sprite-layer-instances");
         const uniformBuffer = createEmptyUniformBuffer(rr._engine, LAYER_UBO_BYTES, "sprite-layer-ubo");
         lg = {
             layer,
@@ -131,13 +148,10 @@ function ensureLayerGpu(rr: SpriteRendererInternal, layer: Sprite2DLayer): Layer
         };
         rr._layerGpu.set(layer, lg);
     }
-    if (lg.instanceBufferCapacity < layer._capacity) {
-        lg.instanceBuffer.destroy();
-        lg.instanceBuffer = rr._engine.device.createBuffer({
-            size: layer._capacity * INSTANCE_STRIDE_BYTES,
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        });
-        lg.instanceBufferCapacity = layer._capacity;
+    const grown = ensureSpriteInstanceBuffer(rr._engine.device, layer, lg.instanceBuffer, lg.instanceBufferCapacity, "sprite-layer-instances");
+    if (grown.reallocated) {
+        lg.instanceBuffer = grown.buffer;
+        lg.instanceBufferCapacity = grown.capacity;
         lg.uploadedVersion = -1;
         // Bundle baked a reference to the *old* GPUBuffer; the new buffer needs a re-record.
         lg.renderBundle = null;
@@ -145,87 +159,13 @@ function ensureLayerGpu(rr: SpriteRendererInternal, layer: Sprite2DLayer): Layer
     return lg;
 }
 
-/**
- * Sync one layer's GPU state to its CPU state. Two uploads, two strategies:
- *  1. **Per-instance vertex data** — version-gated and incremental: skip if `_version`
- *     unchanged; otherwise upload `[0, count)` on first sight (`uploadedVersion === -1`)
- *     or just `[_dirtyMin, min(_dirtyMax, count))` on subsequent edits. Resets the dirty
- *     range and bumps `uploadedVersion` after upload.
- *  2. **Per-layer UBO** — always rewrites all 48 B. The view (camera) and target dims
- *     can change without going through any setter, so version-tracking would buy nothing.
- *     Tiny (one `writeBuffer`), so unconditional is simpler than dirty-tracking.
- */
+/** Sync one layer's GPU state to its CPU state — instance vertex data + per-layer UBO.
+ *  Both helpers are version-/dirty-gated and skip work in the steady state. */
 function uploadLayer(rr: SpriteRendererInternal, lg: LayerGpu): void {
     const layer = lg.layer;
-    if (lg.uploadedVersion !== layer._version && layer.count > 0) {
-        // First sight (or post-grow `uploadedVersion = -1`): upload the whole live range.
-        // Subsequent: upload only the dirty span, clamped to live count (a `remove` may have
-        // marked a slot beyond `count` as dirty; that data is no longer live).
-        let lo: number;
-        let hi: number;
-        if (lg.uploadedVersion === -1) {
-            lo = 0;
-            hi = layer.count;
-        } else {
-            lo = layer._dirtyMin;
-            hi = Math.min(layer._dirtyMax, layer.count);
-        }
-        if (hi > lo) {
-            const offsetBytes = lo * INSTANCE_STRIDE_BYTES;
-            const bytes = (hi - lo) * INSTANCE_STRIDE_BYTES;
-            rr._engine.device.queue.writeBuffer(lg.instanceBuffer, offsetBytes, layer._instanceData.buffer, layer._instanceData.byteOffset + offsetBytes, bytes);
-        }
-        layer._dirtyMin = 0;
-        layer._dirtyMax = 0;
-        lg.uploadedVersion = layer._version;
-    }
-
-    // Layer UBO — small + cheap, but every `queue.writeBuffer` walks the WebGPU validation
-    // layer, so we change-detect: build into `_scratchUbo`, compare to the per-layer
-    // `lastUbo` snapshot, and only upload when something actually changed. For static
-    // layers (steady-state) this skips one `queue.writeBuffer` per layer per frame.
-    // Float layout matches the WGSL `Layer` struct (48 B total, 12 floats):
-    //   [0..1]  viewPos.xy   [2] viewScale   [3] viewRot
-    //   [4..5]  screenSize.xy   [6..7] pivot.xy
-    //   [8..11] opacityMul.rgba  (per-blend-mode pre-shaped, see WGSL `Layer` struct)
-    const ubo = _scratchUbo;
-    ubo[0] = layer.view.positionPx[0];
-    ubo[1] = layer.view.positionPx[1];
-    ubo[2] = layer.view.zoom;
-    ubo[3] = layer.view.rotation;
-    ubo[4] = rr._targetWidth;
-    ubo[5] = rr._targetHeight;
-    ubo[6] = layer.pivot[0];
-    ubo[7] = layer.pivot[1];
-    // Premultiplied sources need RGB *and* A scaled by opacity for a correct fade;
-    // straight-alpha needs only A scaled (the blend stage already uses src.a as the factor).
-    const op = layer.opacity;
-    if (layer.blendMode === "premultiplied") {
-        ubo[8] = op;
-        ubo[9] = op;
-        ubo[10] = op;
-        ubo[11] = op;
-    } else {
-        ubo[8] = 1;
-        ubo[9] = 1;
-        ubo[10] = 1;
-        ubo[11] = op;
-    }
-    const last = lg.lastUbo;
-    let dirty = !lg.uboUploaded;
-    if (!dirty) {
-        for (let i = 0; i < 12; i++) {
-            if (last[i] !== ubo[i]) {
-                dirty = true;
-                break;
-            }
-        }
-    }
-    if (dirty) {
-        rr._engine.device.queue.writeBuffer(lg.uniformBuffer, 0, ubo.buffer, ubo.byteOffset, LAYER_UBO_BYTES);
-        last.set(ubo);
-        lg.uboUploaded = true;
-    }
+    lg.uploadedVersion = uploadSpriteInstances(rr._engine.device, layer, lg.instanceBuffer, lg.uploadedVersion);
+    buildSpriteLayerUbo(layer, rr._targetWidth, rr._targetHeight, _scratchUbo);
+    lg.uboUploaded = writeSpriteLayerUboIfDirty(rr._engine.device, lg.uniformBuffer, _scratchUbo, lg.lastUbo, lg.uboUploaded);
 }
 
 const _scratchUbo = new Float32Array(LAYER_UBO_BYTES / 4);
@@ -257,7 +197,7 @@ function compareLayers(a: Sprite2DLayer, b: Sprite2DLayer): number {
 /** Create a `SpriteRenderer` for `engine`, pre-warming pipelines for the layers' blend modes. */
 export function createSpriteRenderer(engine: EngineContext, opts: SpriteRendererOptions): SpriteRenderer {
     const eng = engine as EngineContextInternal;
-    const indexBuffer = createMappedBuffer(eng, SHARED_INDEX_DATA, GPUBufferUsage.INDEX);
+    const indexBuffer = createMappedBuffer(eng, SHARED_SPRITE_INDEX_DATA, GPUBufferUsage.INDEX);
     const targetSize = getRenderTargetSize(eng);
 
     const rr: SpriteRendererInternal = {
@@ -389,7 +329,12 @@ export function unregisterSpriteRenderer(sr: SpriteRenderer): void {
     unregisterRenderingContext((sr as SpriteRendererInternal)._engine, sr);
 }
 
-/** Destroy all GPU resources owned by the renderer, unregister it from the engine, and clear `layers`. */
+/**
+ * Destroy all GPU resources owned by the renderer, unregister it from the engine, and clear `layers`.
+ * Idempotent. To tie disposal to a scene, call
+ * `onSceneDispose(scene, () => disposeSpriteRenderer(sr))` after `registerSpriteRenderer` —
+ * see the `SpriteRenderer` doc-comment.
+ */
 export function disposeSpriteRenderer(sr: SpriteRenderer): void {
     const rr = sr as SpriteRendererInternal;
     if (rr._disposed) {

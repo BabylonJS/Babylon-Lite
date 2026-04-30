@@ -77,5 +77,31 @@ for (const scene of SCENES) {
             const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => forbidden.test(f));
             expect(offenders, `pure-2D ${scene.slug} must not load scene/* chunks; found: ${offenders.join(", ")}`).toEqual([]);
         }
+
+        // Scene 52 — HUD on 3D — uses SpriteRenderer for the HUD overlay; the
+        // depth-hosted Renderable wrapper (sprite-renderable.js) must NOT be
+        // pulled in. If it is, scene-core's dynamic import is being eager-resolved
+        // somewhere or scene52 accidentally added the layer via addToScene.
+        if (scene.slug === "scene52-hud-on-3d") {
+            const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => /sprite-renderable/.test(f));
+            expect(offenders, `scene52 HUD must not load sprite-renderable.js; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
+        // (proves scene-core.addToScene's dynamic import works) and MUST load
+        // scene-core (it is a real 3D scene, not pure-2D).
+        if (scene.slug === "scene53-depth-hosted-sprites") {
+            const files = jsPayloads.map((p) => p.url.split("/").pop()!);
+            expect(files.some((f) => /sprite-renderable/.test(f)), `scene53 depth-hosted MUST load sprite-renderable.js; loaded: ${files.join(", ")}`).toBe(true);
+        }
+
+        // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
+        // List excludes the sprite-using scenes (50, 51, 52, 53). 60-series are
+        // NME demos with no sprites; 1-40 are core 3D.
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53]);
+        if (!SPRITE_USING_IDS.has(scene.id)) {
+            const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => /sprite-(2d|pipeline|renderer|renderable)/.test(f));
+            expect(offenders, `non-sprite ${scene.slug} must not load sprite chunks; found: ${offenders.join(", ")}`).toEqual([]);
+        }
     });
 }

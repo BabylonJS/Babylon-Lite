@@ -41,6 +41,19 @@ export interface Sprite2DLayerOptions {
      * future PR — most 2D HUD layers want one uniform pivot anyway.
      */
     pivot?: [number, number];
+    /**
+     * Default NDC depth (`0` = near, `1` = far) for sprites added to this layer when their
+     * `Sprite2DProps.z` is omitted. Only meaningful for `depth: "test" | "test-write"` layers
+     * (depth-hosted sprites added to a `SceneContext` via `addToScene`); ignored by pure-2D
+     * `SpriteRenderer` paths whose pipeline runs `depthCompare: "always"`.
+     *
+     * Each sprite carries its **own** Z (slot [10] of the per-instance buffer) so a single layer
+     * can mix sprites at different depths — e.g. one in front of a box, one behind it. Defaults
+     * to `0.5`. Mutating `layer.layerZ` after sprites have been added does **not** retroactively
+     * change them; it only affects sprites added afterwards. To move an existing sprite, call
+     * `updateSprite2DIndex(layer, idx, { z: … })`.
+     */
+    layerZ?: number;
 }
 
 /** A `Sprite2DLayer` — pure data, no methods. */
@@ -55,6 +68,8 @@ export interface Sprite2DLayer {
     view: Sprite2DView;
     /** Layer-wide pivot in normalised sprite-local space; see `Sprite2DLayerOptions.pivot`. */
     pivot: [number, number];
+    /** Default NDC depth for newly added sprites; see `Sprite2DLayerOptions.layerZ`. */
+    layerZ: number;
     count: number;
 
     /** @internal Capacity of the per-instance buffer (in sprites). */
@@ -97,16 +112,25 @@ export interface Sprite2DProps {
     pickable?: boolean;
     /** Reserved for clip animation (later PR). Accepted but unused in PR 1. */
     clip?: unknown;
+    /**
+     * Per-sprite NDC depth (`0` = near, `1` = far). Only consumed by depth-hosted layers
+     * (`depth: "test" | "test-write"`); pure-2D HUD layers ignore it. When omitted on add,
+     * defaults to the **owning layer's** `layerZ` at the moment of insertion. When omitted
+     * on update, the sprite's existing Z is preserved. Mutate freely — the next
+     * `updateUBOs` will re-upload only the dirty range.
+     */
+    z?: number;
 }
 
 /**
- * Per-instance vertex layout (10 floats = 40 bytes):
+ * Per-instance vertex layout (11 floats = 44 bytes):
  *   [0..1]  positionPx.xy   (float32x2 @ offset  0)
  *   [2..3]  sizePx.xy       (float32x2 @ offset  8)
  *   [4..5]  uvMin.xy        (float32x2 @ offset 16)
  *   [6..7]  uvMax.xy        (float32x2 @ offset 24)
  *   [8]     rotation        (float32   @ offset 32)
  *   [9]     colorRGBA       (unorm8x4  @ offset 36, packed via the aliased Uint32 view)
+ *   [10]    z (NDC depth)   (float32   @ offset 40, consumed only by depth-hosted pipelines)
  *
  * The renderer treats slot [9] as a `unorm8x4` vertex attribute (4 bytes seen as RGBA on the
  * GPU). Float32Array is just a convenient homogeneous backing store; the bits are written
@@ -116,19 +140,13 @@ export interface Sprite2DProps {
  * size lives in `layer._savedSize` so a later `visible: true` (without re-supplying
  * `sizePx`) can restore it. See `_savedSize` for the invariant.
  */
-export const INSTANCE_FLOATS_PER_SPRITE = 10;
+export const INSTANCE_FLOATS_PER_SPRITE = 11;
 /** @internal Per-sprite stride in bytes — kept in sync with INSTANCE_FLOATS_PER_SPRITE. */
 export const INSTANCE_STRIDE_BYTES = INSTANCE_FLOATS_PER_SPRITE * 4;
 /** @internal Per-sprite stride (in floats) of the `_savedSize` shadow buffer: `[w, h]`. */
 export const SAVED_SIZE_FLOATS_PER_SPRITE = 2;
 
 const DEFAULT_CAPACITY = 16;
-
-function assertDepthSupported(depth: Sprite2DDepthMode): void {
-    if (depth === "test" || depth === "test-write") {
-        throw new Error(`Sprite2DLayer: depth: "${depth}" lands in PR 3. Use "none" for now.`);
-    }
-}
 
 function assertBlendSupported(blendMode: SpriteBlendMode): void {
     if (blendMode === "additive" || blendMode === "multiply" || blendMode === "cutout") {
@@ -139,7 +157,6 @@ function assertBlendSupported(blendMode: SpriteBlendMode): void {
 /** Create a new (empty) `Sprite2DLayer` backed by `atlas`. */
 export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptions = {}): Sprite2DLayer {
     const depth = opts.depth ?? "none";
-    assertDepthSupported(depth);
     const blendMode = opts.blendMode ?? "alpha";
     assertBlendSupported(blendMode);
 
@@ -161,6 +178,7 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         order: opts.order ?? 0,
         view,
         pivot: [opts.pivot?.[0] ?? 0.5, opts.pivot?.[1] ?? 0.5],
+        layerZ: opts.layerZ ?? 0.5,
         count: 0,
         _capacity: capacity,
         _instanceData: instanceData,
@@ -297,6 +315,10 @@ function writeInstance(layer: Sprite2DLayer, slotIndex: number, props: Partial<S
     // ── Rotation ────────────────────────────────────────────────────────────────────────
     const rotation = props.rotation ?? (prev ? prev[8]! : 0);
 
+    // ── Per-instance Z (props.z → preserved on update → layer.layerZ default on add) ────
+    // Slot [10]. Only consumed by depth-hosted pipelines; pure-2D HUD pipelines ignore it.
+    const z = props.z ?? (prev ? prev[10]! : layer.layerZ);
+
     // ── Write the 9 float slots (color is the 10th, written below via the U32 view) ────
     data[base + 0] = posX;
     data[base + 1] = posY;
@@ -316,6 +338,9 @@ function writeInstance(layer: Sprite2DLayer, slotIndex: number, props: Partial<S
         u32[base + 9] = 0xffffffff; // opaque white
     }
     // else: prev's color bits are already in `data[base+9]` — nothing to write.
+
+    // ── Per-instance Z (slot [10]) ──────────────────────────────────────────────────────
+    data[base + 10] = z;
 }
 
 function markDirty(layer: Sprite2DLayer, lo: number, hi: number): void {

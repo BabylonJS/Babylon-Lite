@@ -15,6 +15,7 @@ import type { SkyboxData } from "../loader-skybox/load-skybox.js";
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
 import type { ComposedShader } from "../shader/fragment-types.js";
 import type { AssetContainer } from "../asset-container.js";
+import type { Sprite2DLayer } from "../sprite/sprite-2d.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -268,9 +269,29 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
     (scene as SceneContextInternal)._beforeRender.unshift(cb);
 }
 
-/** Add an entity (mesh, light, camera, transform node, shadow generator, or asset container) to the scene. */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+/** Register a callback to run when `disposeScene` is called. Used to tie
+ *  user-owned GPU resources (e.g. a `SpriteRenderer`) to the scene's lifetime. */
+export function onSceneDispose(scene: SceneContext, cb: () => void): void {
+    (scene as SceneContextInternal)._disposables.push(cb);
+}
+
+/** Add an entity (mesh, light, camera, transform node, shadow generator, asset container, or depth-hosted sprite layer) to the scene. */
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer | Sprite2DLayer): void {
     const ctx = scene as SceneContextInternal;
+    // Sprite layer routing — discriminator is the only thing scene-core needs
+    // statically. Everything else (depth-mode validation, GPU resource creation,
+    // disposable wiring) lives in the dynamically-imported sprite-renderable
+    // module so non-sprite scenes pay only ~30 bytes for this branch.
+    if ((entity as Sprite2DLayer)._entityType === "sprite-2d-layer") {
+        const layer = entity as Sprite2DLayer;
+        ctx._deferredBuilders.push(async () => {
+            const m = await import("../sprite/sprite-renderable.js");
+            const built = m.buildSpriteRenderable(ctx.engine as EngineContextInternal, layer);
+            ctx._renderables.push(built.renderable);
+            ctx._disposables.push(built.dispose);
+        });
+        return;
+    }
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
         const result = entity as AssetContainer;

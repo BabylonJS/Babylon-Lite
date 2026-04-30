@@ -42,6 +42,10 @@ struct VIn {
 @location(3) iUvMax: vec2<f32>,
 @location(4) iRot: f32,
 @location(5) iColor: vec4<f32>,
+// Per-instance NDC depth (0 = near, 1 = far). Pure-2D HUD pipelines run
+// depthCompare: "always" so the value is ignored; depth-hosted pipelines
+// (depth: "test" | "test-write") use it to participate in the scene's depth attachment.
+@location(6) iZ: f32,
 };
 struct VOut {
 @builtin(position) pos: vec4<f32>,
@@ -65,7 +69,7 @@ let screenPx = viewRot * L.viewScale;
 let ndc = vec2<f32>(screenPx.x / L.screenSize.x * 2.0 - 1.0, 1.0 - screenPx.y / L.screenSize.y * 2.0);
 let uv = mix(in.iUvMin, in.iUvMax, c);
 var out: VOut;
-out.pos = vec4<f32>(ndc, 0.0, 1.0);
+out.pos = vec4<f32>(ndc, in.iZ, 1.0);
 out.uv = uv;
 out.tint = in.iColor;
 return out;
@@ -200,6 +204,7 @@ function buildSpritePipeline(engine: EngineContextInternal, cache: SpritePipelin
                         { shaderLocation: 3, offset: 24, format: "float32x2" },
                         { shaderLocation: 4, offset: 32, format: "float32" },
                         { shaderLocation: 5, offset: 36, format: "unorm8x4" },
+                        { shaderLocation: 6, offset: 40, format: "float32" },
                     ],
                 },
             ],
@@ -219,4 +224,141 @@ function buildSpritePipeline(engine: EngineContextInternal, cache: SpritePipelin
     });
 
     return { device, format: engine.format, msaaSamples: engine.msaaSamples, pipeline, bindGroupLayout };
+}
+
+// ─── Per-layer GPU sync helpers ────────────────────────────────────────────
+// Shared by `sprite-renderer.ts` (multi-layer pure-2D pass) and
+// `sprite-renderable.ts` (single-layer depth-hosted scene `Renderable`).
+// The two consumers have different lifecycles (renderer caches a `LayerGpu`
+// per layer; renderable owns one `Sprite2DLayer`) but the per-frame work —
+// "grow instance buffer if needed", "upload dirty instance range",
+// "build the 12-float UBO", "writeBuffer only if changed" — is identical.
+
+/** Per-layer UBO size in bytes. 12 floats; struct alignment forced to 16 by `vec4<f32>` fields. */
+export const LAYER_UBO_BYTES = 48;
+/** Number of floats in the per-layer UBO scratch / lastUbo arrays. */
+export const LAYER_UBO_FLOATS = LAYER_UBO_BYTES / 4;
+
+/** Shared two-triangle quad index buffer source (4 corners → 6 indices). */
+export const SHARED_SPRITE_INDEX_DATA: Readonly<Uint16Array> = new Uint16Array([0, 1, 2, 0, 2, 3]);
+
+/** Allocate a per-layer instance vertex buffer sized for `capacity` sprites. */
+export function createSpriteInstanceBuffer(device: GPUDevice, capacity: number, label?: string): GPUBuffer {
+    return device.createBuffer({
+        size: capacity * INSTANCE_STRIDE_BYTES,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        label,
+    });
+}
+
+/**
+ * Reallocate the instance buffer if `layer._capacity` outgrew the current GPU buffer.
+ * Returns the (possibly new) buffer + the new capacity, plus a `reallocated` flag the
+ * caller uses to invalidate per-buffer caches (render bundles, `uploadedVersion`, etc).
+ */
+export function ensureSpriteInstanceBuffer(
+    device: GPUDevice,
+    layer: Sprite2DLayer,
+    currentBuffer: GPUBuffer,
+    currentCapacity: number,
+    label?: string
+): { buffer: GPUBuffer; capacity: number; reallocated: boolean } {
+    if (currentCapacity >= layer._capacity) {
+        return { buffer: currentBuffer, capacity: currentCapacity, reallocated: false };
+    }
+    currentBuffer.destroy();
+    return {
+        buffer: createSpriteInstanceBuffer(device, layer._capacity, label),
+        capacity: layer._capacity,
+        reallocated: true,
+    };
+}
+
+/**
+ * Sync per-instance vertex data to `instanceBuffer`. Returns the new `uploadedVersion`
+ * the caller should store. No-op if `layer._version` hasn't advanced or the layer is
+ * empty. On first sight (`uploadedVersion === -1`) uploads `[0, count)`; on subsequent
+ * edits uploads only `[_dirtyMin, min(_dirtyMax, count))`. Resets the dirty range.
+ */
+export function uploadSpriteInstances(device: GPUDevice, layer: Sprite2DLayer, instanceBuffer: GPUBuffer, uploadedVersion: number): number {
+    if (uploadedVersion === layer._version || layer.count === 0) {
+        return uploadedVersion;
+    }
+    let lo: number;
+    let hi: number;
+    if (uploadedVersion === -1) {
+        lo = 0;
+        hi = layer.count;
+    } else {
+        lo = layer._dirtyMin;
+        hi = Math.min(layer._dirtyMax, layer.count);
+    }
+    if (hi > lo) {
+        const offsetBytes = lo * INSTANCE_STRIDE_BYTES;
+        const bytes = (hi - lo) * INSTANCE_STRIDE_BYTES;
+        device.queue.writeBuffer(instanceBuffer, offsetBytes, layer._instanceData.buffer, layer._instanceData.byteOffset + offsetBytes, bytes);
+    }
+    layer._dirtyMin = 0;
+    layer._dirtyMax = 0;
+    return layer._version;
+}
+
+/**
+ * Fill `ubo` (12 floats) with the per-layer UBO contents from `layer` at the given
+ * render-target dims. Layout matches the WGSL `Layer` struct (48 bytes total):
+ *   [0..1]  viewPos.xy   [2] viewScale   [3] viewRot
+ *   [4..5]  screenSize.xy   [6..7] pivot.xy
+ *   [8..11] opacityMul.rgba (pre-shaped per blend mode)
+ *
+ * Per-sprite NDC depth lives on the per-instance vertex buffer (slot [10] of
+ * `Sprite2DLayer._instanceData`), not in this UBO — a single layer can mix sprites
+ * at different depths.
+ *
+ * Premultiplied sources need RGB *and* A scaled by opacity for a correct fade;
+ * straight-alpha needs only A scaled (the blend stage already uses src.a as factor).
+ */
+export function buildSpriteLayerUbo(layer: Sprite2DLayer, screenWidth: number, screenHeight: number, ubo: Float32Array): void {
+    ubo[0] = layer.view.positionPx[0];
+    ubo[1] = layer.view.positionPx[1];
+    ubo[2] = layer.view.zoom;
+    ubo[3] = layer.view.rotation;
+    ubo[4] = screenWidth;
+    ubo[5] = screenHeight;
+    ubo[6] = layer.pivot[0];
+    ubo[7] = layer.pivot[1];
+    const op = layer.opacity;
+    if (layer.blendMode === "premultiplied") {
+        ubo[8] = op;
+        ubo[9] = op;
+        ubo[10] = op;
+        ubo[11] = op;
+    } else {
+        ubo[8] = 1;
+        ubo[9] = 1;
+        ubo[10] = 1;
+        ubo[11] = op;
+    }
+}
+
+/**
+ * Compare `scratchUbo` to `lastUbo` (LAYER_UBO_FLOATS each) and `writeBuffer` only if they
+ * differ. On first call (`alreadyUploaded === false`) forces an unconditional write
+ * so `lastUbo` becomes real. Returns the new `alreadyUploaded` value (always `true`
+ * after the first call regardless of whether bytes changed).
+ */
+export function writeSpriteLayerUboIfDirty(device: GPUDevice, uniformBuffer: GPUBuffer, scratchUbo: Float32Array, lastUbo: Float32Array, alreadyUploaded: boolean): boolean {
+    let dirty = !alreadyUploaded;
+    if (!dirty) {
+        for (let i = 0; i < LAYER_UBO_FLOATS; i++) {
+            if (lastUbo[i] !== scratchUbo[i]) {
+                dirty = true;
+                break;
+            }
+        }
+    }
+    if (dirty) {
+        device.queue.writeBuffer(uniformBuffer, 0, scratchUbo.buffer, scratchUbo.byteOffset, LAYER_UBO_BYTES);
+        lastUbo.set(scratchUbo);
+    }
+    return true;
 }

@@ -133,44 +133,40 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 ---
 
-### PR 2 — Sprite HUD on top of 3D _(the 2.5D path)_
+### PR 2 — Sprite HUD on top of 3D _(the 2.5D path)_ ✅ shipped
 
 **Goal:** 3D scene with a static sprite HUD overlay (the canonical game-GUI case).
 
-**Scope:**
+**As-shipped scope:**
 
-- New `addToScene` branch: `_entityType === "sprite-2d-layer"` with `depth: "none"` routes to `_hudSpriteLayers`
-- `registerScene` auto-creates an internal `SpriteRenderer` and pushes it onto `engine._renderingContexts` _after_ the scene if `_hudSpriteLayers.length > 0`
-- **No special pass plumbing needed** — engine already uses `loadOp: "load"` for registrations 2+; HUD sprite context just disables depth-test in its pipeline
+- HUD overlays use the same primitives as the pure-2D path: `createSpriteRenderer(engine, { layers, clearValue? })` + `registerSpriteRenderer(engine, sr)` after `registerScene(engine, scene)`.
+- A new public `onSceneDispose(scene, cb)` helper is added so callers can wire HUD disposal to the scene lifetime: `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`. With this the HUD comes down on `disposeScene(scene)` automatically.
+- `addToScene` does **not** auto-route HUD layers to an internal `SpriteRenderer`. A `Sprite2DLayer { depth: "none" }` passed to `addToScene` throws and tells the caller to use `createSpriteRenderer`. This keeps `registerScene` zero-cost for non-HUD scenes (no scene/\* code references `SpriteRenderer`) and keeps HUD lifecycle explicit and caller-owned.
 
-**Visual proof:** new lab scene `scene51-3d-with-sprite-hud` — rotating cube + static health-bar overlay in screen-space.
+**Visual proof:** lab scene `scene52-sprite-hud-on-3d` — rotating 3D scene + sprite HUD overlay; HUD disposed via `onSceneDispose`.
 
 **Tests:**
 
-- `addToScene-sprite-2d-branch.test.ts` — bucket routing
-- `register-scene-hud.test.ts` — HUD `SpriteRenderer` is auto-registered after the scene
-- Parity scene with golden screenshot — verifies 3D underneath, HUD on top, no clearing in between
-
-**No power-user opt-out for v1** (per recent decision — API is experimental, breaking later is fine).
+- `sprite-renderer.test.ts` — covers `createSpriteRenderer` + `registerSpriteRenderer` + `disposeSpriteRenderer` lifecycle.
+- `rendering-context-registration.test.ts` — verifies the engine's `_renderingContexts` ordering rule (first context clears, subsequent contexts use `loadOp: "load"`).
 
 ---
 
-### PR 3 — Depth-hosted sprites
+### PR 3 — Depth-hosted sprites ✅ shipped
 
-**Goal:** sprites participate in 3D depth — passes behind / in front of geometry.
+**Goal:** sprites participate in 3D depth — pass behind / in front of geometry.
 
-**Scope:**
+**As-shipped scope:**
 
-- `Sprite2DLayer` with `depth: "test"` and `"test-write"`
-- `addToScene` branch routes these into existing `_opaqueRenderables` / `_transparentRenderables` via `_deferredBuild` — no new render pass, no new pipeline-cache plumbing
-- WGSL fragment composes correctly with depth attachment
+- `Sprite2DLayer { depth: "test" | "test-write" }` added through `addToScene` dynamic-imports `sprite-renderable.ts` and inserts a `Renderable` into `scene._renderables` (`order = 200` for blended `"test"`, `order = 100` for opaque `"test-write"`).
+- No new render pass. No new pipeline-cache plumbing. The renderable participates in the existing scene 3D pass alongside meshes.
+- The composer emits `depthCompare: "less-equal"`, `depthWriteEnabled: true|false` driven by the `depth` value; the per-instance Z (slot [10]) is consumed by the depth test.
 
-**Visual proof:** new lab scene `scene52-depth-tested-sprites` — a sprite that is occluded by a rotating 3D mesh.
+**Visual proof:** lab scene `scene53-depth-hosted-sprites` — sprites partially occluded by 3D meshes.
 
 **Tests:**
 
-- `sprite-2d-depth-routing.test.ts` — verifies `_opaqueRenderables` / `_transparentRenderables` placement
-- Parity scene with golden screenshot showing partial occlusion
+- `sprite-depth-hosted-routing.test.ts` — verifies `addToScene` routes `"test"` / `"test-write"` to `scene._renderables` with the correct `order`, and throws for `"none"`.
 
 ---
 

@@ -383,6 +383,28 @@
         "skipPerf": true
     },
     {
+        "id": 52,
+        "slug": "scene52-hud-on-3d",
+        "name": "Scene 52 — HUD on 3D",
+        "maxMad": 0.5,
+        "maxRawKB": 200,
+        "description": "3D scene (sphere + StandardMaterial under a directional light) with a pure-2D HUD sprite overlay rendered AFTER the 3D pass via createSpriteRenderer + registerSpriteRenderer. HUD layer uses depth: \"none\". Lite-self golden (no BJS oracle).",
+        "tags": ["sprites", "2d", "hud", "3d"],
+        "skipBjs": true,
+        "skipPerf": true
+    },
+    {
+        "id": 53,
+        "slug": "scene53-depth-hosted-sprites",
+        "name": "Scene 53 — Depth-Hosted Sprites Mixed With 3D",
+        "maxMad": 0.5,
+        "maxRawKB": 200,
+        "description": "Two boxes at different camera-distances + a Sprite2DLayer added via addToScene with depth: \"test-write\" and layerZ: 0.5. The front box occludes the sprite; the sprite occludes the back box. Lite-self golden (no BJS oracle).",
+        "tags": ["sprites", "2d", "3d", "depth"],
+        "skipBjs": true,
+        "skipPerf": true
+    },
+    {
         "id": 60,
         "slug": "scene60-nme-flat",
         "name": "Scene 60 — NME Flat Colour",
