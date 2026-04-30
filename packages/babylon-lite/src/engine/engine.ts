@@ -26,11 +26,6 @@ export interface EngineContext {
  * future renderable thing) register themselves as a `RenderingContext` and
  * own their own update / record logic. Engine knows nothing of scene internals.
  */
-/**
- * Minimal surface an engine sees for anything it renders. Scenes (and any other
- * future renderable thing) register themselves as a `RenderingContext` and
- * own their own update / record logic. Engine knows nothing of scene internals.
- */
 export interface RenderingContext {
     /** Draw calls produced by pre-pass work during `_update` (shadows + pre-passes). */
     _drawCallsPre: number;

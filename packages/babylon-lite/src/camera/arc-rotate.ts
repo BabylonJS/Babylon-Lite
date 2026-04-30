@@ -1,3 +1,4 @@
+import type { Camera, NormalizedViewport } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
 import { Vec3Up } from "../math/vec3.js";
 import { mat4LookAtLH } from "../math/mat4.js";
@@ -16,7 +17,7 @@ import type { SceneNode } from "../scene/scene-node.js";
  *  Inertia follows the Babylon.js model: input handlers accumulate per-frame
  *  offsets (inertialAlphaOffset, etc.) which are applied and exponentially
  *  decayed each frame by the controls module. */
-export interface ArcRotateCamera extends IWorldMatrixProvider, IParentable {
+export interface ArcRotateCamera extends Camera, IWorldMatrixProvider, IParentable {
     alpha: number;
     beta: number;
     radius: number;
@@ -24,6 +25,7 @@ export interface ArcRotateCamera extends IWorldMatrixProvider, IParentable {
     fov: number;
     nearPlane: number;
     farPlane: number;
+    viewport?: NormalizedViewport;
     children: SceneNode[];
 
     /** Inertia coefficient for rotation and zoom (0 = instant stop, 0.9 = default, 1 = no decay). */

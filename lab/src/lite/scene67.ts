@@ -40,6 +40,9 @@ async function main(): Promise<void> {
         skipGround: true,
         brdfUrl: "/brdf-lut.png",
     });
+    scene.imageProcessing.toneMappingEnabled = false;
+    scene.imageProcessing.exposure = 1.0;
+    scene.imageProcessing.contrast = 1.0;
 
     const hemi = createHemisphericLight([0, 1, 0], 1);
     addToScene(scene, hemi);

@@ -8,6 +8,7 @@ import { createPickingRay } from "./ray.js";
 import { mat4Invert } from "../math/mat4.js";
 import { getPickingPipeline, getPickingTIPipeline, getPickingSceneBGL, getPickingMeshBGL, getPickingTIMeshBGL } from "./picking-pipeline.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
+import { resolveCameraViewport } from "../camera/viewport.js";
 import { createEmptyUniformBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
@@ -117,14 +118,19 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
         return createEmptyPickingInfo();
     }
 
-    const w = canvas.width;
-    const h = canvas.height;
+    const viewport = resolveCameraViewport(camera, canvas.width, canvas.height);
+    const w = viewport.width;
+    const h = viewport.height;
     if (w === 0 || h === 0) {
         return createEmptyPickingInfo();
     }
 
-    const px = Math.max(0, Math.min(Math.floor(x), w - 1));
-    const py = Math.max(0, Math.min(Math.floor(y), h - 1));
+    if (x < viewport.x || y < viewport.y || x >= viewport.x + viewport.width || y >= viewport.y + viewport.height) {
+        return createEmptyPickingInfo();
+    }
+
+    const px = Math.max(0, Math.min(Math.floor(x - viewport.x), w - 1));
+    const py = Math.max(0, Math.min(Math.floor(y - viewport.y), h - 1));
     const aspect = w / h;
     const vp = getViewProjectionMatrix(camera, aspect);
 

@@ -13,7 +13,7 @@
  *       samplers).
  *    3. Bind-group entry construction from `scene._envTextures`.
  *    4. Per-frame writer for the SH + env scalar tail of the scene UBO
- *       (offset 176 bytes; 40 floats = 160 bytes).
+ *       (after the base scene UBO; 40 floats = 160 bytes).
  */
 
 import type { EngineContextInternal } from "../../engine/engine.js";
@@ -95,7 +95,7 @@ export function pushEnvBindGroupEntries(
     entries.push({ binding: envBindings.brdfSampler, resource: env.brdfSampler });
 }
 
-/** Write the env tail of the NME scene UBO (offset 176, 40 floats):
+/** Write the env tail of the NME scene UBO (40 floats):
  *  9 vec4 SH coefficients + vec4(envRotationY, lodGenerationScale,
  *  environmentIntensity, _pad). */
 let _envScratch: Float32Array | null = null;
@@ -113,5 +113,5 @@ export function writeEnvSceneTail(engine: EngineContextInternal, sceneUBO: GPUBu
     _envScratch[37] = env.lodGenerationScale;
     _envScratch[38] = 1.0;
     _envScratch[39] = 0;
-    engine.device.queue.writeBuffer(sceneUBO, 176, _envScratch as Float32Array<ArrayBuffer>);
+    engine.device.queue.writeBuffer(sceneUBO, 192, _envScratch as Float32Array<ArrayBuffer>);
 }

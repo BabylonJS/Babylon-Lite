@@ -95,6 +95,8 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
      *  `_renderables` into the swapchain. User code may add additional tasks
      *  (offscreen RTTs, post-FX, UI overlays, etc.). */
     _frameGraph: FrameGraph;
+    /** Optional viewport/scissor hook installed by enableCameraViewport(). */
+    _vp?: (pass: GPURenderPassEncoder, width: number, height: number) => void;
 }
 
 /** Install a property setter on mesh.material that sets _materialDirty

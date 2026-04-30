@@ -14,7 +14,6 @@
 
 import type { NodeBuildState, NodeEmitContext, NodeExpr, NodeGraph, NodeValueType, Stage, StageState, BlockEmitter } from "./node-types.js";
 import { WGSL } from "./node-types.js";
-import { loadBlockEmitter } from "./node-registry.js";
 
 // ─── Build-state construction ───────────────────────────────────────
 
@@ -168,7 +167,13 @@ function bridgeVarying(state: NodeBuildState, varyingName: string, value: NodeEx
 // ─── Emitter dispatch ───────────────────────────────────────────────
 
 /** Load all emitters referenced by the graph in a single parallel batch. */
-export async function loadGraphEmitters(graph: NodeGraph): Promise<Map<string, BlockEmitter>> {
+let defaultRegistry: Promise<typeof import("./node-registry.js")> | null = null;
+async function defaultBlockLoader(className: string): Promise<BlockEmitter> {
+    defaultRegistry ??= import("./node-registry.js");
+    return (await defaultRegistry).loadBlockEmitter(className);
+}
+
+export async function loadGraphEmitters(graph: NodeGraph, blockLoader: (className: string) => Promise<BlockEmitter> = defaultBlockLoader): Promise<Map<string, BlockEmitter>> {
     const classNames = new Set<string>();
     for (const b of graph.blocks.values()) {
         classNames.add(b.className);
@@ -176,7 +181,7 @@ export async function loadGraphEmitters(graph: NodeGraph): Promise<Map<string, B
     const map = new Map<string, BlockEmitter>();
     await Promise.all(
         Array.from(classNames).map(async (className) => {
-            const e = await loadBlockEmitter(className);
+            const e = await blockLoader(className);
             map.set(className, e);
         })
     );

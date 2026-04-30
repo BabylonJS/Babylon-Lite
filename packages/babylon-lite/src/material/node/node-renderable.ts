@@ -11,7 +11,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh, MeshInternal } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
 import type { Renderable, SceneUniformUpdater } from "../../render/renderable.js";
-import { getViewProjectionMatrix, getViewMatrix, getCameraPosition } from "../../camera/camera.js";
+import { getViewProjectionMatrix, getViewMatrix, getCameraPosition, getEffectiveAspectRatio } from "../../camera/camera.js";
 import { writeLightsUBO, refreshLightsUBO, getLightsUboSize, computeLightsVersion } from "../../render/lights-ubo.js";
 import type { NodeMaterialInternal } from "./node-material.js";
 import { writeNodeUBO } from "./node-material.js";
@@ -273,7 +273,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
             if (!cam) {
                 return;
             }
-            const aspect = eng.canvas.width / eng.canvas.height;
+            const aspect = getEffectiveAspectRatio(cam, eng.canvas.width, eng.canvas.height);
             const vp = getViewProjectionMatrix(cam, aspect);
             const v = getViewMatrix(cam);
             const eye = getCameraPosition(cam);
@@ -284,7 +284,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                     continue;
                 }
                 // Inlined updateSceneUniforms: write vp (0..15) + view (16..31),
-                // eye (32..34), and fog (36..43)
+                // eye (32..34), fog (36..43), and image processing (44..47)
                 // into the NME material's per-material scene UBO. NME materials own their own
                 // scene UBO (custom struct generated from the NME node graph) and hence cannot
                 // share the canonical SCENE_UBO from the active RenderPassTask.
@@ -310,6 +310,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                     data[41] = fog.color[1];
                     data[42] = fog.color[2];
                 }
+                data[44] = scene.imageProcessing.exposure;
+                data[45] = scene.imageProcessing.contrast;
+                data[46] = scene.imageProcessing.toneMappingEnabled ? 1 : 0;
                 engine.device.queue.writeBuffer(ubo, 0, data.subarray(0, sizeFloats) as Float32Array<ArrayBuffer>);
                 if (material._compile.envBindings) {
                     material._envHelpers!.writeEnvSceneTail(engine, ubo, scene);

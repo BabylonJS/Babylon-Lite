@@ -30,15 +30,19 @@ const WGSL_SCENE_STRUCT_BASE_FIELDS = `viewProjection: mat4x4<f32>,
     view: mat4x4<f32>,
     vEyePosition: vec4<f32>,
     vFogInfos: vec4<f32>,
-    vFogColor: vec4<f32>,`;
+    vFogColor: vec4<f32>,
+    exposureLinear: f32,
+    contrast: f32,
+    toneMappingEnabled: f32,
+    _imagePad: f32,`;
 
 function buildSceneStruct(envFields: string | null): string {
     const fields = envFields ? `${WGSL_SCENE_STRUCT_BASE_FIELDS}\n    ${envFields}` : WGSL_SCENE_STRUCT_BASE_FIELDS;
     return `struct SceneU {\n    ${fields}\n};\n@group(0) @binding(0) var<uniform> sceneU: SceneU;`;
 }
 
-/** Byte size of the NME scene UBO (excluding env: 176; with env tail: 336). */
-export const NME_SCENE_UBO_BASE_BYTES = 176;
+/** Byte size of the NME scene UBO (excluding env: 192; with env tail: 352). */
+export const NME_SCENE_UBO_BASE_BYTES = 192;
 export function getNmeSceneUboBytes(envExtraBytes: number): number {
     return NME_SCENE_UBO_BASE_BYTES + envExtraBytes;
 }

@@ -20,35 +20,10 @@
  *  Snippet server wraps this JSON once more:
  *    { id, version, jsonPayload: "<stringified { nodeMaterial: "<stringified JSON above>" }>" }
  *
- *  This parser is network-agnostic: `parseSnippetPayload` accepts a JSON string,
- *  and `fetchSnippet` is a thin wrapper for tests to stub.
+ *  This parser is network-agnostic; snippet fetching lives in node-snippet.ts.
  */
 
 import type { NodeBlock, NodeConnection, NodeConnectionRef, NodeGraph } from "./node-types.js";
-
-// ─── Snippet fetch ───────────────────────────────────────────────────
-
-const DEFAULT_SNIPPET_SERVER = "https://snippet.babylonjs.com";
-
-/** Fetch a snippet and return its parsed `nodeMaterial` JSON root. */
-export async function fetchSnippetSource(snippetId: string, server: string = DEFAULT_SNIPPET_SERVER): Promise<unknown> {
-    // Accept both "AT7YY5" and "AT7YY5#6". The snippet server uses `/{id}/{version}`.
-    const [id, version] = snippetId.split("#");
-    const url = version ? `${server}/${id}/${version}` : `${server}/${id}`;
-    const resp = await fetch(url);
-    if (!resp.ok) {
-        throw new Error(`NodeMaterial: snippet fetch failed (${resp.status}) for ${url}`);
-    }
-    const outer = (await resp.json()) as { jsonPayload?: string };
-    if (!outer.jsonPayload) {
-        throw new Error(`NodeMaterial: snippet "${snippetId}" has no jsonPayload`);
-    }
-    const inner = JSON.parse(outer.jsonPayload) as { nodeMaterial?: string };
-    if (!inner.nodeMaterial) {
-        throw new Error(`NodeMaterial: snippet "${snippetId}" has no nodeMaterial`);
-    }
-    return JSON.parse(inner.nodeMaterial);
-}
 
 // ─── Block-level JSON shape ──────────────────────────────────────────
 

@@ -15,9 +15,9 @@
 import type { EngineContext, EngineContextInternal } from "../../engine/engine.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult } from "../../render/renderable.js";
-import { fetchSnippetSource, parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
+import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
 import { loadGraphEmitters, emitGraph } from "./node-emitter.js";
-import type { NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
+import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
 import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js";
 
 // ─── Public API types ───────────────────────────────────────────────
@@ -52,6 +52,8 @@ export interface ParseNodeMaterialOptions {
     readonly hasSkeleton?: boolean;
     /** When true, InstancesBlock wires per-instance attributes. Default false. */
     readonly hasInstances?: boolean;
+    /** Optional graph-specific block loader. Avoids the full default registry when callers know the exact block set. */
+    readonly blockLoader?: (className: string) => Promise<BlockEmitter>;
 }
 
 // ─── Internal shape (what the renderable + updater read) ────────────
@@ -87,10 +89,14 @@ interface UniformSlot {
 
 export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippetId: string, options: ParseNodeMaterialOptions = {}): Promise<NodeMaterial> {
     const source =
-        options.json !== undefined ? (typeof options.json === "string" ? JSON.parse(options.json) : options.json) : await fetchSnippetSource(snippetId, options.snippetServer);
+        options.json !== undefined
+            ? typeof options.json === "string"
+                ? JSON.parse(options.json)
+                : options.json
+            : await (await import("./node-snippet.js")).fetchSnippetSource(snippetId, options.snippetServer);
 
     const graph = parseNodeMaterialSource(source);
-    const emitters = await loadGraphEmitters(graph);
+    const emitters = await loadGraphEmitters(graph, options.blockLoader);
 
     const fragRoot = findBlockByClassName(graph, "FragmentOutputBlock");
     if (!fragRoot) {

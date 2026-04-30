@@ -116,6 +116,8 @@
                 border: 1px solid #21262d;
                 border-radius: 8px;
                 overflow: hidden;
+                content-visibility: auto;
+                contain-intrinsic-size: auto 320px;
                 transition:
                     border-color 0.15s,
                     box-shadow 0.15s;
@@ -308,6 +310,36 @@
                 font-size: 0.8rem;
                 flex: 1;
             }
+            .parity-build-progress {
+                margin: 0.75rem 2rem 0.25rem;
+                padding: 0.75rem 1rem;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                background: #161b22;
+            }
+            .parity-build-progress-row {
+                display: flex;
+                justify-content: space-between;
+                gap: 1rem;
+                margin-bottom: 0.5rem;
+                font-size: 0.75rem;
+                color: #8b949e;
+                font-family: "SF Mono", "Cascadia Code", monospace;
+            }
+            .parity-build-progress-track {
+                height: 7px;
+                border-radius: 999px;
+                overflow: hidden;
+                background: #0d1117;
+                border: 1px solid #21262d;
+            }
+            .parity-build-progress-bar {
+                width: 0%;
+                height: 100%;
+                border-radius: 999px;
+                background: linear-gradient(90deg, #1f6feb, #58a6ff);
+                transition: width 0.12s ease-out;
+            }
             .parity-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(700px, 1fr));
@@ -319,6 +351,16 @@
                 border: 1px solid #21262d;
                 border-radius: 8px;
                 overflow: hidden;
+                content-visibility: auto;
+                contain-intrinsic-size: auto 240px;
+            }
+            .diff-card-skipped {
+                border-color: #6e7681;
+                background: #11161d;
+            }
+            .diff-card-skipped .diff-images {
+                opacity: 0.55;
+                filter: grayscale(1);
             }
             .diff-card-header {
                 display: flex;
@@ -346,6 +388,21 @@
             }
             .diff-stats .fail {
                 color: #f85149;
+            }
+            .diff-stats .skipped {
+                color: #d29922;
+            }
+            .diff-skip-badge {
+                display: inline-block;
+                font-size: 0.65rem;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                color: #d29922;
+                background: #3d2e00;
+                border: 1px solid #7a5a00;
+                border-radius: 999px;
+                padding: 0.12rem 0.5rem;
+                margin-right: 0.5rem;
             }
             .diff-images {
                 display: grid;
@@ -380,6 +437,10 @@
                 justify-content: center;
                 color: #30363d;
                 font-size: 0.75rem;
+            }
+            .diff-slot .placeholder.skipped {
+                color: #d29922;
+                background: #11161d;
             }
             .diff-slot img,
             .diff-slot canvas {
@@ -643,6 +704,8 @@
                 border: 1px solid #21262d;
                 border-radius: 8px;
                 overflow: hidden;
+                content-visibility: auto;
+                contain-intrinsic-size: auto 260px;
             }
             .perf-scene-header {
                 display: flex;
@@ -810,6 +873,14 @@
             .docs-toggle:hover {
                 background: #30363d;
                 border-color: #58a6ff;
+            }
+            .docs-toggle:disabled {
+                opacity: 0.5;
+                cursor: default;
+            }
+            .docs-toggle:disabled:hover {
+                background: #21262d;
+                border-color: #30363d;
             }
             .docs-toggle.active {
                 background: #1f6feb;
@@ -1459,6 +1530,15 @@
                 gap: 0.75rem;
                 padding: 0.5rem 1.5rem 1.5rem;
             }
+            body.compact .grid > .card {
+                contain-intrinsic-size: auto 210px;
+            }
+            body.compact .parity-grid > .diff-card {
+                contain-intrinsic-size: auto 160px;
+            }
+            body.compact .perf-grid > .perf-scene-card {
+                contain-intrinsic-size: auto 230px;
+            }
             body.compact .card-body {
                 padding: 0.5rem 0.6rem;
             }
@@ -1571,6 +1651,8 @@
             <button class="docs-toggle" id="show-hidden-toggle" onclick="toggleShowHidden()" style="margin-left: 0.5rem" title="Show hidden cards so you can restore them">
                 👁 Show Hidden <span id="hidden-count" style="font-size: 0.65rem; opacity: 0.7"></span>
             </button>
+            <button class="docs-toggle" id="hide-all-toggle" onclick="hideAllScenes()" style="margin-left: 0.5rem" title="Hide every scene card" disabled>🙈 Hide All</button>
+            <button class="docs-toggle" id="unhide-all-toggle" onclick="unhideAllScenes()" style="margin-left: 0.5rem" title="Restore every hidden scene" disabled>↩ Unhide All</button>
         </header>
 
         <div id="docs-panel" class="docs-panel">
@@ -3015,6 +3097,15 @@
                 <button class="btn parity-sort-btn" onclick="sortParityGrid('desc')" data-sort="desc" title="Sort by MAD descending">MAD ↓</button>
                 <button class="btn" id="parity-filter-btn" onclick="toggleParityFilter()" title="Show only scenes exceeding their MAD threshold">🔴 Diffs Only</button>
             </div>
+            <div class="parity-build-progress" id="parity-build-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="parity-build-progress-row">
+                    <span id="parity-build-status">Building parity cards…</span>
+                    <span id="parity-build-percent">0%</span>
+                </div>
+                <div class="parity-build-progress-track">
+                    <div class="parity-build-progress-bar" id="parity-build-progress-bar"></div>
+                </div>
+            </div>
             <div class="parity-grid" id="parity-grid"></div>
         </div>
 
@@ -3096,6 +3187,33 @@
                     .join("");
             }
 
+            function handleCardImageError(img) {
+                var fallbacks = ["/reference/" + img.dataset.refSlug + "/babylon-ref-golden.png", "/thumbnails/scene" + img.dataset.sceneId + ".png"];
+                var fallbackIndex = Number(img.dataset.fallbackIndex || "0");
+                if (fallbackIndex >= fallbacks.length) {
+                    img.onerror = null;
+                    return;
+                }
+                img.dataset.fallbackIndex = String(fallbackIndex + 1);
+                img.src = fallbacks[fallbackIndex];
+            }
+
+            function renderSceneCardImage(s, priorityAttrs) {
+                return (
+                    '<img src="/reference/' +
+                    s.slug +
+                    '/test-actual.png" data-ref-slug="' +
+                    s.slug +
+                    '" data-scene-id="' +
+                    s.id +
+                    '" data-fallback-index="0" onerror="handleCardImageError(this)" alt="' +
+                    s.name +
+                    '"' +
+                    priorityAttrs +
+                    ' decoding="async" />'
+                );
+            }
+
             function renderFilterPills(containerId, toggleFnName) {
                 var el = document.getElementById(containerId);
                 if (!el) return;
@@ -3110,8 +3228,9 @@
             function initSourceGrid(config) {
                 var grid = document.getElementById("source-grid");
                 grid.innerHTML = config
-                    .map(function (s) {
+                    .map(function (s, index) {
                         var sceneKey = "scene" + s.id;
+                        var priorityAttrs = index < 6 ? ' loading="eager" fetchpriority="high"' : ' loading="lazy" fetchpriority="auto"';
                         return (
                             '<a class="card" href="/scene' +
                             s.id +
@@ -3122,11 +3241,7 @@
                             '">' +
                             renderHideBtn(sceneKey) +
                             '<div class="card-image">' +
-                            '<img src="/reference/' +
-                            s.slug +
-                            '/test-actual.png" alt="' +
-                            s.name +
-                            '" />' +
+                            renderSceneCardImage(s, priorityAttrs) +
                             renderNote(s) +
                             "</div>" +
                             '<div class="card-body">' +
@@ -3168,6 +3283,19 @@
                 localStorage.setItem(HIDDEN_KEY, JSON.stringify(set));
             }
 
+            function getAllSceneKeys() {
+                var keys = {};
+                (window.SCENE_CONFIG || []).forEach(function (s) {
+                    keys["scene" + s.id] = true;
+                });
+                document.querySelectorAll("[data-scene]").forEach(function (el) {
+                    if (el.dataset.scene) {
+                        keys[el.dataset.scene] = true;
+                    }
+                });
+                return Object.keys(keys);
+            }
+
             function renderHideBtn(sceneKey) {
                 return (
                     '<button class="card-hide-btn" data-hide-for="' + sceneKey + '" onclick="toggleHideScene(\'' + sceneKey + '\', event)" title="Hide this scene">\u2715</button>'
@@ -3176,6 +3304,7 @@
 
             function applyHiddenState() {
                 var hidden = getHiddenScenes();
+                var allSceneKeys = getAllSceneKeys();
                 var count = 0;
                 // Apply across every grid. Elements mark themselves with data-scene.
                 document.querySelectorAll("[data-scene]").forEach(function (el) {
@@ -3186,8 +3315,14 @@
                         el.classList.remove("scene-hidden");
                     }
                 });
-                for (var k in hidden) {
-                    if (hidden[k]) count++;
+                if (allSceneKeys.length > 0) {
+                    allSceneKeys.forEach(function (key) {
+                        if (hidden[key]) count++;
+                    });
+                } else {
+                    for (var k in hidden) {
+                        if (hidden[k]) count++;
+                    }
                 }
                 // Update hide-btn icon based on hidden state (✕ vs ↩)
                 document.querySelectorAll(".card-hide-btn").forEach(function (btn) {
@@ -3219,6 +3354,14 @@
                         showHiddenBtn.style.cursor = "";
                     }
                 }
+                var hideAllBtn = document.getElementById("hide-all-toggle");
+                if (hideAllBtn) {
+                    hideAllBtn.disabled = allSceneKeys.length === 0 || count >= allSceneKeys.length;
+                }
+                var unhideAllBtn = document.getElementById("unhide-all-toggle");
+                if (unhideAllBtn) {
+                    unhideAllBtn.disabled = count === 0;
+                }
             }
 
             function toggleHideScene(sceneKey, ev) {
@@ -3233,6 +3376,22 @@
                     hidden[sceneKey] = true;
                 }
                 saveHiddenScenes(hidden);
+                applyHiddenState();
+            }
+
+            function hideAllScenes() {
+                var allSceneKeys = getAllSceneKeys();
+                if (allSceneKeys.length === 0) return;
+                var hidden = {};
+                allSceneKeys.forEach(function (key) {
+                    hidden[key] = true;
+                });
+                saveHiddenScenes(hidden);
+                applyHiddenState();
+            }
+
+            function unhideAllScenes() {
+                saveHiddenScenes({});
                 applyHiddenState();
             }
 
@@ -3281,11 +3440,7 @@
                             '">' +
                             renderHideBtn(sceneKey) +
                             '<div class="card-image">' +
-                            '<img src="/reference/' +
-                            s.slug +
-                            '/test-actual.png" alt="' +
-                            s.name +
-                            '" />' +
+                            renderSceneCardImage(s, ' loading="lazy" fetchpriority="auto"') +
                             '<div class="card-overlay">' +
                             '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' +
                             s.id +
@@ -3345,30 +3500,79 @@
                 });
             }
 
-            function loadParityDiff(s) {
+            var parityDiffPromises = {};
+            var parityDiffReloadAfter = {};
+            var parityLoadAllPromise = null;
+            var parityObserver = null;
+            var parityGridInitialized = false;
+            var parityGridBuildPromise = null;
+
+            function markParityDiffStale(s) {
+                if (s.skipParity) return;
+                var card = document.getElementById("diff-card-" + s.n);
+                if (!card) return;
+                card.dataset.diffStale = "1";
+                if (card.dataset.diffLoaded !== "1") {
+                    var statsEl = document.getElementById("diff-stats-" + s.n);
+                    if (statsEl) statsEl.textContent = "updated \u2014 queued";
+                }
+            }
+
+            function loadParityDiff(s, forceReload) {
+                if (s.skipParity) {
+                    var skippedCard = document.getElementById("diff-card-" + s.n);
+                    if (skippedCard) {
+                        skippedCard.dataset.diffLoaded = "1";
+                        delete skippedCard.dataset.diffLoading;
+                        delete skippedCard.dataset.diffStale;
+                    }
+                    return Promise.resolve();
+                }
+                var card = document.getElementById("diff-card-" + s.n);
+                if (!forceReload && card && card.dataset.diffLoaded === "1" && card.dataset.diffStale !== "1") {
+                    return Promise.resolve();
+                }
+                if (parityDiffPromises[s.n]) {
+                    if (forceReload) {
+                        parityDiffReloadAfter[s.n] = true;
+                    }
+                    return parityDiffPromises[s.n].then(function () {
+                        if (parityDiffReloadAfter[s.n]) {
+                            delete parityDiffReloadAfter[s.n];
+                            return loadParityDiff(s, true);
+                        }
+                    });
+                }
                 var statsEl = document.getElementById("diff-stats-" + s.n);
                 if (statsEl) statsEl.textContent = "loading\u2026";
-                return Promise.all([loadImg(s.golden), loadImg(s.actual)]).then(function (imgs) {
+                if (card) {
+                    card.dataset.diffLoading = "1";
+                    delete card.dataset.diffStale;
+                }
+                parityDiffPromises[s.n] = Promise.all([loadImg(s.golden), loadImg(s.actual)]).then(function (imgs) {
                     var golden = imgs[0],
                         actual = imgs[1];
                     var statsEl = document.getElementById("diff-stats-" + s.n);
+                    var card = document.getElementById("diff-card-" + s.n);
                     if (!golden) {
                         if (statsEl) statsEl.innerHTML = '<span class="fail">golden ref missing \u2014 run BJS reference page</span>';
+                        if (card) card.dataset.diffLoaded = "1";
                         return;
                     }
                     replaceSlot("diff-bjs-" + s.n, golden.cloneNode());
                     if (!actual) {
                         if (statsEl) statsEl.innerHTML = '<span class="warn">test-actual.png missing \u2014 run parity tests first</span>';
+                        if (card) card.dataset.diffLoaded = "1";
                         return;
                     }
                     replaceSlot("diff-lite-" + s.n, actual.cloneNode());
 
                     var result = computeDiff(golden, actual);
                     replaceSlot("diff-img-" + s.n, result.diffCanvas);
-                    var card = document.getElementById("diff-card-" + s.n);
                     if (card) {
                         card.dataset.mad = result.mad.toFixed(4);
                         card.dataset.redDots = String(result.redDots);
+                        card.dataset.diffLoaded = "1";
                     }
                     if (statsEl) {
                         var threshold = s.maxMad;
@@ -3389,71 +3593,277 @@
                             "%</span>";
                     }
                 });
+                return parityDiffPromises[s.n].finally(function () {
+                    var card = document.getElementById("diff-card-" + s.n);
+                    if (card) {
+                        delete card.dataset.diffLoading;
+                    }
+                    delete parityDiffPromises[s.n];
+                });
+            }
+
+            function isParityDiffLoaded(s) {
+                var card = document.getElementById("diff-card-" + s.n);
+                return !!card && card.dataset.diffLoaded === "1" && card.dataset.diffStale !== "1";
+            }
+
+            function areAllParityDiffsLoaded() {
+                var parityScenes = window.__PARITY_SCENES__ || [];
+                if (parityScenes.length === 0) return true;
+                return parityScenes.every(isParityDiffLoaded);
+            }
+
+            function ensureAllParityDiffsLoaded() {
+                if (areAllParityDiffsLoaded()) {
+                    return Promise.resolve();
+                }
+                if (!parityLoadAllPromise) {
+                    var parityScenes = window.__PARITY_SCENES__ || [];
+                    parityLoadAllPromise = Promise.all(
+                        parityScenes.map(function (s) {
+                            return loadParityDiff(s);
+                        })
+                    ).finally(function () {
+                        parityLoadAllPromise = null;
+                    });
+                }
+                return parityLoadAllPromise;
+            }
+
+            function queueParityDiff(s) {
+                void loadParityDiff(s);
+            }
+
+            function queueVisibleParityDiffs() {
+                if (!parityGridInitialized) return;
+                var parityScenes = window.__PARITY_SCENES__ || [];
+                var preloadMargin = 900;
+                var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+                parityScenes.forEach(function (s) {
+                    if (isParityDiffLoaded(s)) return;
+                    var card = document.getElementById("diff-card-" + s.n);
+                    if (!card || card.offsetParent === null) return;
+                    if (s.skipParity) {
+                        card.dataset.diffLoaded = "1";
+                        return;
+                    }
+                    var rect = card.getBoundingClientRect();
+                    if (rect.bottom >= -preloadMargin && rect.top <= viewportHeight + preloadMargin) {
+                        queueParityDiff(s);
+                        if (parityObserver) parityObserver.unobserve(card);
+                    }
+                });
+            }
+
+            function setupParityLazyLoading(parityScenes) {
+                if (parityObserver) {
+                    parityObserver.disconnect();
+                    parityObserver = null;
+                }
+                if (!("IntersectionObserver" in window)) {
+                    void ensureAllParityDiffsLoaded();
+                    return;
+                }
+                parityObserver = new IntersectionObserver(
+                    function (entries) {
+                        entries.forEach(function (entry) {
+                            if (!entry.isIntersecting) return;
+                            var sceneNum = entry.target.dataset.sceneNum;
+                            var scene = parityScenes.find(function (s) {
+                                return String(s.n) === String(sceneNum);
+                            });
+                            if (scene) queueParityDiff(scene);
+                            if (parityObserver) parityObserver.unobserve(entry.target);
+                        });
+                    },
+                    { rootMargin: "900px 0px" }
+                );
+                parityScenes.forEach(function (s) {
+                    var card = document.getElementById("diff-card-" + s.n);
+                    if (s.skipParity) {
+                        if (card) card.dataset.diffLoaded = "1";
+                        return;
+                    }
+                    if (card) parityObserver.observe(card);
+                });
+                requestAnimationFrame(queueVisibleParityDiffs);
+            }
+
+            function prioritizePanelImages(tabName) {
+                var panel = document.getElementById("panel-" + tabName);
+                if (!panel) return;
+                var promoted = 0;
+                panel.querySelectorAll(".card img").forEach(function (img) {
+                    if (promoted >= 8) return;
+                    var card = img.closest(".card");
+                    if (card && card.offsetParent === null) return;
+                    img.loading = "eager";
+                    img.fetchPriority = "high";
+                    promoted++;
+                });
+            }
+
+            function setParityBuildProgress(done, total) {
+                var el = document.getElementById("parity-build-progress");
+                if (!el) return;
+                var pct = total > 0 ? Math.round((done / total) * 100) : 100;
+                el.hidden = false;
+                el.setAttribute("aria-valuenow", String(pct));
+                var status = document.getElementById("parity-build-status");
+                var percent = document.getElementById("parity-build-percent");
+                var bar = document.getElementById("parity-build-progress-bar");
+                if (status) status.textContent = done >= total ? "Parity cards ready" : "Building parity cards " + done + " / " + total;
+                if (percent) percent.textContent = pct + "%";
+                if (bar) bar.style.width = pct + "%";
+            }
+
+            function hideParityBuildProgress() {
+                var el = document.getElementById("parity-build-progress");
+                if (!el) return;
+                el.hidden = true;
+            }
+
+            function paritySceneFromConfig(s) {
+                return {
+                    n: s.id,
+                    name: s.name,
+                    maxMad: s.maxMad,
+                    skipParity: !!s.skipParity,
+                    golden: "/reference/" + s.slug + "/babylon-ref-golden.png",
+                    actual: "/reference/" + s.slug + "/test-actual.png",
+                };
+            }
+
+            function renderParityCard(s) {
+                var sceneKey = "scene" + s.n;
+                var skippedAttrs = s.skipParity ? ' data-skip-parity="1" data-diff-loaded="1"' : "";
+                var skippedClass = s.skipParity ? " diff-card-skipped" : "";
+                var statsText = s.skipParity ? '<span class="skipped">skipped via skipParity in scene-config</span>' : "queued\u2026";
+                var placeholderClass = s.skipParity ? "placeholder skipped" : "placeholder";
+                var placeholderText = s.skipParity ? "Skipped by scene-config" : "Queued\u2026";
+                return (
+                    '<div class="diff-card' +
+                    skippedClass +
+                    '" id="diff-card-' +
+                    s.n +
+                    '" data-scene="' +
+                    sceneKey +
+                    '" data-scene-num="' +
+                    s.n +
+                    '" data-max-mad="' +
+                    s.maxMad +
+                    '"' +
+                    skippedAttrs +
+                    ' style="position: relative">' +
+                    renderHideBtn(sceneKey) +
+                    '<div class="diff-card-header">' +
+                    "<h3>" +
+                    s.name +
+                    "</h3>" +
+                    (s.skipParity ? '<span class="diff-skip-badge" title="Parity spec is skipped via scene-config skipParity">SKIPPED</span>' : "") +
+                    '<span class="diff-stats" id="diff-stats-' +
+                    s.n +
+                    '">' +
+                    statsText +
+                    "</span>" +
+                    "</div>" +
+                    '<div class="diff-images">' +
+                    '<div class="diff-slot"><div class="diff-slot-label">Babylon.js (target)</div>' +
+                    '<div class="' +
+                    placeholderClass +
+                    '" id="diff-bjs-' +
+                    s.n +
+                    '">' +
+                    placeholderText +
+                    "</div></div>" +
+                    '<div class="diff-slot"><div class="diff-slot-label">Babylon Lite</div>' +
+                    '<div class="' +
+                    placeholderClass +
+                    '" id="diff-lite-' +
+                    s.n +
+                    '">' +
+                    placeholderText +
+                    "</div></div>" +
+                    '<div class="diff-slot"><div class="diff-slot-label">Diff (10\u00d7 amplified)</div>' +
+                    '<div class="' +
+                    placeholderClass +
+                    '" id="diff-img-' +
+                    s.n +
+                    '">' +
+                    placeholderText +
+                    "</div></div>" +
+                    "</div>" +
+                    "</div>"
+                );
             }
 
             function initParityGrid(config) {
-                var parityScenes = config.map(function (s) {
-                    return {
-                        n: s.id,
-                        name: s.name,
-                        maxMad: s.maxMad,
-                        golden: "/reference/" + s.slug + "/babylon-ref-golden.png",
-                        actual: "/reference/" + s.slug + "/test-actual.png",
-                    };
-                });
+                if (parityGridInitialized) return Promise.resolve(true);
+                if (parityGridBuildPromise) return parityGridBuildPromise;
+
+                var parityScenes = config.map(paritySceneFromConfig);
                 window.__PARITY_SCENES__ = parityScenes;
 
                 var grid = document.getElementById("parity-grid");
-                grid.innerHTML = parityScenes
-                    .map(function (s) {
-                        var sceneKey = "scene" + s.n;
-                        return (
-                            '<div class="diff-card" id="diff-card-' +
-                            s.n +
-                            '" data-scene="' +
-                            sceneKey +
-                            '" data-scene-num="' +
-                            s.n +
-                            '" data-max-mad="' +
-                            s.maxMad +
-                            '" style="position: relative">' +
-                            renderHideBtn(sceneKey) +
-                            '<div class="diff-card-header">' +
-                            "<h3>" +
-                            s.name +
-                            "</h3>" +
-                            '<span class="diff-stats" id="diff-stats-' +
-                            s.n +
-                            '">loading\u2026</span>' +
-                            "</div>" +
-                            '<div class="diff-images">' +
-                            '<div class="diff-slot"><div class="diff-slot-label">Babylon.js (target)</div>' +
-                            '<div class="placeholder" id="diff-bjs-' +
-                            s.n +
-                            '">Loading\u2026</div></div>' +
-                            '<div class="diff-slot"><div class="diff-slot-label">Babylon Lite</div>' +
-                            '<div class="placeholder" id="diff-lite-' +
-                            s.n +
-                            '">Loading\u2026</div></div>' +
-                            '<div class="diff-slot"><div class="diff-slot-label">Diff (10\u00d7 amplified)</div>' +
-                            '<div class="placeholder" id="diff-img-' +
-                            s.n +
-                            '">Loading\u2026</div></div>' +
-                            "</div>" +
-                            "</div>"
-                        );
-                    })
-                    .join("");
+                grid.innerHTML = "";
+                var total = parityScenes.length;
+                var index = 0;
+                var chunkSize = 8;
+                setParityBuildProgress(0, total);
 
-                // Load all diffs in parallel
-                var allDiffs = parityScenes.map(loadParityDiff);
-                // Re-apply stored sort now that MAD data is available
-                Promise.all(allDiffs).then(function () {
-                    var activeBtn = document.querySelector(".parity-sort-btn.active");
-                    if (activeBtn && activeBtn.dataset.sort !== "num") {
-                        sortParityGrid(activeBtn.dataset.sort, true);
+                parityGridBuildPromise = new Promise(function (resolve) {
+                    function buildChunk() {
+                        var end = Math.min(index + chunkSize, total);
+                        var html = "";
+                        for (; index < end; index++) {
+                            html += renderParityCard(parityScenes[index]);
+                        }
+                        if (html) {
+                            grid.insertAdjacentHTML("beforeend", html);
+                        }
+                        setParityBuildProgress(index, total);
+
+                        if (index < total) {
+                            requestAnimationFrame(buildChunk);
+                            return;
+                        }
+
+                        parityGridInitialized = true;
+                        parityGridBuildPromise = null;
+                        setupParityLazyLoading(parityScenes);
+                        requestAnimationFrame(function () {
+                            setParityBuildProgress(total, total);
+                            setTimeout(hideParityBuildProgress, 250);
+                        });
+                        resolve(true);
                     }
+
+                    requestAnimationFrame(buildChunk);
                 });
+                return parityGridBuildPromise;
+            }
+
+            function ensureParityGridInitialized() {
+                if (!parityGridInitialized) {
+                    var config = window.SCENE_CONFIG || null;
+                    if (!config) return false;
+                    initParityGrid(config).then(function () {
+                        applyHiddenState();
+                        ensureParityGridInitialized();
+                    });
+                    return false;
+                }
+
+                var activeParityBtn = document.querySelector(".parity-sort-btn.active");
+                if (activeParityBtn) {
+                    sortParityGrid(activeParityBtn.dataset.sort || "num", true);
+                }
+                applyParityFilter();
+                if (parityFilterActive && !areAllParityDiffsLoaded()) {
+                    ensureAllParityDiffsLoaded().then(applyParityFilter);
+                }
+                requestAnimationFrame(queueVisibleParityDiffs);
+                return true;
             }
 
             // ── Filter & sort state persistence ──
@@ -3556,6 +3966,13 @@
                 if (panel) panel.classList.add("active");
                 _currentTab = tabName;
                 localStorage.setItem("lab-tab", tabName);
+                if (tabName === "parity") {
+                    ensureParityGridInitialized();
+                } else if (tabName === "source" || tabName === "bundle") {
+                    requestAnimationFrame(function () {
+                        prioritizePanelImages(tabName);
+                    });
+                }
                 // Restore scroll position of the tab we're switching to
                 if (restoreScroll !== false) {
                     var savedScroll = parseInt(localStorage.getItem("lab-scroll-" + tabName) || "0", 10);
@@ -3769,9 +4186,15 @@
                     initSourceGrid(config);
                     initBundleGrid(config);
                     initPerfGrid(config);
-                    initParityGrid(config);
                     restoreLabState();
                     applyHiddenState();
+                    if (_currentTab === "parity") {
+                        ensureParityGridInitialized();
+                    } else if (_currentTab === "source" || _currentTab === "bundle") {
+                        requestAnimationFrame(function () {
+                            prioritizePanelImages(_currentTab);
+                        });
+                    }
                     loadBundleManifest();
                     loadPerfManifest();
                     loadPerfRegManifest();
@@ -3809,34 +4232,36 @@
                         if (sig.perf !== prev.perf) {
                             loadPerfManifest();
                         }
-                        var parityScenes = window.__PARITY_SCENES__ || [];
-                        var byId = {};
-                        parityScenes.forEach(function (s) {
-                            byId["scene" + s.n] = s;
-                        });
-                        var newPar = sig.parity || {};
-                        var oldPar = prev.parity || {};
-                        var reloads = [];
-                        Object.keys(newPar).forEach(function (k) {
-                            if (newPar[k] !== oldPar[k] && byId[k]) {
-                                reloads.push(loadParityDiff(byId[k]));
-                            }
-                        });
-                        if (reloads.length) {
-                            Promise.all(reloads).then(function () {
-                                var activeBtn = document.querySelector(".parity-sort-btn.active");
-                                if (activeBtn && activeBtn.dataset.sort !== "num") {
-                                    sortParityGrid(activeBtn.dataset.sort, true);
-                                }
-                                if (parityFilterActive) {
-                                    // Re-apply red-diffs-only filter for updated cards
-                                    document.querySelectorAll("#parity-grid .diff-card").forEach(function (c) {
-                                        var mad = parseFloat(c.dataset.mad || "0");
-                                        var maxMad = parseFloat(c.dataset.maxMad || "1");
-                                        c.style.display = mad > maxMad ? "" : "none";
-                                    });
+                        if (parityGridInitialized) {
+                            var parityScenes = window.__PARITY_SCENES__ || [];
+                            var byId = {};
+                            parityScenes.forEach(function (s) {
+                                byId["scene" + s.n] = s;
+                            });
+                            var newPar = sig.parity || {};
+                            var oldPar = prev.parity || {};
+                            var reloads = [];
+                            Object.keys(newPar).forEach(function (k) {
+                                if (newPar[k] !== oldPar[k] && byId[k]) {
+                                    var card = document.getElementById("diff-card-" + byId[k].n);
+                                    if (card && (card.dataset.diffLoaded === "1" || card.dataset.diffLoading === "1")) {
+                                        reloads.push(loadParityDiff(byId[k], true));
+                                    } else {
+                                        markParityDiffStale(byId[k]);
+                                    }
                                 }
                             });
+                            if (reloads.length) {
+                                Promise.all(reloads).then(function () {
+                                    var activeBtn = document.querySelector(".parity-sort-btn.active");
+                                    if (activeBtn && activeBtn.dataset.sort !== "num") {
+                                        sortParityGrid(activeBtn.dataset.sort, true);
+                                    }
+                                    if (parityFilterActive) {
+                                        applyParityFilter();
+                                    }
+                                });
+                            }
                         }
                     })
                     .catch(function () {});
@@ -3923,14 +4348,28 @@
                 el.parentNode.replaceChild(element, el);
             }
 
-            function sortParityGrid(dir, skipSave) {
+            function sortParityGrid(dir, skipSave, skipEnsure) {
                 document.querySelectorAll(".parity-sort-btn").forEach(function (b) {
                     b.classList.toggle("active", b.dataset.sort === dir);
                 });
+                if (!parityGridInitialized) {
+                    if (!skipSave) saveLabState();
+                    return;
+                }
+                if (dir !== "num" && !skipEnsure && !areAllParityDiffsLoaded()) {
+                    ensureAllParityDiffsLoaded().then(function () {
+                        sortParityGrid(dir, skipSave, true);
+                    });
+                    if (!skipSave) saveLabState();
+                    return;
+                }
                 var grid = document.getElementById("parity-grid");
                 var cards = Array.from(grid.children);
                 cards.sort(function (a, b) {
                     if (dir === "num") return parseInt(a.dataset.sceneNum || "0") - parseInt(b.dataset.sceneNum || "0");
+                    var aSkipped = a.dataset.skipParity === "1";
+                    var bSkipped = b.dataset.skipParity === "1";
+                    if (aSkipped !== bSkipped) return aSkipped ? 1 : -1;
                     var aMad = parseFloat(a.dataset.mad || "999");
                     var bMad = parseFloat(b.dataset.mad || "999");
                     return dir === "asc" ? aMad - bMad : bMad - aMad;
@@ -3963,14 +4402,17 @@
                 }
             }
 
-            function toggleParityFilter() {
-                parityFilterActive = !parityFilterActive;
+            function applyParityFilter() {
                 var btn = document.getElementById("parity-filter-btn");
                 var cards = document.querySelectorAll("#parity-grid .diff-card");
                 if (parityFilterActive) {
                     btn.style.background = "#3d1117";
                     btn.style.borderColor = "#f85149";
                     cards.forEach(function (c) {
+                        if (c.dataset.skipParity === "1") {
+                            c.style.display = "none";
+                            return;
+                        }
                         var mad = parseFloat(c.dataset.mad || "0");
                         var maxMad = parseFloat(c.dataset.maxMad || "1");
                         c.style.display = mad > maxMad ? "" : "none";
@@ -3981,6 +4423,18 @@
                     cards.forEach(function (c) {
                         c.style.display = "";
                     });
+                }
+            }
+
+            function toggleParityFilter() {
+                parityFilterActive = !parityFilterActive;
+                applyParityFilter();
+                if (!parityGridInitialized) {
+                    saveLabState();
+                    return;
+                }
+                if (parityFilterActive && !areAllParityDiffsLoaded()) {
+                    ensureAllParityDiffsLoaded().then(applyParityFilter);
                 }
                 saveLabState();
             }

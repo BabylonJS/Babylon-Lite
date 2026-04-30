@@ -41,7 +41,8 @@ export function writePassSceneUBO(task: RenderPassTask, eng: EngineContextIntern
     }
     data.fill(0);
 
-    const aspect = eng.canvas.width / eng.canvas.height;
+    const v = camera.viewport;
+    const aspect = (eng.canvas.width / eng.canvas.height) * (v ? v.width / v.height : 1);
     const viewProj = getViewProjectionMatrix(camera, aspect);
     const viewMat = getViewMatrix(camera);
     const camPos = getCameraPosition(camera);

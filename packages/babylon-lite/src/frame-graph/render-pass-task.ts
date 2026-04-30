@@ -233,7 +233,7 @@ function resolvePendingMeshes(task: RenderPassTask, sc: SceneContextInternal): v
         const buildGroup = (material as MaterialInternal)._buildGroup;
         const rebuild = buildGroup?._rebuildSingle;
         if (!rebuild) {
-            throw new Error("RenderPassTask.addToPass: material family is not registered");
+            throw new Error("addToPass unregistered");
         }
         const renderable = rebuild(sc, mesh, material);
         if (!task._renderables.includes(renderable)) {
@@ -398,9 +398,9 @@ function executePass(task: RenderPassTask): number {
     }
 
     const pass = encoder.beginRenderPass(task._renderPassDescriptor);
-    // Viewport always follows the RT's own size (re-allocated on canvas resize for
-    // canvas-sized RTs).
-    pass.setViewport(0, 0, rt._width, rt._height, 0, 1);
+    if (rt.descriptor.resolveToSwapchain && task.scene._vp) {
+        task.scene._vp(pass, rt._width, rt._height);
+    }
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, task._sceneBG);
 

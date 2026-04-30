@@ -9,6 +9,7 @@ export interface Camera {
     fov: number;
     nearPlane: number;
     farPlane: number;
+    viewport?: NormalizedViewport;
     children: SceneNode[];
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
@@ -23,6 +24,14 @@ export interface Camera {
     _vpCache?: Float32Array;
     _vpVer?: number;
     _vpAspect?: number;
+}
+
+/** Babylon-compatible normalized camera viewport. x/y/width/height are fractions of the render target. */
+export interface NormalizedViewport {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
 }
 
 /** Compute the view matrix for a camera. Cached per worldMatrixVersion. */
@@ -92,4 +101,9 @@ export function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Ma
 export function getCameraPosition(camera: Camera): Vec3 {
     const w = camera.worldMatrix;
     return { x: w[12]!, y: w[13]!, z: w[14]! };
+}
+
+export function getEffectiveAspectRatio(camera: Camera | null | undefined, targetWidth: number, targetHeight: number): number {
+    const v = camera?.viewport;
+    return (targetWidth / targetHeight) * (v ? v.width / v.height : 1);
 }

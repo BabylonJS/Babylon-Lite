@@ -104,8 +104,11 @@ export type { ThinInstanceData } from "./mesh/thin-instance.js";
 // ─── Types ───────────────────────────────────────────────────────────
 export type { SceneContext, ImageProcessingConfig } from "./scene/scene.js";
 export type { ArcRotateCamera } from "./camera/arc-rotate.js";
-export type { Camera } from "./camera/camera.js";
+export type { Camera, NormalizedViewport } from "./camera/camera.js";
 export { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix, getCameraPosition } from "./camera/camera.js";
+export { getEffectiveAspectRatio } from "./camera/camera.js";
+export { resolveCameraViewport, enableCameraViewport } from "./camera/viewport.js";
+export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
