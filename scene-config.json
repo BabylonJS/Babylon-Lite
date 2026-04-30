@@ -388,10 +388,8 @@
         "name": "Scene 52 — HUD on 3D",
         "maxMad": 0.5,
         "maxRawKB": 200,
-        "description": "3D scene (sphere + StandardMaterial under a directional light) with a pure-2D HUD sprite overlay rendered AFTER the 3D pass via createSpriteRenderer + registerSpriteRenderer. HUD layer uses depth: \"none\". Lite-self golden (no BJS oracle).",
-        "tags": ["sprites", "2d", "hud", "3d"],
-        "skipBjs": true,
-        "skipPerf": true
+        "description": "3D scene (sphere + StandardMaterial under a directional light) with a pure-2D HUD sprite overlay rendered AFTER the 3D pass via createSpriteRenderer + registerSpriteRenderer. HUD layer uses depth: \"none\". Lite-self golden for parity; BJS reference (Scene + SpriteManager with renderingGroupId=1, disableDepthWrite=true) for perf comparison.",
+        "tags": ["sprites", "2d", "hud", "3d"]
     },
     {
         "id": 53,
@@ -399,10 +397,8 @@
         "name": "Scene 53 — Depth-Hosted Sprites Mixed With 3D",
         "maxMad": 0.5,
         "maxRawKB": 200,
-        "description": "Two boxes at different camera-distances + a Sprite2DLayer added via addToScene with depth: \"test-write\" and layerZ: 0.5. The front box occludes the sprite; the sprite occludes the back box. Lite-self golden (no BJS oracle).",
-        "tags": ["sprites", "2d", "3d", "depth"],
-        "skipBjs": true,
-        "skipPerf": true
+        "description": "Two boxes at different camera-distances + a Sprite2DLayer added via addToScene with depth: \"test-write\" and layerZ: 0.5. The front box occludes the sprite; the sprite occludes the back box. Lite-self golden for parity; BJS reference (Scene + SpriteManager with default depth) for perf comparison.",
+        "tags": ["sprites", "2d", "3d", "depth"]
     },
     {
         "id": 60,
@@ -465,13 +461,7 @@
         "maxMad": 0.1,
         "maxRawKB": 99,
         "description": "Full NME playground integration test using checked-in local AT7YY5#6 NME data plus local texture assets (136 blocks, PBR-style with diffuse/ambient/specular/emissive/normal/opacity/lightmap textures + equirect reflection, plus instances/bones/morph/discard/fog/front-facing and PCF directional shadow receive).",
-        "tags": [
-            "nme",
-            "procedural",
-            "shadows",
-            "morph",
-            "reflection"
-        ]
+        "tags": ["nme", "procedural", "shadows", "morph", "reflection"]
     },
     {
         "id": 67,
@@ -480,12 +470,7 @@
         "maxMad": 0.02,
         "maxRawKB": 95,
         "description": "NME PBRMetallicRoughnessBlock + ReflectionBlock with IBL plumbing on a saturated teal matte sphere. Hemi + point + spot + directional lights make the base material visible against a black background.",
-        "tags": [
-            "pbr",
-            "nme",
-            "procedural",
-            "env"
-        ]
+        "tags": ["pbr", "nme", "procedural", "env"]
     },
     {
         "id": 68,
@@ -494,13 +479,7 @@
         "maxMad": 0.02,
         "maxRawKB": 96,
         "description": "Dark navy PBR sphere with a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0.02, IOR=1.5) for an obvious glossy coat highlight.",
-        "tags": [
-            "pbr",
-            "nme",
-            "procedural",
-            "env",
-            "clearcoat"
-        ]
+        "tags": ["pbr", "nme", "procedural", "env", "clearcoat"]
     },
     {
         "id": 69,
@@ -509,14 +488,7 @@
         "maxMad": 0.02,
         "maxRawKB": 98,
         "description": "Dark purple PBR sphere with softened clearcoat plus a hot magenta SheenBlock wired into PBRMetallicRoughnessBlock.sheen (intensity=1, roughness=0.55) for a visible fabric-like rim.",
-        "tags": [
-            "pbr",
-            "nme",
-            "procedural",
-            "env",
-            "clearcoat",
-            "sheen"
-        ]
+        "tags": ["pbr", "nme", "procedural", "env", "clearcoat", "sheen"]
     },
     {
         "id": 70,

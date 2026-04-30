@@ -40,16 +40,11 @@ interface SceneConfigEntry {
     id: number;
     slug: string;
     name: string;
-    skipPerf?: boolean;
-    skipBjs?: boolean;
 }
 
 const SCENE_CONFIG: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(__dirname, "../../scene-config.json"), "utf-8"));
 
-// Exclude scenes that opt out of perf measurement, and scenes with no BJS oracle
-// (no babylon-ref-sceneN.html exists, so the dev server would serve a fallback
-// page and the canvas readiness wait would hang until timeout).
-const ALL_SCENES: SceneDef[] = SCENE_CONFIG.filter((entry) => !entry.skipPerf && !entry.skipBjs).map((entry) => ({
+const ALL_SCENES: SceneDef[] = SCENE_CONFIG.map((entry) => ({
     name: `scene${entry.id}`,
     label: entry.name,
 }));
