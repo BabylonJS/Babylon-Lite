@@ -310,14 +310,15 @@ fn dither(seed: vec2<f32>, varianceAmount: f32) → f32
   Mix ±normVariance where normVariance = varianceAmount / 255
 ```
 
-### SceneUniforms Variants
+### Canonical SceneUniforms
 
-| Constant | Fields | Used By |
-|----------|--------|---------|
-| `WGSL_SCENE_UNIFORMS_PBR` | viewProj, cameraPos, light dir/intensity/colors (128B) | Skybox, DDS skybox, ground vertex shaders |
-| `WGSL_SCENE_UNIFORMS_PBR_SH` | PBR + 9 SH coefficients + exposure + contrast | PBR materials with IBL |
-| `WGSL_SCENE_UNIFORMS_STD` | viewProjection, view, vEyePosition, vFogInfos, vFogColor | Standard material skybox |
-| `WGSL_SCENE_UNIFORMS_SHADOW` | viewProjection only | Shadow depth shaders |
+All runtime material shaders use the canonical `SceneUniforms` declaration from `packages/babylon-lite/shaders/scene-uniforms.wgsl`, imported through `src/shader/scene-uniforms.ts`. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and contains:
+
+- `viewProjection`, `view`, and `vEyePosition`
+- environment rotation, SH irradiance, exposure/contrast/LOD image-processing fields
+- fog info/color
+
+Light data is not appended to `SceneUniforms`; Standard and PBR use the separate `render/lights-ubo.ts` buffer when direct lighting is active. Frame-graph `RenderPassTask` owns one scene UBO/bind group per pass so offscreen passes can write target-specific projection state (including Y-flip) without mutating global scene state.
 
 ## State Machine / Lifecycle
 
@@ -362,5 +363,5 @@ Materials cache composed shaders by `fragmentKey` (sorted fragment IDs joined wi
 | `fragment-types.ts` | All type definitions: ShaderFragment, ShaderTemplate, ComposedShader, UboSpec, slot types, binding types |
 | `shader-composer.ts` | `composeShader()` — topological sort, slot injection, bind group layout construction, WGSL assembly |
 | `ubo-layout.ts` | `computeUboLayout()` — WGSL std140-like alignment computation for UBO structs |
-| `wgsl-helpers.ts` | Shared WGSL snippets: perturbNormal, ESM shadows, fog, image processing, dither, SceneUniforms variants |
+| `wgsl-helpers.ts` | Shared WGSL snippets: perturbNormal, ESM shadows, fog, image processing, dither |
 | `fragments/thin-instance-fragment.ts` | Example fragment: thin-instance world matrix + optional instance color |

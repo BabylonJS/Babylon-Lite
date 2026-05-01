@@ -155,7 +155,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
 
         _update(): void {
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
-            const encoder = eng._currentEncoder!;
+            const encoder = eng._currentEncoder;
             let draws = 0;
             for (const cb of ctx._beforeRender) {
                 cb(d);

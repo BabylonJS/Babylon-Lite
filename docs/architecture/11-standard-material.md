@@ -127,13 +127,6 @@ export function createStandardMaterial(): StandardMaterialProps;
 
 /** Collect all non-null textures for acquire/release tracking. */
 export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[];
-
-/** Write per-frame scene uniforms (viewProjection, view, eye, fog). */
-export function updateSceneUniforms(
-  device: GPUDevice, sceneUBO: GPUBuffer,
-  viewProjection: Float32Array, viewMatrix: Float32Array,
-  eyePosition: [number, number, number], fog?: FogConfig,
-): void;
 ```
 
 ### Pipeline (`standard-pipeline.ts`)
@@ -164,7 +157,7 @@ export function registerPcfShadowShader(ext: ShadowShaderExt): void;
 export function getPcfShadowExt(): ShadowShaderExt | null;
 
 // Re-exports from lights-ubo
-export { LIGHTS_UBO_SIZE, writeLightsUBO, refreshLightsUBO };
+export { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO };
 ```
 
 ### Template (`standard-template.ts`)
@@ -300,7 +293,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 
 | Binding | Visibility | Type |
 |---|---|---|
-| 0 | VERTEX \| FRAGMENT | Uniform buffer (Scene UBO, 176 bytes) |
+| 0 | VERTEX \| FRAGMENT | Uniform buffer (canonical Scene UBO, 352 bytes) |
 
 **Group 1 — Per-Mesh** (dynamic bindings based on features):
 
@@ -338,15 +331,18 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 
 ### Uniform Buffer Layouts
 
-#### Scene UBO (Group 0, Binding 0) — 176 bytes (44 floats)
+#### Scene UBO (Group 0, Binding 0) — 352 bytes (canonical `SceneUniforms`)
 
 | Offset (bytes) | Floats | WGSL Type | Field |
 |---|---|---|---|
 | 0 | 0–15 | `mat4x4<f32>` | `viewProjection` |
 | 64 | 16–31 | `mat4x4<f32>` | `view` |
 | 128 | 32–35 | `vec4<f32>` | `vEyePosition` (xyz + pad) |
-| 144 | 36–39 | `vec4<f32>` | `vFogInfos` (x=mode, y=start, z=end, w=density) |
-| 160 | 40–43 | `vec4<f32>` | `vFogColor` (rgb + pad) |
+| 144 | 36–39 | Scalars/padding | environment rotation/padding |
+| 160–303 | 40–75 | 9 × SH vec3 + padding | environment irradiance |
+| 304 | 76–79 | Scalars/padding | exposure, contrast, LOD scale |
+| 320 | 80–83 | `vec4<f32>` | `vFogInfos` (x=mode, y=start, z=end, w=density) |
+| 336 | 84–87 | `vec4<f32>` | `vFogColor` (rgb + pad) |
 
 #### Mesh UBO (Group 1, Binding 0) — 64 bytes
 
@@ -354,7 +350,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 |---|---|---|
 | 0 | `mat4x4<f32>` | `world` |
 
-#### Light UBO (Group 1, Binding 1) — 48 or 64 bytes
+#### Lights UBO (Group 1, Binding 1) — 16-byte header + `MAX_LIGHTS × 64` bytes
 
 | Offset (bytes) | Type | Field |
 |---|---|---|
@@ -604,8 +600,8 @@ if fogMode > 0: color.rgb = mix(fogColor, color.rgb, fogCoeff)
 ## State Machine / Lifecycle
 
 ```
-scene.meshes.push(mesh)            → mesh registered for deferred building
-startEngine(engine, scene)                → runs deferred builders (async)
+addToScene(scene, mesh)            → mesh registered for deferred building
+registerScene(engine, scene)       → runs deferred builders and builds frame graph
   standardGroupBuilder()           → detects features, dynamically imports fragment modules
   buildStandardMeshRenderables()   → groups meshes by features, composes shaders
     composeStandardShader()        → createStandardTemplate() + composeShader(template, fragments)
@@ -613,8 +609,9 @@ startEngine(engine, scene)                → runs deferred builders (async)
     createDynamicMeshGPU()         → per-mesh UBOs + bind groups
   → renderables + updater registered by buildScene
   render loop begins
-    updater.update(engine)         → writes scene UBOs + refreshes light UBOs each frame
-    renderable.draw(pass, engine)  → dispatches draw calls per group
+    updater.update(engine)         → refreshes light/material state
+    RenderPassTask.binds renderables for its target
+    DrawBinding.draw(pass, engine) → dispatches draw calls per mesh
   mesh.material = newMat           → triggers single-rebuild path
     buildSingleStandardRenderable()→ recomputes features, gets pipeline, creates mesh GPU resources
 ```
@@ -640,7 +637,7 @@ startEngine(engine, scene)                → runs deferred builders (async)
 | `getOrCreatePipeline()` | Pipeline cache in StandardMaterial |
 | `createStandardTemplate()` + `composeShader()` | GLSL shader generation from defines |
 | `ShaderFragment` composition | `#include` / `#define` preprocessor |
-| `updateSceneUniforms()` | `scene.sceneUbo` update |
+| `DrawBinding.updateUBOs()` | Per-mesh/material uniform refresh before draw |
 | `buildSingleStandardRenderable()` | `Material._markAllSubMeshesAsAllDirty()` |
 | `computeLighting()` in shader | `computeLighting()` in Babylon standard shader |
 | `calcFogFactor()` | `CalcFogFactor()` in Babylon |
@@ -681,7 +678,7 @@ startEngine(engine, scene)                → runs deferred builders (async)
 
 | File | Size | Purpose |
 |---|---|---|
-| `src/material/standard/standard-material.ts` | ~299 lines | Types (StandardMaterialProps, FogConfig), factory, updateSceneUniforms, collectStdBoundTextures, standardGroupBuilder with dynamic fragment imports |
+| `src/material/standard/standard-material.ts` | ~299 lines | Types (StandardMaterialProps, FogConfig), factory, collectStdBoundTextures, standardGroupBuilder with dynamic fragment imports |
 | `src/material/standard/standard-template.ts` | ~299 lines | `StandardTemplateConfig` + `createStandardTemplate()` — builds `ShaderTemplate` with Blinn-Phong lighting, fog, slot markers |
 | `src/material/standard/standard-pipeline.ts` | ~503 lines | Feature flags, `computeFeatures()`, `composeStandardShader()`, `getOrCreatePipeline()`, `createDynamicMeshGPU()`, `writeMaterialUBO()`, pipeline/shader caches, PCF shadow registration |
 | `src/material/standard/standard-renderable.ts` | ~313 lines | `StdFragmentFactories` interface, `buildStandardMeshRenderables()` — groups meshes, composes shaders with fragments, creates Renderables |

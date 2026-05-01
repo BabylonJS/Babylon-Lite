@@ -54,10 +54,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         }
     }
     const hasSomeShadows = shadowLights.length > 0;
-    // Unified light path: load multi-light infrastructure whenever the scene has any light.
-    // The shadow fragment itself is only attached when meshes have PBR_HAS_RECEIVE_SHADOWS;
-    // the multi-light loop's default `shadowFactors = 1.0` leaves unlit meshes untouched.
     const hasAnyLight = scene.lights.length > 0;
+    const hasSingleLight = scene.lights.length === 1 && !hasSomeShadows;
+    const hasMultiLight = hasAnyLight && !hasSingleLight;
 
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
@@ -113,8 +112,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         }
     }
 
-    // Shadow fragment + multi-light helpers (dynamic to keep non-shadow PBR bundles lean).
+    // Light/shadow helpers stay dynamic so single-light and non-shadow bundles stay lean.
     let _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null = null;
+    let _singleLightWGSL = "";
+    let _singleLightBlock = "";
     let _multiLightWGSL = "";
     let _multiLightLoop = "";
     let _writeLightsUBO: ((engine: EngineContextInternal, lights: readonly import("../../light/types.js").LightBase[]) => GPUBuffer) | undefined;
@@ -123,12 +124,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         | undefined;
     let _LIGHTS_UBO_SIZE = 0;
     if (hasAnyLight) {
-        const [lightsUboMod, wgslMod] = await Promise.all([import("../../render/lights-ubo.js"), import("./fragments/multilight-wgsl.js")]);
+        const lightsUboMod = await import("../../render/lights-ubo.js");
         _writeLightsUBO = lightsUboMod.writeLightsUBO;
         _refreshLightsUBO = lightsUboMod.refreshLightsUBO;
         _LIGHTS_UBO_SIZE = lightsUboMod.getLightsUboSize();
-        _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
-        _multiLightLoop = wgslMod.getMultiLightLoop();
+        if (hasSingleLight) {
+            const single = await import("./fragments/singlelight-wgsl.js");
+            _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
+            _singleLightBlock = single.getSingleLightBlock(scene.lights[0]!.lightType);
+        } else {
+            const wgslMod = await import("./fragments/multilight-wgsl.js");
+            _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
+            _multiLightLoop = wgslMod.getMultiLightLoop();
+        }
         if (hasSomeShadows) {
             const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
             _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
@@ -224,7 +232,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     }
 
     const composePbr = createPbrComposer({
-        hasMultiLight: hasAnyLight,
+        hasSingleLight,
+        hasMultiLight,
+        singleLightWGSL: _singleLightWGSL,
+        singleLightBlock: _singleLightBlock,
         multiLightWGSL: _multiLightWGSL,
         multiLightLoop: _multiLightLoop,
         acesHelpers: _acesHelpers,

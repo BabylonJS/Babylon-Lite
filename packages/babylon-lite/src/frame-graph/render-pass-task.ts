@@ -6,7 +6,7 @@
  *   - `record()` builds the cached render-pass descriptor and the bucketed
  *     `DrawBinding` lists from `_renderables` (opaque / transmissive /
  *     transparent), then sorts opaque + transmissive by `order`.
- *   - `execute(encoder)` per-frame: patches the descriptor (swapchain view +
+ *   - `execute()` per-frame: patches the descriptor (swapchain view +
  *     loadOp + clearColor), updates per-binding UBOs, runs/uses the cached
  *     opaque render bundle, then direct-draws transmissive + transparent.
  *
@@ -18,12 +18,11 @@
  *     `_renderableVersion` changes between frames (mesh add/remove, material swap).
  *
  * Swapchain mode is detected by `rt.descriptor.resolveToSwapchain`.
- * In that mode, the render target itself allocates nothing — color uses the
- * engine's shared MSAA texture (or the swap view directly when MSAA is off)
- * and depth uses the engine's shared depth texture. The swap view is acquired
- * per-frame and patched into the descriptor at execute time. `clr: false`
- * switches color + depth `loadOp` to `"load"` so multiple scenes can share
- * the swapchain in one frame (e.g., a 3D scene + a UI overlay scene).
+ * In that mode, the render target owns MSAA/depth textures as needed; the
+ * swap view is acquired per-frame and patched into the descriptor as either
+ * the resolve target or the direct color attachment. `clr: false` switches
+ * color + depth `loadOp` to `"load"` so multiple scenes can share the
+ * swapchain in one frame (e.g., a 3D scene + a UI overlay scene).
  */
 
 import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
@@ -36,10 +35,10 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js"
 import type { Material, MaterialInternal } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
-import { writePassSceneUBO } from "../scene/scene-ubo.js";
 import type { Task } from "./task.js";
 
 export interface RenderPassTaskConfig {
@@ -55,6 +54,8 @@ export interface RenderPassTaskConfig {
     clr?: boolean;
     /** Per-pass camera override. Null/undefined uses `scene.camera`. */
     cam?: Camera | null;
+    /** Use canvas dimensions, not render-target dimensions, for this pass's scene UBO aspect. */
+    cs?: boolean;
 }
 
 export interface RenderPassTask extends Task {
@@ -72,7 +73,7 @@ export interface RenderPassTask extends Task {
 
     /** Cached opaque render bundle. Invalidated by renderable list mutations
      *  (`_lastVersion`) and visibility changes (`_lastVis`). */
-    _opaqueBundle: GPURenderBundle | null;
+    _opaqueBundles: GPURenderBundle[];
     _lastVersion: number;
     _lastVis: number;
 
@@ -90,6 +91,8 @@ export interface RenderPassTask extends Task {
      *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
     _sceneUBO: GPUBuffer;
     _sceneBG: GPUBindGroup;
+    _suData: Float32Array;
+    _su: unknown[];
 
     /** Add a mesh to this pass with an optional per-pass material override.
      *  Resolved at `record()` time via `material._buildGroup._rebuildSingle`,
@@ -102,8 +105,7 @@ export interface RenderPassTask extends Task {
 /** Create a render pass task. GPU resources (target textures + descriptor)
  *  are not allocated until `record()` runs (via `frameGraph.build()`).
  *
- *  Swapchain-targeted tasks use the engine's shared MSAA + depth textures
- *  and acquire the swap view per-frame at execute time. */
+ *  Swapchain-targeted tasks acquire the swap view per-frame at execute time. */
 export function createRenderPassTask(config: RenderPassTaskConfig, engine: EngineContext, scene: SceneContext): RenderPassTask {
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;
@@ -128,7 +130,6 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         layout: sceneBGL,
         entries: [{ binding: 0, resource: { buffer: sceneUBO } }],
     });
-
     const task: RenderPassTask = {
         name: config.name,
         _config: config,
@@ -139,7 +140,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         _opaqueBindings: [],
         _transmissiveBindings: [],
         _transparentBindings: [],
-        _opaqueBundle: null,
+        _opaqueBundles: [],
         _lastVersion: -1,
         _lastVis: 0,
         _renderPassDescriptor: { colorAttachments: [] },
@@ -149,6 +150,8 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         _sampleCount: sampleCount,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
+        _suData: new Float32Array(SCENE_UBO_BYTES / 4),
+        _su: [null, null, NaN, NaN, NaN, NaN, NaN],
         _pendingMeshes: [],
         addToPass(mesh, opts) {
             const material = opts?.material ?? mesh.material;
@@ -190,7 +193,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
             task._transmissiveBindings.length = 0;
             task._transparentBindings.length = 0;
             task._renderables.length = 0;
-            task._opaqueBundle = null;
+            task._opaqueBundles.length = 0;
             task._sceneUBO.destroy();
         },
     };
@@ -215,7 +218,7 @@ export function removeMeshFromTask(task: RenderPassTask, mesh: object): void {
         }
     }
     if (removed) {
-        task._opaqueBundle = null;
+        task._opaqueBundles.length = 0;
         task._lastVersion = -1;
     }
 }
@@ -287,7 +290,7 @@ function buildBindings(task: RenderPassTask, eng: EngineContextInternal): void {
     }
     task._opaqueBindings.sort((a, b) => a.renderable.order - b.renderable.order);
     task._transmissiveBindings.sort((a, b) => a.renderable.order - b.renderable.order);
-    task._opaqueBundle = null;
+    task._opaqueBundles.length = 0;
     task._lastVersion = task.scene._renderableVersion;
 }
 
@@ -356,9 +359,6 @@ function patchPerFrame(task: RenderPassTask, eng: EngineContextInternal, swapcha
 function executePass(task: RenderPassTask): number {
     const eng = task.engine as EngineContextInternal;
     const encoder = eng._currentEncoder;
-    if (!encoder) {
-        return 0;
-    }
     const rt = task._config.rt;
     const scene = task.scene;
     const camera = task._config.cam ?? scene.camera;
@@ -388,7 +388,7 @@ function executePass(task: RenderPassTask): number {
     // Opaque: cached render bundle. Invalidated by scene mutation (_renderableVersion)
     // or visibility version (_vis). The bundle records group(0) at its start so it can
     // be replayed standalone (executeBundles inherits no inherited state).
-    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || !task._opaqueBundle) {
+    if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || task._opaqueBundles.length === 0) {
         const be = eng.device.createRenderBundleEncoder({
             label: `${task.name}-opaque`,
             colorFormats: [rt.descriptor.colorFormat],
@@ -397,18 +397,93 @@ function executePass(task: RenderPassTask): number {
         });
         be.setBindGroup(0, task._sceneBG);
         drawList(be, task._opaqueBindings, eng);
-        task._opaqueBundle = be.finish();
+        task._opaqueBundles[0] = be.finish();
         task._lastVersion = scene._renderableVersion;
         task._lastVis = _vis;
     }
     let draws = task._opaqueBindings.length;
-    pass.executeBundles([task._opaqueBundle]);
+    pass.executeBundles(task._opaqueBundles);
     // executeBundles invalidates pass bind-group state — rebind group 0 before further draws.
     pass.setBindGroup(0, task._sceneBG);
     draws += drawList(pass, task._transmissiveBindings, eng);
     draws += drawList(pass, task._transparentBindings, eng);
     pass.end();
     return draws;
+}
+
+/** Write the canonical SceneUniforms struct to the task-owned scene UBO.
+ *  Bails before touching scratch/GPU when all inputs are unchanged. */
+function writePassSceneUBO(task: RenderPassTask, eng: EngineContextInternal, scene: SceneContextInternal, camera: Camera | null): void {
+    if (!camera) {
+        return;
+    }
+
+    const v = camera.viewport;
+    const rt = task._config.rt;
+    const aspect = (task._config.cs ? eng.canvas.width / eng.canvas.height : rt._width / rt._height) * (v ? v.width / v.height : 1);
+    const fog = scene.fog;
+    const envTextures = scene._envTextures;
+    const img = scene.imageProcessing;
+    const envRotationY = scene.envRotationY || 0;
+    const wv = camera.worldMatrixVersion;
+    const s = task._su;
+    if (s[0] === camera && s[1] === fog && s[2] === wv && s[3] === aspect && s[4] === envRotationY && s[5] === img.exposure && s[6] === img.contrast) {
+        return;
+    }
+    s[0] = camera;
+    s[1] = fog;
+    s[2] = wv;
+    s[3] = aspect;
+    s[4] = envRotationY;
+    s[5] = img.exposure;
+    s[6] = img.contrast;
+
+    const data = task._suData;
+    data.fill(0);
+
+    const viewProj = getViewProjectionMatrix(camera, aspect);
+    const viewMat = getViewMatrix(camera);
+    const wm = camera.worldMatrix;
+
+    // SCENE_UBO float offsets (see shaders/scene-uniforms.wgsl):
+    //   viewProjection  = 0    view             = 16   vEyePosition    = 32
+    //   envRotationY    = 36   vSphericalL00    = 40   exposureLinear  = 76
+    //   contrast        = 77   lodGenerationScale = 78 vFogInfos       = 80
+    //   vFogColor       = 84
+    data.set(viewProj, 0);
+    // Y-flip for offscreen passes — negate row 1 of the projection (the multiplied
+    // view*proj matrix). Row 1 of a column-major mat4 lives at indices 1,5,9,13.
+    if (task._targetSignature.flipY) {
+        data[1] = -data[1]!;
+        data[5] = -data[5]!;
+        data[9] = -data[9]!;
+        data[13] = -data[13]!;
+    }
+    data.set(viewMat, 16);
+    data[32] = wm[12]!;
+    data[33] = wm[13]!;
+    data[34] = wm[14]!;
+
+    if (fog) {
+        data[80] = fog.mode;
+        data[81] = fog.start;
+        data[82] = fog.end;
+        data[83] = fog.density;
+        data[84] = fog.color[0]!;
+        data[85] = fog.color[1]!;
+        data[86] = fog.color[2]!;
+    }
+
+    data[36] = envRotationY;
+    if (envTextures?.sphericalHarmonics) {
+        data.set(envTextures.sphericalHarmonics, 40);
+    }
+
+    data[76] = img.exposure;
+    data[77] = img.contrast;
+    data[78] = envTextures?.lodGenerationScale ?? 0.8;
+
+    eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
 function updateBindingUBOs(list: readonly DrawBinding[]): void {
@@ -419,8 +494,7 @@ function updateBindingUBOs(list: readonly DrawBinding[]): void {
     }
 }
 
-/** Iterate DrawBindings, deduping setPipeline.
- *  Bindings with no `pipeline` (set internally by `draw()`) reset the dedup state. */
+/** Iterate DrawBindings, deduping setPipeline. */
 function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContextInternal): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
@@ -429,14 +503,11 @@ function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: read
         if (mesh && mesh.visible === false) {
             continue;
         }
-        if (b.pipeline && b.pipeline !== lp) {
+        if (b.pipeline !== lp) {
             enc.setPipeline(b.pipeline);
             lp = b.pipeline;
         }
         draws += b.draw(enc, engine);
-        if (!b.pipeline) {
-            lp = null;
-        }
     }
     return draws;
 }

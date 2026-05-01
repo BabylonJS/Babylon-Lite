@@ -21,10 +21,9 @@ import type { RenderTargetSignature } from "../engine/render-target.js";
 export interface DrawBinding {
     /** Back-reference for sort/eviction (order, mesh identity). */
     readonly renderable: Renderable;
-    /** Pipeline used by this binding. Optional: skybox/background renderables call
-     *  `setPipeline` themselves inside `draw()`. drawList dedups when present and
-     *  resets state when absent. */
-    readonly pipeline?: GPURenderPipeline;
+    /** Pipeline used by this binding. The render pass task owns setPipeline()
+     *  and dedups consecutive bindings with the same pipeline. */
+    readonly pipeline: GPURenderPipeline;
     /** Issue draw commands for this renderable into `pass`. The render pass task has
      *  already set the scene bind group (group 0) and `pass.setPipeline(pipeline)` if
      *  it changed. The closure handles per-mesh / per-material bind groups,

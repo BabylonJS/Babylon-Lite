@@ -83,17 +83,20 @@ export function mat4LookAtLH(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
 
 /** Perspective projection (left-handed, zero-to-one depth). Matches Babylon.js. */
 export function mat4PerspectiveLH(fov: number, aspect: number, near: number, far: number): Mat4 {
+    const out = new Float32Array(16) as Mat4;
+    mat4PerspectiveLHToRef(out, fov, aspect, near, far);
+    return out;
+}
+
+/** Write a perspective projection into `out` without allocating. */
+export function mat4PerspectiveLHToRef(out: Float32Array, fov: number, aspect: number, near: number, far: number): void {
     const tan = 1 / Math.tan(fov * 0.5);
     const range = far - near;
-
-    const out = new Float32Array(16) as Mat4;
     out[0] = tan / aspect;
     out[5] = tan;
     out[10] = far / range;
     out[11] = 1;
     out[14] = -(far * near) / range;
-    // out[15] = 0 — already zero from Float32Array init
-    return out;
 }
 
 export { mat4Invert } from "./mat4-invert.js";

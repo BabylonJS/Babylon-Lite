@@ -20,7 +20,7 @@
 | [01-shadow-generator.md](01-shadow-generator.md) | Shadow Generator | ESM + PCF shadows, depth pass, Gaussian blur |
 | [03-texture-2d.md](03-texture-2d.md) | Texture2D | Image upload, mipmap gen, invertY |
 | [04-mesh-generators.md](04-mesh-generators.md) | Mesh Generators | Ground/heightmap, torus, sphere, box, cylinder, plane, disc, polyhedron, ribbon, tube, extrude |
-| [05-lights.md](05-lights.md) | Lights | Hemispheric, directional, point, spot + PBR variants, multi-light UBO |
+| [05-lights.md](05-lights.md) | Lights | Hemispheric, directional, point, spot + shared lights UBO for Standard/PBR |
 | [06-engine.md](06-engine.md) | Engine | GPU init, MSAA, render loop, swap chain |
 | [07-scene.md](07-scene.md) | Scene | SceneContext, one-way ownership |
 | [08-camera.md](08-camera.md) | Camera | ArcRotateCamera + FreeCamera, controls |
@@ -41,6 +41,7 @@
 | [23-loader-hdr.md](23-loader-hdr.md) | HDR Loader | RGBE parsing, SH extraction, GPU compute IBL |
 | [24-loader-babylon.md](24-loader-babylon.md) | .babylon Loader | .babylon format parsing |
 | [25-resource-pool.md](25-resource-pool.md) | Resource Pool | GPU buffer/texture pooling |
+| [27-frame-graph.md](27-frame-graph.md) | Frame Graph | Task ordering, RenderPassTask, render targets, RTT texture flow |
 
 ---
 
@@ -87,14 +88,11 @@ babylon-lite/
 │   │   │   └── free-camera-controls.ts # attachFreeControl() for WASD/arrow
 │   │   ├── light/
 │   │   │   ├── light-base.ts      # Shared light base
-│   │   │   ├── types.ts           # LightBase type, LightBaseInternal, PbrLightExtension
+│   │   │   ├── types.ts           # LightBase type, LightBaseInternal, MAX_LIGHTS
 │   │   │   ├── light-matrix.ts    # Light view-projection for shadows
 │   │   │   ├── hemispheric.ts     # createHemisphericLight()
-│   │   │   ├── hemispheric-pbr.ts # Hemispheric light PBR variant
 │   │   │   ├── point-light.ts     # createPointLight()
-│   │   │   ├── point-pbr.ts       # Point light PBR variant
 │   │   │   ├── directional-light.ts # createDirectionalLight()
-│   │   │   ├── directional-pbr.ts # Directional light PBR variant
 │   │   │   └── spot-light.ts      # createSpotLight()
 │   │   ├── material/
 │   │   │   ├── pbr/               # PBR metallic-roughness material
@@ -104,7 +102,8 @@ babylon-lite/
 │   │   │   │   ├── pbr-pipeline.ts      # Pipeline cache + feature flags
 │   │   │   │   ├── pbr-renderable.ts    # buildPbrRenderables()
 │   │   │   │   ├── pbr-single-rebuild.ts     # Single-mesh pipeline rebuild
-│   │   │   │   ├── pbr-multilight-wgsl.ts    # Multi-light WGSL generation
+│   │   │   │   ├── fragments/singlelight-wgsl.ts # Non-looping one-light WGSL
+│   │   │   │   ├── fragments/multilight-wgsl.ts  # Generic multi-light WGSL
 │   │   │   │   ├── background-material.ts    # Skybox + Ground material factories
 │   │   │   │   ├── background-renderable.ts  # Skybox + Ground → Renderables
 │   │   │   │   ├── background-dds-skybox.ts  # DDS environment skybox
@@ -120,7 +119,7 @@ babylon-lite/
 │   │   │   │       ├── sheen-fragment.ts
 │   │   │   │       └── skeleton-fragment.ts
 │   │   │   └── standard/          # Standard Blinn-Phong material
-│   │   │       ├── standard-material.ts    # Types, factory, updateSceneUniforms
+│   │   │       ├── standard-material.ts    # Types, factory, texture collection
 │   │   │       ├── standard-template.ts    # Standard shader template (WGSL generation)
 │   │   │       ├── standard-pipeline.ts    # Pipeline cache + feature flags
 │   │   │       ├── standard-renderable.ts  # buildStandardMeshRenderables()
@@ -182,10 +181,16 @@ babylon-lite/
 │   │   │   ├── shadow-generator.ts  # ESM shadow generator
 │   │   │   ├── pcf-shadow-generator.ts # PCF shadow generator
 │   │   │   └── shadow-renderable.ts # Shadow → PrePassRenderable
+│   │   ├── frame-graph/
+│   │   │   ├── task.ts              # Frame-graph task interface
+│   │   │   ├── frame-graph.ts       # Ordered task list
+│   │   │   ├── frame-graph-actions.ts # addTask helpers
+│   │   │   └── render-pass-task.ts  # Render-pass task + per-pass scene UBO
 │   │   ├── texture/
 │   │   │   ├── texture-2d.ts      # 2D texture loader
 │   │   │   ├── solid-texture.ts   # 1×1 solid-color texture factory
 │   │   │   ├── cube-texture.ts    # 6-face cube texture loader
+│   │   │   ├── rtt.ts             # Eager render-target texture helper
 │   │   │   └── generate-mipmaps.ts # GPU mipmap generation
 │   │   ├── loader-gltf/
 │   │   │   ├── load-gltf.ts       # GLB parser, GPU upload
@@ -657,8 +662,9 @@ interface GpuPicker { pick(x: number, y: number): Promise<PickingInfo | null>; }
 interface PickingInfo { mesh: Mesh; faceId: number; worldPosition: Vec3; }
 
 // ─── Low-level (advanced/custom rendering) ───────────────────────────
-interface Renderable { order: number; draw(pass: GPURenderPassEncoder, engine: Engine): void; }
-interface PrePassRenderable { execute(encoder: GPUCommandEncoder, engine: Engine): void; }
+interface Renderable { order: number; bind(engine: Engine, target: RenderTargetSignature): DrawBinding; }
+interface DrawBinding { draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: Engine): number; }
+interface PrePassRenderable { execute(encoder: GPUCommandEncoder, engine: Engine): number; }
 interface SceneUniformUpdater { update(engine: Engine): void; }
 
 // ─── Mesh factory options ────────────────────────────────────────────
@@ -725,33 +731,29 @@ drive the render loop.
 **Init sequence**:
 1. `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })`
 2. `adapter.requestDevice({ requiredFeatures })` — optionally enables `float32-filterable` if supported
-3. `canvas.getContext('webgpu')` → configure with `alphaMode: 'opaque'`
-4. Create 4x MSAA color + depth render targets
+3. `canvas.getContext('webgpu')` → configure with `options?.alphaMode ?? 'opaque'`
+4. Store engine render state (`msaaSamples`, registered contexts, transient encoder/swapchain view)
 
 **MSAA configuration**:
 - Color target: `format = navigator.gpu.getPreferredCanvasFormat()` (typically `bgra8unorm`), `sampleCount = 4`
 - Depth target: `depth24plus-stencil8`, `sampleCount = 4`
-- Resolved to swapchain texture each frame
+- Canvas render targets are owned by frame-graph `RenderPassTask`s. If `sampleCount > 1`, the task owns an MSAA color texture and resolves to the swapchain texture each frame.
 
-**Render loop** (`startEngine(engine, scene)` — async, returns `Promise<void>`):
+**Render loop** (`startEngine(engine)` after `registerScene(engine, scene)` — async, returns `Promise<void>`):
 ```
-await run deferred builders → sort renderables → requestAnimationFrame → resize() → renderFrame() → requestAnimationFrame ...
+registerScene runs deferred builders → requestAnimationFrame → resize() → renderFrame() → requestAnimationFrame ...
 ```
 
 **`renderFrame()`**:
-1. Get current swapchain texture view
-2. Create command encoder
-3. Execute pre-passes: iterate `scene._prePasses` → `execute(encoder, engine)`
-4. Begin render pass:
-   - Color: MSAA view → resolve to swapchain, clearColor from scene, loadOp: 'clear', storeOp: 'store'
-   - Depth: depth view, clearValue: 1.0, loadOp: 'clear', storeOp: 'store'
-   - Stencil: clearValue: 0, loadOp: 'clear', storeOp: 'store'
-5. Set viewport (0, 0, width, height, 0, 1)
-6. Update uniforms: iterate `scene._uniformUpdaters` → `update(engine)`
-7. Draw calls: iterate `scene._opaqueRenderables` (sorted by order) then `scene._transparentRenderables` (sorted back-to-front) → `draw(pass, engine)`
-8. End pass, submit
+1. Create command encoder and expose it as `engine._currentEncoder`
+2. For each registered rendering context, run `_update()`:
+   - before-render callbacks, material swaps, shadow generators, legacy pre-passes, shared uniform updaters
+3. For each registered rendering context, run `_record()`:
+   - `scene._frameGraph.execute()` drains its ordered tasks
+   - each `RenderPassTask` acquires/patches the swapchain or RTT views, writes its per-pass scene UBO, and draws bucketed `DrawBinding`s
+4. Submit the command buffer
 
-**Resize**: checks `canvas.clientWidth * devicePixelRatio`, destroys and recreates MSAA/depth textures if changed.
+**Resize**: checks `canvas.clientWidth * devicePixelRatio`, updates the canvas backing store if changed, then asks registered contexts to rebuild frame-graph targets that depend on canvas size.
 
 ### 3.3 Scene (`scene/scene.ts`)
 
@@ -839,17 +841,18 @@ contribution = hemiColor * intensity
 
 ### 3.7 Renderable Architecture (`render/renderable.ts`)
 
-**Entity-owned pipelines**: Each material/entity creates its own pipeline and returns `Renderable` objects. The engine iterates `_prePasses` → `_uniformUpdaters` → `_renderables` without importing any material code.
+**Entity-owned pipelines**: Each material/entity creates its own pipeline and returns `Renderable` objects. Scene-owned `RenderPassTask`s call `renderable.bind(engine, target)` to create target-specific `DrawBinding`s; the engine/frame graph never imports material code.
 
 ```typescript
-interface Renderable { order: number; draw(pass, engine): void; }
-interface PrePassRenderable { execute(encoder, engine): void; }
+interface Renderable { order: number; bind(engine, target): DrawBinding; }
+interface DrawBinding { draw(pass, engine): number; }
+interface PrePassRenderable { execute(encoder, engine): number; }
 interface SceneUniformUpdater { update(engine): void; }
 ```
 
-**Draw order**: skybox (0) → opaque (100) → transparent (200).
+**Draw order**: skybox/background (0) → opaque (100) → transmissive → transparent (200, distance-sorted).
 
-**Deferred building**: Entities register builders on `scene._deferredBuilders`. These run once at `startEngine()` to create GPU resources.
+**Deferred building**: Entities register builders on `scene._deferredBuilders`. These run before rendering to create GPU resources, after which the scene frame graph is built.
 
 ### 3.8 glTF Loader (`loader-gltf/load-gltf.ts`)
 
@@ -950,17 +953,15 @@ All shaders are WGSL. Raw files are imported via Vite `?raw` by their respective
 
 ```wgsl
 struct SceneUniforms {
-  viewProj: mat4x4<f32>,          // 64B @ offset 0
-  cameraPosition: vec3<f32>,      // 12B @ offset 64
-  _pad0: f32,                     //  4B @ offset 76
-  lightDirection: vec3<f32>,      // 12B @ offset 80
-  lightIntensity: f32,            //  4B @ offset 92
-  lightDiffuseColor: vec3<f32>,   // 12B @ offset 96
-  _pad1: f32,                     //  4B @ offset 108
-  lightGroundColor: vec3<f32>,    // 12B @ offset 112
-  _pad2: f32,                     //  4B @ offset 124
-};                                // Total: 128B
+  viewProjection: mat4x4<f32>,
+  view: mat4x4<f32>,
+  vEyePosition: vec4<f32>,
+  envRotationY: f32,
+  /* SH irradiance + image processing + fog fields */
+};                                // Total: 352B
 ```
+
+Direct-light data is stored in the separate lights UBO, not in `SceneUniforms`.
 
 #### PBR Vertex Shader (composed by `composePbrVertex`)
 
@@ -970,7 +971,7 @@ struct SceneUniforms {
 **Logic**:
 ```
 worldPos = mesh.world * vec4(position, 1.0)
-clipPos = scene.viewProj * worldPos
+clipPos = scene.viewProjection * worldPos
 normalW = normalize((mesh.world * vec4(normal, 0)).xyz)
 tangentW = normalize((mesh.world * vec4(tangent.xyz, 0)).xyz)
 bitangentW = cross(normalW, tangentW) * tangent.w
@@ -1081,14 +1082,14 @@ main.ts (e.g. scene1.ts)
   ├─→ createHemisphericLight()       → Returns plain HemisphericLight data
   │     scene.lights.push(light)
   │
-  └─→ startEngine(engine, scene)            → Runs deferred builders (creates pipelines + renderables)
-        Sorts renderables by order     → begins requestAnimationFrame loop
+  └─→ registerScene(engine, scene); startEngine(engine)
+        Runs deferred builders (creates pipelines + renderables)
+        Builds scene._frameGraph       → begins requestAnimationFrame loop
         Each frame:
-          _prePasses → execute(encoder)    // shadow depth passes
-          _uniformUpdaters → update(engine) // write UBOs
-          begin render pass
-          _renderables → draw(pass)        // sorted by order
-          end pass, submit
+          _update(): callbacks, swaps, shadows, pre-passes, uniform updaters
+          _record(): scene._frameGraph.execute()
+            RenderPassTask writes pass scene UBO and draws bound buckets
+          submit
 ```
 
 ---
@@ -1107,7 +1108,7 @@ main.ts (e.g. scene1.ts)
 | `PBRMaterial` | `getOrCreatePbrPipeline()` + composer | Feature-flag pipelines |
 | `StandardMaterial` | `getOrCreatePipeline()` + composer | Feature-flag pipelines |
 | `scene._prepareFrame()` | `startEngine()` runs deferred builders | Lazy pipeline creation |
-| `engine.runRenderLoop(...)` | `startEngine(engine, scene)` | Single scene |
+| `engine.runRenderLoop(...)` | `registerScene(engine, scene)` + `startEngine(engine)` | One or more registered rendering contexts |
 
 ---
 
@@ -1193,14 +1194,11 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/camera/free-camera.ts` | FreeCamera | — |
 | `src/camera/free-camera-controls.ts` | WASD/arrow controls | — |
 | `src/light/light-base.ts` | Shared light base | — |
-| `src/light/types.ts` | LightBase type, SceneAnyLight | — |
+| `src/light/types.ts` | LightBase type, LightBaseInternal, MAX_LIGHTS | — |
 | `src/light/light-matrix.ts` | Light view-projection for shadows | — |
 | `src/light/hemispheric.ts` | Hemispheric light factory | 16 |
-| `src/light/hemispheric-pbr.ts` | Hemispheric PBR variant | — |
 | `src/light/point-light.ts` | Point light factory | 20 |
-| `src/light/point-pbr.ts` | Point light PBR variant | — |
 | `src/light/directional-light.ts` | Directional light factory | 20 |
-| `src/light/directional-pbr.ts` | Directional light PBR variant | — |
 | `src/light/spot-light.ts` | Spot light factory | — |
 | `src/material/pbr/pbr-material.ts` | PBR material props + factory | 25 |
 | `src/material/pbr/pbr-template.ts` | PBR shader template (WGSL gen) | 230 |
@@ -1208,7 +1206,8 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/material/pbr/pbr-pipeline.ts` | PBR pipeline cache | 170 |
 | `src/material/pbr/pbr-renderable.ts` | PBR renderable builder | 140 |
 | `src/material/pbr/pbr-single-rebuild.ts` | Single-mesh PBR rebuild | — |
-| `src/material/pbr/pbr-multilight-wgsl.ts` | Multi-light WGSL generation | — |
+| `src/material/pbr/fragments/singlelight-wgsl.ts` | Non-looping single-light PBR WGSL | — |
+| `src/material/pbr/fragments/multilight-wgsl.ts` | Generic multi-light PBR WGSL | — |
 | `src/material/pbr/background-material.ts` | Skybox + Ground material factories | 217 |
 | `src/material/pbr/background-renderable.ts` | Background renderable builder | 96 |
 | `src/material/pbr/background-dds-skybox.ts` | DDS environment skybox | — |
@@ -1251,9 +1250,14 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/shadow/shadow-generator.ts` | ESM shadow generator | 150 |
 | `src/shadow/pcf-shadow-generator.ts` | PCF shadow generator | — |
 | `src/shadow/shadow-renderable.ts` | Shadow PrePassRenderable | 80 |
+| `src/frame-graph/task.ts` | Frame-graph task interface | — |
+| `src/frame-graph/frame-graph.ts` | Ordered frame-graph task list | — |
+| `src/frame-graph/frame-graph-actions.ts` | Task insertion helpers | — |
+| `src/frame-graph/render-pass-task.ts` | Render-pass task, per-pass scene UBO, draw buckets | — |
 | `src/texture/texture-2d.ts` | 2D texture loader | 60 |
 | `src/texture/solid-texture.ts` | 1×1 solid-color factory | — |
 | `src/texture/cube-texture.ts` | 6-face cube texture loader | 141 |
+| `src/texture/rtt.ts` | Render-target texture helper | — |
 | `src/texture/generate-mipmaps.ts` | GPU mipmap generation | — |
 | `src/loader-gltf/load-gltf.ts` | GLB parser + GPU upload | 390 |
 | `src/loader-gltf/gltf-parser.ts` | glTF JSON parsing helpers | — |

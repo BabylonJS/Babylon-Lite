@@ -1,10 +1,10 @@
 # Module: PBR Material
 > Package path: `packages/babylon-lite/src/material/pbr/`
-> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder), `pbr-flags.ts` (feature flag constants), `pbr-single-rebuild.ts` (hot material swap), `pbr-multilight-wgsl.ts` (multi-light WGSL)
+> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder), `pbr-flags.ts` (feature flag constants), `pbr-single-rebuild.ts` (hot material swap), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
 
 ## Purpose
 
-The PBR Material module implements a physically-based rendering material with GGX microfacet BRDF, Smith-GGX height-correlated geometry, Schlick Fresnel, spherical harmonics diffuse IBL, specular IBL via split-sum approximation, normal mapping (tangent or cotangent), emissive (texture and/or uniform color), image processing (exposure, tone mapping, contrast), Kulla-Conty energy conservation, clearcoat, sheen, metallic reflectance extension, specular anti-aliasing, skeletal animation, morph targets, thin instances, multi-light loops, and ESM/PCF shadow receiving. It renders glTF metallic-roughness and specular-glossiness workflow meshes to match Babylon.js PBR output.
+The PBR Material module implements a physically-based rendering material with GGX microfacet BRDF, Smith-GGX height-correlated geometry, Schlick Fresnel, spherical harmonics diffuse IBL, specular IBL via split-sum approximation, normal mapping (tangent or cotangent), emissive (texture and/or uniform color), image processing (exposure, tone mapping, contrast), Kulla-Conty energy conservation, clearcoat, sheen, metallic reflectance extension, specular anti-aliasing, skeletal animation, morph targets, thin instances, a non-looping single-light path, generic multi-light loops, and ESM/PCF shadow receiving. It renders glTF metallic-roughness and specular-glossiness workflow meshes to match Babylon.js PBR output.
 
 Shaders are **dynamically composed** via the `ShaderFragment` / `ShaderComposer` system — no raw `.wgsl` files. A `ShaderTemplate` (`pbr-template.ts`) provides the base WGSL with slot markers; optional `ShaderFragment` modules inject code into those slots. Only the fragments needed for a given mesh's features are composed, minimizing bundle size per the Size Pillar. Fragment modules are **dynamically imported** at build time so unused features are tree-shaken.
 
@@ -180,36 +180,34 @@ export function releasePbrPipelineVariant(variant: PbrPipelineVariant): void;
 ### Template (`pbr-template.ts`)
 
 ```typescript
-/** Light configuration for PBR template. */
-export interface PbrLightConfig {
-  sceneUboFields: UboField[];
-  lightVectorCode: string;
-  directDiffuseCode: string;
-  geometricAACode: string;
-}
-
 /** Full configuration for PBR template generation. */
 export interface PbrTemplateConfig {
   // Light configuration
-  light?: PbrLightConfig;
+  hasSingleLight?: boolean;
+  hasMultiLight?: boolean;
+  singleLightWGSL?: string;
+  singleLightBlock?: string;
+  multiLightWGSL?: string;
   multiLightLoop?: string;
   // Feature booleans
-  normalMapMode: 'tangent' | 'cotangent' | false;
-  hasEmissive: boolean;
-  hasSpecGloss: boolean;
-  doubleSided: boolean;
-  tonemap: boolean;
-  alphaBlend: boolean;
-  specularAA: boolean;
-  gammaAlbedo: boolean;
-  hasMorph: boolean;
-  hasOcclusion: boolean;
-  hasSheenTexture: boolean;
-  hasEmissiveColor: boolean;
-  hasReflectanceExt: boolean;
-  hasIbl: boolean;
-  hasClearcoat: boolean;
-  hasSheen: boolean;
+  normalMode?: 'tangent' | 'cotangent' | 'none';
+  hasEmissiveTexture?: boolean;
+  hasSpecGloss?: boolean;
+  hasDoubleSided?: boolean;
+  hasTonemap?: boolean;
+  acesHelpers?: string;
+  acesTonemapCall?: string;
+  hasAlphaBlend?: boolean;
+  hasSpecularAA?: boolean;
+  hasGammaAlbedo?: boolean;
+  hasMorph?: boolean;
+  hasOcclusion?: boolean;
+  hasEmissiveColor?: boolean;
+  hasReflectanceExt?: boolean;
+  hasAnisotropy?: boolean;
+  anisoBrdfFunctions?: string;
+  anisoTBBlock?: string;
+  ext?: PbrTemplateExt;
 }
 
 /** Create a ShaderTemplate from PBR configuration. */
@@ -322,18 +320,16 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
   - `AD` — computes per-light shadow factor via ESM or PCF, writes `shadowFactors[lightIndex]`
 - Supports both ESM (`computeShadowESM_<n>`) and PCF (`computeShadowPCF_<n>`) shadow modes per light.
 
-## Multi-Light WGSL (`pbr-multilight-wgsl.ts`)
+## PBR Light WGSL
 
-This module provides lazily-loaded WGSL code for multi-light PBR rendering. It is dynamically imported by `pbr-renderable.ts` only when the scene contains multiple lights (beyond the default hemispheric), keeping bundle size minimal for single-light scenes.
+PBR lighting consumes the shared `render/lights-ubo.ts` buffer. Light code is still dynamically imported so scenes only fetch the shader helper they need:
 
-**Exports** (all `string` constants):
-- `MULTI_LIGHT_STRUCTS` — WGSL struct definitions for `LightEntry` and `lightsUniforms` (storage for up to 4 lights)
-- `COMPUTE_PBR_LIGHT` — WGSL function `computePbrLight()` for per-light BRDF evaluation
-- `MULTI_LIGHT_LOOP` — WGSL loop body accumulating direct diffuse/specular over all lights
+| Helper | Loaded when | Exports |
+|--------|-------------|---------|
+| `fragments/singlelight-wgsl.ts` | Exactly one scene light and no shadow receivers | `SINGLE_LIGHT_STRUCTS`, `getSingleLightBlock(lightType)` |
+| `fragments/multilight-wgsl.ts` | More than one light, or any shadow receiver | `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()` |
 
-**Supported light types**: hemispheric, directional, point, spot. Each light has per-type attenuation and shadow factor application.
-
-The multi-light WGSL is injected into the PBR template via `PbrTemplateConfig.multiLightLoop` and the light structs are added to scene UBO fields via `PbrLightConfig.sceneUboFields`.
+The single-light helper emits specialized, non-looping WGSL for hemispheric, directional, point, or spot lights and reads `lights.lights[0]`. The multi-light helper emits `computePbrLight()` plus a loop over `lights.count`; it also exposes first-light aliases for direct-light fragments (`clearcoat`, `sheen`, `subsurface`) and supports shadow factors written by `pbr-shadow-fragment.ts`.
 
 ## Pipeline Configuration
 
@@ -391,7 +387,7 @@ Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assi
 - Normal texture + sampler — if `PBR_HAS_NORMAL_MAP`
 - ORM texture + sampler — always (or specGloss texture)
 - Emissive texture + sampler — if `PBR_HAS_EMISSIVE`
-- Lights UBO — if multi-light
+- Lights UBO — if single-light, multi-light, or shadow receiving
 - BRDF LUT + sampler + IBL cubemap + sampler — if `PBR_HAS_ENV`
 - Reflectance maps + samplers — if reflectance extension
 - Sheen texture + sampler — if `PBR_HAS_SHEEN_TEXTURE`
@@ -410,30 +406,9 @@ The builder also stashes `_buildGroup._rebuildSingle` for hot material swapping 
 
 ### Scene Uniform Buffer Layout (Group 0, Binding 0)
 
-The scene UBO size varies based on features. Base fields (always present):
+PBR uses the canonical `SceneUniforms` shared with Standard/material-independent passes. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and is declared in `packages/babylon-lite/shaders/scene-uniforms.wgsl`. It contains view/projection matrices, camera position, environment rotation, SH irradiance, image-processing fields, and fog fields.
 
-| Offset (bytes) | Size | WGSL Type | Field |
-|---|---|---|---|
-| 0 | 64 | `mat4x4<f32>` | `viewProj` |
-| 64 | 12 | `vec3<f32>` | `cameraPosition` |
-| 76 | 4 | `f32` | `_pad0` |
-| 80 | 12 | `vec3<f32>` | `lightDirection` |
-| 92 | 4 | `f32` | `lightIntensity` |
-| 96 | 12 | `vec3<f32>` | `lightDiffuseColor` |
-| 108 | 4 | `f32` | `_pad1` |
-| 112 | 12 | `vec3<f32>` | `lightGroundColor` |
-| 124 | 4 | `f32` | `_pad2` |
-
-When `PBR_HAS_ENV` (SH irradiance fields appended):
-
-| 128–271 | 144 | 9 × `vec3<f32>` + pad | SH coefficients (L00…L22) |
-
-When `PBR_HAS_TONEMAP` (image processing fields appended):
-
-| varies | 4 | `f32` | `exposureLinear` |
-| varies | 4 | `f32` | `contrast` |
-
-Additional fields added by light extensions and multi-light configurations via `PbrLightConfig.sceneUboFields`.
+Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the separate lights UBO in group 1 when `hasSingleLight` or `hasMultiLight` is enabled.
 
 ### Mesh Uniform Buffer Layout (Group 1, Binding 0)
 
@@ -468,7 +443,7 @@ The exact layout is computed by `computeUboLayout()` from the merged UBO field l
 
 - **Vertex template** — world transform, optional TBN (tangent or cotangent), UV passthrough, slot markers for morph (`/*VR*/`), skinning (`/*VW*/`), shadow (`/*VB*/`)
 - **Fragment template** — texture sampling, BRDF functions (always included: GGX NDF, Smith-GGX geometry, Schlick Fresnel), optional specular AA, optional gamma decode, slot markers for material setup (`/*MF*/`, `/*SV*/`, `/*BL*/`), direct lighting (`/*AD*/`), IBL (`/*AI*/` or `/*NI*/`), post-effects (`/*AT*/`, `/*BC*/`, `/*BA*/`)
-- **Base UBO fields** and **base bindings** for the always-present textures
+- **Base UBO fields** and **base bindings** for the always-present textures, plus the lights UBO binding when direct lighting is enabled
 
 Supports both metallic-roughness and specular-glossiness workflows via `hasSpecGloss`.
 
@@ -482,11 +457,11 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 1. Dynamically imports only the fragment modules needed by the mesh set
 2. Registers PBR light extensions on scene lights
 3. Creates composed shaders per feature bitmask (cached)
-4. Creates shared scene UBO + scene bind group
-5. Optionally creates shared lights UBO for multi-light scenes
+4. Creates one shared lights UBO for any lit scene
+5. Builds per-mesh mesh/material UBOs and bind groups
 6. For each mesh: `computePbrFeatures()` → compose shader → `getOrCreatePbrPipeline()` → create mesh UBO → `createPbrMeshBindGroup()`
-7. Splits meshes into opaque/transparent lists, sorts by feature set to minimize pipeline switches
-8. Returns `Renderable`(s) (opaque order = 100, transparent order = 200) + `SceneUniformUpdater`
+7. Returns one `Renderable` per mesh; each renderable binds target-specific `DrawBinding`s for frame-graph passes
+8. Uses opaque order = 100, transparent order = 200, and marks transmissive materials for the transmissive pass bucket
 9. Stashes `_sceneBGL`/`_sceneBG` on scene for background renderables to reuse
 10. Sets up disposal to clear pipeline cache and samplers on scene teardown
 
@@ -512,7 +487,7 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 1. `/*VR*/` — Morph target application (if `PBR_HAS_MORPH_TARGETS`): accumulates position/normal deltas from morph texture
 2. `/*VW*/` — Skinning (if `PBR_HAS_SKELETON`): `finalWorld = mesh.world * boneInfluence`; otherwise `finalWorld = mesh.world`
 3. `worldPos = finalWorld × vec4(position, 1.0)`
-4. `clipPos = scene.viewProj × worldPos`
+4. `clipPos = scene.viewProjection × worldPos`
 5. `worldNormal = normalize((finalWorld × vec4(normalize(normal), 0)).xyz)`
 6. If tangent normal map — compute TBN **in local space first** (critical for reflection matrices):
    ```
@@ -561,7 +536,8 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 - Clearcoat direct BRDF (clearcoat-fragment `AD`)
 - Sheen direct term (sheen-fragment `AD`)
 - Shadow factor application (pbr-shadow-fragment `AD`)
-- Multi-light loop (if enabled via `multiLightLoop`)
+- Single-light direct block when `hasSingleLight` is enabled
+- Multi-light loop when `hasMultiLight` is enabled
 
 #### 6. Environment Lighting — `/*AI*/` or `/*NI*/` Slot
 
@@ -602,17 +578,18 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | `PBR_HAS_SPEC_GLOSS` | `#define SPECULARGLOSSINESS` |
 | `PBR_HAS_SPECULAR_AA` | `#define SPECULARAA` |
 | `pbr-single-rebuild.ts` | `Material._markAllSubMeshesAsAllDirty()` |
-| `pbr-multilight-wgsl.ts` | Multi-light loop in `pbr.fragment.fx` |
+| `singlelight-wgsl.ts` / `multilight-wgsl.ts` | Direct-light setup/functions in `pbr.fragment.fx` |
 
 ## Dependencies
 
 - **`pbr-material.ts`**: Imports `Texture2D` from texture-2d, `MeshGroupBuilder` from renderable.
-- **`pbr-flags.ts`**: Imports `PbrLightExtension` from light types. No other dependencies (pure constants).
+- **`pbr-flags.ts`**: Pure PBR feature/ext constants and registry helpers. No light-extension dependency.
 - **`pbr-template.ts`**: Imports `ShaderTemplate`, `UboField`, `VertexAttribute`, `Varying`, `BindingDecl` from fragment-types.
 - **`pbr-pipeline.ts`**: Imports `PbrMaterialProps` from pbr-material, `ComposedShader` from shader-composer, feature flags from pbr-flags.
 - **`pbr-renderable.ts`**: Imports pipeline functions, template creator, shader composer, fragment factories (dynamic), engine/scene/mesh/light types, resource pool helpers.
 - **`pbr-single-rebuild.ts`**: Imports `_createPbrMeshUBO` from pbr-renderable, pipeline helpers, feature flags, resource pool.
-- **`pbr-multilight-wgsl.ts`**: No imports (pure WGSL string constants).
+- **`fragments/singlelight-wgsl.ts`**: No imports (pure WGSL string helpers).
+- **`fragments/multilight-wgsl.ts`**: Imports `MAX_LIGHTS` to size the generated WGSL arrays.
 - **Fragment modules**: Each imports only `ShaderFragment` (and optionally `BindingDecl`, `Varying`) from `fragment-types.js`.
 - **Depended on by**: `load-gltf.ts` (imports `PbrMaterialProps`, `createPbrMaterial`), `background-renderable.ts` (reuses scene BGL/BG), `index.ts` (public exports).
 
@@ -642,12 +619,13 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | File | Size | Purpose |
 |---|---|---|
 | `src/material/pbr/pbr-material.ts` | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
-| `src/material/pbr/pbr-flags.ts` | ~43 lines | Feature flag bit constants (24 flags) + light extension helpers |
+| `src/material/pbr/pbr-flags.ts` | ~43 lines | Feature flag bit constants + PBR extension registry helpers |
 | `src/material/pbr/pbr-template.ts` | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings |
 | `src/material/pbr/pbr-pipeline.ts` | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management |
-| `src/material/pbr/pbr-renderable.ts` | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, scene UBO, draw packet creation, opaque/transparent sorting |
+| `src/material/pbr/pbr-renderable.ts` | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation |
 | `src/material/pbr/pbr-single-rebuild.ts` | ~214 lines | `buildSinglePbrRenderable()` — hot material swap for a single mesh |
-| `src/material/pbr/pbr-multilight-wgsl.ts` | ~78 lines | Lazy WGSL constants: `MULTI_LIGHT_STRUCTS`, `COMPUTE_PBR_LIGHT`, `MULTI_LIGHT_LOOP` |
+| `src/material/pbr/fragments/singlelight-wgsl.ts` | ~75 lines | Lazy WGSL helpers for the non-looping one-light direct path |
+| `src/material/pbr/fragments/multilight-wgsl.ts` | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()` |
 | `src/material/pbr/fragments/ibl-fragment.ts` | ~86 lines | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance) |
 | `src/material/pbr/fragments/clearcoat-fragment.ts` | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat) |
 | `src/material/pbr/fragments/sheen-fragment.ts` | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen) |

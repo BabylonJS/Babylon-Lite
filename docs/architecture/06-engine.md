@@ -12,14 +12,15 @@ The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adap
  *  GPU internals (device, context, format) are @internal (EngineContextInternal) — not user-facing. */
 export interface EngineContext {
   readonly canvas: HTMLCanvasElement;
-  readonly msaaSamples: number;           // always 4
+  readonly msaaSamples: number;           // 1 or 4
+  readonly format: GPUTextureFormat;
 
   /** GPU draw calls executed in the last rendered frame. */
   drawCallCount: number;
 }
 
-/** Start the render loop for the given scene. Resolves after the first frame renders. */
-export function startEngine(engine: EngineContext, scene: SceneContext): Promise<void>;
+/** Start the render loop for all registered rendering contexts. Resolves after the first frame renders. */
+export function startEngine(engine: EngineContext): Promise<void>;
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
 /** Resize render targets to match canvas size. */
@@ -28,7 +29,7 @@ export function resizeEngine(engine: EngineContext): void;
 export function disposeEngine(engine: EngineContext): void;
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
-export async function createEngine(canvas: HTMLCanvasElement): Promise<EngineContext>;
+export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOptions): Promise<EngineContext>;
 ```
 
 ### Internal Types (not exported)
@@ -39,15 +40,12 @@ interface EngineContextInternal extends EngineContext {
   readonly device: GPUDevice;
   readonly context: GPUCanvasContext;
   readonly format: GPUTextureFormat;
-}
-
-interface RenderTargets {
-  msaaTexture: GPUTexture;
-  msaaView: GPUTextureView;
-  depthTexture: GPUTexture;
-  depthView: GPUTextureView;
-  width: number;
-  height: number;
+  readonly alphaMode: GPUCanvasAlphaMode;
+  _renderingContexts: RenderingContext[];
+  _currentEncoder: GPUCommandEncoder;
+  _swapchainView: GPUTextureView;
+  _currentDelta: number;
+  _cbs: GPUCommandBuffer[];
 }
 ```
 
@@ -58,18 +56,13 @@ interface RenderTargets {
 1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
 2. **Device request**: `adapter.requestDevice({ requiredFeatures })` — optionally enables `float32-filterable` if supported.
 3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
-4. **Swap chain configure**: `context.configure({ device, format, alphaMode: 'opaque' })` where `format = navigator.gpu.getPreferredCanvasFormat()`.
-5. **MSAA**: Hard-coded to `msaaSamples = 4`.
-6. **Render targets**: Creates initial MSAA color and depth/stencil textures matching canvas dimensions.
+4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
+5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
+6. **Rendering contexts**: Initializes an empty `_renderingContexts` list. Scenes and other renderers register themselves with the engine.
 
-### Render Targets (`createRenderTargets`)
+### Render Targets
 
-| Texture | Format | SampleCount | Usage |
-|---|---|---|---|
-| `msaaTexture` | `navigator.gpu.getPreferredCanvasFormat()` (e.g. `bgra8unorm`) | 4 | `RENDER_ATTACHMENT` |
-| `depthTexture` | `depth24plus-stencil8` | 4 | `RENDER_ATTACHMENT` |
-
-Both textures are sized to `(width, height)` and views are created immediately.
+The engine no longer owns per-frame color/depth render targets directly. Render targets are owned by registered rendering contexts, primarily scene frame-graph `RenderPassTask`s. The engine owns the canvas/swapchain and exposes the current swapchain view once per frame through `_swapchainView`.
 
 ### Resize Logic
 
@@ -78,30 +71,27 @@ Called at the **start of every frame** (inside the rAF callback), not on a resiz
 ```
 w = canvas.clientWidth * devicePixelRatio | 0
 h = canvas.clientHeight * devicePixelRatio | 0
-if (w == targets.width && h == targets.height) return;
+if (w == canvas.width && h == canvas.height) return;
 canvas.width = w; canvas.height = h;
-context.configure({ device, format, alphaMode: 'opaque' });
-targets.msaaTexture.destroy();
-targets.depthTexture.destroy();
-targets = createRenderTargets(device, w, h, format, msaaSamples);
+for each registered context: context._resize?.()
 ```
 
 The bitwise OR with 0 (`| 0`) truncates to integer.
 
 ### Render Loop
 
-`startEngine(engine, scene)` returns a `Promise<void>` that resolves after the first frame has been rendered:
+`startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
 
 ```
-startEngine(engine, scene):
-  await buildScene(scene)          // runs all deferred builders
-  sort scene._renderables by order
+registerScene(engine, scene):
+  adds scene as a RenderingContext
+
+startEngine(engine):
   return new Promise(resolve => {
     renderFn = (now) => {
       resizeEngine(engine);
-      deltaMs = now - prev (or scene._fixedDeltaMs if set)
-      call scene._beforeRender callbacks with deltaMs
-      renderFrame(engine, targets, scene);
+      deltaMs = now - prev
+      renderFrame(engine, deltaMs);
       resolve()                  // first frame only
       prev = now
       animFrameId = requestAnimationFrame(renderFn);
@@ -114,37 +104,30 @@ stopEngine(engine):
   animFrameId = 0; renderFn = null;
 ```
 
-The `_beforeRender` callbacks receive `deltaMs` (milliseconds since the previous frame). If `scene._fixedDeltaMs` is set, that value is used instead — useful for deterministic animation playback.
+Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixedDeltaMs` is set, the scene uses that value instead — useful for deterministic animation playback.
 
 ### Frame Rendering (`renderFrame`)
 
 Each frame consists of:
 
-1. **Obtain swap chain view**: `engine.context.getCurrentTexture().createView()`.
-2. **Create command encoder**: `device.createCommandEncoder()`.
-3. **Pre-render passes**: Iterate `scene._prePasses` — call each `execute(encoder, engine)`. Used for shadow depth passes, blur passes, compute, etc.
-4. **Begin main render pass**:
-   - Color attachment: `view = targets.msaaView`, `resolveTarget = swapChainView`, `clearValue = scene.clearColor`, `loadOp = 'clear'`, `storeOp = 'store'`.
-   - Depth/stencil attachment: `view = targets.depthView`, `depthClearValue = 1.0`, `depthLoadOp = 'clear'`, `depthStoreOp = 'store'`, `stencilClearValue = 0`, `stencilLoadOp = 'clear'`, `stencilStoreOp = 'store'`.
-5. **Set viewport**: `pass.setViewport(0, 0, targets.width, targets.height, 0, 1)`.
-6. **Update uniforms**: Iterate `scene._uniformUpdaters` — call each `update(engine)`. Writes camera, light, fog data to UBOs.
-7. **Draw calls**: Iterate `scene._renderables` (sorted by `order` at start) — call each `draw(pass, engine)`. Each renderable dispatches its own draw calls.
-8. **End pass and submit**: `pass.end()`, `device.queue.submit([encoder.finish()])`.
+1. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
+2. **Obtain swapchain view**: `engine.context.getCurrentTexture().createView()` and assign `engine._swapchainView`.
+3. **Update/record contexts**: For each registered `RenderingContext`, call `_update()` then `_record()`.
+   - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
+   - A scene `_record()` delegates to `scene._frameGraph.execute()`.
+4. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
 
 ### Deferred Builder Execution
 
-When `startEngine(engine, scene)` is called:
-1. **Await** `buildScene(scene)` — runs all deferred builders (creates pipelines, bind groups, renderables). This is async because builders may perform async work.
-2. Sort `scene._renderables` by `order` (ascending)
-3. Begin the rAF render loop
-4. The returned Promise resolves after the first `renderFrame()` call completes
+When `registerScene(engine, scene)` is called, the scene runs its deferred builders, builds material renderables, and rebuilds its frame graph. `startEngine(engine)` then begins the rAF loop and resolves after the first `renderFrame()` call completes.
 
-The 4× MSAA texture (`targets.msaaView`) is automatically resolved to the swap chain texture (`swapChainView`) by the WebGPU runtime because `resolveTarget` is set in the color attachment.
+Swapchain MSAA/depth attachments are managed by the default scene `RenderPassTask` through render-target helpers, not by the engine render loop itself.
 
 ## State Machine / Lifecycle
 
 ```
-[Created] --startEngine(engine, scene)--> [Building (await buildScene)] --> [Running (rAF loop)]
+[Created] --registerScene(engine, scene)--> [Context registered + frame graph built]
+          --startEngine(engine)-----------> [Running (rAF loop)]
                                                           |
                                                       resizeEngine(engine) each frame
                                                       _beforeRender(deltaMs) each frame
@@ -152,7 +135,7 @@ The 4× MSAA texture (`targets.msaaView`) is automatically resolved to the swap 
                                                           |
                                           --stopEngine(engine)----> [Stopped]
                                                           |
-                                          --startEngine(engine, scene)----> [Building] --> [Running]
+                                           --startEngine(engine)----------> [Running]
 ```
 
 ## Babylon.js Equivalence Map
@@ -162,14 +145,14 @@ The 4× MSAA texture (`targets.msaaView`) is automatically resolved to the swap 
 | `createEngine(canvas)` | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()` |
 | `engine.device` | `engine._device` |
 | `engine.format` | `engine._textureHelper._glslang.getPreferredFormat()` |
-| `engine.msaaSamples` (always 4) | `engine._samples` (configurable) |
-| `startEngine(engine, scene)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
+| `engine.msaaSamples` (1 or 4) | `engine._samples` |
+| `registerScene(engine, scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
 | `stopEngine(engine)` | `engine.stopRenderLoop()` |
 | `resizeEngine(engine)` | `engine.resize()` |
-| MSAA render targets | Engine internally manages MSAA framebuffers |
-| `scene._prePasses` iteration | `scene.onBeforeRenderObservable` |
-| `scene._uniformUpdaters` iteration | Internal UBO update during frame |
-| `scene._renderables` iteration | Internal draw list dispatch |
+| Registered `RenderingContext`s | Engine render loop callbacks |
+| Scene frame graph execution | Scene render graph / rendering manager |
+| `scene._prePasses` in `_update()` | `scene.onBeforeRenderObservable` + shadow pre-work |
+| `scene._frameGraph.execute()` | Internal draw list dispatch |
 
 ## Dependencies
 

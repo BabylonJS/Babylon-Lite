@@ -37,9 +37,15 @@ return F0 + (F90 - F0) * (t2 * t2 * t);
 `;
 
 export interface PbrTemplateConfig {
+    /** When true, generates a non-looping single-light direct block + lights UBO binding. */
+    readonly hasSingleLight?: boolean;
     /** When true, generates a multi-light loop + lights UBO binding.
-     *  Always true for PBR scenes that have at least one light. */
+     *  Used for multiple lights or shadow receivers. */
     readonly hasMultiLight?: boolean;
+    /** Pre-built WGSL for the single-light UBO structs. */
+    readonly singleLightWGSL?: string;
+    /** Pre-built WGSL for the single-light direct lighting block. */
+    readonly singleLightBlock?: string;
     /** Pre-built WGSL for multi-light (structs + computePbrLight). Passed from
      *  dynamically imported fragments/multilight-wgsl.ts to keep it out of non-shadow bundles. */
     readonly multiLightWGSL?: string;
@@ -92,7 +98,10 @@ export interface PbrTemplateConfig {
  */
 export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     const {
+        hasSingleLight = false,
         hasMultiLight = false,
+        singleLightWGSL = "",
+        singleLightBlock = "",
         multiLightWGSL = "",
         multiLightLoop = "",
         normalMode = "none",
@@ -188,7 +197,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     if (hasSpecGloss) {
         baseBindings.push(...tex2d("specGlossTexture", "specGlossSampler"));
     }
-    if (hasMultiLight) {
+    if (hasSingleLight || hasMultiLight) {
         baseBindings.push({ name: "lights", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT });
     }
 
@@ -328,11 +337,13 @@ var AA_factor_y = 0.0;
             : `var AA_factor_x = 0.0;
 var AA_factor_y = 0.0;`;
 
-    // Direct lighting block — single unified path that loops over the lights UBO.
-    // Works for any light count (1..MAX_LIGHTS); empty count yields zero contribution.
+    // Direct lighting block — use the compact non-looping shader for one non-shadow light,
+    // and the generic multi-light loop for multiple lights or shadow receivers.
     const directLightBlock: string = hasMultiLight
         ? multiLightLoop
-        : `var directDiffuse = vec3<f32>(0.0);
+        : hasSingleLight
+          ? singleLightBlock
+          : `var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 /*BL*/`;
 
@@ -362,7 +373,7 @@ return vec4<f32>(color, finalAlpha);`
         : `@fragment fn main(input: FragmentInput) -> @location(0) vec4<f32> {`;
     const doubleSidedFlip = hasDoubleSided ? `if (!frontFacing) { N = -N; }` : "";
 
-    const multiLightDecls = hasMultiLight ? multiLightWGSL : "";
+    const lightDecls = hasMultiLight ? multiLightWGSL : hasSingleLight ? singleLightWGSL : "";
 
     const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
 
@@ -380,7 +391,7 @@ return vec4<f32>(color, finalAlpha);`
 ${BRDF_FUNCTIONS}
 ${acesBlock}
 ${anisoBrdfBlock}
-${multiLightDecls}
+${lightDecls}
 ${fragmentHelpers}
 ${doubleSidedEntry}
 ${fragmentPrelude}/*SV*/

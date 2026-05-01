@@ -79,7 +79,7 @@ across both families and orthogonal to family.
   `LightBase`, `Sprite3DSceneUBO`, depth/MSAA targets, billboard
   variants, or anchor projection code. Tree-shaking removes them all.
 - **One engine loop, two registerable kinds.** `startEngine(engine)`
-  walks `engine._registrations` once per frame. Pure-2D registers a
+  walks `engine._renderingContexts` once per frame. Pure-2D registers a
   `SpriteRenderer`; scene-based apps register a `SceneContext` (which
   may itself register an internal HUD `SpriteRenderer` lazily). The
   engine has no notion of "2D vs 3D" — it just iterates registrations.
@@ -190,11 +190,11 @@ import chunks, no `axisLock?: 'none'|'y'|Vec3` flag.
 
 ## Resolution: One engine loop, two registerable kinds
 
-**Decision: the engine grows a small registration list. Two kinds of
+**Decision: the engine grows a small rendering-context list. Two kinds of
 things can be registered with an engine: a `SceneContext` (via
 `registerScene(engine, scene)`) and a `SpriteRenderer` (via
 `registerSpriteRenderer(sr)`). `startEngine(engine)` no longer
-takes a `scene` argument — it walks `engine._registrations` once per
+takes a `scene` argument — it walks `engine._renderingContexts` once per
 frame, calling each registration's `render` callback in registration
 order. Pure-2D experiences (Lottie/Rive-class apps) create a
 `SpriteRenderer`, register it, and never create a `SceneContext`.
@@ -205,11 +205,9 @@ layers (and routes depth-hosted layers through the existing renderable
 system so they draw inside the scene's 3D pass).**
 
 The `SceneContext` shape, the `addToScene` switch body, and the existing
-3D render code are otherwise unchanged. The future render-graph work
-will replace `engine._registrations` with a real graph; both `Scene` and
-`SpriteRenderer` already conform to the `{ render, dispose }` shape that
-graph nodes will need, so the migration is a list-to-graph swap with no
-public-API change.
+3D render code are otherwise unchanged. The frame graph keeps the same
+ordered execution model as `engine._renderingContexts`; both `Scene` and
+`SpriteRenderer` remain render-loop participants without requiring a DAG.
 
 ### Rejected alternatives
 
@@ -232,16 +230,16 @@ export interface EngineRenderer {
 }
 
 /** @internal Inside EngineContextInternal: */
-//   _registrations: EngineRenderer[];
+//   _renderingContexts: EngineRenderer[];
 //   _firstFrameResolvers: (() => void)[];
 
-/** Drive the engine's render loop. Walks _registrations in order, once per frame. */
+/** Drive the engine's render loop. Walks registered rendering contexts in order, once per frame. */
 export function startEngine(engine: EngineContext): Promise<void>;
 ```
 
 `startEngine` resolves on the first frame after registration that
-completes successfully — the same first-frame-ready contract today's
-`startEngine(engine, scene)` provides. There is no per-frame `if (is2D)`
+completes successfully — the same first-frame-ready contract scene
+registration provides. There is no per-frame `if (is2D)`
 branch; the loop just iterates the list.
 
 ### The `SpriteRenderer`
@@ -1537,7 +1535,7 @@ engine right after the scene's own registration.
 ```
 startEngine(engine) per-frame:
   1. Acquire swap-chain view + create command encoder.
-  2. For each registration r in engine._registrations (in order):
+  2. For each registration r in engine._renderingContexts (in order):
        r.render(encoder, deltaMs)
          Scene wrapper (added by registerScene):
            - Run scene._beforeRender hooks: clip ticks; anchor projection writes positionPx.
@@ -1944,7 +1942,7 @@ packages/babylon-lite/src/
 ```typescript
 // ─── Engine ──────────────────────────────────────────────────────────
 export type { EngineRenderer } from "./engine/engine.js";
-// `startEngine` no longer takes a `scene` argument — it walks engine._registrations.
+// `startEngine` no longer takes a `scene` argument — it walks engine._renderingContexts.
 export { startEngine } from "./engine/start-engine.js";
 
 // ─── Scene ───────────────────────────────────────────────────────────
@@ -2024,11 +2022,11 @@ export type { SpritePickInfo } from "./sprite/picking/pick-sprite-2d.js";
 
 - Making the engine the sole render-loop owner via `register*` /
   `startEngine(engine)` is the seed of the frame graph. Today
-  `engine._registrations` is a flat list iterated in order; tomorrow it
-  becomes a DAG of `EngineRenderer` nodes. Both `Scene` (wrapped by
-  `registerScene`) and `SpriteRenderer` already conform to the
-  `{ render, dispose }` shape graph nodes need, so the migration is a
-  list-to-graph swap with no public-API break.
+  `engine._renderingContexts` is a flat list iterated in order; the frame
+  graph keeps that ordered-task model rather than becoming a DAG. If Lite
+  ever gets a node render graph, that would be a separate higher-level DAG
+  that emits ordered frame-graph tasks, with no public-API break for
+  `Scene` or `SpriteRenderer`.
 
 - Two output buckets is the right granularity. `"none"` versus
   `"test"|"test-write"` corresponds exactly to the two distinct render-

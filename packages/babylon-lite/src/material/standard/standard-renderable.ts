@@ -253,7 +253,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     const lightsVersions: number[] = [];
 
     // Per-frame light UBO refresh — scene UBO is now written by the active
-    // RenderPassTask via writePassSceneUBO (see scene/scene-ubo.ts).
+    // RenderPassTask via writePassSceneUBO.
     const updater: SceneUniformUpdater = {
         update(eng: EngineContext) {
             for (let m = 0; m < lightsUBOByMask.length; m++) {

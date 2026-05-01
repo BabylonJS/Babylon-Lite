@@ -10,13 +10,12 @@
  * Lifecycle:
  *   - Engine and scene are captured at task creation and exposed as
  *     `engine` / `scene`.
- *   - `record()` is called once when the frame graph is built (via
- *     `buildFrameGraph`). Tasks use this to allocate GPU resources, build
+ *   - `record()` is called when the frame graph is built (via
+ *     `FrameGraph.build()`). Tasks use this to allocate GPU resources, build
  *     their render-pass descriptor, and finalize anything that needs the
  *     final canvas / target size.
- *   - `execute(encoder)` is called once per frame and is responsible for
- *     encoding the GPU work for this task. It returns the number of draw
- *     calls issued.
+ *   - `execute()` is called once per frame and reads the current encoder from
+ *     `engine._currentEncoder`. It returns the number of draw calls issued.
  *   - `dispose()` is called when the frame graph is disposed.
  */
 

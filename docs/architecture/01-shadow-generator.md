@@ -144,7 +144,7 @@ import depthVertSrc  from '../../shaders/shadow-depth.vertex.wgsl?raw';
 import depthFragSrc  from '../../shaders/shadow-depth.fragment.wgsl?raw';
 import blurVertSrc   from '../../shaders/shadow-blur.vertex.wgsl?raw';
 import blurFragSrc   from '../../shaders/shadow-blur.fragment.wgsl?raw';
-import { WGSL_SCENE_UNIFORMS_SHADOW } from '../shader/wgsl-helpers.js';
+// Shadow depth shaders inline a minimal light-view SceneUniforms declaration.
 ```
 
 ### Imports (PCF generator)
@@ -157,7 +157,7 @@ import type { ShadowGenerator } from './shadow-generator.js';
 import { buildCasters, syncCasterMatrices, drawCasters, shadowMatrixChanged } from './shadow-base.js';
 import depthVertSrc from '../../shaders/shadow-pcf-depth.vertex.wgsl?raw';
 import { registerPcfShadowShader, registerPcfShadowBgl } from '../material/standard/standard-pipeline.js';
-import { WGSL_SCENE_UNIFORMS_SHADOW } from '../shader/wgsl-helpers.js';
+// Shadow depth shaders inline a minimal light-view SceneUniforms declaration.
 ```
 
 ---
@@ -741,7 +741,7 @@ Reserved for future integration of shadow maps into the general render pipeline'
 - `../mesh/mesh.js` — `Mesh` interface
 - `../engine/engine.js` — `Engine`, `EngineInternal`
 - `../resource/gpu-pool.js` — `getOrCreateSampler`
-- `../shader/wgsl-helpers.js` — `WGSL_SCENE_UNIFORMS_SHADOW`
+- Inline `SHADOW_LIGHT_VIEW_WGSL` — minimal `SceneUniforms { viewProjection }` for light-space depth rendering
 - `./shadow-base.js` — `buildCasters`, `syncCasterMatrices`, `drawCasters`, `shadowMatrixChanged`
 - `../../shaders/shadow-depth.vertex.wgsl` — depth vertex shader (raw import)
 - `../../shaders/shadow-depth.fragment.wgsl` — depth fragment shader (raw import)
@@ -753,7 +753,7 @@ Reserved for future integration of shadow maps into the general render pipeline'
 - `../mesh/mesh.js` — `Mesh` interface
 - `../engine/engine.js` — `Engine`, `EngineInternal`
 - `../material/standard/standard-pipeline.js` — `registerPcfShadowShader`, `registerPcfShadowBgl`
-- `../shader/wgsl-helpers.js` — `WGSL_SCENE_UNIFORMS_SHADOW`
+- Inline `SHADOW_LIGHT_VIEW_WGSL` — minimal `SceneUniforms { viewProjection }` for light-space depth rendering
 - `./shadow-base.js` — `buildCasters`, `syncCasterMatrices`, `drawCasters`, `shadowMatrixChanged`
 - `./shadow-generator.js` — `ShadowGenerator` type
 - `../../shaders/shadow-pcf-depth.vertex.wgsl` — PCF depth vertex shader (raw import)

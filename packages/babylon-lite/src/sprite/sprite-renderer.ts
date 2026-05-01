@@ -338,7 +338,7 @@ function spriteRendererRecord(rr: SpriteRendererInternal): number {
         return 0;
     }
     const eng = rr._engine;
-    const encoder = eng._currentEncoder!;
+    const encoder = eng._currentEncoder;
     const swapView = eng._swapchainView;
 
     // Open a render pass directly on the swapchain. Sprite rendering doesn't

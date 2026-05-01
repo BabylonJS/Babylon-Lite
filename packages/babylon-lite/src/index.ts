@@ -7,9 +7,8 @@ export type { EngineContext, EngineOptions } from "./engine/engine.js";
 export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene, registerScene, unregisterScene } from "./scene/scene.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
-// Step 1 scaffolding: scene-owned ordered list of tasks. Today only
-// offscreen RenderPassTasks exist; the engine still drives the main
-// pass. Subsequent steps will move main into the graph.
+// Scene-owned ordered list of tasks. The default scene pass is a
+// RenderPassTask, and user tasks can render offscreen RTTs, overlays, etc.
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export { addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";

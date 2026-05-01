@@ -4,16 +4,16 @@
  * draws into the swapchain is just one task among many. Pre-pass RTTs run
  * first, the scene-render task draws into the swapchain, UI overlay tasks
  * run after, etc. Order is the user's responsibility (controlled via
- * `addRenderPassTask{,AtStart,Before}`).
+ * `addTask`, `addTaskAtStart`, and `addTaskBefore`).
  *
  * Lifecycle:
  *   1. createFrameGraph(engine, scene)      → empty graph
- *   2. addRenderPassTask{,AtStart,Before}   → register tasks
+ *   2. addTask{,AtStart,Before}             → register tasks
  *      (createSceneContext registers a default scene-render task)
  *   3. await fg.build()                     → record every task
  *      (allocate render-target textures, build pass descriptors)
- *   4. fg.execute(encoder)                  → drain every task into the
- *      command encoder (called from scene._record)
+ *   4. fg.execute()                         → drain every task into the
+ *      current command encoder (called from scene._record)
  *   5. fg.dispose()                         → free everything
  */
 

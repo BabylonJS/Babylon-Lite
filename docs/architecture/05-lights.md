@@ -3,15 +3,15 @@
 
 ## Purpose
 
-Provides plain-data light definitions for **hemispheric**, **directional**, **point**, and **spot** light types, plus a shared infrastructure layer (`light-base.ts`, `light-matrix.ts`, `types.ts`) and a multi-light UBO packing system (`lights-ubo.ts`). Following Babylon Lite's "pillar 4b" principle, lights are stateless data objects with no scene references.
+Provides plain-data light definitions for **hemispheric**, **directional**, **point**, and **spot** light types, plus a shared infrastructure layer (`light-base.ts`, `light-matrix.ts`, `types.ts`) and a lights UBO packing system (`render/lights-ubo.ts`). Following Babylon Lite's "pillar 4b" principle, lights are stateless data objects with no scene references.
 
 Factory functions create light objects with sensible defaults; callers add them to scenes or pass them to material setup functions. Each light carries:
 - Push-based dirty tracking via `ObservableVec3` for positions/directions
 - World-matrix state with parent support (inherited from `light-base.ts`)
-- Standard-material UBO writer (`_writeStandardLightUbo`) for the multi-light system
-- Lazy PBR extension registration (`_registerPbr`) for tree-shakable PBR support
+- Standard/PBR UBO writer (`_writeStandardLightUbo`) for the shared lights UBO system
+- Version tracking (`_lightVersion`) so per-frame light uploads can be guarded
 
-**PBR light variants** (e.g. `hemispheric-pbr.ts`, `directional-pbr.ts`, `point-pbr.ts`) are dynamically imported only when a light is used with PBR materials. They provide WGSL shader snippets and UBO writers specific to PBR shading, keeping them tree-shakable.
+PBR no longer uses per-light extension registration or light fields in `SceneUniforms`. It consumes the same lights UBO as Standard materials. Exactly one non-shadow PBR light uses `material/pbr/fragments/singlelight-wgsl.ts`; multiple lights or any shadow receiver use `material/pbr/fragments/multilight-wgsl.ts`.
 
 ---
 
@@ -23,6 +23,7 @@ Factory functions create light objects with sensible defaults; callers add them 
 /** Shared base for all light types. Provides pipeline integration callbacks. */
 export interface LightBase extends IWorldMatrixProvider, IParentable {
   readonly lightType: string;
+  children: SceneNode[];
   excludedMeshIds?: ReadonlySet<string>;
   includedOnlyMeshIds?: ReadonlySet<string>;
   shadowGenerator?: ShadowGenerator;
@@ -33,21 +34,13 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
 
 /** @internal */
 export interface LightBaseInternal extends LightBase {
-  readonly _registerPbr: () => Promise<void>;
   readonly _writeStandardLightUbo?: (data: Float32Array, offset: number) => void;
+  readonly _lightVersion: number;
 }
 
-export const MAX_LIGHTS = 4;
+export let MAX_LIGHTS = 4;
+export function setMaxLights(n: number): void;
 export const LIGHT_ENTRY_FLOATS = 16;  // 4 × vec4 = 64 bytes per light
-
-export interface PbrLightExtension {
-  readonly tag: string;
-  readonly pbrSceneUboFields: readonly { readonly name: string; readonly type: 'f32' | 'vec3<f32>' | 'vec4<f32>' }[];
-  emitLightVector(): string;
-  emitDirectDiffuse(): string;
-  emitGeometricAA(): string;
-  writeSceneUbo(data: Float32Array, baseOffset: number, light: LightBase): void;
-}
 ```
 
 ### Light Base (`light-base.ts`)
@@ -222,7 +215,7 @@ Every light factory:
 1. Calls `createLightBase(getLocalMatrix)` which returns `{ wm, onDirty }`:
    - `wm`: `WorldMatrixAccessors` — provides `getWorldMatrix()`, `getWorldMatrixVersion()`, `markLocalDirty()`, and `parent` get/set
    - `onDirty`: callback that calls `wm.markLocalDirty()` — passed to `ObservableVec3` constructors
-2. Builds the light data object with `_registerPbr` and `_writeStandardLightUbo` callbacks
+2. Builds the light data object with an `_writeStandardLightUbo` callback
 3. Calls `applyWorldMatrixAccessors(target, wm)` which uses `Object.defineProperties` to add `parent`, `worldMatrix`, and `worldMatrixVersion` as getters/setters
 
 This pattern eliminates duplicated world-matrix boilerplate across all light types.
@@ -238,11 +231,11 @@ Each light writes its type flag at `data[offset + 3]` in `_writeStandardLightUbo
 | `2`             | Spot        | xyz = world position (worldMatrix col 3) |
 | `3`             | Hemispheric | xyz = world direction (worldMatrix col 2) |
 
-### Multi-Light UBO Layout (`lights-ubo.ts`)
+### Lights UBO Layout (`render/lights-ubo.ts`)
 
-The standard material pipeline uses a shared lights UBO supporting up to `MAX_LIGHTS = 4` simultaneous lights.
+Standard and PBR material pipelines use a shared lights UBO supporting up to `MAX_LIGHTS = 4` simultaneous lights by default. `setMaxLights(n)` may adjust the cap before pipelines/UBOs are created.
 
-**Total UBO size:** `LIGHTS_UBO_SIZE = 16 + 4 × 64 = 272 bytes`
+**Default total UBO size:** `getLightsUboSize() = 16 + MAX_LIGHTS × 64` bytes (272 bytes when `MAX_LIGHTS = 4`)
 
 **Layout:**
 
@@ -274,12 +267,15 @@ The standard material pipeline uses a shared lights UBO supporting up to `MAX_LI
 /** Fill a Float32Array with standard light data. */
 export function fillLightsData(data: Float32Array, lights: readonly LightBase[]): void;
 
-/** Create a new lights UBO from all standard-compatible lights. */
-export function writeLightsUBO(device: GPUDevice, lights: readonly LightBase[]): GPUBuffer;
+/** Current lights UBO byte size for the active MAX_LIGHTS value. */
+export function getLightsUboSize(): number;
+
+/** Create a new lights UBO from all compatible lights. */
+export function writeLightsUBO(engine: EngineContextInternal, lights: readonly LightBase[]): GPUBuffer;
 
 /** Refresh an existing lights UBO with current light state. */
 export function refreshLightsUBO(
-  device: GPUDevice,
+  engine: EngineContextInternal,
   buffer: GPUBuffer,
   lights: readonly LightBase[],
   scratch: Float32Array,
@@ -292,65 +288,16 @@ export function refreshLightsUBO(
 3. Call each light's `_writeStandardLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS)`
 4. Write `count` into the first u32 slot via `Uint32Array` view
 
-### PBR Light Extensions
+### PBR Light Shader Paths
 
-PBR variants are tree-shakable — loaded via dynamic `import()` in each light's `_registerPbr` callback. Each extension implements `PbrLightExtension`:
+PBR materials consume the same packed `LightEntry` layout as Standard materials. The PBR renderable builder decides which WGSL helper to import once per scene:
 
-| Extension | File | Tag | Loaded When |
-|-----------|------|-----|-------------|
-| Hemispheric PBR | `hemispheric-pbr.ts` | `"hemispheric"` | Hemispheric light used with PBR material |
-| Directional PBR | `directional-pbr.ts` | `"directional"` | Directional light used with PBR material |
-| Point PBR | `point-pbr.ts` | `"point"` | Point light used with PBR material |
-| Spot PBR | *(not yet implemented)* | — | — |
+| Condition | WGSL helper | Behavior |
+|-----------|-------------|----------|
+| `scene.lights.length === 1` and no shadow generators | `material/pbr/fragments/singlelight-wgsl.ts` | Non-looping direct-light code specialized by the single light's `lightType`; reads `lights.lights[0]` |
+| More than one light, or any shadow receiver | `material/pbr/fragments/multilight-wgsl.ts` | Generic `computePbrLight()` + loop over `lights.count`; shadow fragment writes per-light shadow factors |
 
-Each extension provides:
-
-1. **`pbrSceneUboFields`** — structured field descriptors for the PBR template composer
-2. **`emitLightVector()`** — WGSL code computing L vector, NdotL, and attenuation
-3. **`emitDirectDiffuse()`** — WGSL code computing direct diffuse contribution
-4. **`emitGeometricAA()`** — WGSL code for geometric anti-aliasing (hemispheric only)
-5. **`writeSceneUbo()`** — TypeScript function to pack light data into PBR scene UBO
-
-Registration is done via `_setPbrLightExtension()` from `material/pbr/pbr-flags.js`. Only one PBR light extension is active at a time.
-
-#### Hemispheric PBR UBO Fields
-
-| Offset | Name | Type | Content |
-|--------|------|------|---------|
-| +0     | `lightDirection` | `vec3<f32>` | direction |
-| +3     | `lightIntensity` | `f32` | intensity |
-| +4     | `lightDiffuseColor` | `vec3<f32>` | diffuseColor |
-| +7     | `_pad1` | `f32` | padding |
-| +8     | `lightGroundColor` | `vec3<f32>` | groundColor |
-
-**Hemispheric PBR shading:**
-- Light vector: `L = normalize(lightDirection)`, `NdotL = dot(N, L) * 0.5 + 0.5` (wrapped diffuse)
-- Diffuse: `mix(groundColor, lightColor, NdotL) * surfaceAlbedo * directIntensity`
-- Geometric AA: `directRoughness = max(roughness, pow(saturate(slopeSquare), 0.333))`
-
-#### Directional PBR UBO Fields
-
-Same UBO layout as hemispheric (groundColor present but zeroed).
-
-**Directional PBR shading:**
-- Light vector: `L = normalize(-lightDirection)`, `NdotL = max(dot(N, L), 0.0)` (standard Lambertian)
-- Diffuse: `surfaceAlbedo * (1/PI) * NdotL * lightColor * directIntensity`
-- No geometric AA
-
-#### Point PBR UBO Fields
-
-| Offset | Name | Type | Content |
-|--------|------|------|---------|
-| +0     | `lightPosition` | `vec3<f32>` | position |
-| +3     | `lightIntensity` | `f32` | intensity |
-| +4     | `lightDiffuseColor` | `vec3<f32>` | diffuse color |
-| +7     | `lightRange` | `f32` | range |
-| +8     | `_pointPad` | `vec3<f32>` | padding |
-
-**Point PBR shading:**
-- Light vector: `L = normalize(lightPosition - fragPos)`, `lightAtten = 1 / max(distSq, 0.0001)` (inverse-square falloff)
-- Diffuse: `surfaceAlbedo * (1/PI) * NdotL * lightColor * lightAtten * directIntensity`
-- No geometric AA
+Supported PBR light types are hemispheric, directional, point, and spot. Point lights use glTF-compatible inverse-square falloff with a smooth range cutoff. Spot lights use linear range falloff plus cone/exponent falloff, matching the Standard path's packed fields.
 
 ### Shader Lighting Math (Standard Material)
 
@@ -404,15 +351,13 @@ specular = specComp * lightSpecularColor * attenuation
 
 Light modules do not create GPU pipelines. They produce plain data consumed by material pipelines.
 
-The multi-light UBO (`lights-ubo.ts`) creates a single `GPUBuffer` of 272 bytes with `UNIFORM | COPY_DST` usage, refreshed per-frame via `refreshLightsUBO()`.
+The lights UBO (`render/lights-ubo.ts`) creates a single `GPUBuffer` with `UNIFORM | COPY_DST` usage, refreshed per-frame via `refreshLightsUBO()`. The default size is 272 bytes, but the size follows `MAX_LIGHTS`.
 
 ---
 
 ## Shader Logic
 
-Light modules do not contain shaders. The lighting computation lives in the material fragment shaders (`standard-textured.fragment.wgsl`, `standard.fragment.wgsl`). See the shader logic section in [02-standard-textured-material.md](02-standard-textured-material.md).
-
-PBR light extensions emit WGSL snippets that are injected into the PBR fragment shader at pipeline build time via the template composer. The snippets are inlined strings in the extension modules, not separate `.wgsl` files.
+Light modules do not contain shaders. Lighting computation lives in material shader modules: Standard composes its light loop from the shared lights UBO, and PBR dynamically imports either `singlelight-wgsl.ts` or `multilight-wgsl.ts` from `material/pbr/fragments/`.
 
 ---
 
@@ -444,19 +389,18 @@ spot.angle = Math.PI / 4;
 - `worldMatrix` getter lazily recomputes from `getLocalMatrix()` and parent chain when dirty
 - `_writeStandardLightUbo` reads from `worldMatrix` (which auto-resolves parent transforms)
 
-### Multi-Light UBO Lifecycle
+### Lights UBO Lifecycle
 
-1. **Creation:** `writeLightsUBO(device, lights)` — allocates 272-byte UBO, fills with current light state
-2. **Per-frame refresh:** `refreshLightsUBO(device, buffer, lights, scratch)` — re-fills scratch Float32Array and uploads
-3. **Light filtering:** Only lights with `_writeStandardLightUbo` defined are included; up to `MAX_LIGHTS = 4`
+1. **Creation:** `writeLightsUBO(engine, lights)` — allocates a `getLightsUboSize()` UBO and fills it with current light state
+2. **Per-frame refresh:** `refreshLightsUBO(engine, buffer, lights, scratch)` — re-fills scratch Float32Array and uploads
+3. **Light filtering:** Only lights with `_writeStandardLightUbo` defined are included; up to `MAX_LIGHTS`
 
-### PBR Registration Lifecycle
+### PBR Lights UBO Lifecycle
 
-1. Material build detects light type and calls `light._registerPbr()`
-2. Dynamic import loads the PBR extension module (e.g. `hemispheric-pbr.ts`)
-3. Extension calls `_setPbrLightExtension(extension)` to register globally
-4. PBR shader template uses the extension's emitted WGSL snippets
-5. PBR scene UBO writer calls `extension.writeSceneUbo()` per-frame
+1. `buildPbrRenderables()` detects whether the scene has no lights, one non-shadow light, or a multi-light/shadow setup.
+2. If any light exists, it creates one shared lights UBO via `writeLightsUBO(engine, scene.lights)`.
+3. Single-light scenes import `singlelight-wgsl.ts`; multi-light/shadow scenes import `multilight-wgsl.ts` and, when needed, `pbr-shadow-fragment.ts`.
+4. Per-frame refresh calls `refreshLightsUBO(engine, buffer, scene.lights, scratch)` after checking the aggregate light version.
 
 **No GPU resources are created by light modules.** All GPU work (UBO creation, data packing) happens in the material module or `lights-ubo.ts`.
 
@@ -493,18 +437,16 @@ spot.angle = Math.PI / 4;
 | `MAX_LIGHTS = 4`                               | `maxSimultaneousLights` (default 4)         |
 | `fillLightsData()` / `writeLightsUBO()`       | Babylon's internal light UBO building       |
 | `refreshLightsUBO()`                           | Per-frame light uniform update              |
-| `_registerPbr()` dynamic import               | Static class registration in Babylon.js     |
-| `PbrLightExtension` (emitLightVector, etc.)   | PBR shader includes (`pbrDirectLightingSetupFunctions`, etc.) |
+| `singlelight-wgsl.ts` / `multilight-wgsl.ts`  | PBR shader includes (`pbrDirectLightingSetupFunctions`, etc.) |
 
 ### Key Differences from Babylon.js
 
 1. **No scene reference** — Babylon Lite lights are POJOs with world-matrix accessors; Babylon.js lights are class instances that register with a Scene.
 2. **`lightType` string discriminator** — Instead of class hierarchy, each light has a `lightType` string literal (`'directional'`, `'point'`, `'spot'`, `'hemispheric'`).
 3. **`ObservableVec3`** — Direction/position use observable vectors with dirty callbacks, replacing Babylon's Vector3 + manual dirty tracking.
-4. **Multi-light UBO** — Standard material packs up to 4 lights into a single 272-byte UBO; Babylon.js uses separate per-light uniforms.
-5. **Tree-shakable PBR** — PBR light extensions are dynamically imported only when needed; Babylon.js always includes all light-type shaders.
+4. **Shared lights UBO** — Standard and PBR pack up to `MAX_LIGHTS` lights into one UBO; Babylon.js uses separate per-light uniforms/defines.
+5. **Tree-shakable PBR light code** — PBR imports the one-light or multi-light WGSL helper only when needed; Babylon.js includes broad light shader support.
 6. **No shadow caster list on lights** — Shadow casters are managed by `ShadowGenerator`, not by the light. Lights reference their shadow generator via `shadowGenerator` property.
-7. **Spot light PBR** — Not yet implemented; `_registerPbr` is a no-op for spot lights.
 
 ---
 
@@ -528,28 +470,21 @@ spot.angle = Math.PI / 4;
 - `./types.js` — `LightBase`
 - `./light-base.js` — `createLightBase`, `applyWorldMatrixAccessors`, `ObservableVec3`
 - `./light-matrix.js` — `localMatrixFromDirection`
-- `./directional-pbr.js` — dynamic import for `registerDirectionalPbrLight`
 
 ### point-light.ts
 - `./types.js` — `LightBase`
 - `../math/mat4.js` — `mat4Translation`
 - `./light-base.js` — `createLightBase`, `applyWorldMatrixAccessors`, `ObservableVec3`
-- `./point-pbr.js` — dynamic import for `registerPointPbrLight`
 
 ### hemispheric.ts
 - `./types.js` — `LightBase`
 - `./light-base.js` — `createLightBase`, `applyWorldMatrixAccessors`, `ObservableVec3`
 - `./light-matrix.js` — `localMatrixFromDirection`
-- `./hemispheric-pbr.js` — dynamic import for `registerHemisphericPbrLight`
 
 ### spot-light.ts
 - `./types.js` — `LightBase`
 - `./light-base.js` — `createLightBase`, `applyWorldMatrixAccessors`, `ObservableVec3`
 - `./light-matrix.js` — `localMatrixFromDirection`
-
-### PBR extensions (hemispheric-pbr.ts, directional-pbr.ts, point-pbr.ts)
-- `./types.js` — `PbrLightExtension`, `LightBase`
-- `../material/pbr/pbr-flags.js` — `_setPbrLightExtension`
 
 ### lights-ubo.ts
 - `../light/types.js` — `LightBase`, `LightBaseInternal`, `MAX_LIGHTS`, `LIGHT_ENTRY_FLOATS`
@@ -571,11 +506,11 @@ spot.angle = Math.PI / 4;
 11. **Spot UBO packing** — Spot light writes exponent at [11], direction at [12–14], cos(angle/2) at [15].
 12. **Light UBO packing** — For directional light: `lightData.w = 1`, colors premultiplied by intensity.
 13. **Light UBO packing** — For point light: `lightData.w = 0`, `lightDiffuse.a = range`.
-14. **Multi-light UBO size** — `LIGHTS_UBO_SIZE = 272` bytes (16 header + 4 × 64).
+14. **Lights UBO size** — `getLightsUboSize() = 272` bytes by default (16 header + 4 × 64).
 15. **fillLightsData count** — With 6 lights, only first 4 with `_writeStandardLightUbo` are packed.
 16. **localMatrixFromDirection** — Verify column 2 = normalized direction, column 0 = right, column 1 = up.
-17. **PBR extension registration** — `_registerPbr()` for hemispheric should dynamically import and call `registerHemisphericPbrLight()`.
-18. **PBR UBO writing** — Hemispheric PBR `writeSceneUbo` packs direction, intensity, diffuseColor, groundColor in expected layout.
+17. **PBR single-light selection** — One non-shadow light imports `singlelight-wgsl.ts`, not the generic multi-light loop.
+18. **PBR multi-light selection** — Multiple lights or shadow receivers import `multilight-wgsl.ts`.
 
 ---
 
@@ -583,14 +518,11 @@ spot.angle = Math.PI / 4;
 
 | File | Role |
 |------|------|
-| `src/light/types.ts` | `LightBase`, `LightBaseInternal`, `PbrLightExtension` interfaces; `MAX_LIGHTS`, `LIGHT_ENTRY_FLOATS` constants |
+| `src/light/types.ts` | `LightBase`, `LightBaseInternal` interfaces; `MAX_LIGHTS`, `setMaxLights()`, `LIGHT_ENTRY_FLOATS` |
 | `src/light/light-base.ts` | `createLightBase()`, `applyWorldMatrixAccessors()` — shared world-matrix state factory; re-exports `ObservableVec3` |
 | `src/light/light-matrix.ts` | `localMatrixFromDirection()` — builds local 4×4 matrix from direction + position |
 | `src/light/directional-light.ts` | `DirectionalLight` interface + `createDirectionalLight()` factory |
 | `src/light/point-light.ts` | `PointLight` interface + `createPointLight()` factory |
 | `src/light/hemispheric.ts` | `HemisphericLight` interface + `createHemisphericLight()` factory |
 | `src/light/spot-light.ts` | `SpotLight` interface + `createSpotLight()` factory |
-| `src/light/hemispheric-pbr.ts` | PBR extension for hemispheric light — WGSL snippets + UBO writer; tree-shakable |
-| `src/light/directional-pbr.ts` | PBR extension for directional light — WGSL snippets + UBO writer; tree-shakable |
-| `src/light/point-pbr.ts` | PBR extension for point light — WGSL snippets + UBO writer; tree-shakable |
-| `src/render/lights-ubo.ts` | Multi-light UBO system — `fillLightsData()`, `writeLightsUBO()`, `refreshLightsUBO()`; packs up to 4 lights into 272-byte UBO |
+| `src/render/lights-ubo.ts` | Shared lights UBO system — `getLightsUboSize()`, `fillLightsData()`, `writeLightsUBO()`, `refreshLightsUBO()`; packs up to `MAX_LIGHTS` lights |

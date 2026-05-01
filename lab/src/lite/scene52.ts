@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     const r1Cam = createFreeCamera({ x: 0, y: 0, z: -3 }, { x: 0, y: 0, z: 0 });
     r1Cam.nearPlane = 0.1;
     r1Cam.farPlane = 100;
-    const r1Task = createRenderPassTask({ name: "r1", rt: r1RT, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cam: r1Cam }, engine, scene);
+    const r1Task = createRenderPassTask({ name: "r1", rt: r1RT, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cam: r1Cam, cs: true }, engine, scene);
     addTaskAtStart(scene, r1Task);
 
     // Override material for A in R1 — green sphere on a blue background.

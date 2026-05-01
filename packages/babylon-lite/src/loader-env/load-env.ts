@@ -99,7 +99,10 @@ export async function loadEnvironment(
         : undefined;
     const skyboxUrl = options?.skyboxUrl;
     const skyboxIsDds = skyboxUrl != null && skyboxUrl.toLowerCase().endsWith(".dds");
-    const skyboxIsEnv = skyboxUrl != null && skyboxUrl.toLowerCase().endsWith(".env");
+    // Skybox is treated as .env when the URL has an .env extension OR when it matches the
+    // lighting URL (which we just loaded successfully as .env). The latter handles data URIs
+    // and other extensionless URLs where the caller wants to reuse the IBL cubemap as a skybox.
+    const skyboxIsEnv = skyboxUrl != null && (skyboxUrl === url || skyboxUrl.toLowerCase().endsWith(".env"));
     const bgOptions = {
         skipSkybox: skyboxIsDds || skyboxIsEnv || options?.skipSkybox,
         skipGround: options?.skipGround,

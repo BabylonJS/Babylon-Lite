@@ -39,7 +39,10 @@ import {
 } from "./pbr-flags.js";
 
 export interface PbrComposerDeps {
+    readonly hasSingleLight: boolean;
     readonly hasMultiLight: boolean;
+    readonly singleLightWGSL: string;
+    readonly singleLightBlock: string;
     readonly multiLightWGSL: string;
     readonly multiLightLoop: string;
     readonly acesHelpers: string;
@@ -58,7 +61,10 @@ export type PbrComposeFn = (features: number, features2?: number) => ComposedSha
 export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
     const cache = new Map<string, ComposedShader>();
     const {
+        hasSingleLight,
         hasMultiLight,
+        singleLightWGSL,
+        singleLightBlock,
         multiLightWGSL,
         multiLightLoop,
         acesHelpers,
@@ -108,7 +114,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                 : undefined;
 
         const template = createPbrTemplate({
+            hasSingleLight,
             hasMultiLight,
+            singleLightWGSL,
+            singleLightBlock,
             multiLightWGSL,
             multiLightLoop,
             normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",

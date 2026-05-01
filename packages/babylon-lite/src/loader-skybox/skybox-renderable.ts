@@ -20,8 +20,8 @@ export function buildSkyboxRenderable(scene: SceneContext, skybox: SkyboxData): 
             const pipeline = gpu.getPipeline(eng as EngineContextInternal, sig);
             return {
                 renderable: r,
+                pipeline,
                 draw(pass) {
-                    pass.setPipeline(pipeline);
                     pass.setBindGroup(1, gpu.meshBindGroup);
                     pass.setVertexBuffer(0, skybox.posBuffer);
                     pass.setVertexBuffer(1, skybox.normBuffer);

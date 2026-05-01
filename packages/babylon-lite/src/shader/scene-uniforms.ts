@@ -1,7 +1,7 @@
 /** Canonical SceneUniforms — TS counterpart to `shaders/scene-uniforms.wgsl`.
  *
  *  Only the size + the WGSL source are exported. Per-field byte offsets are
- *  hard-coded inline at every write site (see `scene/scene-ubo.ts` and the
+ *  hard-coded inline at every write site (see `frame-graph/render-pass-task.ts` and the
  *  light extensions). If the WGSL struct changes, update those offsets. */
 
 import sceneUniformsWgsl from "../../shaders/scene-uniforms.wgsl?raw";

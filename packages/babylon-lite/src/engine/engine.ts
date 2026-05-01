@@ -36,7 +36,7 @@ export interface RenderingContext {
      *  `engine._currentDelta`. */
     _update(): void;
     /** Drive this context's GPU work — typically delegates to
-     *  `frameGraph.execute(engine._currentEncoder)`. Returns draw-call count. */
+     *  `frameGraph.execute()`. Returns draw-call count. */
     _record(): number;
     /** Optional. Called by the engine when the canvas backing-store size changes.
      *  Implementations should rebuild any canvas-sized GPU resources (e.g. ask
@@ -48,6 +48,7 @@ export interface RenderingContext {
 export interface EngineContextInternal extends EngineContext {
     readonly device: GPUDevice;
     readonly context: GPUCanvasContext;
+    readonly alphaMode: GPUCanvasAlphaMode;
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
     /** Registered rendering contexts in render order (first clears; subsequent overlay). */
@@ -56,11 +57,12 @@ export interface EngineContextInternal extends EngineContext {
     // ─── Per-frame transient state ─────────────────────────────────────
     /** Encoder being filled this frame. Set by `renderFrame` before each context's
      *  `_update`/`_record`; consumed by frame-graph tasks and pre-passes. */
-    _currentEncoder: GPUCommandEncoder | null;
+    _currentEncoder: GPUCommandEncoder;
     /** Swapchain view acquired once per frame before contexts record. */
     _swapchainView: GPUTextureView;
     /** Frame delta in ms (read by scenes that don't override fixedDeltaMs). */
     _currentDelta: number;
+    _cbs: GPUCommandBuffer[];
 }
 
 /** @internal Return true if `context` is already registered with `engine`. */
@@ -101,6 +103,11 @@ export interface RenderTargetSize {
  */
 export interface EngineOptions {
     msaaSamples?: 1 | 4;
+    /**
+     * WebGPU canvas alpha mode. Use "premultiplied" to enable canvas transparency (clear color
+     * with alpha < 1 will let HTML content underneath show through). Defaults to "opaque".
+     */
+    alphaMode?: GPUCanvasAlphaMode;
 }
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
@@ -126,7 +133,8 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     }
 
     const format = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({ device, format, alphaMode: "opaque" });
+    const alphaMode: GPUCanvasAlphaMode = options?.alphaMode ?? "opaque";
+    context.configure({ device, format, alphaMode });
 
     const versionToLog = `Babylon Lite v${VERSION}`;
     // eslint-disable-next-line no-console
@@ -141,15 +149,17 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         device,
         context,
         format,
+        alphaMode,
         canvas,
         msaaSamples,
         drawCallCount: 0,
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
-        _currentEncoder: null,
+        _currentEncoder: undefined!,
         _swapchainView: undefined!,
         _currentDelta: 0,
+        _cbs: [],
     };
 
     return engine;
@@ -247,9 +257,8 @@ function renderFrame(engine: EngineContextInternal, delta: number): void {
         drawCalls += s._record();
     }
 
-    const finalEncoder = engine._currentEncoder!;
-    engine.device.queue.submit([finalEncoder.finish()]);
+    const finalEncoder = engine._currentEncoder;
+    engine._cbs[0] = finalEncoder.finish();
+    engine.device.queue.submit(engine._cbs);
     engine.drawCallCount = drawCalls;
-
-    engine._currentEncoder = null;
 }
