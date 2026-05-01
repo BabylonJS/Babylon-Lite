@@ -94,8 +94,8 @@ let H = normalize(V + L);
 let NdotH = clamp(dot(N, H), 0.0000001, 1.0);
 let VdotH = saturate(dot(V, H));
 for (var li = 0u; li < lc; li++) {
-let entry = lights.lights[li];
-let pl = computePbrLight(entry, N, input.worldPos);
+var pl: PbrLightResult;
+if (li == 0u) { pl = pl0; } else { pl = computePbrLight(lights.lights[li], N, input.worldPos); }
 let sf = shadowFactors[li];
 if (pl.isHemi) {
 directDiffuse += pl.color * surfaceAlbedo * material.directIntensity * sf;
