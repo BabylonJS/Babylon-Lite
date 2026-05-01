@@ -83,6 +83,7 @@ export interface RenderPassTask extends Task {
     _depthAttachment: GPURenderPassDepthStencilAttachment | null;
 
     _targetSignature: RenderTargetSignature;
+    _sampleCount: number;
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderPassTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
@@ -109,13 +110,14 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
     const rt = config.rt;
     config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     const swapchain = rt.descriptor.resolveToSwapchain === true;
+    const sampleCount = rt.descriptor.sampleCount ?? 1;
     // Offscreen RTTs need a Y-flipped projection so the result texture samples
     // upright when sourced by a downstream pass. Swapchain passes never flip.
     const flipY = !swapchain;
     const targetSignature: RenderTargetSignature = {
         colorFormat: rt.descriptor.colorFormat,
         depthStencilFormat: rt.descriptor.depthStencilFormat,
-        sampleCount: rt.descriptor.sampleCount ?? 1,
+        sampleCount,
         flipY,
     };
 
@@ -144,6 +146,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         _colorAttachment: null,
         _depthAttachment: null,
         _targetSignature: targetSignature,
+        _sampleCount: sampleCount,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
         _pendingMeshes: [],
@@ -337,11 +340,11 @@ function patchPerFrame(task: RenderPassTask, eng: EngineContextInternal, swapcha
         // Read the live scene clearColor for auto-filled tasks: scenes commonly do
         // `scene.clearColor = {...}` (assignment, not mutation), so the original
         // reference captured at task-creation goes stale.
-        att.clearValue = task._autoFromScene ? task.scene.clearColor : c.clrColor!;
+        att.clearValue = c.clrColor!;
         att.loadOp = c.clr !== false ? "clear" : "load";
         if (swapchain) {
             const swapView = eng._swapchainView;
-            if (c.rt.descriptor.sampleCount > 1) {
+            if (task._sampleCount > 1) {
                 att.resolveTarget = swapView;
             } else {
                 att.view = swapView;
