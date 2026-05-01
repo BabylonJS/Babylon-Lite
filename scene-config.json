@@ -516,5 +516,14 @@
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
         "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"],
         "skipParity": true
+    },
+    {
+        "id": 74,
+        "slug": "scene74-effect-renderer",
+        "name": "Scene 74 — Effect Renderer",
+        "maxMad": 0.05,
+        "maxRawKB": 20,
+        "description": "EffectRenderer-style fullscreen procedural pass: radial glow, diagonal gradient, crisp rings, and grid rendered without scene geometry.",
+        "tags": ["procedural", "effect"]
     }
 ]
