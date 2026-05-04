@@ -68,6 +68,7 @@ function getTable(): Map<string, BlockLoader> {
     t.set("ReflectionTextureBlock", () => import("./blocks/reflection-texture-block.js"));
     // PBR blocks (scene 67+):
     t.set("PBRMetallicRoughnessBlock", () => import("./blocks/pbr-metallic-roughness-block.js"));
+    t.set("PBRMetallicRoughnessBlock__full", () => import("./blocks/pbr-metallic-roughness-block-full.js"));
     t.set("ReflectionBlock", () => import("./blocks/reflection-block.js"));
     t.set("ClearCoatBlock", () => import("./blocks/clearcoat-block.js"));
     t.set("SheenBlock", () => import("./blocks/sheen-block.js"));

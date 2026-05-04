@@ -51,6 +51,21 @@ export interface NodeGraph {
     readonly needsAlphaBlending: boolean;
 }
 
+export interface NodePbrMrHelperRequest {
+    readonly key: string;
+    readonly useEnv: boolean;
+    readonly useClearcoat: boolean;
+    readonly useSheen: boolean;
+    readonly useRefraction: boolean;
+    readonly useSubsurface: boolean;
+    readonly useAnisotropy: boolean;
+    readonly useShAlbedoScaling: boolean;
+    readonly useCcBump: boolean;
+    readonly useCcTint: boolean;
+    readonly useSpecularAA: boolean;
+    readonly remapClearcoatF0: boolean;
+}
+
 // ─── WGSL value types ───────────────────────────────────────────────
 
 export type NodeValueType = "f32" | "vec2f" | "vec3f" | "vec4f" | "mat4f" | "texture2d" | "textureCube";
@@ -99,6 +114,10 @@ export interface NodeBuildState {
     readonly nodeUboFields: UboField[];
     readonly bindings: BindingDecl[];
     readonly textures: NodeTextureBinding[];
+    /** PBRMetallicRoughnessBlock helper bodies are large, so the block records
+     *  feature-specific helper requests here and node-material resolves them
+     *  through dynamic imports after graph emission. */
+    readonly pbrMrHelperRequests: NodePbrMrHelperRequest[];
     /** Monotonic counter for SSA temp names, shared across stages. */
     nextTemp: number;
     /** Set by any block that references the scene lights UBO (LightBlock,

@@ -239,7 +239,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
 
     // ── Load BRDF LUT ────────────────────────────────────────────────────────
     const brdfImage = await brdfPromise;
-    const { decodeBrdfPng } = await import("./brdf-rgbd-decode.js");
+    const { decodeBrdfPng } = await import("./rgbd-decode.js");
     const brdfLut = decodeBrdfPng(engine, brdfImage);
     brdfImage.close();
 

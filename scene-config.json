@@ -516,5 +516,32 @@
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
         "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"],
         "skipParity": true
+    },
+    {
+        "id": 74,
+        "slug": "scene74-effect-renderer",
+        "name": "Scene 74 — Effect Renderer",
+        "maxMad": 0.05,
+        "maxRawKB": 20,
+        "description": "EffectRenderer-style fullscreen procedural pass: radial glow, diagonal gradient, crisp rings, and grid rendered without scene geometry.",
+        "tags": ["procedural", "effect"]
+    },
+    {
+        "id": 75,
+        "slug": "scene75-effect-rtt-sphere",
+        "name": "Scene 75 — Effect RTT Sphere",
+        "maxMad": 0.05,
+        "maxRawKB": 50,
+        "description": "EffectRenderer-style WGSL pass renders a 512×512 green offscreen texture, then an unlit sphere displays that render target as its base-color texture.",
+        "tags": ["procedural", "effect", "rtt"]
+    },
+    {
+        "id": 76,
+        "slug": "scene76-effect-texture",
+        "name": "Scene 76 — Effect Texture",
+        "maxMad": 0.05,
+        "maxRawKB": 25,
+        "description": "EffectWrapper fullscreen pass samples a Texture2D bound through setEffectTexture, proving texture and sampler bindings work without scene geometry.",
+        "tags": ["procedural", "effect", "texture"]
     }
 ]

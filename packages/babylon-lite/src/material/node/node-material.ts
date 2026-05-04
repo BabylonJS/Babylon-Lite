@@ -121,6 +121,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         hasSkeleton: options.hasSkeleton ?? false,
         hasInstances: options.hasInstances ?? false,
     });
+    await resolvePbrMrHelpers(state);
 
     // Dynamic import: env IBL helpers in node-env.ts are only loaded when the
     // graph emitted state.usesEnv. Scenes without ReflectionBlock+PBR-MR never
@@ -275,6 +276,34 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _envHelpers: envHelpers,
     };
     return material;
+}
+
+function isCorePbrMrRequest(request: import("./node-types.js").NodePbrMrHelperRequest): boolean {
+    return (
+        !request.useClearcoat &&
+        !request.useSheen &&
+        !request.useRefraction &&
+        !request.useSubsurface &&
+        !request.useAnisotropy &&
+        !request.useShAlbedoScaling &&
+        !request.useCcBump &&
+        !request.useCcTint &&
+        !request.useSpecularAA &&
+        !request.remapClearcoatF0
+    );
+}
+
+async function resolvePbrMrHelpers(state: NodeBuildState): Promise<void> {
+    if (state.pbrMrHelperRequests.length === 0) {
+        return;
+    }
+    if (state.pbrMrHelperRequests.some((request) => !isCorePbrMrRequest(request))) {
+        throw new Error("NodeMaterial: advanced PBR-MR helper request must be emitted by the full PBR-MR block");
+    }
+    const core = await import("./blocks/pbr-mr-helper-core.js");
+    for (const request of state.pbrMrHelperRequests) {
+        state.fragment.helpers.set(request.key, core.buildPbrMrHelperCore(request));
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

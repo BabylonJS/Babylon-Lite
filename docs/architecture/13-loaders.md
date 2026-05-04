@@ -4,7 +4,7 @@
 > - `packages/babylon-lite/src/loader-env/load-env.ts` — Babylon .env environment loader
 > - `packages/babylon-lite/src/loader-env/load-dds-env.ts` — DDS cubemap environment loader
 > - `packages/babylon-lite/src/loader-env/env-helpers.ts` — Shared environment assembly helpers
-> - `packages/babylon-lite/src/loader-env/brdf-rgbd-decode.ts` — BRDF PNG RGBD decode (GPU compute)
+> - `packages/babylon-lite/src/loader-env/rgbd-decode.ts` — Shared RGBD PNG/cubemap decode (GPU compute)
 > - `packages/babylon-lite/src/loader-hdr/load-hdr.ts` — HDR panorama environment loader
 > - `packages/babylon-lite/src/loader-hdr/hdr-parser.ts` — RGBE CPU parser + SH extraction
 > - `packages/babylon-lite/src/loader-hdr/hdr-ibl-pipeline.ts` — GPU compute IBL pipeline
@@ -322,7 +322,7 @@ Handles denormalized numbers, overflow (→ infinity), and NaN.
 
 ### BRDF LUT Generation
 
-> **Note on `.env` loader**: The `.env` (`loadEnvironment`) path no longer CPU-computes the BRDF LUT. It instead decodes a pre-baked BRDF LUT from an RGBD-encoded PNG provided via `options.brdfUrl`, using GPU compute in `brdf-rgbd-decode.ts`. The CPU algorithm below applies to the **HDR loader** (`hdr-ibl-pipeline.ts`) only.
+> **Note on `.env` and DDS loaders**: Environment loaders no longer CPU-compute the BRDF LUT. They decode a pre-baked BRDF LUT from an RGBD-encoded PNG provided via `options.brdfUrl`, using GPU compute in `rgbd-decode.ts`. The CPU algorithm below applies to the **HDR loader** (`hdr-ibl-pipeline.ts`) only.
 
 GPU compute split-sum integration (256×256, `rgba16float`, HDR path):
 
@@ -429,7 +429,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `loadEnvironment(scene, url, { brdfUrl })` | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
 | `.env` file format | Babylon-proprietary environment file |
 | RGBD decode | `FromRGBD` shader in Babylon |
-| `generateBrdfLut()` (GPU compute, RGBD PNG decode, in brdf-rgbd-decode.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime) |
+| `generateBrdfLut()` (GPU compute, RGBD PNG decode, in rgbd-decode.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime) |
 | `polynomialToPreScaledHarmonics()` | `SphericalHarmonics.FromPolynomial()` + `preScaleForRendering()` |
 | `uploadCubemapRGBD()` | Internal cubemap processing in `HDRCubeTexture` |
 | Staging buffer RGBD decode | Avoids Canvas 2D premultiplication issue |
@@ -454,9 +454,9 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 - **`load-gltf.ts` imports**: `Engine` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `LoaderResult` from `../loader-results.js`.
 - **`load-env.ts` imports**: `SceneContext` from `../scene/scene.js`.
-- **`load-dds-env.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `EnvironmentTextures` from `./load-env.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `./env-helpers.js`; dynamic import of `./brdf-rgbd-decode.js`.
+- **`load-dds-env.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `EnvironmentTextures` from `./load-env.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `./env-helpers.js`; dynamic import of `./rgbd-decode.js`.
 - **`env-helpers.ts` imports**: `EnvironmentTextures`, `polynomialToPreScaledHarmonics` from `./load-env.js`; `getOrCreateSampler` from `../resource/gpu-pool.js`.
-- **`brdf-rgbd-decode.ts` imports**: None (standalone GPU compute).
+- **`rgbd-decode.ts` imports**: `EngineContextInternal` from `../engine/engine.js`.
 - **`load-hdr.ts` imports**: `EnvironmentTextures` from `../loader-env/load-env.js`; `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `../loader-env/env-helpers.js`; `parseRGBE`, `computeSHFromEquirect` from `./hdr-parser.js`; `equirectToCubemapGPU`, `prefilterCubemapGPU`, `generateBrdfLut` from `./hdr-ibl-pipeline.js`; dynamic imports: `../material/pbr/background-hdr-skybox.js`, `../material/pbr/background-renderable.js`.
 - **`hdr-parser.ts` imports**: None (standalone CPU code).
 - **`hdr-ibl-pipeline.ts` imports**: `HdrImage` from `./hdr-parser.js`; `getOrCreateSampler` from `../resource/gpu-pool.js`.
@@ -523,10 +523,10 @@ output_L1_-1 = raw_L1_-1 × B1m
 | File | Size | Purpose |
 |---|---|---|
 | `src/loader-gltf/load-gltf.ts` | ~413 lines | GLB parsing, mesh extraction, texture upload, world matrix computation |
-| `src/loader-env/load-env.ts` | ~470 lines | .env parsing, RGBD decode, BRDF LUT generation (CPU), SH conversion |
+| `src/loader-env/load-env.ts` | ~470 lines | .env parsing, RGBD decode, BRDF LUT upload, SH conversion |
 | `src/loader-env/load-dds-env.ts` | ~286 lines | DDS cubemap loader, float16 SH extraction, BRDF PNG decode orchestration |
 | `src/loader-env/env-helpers.ts` | ~34 lines | Shared sampler creation, EnvironmentTextures assembly |
-| `src/loader-env/brdf-rgbd-decode.ts` | ~52 lines | GPU compute RGBD PNG → rgba16float BRDF LUT decode |
+| `src/loader-env/rgbd-decode.ts` | ~125 lines | Shared GPU compute RGBD PNG/cubemap → rgba16float decode |
 | `src/loader-hdr/load-hdr.ts` | ~102 lines | HDR environment loader orchestrator, deferred background builder |
 | `src/loader-hdr/hdr-parser.ts` | ~218 lines | RGBE CPU parser, RLE scanline decoder, equirect SH computation |
 | `src/loader-hdr/hdr-ibl-pipeline.ts` | ~400 lines | GPU compute: equirect→cubemap, GGX prefilter, BRDF LUT generation |

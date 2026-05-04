@@ -1,26 +1,8 @@
-/** RGBD PNG decoder — decodes Babylon's pre-baked RGBD-encoded textures
- *  (BRDF LUT + cubemap faces) into rgba16float via a shared compute pipeline.
- *
- *  Both callers live in the .env loader path; sharing the shader module and
- *  pipeline cache avoids duplicating ~700 bytes of WGSL + boilerplate.
- */
+/** RGBD decoder — decodes Babylon BRDF PNG and .env cubemap faces into rgba16float. */
 
 import type { EngineContextInternal } from "../engine/engine.js";
 
-// Single WGSL; `flipY` override lets cubemap face upload flip Y (BJS uses
-// invertY=true) while the BRDF LUT path uses a direct copy.
-const WGSL =
-    `override flipY:bool=false;` +
-    `@group(0) @binding(0) var inputTex:texture_2d<f32>;` +
-    `@group(0) @binding(1) var outputTex:texture_storage_2d<rgba16float,write>;` +
-    `@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) gid:vec3u){` +
-    `let dims=textureDimensions(inputTex);` +
-    `if(gid.x>=dims.x||gid.y>=dims.y){return;}` +
-    `let srcY=select(gid.y,dims.y-1u-gid.y,flipY);` +
-    `let rgba=textureLoad(inputTex,vec2u(gid.x,srcY),0);` +
-    `let a=max(rgba.a,1.0/255.0);` +
-    `textureStore(outputTex,vec2u(gid.x,gid.y),vec4f(pow(rgba.rgb,vec3f(2.2))/a,1.0));` +
-    `}`;
+const WGSL = `override f:bool=false;@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var o:texture_storage_2d<rgba16float,write>;@compute @workgroup_size(8,8)fn main(@builtin(global_invocation_id)g:vec3u){let d=textureDimensions(t);if(any(g.xy>=d)){return;}let c=textureLoad(t,vec2u(g.x,select(g.y,d.y-1u-g.y,f)),0);textureStore(o,g.xy,vec4f(pow(c.rgb,vec3f(2.2))/max(c.a,1.0/255.0),1));}`;
 
 let _device: GPUDevice | null = null;
 let _module: GPUShaderModule | null = null;
@@ -40,7 +22,7 @@ function getPipeline(device: GPUDevice, flipY: boolean): GPUComputePipeline {
     }
     const p = device.createComputePipeline({
         layout: "auto",
-        compute: { module: _module!, entryPoint: "main", constants: { flipY: flipY ? 1 : 0 } },
+        compute: { module: _module!, entryPoint: "main", constants: { f: flipY ? 1 : 0 } },
     });
     if (flipY) {
         _flip = p;
@@ -68,7 +50,7 @@ function encodeDispatch(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline
     pass.end();
 }
 
-/** Decode a single RGBD PNG (e.g. BRDF LUT) → rgba16float 2D texture. No Y-flip. */
+/** Decode a single RGBD PNG (e.g. BRDF LUT) -> rgba16float 2D texture. No Y-flip. */
 export function decodeBrdfPng(engine: EngineContextInternal, image: ImageBitmap): GPUTexture {
     const device = engine.device;
     const pipeline = getPipeline(device, false);

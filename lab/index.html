@@ -1725,6 +1725,10 @@
                             <div class="arch-mod-name">Render Pipeline</div>
                             <div class="arch-mod-sub">Renderable · pre-pass · scene uniforms · opaque/transparent ordering</div>
                         </div>
+                        <div class="arch-mod arch-mod-render">
+                            <div class="arch-mod-name">Effects</div>
+                            <div class="arch-mod-sub">EffectWrapper · fullscreen triangle · RenderTarget output · uniforms · texture/sampler bindings</div>
+                        </div>
                     </div>
                     <div class="arch-modules">
                         <div class="arch-mod arch-mod-core">
@@ -1871,6 +1875,30 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td></td>
+                        </tr>
+                        <tr>
+                            <td>EffectRenderer / EffectWrapper</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scenes 74-76 — direct swapchain renderer plus RTT task path</td>
+                        </tr>
+                        <tr>
+                            <td>Fullscreen Effect Passes</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Single fullscreen triangle, no vertex/index buffers</td>
+                        </tr>
+                        <tr>
+                            <td>Effect RenderTarget Output</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 75 — render effect into texture, then use it in a material</td>
+                        </tr>
+                        <tr>
+                            <td>Effect Texture Bindings</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 76 — Texture2D + sampler binding via setEffectTexture()</td>
                         </tr>
 
                         <!-- Materials -->
@@ -2917,9 +2945,9 @@
                         </tr>
                         <tr>
                             <td>Post-Processing Pipeline</td>
-                            <td>—</td>
+                            <td>⚡</td>
                             <td>✅</td>
-                            <td>Bloom, DOF, SSAO, FXAA, etc.</td>
+                            <td>Low-level EffectWrapper passes are supported; no built-in Bloom/DOF/SSAO stack yet</td>
                         </tr>
                         <tr>
                             <td>GUI (2D / 3D UI)</td>

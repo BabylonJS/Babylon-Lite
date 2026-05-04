@@ -69,7 +69,7 @@ async function loadScene73BlockEmitter(className: string): Promise<any> {
         case "InputBlock":
             return (await import("../../../packages/babylon-lite/src/material/node/blocks/input-block.js")).emitter;
         case "PBRMetallicRoughnessBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/pbr-metallic-roughness-block.js")).emitter;
+            return (await import("../../../packages/babylon-lite/src/material/node/blocks/pbr-metallic-roughness-block-full.js")).emitter;
         case "PerturbNormalBlock":
             return (await import("../../../packages/babylon-lite/src/material/node/blocks/perturb-normal.js")).emitter;
         case "ReflectionBlock":

@@ -145,6 +145,8 @@ babylon-lite/
 │   │   │   ├── renderable.ts      # Renderable, PrePassRenderable, SceneUniformUpdater
 │   │   │   ├── scene-helpers.ts   # Shared helper utilities
 │   │   │   └── lights-ubo.ts     # Multi-light UBO packing
+│   │   ├── effect/
+│   │   │   └── effect-renderer.ts # EffectWrapper fullscreen passes + RenderTarget output
 │   │   ├── mesh/
 │   │   │   ├── mesh.ts            # Mesh type and GPU upload
 │   │   │   ├── mesh-factories.ts  # High-level createSphere/Box/Torus/Ground/Cylinder/Plane/Disc/Polyhedron/Ribbon/Tube/Extrude
@@ -196,10 +198,10 @@ babylon-lite/
 │   │   │   ├── gltf-material.ts   # glTF material → PbrMaterialProps
 │   │   │   └── gltf-animation.ts  # glTF animation extraction
 │   │   ├── loader-env/
-│   │   │   ├── load-env.ts        # .env parser, BRDF LUT generation, cubemap upload
+│   │   │   ├── load-env.ts        # .env parser, RGBD decode, cubemap upload
 │   │   │   ├── load-dds-env.ts    # DDS environment loading
 │   │   │   ├── env-helpers.ts     # Environment helper utilities
-│   │   │   └── brdf-rgbd-decode.ts # BRDF RGBD decode helpers
+│   │   │   └── rgbd-decode.ts     # RGBD decode helpers
 │   │   ├── loader-hdr/
 │   │   │   ├── load-hdr.ts        # loadHdrEnvironment() — HDR environment pipeline
 │   │   │   ├── hdr-parser.ts      # RGBE file parser
@@ -210,12 +212,14 @@ babylon-lite/
 │   │       ├── load-skybox.ts     # High-level skybox loader
 │   │       └── skybox-renderable.ts # Skybox → deferred Renderable builder
 │
-├── lab/               # Dev sandbox (Scenes 1–22)
+├── lab/               # Dev sandbox (Scenes 1–76)
 │   ├── index.html
 │   ├── src/lite/scene1.ts          # Scene 1: BoomBox PBR
 │   ├── src/lite/scene2.ts          # Scene 2: Sphere + DirectionalLight
-│   ├── ...                         # Scenes 3–21
-│   ├── src/lite/scene22.ts         # Scene 22: PBR Shadows
+│   ├── ...                         # Scenes 3–73
+│   ├── src/lite/scene74.ts         # Scene 74: EffectRenderer fullscreen pass
+│   ├── src/lite/scene75.ts         # Scene 75: EffectWrapper render-to-texture sphere
+│   ├── src/lite/scene76.ts         # Scene 76: EffectWrapper texture binding
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── vite.config.ts
@@ -223,8 +227,10 @@ babylon-lite/
 ├── reference/                     # Per-scene reference data
 │   ├── scene1-boombox/            # Scene 1 reference data
 │   ├── scene2-sphere/             # Scene 2 reference data
-│   ├── ...                        # Scenes 3–21
-│   ├── scene22-pbr-shadows/       # Scene 22 reference data
+│   ├── ...                        # Scenes 3–73
+│   ├── scene74-effect-renderer/   # EffectRenderer fullscreen golden
+│   ├── scene75-effect-rtt-sphere/ # EffectWrapper RTT golden
+│   ├── scene76-effect-texture/    # EffectWrapper texture-binding golden
 │   └── (each contains golden screenshots for parity tests)
 │
 └── docs/architecture/
@@ -272,6 +278,17 @@ loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size?: number): Pr
 
 // Texture factories
 createSolidTexture2D(engine: Engine, r: number, g: number, b: number, a?: number): Texture2D
+
+// EffectRenderer-style fullscreen passes
+createEffectWrapper(engine: Engine, options: EffectWrapperOptions): EffectWrapper
+setEffectUniforms(wrapper: EffectWrapper, data: ArrayBuffer | ArrayBufferView | Record<string | number, ArrayBuffer | ArrayBufferView>): void
+setEffectTexture(wrapper: EffectWrapper, bindingNameOrIndex: string | number, texture: Texture2D): void
+createEffectRenderer(engine: Engine, effect: EffectWrapper, options?: EffectRendererOptions): EffectRenderer
+registerEffectRenderer(renderer: EffectRenderer): void
+unregisterEffectRenderer(renderer: EffectRenderer): void
+disposeEffectRenderer(renderer: EffectRenderer): void
+createEffectRenderTask(config: EffectRenderTaskConfig, engine: Engine, scene: SceneContext): EffectRenderTask
+disposeEffectWrapper(wrapper: EffectWrapper): void
 
 // Lights
 createHemisphericLight(direction?: [number,number,number], intensity?: number): HemisphericLight
@@ -1246,10 +1263,10 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/loader-gltf/gltf-parser.ts` | glTF JSON parsing helpers | — |
 | `src/loader-gltf/gltf-material.ts` | glTF material → PbrMaterialProps | — |
 | `src/loader-gltf/gltf-animation.ts` | glTF animation extraction | — |
-| `src/loader-env/load-env.ts` | .env parser + BRDF gen | 240 |
+| `src/loader-env/load-env.ts` | .env parser + RGBD decode | 240 |
 | `src/loader-env/load-dds-env.ts` | DDS environment loading | — |
 | `src/loader-env/env-helpers.ts` | Environment helper utilities | — |
-| `src/loader-env/brdf-rgbd-decode.ts` | BRDF RGBD decode helpers | — |
+| `src/loader-env/rgbd-decode.ts` | Shared RGBD decode helpers | — |
 | `src/loader-hdr/load-hdr.ts` | HDR environment pipeline | — |
 | `src/loader-hdr/hdr-parser.ts` | RGBE file parser | — |
 | `src/loader-hdr/hdr-ibl-pipeline.ts` | GPU compute IBL from HDR | — |
@@ -1257,4 +1274,4 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/loader-skybox/load-skybox.ts` | High-level skybox loader | — |
 | `src/loader-skybox/skybox-renderable.ts` | Skybox → Renderable builder | — |
 | `lab/src/lite/scene1.ts` | Scene 1: BoomBox PBR | 44 |
-| `lab/src/lite/scene*.ts` | Scenes 1–22 (dev sandbox) | — |
+| `lab/src/lite/scene*.ts` | Scenes 1–76 (dev sandbox) | — |

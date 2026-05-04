@@ -12,7 +12,7 @@
  *  so each block tree-shakes independently.
  */
 
-import type { NodeBuildState, NodeEmitContext, NodeExpr, NodeGraph, NodeValueType, Stage, StageState, BlockEmitter } from "./node-types.js";
+import type { NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, NodeGraph, NodeValueType, Stage, StageState, BlockEmitter } from "./node-types.js";
 import { WGSL } from "./node-types.js";
 
 // ─── Build-state construction ───────────────────────────────────────
@@ -34,6 +34,7 @@ export function createBuildState(): NodeBuildState {
         nodeUboFields: [],
         bindings: [],
         textures: [],
+        pbrMrHelperRequests: [],
         nextTemp: 0,
         usesLightsUbo: false,
         usesMorphTargets: false,
@@ -173,15 +174,36 @@ async function defaultBlockLoader(className: string): Promise<BlockEmitter> {
     return (await defaultRegistry).loadBlockEmitter(className);
 }
 
+function pbrMrBlockNeedsFullEmitter(block: NodeBlock): boolean {
+    return (
+        (block.serialized as { enableSpecularAntiAliasing?: boolean }).enableSpecularAntiAliasing === true ||
+        !!block.inputs.get("clearcoat")?.source ||
+        !!block.inputs.get("sheen")?.source ||
+        !!block.inputs.get("subsurface")?.source ||
+        !!block.inputs.get("anisotropy")?.source
+    );
+}
+
+function graphNeedsFullPbrMrEmitter(graph: NodeGraph): boolean {
+    for (const block of graph.blocks.values()) {
+        if (block.className === "PBRMetallicRoughnessBlock" && pbrMrBlockNeedsFullEmitter(block)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export async function loadGraphEmitters(graph: NodeGraph, blockLoader: (className: string) => Promise<BlockEmitter> = defaultBlockLoader): Promise<Map<string, BlockEmitter>> {
     const classNames = new Set<string>();
     for (const b of graph.blocks.values()) {
         classNames.add(b.className);
     }
     const map = new Map<string, BlockEmitter>();
+    const useFullPbrMrEmitter = blockLoader === defaultBlockLoader && graphNeedsFullPbrMrEmitter(graph);
     await Promise.all(
         Array.from(classNames).map(async (className) => {
-            const e = await blockLoader(className);
+            const loaderKey = className === "PBRMetallicRoughnessBlock" && useFullPbrMrEmitter ? "PBRMetallicRoughnessBlock__full" : className;
+            const e = await blockLoader(loaderKey);
             map.set(className, e);
         })
     );
