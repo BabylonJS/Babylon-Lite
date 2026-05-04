@@ -76,6 +76,8 @@ interface EffectRenderTaskInternal extends EffectRenderTask {
     _targetSignature: RenderTargetSignature;
     _renderPassDescriptor: GPURenderPassDescriptor;
     _colorAttachment: GPURenderPassColorAttachment;
+    _pipeline: GPURenderPipeline | null;
+    _bindGroup: GPUBindGroup | null;
 }
 
 // ─── Direct swapchain renderer (no scene / frame graph required) ─────────────
@@ -112,6 +114,8 @@ interface EffectRendererInternal extends EffectRenderer {
     _targetSignature: RenderTargetSignature;
     _renderPassDescriptor: GPURenderPassDescriptor;
     _colorAttachment: GPURenderPassColorAttachment;
+    _pipeline: GPURenderPipeline | null;
+    _bindGroup: GPUBindGroup | null;
     _disposed: boolean;
 }
 
@@ -166,6 +170,7 @@ export function setEffectTexture(wrapper: EffectWrapper, bindingNameOrIndex: str
 export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: EngineContext, scene: SceneContext): EffectRenderTask {
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;
+    const effect = config.effect as EffectWrapperInternal;
     const rt = config.target;
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
     const sampleCount = rt.descriptor.sampleCount ?? 1;
@@ -187,8 +192,12 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
         _targetSignature: targetSignature,
         _renderPassDescriptor: { label: config.name, colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
+        _pipeline: null,
+        _bindGroup: null,
         record(): void {
             buildRenderTarget(rt, eng);
+            task._pipeline = getEffectPipeline(effect, task._targetSignature);
+            task._bindGroup = getEffectBindGroup(effect);
             patchColorAttachment(task, eng);
         },
         execute(): number {
@@ -196,20 +205,24 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
             if (!encoder) {
                 return 0;
             }
-            ensureTargetSize(task, eng);
             patchColorAttachment(task, eng);
-            const pipeline = getEffectPipeline(config.effect as EffectWrapperInternal, task._targetSignature);
-            const bindGroup = getEffectBindGroup(config.effect as EffectWrapperInternal);
+            const pipeline = task._pipeline;
+            if (!pipeline) {
+                throw new Error(`EffectRenderTask "${task.name}" executed before record().`);
+            }
             const pass = encoder.beginRenderPass(task._renderPassDescriptor);
             pass.setPipeline(pipeline);
-            if (bindGroup) {
-                pass.setBindGroup(0, bindGroup);
+            if (task._bindGroup) {
+                pass.setBindGroup(0, task._bindGroup);
             }
             pass.draw(3);
             pass.end();
             return 1;
         },
         dispose(): void {
+            disposeRenderTarget(task._rt);
+            task._pipeline = null;
+            task._bindGroup = null;
             task._renderPassDescriptor = { colorAttachments: [] };
         },
     };
@@ -278,6 +291,8 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
         _targetSignature: targetSignature,
         _renderPassDescriptor: renderPassDescriptor,
         _colorAttachment: colorAttachment,
+        _pipeline: null,
+        _bindGroup: null,
         _disposed: false,
         _update(): void {},
         _record(): number {
@@ -290,12 +305,14 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
             if (!encoder) {
                 return 0;
             }
-            const pipeline = getEffectPipeline(er._effect, er._targetSignature);
-            const bindGroup = getEffectBindGroup(er._effect);
+            const pipeline = er._pipeline;
+            if (!pipeline) {
+                throw new Error(`EffectRenderer "${er.name}" recorded before registerEffectRenderer().`);
+            }
             const pass = encoder.beginRenderPass(er._renderPassDescriptor);
             pass.setPipeline(pipeline);
-            if (bindGroup) {
-                pass.setBindGroup(0, bindGroup);
+            if (er._bindGroup) {
+                pass.setBindGroup(0, er._bindGroup);
             }
             pass.draw(3);
             pass.end();
@@ -313,7 +330,9 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
 
 /** Register the effect renderer with its engine. Idempotent — a second call is a no-op. */
 export function registerEffectRenderer(er: EffectRenderer): void {
-    registerRenderingContext((er as EffectRendererInternal)._engine, er);
+    const internal = er as EffectRendererInternal;
+    prepareEffectRenderer(internal);
+    registerRenderingContext(internal._engine, er);
 }
 
 /** Unregister the effect renderer from its engine. No-op if not registered. */
@@ -383,10 +402,6 @@ function ensureRtCanvasSize(rt: RenderTarget, eng: EngineContextInternal): void 
         return;
     }
     buildRenderTarget(rt, eng);
-}
-
-function ensureTargetSize(task: EffectRenderTaskInternal, eng: EngineContextInternal): void {
-    ensureRtCanvasSize(task._rt, eng);
 }
 
 function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: RenderTargetSignature): GPURenderPipeline {
@@ -481,6 +496,11 @@ function getEffectBindGroup(wrapper: EffectWrapperInternal): GPUBindGroup | null
     return wrapper._bindGroup;
 }
 
+function prepareEffectRenderer(er: EffectRendererInternal): void {
+    er._pipeline ??= getEffectPipeline(er._effect, er._targetSignature);
+    er._bindGroup = getEffectBindGroup(er._effect);
+}
+
 function bindGroupEntry(wrapper: EffectWrapperInternal, layout: EffectBindingLayout): GPUBindGroupEntry {
     if (layout.kind === "uniform") {
         const slot = findUniformSlot(wrapper, layout.binding);
@@ -521,7 +541,7 @@ function matchesBinding(layout: EffectBindingLayout, bindingNameOrIndex: string 
 function writeUniformSlot(wrapper: EffectWrapperInternal, slot: EffectUniformSlot, data: ArrayBuffer | ArrayBufferView): void {
     const bytes = toBytes(data);
     if (bytes.byteLength > slot.byteLength) {
-        throw new Error(`setEffectUniforms: ${bytes.byteLength} bytes exceeds uniform binding ${slot.layout.binding} size ${slot.byteLength}.`);
+        throw new Error(`writeUniformSlot: ${bytes.byteLength} bytes exceeds uniform binding ${slot.layout.binding} size ${slot.byteLength}.`);
     }
     wrapper._engine.device.queue.writeBuffer(slot.buffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }

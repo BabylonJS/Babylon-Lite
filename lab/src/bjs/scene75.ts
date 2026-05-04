@@ -75,16 +75,13 @@ void main(void) {
     scene.onAfterRenderObservable.add(() => {
         canvas.dataset.drawCalls = String(eng._drawCalls?.current ?? 0);
     });
+    scene.onAfterRenderObservable.addOnce(() => {
+        canvas.dataset.initMs = String(performance.now() - initStart);
+        canvas.dataset.ready = "true";
+    });
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
-
-    renderer.render(wrapper, renderTexture);
-    scene.render();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-
-    canvas.dataset.initMs = String(performance.now() - initStart);
-    canvas.dataset.ready = "true";
 })().catch((err) => {
     console.error(err);
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
