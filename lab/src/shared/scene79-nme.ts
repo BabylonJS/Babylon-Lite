@@ -159,8 +159,8 @@ const red = binary("DivideBlock", "RedAverage", rSumB, three);
 
 const curveInOutSine = curve("CurveEaseInOutSineX", 2, uvSplit, "x");
 const curveInQuad = curve("CurveEaseInQuadY", 3, uvSplit, "y");
-const curveOutBack = curve("CurveEaseOutBackX", 22, uvSplit, "x");
-const condLe = conditional("CondCurveLessOrEqual", 4, uvSplit, twoThirds, curveInQuad, curveOutBack, "x");
+const curveInBack = curve("CurveEaseInBackX", 21, uvSplit, "x");
+const condLe = conditional("CondCurveLessOrEqual", 4, uvSplit, twoThirds, curveInQuad, curveInBack, "x");
 const gSumA = binary("AddBlock", "GAddSineConditional", curveInOutSine, condLe);
 const gSumB = binary("AddBlock", "GAddQuad", gSumA, curveInQuad);
 const green = binary("DivideBlock", "GreenAverage", gSumB, three);
