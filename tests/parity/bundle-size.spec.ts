@@ -26,6 +26,21 @@ const BUNDLE_INFO_DIR = resolve(__dirname, "../../lab/public/bundle/bundle-info"
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
 const SCENES = allScenes.filter((s) => s.maxRawKB != null);
 
+interface BundleInfoModule {
+    id: string;
+}
+
+interface BundleInfoChunk {
+    file: string;
+    modules: BundleInfoModule[];
+}
+
+function getRuntimeModuleIds(sceneKey: string, runtimeFiles: readonly string[]): string[] {
+    const info = JSON.parse(readFileSync(resolve(BUNDLE_INFO_DIR, `${sceneKey}.json`), "utf-8")) as { chunks: BundleInfoChunk[] };
+    const loaded = new Set(runtimeFiles);
+    return info.chunks.filter((chunk) => loaded.has(chunk.file)).flatMap((chunk) => chunk.modules.map((module) => module.id.replace(/\\/g, "/")));
+}
+
 for (const scene of SCENES) {
     test(`${scene.name} bundle ≤ ${scene.maxRawKB} KB raw`, async ({ page }) => {
         const jsPayloads: { url: string; file: string; body: Buffer }[] = [];
@@ -69,6 +84,9 @@ for (const scene of SCENES) {
             console.log(d);
         }
 
+        const runtimeFiles = jsPayloads.map((p) => p.file);
+        const runtimeModules = getRuntimeModuleIds(`scene${scene.id}`, runtimeFiles);
+
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 
         // Pure-2D ceiling: scenes 50/51 must NOT pull any scene/* code.
@@ -80,21 +98,20 @@ for (const scene of SCENES) {
 
         // Scene 52 — HUD on 3D — uses SpriteRenderer for the HUD overlay; the
         // depth-hosted Renderable wrapper (sprite-renderable.js) must NOT be
-        // pulled in. If it is, scene-core's dynamic import is being eager-resolved
-        // somewhere or scene52 accidentally added the layer via addToScene.
+        // pulled in. If it is, scene52 accidentally used the depth-hosted
+        // addSprite2DLayerToScene helper instead of the HUD SpriteRenderer path.
         if (scene.slug === "scene52-hud-on-3d") {
-            const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => /sprite-renderable/.test(f));
-            expect(offenders, `scene52 HUD must not load sprite-renderable.js; found: ${offenders.join(", ")}`).toEqual([]);
+            const offenders = runtimeModules.filter((id) => /\/sprite\/(sprite-renderable|sprite-scene)\.ts$/.test(id));
+            expect(offenders, `scene52 HUD must not load depth-hosted sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
-        // (proves scene-core.addToScene's dynamic import works) and MUST load
+        // (proves the sprite-owned scene helper is active) and MUST load
         // scene-core (it is a real 3D scene, not pure-2D).
         if (scene.slug === "scene53-depth-hosted-sprites") {
-            const files = jsPayloads.map((p) => p.url.split("/").pop()!);
             expect(
-                files.some((f) => /sprite-renderable/.test(f)),
-                `scene53 depth-hosted MUST load sprite-renderable.js; loaded: ${files.join(", ")}`
+                runtimeModules.some((id) => /\/sprite\/sprite-renderable\.ts$/.test(id)),
+                `scene53 depth-hosted MUST include sprite-renderable.ts; loaded modules: ${runtimeModules.join(", ")}`
             ).toBe(true);
         }
 
@@ -103,8 +120,8 @@ for (const scene of SCENES) {
         // NME demos with no sprites; 1-40 are core 3D.
         const SPRITE_USING_IDS = new Set([50, 51, 52, 53]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
-            const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => /sprite-(2d|pipeline|renderer|renderable)/.test(f));
-            expect(offenders, `non-sprite ${scene.slug} must not load sprite chunks; found: ${offenders.join(", ")}`).toEqual([]);
+            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-(2d|pipeline|renderer|renderable|scene)\.ts$/.test(id));
+            expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
     });
 }

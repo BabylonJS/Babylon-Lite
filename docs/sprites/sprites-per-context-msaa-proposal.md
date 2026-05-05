@@ -39,12 +39,12 @@ Scene 50 and Scene 51 are pure SpriteRenderer scenes. They draw through the dire
 
 Scene 52 demonstrates the mixed HUD case: a normal scene frame graph renders and resolves first, then the HUD `SpriteRenderer` is registered after the scene with `clear: false` so it loads the resolved swapchain color and draws the 2D overlay at sampleCount=1.
 
-Scene 53 demonstrates depth-hosted sprites. Those do not use `SpriteRenderer`; `addToScene` creates a scene renderable, so the sprites inherit the frame-graph target's color/depth attachments and sample count.
+Scene 53 demonstrates depth-hosted sprites. Those do not use `SpriteRenderer`; `addSprite2DLayerToScene` creates a scene renderable, so the sprites inherit the frame-graph target's color/depth attachments and sample count.
 
 ## Risks & mitigations
 
 - **Parity**: pure-2D/HUD sprites render with the same direct sampleCount=1 path in lab and tests; depth-hosted sprites use the scene target and compare against BJS with the scene's MSAA behavior.
-- **Bundle size**: pure-2D scenes import `SpriteRenderer` only; depth-hosted support stays behind the `addToScene` dynamic import.
+- **Bundle size**: pure-2D scenes import `SpriteRenderer` only; depth-hosted support stays in the sprite-owned `addSprite2DLayerToScene` helper.
 - **Pipeline cache**: keyed on sample count, depth state, and depth-stencil format, so direct HUD pipelines and depth-hosted scene pipelines do not alias.
 - **Mixed scene/HUD canvases**: supported for the shipped case because the scene resolves into the swapchain before the HUD pass loads it. This is not a general per-context attachment system.
 

@@ -2,7 +2,7 @@
 //
 // Showcases TWO things at once, both new in PR3:
 //   1. Sprites participating in the scene's depth attachment via
-//      `addToScene(layer)` + `depth: "test-write"` — they can occlude /
+//      `addSprite2DLayerToScene(layer)` + `depth: "test-write"` — they can occlude /
 //      be occluded by 3D meshes.
 //   2. Per-instance Z (slot [10] of the per-instance vertex buffer) —
 //      multiple sprites in the SAME layer at DIFFERENT depths.
@@ -28,6 +28,7 @@
 
 import {
     addSprite2DIndex,
+    addSprite2DLayerToScene,
     addToScene,
     createArcRotateCamera,
     createBox,
@@ -87,7 +88,7 @@ async function main(): Promise<void> {
         depth: "test-write",
     });
     addPerInstanceZSprites(sprites, canvas);
-    addToScene(scene, sprites);
+    addSprite2DLayerToScene(scene, sprites);
 
     await registerScene(engine, scene);
     await startEngine(engine);
