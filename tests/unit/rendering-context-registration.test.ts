@@ -8,7 +8,10 @@ import {
     type EngineContextInternal,
     type RenderingContext,
 } from "../../packages/babylon-lite/src/engine/engine";
+import { addTaskAtStart } from "../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
+import type { Task } from "../../packages/babylon-lite/src/frame-graph/task";
 import { createSceneContext, disposeScene, registerScene, unregisterScene } from "../../packages/babylon-lite/src/scene/scene";
+import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
 
 const gpuGlobals = globalThis as typeof globalThis & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -111,5 +114,30 @@ describe("registerScene / unregisterScene", () => {
         disposeScene(scene);
 
         expect(list).toEqual([]);
+    });
+
+    it("records frame-graph tasks added before scene registration", async () => {
+        const engine = makeMockEngine() as EngineContextInternal;
+        const scene = createSceneContext(engine) as SceneContextInternal;
+        let recorded = false;
+        const task: Task = {
+            name: "pre-scene-task",
+            engine,
+            scene,
+            record(): void {
+                recorded = true;
+            },
+            execute(): number {
+                return 1;
+            },
+            dispose(): void {
+                return;
+            },
+        };
+
+        addTaskAtStart(scene, task);
+        await registerScene(engine, scene);
+
+        expect(recorded).toBe(true);
     });
 });

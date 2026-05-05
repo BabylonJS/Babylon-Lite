@@ -224,7 +224,6 @@ export function createSceneContext(engine: EngineContext): SceneContext {
             ctx
         )
     );
-    void fg.build();
     ctx._disposables.push(() => fg.dispose());
     return ctx;
 }
@@ -385,6 +384,7 @@ export async function registerScene(engine: EngineContext, scene: SceneContext):
     }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
+    await ctx._frameGraph.build();
     registerRenderingContext(engine, ctx);
 }
 
