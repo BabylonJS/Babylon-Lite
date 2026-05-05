@@ -68,11 +68,11 @@ translucencyDirect += (1.0 / PI) * wrapNdotL * ssTransmittance * lightAtten * li
 // Also: scale direct diffuse by (1-ssI) and add translucencyDirect lobe.
 const SS_IBL_MOD = `{
 let N_back = -N_env;
-let envIrrBack = (scene.vSphericalL00
-  + scene.vSphericalL1_1 * N_back.y + scene.vSphericalL10 * N_back.z + scene.vSphericalL11 * N_back.x
-  + scene.vSphericalL2_2 * (N_back.y * N_back.x) + scene.vSphericalL2_1 * (N_back.y * N_back.z)
-  + scene.vSphericalL20 * (3.0 * N_back.z * N_back.z - 1.0) + scene.vSphericalL21 * (N_back.z * N_back.x)
-  + scene.vSphericalL22 * (N_back.x * N_back.x - N_back.y * N_back.y)) * material.environmentIntensity;
+let envIrrBack = (scene.vSphericalL00.rgb
+  + scene.vSphericalL1_1.rgb * N_back.y + scene.vSphericalL10.rgb * N_back.z + scene.vSphericalL11.rgb * N_back.x
+  + scene.vSphericalL2_2.rgb * (N_back.y * N_back.x) + scene.vSphericalL2_1.rgb * (N_back.y * N_back.z)
+  + scene.vSphericalL20.rgb * (3.0 * N_back.z * N_back.z - 1.0) + scene.vSphericalL21.rgb * (N_back.z * N_back.x)
+  + scene.vSphericalL22.rgb * (N_back.x * N_back.x - N_back.y * N_back.y)) * material.environmentIntensity;
 let refractionIrradiance = envIrrBack * ssTransmittance;
 color -= finalIrradiance * ssIntensity;
 color += refractionIrradiance * occlusion;

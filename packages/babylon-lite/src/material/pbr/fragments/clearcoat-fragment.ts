@@ -127,7 +127,7 @@ let ccR_raw = reflect(-V, ${N});
 let ccR_ibl = rotateY(ccR_raw, scene.envRotationY);
 let ccNdotV_ibl = abs(dot(${N}, V)) + 0.0000001;
 ${alphaG}
-var ccSpecLod_ibl = log2(cubemapDim * ccAlphaG_ibl) * scene.lodGenerationScale;
+var ccSpecLod_ibl = log2(cubemapDim * ccAlphaG_ibl) * scene.vImageInfos.z;
 let ccEnvRadiance_ibl = textureSampleLevel(iblTexture, iblSampler, ccR_ibl, clamp(ccSpecLod_ibl, 0.0, maxLod)).rgb * material.environmentIntensity;
 let ccBrdf_ibl = textureSample(brdfLUT, brdfSampler_, vec2<f32>(ccNdotV_ibl, ccRough_ibl)).rgb;
 ${ehoLine}

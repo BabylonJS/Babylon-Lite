@@ -14,7 +14,6 @@
 
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
-import { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO } from "../../render/lights-ubo.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { getSceneBindGroupLayout, clearSceneBGLCache } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
@@ -284,10 +283,8 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
 
 // ─── Per-Mesh GPU Setup ─────────────────────────────────────────────
 
-export { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO };
-
-/** Build the per-mesh material/lights bind group (group 1). The mesh UBO,
- *  material UBO, and lights buffer are created/owned by the caller — this
+/** Build the per-mesh material bind group (group 1). The mesh UBO
+ *  and material UBO are created/owned by the caller — this
  *  function only assembles the bind group entries that match the composer's
  *  binding layout.
  *
@@ -297,12 +294,10 @@ export function createStandardMeshBindGroup(
     bindings: StandardShaderBindings,
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
-    lightsBuffer: GPUBuffer,
     material: StandardMaterialProps
 ): GPUBindGroup {
     const device = engine.device;
     const features = bindings.features;
-    const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
 
@@ -310,7 +305,6 @@ export function createStandardMeshBindGroup(
     let nextBinding = 0;
     const entries: GPUBindGroupEntry[] = [
         { binding: nextBinding++, resource: { buffer: meshUBO } },
-        { binding: nextBinding++, resource: { buffer: lightsBuffer } },
         { binding: nextBinding++, resource: { buffer: materialUBO } },
     ];
 
@@ -319,8 +313,8 @@ export function createStandardMeshBindGroup(
         entries.push({ binding: nextBinding++, resource: tex.texture.createView() }, { binding: nextBinding++, resource: tex.sampler });
     }
 
-    // UV params UBO (always when UV or shadow is needed).
-    if (hasShadow || needsUV) {
+    // UV params UBO (only when UVs are actually emitted).
+    if (needsUV) {
         const uvData = new Float32Array(4);
         const scaleX = material.uvScale[0];
         let scaleY = material.uvScale[1];

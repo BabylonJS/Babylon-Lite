@@ -1,5 +1,7 @@
 /** Single-light WGSL helpers for the PBR template.
- *  Used for exactly one non-shadow light; avoids the generic multi-light loop. */
+ *  Used for exactly one non-shadow affected mesh light; avoids the generic multi-light loop. */
+
+import { MAX_LIGHTS } from "../../../light/types.js";
 
 export const SINGLE_LIGHT_STRUCTS = `
 struct LightEntry {
@@ -10,7 +12,7 @@ vLightDirection: vec4<f32>,
 };
 struct lightsUniforms {
 count: u32, _p0: u32, _p1: u32, _p2: u32,
-lights: array<LightEntry, 1>,
+    lights: array<LightEntry, ${MAX_LIGHTS}>,
 };
 `;
 
@@ -29,7 +31,7 @@ var directSpecular = coloredFresnel * D * G * NdotL * lightColor * lightAtten * 
 export function getSingleLightBlock(type: string): string {
     let light = "";
     if (type === "hemispheric") {
-        light = `let entry = lights.lights[0];
+        light = `let entry = lights.lights[mli(0u)];
 let L = normalize(entry.vLightData.xyz);
 let NdotL = dot(N, L) * 0.5 + 0.5;
 let lightAtten = 1.0;
@@ -37,34 +39,38 @@ let lightColor = entry.vLightDiffuse.rgb;
 let hemiDiffuse = mix(entry.vLightDirection.xyz, lightColor, NdotL);
 var directDiffuse = hemiDiffuse * surfaceAlbedo * material.directIntensity;`;
     } else if (type === "directional") {
-        light = `let entry = lights.lights[0];
+        light = `let entry = lights.lights[mli(0u)];
 let L = normalize(-entry.vLightData.xyz);
 let NdotL = max(dot(N, L), 0.0);
 let lightAtten = 1.0;
 let lightColor = entry.vLightDiffuse.rgb;
 var directDiffuse = surfaceAlbedo * (1.0 / PI) * NdotL * lightColor * material.directIntensity;`;
     } else if (type === "spot") {
-        light = `let entry = lights.lights[0];
+        light = `let entry = lights.lights[mli(0u)];
 let lightToFrag = entry.vLightData.xyz - input.worldPos;
 let lightDist = length(lightToFrag);
 let L = lightToFrag / max(lightDist, 0.0001);
 let NdotL = max(dot(N, L), 0.0);
-let spotC = max(0.0, dot(entry.vLightDirection.xyz, -L));
-let rangeAtt = max(0.0, 1.0 - lightDist / entry.vLightDiffuse.a);
-let lightAtten = select(0.0, rangeAtt * max(0.0, pow(spotC, entry.vLightSpecular.a)), spotC >= entry.vLightDirection.w);
+let spotC = dot(entry.vLightDirection.xyz, -L);
+let physicalFalloff = material.lightFalloffMode >= 0.5;
+let rangeAtt = select(max(0.0, 1.0 - lightDist / entry.vLightDiffuse.a), 1.0 / max(dot(lightToFrag, lightToFrag), 0.0000001), physicalFalloff);
+let standardDirFalloff = select(0.0, max(0.0, pow(max(spotC, 0.0), entry.vLightSpecular.a)), spotC >= entry.vLightDirection.w);
+let kappa = 6.64385618977 / max(1.0 - entry.vLightDirection.w, 0.0001);
+let physicalDirFalloff = exp2(kappa * (spotC - 1.0));
+let lightAtten = rangeAtt * select(standardDirFalloff, physicalDirFalloff, physicalFalloff);
 let lightColor = entry.vLightDiffuse.rgb;
 var directDiffuse = surfaceAlbedo * (1.0 / PI) * NdotL * lightColor * lightAtten * material.directIntensity;`;
     } else {
-        light = `let entry = lights.lights[0];
+        light = `let entry = lights.lights[mli(0u)];
 let lightToFrag = entry.vLightData.xyz - input.worldPos;
 let lightDist2 = dot(lightToFrag, lightToFrag);
 let L = normalize(lightToFrag);
 let NdotL = max(dot(N, L), 0.0);
 let range = entry.vLightDiffuse.a;
-let invR2 = 1.0 / range / range;
-let sf = lightDist2 * invR2;
-let rangeAtten = clamp(1.0 - sf * sf, 0.0, 1.0);
-let lightAtten = (rangeAtten * rangeAtten) / max(lightDist2, 0.0001);
+let physicalFalloff = material.lightFalloffMode >= 0.5;
+let physicalAtten = 1.0 / max(lightDist2, 0.0001);
+let standardAtten = max(0.0, 1.0 - sqrt(lightDist2) / range);
+let lightAtten = select(standardAtten, physicalAtten, physicalFalloff);
 let lightColor = entry.vLightDiffuse.rgb;
 var directDiffuse = surfaceAlbedo * (1.0 / PI) * NdotL * lightColor * lightAtten * material.directIntensity;`;
     }

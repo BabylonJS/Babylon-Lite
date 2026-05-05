@@ -35,13 +35,19 @@ export function createBuildState(): NodeBuildState {
         bindings: [],
         textures: [],
         pbrMrHelperRequests: [],
+        loopVariables: new Map(),
         nextTemp: 0,
         usesLightsUbo: false,
+        usesScreenSize: false,
+        usesFragDepth: false,
+        usesClipPlanes: false,
+        usesMeshAttributeExists: false,
         usesMorphTargets: false,
         usesEnv: false,
         usesClearcoat: false,
         usesSheen: false,
         usesAnisotropy: false,
+        usesIridescence: false,
         usesSubsurface: false,
         shadowLights: [],
         hasSkeleton: false,
@@ -180,7 +186,8 @@ function pbrMrBlockNeedsFullEmitter(block: NodeBlock): boolean {
         !!block.inputs.get("clearcoat")?.source ||
         !!block.inputs.get("sheen")?.source ||
         !!block.inputs.get("subsurface")?.source ||
-        !!block.inputs.get("anisotropy")?.source
+        !!block.inputs.get("anisotropy")?.source ||
+        !!block.inputs.get("iridescence")?.source
     );
 }
 

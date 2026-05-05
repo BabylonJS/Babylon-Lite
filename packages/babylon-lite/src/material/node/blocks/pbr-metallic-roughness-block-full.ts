@@ -1,7 +1,9 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } from "../node-types.js";
+import { MAX_LIGHTS } from "../../../light/types.js";
 import { buildPbrMrHelperFull } from "./pbr-mr-helper-full.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
+const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(block: NodeBlock, inputName: string, fallback: string, target: "vec3f" | "f32", stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): string {
     const input = block.inputs.get(inputName);
@@ -142,8 +144,24 @@ export const emitter: BlockEmitter = {
                 }
             }
         }
+        const iriInputRef = block.inputs.get("iridescence")?.source;
+        let useIridescence = false;
+        let iriIntensityExpr = "1.0";
+        let iriIorExpr = "1.3";
+        let iriThicknessExpr = "400.0";
+        if (iriInputRef) {
+            const iriBlk = ctx.graph.blocks.get(iriInputRef.blockId);
+            if (iriBlk && iriBlk.className === "IridescenceBlock") {
+                useIridescence = true;
+                state.usesIridescence = true;
+                ctx.resolveOutput(iriBlk, iriInputRef.outputName, stage, state);
+                iriIntensityExpr = resolveOptional(iriBlk, "intensity", "1.0", "f32", stage, state, ctx);
+                iriIorExpr = resolveOptional(iriBlk, "indexOfRefraction", "1.3", "f32", stage, state, ctx);
+                iriThicknessExpr = resolveOptional(iriBlk, "thickness", "400.0", "f32", stage, state, ctx);
+            }
+        }
         const useSpecularAA = (block.serialized as { enableSpecularAntiAliasing?: boolean }).enableSpecularAntiAliasing === true;
-        const helperKey = `${HELPER_KEY_PREFIX}_${reflectionConnected ? "env" : "noenv"}_${useClearcoat ? "cc" : "nocc"}_${remapClearcoatF0 ? "ccF0R" : "ccF0"}_${useSheen ? "sh" : "nosh"}_${useRefraction ? "refr" : "norefr"}_${useSubsurface ? "ss" : "noss"}_${useAnisotropy ? "ani" : "noani"}_${useShAlbedoScaling ? "shAS" : "noShAS"}_${useCcBump ? "ccB" : ""}_${useCcTint ? "ccT" : ""}_${useSpecularAA ? "aa" : "noaa"}`;
+        const helperKey = `${HELPER_KEY_PREFIX}_${reflectionConnected ? "env" : "noenv"}_${useClearcoat ? "cc" : "nocc"}_${remapClearcoatF0 ? "ccF0R" : "ccF0"}_${useSheen ? "sh" : "nosh"}_${useRefraction ? "refr" : "norefr"}_${useSubsurface ? "ss" : "noss"}_${useAnisotropy ? "ani" : "noani"}_${useIridescence ? "iri" : "noiri"}_${useShAlbedoScaling ? "shAS" : "noShAS"}_${useCcBump ? "ccB" : ""}_${useCcTint ? "ccT" : ""}_${useSpecularAA ? "aa" : "noaa"}`;
         state.fragment.helpers.set(
             helperKey,
             buildPbrMrHelperFull({
@@ -154,6 +172,7 @@ export const emitter: BlockEmitter = {
                 useRefraction,
                 useSubsurface,
                 useAnisotropy,
+                useIridescence,
                 useShAlbedoScaling,
                 useCcBump,
                 useCcTint,
@@ -179,10 +198,10 @@ export const emitter: BlockEmitter = {
             const ro = resolveOptional(block, "roughness", "0.5", "f32", stage, state, ctx);
             const ao = resolveOptional(block, "ambientOcc", "1.0", "f32", stage, state, ctx);
             const baseIorExpr = resolveOptional(block, "indexOfRefraction", "1.5", "f32", stage, state, ctx);
-            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `v4(1.0)`;
+            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
             state.fragment.body.push(
-                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${ccBumpExpr}, ${ccBumpUvExpr}, ${ccTintColorExpr}, ${ccTintAtDistanceExpr}, ${ccTintThicknessExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${baseIorExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${sf});`
+                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${ccBumpExpr}, ${ccBumpUvExpr}, ${ccTintColorExpr}, ${ccTintAtDistanceExpr}, ${ccTintThicknessExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${baseIorExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${iriIntensityExpr}, ${iriIorExpr}, ${iriThicknessExpr}, ${sf});`
             );
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         }

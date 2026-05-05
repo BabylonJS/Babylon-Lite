@@ -231,6 +231,8 @@ export async function attachCompareArtifacts(testInfo: TestInfo, actualPath: str
 export interface CaptureGoldenOptions {
     /** Scene ID number (e.g. 7 for scene7) */
     sceneId: number;
+    /** Force recapture even when a golden already exists on disk. */
+    force?: boolean;
     /** seekTime query param for animated scenes (omit for static) */
     seekTime?: number;
     /** Extra query string (without leading '?') appended to the ref page URL. */
@@ -247,7 +249,7 @@ export interface CaptureGoldenOptions {
  * screenshots the canvas, and saves as babylon-ref-golden.png.
  *
  * Skips capture if the golden file already exists on disk (committed references).
- * Set RECAPTURE_GOLDEN=true to force recapture.
+ * Set RECAPTURE_GOLDEN=true or pass force=true to force recapture.
  *
  * Must be called with the Page's browser (page.context().browser()).
  */
@@ -257,7 +259,7 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     const goldenPath = path.join(refDir, "babylon-ref-golden.png");
 
     // Skip capture if golden already exists (unless RECAPTURE_GOLDEN is set)
-    if (fs.existsSync(goldenPath) && !process.env.RECAPTURE_GOLDEN) {
+    if (fs.existsSync(goldenPath) && !opts.force && !process.env.RECAPTURE_GOLDEN) {
         return goldenPath;
     }
 

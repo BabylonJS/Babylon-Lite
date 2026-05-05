@@ -362,15 +362,6 @@
         "skipPerf": true
     },
     {
-        "id": 52,
-        "slug": "scene52-rtt-override",
-        "name": "Scene 52 — RTT with material override",
-        "maxMad": 0.01,
-        "maxRawKB": 75,
-        "description": "Frame-graph multi-pass authoring: sphere A (red) and box B in main; an offscreen 512×512 RTT renders A only, with a green override material from a different camera, and the RTT color is wired as B's diffuseTexture.",
-        "tags": ["std", "procedural", "frame-graph", "rtt", "multi-pass"]
-    },
-    {
         "id": 50,
         "slug": "scene50-sprite-grid",
         "name": "Scene 50 — Sprite Grid",
@@ -545,11 +536,128 @@
         "tags": ["procedural", "effect", "texture"]
     },
     {
+        "id": 77,
+        "slug": "scene77-nme-compat",
+        "name": "Scene 77 — NME Compatibility Blocks",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Node Material compatibility graph for editor-only/alias blocks: OppositeBlock computes 1 - uv.x, Elbow and Teleport In/Out pass the value through, and an inactive DebugBlock is parsed without changing shader output.",
+        "tags": ["nme", "procedural"]
+    },
+    {
+        "id": 78,
+        "slug": "scene78-nme-math",
+        "name": "Scene 78 — NME Scalar/Vector Math",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Single-plane Node Material graph covering scalar and vector math blocks: Divide, Mod, Reciprocal, Length, Distance, Cross, Reflect, Refract, ArcTan2, and Fresnel with UV-derived deterministic inputs.",
+        "tags": ["nme", "procedural", "math"]
+    },
+    {
+        "id": 79,
+        "slug": "scene79-nme-modes",
+        "name": "Scene 79 — NME Modes",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Single-plane Node Material graph covering NLerpBlock, ConditionalBlock, CurveBlock, WaveBlock, and RandomNumberBlock with UV-driven deterministic inputs, multiple condition/curve/wave modes, and Babylon.js-compatible getRand(seed.xy).",
+        "tags": ["nme", "procedural", "math"]
+    },
+    {
+        "id": 80,
+        "slug": "scene80-nme-color",
+        "name": "Scene 80 — NME Color Operations",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Single-plane Node Material color ramp covering ColorMergerBlock, ColorConverterBlock, DesaturateBlock, GradientBlock, PosterizeBlock, and ReplaceColorBlock with deterministic UV-driven color operations.",
+        "tags": ["nme", "procedural", "color"]
+    },
+    {
+        "id": 81,
+        "slug": "scene81-nme-uv-projection",
+        "name": "Scene 81 — NME UV Projection",
+        "maxMad": 0.5,
+        "maxRawKB": 71,
+        "description": "UV sphere Node Material graph covering PannerBlock, Rotate2dBlock, TriPlanarBlock, and BiPlanarBlock with a frozen-time atlas texture and object-space projection mapping.",
+        "tags": ["nme", "procedural", "texture", "uv"]
+    },
+    {
+        "id": 82,
+        "slug": "scene82-nme-noise",
+        "name": "Scene 82 — NME Procedural Noise",
+        "maxMad": 0.5,
+        "maxRawKB": 75,
+        "description": "Single-plane Node Material graph split into four deterministic procedural quadrants covering CloudBlock, SimplexPerlin3DBlock, VoronoiNoiseBlock, and WorleyNoise3DBlock.",
+        "tags": ["nme", "procedural", "noise"]
+    },
+    {
+        "id": 83,
+        "slug": "scene83-nme-normals",
+        "name": "Scene 83 — NME Normals",
+        "maxMad": 0.5,
+        "maxRawKB": 75,
+        "description": "Lit Node Material plane covering DerivativeBlock, HeightToNormalBlock, TBNBlock, NormalBlendBlock, and AmbientOcclusionBlock with a UV height field, blended normal-map color, tangent basis tint, and deterministic AO darkening.",
+        "tags": ["nme", "procedural", "normals", "lighting"]
+    },
+    {
+        "id": 84,
+        "slug": "scene84-nme-fragment-screen",
+        "name": "Scene 84 — NME Fragment Screen",
+        "maxMad": 0.5,
+        "maxRawKB": 90,
+        "description": "Node Material planes covering FragCoordBlock, ScreenSizeBlock, ScreenSpaceBlock, TwirlBlock, and FragDepthBlock with normalized screen coordinates, projected mesh coordinates, a twirl field, and deterministic custom-depth overwriting.",
+        "tags": ["nme", "procedural", "screen", "depth"]
+    },
+    {
+        "id": 85,
+        "slug": "scene85-nme-matrix",
+        "name": "Scene 85 — NME Matrix",
+        "maxMad": 0.5,
+        "maxRawKB": 68,
+        "description": "Node Material plane covering MatrixBuilder, MatrixTransposeBlock, MatrixSplitterBlock, and MatrixDeterminantBlock with matrix-driven vertex shear and determinant/splitter-derived fragment color.",
+        "tags": ["nme", "procedural", "matrix"]
+    },
+    {
+        "id": 86,
+        "slug": "scene86-nme-scene-state",
+        "name": "Scene 86 — NME Scene State",
+        "maxMad": 0.5,
+        "maxRawKB": 75,
+        "description": "Node Material quads covering MeshAttributeExistsBlock, ClipPlanesBlock, and ReflectionTextureBaseBlock compatibility with per-mesh UV/color/tangent branch selection and scene clip-plane discard.",
+        "tags": ["nme", "scene-state", "mesh-attributes", "clip-plane"]
+    },
+    {
+        "id": 87,
+        "slug": "scene87-nme-iridescence-image",
+        "name": "Scene 87 — NME Iridescence + Image Processing",
+        "maxMad": 0.5,
+        "maxRawKB": 99,
+        "description": "Environment-lit Node Material PBR sphere covering IridescenceBlock thin-film Fresnel plus ImageProcessingBlock output routing under standard tone mapping/exposure/contrast.",
+        "tags": ["nme", "pbr", "iridescence", "image-processing", "env"]
+    },
+    {
+        "id": 88,
+        "slug": "scene88-nme-loop",
+        "name": "Scene 88 — NME LoopBlock",
+        "maxMad": 0.05,
+        "maxRawKB": 68,
+        "description": "Single-plane Node Material graph covering LoopBlock control flow with StorageRead/StorageWrite accumulation of five deterministic UV color bands.",
+        "tags": ["nme", "procedural", "loop"]
+    },
+    {
+        "id": 89,
+        "slug": "scene89-nme-storage",
+        "name": "Scene 89 — NME Storage Blocks",
+        "maxMad": 0.05,
+        "maxRawKB": 68,
+        "description": "Single-plane Node Material graph covering StorageReadBlock and StorageWriteBlock through a LoopBlock-local vec4 storage value with component-dependent feedback updates.",
+        "tags": ["nme", "procedural", "loop", "storage"]
+    },
+    {
         "id": 90,
         "slug": "scene90-pbr-shadow-only",
         "name": "Scene 90 — PBR Shadow-Only Receiver",
         "maxMad": 0.5,
-        "maxRawKB": 75,
+        "maxRawKB": 78,
         "description": "Wide invisible PBR ground plane (mode: \"shadowOnly\") catching the soft drop shadow of a small static sphere. DirectionalLight uses the new `frustumSize` override so the ESM blur spreads the silhouette over the full frustum. BJS oracle: BackgroundMaterial.shadowOnly + DirectionalLight.shadowFrustumSize.",
         "tags": ["pbr", "procedural", "shadows", "shadow-only"],
         "skipPerf": true
@@ -559,9 +667,27 @@
         "slug": "scene91-skinned-shadow",
         "name": "Scene 91 — Skinned Shadow Casting",
         "maxMad": 0.5,
-        "maxRawKB": 110,
+        "maxRawKB": 115,
         "description": "Alien.gltf (same skinned rig as scene 5) casting a shadow onto a flat PBR ground via the directional shadow generator. Exercises the new skinned depth pipeline (4-bone path) and per-caster bone-texture bind groups. Animation deterministic via ?seekTime=2.",
         "tags": ["pbr", "gltf", "skeleton", "shadows"],
         "skipPerf": true
+    },
+    {
+        "id": 110,
+        "slug": "scene110-rtt-override",
+        "name": "Scene 110 — RTT with material override",
+        "maxMad": 0.01,
+        "maxRawKB": 52,
+        "description": "Frame-graph multi-pass authoring: sphere A (red) and box B in main; an offscreen 512×512 RTT renders A only, with a green override material from a different camera, and the RTT color is wired as B's diffuseTexture.",
+        "tags": ["std", "procedural", "frame-graph", "rtt", "multi-pass"]
+    },
+    {
+        "id": 111,
+        "slug": "scene111-light-selection",
+        "name": "Scene 111 — Light Selection Stress Test",
+        "maxMad": 0.01,
+        "maxRawKB": 136,
+        "description": "Stress scene for the scene-wide lights UBO: Standard, PBR, and NodeMaterial spheres on a shadow-receiving ground, 16 scene lights, per-mesh light inclusion sets, and three supported shadow generators.",
+        "tags": ["std", "pbr", "nme", "procedural", "shadow"]
     }
 ]

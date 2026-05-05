@@ -12,6 +12,9 @@
 
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
 import { NME_LIGHTING_HELPER_KEY, NME_LIGHTING_HELPER_WGSL } from "./_lighting-helper.js";
+import { MAX_LIGHTS } from "../../../light/types.js";
+
+const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(
     block: Parameters<BlockEmitter["emit"]>[0],
@@ -49,7 +52,7 @@ export const emitter: BlockEmitter = {
             const gl = resolveOptional(block, "glossiness", "1.0", stage, state, ctx, "f32");
             // BJS multiplies glossiness * glossPower; default glossPower is 1024 when unconnected.
             const gp = resolveOptional(block, "glossPower", "1024.0", stage, state, ctx, "f32");
-            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `vec4<f32>(1.0)`;
+            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_lt${ctx.temp(state, "light")}`;
             state.fragment.body.push(`let ${callVar} = nme_computeLighting(${wp}, ${wn}, ${cp}, ${dc}, ${sc}, (${gl}) * (${gp}), ${sf});`);
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });

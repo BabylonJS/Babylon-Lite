@@ -8,15 +8,15 @@ import { HAS_AMBIENT_TEXTURE, AMBIENT_USES_UV2 } from "../standard-flags.js";
 const STAGE_FRAGMENT = 0x2;
 
 export function createStdAmbientFragment(usesUV2: boolean): ShaderFragment {
-    const uv = usesUV2 ? "input.vUV2" : "input.vUV";
+    const uv = usesUV2 ? "input.vv" : "input.vu";
     return {
         id: "std-ambient",
         bindings: [
-            { name: "ambientTex", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "ambientSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+            { name: "aT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
+            { name: "aS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
         ],
         fragmentSlots: {
-            AD: `baseAmbientColor = textureSample(ambientTex, ambientSampler, ${uv}).rgb * mat.ambTexLvl;`,
+            AD: `baseAmbientColor = textureSample(aT, aS, ${uv}).rgb * mat.ambTexLvl;`,
         },
     };
 }

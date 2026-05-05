@@ -1,17 +1,14 @@
 /** Standard mesh renderable — builds Renderables from Mesh + StandardMaterial.
  *
- *  `buildStandardMeshRenderables` does shared per-scene setup (registers a
- *  `_stdCtxByScene` ctx + builds the unified scene-uniform updater), then
- *  delegates per-mesh work to `buildSingleStandardRenderable`. The same
- *  single-mesh function is reused by the material-swap path. */
+ *  `buildStandardMeshRenderables` does shared per-scene setup, then delegates
+ *  per-mesh work to `buildSingleStandardRenderable`. The same single-mesh
+ *  function is reused by the material-swap path. */
 
-import type { EngineContext } from "../../engine/engine.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
-import type { Renderable, SceneUniformUpdater, MeshGroupBuildResult } from "../../render/renderable.js";
-import type { LightBase } from "../../light/types.js";
+import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
 import { collectStdBoundTextures } from "./standard-material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
@@ -21,16 +18,13 @@ import {
     getOrCreateStandardBindings,
     getOrCreateStandardPipeline,
     createStandardMeshBindGroup,
-    writeLightsUBO,
-    refreshLightsUBO,
     clearStandardPipelineCache,
-    getLightsUboSize,
     writeStdMaterialData,
 } from "./standard-pipeline.js";
 import { NEEDS_UV, NEEDS_UV2, RECEIVE_SHADOWS, THIN_INSTANCES, THIN_INSTANCE_COLOR, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
-import { computeLightsVersion } from "../../render/lights-ubo.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
+import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
  *  every Standard renderable since `updateUBOs()` is single-threaded per frame. */
@@ -67,11 +61,6 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     // All receiving meshes in this build share the same shadow generators,
     // so keying the shadow BG by `bindings.shadowBGL` alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
-    /** Indexed by light bitmask (≤ 16 entries for MAX_LIGHTS=4). */
-    const lightsUBOByMask: GPUBuffer[] = [];
-    /** Parallel to lightsUBOByMask — lights present in each bitmask. */
-    const lightsForMask: LightBase[][] = [];
-
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on standardGroupBuilder._rebuildSingle).
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: unknown): Renderable => {
@@ -84,7 +73,6 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         if (mesh.thinInstances?.colors) {
             features |= THIN_INSTANCE_COLOR;
         }
-
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
         for (const ext of _getStdExts().values()) {
@@ -117,30 +105,17 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         }
         const bindings = getOrCreateStandardBindings(engine, features, frags);
 
-        // Per-mesh light filtering: bitmask cache (MAX_LIGHTS=4 → at most 16 entries).
-        let mask = 0;
-        for (let i = 0; i < s.lights.length; i++) {
-            const l = s.lights[i]!;
-            const inc = l.includedOnlyMeshIds;
-            if (!mesh.id || (inc?.size ? inc.has(mesh.id) : !l.excludedMeshIds?.has(mesh.id))) {
-                mask |= 1 << i;
-            }
-        }
-        if (!lightsUBOByMask[mask]) {
-            const filtered = s.lights.filter((_, i) => (mask >> i) & 1);
-            lightsForMask[mask] = filtered;
-            lightsUBOByMask[mask] = writeLightsUBO(engine, filtered);
-        }
-        const lightsBuffer = lightsUBOByMask[mask]!;
-
         const meshShadowGens = mesh.receiveShadows ? shadowLights.map((sl) => sl.gen) : [];
 
-        const meshUBO = createUniformBuffer(engine, mesh.worldMatrix);
+        const meshUboData = new Float32Array(bindings.composed.meshUboSpec.totalBytes / 4);
+        meshUboData.set(mesh.worldMatrix, 0);
+        writeMeshLightSelection(mesh, s.lights, meshUboData);
+        const meshUBO = createUniformBuffer(engine, meshUboData);
         const textureLevel = (features & NEEDS_UV) !== 0 ? 1.0 : 0;
         const matData = new Float32Array(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, lightsBuffer, mat);
+        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -181,10 +156,14 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         ]);
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
+        let _lastLightsCount = s.lights.length;
         const updateUBOs = (): void => {
-            if (mesh.worldMatrixVersion !== _lastWorldVersion) {
-                device.queue.writeBuffer(meshUBO, 0, mesh.worldMatrix as unknown as Float32Array<ArrayBuffer>);
+            if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+                meshUboData.set(mesh.worldMatrix, 0);
+                writeMeshLightSelection(mesh, s.lights, meshUboData);
+                device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
                 _lastWorldVersion = mesh.worldMatrixVersion;
+                _lastLightsCount = s.lights.length;
             }
             const m = mat as any;
             if (m._uboDirty) {
@@ -248,31 +227,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
-    // Pre-allocated scratch buffer for light UBO refresh.
-    const lightsScratch = new Float32Array(getLightsUboSize() / 4);
-    const lightsVersions: number[] = [];
-
-    // Per-frame light UBO refresh — scene UBO is now written by the active
-    // RenderPassTask via writePassSceneUBO.
-    const updater: SceneUniformUpdater = {
-        update(eng: EngineContext) {
-            for (let m = 0; m < lightsUBOByMask.length; m++) {
-                const buf = lightsUBOByMask[m];
-                if (buf && lightsForMask[m]) {
-                    const ver = computeLightsVersion(lightsForMask[m]!);
-                    if (ver !== lightsVersions[m]) {
-                        lightsVersions[m] = ver;
-                        refreshLightsUBO(eng as EngineContextInternal, buf, lightsForMask[m]!, lightsScratch);
-                    }
-                }
-            }
-        },
-    };
-
     (scene as SceneContextInternal)._disposables.push(
         () => clearStandardPipelineCache(),
         () => clearSamplerCache(engine)
     );
 
-    return { renderables, updater, rebuildSingle };
+    return { renderables, rebuildSingle };
 }

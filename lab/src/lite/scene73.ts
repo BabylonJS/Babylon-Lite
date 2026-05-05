@@ -15,10 +15,9 @@ import { getScene73Nme } from "../shared/scene73-nme.js";
 
 const MODEL_URL = "/models/CarbonFiberWheel.glb";
 const ENV_URL = "https://assets.babylonjs.com/core/environments/environmentSpecular.env";
-
-function sanitize(name: string): string {
-    return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
+const BUMP_TEXTURE_URL = "/textures/scene73/282f0a94d9004dfe.png";
+const ALBEDO_TEXTURE_URL = "/textures/scene73/fb27156c0c2cc703.png";
+const METALLIC_ROUGHNESS_TEXTURE_URL = "/textures/scene73/b4338d9f02059ce4.png";
 
 function collectMeshes(container: AssetContainer): Mesh[] {
     const meshes: Mesh[] = [];
@@ -41,45 +40,37 @@ function collectMeshes(container: AssetContainer): Mesh[] {
     return meshes;
 }
 
-async function loadSnippetTextures(engine: Parameters<typeof loadTexture2D>[0], json: unknown): Promise<Record<string, Texture2D>> {
-    const blocks = (json as { blocks?: Array<Record<string, unknown>> }).blocks ?? [];
-    const out: Record<string, Texture2D> = {};
-    for (const b of blocks) {
-        if (b.customType !== "BABYLON.TextureBlock" && b.customType !== "BABYLON.ImageSourceBlock") {
-            continue;
-        }
-        const tex = b.texture as { url?: string; name?: string; invertY?: boolean } | undefined;
-        const url = tex?.url && tex.url.length > 0 ? tex.url : tex?.name;
-        if (!url) {
-            continue;
-        }
-        out[sanitize((b.name as string | undefined) || `tex${b.id}`)] = await loadTexture2D(engine, url, { invertY: tex?.invertY ?? true });
-    }
-    return out;
+async function loadScene73Textures(engine: Parameters<typeof loadTexture2D>[0]): Promise<Record<string, Texture2D>> {
+    const [bump, albedo, metallicRoughness] = await Promise.all([
+        loadTexture2D(engine, BUMP_TEXTURE_URL, { invertY: false }),
+        loadTexture2D(engine, ALBEDO_TEXTURE_URL, { invertY: false }),
+        loadTexture2D(engine, METALLIC_ROUGHNESS_TEXTURE_URL, { invertY: false }),
+    ]);
+    return { Bump_texture: bump, Albedo_texture: albedo, MetallicRoughness_texture: metallicRoughness };
 }
 
 async function loadScene73BlockEmitter(className: string): Promise<any> {
     switch (className) {
         case "ClearCoatBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/clearcoat-block.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/clearcoat-block.js")).emitter;
         case "ColorSplitterBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/color-splitter.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/color-splitter.js")).emitter;
         case "FragmentOutputBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/fragment-output.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/fragment-output.js")).emitter;
         case "InputBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/input-block.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/input-block.js")).emitter;
         case "PBRMetallicRoughnessBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/pbr-metallic-roughness-block-full.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/pbr-metallic-roughness-block-full.js")).emitter;
         case "PerturbNormalBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/perturb-normal.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/perturb-normal.js")).emitter;
         case "ReflectionBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/reflection-block.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/reflection-block.js")).emitter;
         case "TextureBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/texture-block.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/texture-block.js")).emitter;
         case "TransformBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/transform-block.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/transform-block.js")).emitter;
         case "VertexOutputBlock":
-            return (await import("../../../packages/babylon-lite/src/material/node/blocks/vertex-output.js")).emitter;
+            return (await import("babylon-lite/material/node/blocks/vertex-output.js")).emitter;
         default:
             throw new Error(`Scene73: unsupported NME block "${className}"`);
     }
@@ -111,7 +102,7 @@ async function main(): Promise<void> {
     const leftWheel = await loadGltf(engine, MODEL_URL);
     const rightWheel = await loadGltf(engine, MODEL_URL);
     const nmeJson = await getScene73Nme();
-    const textures = await loadSnippetTextures(engine, nmeJson);
+    const textures = await loadScene73Textures(engine);
     const nme = await parseNodeMaterialFromSnippet(engine, "", { json: nmeJson, textures, blockLoader: loadScene73BlockEmitter });
     for (const mesh of collectMeshes(rightWheel)) {
         mesh.material = nme;

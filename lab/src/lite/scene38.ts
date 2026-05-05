@@ -18,7 +18,6 @@ import {
     createTube,
     createExtrudeShape,
     createStandardMaterial,
-    attachControl,
     registerScene,
 } from "babylon-lite";
 
@@ -32,7 +31,6 @@ async function main(): Promise<void> {
     camera.nearPlane = 0.5;
     camera.farPlane = 1000;
     scene.camera = camera;
-    attachControl(camera, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
     const dir = createDirectionalLight([-0.5, -1, 0.3]);

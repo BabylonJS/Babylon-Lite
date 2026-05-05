@@ -3,15 +3,15 @@
 
 ## Purpose
 
-Provides plain-data light definitions for **hemispheric**, **directional**, **point**, and **spot** light types, plus a shared infrastructure layer (`light-base.ts`, `light-matrix.ts`, `types.ts`) and a lights UBO packing system (`render/lights-ubo.ts`). Following Babylon Lite's "pillar 4b" principle, lights are stateless data objects with no scene references.
+Provides plain-data light definitions for **hemispheric**, **directional**, **point**, and **spot** light types, plus a shared infrastructure layer (`light-base.ts`, `light-matrix.ts`, `types.ts`) and a scene-owned lights UBO packing system (`render/lights-ubo.ts`, `scene/scene-light-state.ts`). Following Babylon Lite's "pillar 4b" principle, lights are stateless data objects with no scene references.
 
 Factory functions create light objects with sensible defaults; callers add them to scenes or pass them to material setup functions. Each light carries:
 - Push-based dirty tracking via `ObservableVec3` for positions/directions
 - World-matrix state with parent support (inherited from `light-base.ts`)
-- Standard/PBR UBO writer (`_writeStandardLightUbo`) for the shared lights UBO system
+- Shared UBO writer (`_writeLightUbo`) for the scene lights UBO system
 - Version tracking (`_lightVersion`) so per-frame light uploads can be guarded
 
-PBR no longer uses per-light extension registration or light fields in `SceneUniforms`. It consumes the same lights UBO as Standard materials. Exactly one non-shadow PBR light uses `material/pbr/fragments/singlelight-wgsl.ts`; multiple lights or any shadow receiver use `material/pbr/fragments/multilight-wgsl.ts`.
+PBR no longer uses per-light extension registration or light fields in `SceneUniforms`. Standard, PBR, and NodeMaterial consume the scene-owned `LightsUniforms` UBO at `@group(0) @binding(1)`. Per-mesh UBOs carry material-independent light selection (`lc` plus packed `li: array<vec4<u32>, ceil(MAX_LIGHTS / 4)>`) computed from `LightBase.includedOnlyMeshIds` / `excludedMeshIds`; shaders index the scene lights array through those mesh indices. Exactly one eligible non-shadow PBR light uses `material/pbr/fragments/singlelight-wgsl.ts`; multiple lights or any shadow receiver use `material/pbr/fragments/multilight-wgsl.ts`.
 
 ---
 
@@ -34,11 +34,11 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
 
 /** @internal */
 export interface LightBaseInternal extends LightBase {
-  readonly _writeStandardLightUbo?: (data: Float32Array, offset: number) => void;
+  readonly _writeLightUbo?: (data: Float32Array, offset: number) => void;
   readonly _lightVersion: number;
 }
 
-export let MAX_LIGHTS = 4;
+export let MAX_LIGHTS = 16;
 export function setMaxLights(n: number): void;
 export const LIGHT_ENTRY_FLOATS = 16;  // 4 × vec4 = 64 bytes per light
 ```
@@ -142,6 +142,7 @@ export interface HemisphericLight extends LightBase {
   direction: ObservableVec3;
   intensity: number;
   diffuseColor: [number, number, number];
+  specularColor: [number, number, number];
   groundColor: [number, number, number];
 }
 
@@ -158,6 +159,7 @@ export function createHemisphericLight(
 | direction    | `(0, 1, 0)` via ObservableVec3 |
 | intensity    | `1.0`          |
 | diffuseColor | `[1, 1, 1]`   |
+| specularColor | `[1, 1, 1]` |
 | groundColor  | `[0, 0, 0]`   |
 
 ### Spot Light (`spot-light.ts`)
@@ -207,7 +209,7 @@ export function createSpotLight(
 
 ### Data Structures
 
-All lights are plain JavaScript objects (POJOs) with `Object.defineProperties`-based world-matrix accessors — no classes, no GPU resources. They are passed to material creation functions which pack them into GPU uniform buffers.
+All lights are plain JavaScript objects (POJOs) with `Object.defineProperties`-based world-matrix accessors — no classes, no GPU resources. The scene owns one GPU `LightsUniforms` buffer for `scene.lights`; materials only declare/read the fixed group-0 binding.
 
 ### Light Base Infrastructure (`light-base.ts`)
 
@@ -215,14 +217,14 @@ Every light factory:
 1. Calls `createLightBase(getLocalMatrix)` which returns `{ wm, onDirty }`:
    - `wm`: `WorldMatrixAccessors` — provides `getWorldMatrix()`, `getWorldMatrixVersion()`, `markLocalDirty()`, and `parent` get/set
    - `onDirty`: callback that calls `wm.markLocalDirty()` — passed to `ObservableVec3` constructors
-2. Builds the light data object with an `_writeStandardLightUbo` callback
+2. Builds the light data object with an `_writeLightUbo` callback
 3. Calls `applyWorldMatrixAccessors(target, wm)` which uses `Object.defineProperties` to add `parent`, `worldMatrix`, and `worldMatrixVersion` as getters/setters
 
 This pattern eliminates duplicated world-matrix boilerplate across all light types.
 
 ### Light Type Discrimination (Standard Material)
 
-Each light writes its type flag at `data[offset + 3]` in `_writeStandardLightUbo`:
+Each light writes its type flag at `data[offset + 3]` in `_writeLightUbo`:
 
 | `vLightData.w` | Light Type   | Position/Direction Source |
 |-----------------|-------------|--------------------------|
@@ -233,9 +235,25 @@ Each light writes its type flag at `data[offset + 3]` in `_writeStandardLightUbo
 
 ### Lights UBO Layout (`render/lights-ubo.ts`)
 
-Standard and PBR material pipelines use a shared lights UBO supporting up to `MAX_LIGHTS = 4` simultaneous lights by default. `setMaxLights(n)` may adjust the cap before pipelines/UBOs are created.
+Standard, PBR, and NodeMaterial pipelines use a shared scene lights UBO supporting up to `MAX_LIGHTS = 16` packed scene lights by default. `setMaxLights(n)` may adjust the cap before pipelines/UBOs are created. Unlike Babylon.js's default `maxSimultaneousLights = 4` per material, Babylon Lite's `MAX_LIGHTS` is the total scene-wide packed-light capacity.
 
-**Default total UBO size:** `getLightsUboSize() = 16 + MAX_LIGHTS × 64` bytes (272 bytes when `MAX_LIGHTS = 4`)
+The frame/pass bind group layout is:
+
+| Group | Binding | Owner | Contents |
+|-------|---------|-------|----------|
+| 0 | 0 | `RenderPassTask` | Per-pass `SceneUniforms` (camera, fog, image processing, environment) |
+| 0 | 1 | `SceneContextInternal` via `scene-light-state.ts` | Scene-wide `LightsUniforms` packed from `scene.lights` |
+
+Material/mesh bind groups never contain light buffers. Mesh UBOs append:
+
+```wgsl
+lc: u32,
+li: array<vec4<u32>, ceil(MAX_LIGHTS / 4)>,
+```
+
+Each packed index addresses `lights.lights[index]` in the scene-wide UBO (`li[i / 4u][i % 4u]`). `render/lights-ubo.ts` computes this list per mesh by skipping lights whose `includedOnlyMeshIds` excludes the mesh or whose `excludedMeshIds` includes it.
+
+**Default total UBO size:** `getLightsUboSize() = 16 + MAX_LIGHTS × 64` bytes (1040 bytes when `MAX_LIGHTS = 16`)
 
 **Layout:**
 
@@ -256,7 +274,7 @@ Standard and PBR material pipelines use a shared lights UBO supporting up to `MA
 | [3]         | 1 (type flag)     | 0 (type flag) | 2 (type flag) | 3 (type flag) |
 | [4–6]       | diffuse × intensity | diffuse × intensity | diffuse × intensity | diffuseColor × intensity |
 | [7]         | MAX_VALUE (range) | range | range | *(unused)* |
-| [8–10]      | specular × intensity | specular × intensity | specular × intensity | diffuseColor × intensity |
+| [8–10]      | specular × intensity | specular × intensity | specular × intensity | specularColor × intensity |
 | [11]        | *(unused)*        | *(unused)* | exponent | *(unused)* |
 | [12–14]     | *(unused)*        | *(unused)* | direction (col2) | groundColor × intensity |
 | [15]        | *(unused)*        | *(unused)* | cos(angle/2) | *(unused)* |
@@ -284,8 +302,8 @@ export function refreshLightsUBO(
 
 **`fillLightsData` algorithm:**
 1. Zero the entire Float32Array
-2. Iterate lights, skip those without `_writeStandardLightUbo`, stop at `MAX_LIGHTS`
-3. Call each light's `_writeStandardLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS)`
+2. Iterate lights, skip those without `_writeLightUbo`, stop at `MAX_LIGHTS`
+3. Call each light's `_writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS)`
 4. Write `count` into the first u32 slot via `Uint32Array` view
 
 ### PBR Light Shader Paths
@@ -294,10 +312,10 @@ PBR materials consume the same packed `LightEntry` layout as Standard materials.
 
 | Condition | WGSL helper | Behavior |
 |-----------|-------------|----------|
-| `scene.lights.length === 1` and no shadow generators | `material/pbr/fragments/singlelight-wgsl.ts` | Non-looping direct-light code specialized by the single light's `lightType`; reads `lights.lights[0]` |
-| More than one light, or any shadow receiver | `material/pbr/fragments/multilight-wgsl.ts` | Generic `computePbrLight()` + loop over `lights.count`; shadow fragment writes per-light shadow factors |
+| Mesh has exactly one eligible light and no shadow receiver path | `material/pbr/fragments/singlelight-wgsl.ts` | Non-looping direct-light code specialized by that light's `lightType`; reads `lights.lights[mli(0u)]` |
+| Mesh has multiple eligible lights, or any shadow receiver path | `material/pbr/fragments/multilight-wgsl.ts` | Generic `computePbrLight()` + loop over `mesh.lc`; shadow fragment writes per-scene-light shadow factors |
 
-Supported PBR light types are hemispheric, directional, point, and spot. Point lights use glTF-compatible inverse-square falloff with a smooth range cutoff. Spot lights use linear range falloff plus cone/exponent falloff, matching the Standard path's packed fields.
+Supported PBR light types are hemispheric, directional, point, and spot. PBR materials default to physical inverse-square point/spot falloff. Materials with `usePhysicalLightFalloff: false` use Babylon's Standard-style falloff instead: linear range attenuation plus spot cone exponent attenuation.
 
 ### Shader Lighting Math (Standard Material)
 
@@ -351,13 +369,13 @@ specular = specComp * lightSpecularColor * attenuation
 
 Light modules do not create GPU pipelines. They produce plain data consumed by material pipelines.
 
-The lights UBO (`render/lights-ubo.ts`) creates a single `GPUBuffer` with `UNIFORM | COPY_DST` usage, refreshed per-frame via `refreshLightsUBO()`. The default size is 272 bytes, but the size follows `MAX_LIGHTS`.
+The lights UBO (`render/lights-ubo.ts`) creates a single `GPUBuffer` with `UNIFORM | COPY_DST` usage. `SceneContextInternal._lightGpuState` stores it on the scene, refreshes it per-frame through `refreshSceneLightsUBO()`, and recreates it if the active `MAX_LIGHTS` size changes. The default size is 1040 bytes, but the size follows `MAX_LIGHTS`.
 
 ---
 
 ## Shader Logic
 
-Light modules do not contain shaders. Lighting computation lives in material shader modules: Standard composes its light loop from the shared lights UBO, and PBR dynamically imports either `singlelight-wgsl.ts` or `multilight-wgsl.ts` from `material/pbr/fragments/`.
+Light modules do not contain shaders. Lighting computation lives in material shader modules: Standard and NodeMaterial loop over `mesh.lc` / `mli(i)` into the group-0 lights UBO, and PBR dynamically imports either `singlelight-wgsl.ts` or `multilight-wgsl.ts` from `material/pbr/fragments/`.
 
 ---
 
@@ -387,22 +405,18 @@ spot.angle = Math.PI / 4;
 
 - Setting `direction.x`, `direction.y`, `direction.z` or calling `direction.set(x,y,z)` on any `ObservableVec3` triggers `onDirty()` → `wm.markLocalDirty()` → increments `worldMatrixVersion`
 - `worldMatrix` getter lazily recomputes from `getLocalMatrix()` and parent chain when dirty
-- `_writeStandardLightUbo` reads from `worldMatrix` (which auto-resolves parent transforms)
+- `_writeLightUbo` reads from `worldMatrix` (which auto-resolves parent transforms)
 
 ### Lights UBO Lifecycle
 
-1. **Creation:** `writeLightsUBO(engine, lights)` — allocates a `getLightsUboSize()` UBO and fills it with current light state
-2. **Per-frame refresh:** `refreshLightsUBO(engine, buffer, lights, scratch)` — re-fills scratch Float32Array and uploads
-3. **Light filtering:** Only lights with `_writeStandardLightUbo` defined are included; up to `MAX_LIGHTS`
+1. **Creation:** `ensureSceneLightState(engine, scene)` allocates a `getLightsUboSize()` UBO and stores it on `SceneContextInternal._lightGpuState`.
+2. **Group-0 binding:** every `RenderPassTask` binds its task-owned scene UBO at binding 0 and the scene-owned lights UBO at binding 1.
+3. **Per-frame refresh:** `refreshSceneLightsUBO(engine, scene)` compares the aggregate light version and light count, then writes the shared UBO only when needed.
+4. **Light filtering:** only lights with `_writeLightUbo` defined are packed; up to `MAX_LIGHTS`.
+5. **Resize for cap changes:** if `MAX_LIGHTS` changes and the UBO byte size changes, `ensureSceneLightState()` destroys/recreates the scene light buffer and render-pass tasks rebuild their group-0 bind group.
+6. **Mesh selection:** material renderables write per-mesh `lc` and packed `li` indices into the mesh UBO; this selection respects `includedOnlyMeshIds` and `excludedMeshIds`.
 
-### PBR Lights UBO Lifecycle
-
-1. `buildPbrRenderables()` detects whether the scene has no lights, one non-shadow light, or a multi-light/shadow setup.
-2. If any light exists, it creates one shared lights UBO via `writeLightsUBO(engine, scene.lights)`.
-3. Single-light scenes import `singlelight-wgsl.ts`; multi-light/shadow scenes import `multilight-wgsl.ts` and, when needed, `pbr-shadow-fragment.ts`.
-4. Per-frame refresh calls `refreshLightsUBO(engine, buffer, scene.lights, scratch)` after checking the aggregate light version.
-
-**No GPU resources are created by light modules.** All GPU work (UBO creation, data packing) happens in the material module or `lights-ubo.ts`.
+**No GPU resources are created by light modules.** Light packing and scene-owned GPU state live in `lights-ubo.ts`; materials only own shaders, mesh/material UBOs, textures, and bind groups.
 
 ---
 
@@ -420,6 +434,7 @@ spot.angle = Math.PI / 4;
 | `PointLight.range = Number.MAX_VALUE`           | `PointLight.range` (default very large)     |
 | `createHemisphericLight(dir, intensity)`       | `new HemisphericLight(name, dir, scene)`    |
 | `HemisphericLight.diffuseColor`                | `HemisphericLight.diffuse`                  |
+| `HemisphericLight.specularColor`               | `HemisphericLight.specular`                 |
 | `HemisphericLight.groundColor`                 | `HemisphericLight.groundColor`              |
 | `createSpotLight(pos, dir, angle, exp, int)`   | `new SpotLight(name, pos, dir, angle, exp, scene)` |
 | `SpotLight.angle`                              | `SpotLight.angle`                           |
@@ -434,7 +449,7 @@ spot.angle = Math.PI / 4;
 | `ObservableVec3` with dirty callback           | `Vector3` + `_markAsDirty()` pattern        |
 | `localMatrixFromDirection()`                   | `Light._buildUniformLayout()` (internal)    |
 | Light type w flag (0/1/2/3)                    | Internal type system (`LIGHTTYPEID_*`)      |
-| `MAX_LIGHTS = 4`                               | `maxSimultaneousLights` (default 4)         |
+| `MAX_LIGHTS = 16` scene-wide cap              | `maxSimultaneousLights` (default 4 per material) |
 | `fillLightsData()` / `writeLightsUBO()`       | Babylon's internal light UBO building       |
 | `refreshLightsUBO()`                           | Per-frame light uniform update              |
 | `singlelight-wgsl.ts` / `multilight-wgsl.ts`  | PBR shader includes (`pbrDirectLightingSetupFunctions`, etc.) |
@@ -444,7 +459,7 @@ spot.angle = Math.PI / 4;
 1. **No scene reference** — Babylon Lite lights are POJOs with world-matrix accessors; Babylon.js lights are class instances that register with a Scene.
 2. **`lightType` string discriminator** — Instead of class hierarchy, each light has a `lightType` string literal (`'directional'`, `'point'`, `'spot'`, `'hemispheric'`).
 3. **`ObservableVec3`** — Direction/position use observable vectors with dirty callbacks, replacing Babylon's Vector3 + manual dirty tracking.
-4. **Shared lights UBO** — Standard and PBR pack up to `MAX_LIGHTS` lights into one UBO; Babylon.js uses separate per-light uniforms/defines.
+4. **Shared lights UBO** — Standard and PBR pack up to `MAX_LIGHTS` scene lights into one UBO; Babylon.js uses material-scoped light defines/uniforms and defaults to 4 simultaneous lights per material.
 5. **Tree-shakable PBR light code** — PBR imports the one-light or multi-light WGSL helper only when needed; Babylon.js includes broad light shader support.
 6. **No shadow caster list on lights** — Shadow casters are managed by `ShadowGenerator`, not by the light. Lights reference their shadow generator via `shadowGenerator` property.
 
@@ -495,19 +510,19 @@ spot.angle = Math.PI / 4;
 
 1. **Directional light defaults** — `createDirectionalLight([0, -1, 0])` returns `lightType: 'directional'`, direction `(0,-1,0)`, position `(0,0,0)`, diffuse `[1,1,1]`, specular `[1,1,1]`, intensity `1`.
 2. **Point light defaults** — `createPointLight([5, 3, 0])` returns `lightType: 'point'`, position `(5,3,0)`, diffuse `[1,1,1]`, specular `[1,1,1]`, intensity `1`, range `Number.MAX_VALUE`.
-3. **Hemispheric light defaults** — `createHemisphericLight()` returns `lightType: 'hemispheric'`, direction `(0,1,0)`, intensity `1`, diffuseColor `[1,1,1]`, groundColor `[0,0,0]`.
+3. **Hemispheric light defaults** — `createHemisphericLight()` returns `lightType: 'hemispheric'`, direction `(0,1,0)`, intensity `1`, diffuseColor `[1,1,1]`, specularColor `[1,1,1]`, groundColor `[0,0,0]`.
 4. **Spot light defaults** — `createSpotLight([0,10,0], [0,-1,0], PI/3, 2)` returns `lightType: 'spot'`, diffuse `[1,1,1]`, specular `[1,1,1]`, intensity `1`, range `Number.MAX_VALUE`.
 5. **Custom intensity** — `createDirectionalLight([1,0,0], 2.5).intensity` should be `2.5`.
 6. **Mutability** — All properties should be directly assignable. ObservableVec3 properties support `.x`, `.y`, `.z` setters and `.set(x,y,z)`.
 7. **Dirty tracking** — Setting `direction.x = 5` should increment `worldMatrixVersion`.
 8. **World matrix** — Directional light's worldMatrix column 2 should match normalized direction.
 9. **Parent support** — Setting `light.parent` should affect `worldMatrix` computation.
-10. **Light type flags** — `_writeStandardLightUbo` should set w=0 (point), w=1 (directional), w=2 (spot), w=3 (hemispheric).
+10. **Light type flags** — `_writeLightUbo` should set w=0 (point), w=1 (directional), w=2 (spot), w=3 (hemispheric).
 11. **Spot UBO packing** — Spot light writes exponent at [11], direction at [12–14], cos(angle/2) at [15].
 12. **Light UBO packing** — For directional light: `lightData.w = 1`, colors premultiplied by intensity.
 13. **Light UBO packing** — For point light: `lightData.w = 0`, `lightDiffuse.a = range`.
 14. **Lights UBO size** — `getLightsUboSize() = 272` bytes by default (16 header + 4 × 64).
-15. **fillLightsData count** — With 6 lights, only first 4 with `_writeStandardLightUbo` are packed.
+15. **fillLightsData count** — With 6 lights, only first 4 with `_writeLightUbo` are packed.
 16. **localMatrixFromDirection** — Verify column 2 = normalized direction, column 0 = right, column 1 = up.
 17. **PBR single-light selection** — One non-shadow light imports `singlelight-wgsl.ts`, not the generic multi-light loop.
 18. **PBR multi-light selection** — Multiple lights or shadow receivers import `multilight-wgsl.ts`.
@@ -525,4 +540,4 @@ spot.angle = Math.PI / 4;
 | `src/light/point-light.ts` | `PointLight` interface + `createPointLight()` factory |
 | `src/light/hemispheric.ts` | `HemisphericLight` interface + `createHemisphericLight()` factory |
 | `src/light/spot-light.ts` | `SpotLight` interface + `createSpotLight()` factory |
-| `src/render/lights-ubo.ts` | Shared lights UBO system — `getLightsUboSize()`, `fillLightsData()`, `writeLightsUBO()`, `refreshLightsUBO()`; packs up to `MAX_LIGHTS` lights |
+| `src/render/lights-ubo.ts` | Shared lights UBO system — `getLightsUboSize()`, scene light GPU state, mesh light selection; packs up to `MAX_LIGHTS` scene lights |

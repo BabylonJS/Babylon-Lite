@@ -25,7 +25,7 @@ fn nme_computeLighting(
     diffuseColor: vec3<f32>,
     specularColor: vec3<f32>,
     glossiness: f32,
-    shadowFactors: vec4<f32>
+    shadowFactors: array<f32, ${MAX_LIGHTS}>
 ) -> NmeLightResult {
     var result: NmeLightResult;
     result.diffuse = vec3<f32>(0.0);
@@ -34,11 +34,12 @@ fn nme_computeLighting(
     var numLights: f32 = 0.0;
     let viewDir = normalize(cameraPos - worldPos);
     let N = normalize(worldNormal);
-    let lc = min(nmeLights.count, ${MAX_LIGHTS}u);
-    for (var i: u32 = 0u; i < lc; i = i + 1u) {
-        let L = nmeLights.lights[i];
+     let lc = min(meshU.lc, ${MAX_LIGHTS}u);
+     for (var i: u32 = 0u; i < lc; i = i + 1u) {
+        let lightIndex = nli(i);
+        let L = nmeLights.lights[lightIndex];
         let t = u32(L.vLightData.w);
-        let sh = shadowFactors[i];
+        let sh = shadowFactors[lightIndex];
         var lv: vec3<f32>;
         var atten: f32 = 1.0;
         if (t == 3u) {

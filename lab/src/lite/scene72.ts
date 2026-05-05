@@ -57,6 +57,49 @@ async function loadSnippetTextures(engine: Parameters<typeof loadTexture2D>[0], 
     return out;
 }
 
+async function loadScene72BlockEmitter(className: string): Promise<any> {
+    switch (className) {
+        case "AddBlock":
+            return (await import("babylon-lite/material/node/blocks/add-block.js")).emitter;
+        case "AnisotropyBlock":
+            return (await import("babylon-lite/material/node/blocks/anisotropy-block.js")).emitter;
+        case "ClearCoatBlock":
+            return (await import("babylon-lite/material/node/blocks/clearcoat-block.js")).emitter;
+        case "FragmentOutputBlock":
+            return (await import("babylon-lite/material/node/blocks/fragment-output.js")).emitter;
+        case "InputBlock":
+            return (await import("babylon-lite/material/node/blocks/input-block.js")).emitter;
+        case "LerpBlock":
+            return (await import("babylon-lite/material/node/blocks/lerp-block.js")).emitter;
+        case "MultiplyBlock":
+            return (await import("babylon-lite/material/node/blocks/multiply-block.js")).emitter;
+        case "PBRMetallicRoughnessBlock":
+            return (await import("babylon-lite/material/node/blocks/pbr-metallic-roughness-block-full.js")).emitter;
+        case "PerturbNormalBlock":
+            return (await import("babylon-lite/material/node/blocks/perturb-normal.js")).emitter;
+        case "ReflectionBlock":
+            return (await import("babylon-lite/material/node/blocks/reflection-block.js")).emitter;
+        case "RefractionBlock":
+            return (await import("babylon-lite/material/node/blocks/refraction-block.js")).emitter;
+        case "SheenBlock":
+            return (await import("babylon-lite/material/node/blocks/sheen-block.js")).emitter;
+        case "SubSurfaceBlock":
+            return (await import("babylon-lite/material/node/blocks/subsurface-block.js")).emitter;
+        case "SubtractBlock":
+            return (await import("babylon-lite/material/node/blocks/subtract-block.js")).emitter;
+        case "TextureBlock":
+            return (await import("babylon-lite/material/node/blocks/texture-block.js")).emitter;
+        case "TransformBlock":
+            return (await import("babylon-lite/material/node/blocks/transform-block.js")).emitter;
+        case "VectorMergerBlock":
+            return (await import("babylon-lite/material/node/blocks/vector-merger.js")).emitter;
+        case "VertexOutputBlock":
+            return (await import("babylon-lite/material/node/blocks/vertex-output.js")).emitter;
+        default:
+            throw new Error(`Scene72: unsupported NME block "${className}"`);
+    }
+}
+
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -119,7 +162,7 @@ async function main(): Promise<void> {
         SubSurface_thickness_texture: white,
     };
     const textures = { ...fallback, ...loaded };
-    const material = await parseNodeMaterialFromSnippet(engine, "", { json, textures, shadowGenerators: [sg] });
+    const material = await parseNodeMaterialFromSnippet(engine, "", { json, textures, shadowGenerators: [sg], blockLoader: loadScene72BlockEmitter });
     (sphere as { material?: unknown }).material = material;
     (ground as { material?: unknown }).material = material;
 

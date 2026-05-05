@@ -8,6 +8,7 @@ export function buildPbrMrHelperCore(request: NodePbrMrHelperRequest): string {
         request.useRefraction ||
         request.useSubsurface ||
         request.useAnisotropy ||
+        request.useIridescence ||
         request.useShAlbedoScaling ||
         request.useCcBump ||
         request.useCcTint ||
@@ -32,7 +33,7 @@ function HELPER_WGSL(useEnv: boolean): string {
         + sceneU.vSphericalL1_1.xyz * N_env.y + sceneU.vSphericalL10.xyz * N_env.z + sceneU.vSphericalL11.xyz * N_env.x
         + sceneU.vSphericalL2_2.xyz * (N_env.y * N_env.x) + sceneU.vSphericalL2_1.xyz * (N_env.y * N_env.z)
         + sceneU.vSphericalL20.xyz * (3.0 * N_env.z * N_env.z - 1.0) + sceneU.vSphericalL21.xyz * (N_env.z * N_env.x)
-        + sceneU.vSphericalL22.xyz * (N_env.x * N_env.x - N_env.y * N_env.y)) * sceneU.environmentIntensity;
+        + sceneU.vSphericalL22.xyz * (N_env.x * N_env.x - N_env.y * N_env.y));
     let brdfSample = textureSample(nmeBrdfLUT, nmeBrdfSampler, v2(NdotV, rough_c));
     let envBrdf = brdfSample.rgb;
     let reflectanceF0Scalar = max(colorF0.r, max(colorF0.g, colorF0.b));
@@ -47,8 +48,8 @@ function HELPER_WGSL(useEnv: boolean): string {
     let energyConservation = 1.0 + _coloredR0 * (1.0 / max(envBrdf.y, 0.001) - 1.0);
     let maxLod = f32(textureNumLevels(nmeIblTexture) - 1);
     let cubemapDim = f32(textureDimensions(nmeIblTexture).x);
-    let specLod = log2(cubemapDim * alphaG) * sceneU.lodGenerationScale;
-    var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let specLod = log2(cubemapDim * alphaG) * sceneU.vImageInfos.z;
+    var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb;
     var finalIrradiance = environmentIrradiance * surfaceAlbedo;
     let finalRadianceScaled = environmentRadiance * colorSpecEnvReflectance * energyConservation;
     let finalSpecularScaledDirect = specAcc * energyConservation;
@@ -110,7 +111,7 @@ fn nme_pbr_mr_compute(
     ssTintColor: v3, ssThickness: f32,
     ssTranslucencyIntensityIn: f32, ssDiffusionDist: v3,
     anisoIntensityIn: f32, anisoDirection: v2, anisoUv: v2,
-    shadowFactors: v4
+    shadowFactors: array<f32, ${MAX_LIGHTS}>
 ) -> NmePbrMrResult {
     var r: NmePbrMrResult;
     let Ng = normalize(geometricNormal);
@@ -149,11 +150,12 @@ fn nme_pbr_mr_compute(
     var specAcc = v3(0.0);
     var aggShadow: f32 = 0.0;
     var nLights: f32 = 0.0;
-    let lc = min(nmeLights.count, ${MAX_LIGHTS}u);
+    let lc = min(meshU.lc, ${MAX_LIGHTS}u);
     for (var i: u32 = 0u; i < lc; i = i + 1u) {
-        let entry = nmeLights.lights[i];
+        let lightIndex = nli(i);
+        let entry = nmeLights.lights[lightIndex];
         let t = u32(entry.vLightData.w);
-        let sh = shadowFactors[i];
+        let sh = shadowFactors[lightIndex];
         if (t == 3u) {
             let Ldir = normalize(entry.vLightData.xyz);
             let nl = clamp(0.5 + 0.5 * dot(N, Ldir), 0.0000001, 1.0);
@@ -233,17 +235,17 @@ ${iblBlock}
             : `let _specLum = clamp(dot(specAcc, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
     r.lumOverAlpha = _specLum;`
     }
-    var colorOut = max(r.lighting, v3(0.0)) * sceneU.exposureLinear;
-    if (sceneU.toneMappingEnabled > 0.5) {
+    var colorOut = max(r.lighting, v3(0.0)) * sceneU.vImageInfos.x;
+    if (sceneU.vImageInfos.w > 0.5) {
         colorOut = 1.0 - exp2(-1.590579 * colorOut);
     }
     colorOut = pow(max(colorOut, v3(0.0)), v3(0.45454545));
     colorOut = clamp(colorOut, v3(0.0), v3(1.0));
     let highContrast = colorOut * colorOut * (v3(3.0) - colorOut * 2.0);
-    if (sceneU.contrast < 1.0) {
-        colorOut = mix(v3(0.5), colorOut, sceneU.contrast);
+    if (sceneU.vImageInfos.y < 1.0) {
+        colorOut = mix(v3(0.5), colorOut, sceneU.vImageInfos.y);
     } else {
-        colorOut = mix(colorOut, highContrast, sceneU.contrast - 1.0);
+        colorOut = mix(colorOut, highContrast, sceneU.vImageInfos.y - 1.0);
     }
     r.lighting = max(colorOut, v3(0.0));
     if (nLights > 0.0) { r.shadow = aggShadow / nLights; } else { r.shadow = 1.0; }

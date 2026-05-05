@@ -1,6 +1,8 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } from "../node-types.js";
+import { MAX_LIGHTS } from "../../../light/types.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
+const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(block: NodeBlock, inputName: string, fallback: string, target: "vec3f" | "f32", stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): string {
     const input = block.inputs.get(inputName);
@@ -19,7 +21,8 @@ export const emitter: BlockEmitter = {
             block.inputs.get("clearcoat")?.source ||
             block.inputs.get("sheen")?.source ||
             block.inputs.get("subsurface")?.source ||
-            block.inputs.get("anisotropy")?.source
+            block.inputs.get("anisotropy")?.source ||
+            block.inputs.get("iridescence")?.source
         ) {
             throw new Error("NodeMaterial: PBR-MR core emitter cannot emit optional PBR feature code");
         }
@@ -38,6 +41,7 @@ export const emitter: BlockEmitter = {
                 useRefraction: false,
                 useSubsurface: false,
                 useAnisotropy: false,
+                useIridescence: false,
                 useShAlbedoScaling: false,
                 useCcBump: false,
                 useCcTint: false,
@@ -63,7 +67,7 @@ export const emitter: BlockEmitter = {
             const ro = resolveOptional(block, "roughness", "0.5", "f32", stage, state, ctx);
             const ao = resolveOptional(block, "ambientOcc", "1.0", "f32", stage, state, ctx);
             const baseIorExpr = resolveOptional(block, "indexOfRefraction", "1.5", "f32", stage, state, ctx);
-            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `v4(1.0)`;
+            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
             state.fragment.body.push(
                 `let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, 0.0, 0.0, 1.5, v3(0.5, 0.5, 1.0), v2(0.0), v3(1.0), 1.0, 0.0, 0.0, v3(1.0), 0.0, ${baseIorExpr}, 0.0, 1.5, 1.0, v3(1.0), 0.0, 0.0, v3(1.0), 0.0, v2(1.0, 0.0), v2(0.0), ${sf});`

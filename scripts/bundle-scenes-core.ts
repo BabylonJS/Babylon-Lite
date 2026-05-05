@@ -177,19 +177,28 @@ function minifyTemplateWgsl(code: string): string {
 }
 
 function processTemplateLiteral(code: string, i: number, len: number, out: string[]): number {
+    const wgsl: string[] = [];
+    const flushWgsl = (): void => {
+        if (wgsl.length > 0) {
+            out.push(mangleWgslIdentifiers(wgsl.join("")));
+            wgsl.length = 0;
+        }
+    };
     while (i < len) {
         const ch = code[i]!;
 
         if (ch === "\\") {
-            out.push(ch, code[i + 1] ?? "");
+            wgsl.push(ch, code[i + 1] ?? "");
             i += 2;
             continue;
         }
         if (ch === "`") {
+            flushWgsl();
             out.push("`");
             return i + 1;
         }
         if (ch === "$" && i + 1 < len && code[i + 1] === "{") {
+            flushWgsl();
             out.push("${");
             i += 2;
             let depth = 1;
@@ -234,7 +243,7 @@ function processTemplateLiteral(code: string, i: number, len: number, out: strin
 
         // Collapse WGSL whitespace and strip it around punctuation/operators.
         if (ch === " " || ch === "\n" || ch === "\t" || ch === "\r") {
-            const prev = out.length > 0 ? out[out.length - 1]! : "";
+            const prev = wgsl.length > 0 ? wgsl[wgsl.length - 1]! : "";
             const prevCh = prev.length > 0 ? prev[prev.length - 1]! : "";
             let j = i + 1;
             while (j < len && (code[j] === " " || code[j] === "\n" || code[j] === "\t" || code[j] === "\r")) j++;
@@ -245,16 +254,96 @@ function processTemplateLiteral(code: string, i: number, len: number, out: strin
                 continue;
             }
             if (prevCh !== " " && prevCh !== "`" && next !== "`") {
-                out.push(" ");
+                wgsl.push(" ");
             }
             i = j;
             continue;
         }
 
-        out.push(ch);
+        wgsl.push(ch);
         i++;
     }
+    flushWgsl();
     return i;
+}
+
+function mangleWgslIdentifiers(code: string): string {
+    const replacements: [string, string][] = [
+        ["computeLighting", "cl"],
+        ["computeSphericalCoords", "csc"],
+        ["computePlanarCoords", "cpc"],
+        ["computePbrLight", "cpl"],
+        ["perturbNormal", "pn"],
+        ["PbrLightResult", "PLR"],
+        ["LightEntry", "LE"],
+        ["lightsUniforms", "LU"],
+        ["vLightData", "d"],
+        ["vLightDiffuse", "c"],
+        ["vLightSpecular", "s"],
+        ["vLightDirection", "r"],
+        ["viewDirectionW", "vdw"],
+        ["normalW", "nw"],
+        ["diffuseBase", "db"],
+        ["specularBase", "sb"],
+        ["baseAmbientColor", "bac"],
+        ["reflectionColor", "rc"],
+        ["finalDiffuse", "fd"],
+        ["finalSpecular", "fs"],
+        ["directDiffuse", "dd"],
+        ["directSpecular", "ds"],
+        ["directRoughness", "dr"],
+        ["directAlphaG", "dag"],
+        ["shadowFactors", "sf"],
+        ["lightIndex0", "li0"],
+        ["lightIndex", "lix"],
+        ["lightColor", "lc"],
+        ["lightAtten", "la"],
+        ["specColor", "sc"],
+        ["isHemi", "ih"],
+        ["viewNormal", "vn"],
+        ["viewDir", "vd"],
+        ["reflCoords", "rcd"],
+        ["finalWorld", "fw"],
+        ["worldPos4", "wp4"],
+        ["normalWorld", "nwm"],
+        ["positionW", "pw"],
+        ["bumpScale", "bs"],
+        ["opSample", "os"],
+        ["diffuseColor", "dc"],
+        ["emissiveContrib", "ec"],
+        ["specularColor", "spc"],
+        ["baseColor", "bc"],
+        ["glossiness", "gl"],
+        ["alpha", "al"],
+        ["surfaceAlbedo", "sa"],
+        ["roughness", "rg"],
+        ["colorF0", "f0"],
+        ["colorF90", "f90"],
+        ["finalIrradiance", "fi"],
+        ["finalRadianceScaled", "fr"],
+        ["finalSpecularScaled", "fss"],
+        ["AA_factor_x", "aax"],
+        ["AA_factor_y", "aay"],
+        ["alphaG", "ag"],
+        ["N_geom", "ng"],
+        ["NdotV", "nv"],
+        ["rangeAtten", "ra"],
+        ["rangeAtt", "rat"],
+        ["spotC", "sc2"],
+        ["lightToFrag", "ltf"],
+        ["lightDist2", "ld2"],
+        ["lightDist", "ld"],
+        ["toLight", "tl"],
+        ["dist", "dst"],
+        ["entry", "e"],
+        ["hemiDiffuse", "hd"],
+        ["coloredFresnel", "cf"],
+    ];
+    let out = code;
+    for (const [from, to] of replacements) {
+        out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
+    }
+    return out;
 }
 
 /**
@@ -606,6 +695,23 @@ export async function buildBundleScenes(): Promise<void> {
         };
     }
 
+    function minimalVitePreloadPlugin(): Plugin {
+        const id = "\0minimal-vite-preload";
+        return {
+            name: "minimal-vite-preload",
+            enforce: "pre",
+            resolveId(source) {
+                return source === "vite/preload-helper.js" ? id : null;
+            },
+            load(source) {
+                return source === id ? "export const __vitePreload = (baseModule) => baseModule();" : null;
+            },
+            transform(_code, source) {
+                return source.endsWith("vite/preload-helper.js") ? "export const __vitePreload = (baseModule) => baseModule();" : null;
+            },
+        };
+    }
+
     async function buildScene(scene: string) {
         const sceneOutDir = resolve(outDir, scene);
         const isBjs = scene.startsWith("bjs-");
@@ -615,7 +721,7 @@ export async function buildBundleScenes(): Promise<void> {
             configFile: false,
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin()],
+            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Point babylon-lite directly at TS source directory so the bundle always
                 // picks up the current code (no stale node_modules build).
@@ -631,7 +737,7 @@ export async function buildBundleScenes(): Promise<void> {
                 emptyOutDir: true,
                 minify: "esbuild",
                 sourcemap: false,
-                modulePreload: false,
+                modulePreload: { polyfill: false, resolveDependencies: () => [] },
                 rollupOptions: {
                     input: { [scene]: resolve(labDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
                     // Exclude third-party WASM runtimes from Lite bundles so the

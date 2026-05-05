@@ -210,7 +210,7 @@ export interface StdFragmentFactories {
 
 export function buildStandardMeshRenderables(
   scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories,
-): { renderables: Renderable[]; updater: SceneUniformUpdater };
+): MeshGroupBuildResult;
 ```
 
 ### Single-Material Rebuild (`standard-single-rebuild.ts`)
@@ -294,31 +294,18 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 | Binding | Visibility | Type |
 |---|---|---|
 | 0 | VERTEX \| FRAGMENT | Uniform buffer (canonical Scene UBO, 352 bytes) |
+| 1 | FRAGMENT | Uniform buffer (scene-owned `LightsUniforms`) |
 
 **Group 1 — Per-Mesh** (dynamic bindings based on features):
 
 | Binding | Visibility | Type | Resource | When |
 |---|---|---|---|---|
-| 0 | VERTEX | Uniform buffer | Mesh UBO (64B) | Always |
-| 1 | FRAGMENT | Uniform buffer | Light UBO (48B or 64B with shadow) | Always |
-| 2 | FRAGMENT | Uniform buffer | Material UBO (96B) | Always |
-| 3 | FRAGMENT | texture_2d | Diffuse texture | HAS_DIFFUSE_TEXTURE |
-| 4 | FRAGMENT | sampler | Diffuse sampler | HAS_DIFFUSE_TEXTURE |
-| 5 | VERTEX+FRAGMENT | Uniform buffer | Shadow UBO (96B) or UV UBO (16B) | RECEIVE_SHADOWS or NEEDS_UV |
-| 6 | FRAGMENT | texture_2d | Emissive texture | HAS_EMISSIVE_TEXTURE |
-| 7 | FRAGMENT | sampler | Emissive sampler | HAS_EMISSIVE_TEXTURE |
-| 8 | FRAGMENT | texture_2d | Bump texture | HAS_BUMP_TEXTURE |
-| 9 | FRAGMENT | sampler | Bump sampler | HAS_BUMP_TEXTURE |
-| 10 | FRAGMENT | texture_2d | Specular texture | HAS_SPECULAR_TEXTURE |
-| 11 | FRAGMENT | sampler | Specular sampler | HAS_SPECULAR_TEXTURE |
-| 12 | FRAGMENT | texture_2d | Ambient texture | HAS_AMBIENT_TEXTURE |
-| 13 | FRAGMENT | sampler | Ambient sampler | HAS_AMBIENT_TEXTURE |
-| 14 | FRAGMENT | texture_2d | Lightmap texture | HAS_LIGHTMAP_TEXTURE |
-| 15 | FRAGMENT | sampler | Lightmap sampler | HAS_LIGHTMAP_TEXTURE |
-| 16 | FRAGMENT | texture_2d | Opacity texture | HAS_OPACITY_TEXTURE |
-| 17 | FRAGMENT | sampler | Opacity sampler | HAS_OPACITY_TEXTURE |
-| 18 | FRAGMENT | texture_2d | Reflection texture | HAS_REFLECTION_TEXTURE |
-| 19 | FRAGMENT | sampler | Reflection sampler | HAS_REFLECTION_TEXTURE |
+| 0 | VERTEX \| FRAGMENT | Uniform buffer | Mesh UBO (`world` + per-mesh light selection) | Always |
+| 1 | FRAGMENT | Uniform buffer | Material UBO (96B) | Always |
+| 2 | FRAGMENT | texture_2d | Diffuse texture | HAS_DIFFUSE_TEXTURE |
+| 3 | FRAGMENT | sampler | Diffuse sampler | HAS_DIFFUSE_TEXTURE |
+| 4 | VERTEX+FRAGMENT | Uniform buffer | Shadow UBO (96B) or UV UBO (16B) | RECEIVE_SHADOWS or NEEDS_UV |
+| next | FRAGMENT | texture/sampler pairs | Emissive, bump, specular, ambient, lightmap, opacity, reflection resources | Feature-dependent, assigned sequentially by the shader composer |
 
 **Group 2 — Shadow Map** (only when RECEIVE_SHADOWS):
 
@@ -344,22 +331,25 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 | 320 | 80–83 | `vec4<f32>` | `vFogInfos` (x=mode, y=start, z=end, w=density) |
 | 336 | 84–87 | `vec4<f32>` | `vFogColor` (rgb + pad) |
 
-#### Mesh UBO (Group 1, Binding 0) — 64 bytes
+#### Mesh UBO (Group 1, Binding 0)
 
 | Offset | WGSL Type | Field |
 |---|---|---|
 | 0 | `mat4x4<f32>` | `world` |
+| 64 | `u32` | `lc` |
+| 80.. | `array<vec4<u32>, ceil(MAX_LIGHTS / 4)>` | packed light indices into group-0 `LightsUniforms` |
 
-#### Lights UBO (Group 1, Binding 1) — 16-byte header + `MAX_LIGHTS × 64` bytes
+#### Lights UBO (Group 0, Binding 1) — 16-byte header + `MAX_LIGHTS × 64` bytes
 
 | Offset (bytes) | Type | Field |
 |---|---|---|
-| 0–15 | `vec4<f32>` | `vLightData` — xyz=position/dir, w=0(point)/1(dir) |
-| 16–31 | `vec4<f32>` | `vLightDiffuse` — rgb=diffuse×intensity, a=range |
-| 32–47 | `vec4<f32>` | `vLightSpecular` — rgb=specular×intensity, a=0 |
-| 48–63 | `vec4<f32>` | `shadowsInfo` — if RECEIVE_SHADOWS (x=darkness, z=depthScale, w=frustumEdgeFalloff) |
+| 0–15 | `u32 + padding` | `count` header |
+| 16 + N×64 + 0 | `vec4<f32>` | `vLightData` — xyz=position/dir, w=type |
+| 16 + N×64 + 16 | `vec4<f32>` | `vLightDiffuse` — rgb=diffuse×intensity, a=range |
+| 16 + N×64 + 32 | `vec4<f32>` | `vLightSpecular` — rgb=specular×intensity, a=spot exponent for spot lights |
+| 16 + N×64 + 48 | `vec4<f32>` | `vLightDirection` — direction/cos half-angle for spot lights |
 
-#### Material UBO (Group 1, Binding 2) — 96 bytes (24 floats)
+#### Material UBO (Group 1, Binding 1) — 96 bytes (24 floats)
 
 | Offset (bytes) | Type | Field |
 |---|---|---|
@@ -399,7 +389,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 
 | Block | Contents | Included when |
 |---|---|---|
-| `LIGHTING_FN` | `computeLighting()` — Blinn-Phong with up to 4 lights, shadow factors | Not `DISABLE_LIGHTING` |
+| `LIGHTING_FN` | `computeLighting()` — Blinn-Phong over the mesh-selected subset of the scene-wide `MAX_LIGHTS` lights, shadow factors | Not `DISABLE_LIGHTING` |
 | `FOG_FN` | `calcFogFactor()` — linear/exp/exp2 from `WGSL_FOG` helper | Always |
 
 **Template slot markers** (injected by `ShaderComposer`):
@@ -424,7 +414,7 @@ export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): 
 
 `getOrCreateStandardPipeline` keeps a per-`StandardShaderBindings` `Map<targetSignatureKey(sig), GPURenderPipeline>`. BGLs are stable across signatures (only the pipeline depends on `sig`), so meshBGs validate against any pipeline produced for the same `(features)` bindings instance.
 
-Composed shaders are also cached per `(features, fragmentIds)` to avoid recomposition when only format/MSAA differs. The scene UBO is created per pipeline variant (not per mesh), and a single `SceneUniformUpdater` writes to ALL variant UBOs each frame.
+Composed shaders are also cached per `(features, fragmentIds)` to avoid recomposition when only format/MSAA differs. The group-0 scene bind group is owned by `RenderPassTask`; Standard renderables bind only material/mesh/shadow groups.
 
 Pipeline and composed shader caches are cleared on GPU device change.
 
@@ -434,9 +424,8 @@ Pipeline and composed shader caches are cleared on GPU device change.
 1. Groups meshes by feature bitmask (via `computeFeatures()`)
 2. For each group: builds fragment list from feature flags + `StdFragmentFactories` → `composeStandardShader(features, fragments)` → `getOrCreatePipeline()` → `createDynamicMeshGPU()`
 3. Creates one `Renderable` per group (order = 100, or 200 for transparent)
-4. Creates a single `SceneUniformUpdater` that writes to all variant sceneUBOs and refreshes all cached light UBOs
-5. Stashes first sceneUBO on scene for deferred builders (skybox)
-6. Acquires textures for reference counting, registers cleanup disposables
+4. Relies on `RenderPassTask` for the group-0 scene UBO and scene-owned lights UBO refresh
+5. Acquires textures for reference counting, registers cleanup disposables
 
 When thin instances are present, the draw function calls `tiSync(device, ti, pass, slot, hasInstanceColor)` to synchronize GPU buffers before each instanced draw, and uses `drawIndexed(indexCount, ti.count)` for instanced rendering.
 
@@ -446,9 +435,9 @@ When thin instances are present, the draw function calls `tiSync(device, ti, pas
 - Rebuilds a single mesh renderable after material swap without rebuilding the entire scene
 - Computes feature bitmask from the mesh's current material
 - Gets/creates pipeline variant and builds per-mesh GPU resources
-- Computes light mask for the mesh and writes a filtered lights UBO
+- Computes per-mesh light-selection indices and writes them to the mesh UBO
 - Builds per-light shadow UBOs if shadow generators exist
-- If no shared scene UBO exists yet, initializes it and pushes a scene uniform updater
+- Relies on the active render-pass task for group-0 scene/lights binding
 - Acquires/releases textures for reference counting
 - Returns a `Renderable` that early-exits draw if mesh material changed again
 - Render order: `mesh.renderOrder ?? (isTransparent ? 200 : 100)`

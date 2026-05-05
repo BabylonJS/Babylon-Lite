@@ -65,7 +65,7 @@ describe("PBR template + fragments integration", () => {
         expect(result.fragmentWGSL).toContain("@fragment fn main");
         expect(result.fragmentWGSL).toContain("distributionGGX");
         expect(result.fragmentWGSL).toContain("fresnelSchlick");
-        expect(result.meshUboSpec.totalBytes).toBe(64); // world matrix only — uv transforms now per-texture on material UBO
+        expect(result.meshUboSpec.totalBytes).toBe(144); // world matrix + per-mesh light-selection data
         expect(result.materialUboSpec).toBeDefined();
     });
 
@@ -213,7 +213,9 @@ describe("Standard template + fragments integration", () => {
             hasShadow: false,
         });
         const result = composeShader(template, []);
-        expect(result.fragmentWGSL).toContain("diffuseTexture");
+        expect(result.fragmentWGSL).toContain("@group(1) @binding(2) var dT: texture_2d<f32>");
+        expect(result.fragmentWGSL).toContain("@group(1) @binding(3) var dS: sampler");
+        expect(result.fragmentWGSL).toContain("textureSample(dT, dS, input.vu)");
         expect(result.vertexWGSL).toContain("uv");
     });
 

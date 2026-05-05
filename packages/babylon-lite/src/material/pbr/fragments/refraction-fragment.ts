@@ -51,7 +51,7 @@ let refrDir = rotateY(refrDir_raw, scene.envRotationY);
 // At IOR≥1.5 → 0 (perfect refraction, sharp)
 let refrAlphaG = mix(alphaG, 0.0, clamp(ior * 3.0 - 2.0, 0.0, 1.0));
 // BJS getLodFromAlphaG:  log2(textureSize * alphaG) * lodGenerationScale
-let refrSpecLod = log2(cubemapDim * refrAlphaG) * scene.lodGenerationScale;
+let refrSpecLod = log2(cubemapDim * refrAlphaG) * scene.vImageInfos.z;
 let refrLodClamped = clamp(refrSpecLod, 0.0, maxLod);
 let envRefraction = textureSampleLevel(iblTexture, iblSampler, refrDir, refrLodClamped).rgb * material.environmentIntensity;
 

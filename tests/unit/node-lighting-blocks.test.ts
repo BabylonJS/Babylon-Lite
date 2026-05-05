@@ -83,7 +83,7 @@ describe("NME lighting blocks", () => {
         expect(r.fragmentWgsl).toMatch(/mix\(nodeU\.fc, nodeU\.col, nme_fogFactor/);
     });
 
-    it("LightInformationBlock reads from nmeLights[i]", async () => {
+    it("LightInformationBlock reads from mesh-selected nmeLights[i]", async () => {
         const g = {
             blocks: [
                 {
@@ -105,7 +105,7 @@ describe("NME lighting blocks", () => {
             outputNodes: [2],
         };
         const r = await compile(g);
-        expect(r.fragmentWgsl).toContain("nmeLights.lights[2u].vLightDiffuse.rgb");
+        expect(r.fragmentWgsl).toContain("nmeLights.lights[nli(2u)].vLightDiffuse.rgb");
     });
 
     it("PerturbNormalBlock injects helper and strength default", async () => {

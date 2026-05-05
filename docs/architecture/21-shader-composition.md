@@ -93,8 +93,6 @@ export interface ShaderFragment {
     readonly helperFunctions?: string;
     readonly fragmentSlots?: Partial<Record<FragmentSlot, string>>;
 
-    // ── Scene UBO ──
-    readonly sceneUboFields?: readonly UboField[];
 }
 ```
 
@@ -105,11 +103,11 @@ export interface ShaderTemplate {
     readonly vertexTemplate: string;                    // WGSL with slot markers
     readonly fragmentTemplate: string;                  // WGSL with slot markers
     readonly baseMeshUboFields: readonly UboField[];
-    readonly baseSceneUboFields: readonly UboField[];
     readonly baseVertexAttributes: readonly VertexAttribute[];
     readonly baseVaryings: readonly Varying[];
     readonly baseBindings?: readonly BindingDecl[];
     readonly baseVertexBindings?: readonly BindingDecl[];
+    readonly baseMaterialUboFields?: readonly UboField[];
 }
 ```
 
@@ -211,9 +209,9 @@ Fixed markers replaced once (not iterated over fragments):
 
 ### Bind Group Layout Construction
 
-The composer uses three bind groups:
-- **Group 0**: Scene UBO (managed externally by the render pipeline)
-- **Group 1 ("mesh")**: Mesh UBO (binding 0, always present) + fragment bindings (binding 1+)
+The composer emits material-owned bind groups after the frame-graph scene group:
+- **Group 0**: external frame-graph scene group, not owned by the composer. Binding 0 is the per-pass `SceneUniforms` UBO and binding 1 is the scene-owned `LightsUniforms` UBO.
+- **Group 1 ("mesh")**: Mesh UBO (binding 0, always present), optional Material UBO (binding 1 when `baseMaterialUboFields` is present), and fragment bindings after that
 - **Group 2 ("shadow")**: Shadow-specific bindings (optional)
 
 Binding assignment order:
@@ -246,7 +244,11 @@ Each binding gets:
 | `vec2<f32>` | 8 | 8 |
 | `vec3<f32>` | 16 | 12 |
 | `vec4<f32>` | 16 | 16 |
+| `vec4<u32>` | 16 | 16 |
 | `mat4x4<f32>` | 16 | 64 |
+| `array<vec4<u32>, N>` | 16 | 16 × N |
+
+Array type parsing accepts optional whitespace after the comma, so both `array<vec4<u32>, 4>` and `array<vec4<u32>,4>` are valid field type strings. This matters for production bundles because inline WGSL minification may remove spaces.
 
 Algorithm:
 1. Walk fields in order, align cursor to field alignment
@@ -254,9 +256,11 @@ Algorithm:
 3. Generate WGSL struct body (`name: type,` per field)
 4. Round total size to 16-byte boundary
 
-Two UBO specs are generated per composed shader:
-- **Mesh UBO**: template `baseMeshUboFields` + fragment `uboFields` (group 1, binding 0)
-- **Scene UBO**: template `baseSceneUboFields` + fragment `sceneUboFields` (group 0, binding 0)
+Composed shaders generate material-owned UBO specs only:
+- **Mesh UBO**: template `baseMeshUboFields` (group 1, binding 0)
+- **Material UBO**: template `baseMaterialUboFields` + fragment `uboFields` (group 1, binding 1) when `baseMaterialUboFields` is present; otherwise fragment `uboFields` are appended to the mesh UBO
+
+The canonical scene UBO is not composed from fragments. Material templates prepend `SCENE_UBO_WGSL` through the `/*SU*/` marker, and `RenderPassTask` writes the group-0 scene bind group per pass.
 
 ### Deduplication — `dedup()`
 

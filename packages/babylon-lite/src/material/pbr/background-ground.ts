@@ -23,16 +23,16 @@ import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 const WGSL_IMAGE_PROCESSING = `
 fn applyImageProcessing(result: vec4<f32>) -> vec4<f32> {
 var rgb = result.rgb;
-rgb *= scene.exposureLinear;
+rgb *= scene.vImageInfos.x;
 const tonemappingCalibration: f32 = 1.590579;
 rgb = 1.0 - exp2(-tonemappingCalibration * rgb);
 rgb = pow(rgb, vec3<f32>(1.0 / 2.2));
 rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
 let highContrast = rgb * rgb * (3.0 - 2.0 * rgb);
-if (scene.contrast < 1.0) {
-rgb = mix(vec3<f32>(0.5), rgb, scene.contrast);
+if (scene.vImageInfos.y < 1.0) {
+rgb = mix(vec3<f32>(0.5), rgb, scene.vImageInfos.y);
 } else {
-rgb = mix(rgb, highContrast, scene.contrast - 1.0);
+rgb = mix(rgb, highContrast, scene.vImageInfos.y - 1.0);
 }
 rgb = max(rgb, vec3<f32>(0.0));
 return vec4<f32>(rgb, result.a);

@@ -27,19 +27,20 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
 
 /** @internal LightBase with internal pipeline integration callbacks. Not re-exported from index.ts. */
 export interface LightBaseInternal extends LightBase {
-    readonly _writeStandardLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
+    readonly _writeLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
     /** Monotonically increasing version — bumped when any UBO-relevant property changes. */
     readonly _lightVersion: number;
 }
 
-/** Maximum simultaneous lights supported by the multi-light pipeline (both
- *  Standard and PBR). Default 4 to match Babylon.js's `maxSimultaneousLights`.
- *  Raise via `setMaxLights(n)` before creating any scene / loading any asset
- *  that needs more lights (e.g. the glTF loader auto-raises this when an
- *  asset declares more KHR_lights_punctual lights than the current cap). */
-export let MAX_LIGHTS = 4;
+/** Maximum number of scene lights packed into the shared lights UBO.
+ *  Babylon.js defaults to 4 lights per material; Babylon Lite's cap is scene-wide
+ *  because all materials index the same group-0 lights buffer. Raise via
+ *  `setMaxLights(n)` before creating any scene / loading any asset that needs
+ *  more lights (e.g. the glTF loader auto-raises this when an asset declares
+ *  more KHR_lights_punctual lights than the current cap). */
+export let MAX_LIGHTS = 16;
 
-/** Raise (or lower) the maximum number of lights bound to a single draw.
+/** Raise (or lower) the maximum number of scene lights in the shared lights UBO.
  *  Must be called BEFORE scene pipelines are compiled — existing pipelines
  *  and UBOs bake the cap into their WGSL/layout. */
 export function setMaxLights(n: number): void {

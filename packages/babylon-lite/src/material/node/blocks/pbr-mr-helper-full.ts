@@ -30,26 +30,26 @@ function ccDirectBlock(useClearcoat: boolean, useCcTint: boolean): string {
     const NdotLcc = "ccNdotL";
     const declCcNdotL = `let ccNdotL = clamp(dot(ccNormalW, L), 0.0000001, 1.0);`;
     return `
-        ${declCcNdotL}
-        if (${NdotLcc} > 0.0 && atten > 0.0) {
-            let ccH = normalize(V + L);
-            let ccNdotH = clamp(dot(${Ncc}, ccH), 0.0000001, 1.0);
-            let ccVdotH = saturate(dot(V, ccH));
-            let ccD = nme_pbr_distGGX(ccNdotH, ccAlphaG);
-            let ccVis = 0.25 / (ccVdotH * ccVdotH + 0.0000001);
-            let ccF_d = nme_pbr_ccSchlick(ccF0, ccVdotH);
-            let ccTerm = ccF_d * ccD * ccVis * ${NdotLcc};
-            ccDirectSpecAcc = ccDirectSpecAcc + v3(ccTerm) * color * atten * ccIntensity * sh;
-            baseLayerAtten = 1.0 - ccF_d * ccIntensity;
-            ${
-                useCcTint
-                    ? `let ccLRefract = -refract(L, ${Ncc}, ccIorInv);
-            let ccNdotLRefract = clamp(dot(${Ncc}, ccLRefract), 0.0000001, 1.0);
-            let ccDirectAbsorption = nme_pbr_cocaLambert(ccAbsorptionColor, ccTintThickness * ((ccNdotLRefract + ccNdotVRefract) / (ccNdotLRefract * ccNdotVRefract)));
-            baseLayerAbsorption = mix(v3(1.0), ccDirectAbsorption, v3(ccIntensity));`
-                    : ``
-            }
-        }`;
+${declCcNdotL}
+if (${NdotLcc} > 0.0 && atten > 0.0) {
+let ccH = normalize(V + L);
+let ccNdotH = clamp(dot(${Ncc}, ccH), 0.0000001, 1.0);
+let ccVdotH = saturate(dot(V, ccH));
+let ccD = nme_pbr_distGGX(ccNdotH, ccAlphaG);
+let ccVis = 0.25 / (ccVdotH * ccVdotH + 0.0000001);
+let ccF_d = nme_pbr_ccSchlick(ccF0, ccVdotH);
+let ccTerm = ccF_d * ccD * ccVis * ${NdotLcc};
+ccDirectSpecAcc = ccDirectSpecAcc + v3(ccTerm) * color * atten * ccIntensity * sh;
+baseLayerAtten = 1.0 - ccF_d * ccIntensity;
+${
+    useCcTint
+        ? `let ccLRefract = -refract(L, ${Ncc}, ccIorInv);
+let ccNdotLRefract = clamp(dot(${Ncc}, ccLRefract), 0.0000001, 1.0);
+let ccDirectAbsorption = nme_pbr_cocaLambert(ccAbsorptionColor, ccTintThickness * ((ccNdotLRefract + ccNdotVRefract) / (ccNdotLRefract * ccNdotVRefract)));
+baseLayerAbsorption = mix(v3(1.0), ccDirectAbsorption, v3(ccIntensity));`
+        : ``
+}
+}`;
 }
 
 function ccHemiBlock(useClearcoat: boolean, useCcTint: boolean): string {
@@ -58,26 +58,26 @@ function ccHemiBlock(useClearcoat: boolean, useCcTint: boolean): string {
     }
     const Ncc = "ccNormalW";
     return `
-        let ccNdotL_h = clamp(dot(${Ncc}, Ldir), 0.0000001, 1.0);
-        if (nl > 0.0) {
-            let ccH_h = normalize(V + Ldir);
-            let ccNdotH_h = clamp(dot(${Ncc}, ccH_h), 0.0000001, 1.0);
-            let ccVdotH_h = saturate(dot(V, ccH_h));
-            let ccD_h = nme_pbr_distGGX(ccNdotH_h, ccAlphaG);
-            let ccVis_h = 0.25 / (ccVdotH_h * ccVdotH_h + 0.0000001);
-            let ccF_h = nme_pbr_ccSchlick(ccF0, ccVdotH_h);
-            let ccTerm_h = ccF_h * ccD_h * ccVis_h * ccNdotL_h;
-            ccDirectSpecAcc = ccDirectSpecAcc + v3(ccTerm_h) * entry.vLightDiffuse.rgb * ccIntensity * sh;
-            baseLayerAtten = 1.0 - ccF_h * ccIntensity;
-            ${
-                useCcTint
-                    ? `let ccLRefract_h = -refract(Ldir, ${Ncc}, ccIorInv);
-            let ccNdotLRefract_h = clamp(dot(${Ncc}, ccLRefract_h), 0.0000001, 1.0);
-            let ccDirectAbsorption_h = nme_pbr_cocaLambert(ccAbsorptionColor, ccTintThickness * ((ccNdotLRefract_h + ccNdotVRefract) / (ccNdotLRefract_h * ccNdotVRefract)));
-            baseLayerAbsorption = mix(v3(1.0), ccDirectAbsorption_h, v3(ccIntensity));`
-                    : ``
-            }
-        }`;
+let ccNdotL_h = clamp(dot(${Ncc}, Ldir), 0.0000001, 1.0);
+if (nl > 0.0) {
+let ccH_h = normalize(V + Ldir);
+let ccNdotH_h = clamp(dot(${Ncc}, ccH_h), 0.0000001, 1.0);
+let ccVdotH_h = saturate(dot(V, ccH_h));
+let ccD_h = nme_pbr_distGGX(ccNdotH_h, ccAlphaG);
+let ccVis_h = 0.25 / (ccVdotH_h * ccVdotH_h + 0.0000001);
+let ccF_h = nme_pbr_ccSchlick(ccF0, ccVdotH_h);
+let ccTerm_h = ccF_h * ccD_h * ccVis_h * ccNdotL_h;
+ccDirectSpecAcc = ccDirectSpecAcc + v3(ccTerm_h) * entry.vLightDiffuse.rgb * ccIntensity * sh;
+baseLayerAtten = 1.0 - ccF_h * ccIntensity;
+${
+    useCcTint
+        ? `let ccLRefract_h = -refract(Ldir, ${Ncc}, ccIorInv);
+let ccNdotLRefract_h = clamp(dot(${Ncc}, ccLRefract_h), 0.0000001, 1.0);
+let ccDirectAbsorption_h = nme_pbr_cocaLambert(ccAbsorptionColor, ccTintThickness * ((ccNdotLRefract_h + ccNdotVRefract) / (ccNdotLRefract_h * ccNdotVRefract)));
+baseLayerAbsorption = mix(v3(1.0), ccDirectAbsorption_h, v3(ccIntensity));`
+        : ``
+}
+}`;
 }
 
 function shDirectBlock(useSheen: boolean): string {
@@ -85,13 +85,13 @@ function shDirectBlock(useSheen: boolean): string {
         return "";
     }
     return `
-        if (NdotL > 0.0 && atten > 0.0) {
-            let shH = normalize(V + L);
-            let shNdotH = clamp(dot(N, shH), 0.0000001, 1.0);
-            let shD = nme_pbr_charlieD(shNdotH, shAlphaG);
-            let shV = 1.0 / (4.0 * (NdotL + NdotV - NdotL * NdotV) + 0.0000001);
-            shDirectAcc = shDirectAcc + shColorScaled * shD * shV * NdotL * color * atten * sh * baseLayerAtten;
-        }`;
+if (NdotL > 0.0 && atten > 0.0) {
+let shH = normalize(V + L);
+let shNdotH = clamp(dot(N, shH), 0.0000001, 1.0);
+let shD = nme_pbr_charlieD(shNdotH, shAlphaG);
+let shV = 1.0 / (4.0 * (NdotL + NdotV - NdotL * NdotV) + 0.0000001);
+shDirectAcc = shDirectAcc + shColorScaled * shD * shV * NdotL * color * atten * sh * baseLayerAtten;
+}`;
 }
 
 function shHemiBlock(useSheen: boolean): string {
@@ -99,13 +99,13 @@ function shHemiBlock(useSheen: boolean): string {
         return "";
     }
     return `
-        if (nl > 0.0) {
-            let shH_h = normalize(V + Ldir);
-            let shNdotH_h = clamp(dot(N, shH_h), 0.0000001, 1.0);
-            let shD_h = nme_pbr_charlieD(shNdotH_h, shAlphaG);
-            let shV_h = 1.0 / (4.0 * (nl + NdotV - nl * NdotV) + 0.0000001);
-            shDirectAcc = shDirectAcc + shColorScaled * shD_h * shV_h * nl * entry.vLightSpecular.rgb * sh * baseLayerAtten;
-        }`;
+if (nl > 0.0) {
+let shH_h = normalize(V + Ldir);
+let shNdotH_h = clamp(dot(N, shH_h), 0.0000001, 1.0);
+let shD_h = nme_pbr_charlieD(shNdotH_h, shAlphaG);
+let shV_h = 1.0 / (4.0 * (nl + NdotV - nl * NdotV) + 0.0000001);
+shDirectAcc = shDirectAcc + shColorScaled * shD_h * shV_h * nl * entry.vLightSpecular.rgb * sh * baseLayerAtten;
+}`;
 }
 
 /** Subsurface IBL block — runs inside the env IBL section. Computes refraction
@@ -121,8 +121,8 @@ function shHemiBlock(useSheen: boolean): string {
 function ssBlock(useSubsurface: boolean, useRefraction: boolean, useAnisotropy: boolean): string {
     if (!useSubsurface && !useRefraction) {
         return `let finalRefraction = v3(0.0);
-    let refractionOpacity = 1.0;
-    let ssRefractionIrradiance = v3(0.0);`;
+let refractionOpacity = 1.0;
+let ssRefractionIrradiance = v3(0.0);`;
     }
     const refrPart = useRefraction
         ? `// Refraction: refract V through N at IOR, sample env at refraction LOD.
@@ -131,14 +131,14 @@ function ssBlock(useSubsurface: boolean, useRefraction: boolean, useAnisotropy: 
     let refrV_raw = refract(-V, ${useAnisotropy ? "aniN" : "N"}, invIor);
     let refrV = v3(refrV_raw.x * cosA + refrV_raw.z * sinA, refrV_raw.y, -refrV_raw.x * sinA + refrV_raw.z * cosA);
     let refrAlphaG = mix(alphaG, 0.0, clamp(invIor * 3.0 - 2.0, 0.0, 1.0));
-    let refrLod = log2(cubemapDim * refrAlphaG) * sceneU.lodGenerationScale;
-    let envRefr = textureSampleLevel(nmeIblTexture, nmeIblSampler, refrV, clamp(refrLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let refrLod = log2(cubemapDim * refrAlphaG) * sceneU.vImageInfos.z;
+    let envRefr = textureSampleLevel(nmeIblTexture, nmeIblSampler, refrV, clamp(refrLod, 0.0, maxLod)).rgb;
     let volumeAlbedo = nme_pbr_colorAtDistance(ssTintColor, refrTintAtDistance);
     let refrTransmittance = v3(refrIntensity) * nme_pbr_cocaLambert(volumeAlbedo, ssThickness);
     let finalRefractionRaw = envRefr * refrTransmittance * (v3(1.0) - refractionSpecEnvReflectance);
     let refractionOpacity = 1.0 - refrIntensity;`
         : `let finalRefractionRaw = v3(0.0);
-    let refractionOpacity = 1.0;`;
+let refractionOpacity = 1.0;`;
     const ssPart = useSubsurface
         ? `// Translucency: back-scattered SH irradiance with Burley transmittance.
     let nN_raw = -N;
@@ -147,15 +147,15 @@ function ssBlock(useSubsurface: boolean, useRefraction: boolean, useAnisotropy: 
         + sceneU.vSphericalL1_1.xyz * nN_env.y + sceneU.vSphericalL10.xyz * nN_env.z + sceneU.vSphericalL11.xyz * nN_env.x
         + sceneU.vSphericalL2_2.xyz * (nN_env.y * nN_env.x) + sceneU.vSphericalL2_1.xyz * (nN_env.y * nN_env.z)
         + sceneU.vSphericalL20.xyz * (3.0 * nN_env.z * nN_env.z - 1.0) + sceneU.vSphericalL21.xyz * (nN_env.z * nN_env.x)
-        + sceneU.vSphericalL22.xyz * (nN_env.x * nN_env.x - nN_env.y * nN_env.y)) * sceneU.environmentIntensity;
+        + sceneU.vSphericalL22.xyz * (nN_env.x * nN_env.x - nN_env.y * nN_env.y));
     let ssRefractionIrradiance = backIrradiance * ssTransmittance;
     finalIrradiance = finalIrradiance * refractionOpacity;
     finalIrradiance = finalIrradiance * (1.0 - translucencyIntensity);`
         : `let ssRefractionIrradiance = v3(0.0);
-    finalIrradiance = finalIrradiance * refractionOpacity;`;
+finalIrradiance = finalIrradiance * refractionOpacity;`;
     return `${refrPart}
-    ${ssPart}
-    let finalRefraction = finalRefractionRaw;`;
+${ssPart}
+let finalRefraction = finalRefractionRaw;`;
 }
 
 export function buildPbrMrHelperFull(request: NodePbrMrHelperRequest): string {
@@ -166,6 +166,7 @@ export function buildPbrMrHelperFull(request: NodePbrMrHelperRequest): string {
         request.useRefraction,
         request.useSubsurface,
         request.useAnisotropy,
+        request.useIridescence,
         request.useShAlbedoScaling,
         request.useCcBump,
         request.useCcTint,
@@ -181,6 +182,7 @@ function HELPER_WGSL(
     useRefraction: boolean,
     useSubsurface: boolean,
     useAnisotropy: boolean,
+    useIridescence: boolean,
     useShAlbedoScaling: boolean,
     useCcBump: boolean,
     useCcTint: boolean,
@@ -189,71 +191,68 @@ function HELPER_WGSL(
 ): string {
     const ccDecls = useClearcoat
         ? `let ccIntensity = clamp(ccIntensityIn, 0.0, 1.0);
-    let ccRough = clamp(ccRoughnessIn, 0.0, 1.0);
-    let ccF0_raw = (ccIor - 1.0) / (ccIor + 1.0);
-    let ccF0 = ccF0_raw * ccF0_raw;
-    var ccDirectSpecAcc = v3(0.0);`
+let ccRough = clamp(ccRoughnessIn, 0.0, 1.0);
+let ccF0_raw = (ccIor - 1.0) / (ccIor + 1.0);
+let ccF0 = ccF0_raw * ccF0_raw;
+var ccDirectSpecAcc = v3(0.0);`
         : `let ccDirectSpecAcc = v3(0.0);`;
 
     const ccAlphaSetup = useClearcoat
         ? `var ccAA_factor_y = 0.0;
-    ${
-        useSpecularAA
-            ? `{ let ccNdfdx_AA = dpdx(ccNormalW);
-      let ccNdfdy_AA = dpdy(ccNormalW);
-      let ccSlopeSquare_AA = max(dot(ccNdfdx_AA, ccNdfdx_AA), dot(ccNdfdy_AA, ccNdfdy_AA));
-      ccAA_factor_y = sqrt(ccSlopeSquare_AA) * 0.75; }`
-            : ``
-    }
-    let ccAlphaG = ccRough * ccRough + 0.0005 + ccAA_factor_y;`
+${
+    useSpecularAA
+        ? `{ let ccNdfdx_AA = dpdx(ccNormalW);
+let ccNdfdy_AA = dpdy(ccNormalW);
+let ccSlopeSquare_AA = max(dot(ccNdfdx_AA, ccNdfdx_AA), dot(ccNdfdy_AA, ccNdfdy_AA));
+ccAA_factor_y = sqrt(ccSlopeSquare_AA) * 0.75; }`
+        : ``
+}
+let ccAlphaG = ccRough * ccRough + 0.0005 + ccAA_factor_y;`
         : ``;
 
     const ccNormalSetup = useClearcoat
         ? useCcBump
-            ? `// Use the same TBN basis as base PerturbNormal (matches BJS perturbNormal helper).
-    let ccNormalW = nme_perturbNormal(worldPos, Ng, ccBumpUv, ccBumpColor, 1.0);
-    let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${
-        useCcTint
-            ? `
-    let ccIorInv = 1.0 / max(ccIor, 1.0001);
-    let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
-    let ccVRefract = refract(-V, ccNormalW, ccIorInv);
-    let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
-            : ``
-    }`
+            ? `let ccNormalW = nme_perturbNormal(worldPos, Ng, ccBumpUv, ccBumpColor, 1.0);
+let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${
+                  useCcTint
+                      ? `
+let ccIorInv = 1.0 / max(ccIor, 1.0001);
+let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
+let ccVRefract = refract(-V, ccNormalW, ccIorInv);
+let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
+                      : ``
+              }`
             : `let ccNormalW = Ng;
-    let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${
-        useCcTint
-            ? `
-    let ccIorInv = 1.0 / max(ccIor, 1.0001);
-    let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
-    let ccVRefract = refract(-V, ccNormalW, ccIorInv);
-    let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
-            : ``
-    }`
+let ccNdotV = abs(dot(ccNormalW, V)) + 0.0000001;${
+                  useCcTint
+                      ? `
+let ccIorInv = 1.0 / max(ccIor, 1.0001);
+let ccAbsorptionColor = nme_pbr_colorAtDistance(max(ccTintColor, v3(0.0000001)), max(ccTintAtDistance, 0.0000001));
+let ccVRefract = refract(-V, ccNormalW, ccIorInv);
+let ccNdotVRefract = abs(dot(ccNormalW, ccVRefract)) + 0.0000001;`
+                      : ``
+              }`
         : `let ccNormalW = N;
-    let ccNdotV: f32 = 0.0;`;
+let ccNdotV: f32 = 0.0;`;
 
     const shDecls = useSheen
         ? `let shIntensityRaw = clamp(shIntensityIn, 0.0, 1.0);
-    ${
-        useShAlbedoScaling
-            ? `// SHEEN_ALBEDOSCALING ON: don't pre-scale shIntensity (BJS pbrBlockSheen.fx).
-    let shIntensity = shIntensityRaw;`
-            : `// BJS sheen WITHOUT albedoScaling: shIntensity *= (1 - reflectanceF0)
-    let reflectanceF0 = max(colorF0.r, max(colorF0.g, colorF0.b));
-    let shIntensity = shIntensityRaw * (1.0 - reflectanceF0);`
-    }
-    let shRough = clamp(shRoughnessIn, 0.0, 1.0);
-    let shAlphaG = shRough * shRough + 0.0005;
-    let shColorScaled = shColorIn * shIntensity;
-    var shDirectAcc = v3(0.0);`
+${
+    useShAlbedoScaling
+        ? `let shIntensity = shIntensityRaw;`
+        : `let reflectanceF0 = max(colorF0.r, max(colorF0.g, colorF0.b));
+let shIntensity = shIntensityRaw * (1.0 - reflectanceF0);`
+}
+let shRough = clamp(shRoughnessIn, 0.0, 1.0);
+let shAlphaG = shRough * shRough + 0.0005;
+let shColorScaled = shColorIn * shIntensity;
+var shDirectAcc = v3(0.0);`
         : `let shDirectAcc = v3(0.0);`;
 
     const shIblTerm =
         useEnv && useSheen
-            ? `let shSpecLod = log2(cubemapDim * shAlphaG) * sceneU.lodGenerationScale;
-    let shEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+            ? `let shSpecLod = log2(cubemapDim * shAlphaG) * sceneU.vImageInfos.z;
+    let shEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb;
     let shBrdfBlue = textureSample(nmeBrdfLUT, nmeBrdfSampler, v2(NdotV, shRough)).b;
     let shFinalIbl = shEnvRadiance * shColorScaled * shBrdfBlue * seo * eho;
     ${
@@ -263,13 +262,13 @@ function HELPER_WGSL(
             : `let shAlbedoScaling: f32 = 1.0;`
     }`
             : `let shFinalIbl = v3(0.0);
-    let shAlbedoScaling: f32 = 1.0;`;
+let shAlbedoScaling: f32 = 1.0;`;
 
     const directSpecR0Decl =
         useClearcoat && remapClearcoatF0
             ? `let _directF0S = sqrt(max(colorF0, v3(0.0)));
-    let _directF0T = ((1.0 - ccIor) + (1.0 + ccIor) * _directF0S) / ((1.0 + ccIor) + (1.0 - ccIor) * _directF0S);
-    let directSpecR0 = mix(colorF0, clamp(_directF0T * _directF0T, v3(0.0), v3(1.0)), ccIntensity);`
+let _directF0T = ((1.0 - ccIor) + (1.0 + ccIor) * _directF0S) / ((1.0 + ccIor) + (1.0 - ccIor) * _directF0S);
+let directSpecR0 = mix(colorF0, clamp(_directF0T * _directF0T, v3(0.0), v3(1.0)), ccIntensity);`
             : `let directSpecR0 = colorF0;`;
 
     const shIblScale = useClearcoat ? ` * ccConsIBL${useCcTint ? " * ccAbsorption" : ""}` : "";
@@ -282,10 +281,10 @@ function HELPER_WGSL(
     let ccEnergyConservation = 1.0 + _coloredR0 * (1.0 / max(ccBrdfSample.y, 0.001) - 1.0);
     let ccEhoT = clamp(1.0 + 1.1 * dot(reflect(-V, ccNormalW), Ng), 0.0, 1.0);
     let ccSpecEnvRefl = ccSpecEnvReflRaw * (ccEhoT * ccEhoT);
-    let ccSpecLod = log2(cubemapDim * ccAlphaG) * sceneU.lodGenerationScale;
+    let ccSpecLod = log2(cubemapDim * ccAlphaG) * sceneU.vImageInfos.z;
     let ccR_raw = reflect(-V, ccNormalW);
     let ccR = v3(ccR_raw.x * cosA + ccR_raw.z * sinA, ccR_raw.y, -ccR_raw.x * sinA + ccR_raw.z * cosA);
-    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, ccR, clamp(ccSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, ccR, clamp(ccSpecLod, 0.0, maxLod)).rgb;
     ${
         useCcTint
             ? `// Clearcoat absorption: BJS Beer-Lambert path length through the coat.
@@ -297,20 +296,20 @@ function HELPER_WGSL(
     const ccTintScale = useCcTint ? " * ccAbsorption" : "";
     const ccIblFinal = useClearcoat
         ? `${ccIblPre}
-    ${shIblTerm}
-    r.lighting = finalIrradiance * shAlbedoScaling * ccConsIBL${ccTintScale}
-        + finalRadianceScaled * shAlbedoScaling * ccConsIBL${ccTintScale}
-        + ssRefractionIrradiance * ao_c
-        + finalSpecularScaledDirect * shAlbedoScaling
-        + diffuseAcc * shAlbedoScaling
-        + diffuseTransmissionAcc
-        + ccDirectSpecAcc * ccEnergyConservation
-        + ccFinalRadiance
-        + shDirectAcc
-        + shFinalIbl${shIblScale}
-        + finalRefraction${refrCcScale}${ccTintScale};`
+${shIblTerm}
+r.lighting = finalIrradiance * shAlbedoScaling * ccConsIBL${ccTintScale}
++ finalRadianceScaled * shAlbedoScaling * ccConsIBL${ccTintScale}
++ ssRefractionIrradiance * ao_c
++ finalSpecularScaledDirect * shAlbedoScaling
++ diffuseAcc * shAlbedoScaling
++ diffuseTransmissionAcc
++ ccDirectSpecAcc * ccEnergyConservation
++ ccFinalRadiance
++ shDirectAcc
++ shFinalIbl${shIblScale}
++ finalRefraction${refrCcScale}${ccTintScale};`
         : `${shIblTerm}
-    r.lighting = finalIrradiance * shAlbedoScaling + ssRefractionIrradiance * ao_c + (finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc) * shAlbedoScaling + diffuseTransmissionAcc + shDirectAcc + shFinalIbl + finalRefraction;`;
+r.lighting = finalIrradiance * shAlbedoScaling + ssRefractionIrradiance * ao_c + (finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc) * shAlbedoScaling + diffuseTransmissionAcc + shDirectAcc + shFinalIbl + finalRefraction;`;
 
     const ccDirectFinal = useClearcoat
         ? `r.lighting = diffuseAcc + specAcc + diffuseTransmissionAcc + ccDirectSpecAcc + shDirectAcc;`
@@ -330,7 +329,7 @@ function HELPER_WGSL(
         + sceneU.vSphericalL1_1.xyz * N_env.y + sceneU.vSphericalL10.xyz * N_env.z + sceneU.vSphericalL11.xyz * N_env.x
         + sceneU.vSphericalL2_2.xyz * (N_env.y * N_env.x) + sceneU.vSphericalL2_1.xyz * (N_env.y * N_env.z)
         + sceneU.vSphericalL20.xyz * (3.0 * N_env.z * N_env.z - 1.0) + sceneU.vSphericalL21.xyz * (N_env.z * N_env.x)
-        + sceneU.vSphericalL22.xyz * (N_env.x * N_env.x - N_env.y * N_env.y)) * sceneU.environmentIntensity;
+        + sceneU.vSphericalL22.xyz * (N_env.x * N_env.x - N_env.y * N_env.y));
     let brdfSample = textureSample(nmeBrdfLUT, nmeBrdfSampler, v2(NdotV, rough_c));
     let envBrdf = brdfSample.rgb;
     let reflectanceF0Scalar = max(colorF0.r, max(colorF0.g, colorF0.b));
@@ -351,8 +350,8 @@ function HELPER_WGSL(
     let energyConservation = 1.0 + _coloredR0 * (1.0 / max(envBrdf.y, 0.001) - 1.0);
     let maxLod = f32(textureNumLevels(nmeIblTexture) - 1);
     let cubemapDim = f32(textureDimensions(nmeIblTexture).x);
-    let specLod = log2(cubemapDim * alphaG) * sceneU.lodGenerationScale;
-    var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let specLod = log2(cubemapDim * alphaG) * sceneU.vImageInfos.z;
+    var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb;
     ${refractionSpecEnvReflectanceDecl}
     var finalIrradiance = environmentIrradiance * surfaceAlbedo;
     let finalRadianceScaled = environmentRadiance * colorSpecEnvReflectance * energyConservation;
@@ -363,55 +362,55 @@ function HELPER_WGSL(
     r.specularInd = finalRadianceScaled;
     ${ccIblFinal}`
         : `
-    r.diffuseInd = v3(0.0);
-    r.specularInd = v3(0.0);
-    ${ccDirectFinal}`;
+r.diffuseInd = v3(0.0);
+r.specularInd = v3(0.0);
+${ccDirectFinal}`;
 
     const ccSchlickFn = useClearcoat
         ? `fn nme_pbr_ccSchlick(f0: f32, cosTheta: f32) -> f32 {
-    let t = 1.0 - cosTheta;
-    let t2 = t * t;
-    return f0 + (1.0 - f0) * (t2 * t2 * t);
+let t = 1.0 - cosTheta;
+let t2 = t * t;
+return f0 + (1.0 - f0) * (t2 * t2 * t);
 }
 `
         : ``;
 
     const charlieFn = useSheen
         ? `fn nme_pbr_charlieD(NdotH: f32, alphaG: f32) -> f32 {
-    let invR = 1.0 / max(alphaG, 0.0005);
-    let cos2h = NdotH * NdotH;
-    let sin2h = 1.0 - cos2h;
-    return (2.0 + invR) * pow(sin2h, invR * 0.5) / (2.0 * NME_PBR_PI);
+let invR = 1.0 / max(alphaG, 0.0005);
+let cos2h = NdotH * NdotH;
+let sin2h = 1.0 - cos2h;
+return (2.0 + invR) * pow(sin2h, invR * 0.5) / (2.0 * NME_PBR_PI);
 }
 `
         : ``;
 
     const anisoFns = useAnisotropy
         ? `fn nme_pbr_anisoRoughness(alphaG: f32, anisotropy: f32) -> v2 {
-    let alphaT = max(alphaG * (1.0 + anisotropy), 0.0005);
-    let alphaB = max(alphaG * (1.0 - anisotropy), 0.0005);
-    return v2(alphaT, alphaB);
+let alphaT = max(alphaG * (1.0 + anisotropy), 0.0005);
+let alphaB = max(alphaG * (1.0 - anisotropy), 0.0005);
+return v2(alphaT, alphaB);
 }
 fn nme_pbr_anisoBentNormal(T: v3, B: v3, N: v3, V: v3, anisotropy: f32) -> v3 {
-    var anisotropicFrameDirection = B;
-    if (anisotropy < 0.0) {
-        anisotropicFrameDirection = T;
-    }
-    let anisoTan = cross(normalize(anisotropicFrameDirection), V);
-    let anisoNormal = cross(anisoTan, anisotropicFrameDirection);
-    return normalize(mix(N, anisoNormal, abs(anisotropy)));
+var anisotropicFrameDirection = B;
+if (anisotropy < 0.0) {
+anisotropicFrameDirection = T;
+}
+let anisoTan = cross(normalize(anisotropicFrameDirection), V);
+let anisoNormal = cross(anisoTan, anisotropicFrameDirection);
+return normalize(mix(N, anisoNormal, abs(anisotropy)));
 }
 fn nme_pbr_burleyAnisoD(NdotH: f32, TdotH: f32, BdotH: f32, alphaTB: v2) -> f32 {
-    let a2 = alphaTB.x * alphaTB.y;
-    let v = v3(alphaTB.y * TdotH, alphaTB.x * BdotH, a2 * NdotH);
-    let v2 = dot(v, v);
-    let w2 = a2 / max(v2, 0.0000001);
-    return a2 * w2 * w2 * (1.0 / NME_PBR_PI);
+let a2 = alphaTB.x * alphaTB.y;
+let v = v3(alphaTB.y * TdotH, alphaTB.x * BdotH, a2 * NdotH);
+let v2 = dot(v, v);
+let w2 = a2 / max(v2, 0.0000001);
+return a2 * w2 * w2 * (1.0 / NME_PBR_PI);
 }
 fn nme_pbr_visAnisoSmith(NdotL: f32, NdotV: f32, TdotV: f32, BdotV: f32, TdotL: f32, BdotL: f32, alphaTB: v2) -> f32 {
-    let lambdaV = NdotL * length(v3(alphaTB.x * TdotV, alphaTB.y * BdotV, NdotV));
-    let lambdaL = NdotV * length(v3(alphaTB.x * TdotL, alphaTB.y * BdotL, NdotL));
-    return 0.5 / max(lambdaV + lambdaL, 0.0000001);
+let lambdaV = NdotL * length(v3(alphaTB.x * TdotV, alphaTB.y * BdotV, NdotV));
+let lambdaL = NdotV * length(v3(alphaTB.x * TdotL, alphaTB.y * BdotL, NdotL));
+return 0.5 / max(lambdaV + lambdaL, 0.0000001);
 }
 `
         : ``;
@@ -419,88 +418,87 @@ fn nme_pbr_visAnisoSmith(NdotL: f32, NdotV: f32, TdotV: f32, BdotV: f32, TdotL: 
     const ssFns =
         useSubsurface || useRefraction || useCcTint
             ? `fn nme_pbr_transmittanceBurley(tintColor: v3, diffusionDist: v3, thickness: f32) -> v3 {
-    let S = v3(1.0) / max(diffusionDist, v3(0.0000001));
-    let temp = exp(-0.333333333 * thickness * S);
-    return tintColor * 0.25 * (temp * temp * temp + 3.0 * temp);
+let S = v3(1.0) / max(diffusionDist, v3(0.0000001));
+let temp = exp(-0.333333333 * thickness * S);
+return tintColor * 0.25 * (temp * temp * temp + 3.0 * temp);
 }
 fn nme_pbr_cocaLambert(volumeAlbedo: v3, distance: f32) -> v3 {
-    return exp(-volumeAlbedo * distance);
+return exp(-volumeAlbedo * distance);
 }
 fn nme_pbr_colorAtDistance(color: v3, distance: f32) -> v3 {
-    return -log(color) / distance;
+return -log(color) / distance;
 }
 `
             : ``;
 
     const anisoSetup = useAnisotropy
-        ? `// Build TBN from screen-space derivatives (matches BJS cotangent_frame()).
-    let _adp1 = dpdx(worldPos);
-    let _adp2 = -dpdy(worldPos);
-    let _aduv1 = dpdx(anisoUv);
-    let _aduv2 = -dpdy(anisoUv);
-    let _adp2perp = cross(_adp2, Ng);
-    let _adp1perp = cross(Ng, _adp1);
-    let _atan = _adp2perp * _aduv1.x + _adp1perp * _aduv2.x;
-    let _abit = _adp2perp * _aduv1.y + _adp1perp * _aduv2.y;
-    let _adet = max(dot(_atan, _atan), dot(_abit, _abit));
-    let _ainvmax = select(0.0, inverseSqrt(_adet), _adet > 0.0);
-    let _aTBN0 = normalize(_atan * _ainvmax);
-    let _aTBN1 = normalize(_abit * _ainvmax);
-    let anisoIntensity = clamp(anisoIntensityIn, -1.0, 1.0);
-    let anisoDir = v3(anisoDirection, 0.0);
-    let anisoT_raw = _aTBN0 * anisoDir.x + _aTBN1 * anisoDir.y;
-    let anisoT = normalize(anisoT_raw);
-    let anisoB = normalize(cross(Ng, anisoT));
-    let aniAlphaTB = nme_pbr_anisoRoughness(alphaG, anisoIntensity);
-    let aniN = nme_pbr_anisoBentNormal(anisoT, anisoB, N, V, anisoIntensity);`
+        ? `let _adp1 = dpdx(worldPos);
+let _adp2 = -dpdy(worldPos);
+let _aduv1 = dpdx(anisoUv);
+let _aduv2 = -dpdy(anisoUv);
+let _adp2perp = cross(_adp2, Ng);
+let _adp1perp = cross(Ng, _adp1);
+let _atan = _adp2perp * _aduv1.x + _adp1perp * _aduv2.x;
+let _abit = _adp2perp * _aduv1.y + _adp1perp * _aduv2.y;
+let _adet = max(dot(_atan, _atan), dot(_abit, _abit));
+let _ainvmax = select(0.0, inverseSqrt(_adet), _adet > 0.0);
+let _aTBN0 = normalize(_atan * _ainvmax);
+let _aTBN1 = normalize(_abit * _ainvmax);
+let anisoIntensity = clamp(anisoIntensityIn, -1.0, 1.0);
+let anisoDir = v3(anisoDirection, 0.0);
+let anisoT_raw = _aTBN0 * anisoDir.x + _aTBN1 * anisoDir.y;
+let anisoT = normalize(anisoT_raw);
+let anisoB = normalize(cross(Ng, anisoT));
+let aniAlphaTB = nme_pbr_anisoRoughness(alphaG, anisoIntensity);
+let aniN = nme_pbr_anisoBentNormal(anisoT, anisoB, N, V, anisoIntensity);`
         : `let anisoT = v3(1.0, 0.0, 0.0);
-    let anisoB = v3(0.0, 0.0, 1.0);
-    let aniAlphaTB = v2(alphaG, alphaG);
-    let aniN = N;`;
+let anisoB = v3(0.0, 0.0, 1.0);
+let aniAlphaTB = v2(alphaG, alphaG);
+let aniN = N;`;
 
     const specularAABlock = useSpecularAA
         ? `var AA_factor_x = 0.0;
-    var AA_factor_y = 0.0;
-    { let nDfdx_AA = dpdx(N);
-      let nDfdy_AA = dpdy(N);
-      let slopeSquare_AA = max(dot(nDfdx_AA, nDfdx_AA), dot(nDfdy_AA, nDfdy_AA));
-      AA_factor_x = pow(saturate(slopeSquare_AA), 0.333);
-      AA_factor_y = sqrt(slopeSquare_AA) * 0.75;
-      alphaG = alphaG + AA_factor_y; }`
+var AA_factor_y = 0.0;
+{ let nDfdx_AA = dpdx(N);
+let nDfdy_AA = dpdy(N);
+let slopeSquare_AA = max(dot(nDfdx_AA, nDfdx_AA), dot(nDfdy_AA, nDfdy_AA));
+AA_factor_x = pow(saturate(slopeSquare_AA), 0.333);
+AA_factor_y = sqrt(slopeSquare_AA) * 0.75;
+alphaG = alphaG + AA_factor_y; }`
         : `let AA_factor_x = 0.0;
-    let AA_factor_y = 0.0;`;
+let AA_factor_y = 0.0;`;
 
     return `alias v2 = vec2<f32>;
 alias v3 = vec3<f32>;
 alias v4 = vec4<f32>;
 struct NmePbrMrResult {
-    lighting: v3,
-    diffuseDir: v3,
-    specularDir: v3,
-    diffuseInd: v3,
-    specularInd: v3,
-    shadow: f32,
-    lumOverAlpha: f32,
+lighting: v3,
+diffuseDir: v3,
+specularDir: v3,
+diffuseInd: v3,
+specularInd: v3,
+shadow: f32,
+lumOverAlpha: f32,
 };
 const NME_PBR_PI: f32 = 3.14159265358979323846;
 fn nme_pbr_distGGX(NdotH: f32, alphaG: f32) -> f32 {
-    let a2 = alphaG * alphaG;
-    let d = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    return a2 / (NME_PBR_PI * d * d);
+let a2 = alphaG * alphaG;
+let d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+return a2 / (NME_PBR_PI * d * d);
 }
 fn nme_pbr_geomGGX(NdotL: f32, NdotV: f32, alphaG: f32) -> f32 {
-    let a2 = alphaG * alphaG;
-    let gl = NdotL * sqrt(NdotV * (NdotV - a2 * NdotV) + a2);
-    let gv = NdotV * sqrt(NdotL * (NdotL - a2 * NdotL) + a2);
-    return 0.5 / max(gl + gv, 0.00001);
+let a2 = alphaG * alphaG;
+let gl = NdotL * sqrt(NdotV * (NdotV - a2 * NdotV) + a2);
+let gv = NdotV * sqrt(NdotL * (NdotL - a2 * NdotL) + a2);
+return 0.5 / max(gl + gv, 0.00001);
 }
 fn nme_pbr_fresSchlick(c: f32, F0: v3, F90: v3) -> v3 {
-    let t = 1.0 - c;
-    let t2 = t * t;
-    return F0 + (F90 - F0) * (t2 * t2 * t);
+let t = 1.0 - c;
+let t2 = t * t;
+return F0 + (F90 - F0) * (t2 * t2 * t);
 }
 fn nme_pbr_diffuseEON(albedo: v3, sigma: f32, NdotL: f32, NdotV: f32, LdotV: f32) -> v3 {
-    return albedo * (1.0 / NME_PBR_PI);
+return albedo * (1.0 / NME_PBR_PI);
 }
 ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     worldPos: v3, geometricNormal: v3, worldNormal: v3, cameraPos: v3,
@@ -514,7 +512,8 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     ssTintColor: v3, ssThickness: f32,
     ssTranslucencyIntensityIn: f32, ssDiffusionDist: v3,
     anisoIntensityIn: f32, anisoDirection: v2, anisoUv: v2,
-    shadowFactors: v4
+    iridescenceIntensityIn: f32, iridescenceIorIn: f32, iridescenceThicknessIn: f32,
+    shadowFactors: array<f32, ${MAX_LIGHTS}>
 ) -> NmePbrMrResult {
     var r: NmePbrMrResult;
     let Ng = normalize(geometricNormal);
@@ -530,7 +529,12 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     let dielectricF0Scalar = dielectricF0Raw * dielectricF0Raw;
     let dielectricF0 = v3(dielectricF0Scalar);
     var surfaceAlbedo = baseColor * (1.0 - metallic_c) * (1.0 - dielectricF0Scalar);
-    let colorF0 = mix(dielectricF0, baseColor, metallic_c);
+    let colorF0Base = mix(dielectricF0, baseColor, metallic_c);
+    let colorF0 = ${
+        useIridescence
+            ? `mix(colorF0Base, nme_pbr_evalIridescence(1.0, max(iridescenceIorIn, 1.0001), NdotV, max(iridescenceThicknessIn, 0.0), colorF0Base), clamp(iridescenceIntensityIn, 0.0, 1.0))`
+            : `colorF0Base`
+    };
     let colorF90 = v3(1.0);
     let ao_c = clamp(ao, 0.0, 1.0);
     let directRoughness = max(rough_c, AA_factor_x);
@@ -556,11 +560,12 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     var specAcc = v3(0.0);
     var aggShadow: f32 = 0.0;
     var nLights: f32 = 0.0;
-    let lc = min(nmeLights.count, ${MAX_LIGHTS}u);
+    let lc = min(meshU.lc, ${MAX_LIGHTS}u);
     for (var i: u32 = 0u; i < lc; i = i + 1u) {
-        let entry = nmeLights.lights[i];
+        let lightIndex = nli(i);
+        let entry = nmeLights.lights[lightIndex];
         let t = u32(entry.vLightData.w);
-        let sh = shadowFactors[i];
+        let sh = shadowFactors[lightIndex];
         if (t == 3u) {
             let Ldir = normalize(entry.vLightData.xyz);
             let nl = clamp(0.5 + 0.5 * dot(N, Ldir), 0.0000001, 1.0);
@@ -670,17 +675,17 @@ ${iblBlock}
             : `let _specLum = clamp(dot(specAcc, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
     r.lumOverAlpha = _specLum;`
     }
-    var colorOut = max(r.lighting, v3(0.0)) * sceneU.exposureLinear;
-    if (sceneU.toneMappingEnabled > 0.5) {
+    var colorOut = max(r.lighting, v3(0.0)) * sceneU.vImageInfos.x;
+    if (sceneU.vImageInfos.w > 0.5) {
         colorOut = 1.0 - exp2(-1.590579 * colorOut);
     }
     colorOut = pow(max(colorOut, v3(0.0)), v3(0.45454545));
     colorOut = clamp(colorOut, v3(0.0), v3(1.0));
     let highContrast = colorOut * colorOut * (v3(3.0) - colorOut * 2.0);
-    if (sceneU.contrast < 1.0) {
-        colorOut = mix(v3(0.5), colorOut, sceneU.contrast);
+    if (sceneU.vImageInfos.y < 1.0) {
+        colorOut = mix(v3(0.5), colorOut, sceneU.vImageInfos.y);
     } else {
-        colorOut = mix(colorOut, highContrast, sceneU.contrast - 1.0);
+        colorOut = mix(colorOut, highContrast, sceneU.vImageInfos.y - 1.0);
     }
     r.lighting = max(colorOut, v3(0.0));
     if (nLights > 0.0) { r.shadow = aggShadow / nLights; } else { r.shadow = 1.0; }

@@ -11,5 +11,7 @@ fn main(
   @location(0) position: vec3<f32>,
 ) -> @builtin(position) vec4<f32> {
   let worldPos = mesh.world * vec4<f32>(position, 1.0);
-  return scene.viewProjection * worldPos;
+  var clipPos = scene.viewProjection * worldPos;
+  clipPos.z = clipPos.z + scene.pcfBias.x * clipPos.w;
+  return clipPos;
 }

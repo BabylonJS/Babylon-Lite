@@ -154,7 +154,7 @@ function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenera
       this._deferredBuilders.push(async () => {
         const result = await builder(this, _groups.get(builder)!);
         this._renderables.push(...result.renderables);
-        this._uniformUpdaters.push(result.updater);
+        if (result.updater) this._uniformUpdaters.push(result.updater);
       });
     }
     _groups.get(builder)?.push(entity);
@@ -176,7 +176,7 @@ Materials carry a `_buildGroup: MeshGroupBuilder` function that knows how to cre
 1. `addToScene(scene, mesh)` groups the mesh by its `material._buildGroup` identity.
 2. If this is the first mesh for a given builder, a deferred builder is registered.
 3. At `buildScene(scene)` time (called by `startEngine()`), each deferred builder runs once with the full batch of meshes for that group.
-4. Builders return `{ renderables, updater }` which are pushed onto `_renderables` and `_uniformUpdaters`.
+4. Builders return `MeshGroupBuildResult`; `renderables` are pushed onto `_renderables`, and an optional `updater` is pushed onto `_uniformUpdaters` only when present.
 
 `buildScene(scene)` is async — deferred builders may return `Promise<void>` for GPU resource creation.
 

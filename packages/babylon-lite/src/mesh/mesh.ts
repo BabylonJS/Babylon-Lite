@@ -23,6 +23,10 @@ export interface MeshGPU {
     readonly uvBuffer: GPUBuffer;
     readonly uv2Buffer?: GPUBuffer | null;
     readonly colorBuffer?: GPUBuffer | null;
+    readonly hasUv?: boolean;
+    readonly hasUv2?: boolean;
+    readonly hasTangent?: boolean;
+    readonly hasColor?: boolean;
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
@@ -122,7 +126,9 @@ export function uploadMeshToGPU(
     normals: Float32Array,
     indices: Uint32Array,
     uvs?: Float32Array,
-    uvs2?: Float32Array
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
 ): MeshGPU {
     const device = engine.device;
     const positionBuffer = createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX);
@@ -148,11 +154,20 @@ export function uploadMeshToGPU(
         uv2Buffer = createMappedBuffer(engine, uvs2, GPUBufferUsage.VERTEX);
     }
 
+    const tangentBuffer = tangents && tangents.length > 0 ? createMappedBuffer(engine, tangents, GPUBufferUsage.VERTEX) : null;
+    const colorBuffer = colors && colors.length > 0 ? createMappedBuffer(engine, colors, GPUBufferUsage.VERTEX) : null;
+
     return {
         positionBuffer,
         normalBuffer,
         uvBuffer,
         uv2Buffer,
+        tangentBuffer,
+        colorBuffer,
+        hasUv: !!uvs && uvs.length > 0,
+        hasUv2: !!uvs2 && uvs2.length > 0,
+        hasTangent: !!tangents && tangents.length > 0,
+        hasColor: !!colors && colors.length > 0,
         indexBuffer,
         indexCount: indices.length,
         indexFormat: "uint32",

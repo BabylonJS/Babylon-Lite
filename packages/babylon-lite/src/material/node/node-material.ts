@@ -67,7 +67,6 @@ export interface NodeMaterialInternal extends NodeMaterial {
     readonly _shadowGenerators: readonly import("../../shadow/shadow-generator.js").ShadowGenerator[];
     /** Whether this material requires alpha blending (derived from graph + JSON flags). */
     readonly _needsAlphaBlending: boolean;
-    _sceneUBO: GPUBuffer | null;
     _nodeUBO: GPUBuffer | null;
     _uboDirty: boolean;
     _uniformValues: Map<string, UniformSlot>;
@@ -128,13 +127,9 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     // bundle this module.
     let envHelpers: typeof import("./node-env.js") | null = null;
     let envEmitter: typeof import("./node-env.js").emitEnv | undefined;
-    let envExtraBytes = 0;
-    let envSceneStructFields: string | undefined;
     if (state.usesEnv) {
         envHelpers = await import("./node-env.js");
         envEmitter = envHelpers.emitEnv;
-        envExtraBytes = envHelpers.NME_SCENE_UBO_ENV_EXTRA_BYTES;
-        envSceneStructFields = envHelpers.SCENE_STRUCT_ENV_FIELDS;
     }
 
     // Dynamic import: the PCF/ESM WGSL helpers live in node-shadow.ts and
@@ -150,10 +145,9 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         engine: engineInternal,
         format: engineInternal.format,
         msaaSamples: engineInternal.msaaSamples,
+        backFaceCulling: graph.backFaceCulling,
         alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
         envEmitter,
-        envExtraBytes,
-        envSceneStructFields,
         shadowEmitter,
     });
 
@@ -268,7 +262,6 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _vertexAttrNames: attrNames,
         _shadowGenerators: options.shadowGenerators ?? [],
         _needsAlphaBlending: graph.needsAlphaBlending,
-        _sceneUBO: null,
         _nodeUBO: null,
         _uboDirty: false,
         _uniformValues: uniformValues,

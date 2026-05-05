@@ -11,11 +11,11 @@ export function createStdEmissiveFragment(): ShaderFragment {
     return {
         id: "std-emissive",
         bindings: [
-            { name: "emissiveTex", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "emissiveSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+            { name: "eT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
+            { name: "eS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
         ],
         fragmentSlots: {
-            AT: `emissiveContrib = mat.ec + textureSample(emissiveTex, emissiveSampler, input.vUV).rgb * mat.tl;`,
+            AT: `emissiveContrib = mat.ec + textureSample(eT, eS, input.vu).rgb * mat.tl;`,
         },
     };
 }

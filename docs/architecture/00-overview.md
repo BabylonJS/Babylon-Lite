@@ -449,6 +449,7 @@ interface HemisphericLight extends LightBase {
   direction: ObservableVec3;
   intensity: number;
   diffuseColor: [number, number, number];
+  specularColor: [number, number, number];
   groundColor: [number, number, number];
 }
 
@@ -495,6 +496,7 @@ interface PbrMaterialProps {
   alphaBlend?: boolean;                                  // Enable alpha blending (glTF BLEND)
   environmentIntensity?: number;                         // IBL contribution scale (default 1.0)
   directIntensity?: number;                              // Direct light contribution scale (default 1.0)
+  usePhysicalLightFalloff?: boolean;                     // Direct point/spot inverse-square falloff (default true)
   reflectance?: number;                                  // Dielectric F0 (default 0.04)
   occlusionStrength?: number;                            // AO strength from ORM R channel (default 1.0)
   metallicF0Factor?: number;                             // Dielectric F0 scale (default 1.0)
@@ -664,7 +666,7 @@ interface PickingInfo { mesh: Mesh; faceId: number; worldPosition: Vec3; }
 
 // ─── Low-level (advanced/custom rendering) ───────────────────────────
 interface Renderable { order: number; bind(engine: Engine, target: RenderTargetSignature): DrawBinding; }
-interface DrawBinding { draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: Engine): number; }
+interface DrawBinding { pipeline: GPURenderPipeline; draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: Engine): number; }
 interface PrePassRenderable { execute(encoder: GPUCommandEncoder, engine: Engine): number; }
 interface SceneUniformUpdater { update(engine: Engine): void; }
 
@@ -815,6 +817,7 @@ Plain data factory. Returns `HemisphericLight` with:
 - `direction: ObservableVec3(0, 1, 0)` (up)
 - `intensity: 1.0`
 - `diffuseColor: [1, 1, 1]` (sky/top)
+- `specularColor: [1, 1, 1]` (highlight color)
 - `groundColor: [0, 0, 0]` (bottom)
 
 The hemispheric light model in the shader:
@@ -836,9 +839,11 @@ contribution = hemiColor * intensity
 
 **Pipeline caching**: Both materials cache pipelines per `(features, format, msaaSamples)` tuple. Meshes with the same features share a pipeline.
 
-**Bind group layout (PBR group 1)**: Bindings assigned sequentially — mesh UBO, baseColor, [normal], ORM, [emissive], [BRDF LUT, IBL cube]. Binding count varies by features.
+**Bind group layout (scene group 0)**: binding 0 is the per-pass `SceneUniforms` UBO owned by `RenderPassTask`; binding 1 is the scene-owned `LightsUniforms` UBO.
 
-**Bind group layout (Standard group 1)**: mesh UBO, light UBO, material UBO, [diffuse texture], [shadow/UV UBO], [emissive texture]. Group 2 = shadow map (if shadows).
+**Bind group layout (PBR group 1)**: Bindings assigned sequentially — mesh UBO (world + per-mesh light indices), baseColor, [normal], ORM, [emissive], [BRDF LUT, IBL cube]. Binding count varies by features.
+
+**Bind group layout (Standard group 1)**: mesh UBO (world + per-mesh light indices), material UBO, [diffuse texture], [shadow/UV UBO], [emissive texture]. Group 2 = shadow map (if shadows).
 
 ### 3.7 Renderable Architecture (`render/renderable.ts`)
 
@@ -846,7 +851,7 @@ contribution = hemiColor * intensity
 
 ```typescript
 interface Renderable { order: number; bind(engine, target): DrawBinding; }
-interface DrawBinding { draw(pass, engine): number; }
+interface DrawBinding { pipeline: GPURenderPipeline; draw(pass, engine): number; }
 interface PrePassRenderable { execute(encoder, engine): number; }
 interface SceneUniformUpdater { update(engine): void; }
 ```

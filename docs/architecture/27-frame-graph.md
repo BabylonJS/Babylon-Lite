@@ -1,4 +1,5 @@
 # Module: Frame Graph
+
 > Package path: `packages/babylon-lite/src/frame-graph/`
 > Related paths: `packages/babylon-lite/src/engine/render-target.ts`, `packages/babylon-lite/src/texture/rtt.ts`, `packages/babylon-lite/src/render/renderable.ts`
 
@@ -36,13 +37,13 @@ export { createRenderTargetTexture } from "./texture/rtt.js";
 
 ```typescript
 export interface FrameGraph {
-  _tasks: Task[];
-  _ready: boolean;
-  _engine: EngineContextInternal;
-  _scene: SceneContextInternal;
-  build(): Promise<void>;
-  execute(): number;
-  dispose(): void;
+    _tasks: Task[];
+    _ready: boolean;
+    _engine: EngineContextInternal;
+    _scene: SceneContextInternal;
+    build(): Promise<void>;
+    execute(): number;
+    dispose(): void;
 }
 ```
 
@@ -52,22 +53,22 @@ export interface FrameGraph {
 
 ```typescript
 export interface Task {
-  readonly name: string;
-  readonly engine: EngineContextInternal;
-  readonly scene: SceneContextInternal;
-  record(): Promise<void> | void;
-  execute(): number;
-  dispose(): void;
+    readonly name: string;
+    readonly engine: EngineContextInternal;
+    readonly scene: SceneContextInternal;
+    record(): Promise<void> | void;
+    execute(): number;
+    dispose(): void;
 }
 ```
 
 Task lifecycle:
 
-| Method | Called by | Purpose |
-|---|---|---|
-| `record()` | `FrameGraph.build()` | Allocate/rebuild GPU resources and finalize descriptors. May be async. |
+| Method      | Called by                             | Purpose                                                                 |
+| ----------- | ------------------------------------- | ----------------------------------------------------------------------- |
+| `record()`  | `FrameGraph.build()`                  | Allocate/rebuild GPU resources and finalize descriptors. May be async.  |
 | `execute()` | `FrameGraph.execute()` once per frame | Encode GPU work into `engine._currentEncoder`. Returns draw-call count. |
-| `dispose()` | `FrameGraph.dispose()` | Release task-owned GPU resources. |
+| `dispose()` | `FrameGraph.dispose()`                | Release task-owned GPU resources.                                       |
 
 At the time of this PR, `RenderPassTask` is the only implementation of `Task`. The interface exists so future frame-graph work can add other ordered task types without changing `FrameGraph` itself, for example compute tasks, copy/resolve tasks, post-process tasks, or resource-transition/helper tasks.
 
@@ -76,8 +77,8 @@ At the time of this PR, `RenderPassTask` is the only implementation of `Task`. T
 Tasks execute in array order. There is no automatic dependency analysis; caller order is the contract.
 
 ```typescript
-addTask(sceneOrGraph, task);              // append at end
-addTaskAtStart(sceneOrGraph, task);       // insert at start
+addTask(sceneOrGraph, task); // append at end
+addTaskAtStart(sceneOrGraph, task); // insert at start
 addTaskBefore(sceneOrGraph, task, beforeTask);
 ```
 
@@ -95,33 +96,33 @@ Rules:
 
 ```typescript
 export interface RenderTargetDescriptor {
-  label?: string;
-  colorFormat: GPUTextureFormat;
-  depthStencilFormat?: GPUTextureFormat;
-  sampleCount: number;
-  size: "canvas" | { width: number; height: number };
-  resolveToSwapchain?: boolean;
+    label?: string;
+    colorFormat: GPUTextureFormat;
+    depthStencilFormat?: GPUTextureFormat;
+    sampleCount: number;
+    size: "canvas" | { width: number; height: number };
+    resolveToSwapchain?: boolean;
 }
 ```
 
 Render targets are pure-state descriptors plus owned GPU texture handles. `buildRenderTarget(rt, engine)` allocates textures during `RenderPassTask.record()`.
 
-| Field | Meaning |
-|---|---|
-| `colorFormat` | Color attachment format; use `engine.format` for swapchain-compatible output. |
-| `depthStencilFormat` | Optional depth/stencil attachment format. Most 3D passes use `"depth24plus-stencil8"`. |
-| `sampleCount` | `1` or `4`, matching WebGPU limits. Pipelines key on this value. |
-| `size` | `"canvas"` follows canvas backing-store size; fixed `{ width, height }` is used for stable RTTs. |
+| Field                | Meaning                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `colorFormat`        | Color attachment format; use `engine.format` for swapchain-compatible output.                                                   |
+| `depthStencilFormat` | Optional depth/stencil attachment format. Most 3D passes use `"depth24plus-stencil8"`.                                          |
+| `sampleCount`        | `1` or `4`, matching WebGPU limits. Pipelines key on this value.                                                                |
+| `size`               | `"canvas"` follows canvas backing-store size; fixed `{ width, height }` is used for stable RTTs.                                |
 | `resolveToSwapchain` | True for swapchain passes. With MSAA, the task uses an owned MSAA color texture and resolves into the per-frame swapchain view. |
 
 ### Target Signature
 
 ```typescript
 export interface RenderTargetSignature {
-  colorFormat: GPUTextureFormat;
-  depthStencilFormat?: GPUTextureFormat;
-  sampleCount: number;
-  flipY?: boolean;
+    colorFormat: GPUTextureFormat;
+    depthStencilFormat?: GPUTextureFormat;
+    sampleCount: number;
+    flipY?: boolean;
 }
 ```
 
@@ -130,10 +131,7 @@ Material pipelines are cached by target signature. Offscreen render targets set 
 ### Eager RTT Texture
 
 ```typescript
-export function createRenderTargetTexture(
-  engine: EngineContext,
-  descriptor: RenderTargetDescriptor
-): { rt: RenderTarget; texture: Texture2D };
+export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor): { rt: RenderTarget; texture: Texture2D };
 ```
 
 Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as a `Texture2D`.
@@ -150,23 +148,23 @@ Constraints:
 
 ```typescript
 export interface RenderPassTaskConfig {
-  name: string;
-  rt: RenderTarget;
-  clrColor?: GPUColorDict;
-  clr?: boolean;
-  cam?: Camera | null;
-  cs?: boolean;
+    name: string;
+    rt: RenderTarget;
+    clrColor?: GPUColorDict;
+    clr?: boolean;
+    cam?: Camera | null;
+    cs?: boolean;
 }
 ```
 
-| Field | Meaning |
-|---|---|
-| `name` | Used for labels and diagnostics. |
-| `rt` | Concrete render target for this pass. |
-| `clrColor` | Clear color. The object may be mutated between frames. |
-| `clr` | Defaults to clear. Set `false` to use color/depth `loadOp: "load"` for overlays or multi-scene composition. |
-| `cam` | Optional per-pass camera. Defaults to `scene.camera`. |
-| `cs` | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect. |
+| Field      | Meaning                                                                                                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | Used for labels and diagnostics.                                                                                                                                                                                |
+| `rt`       | Concrete render target for this pass.                                                                                                                                                                           |
+| `clrColor` | Clear color. The object may be mutated between frames.                                                                                                                                                          |
+| `clr`      | Defaults to clear. Set `false` to use color/depth `loadOp: "load"` for overlays or multi-scene composition.                                                                                                     |
+| `cam`      | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                           |
+| `cs`       | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect. |
 
 ### Default Scene Pass
 
@@ -174,12 +172,12 @@ export interface RenderPassTaskConfig {
 
 ```typescript
 const swapRT = createRenderTarget({
-  label: "scene-swapchain",
-  colorFormat: engine.format,
-  depthStencilFormat: "depth24plus-stencil8",
-  sampleCount: engine.msaaSamples,
-  size: "canvas",
-  resolveToSwapchain: true,
+    label: "scene-swapchain",
+    colorFormat: engine.format,
+    depthStencilFormat: "depth24plus-stencil8",
+    sampleCount: engine.msaaSamples,
+    size: "canvas",
+    resolveToSwapchain: true,
 });
 
 createRenderPassTask({ name: "scene", rt: swapRT, clrColor: scene.clearColor }, engine, scene);
@@ -210,15 +208,15 @@ const binding = renderable.bind(engine, targetSignature);
 
 Bindings are partitioned into:
 
-| Bucket | Renderable flags | Execution |
-|---|---|---|
-| Opaque | `!isTransparent && !isTransmissive` | Cached `GPURenderBundle` |
-| Transmissive | `isTransmissive` | Direct draw after opaque |
-| Transparent | `isTransparent` | Direct draw after transmissive, sorted back-to-front per frame |
+| Bucket       | Renderable flags                    | Execution                                                      |
+| ------------ | ----------------------------------- | -------------------------------------------------------------- |
+| Opaque       | `!isTransparent && !isTransmissive` | Cached `GPURenderBundle`                                       |
+| Transmissive | `isTransmissive`                    | Direct draw after opaque                                       |
+| Transparent  | `isTransparent`                     | Direct draw after transmissive, sorted back-to-front per frame |
 
 Opaque and transmissive buckets currently sort by `renderable.order`. Transparent is sorted by squared distance from the active pass camera and must not be pipeline-sorted.
 
-`DrawBinding.pipeline` is optional. If present, `drawList()` deduplicates `setPipeline()`. If absent, the binding's draw closure owns pipeline binding and the dedup state is reset.
+`DrawBinding.pipeline` is mandatory. `RenderPassTask` owns `setPipeline()` and deduplicates consecutive bindings with the same pipeline before calling the binding's `draw()` closure.
 
 ## Per-Pass Scene UBO
 
@@ -231,18 +229,18 @@ Each `RenderPassTask` owns:
 
 `writePassSceneUBO()` writes the canonical 352-byte `SceneUniforms` layout:
 
-| Float offset | Field |
-|---:|---|
-| 0 | `viewProjection` |
-| 16 | `view` |
-| 32 | `vEyePosition` |
-| 36 | `envRotationY` |
-| 40 | spherical harmonics coefficients |
-| 76 | `exposureLinear` |
-| 77 | `contrast` |
-| 78 | `lodGenerationScale` |
-| 80 | `vFogInfos` |
-| 84 | `vFogColor` |
+| Float offset | Field                            |
+| -----------: | -------------------------------- |
+|            0 | `viewProjection`                 |
+|           16 | `view`                           |
+|           32 | `vEyePosition`                   |
+|           36 | `envRotationY`                   |
+|           40 | spherical harmonics coefficients |
+|           76 | `exposureLinear`                 |
+|           77 | `contrast`                       |
+|           78 | `lodGenerationScale`             |
+|           80 | `vFogInfos`                      |
+|           84 | `vFogColor`                      |
 
 The writer bails before touching scratch/GPU when camera, fog, aspect, environment rotation, exposure, and contrast are unchanged.
 
@@ -250,26 +248,22 @@ Offscreen targets use `targetSignature.flipY` and negate the projection row so d
 
 ## Usage: Offscreen Pass Feeding a Material
 
-Scene 52 demonstrates the core pattern:
+Scene 110 demonstrates the core pattern:
 
 ```typescript
 const { rt, texture } = createRenderTargetTexture(engine, {
-  label: "r1",
-  colorFormat: engine.format,
-  depthStencilFormat: "depth24plus-stencil8",
-  sampleCount: 1,
-  size: { width: 512, height: 512 },
+    label: "r1",
+    colorFormat: engine.format,
+    depthStencilFormat: "depth24plus-stencil8",
+    sampleCount: 1,
+    size: { width: 512, height: 512 },
 });
 
 const consumerMaterial = createStandardMaterial();
 consumerMaterial.diffuseTexture = texture;
 
 const rttCamera = createFreeCamera({ x: 0, y: 0, z: -3 }, { x: 0, y: 0, z: 0 });
-const task = createRenderPassTask(
-  { name: "r1", rt, cam: rttCamera, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cs: true },
-  engine,
-  scene
-);
+const task = createRenderPassTask({ name: "r1", rt, cam: rttCamera, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cs: true }, engine, scene);
 
 addTaskAtStart(scene, task);
 task.addToPass(sourceMesh, { material: overrideMaterial });
@@ -310,25 +304,25 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 
 ## Babylon.js FrameGraph Mapping
 
-| Babylon.js concept | Babylon Lite |
-|---|---|
-| Frame graph | Ordered `FrameGraph._tasks` |
-| Frame graph task | `Task` |
-| Render pass task | `RenderPassTask` |
-| Texture/resource handle | Concrete `RenderTarget` for now |
-| Task record/build phase | `Task.record()` via `FrameGraph.build()` |
-| Per-frame execute phase | `Task.execute()` via `FrameGraph.execute()` |
-| Render target texture | `createRenderTargetTexture()` |
+| Babylon.js concept             | Babylon Lite                                        |
+| ------------------------------ | --------------------------------------------------- |
+| Frame graph                    | Ordered `FrameGraph._tasks`                         |
+| Frame graph task               | `Task`                                              |
+| Render pass task               | `RenderPassTask`                                    |
+| Texture/resource handle        | Concrete `RenderTarget` for now                     |
+| Task record/build phase        | `Task.record()` via `FrameGraph.build()`            |
+| Per-frame execute phase        | `Task.execute()` via `FrameGraph.execute()`         |
+| Render target texture          | `createRenderTargetTexture()`                       |
 | Pass-specific camera/scene UBO | `RenderPassTaskConfig.cam` + task-owned `_sceneUBO` |
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
-| `src/frame-graph/task.ts` | Polymorphic task interface |
-| `src/frame-graph/frame-graph.ts` | Ordered task list and build/execute/dispose lifecycle |
-| `src/frame-graph/frame-graph-actions.ts` | Public task insertion helpers |
-| `src/frame-graph/render-pass-task.ts` | Render-pass task, per-pass scene UBO, target binding, draw buckets |
-| `src/engine/render-target.ts` | Render target descriptors, allocation, disposal, target signatures |
-| `src/texture/rtt.ts` | Eager render-target texture helper |
-| `src/render/renderable.ts` | `Renderable` and `DrawBinding` contracts consumed by render-pass tasks |
+| File                                     | Purpose                                                                |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| `src/frame-graph/task.ts`                | Polymorphic task interface                                             |
+| `src/frame-graph/frame-graph.ts`         | Ordered task list and build/execute/dispose lifecycle                  |
+| `src/frame-graph/frame-graph-actions.ts` | Public task insertion helpers                                          |
+| `src/frame-graph/render-pass-task.ts`    | Render-pass task, per-pass scene UBO, target binding, draw buckets     |
+| `src/engine/render-target.ts`            | Render target descriptors, allocation, disposal, target signatures     |
+| `src/texture/rtt.ts`                     | Eager render-target texture helper                                     |
+| `src/render/renderable.ts`               | `Renderable` and `DrawBinding` contracts consumed by render-pass tasks |

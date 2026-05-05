@@ -19,7 +19,7 @@ PBR shaders are built using the `ShaderComposer` architecture defined in `src/sh
    - `dependencies` — other fragment IDs that must be composed first
    - `fragmentSlots` / `vertexSlots` — WGSL snippets keyed by slot name
    - `bindings` / `vertexBindings` — `BindingDecl[]` for textures/samplers/UBOs
-   - `uboFields` / `sceneUboFields` — additional mesh/scene UBO fields
+   - `uboFields` — additional material UBO fields
    - `vertexAttributes` — additional vertex buffer attributes
    - `varyings` — additional inter-stage varyings
    - `helperFunctions` / `vertexHelperFunctions` — WGSL helper code
@@ -116,6 +116,7 @@ export interface PbrMaterialProps {
   alphaBlend?: boolean;
   environmentIntensity?: number;
   directIntensity?: number;
+  usePhysicalLightFalloff?: boolean;
   reflectance?: number;
   occlusionStrength?: number;
   metallicF0Factor?: number;
@@ -159,22 +160,26 @@ await loadGltf(scene, 'model.glb');
 /** Compute PBR feature bitmask from mesh/material/scene capabilities. */
 export function computePbrFeatures(...): number;
 
-/** Get or create a cached PBR pipeline variant for the given features. */
+/** Get or create sig-independent PBR shader bindings. */
+export function getOrCreatePbrBindings(
+  engine: EngineContextInternal, features: number, features2: number,
+  composed: ComposedShader, shaderKey?: string,
+): PbrShaderBindings;
+
+/** Get or create a cached PBR pipeline for a render-target signature. */
 export function getOrCreatePbrPipeline(
-  device: GPUDevice, format: GPUTextureFormat, msaaSamples: number,
-  features: number, sceneBGL: GPUBindGroupLayout, composed: ComposedShader,
-): PbrPipelineVariant;
+  engine: EngineContextInternal, sig: RenderTargetSignature, bindings: PbrShaderBindings,
+): GPURenderPipeline;
 
 /** Create per-mesh bind group (group 1) with textures matching the composed shader layout. */
 export function createPbrMeshBindGroup(
-  device: GPUDevice, variant: PbrPipelineVariant,
-  meshUBO: GPUBuffer, material: PbrMaterialProps, env: EnvironmentTextures | null,
-  boneTextureView?: GPUTextureView, morphTargetView?: GPUTextureView,
-  morphWeightsBuffer?: GPUBuffer, lightsUBO?: GPUBuffer,
+  engine: EngineContextInternal, bindings: PbrShaderBindings, composed: ComposedShader,
+  meshUBO: GPUBuffer, materialUBO: GPUBuffer, material: PbrMaterialProps,
+  env: EnvironmentTextures | null,
+  meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null,
 ): GPUBindGroup;
 
 export function clearPbrPipelineCache(): void;
-export function releasePbrPipelineVariant(variant: PbrPipelineVariant): void;
 ```
 
 ### Template (`pbr-template.ts`)
@@ -217,10 +222,10 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate;
 ### Renderable Builder (`pbr-renderable.ts`)
 
 ```typescript
-/** Build PBR Renderable(s) + SceneUniformUpdater from mesh data. */
+/** Build PBR renderables from mesh data. */
 export function buildPbrRenderables(
   scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined,
-): { renderables: Renderable[]; updater: SceneUniformUpdater; _sceneBGL: GPUBindGroupLayout; _sceneBG: GPUBindGroup };
+): Promise<MeshGroupBuildResult>;
 
 /** Exported for use by pbr-single-rebuild.ts. */
 export function _createPbrMeshUBO(...): GPUBuffer;
@@ -329,7 +334,9 @@ PBR lighting consumes the shared `render/lights-ubo.ts` buffer. Light code is st
 | `fragments/singlelight-wgsl.ts` | Exactly one scene light and no shadow receivers | `SINGLE_LIGHT_STRUCTS`, `getSingleLightBlock(lightType)` |
 | `fragments/multilight-wgsl.ts` | More than one light, or any shadow receiver | `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()` |
 
-The single-light helper emits specialized, non-looping WGSL for hemispheric, directional, point, or spot lights and reads `lights.lights[0]`. The multi-light helper emits `computePbrLight()` plus a loop over `lights.count`; it also exposes first-light aliases for direct-light fragments (`clearcoat`, `sheen`, `subsurface`) and supports shadow factors written by `pbr-shadow-fragment.ts`.
+The single-light helper emits specialized, non-looping WGSL for hemispheric, directional, point, or spot lights and reads the mesh-selected light index. The multi-light helper emits `computePbrLight()` plus a loop over the mesh-selected light indices; it also exposes first-light aliases for direct-light fragments (`clearcoat`, `sheen`, `subsurface`) and supports shadow factors written by `pbr-shadow-fragment.ts`.
+
+`usePhysicalLightFalloff` defaults to `true`, matching Babylon.js PBR's physical inverse-square point/spot falloff. When set to `false`, point and spot lights use Babylon's Standard-style falloff: linear range attenuation and spot cone exponent attenuation. Scene 22 uses this path to mirror `PBRMaterial.usePhysicalLightFalloff = false` in the Babylon.js reference.
 
 ## Pipeline Configuration
 
@@ -387,7 +394,6 @@ Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assi
 - Normal texture + sampler — if `PBR_HAS_NORMAL_MAP`
 - ORM texture + sampler — always (or specGloss texture)
 - Emissive texture + sampler — if `PBR_HAS_EMISSIVE`
-- Lights UBO — if single-light, multi-light, or shadow receiving
 - BRDF LUT + sampler + IBL cubemap + sampler — if `PBR_HAS_ENV`
 - Reflectance maps + samplers — if reflectance extension
 - Sheen texture + sampler — if `PBR_HAS_SHEEN_TEXTURE`
@@ -408,7 +414,7 @@ The builder also stashes `_buildGroup._rebuildSingle` for hot material swapping 
 
 PBR uses the canonical `SceneUniforms` shared with Standard/material-independent passes. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and is declared in `packages/babylon-lite/shaders/scene-uniforms.wgsl`. It contains view/projection matrices, camera position, environment rotation, SH irradiance, image-processing fields, and fog fields.
 
-Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the separate lights UBO in group 1 when `hasSingleLight` or `hasMultiLight` is enabled.
+Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the scene-owned `LightsUniforms` UBO at group 0 binding 1 when `hasSingleLight` or `hasMultiLight` is enabled.
 
 ### Mesh Uniform Buffer Layout (Group 1, Binding 0)
 
@@ -417,10 +423,8 @@ Base fields (always present):
 | Offset (bytes) | Size | WGSL Type | Field |
 |---|---|---|---|
 | 0 | 64 | `mat4x4<f32>` | `world` |
-| 64 | 4 | `f32` | `environmentIntensity` |
-| 68 | 4 | `f32` | `directIntensity` |
-| 72 | 4 | `f32` | `reflectance` |
-| 76 | 4 | `f32` | `alpha` |
+| 64 | 4 | `u32` | `lc` |
+| 80.. | `ceil(MAX_LIGHTS / 4) × 16` | `array<vec4<u32>, ceil(MAX_LIGHTS / 4)>` | packed light indices into group-0 `LightsUniforms` |
 
 Additional fields appended by fragments:
 
@@ -443,7 +447,7 @@ The exact layout is computed by `computeUboLayout()` from the merged UBO field l
 
 - **Vertex template** — world transform, optional TBN (tangent or cotangent), UV passthrough, slot markers for morph (`/*VR*/`), skinning (`/*VW*/`), shadow (`/*VB*/`)
 - **Fragment template** — texture sampling, BRDF functions (always included: GGX NDF, Smith-GGX geometry, Schlick Fresnel), optional specular AA, optional gamma decode, slot markers for material setup (`/*MF*/`, `/*SV*/`, `/*BL*/`), direct lighting (`/*AD*/`), IBL (`/*AI*/` or `/*NI*/`), post-effects (`/*AT*/`, `/*BC*/`, `/*BA*/`)
-- **Base UBO fields** and **base bindings** for the always-present textures, plus the lights UBO binding when direct lighting is enabled
+- **Base UBO fields** for the mesh light-selection data and **base bindings** for the always-present textures; direct lighting uses the fixed group-0 lights UBO
 
 Supports both metallic-roughness and specular-glossiness workflows via `hasSpecGloss`.
 
@@ -455,14 +459,13 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 
 `buildPbrRenderables(scene, meshes, envTextures)`:
 1. Dynamically imports only the fragment modules needed by the mesh set
-2. Registers PBR light extensions on scene lights
-3. Creates composed shaders per feature bitmask (cached)
-4. Creates one shared lights UBO for any lit scene
-5. Builds per-mesh mesh/material UBOs and bind groups
-6. For each mesh: `computePbrFeatures()` → compose shader → `getOrCreatePbrPipeline()` → create mesh UBO → `createPbrMeshBindGroup()`
+2. Computes per-mesh affected light indices from scene lights
+3. Creates composed shaders per feature bitmask and per-mesh light mode (no light, single-light fast path, or multi/shadow path)
+4. Builds per-mesh mesh/material UBOs and bind groups; the mesh UBO stores `lc` and packed `li` scene-light indices
+5. For each mesh: `computePbrFeatures()` → compose shader → `getOrCreatePbrPipeline()` → create mesh UBO → `createPbrMeshBindGroup()`
 7. Returns one `Renderable` per mesh; each renderable binds target-specific `DrawBinding`s for frame-graph passes
 8. Uses opaque order = 100, transparent order = 200, and marks transmissive materials for the transmissive pass bucket
-9. Stashes `_sceneBGL`/`_sceneBG` on scene for background renderables to reuse
+9. Returns `rebuildSingle` so material swaps and per-pass material overrides can rebuild one mesh without rebuilding the whole scene
 10. Sets up disposal to clear pipeline cache and samplers on scene teardown
 
 ### Single-Material Rebuild (`pbr-single-rebuild.ts`)

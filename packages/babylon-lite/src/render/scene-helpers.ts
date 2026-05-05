@@ -5,22 +5,28 @@
 
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { createSingleUniformBGL } from "../shader/bgl-helpers.js";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
 
 let _cachedSceneBGL: GPUBindGroupLayout | null = null;
 let _cachedDevice: GPUDevice | null = null;
 
-/** Shared scene bind group layout — one uniform buffer at binding 0,
- *  visible to both vertex and fragment stages. Cached per device. */
+/** Shared scene bind group layout:
+ *  binding 0: per-pass SceneUniforms UBO
+ *  binding 1: scene-owned LightsUniforms UBO */
 export function getSceneBindGroupLayout(engine: EngineContextInternal): GPUBindGroupLayout {
     const device = engine.device;
     if (_cachedSceneBGL && _cachedDevice === device) {
         return _cachedSceneBGL;
     }
     _cachedDevice = device;
-    _cachedSceneBGL = createSingleUniformBGL(engine, "scene", GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT);
+    _cachedSceneBGL = device.createBindGroupLayout({
+        label: "scene",
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+        ],
+    });
     return _cachedSceneBGL;
 }
 
