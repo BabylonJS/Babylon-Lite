@@ -1,4 +1,4 @@
-// Scene 52 — RTT with per-pass material override.
+// Scene 110 — RTT with per-pass material override.
 //
 // Two meshes A (sphere) and B (box) are added to the main pass with the standard pipeline.
 // A second render pass R1 renders mesh A *only*, with its own camera AND a different
@@ -9,7 +9,7 @@
 // per-pass material override, and that one Renderable per (mesh, material) is shared
 // across multiple passes.
 //
-// Note: id 52 — id 50 is reserved by a co-worker.
+// Note: id 110 — moved from id 52.
 
 import {
     addToScene,

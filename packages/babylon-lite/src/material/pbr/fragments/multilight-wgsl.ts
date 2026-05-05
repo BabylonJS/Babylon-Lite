@@ -20,7 +20,7 @@ lights: array<LightEntry, ${MAX_LIGHTS}>,
 
 export const COMPUTE_PBR_LIGHT = `
 struct PbrLightResult { L: vec3<f32>, NdotL: f32, atten: f32, color: vec3<f32>, specColor: vec3<f32>, isHemi: bool };
-fn computePbrLight(entry: LightEntry, N: vec3<f32>, worldPos: vec3<f32>) -> PbrLightResult {
+fn computePbrLight(entry: LightEntry, N: vec3<f32>, worldPos: vec3<f32>, lightFalloffMode: f32) -> PbrLightResult {
 var r: PbrLightResult;
 let t = u32(entry.vLightData.w);
 r.isHemi = t == 3u;
@@ -40,24 +40,18 @@ let toLight = entry.vLightData.xyz - worldPos;
 let d2 = dot(toLight, toLight);
 let dist = sqrt(d2);
 r.L = toLight / max(dist, 0.0001);
-if (t == 2u) {
-// Spot: standard linear range falloff + cone falloff (preserved from pre-glTF behaviour).
-let range = entry.vLightDiffuse.a;
-r.atten = max(0.0, 1.0 - dist / range);
-let c = max(0.0, dot(entry.vLightDirection.xyz, -r.L));
-if (c >= entry.vLightDirection.w) { r.atten *= max(0.0, pow(c, entry.vLightSpecular.a)); }
-else { r.atten = 0.0; }
-} else {
-// Point: glTF-compatible inverse-square with smooth range cutoff.
-// For infinite range (vLightDiffuse.a == MAX_VALUE) invR2 underflows to 0 and
-// the smooth factor degenerates to 1, leaving pure inverse-square -- matching
-// BJS's FALLOFF_GLTF (KHR_lights_punctual) and the single-light point-pbr path.
-let range = entry.vLightDiffuse.a;
-let invR2 = 1.0 / range / range;
-let sf = d2 * invR2;
-let rangeAtten = clamp(1.0 - sf * sf, 0.0, 1.0);
-r.atten = (rangeAtten * rangeAtten) / max(d2, 0.0001);
-}
+        let physicalFalloff = lightFalloffMode >= 0.5;
+        let rangeAtt = select(max(0.0, 1.0 - dist / entry.vLightDiffuse.a), 1.0 / max(d2, 0.0000001), physicalFalloff);
+        if (t == 2u) {
+        let cosHalfAngle = entry.vLightDirection.w;
+        let c = dot(-entry.vLightDirection.xyz, r.L);
+        let standardDirFalloff = select(0.0, max(0.0, pow(max(c, 0.0), entry.vLightSpecular.a)), c >= cosHalfAngle);
+        let kappa = 6.64385618977 / max(1.0 - cosHalfAngle, 0.0001);
+        let physicalDirFalloff = exp2(kappa * (c - 1.0));
+        r.atten = rangeAtt * select(standardDirFalloff, physicalDirFalloff, physicalFalloff);
+        } else {
+        r.atten = rangeAtt;
+        }
 }
 r.NdotL = max(dot(N, r.L), 0.0);
 r.color = entry.vLightDiffuse.rgb;
@@ -78,25 +72,27 @@ var directSpecular = vec3<f32>(0.0);
 let directRoughness = max(roughness, AA_factor_x);
 let directAlphaG = directRoughness * directRoughness + 0.0005;
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
-let lc = min(lights.count, ${MAX_LIGHTS}u);
+let lc = min(mesh.lc, ${MAX_LIGHTS}u);
 /*AS*/
 // First-light aliases — kept at directLightBlock scope so the AD slot below
 // (clearcoat / sheen / subsurface) sees the same single-light variable names
 // it was originally written against. Multi-light direct contributions
 // for those ancillary BRDFs are not yet supported (single-light parity only).
-let entry0 = lights.lights[0];
-let pl0 = computePbrLight(entry0, N, input.worldPos);
+let lightIndex0 = mli(0u);
+let entry0 = lights.lights[lightIndex0];
+let pl0 = computePbrLight(entry0, N, input.worldPos, material.lightFalloffMode);
 let L = pl0.L;
 let NdotL = pl0.NdotL;
 let lightColor = pl0.specColor;
-let lightAtten = pl0.atten * shadowFactors[0];
+let lightAtten = pl0.atten * shadowFactors[lightIndex0];
 let H = normalize(V + L);
 let NdotH = clamp(dot(N, H), 0.0000001, 1.0);
 let VdotH = saturate(dot(V, H));
 for (var li = 0u; li < lc; li++) {
 var pl: PbrLightResult;
-if (li == 0u) { pl = pl0; } else { pl = computePbrLight(lights.lights[li], N, input.worldPos); }
-let sf = shadowFactors[li];
+let lightIndex = mli(li);
+if (li == 0u) { pl = pl0; } else { pl = computePbrLight(lights.lights[lightIndex], N, input.worldPos, material.lightFalloffMode); }
+let sf = shadowFactors[lightIndex];
 if (pl.isHemi) {
 directDiffuse += pl.color * surfaceAlbedo * material.directIntensity * sf;
 } else {

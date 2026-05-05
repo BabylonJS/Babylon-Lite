@@ -1,6 +1,26 @@
 // Scene 22: PBR Shadows — scene4 variant with PBR ground material + multi-light shadows
 
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSpotLight, createTorus, createSphere, createGroundFromHeightMap, createShadowGenerator, createPcfShadowGenerator, createStandardMaterial, createPbrMaterial, createSolidTexture2D, loadTexture2D, attachControl, registerScene } from "babylon-lite";
+import {
+    onBeforeRender,
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createDirectionalLight,
+    createSpotLight,
+    createTorus,
+    createSphere,
+    createGroundFromHeightMap,
+    createShadowGenerator,
+    createPcfShadowGenerator,
+    createStandardMaterial,
+    createPbrMaterial,
+    createSolidTexture2D,
+    loadTexture2D,
+    attachControl,
+    registerScene,
+} from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -48,6 +68,7 @@ async function main(): Promise<void> {
         baseColorTexture: groundTex,
         ormTexture: ormTex,
         gammaAlbedo: true,
+        usePhysicalLightFalloff: false,
     });
     ground.receiveShadows = true;
     addToScene(scene, ground);
@@ -57,6 +78,7 @@ async function main(): Promise<void> {
         mapSize: 1024,
         depthScale: 50,
         bias: 0.00005,
+        blurKernel: 64,
         blurScale: 2,
         darkness: 0,
         frustumEdgeFalloff: 0,

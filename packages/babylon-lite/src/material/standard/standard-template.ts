@@ -6,14 +6,14 @@
  *
  * The Standard material uses 3 separate UBOs in group 1:
  *   binding 0: mesh UBO (world matrix)
- *   binding 1: lights UBO (array of light entries)
- *   binding 2: material UBO (colors, levels)
+ *   binding 1: material UBO (colors, levels)
  * Plus optional texture/sampler bindings at fixed slots.
  */
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import { WGSL_FOG } from "../../shader/wgsl-helpers.js";
 import { MAX_LIGHTS } from "../../light/types.js";
+import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -86,7 +86,7 @@ export interface StandardTemplateConfig {
  * The template contains slot markers that the composer fills.
  */
 export function createStandardTemplate(config: StandardTemplateConfig): ShaderTemplate {
-    const { textures, needsUV, needsUV2, hasShadow, disableLighting } = config;
+    const { textures, needsUV, needsUV2, disableLighting } = config;
 
     // ── Base vertex attributes ──────────────────────────────────
     const baseVertexAttributes: VertexAttribute[] = [
@@ -102,39 +102,37 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
 
     // ── Base varyings ───────────────────────────────────────────
     const baseVaryings: Varying[] = [
-        { name: "vPositionW", type: "vec3<f32>" },
-        { name: "vNormalW", type: "vec3<f32>" },
-        { name: "vFogDistance", type: "vec3<f32>" },
+        { name: "vp", type: "vec3<f32>" },
+        { name: "vn", type: "vec3<f32>" },
+        { name: "vf", type: "vec3<f32>" },
     ];
     if (needsUV) {
-        baseVaryings.push({ name: "vUV", type: "vec2<f32>" });
+        baseVaryings.push({ name: "vu", type: "vec2<f32>" });
     }
     if (needsUV2) {
-        baseVaryings.push({ name: "vUV2", type: "vec2<f32>" });
+        baseVaryings.push({ name: "vv", type: "vec2<f32>" });
     }
     // shadow varyings (vPositionFromLight, vDepthMetric) are provided by std-shadow-fragment
 
-    // ── Base UBO fields (mesh = world matrix only) ──────────────
+    // ── Base UBO fields (mesh = world matrix + affected light indices) ──────────────
     const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
+    appendMeshLightUboFields(baseMeshUboFields);
 
     // ── Base bindings (group 1, starting after mesh UBO at 0) ───
-    // Order: lights, material, diffuse*, shadow/UV*, emissive*, bump*, specular*, ambient*, lightmap*, opacity*, reflection*
+    // Order: material, diffuse*, shadow/UV*, emissive*, bump*, specular*, ambient*, lightmap*, opacity*, reflection*
     // The shadow/UV UBO is placed AFTER diffuse so its auto-assigned binding index
     // matches the conventional slot 5 when diffuse is present (bindings 3,4).
-    const baseBindings: BindingDecl[] = [
-        { name: "lights", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT },
-        { name: "mat", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT },
-    ];
+    const baseBindings: BindingDecl[] = [{ name: "mat", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT }];
 
     if (textures.diffuse) {
         baseBindings.push(
-            { name: "diffuseTexture", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "diffuseSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { name: "dT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
+            { name: "dS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
         );
     }
-    // UV params UBO — always when UV is needed (shadow or texture)
-    if (hasShadow || needsUV) {
-        baseBindings.push({ name: "uvParams", type: { kind: "uniform-buffer" }, visibility: STAGE_VERTEX });
+    // UV params UBO — only when UVs are actually emitted.
+    if (needsUV) {
+        baseBindings.push({ name: "up", type: { kind: "uniform-buffer" }, visibility: STAGE_VERTEX });
     }
     // bump bindings are provided by the normal-map fragment (not baseBindings)
     // emissive, specular, ambient, lightmap, opacity, reflection bindings
@@ -147,12 +145,12 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
 
     // ── Vertex template ─────────────────────────────────────────
 
-    const uvPassthrough = hasShadow || needsUV ? `out.vUV = uv * uvParams.uvScaleOffset.xy + uvParams.uvScaleOffset.zw;` : "";
+    const uvPassthrough = needsUV ? `out.vu = uv * up.u.xy + up.u.zw;` : "";
 
-    const uv2Passthrough = needsUV2 ? `out.vUV2 = uv2;` : "";
+    const uv2Passthrough = needsUV2 ? `out.vv = uv2;` : "";
 
     // Vertex UBO struct definitions (must be before binding declarations)
-    const vertexUboStructs = hasShadow || needsUV ? `struct uvParamsUniforms { uvScaleOffset: vec4<f32>, }` : "";
+    const vertexUboStructs = needsUV ? `struct upUniforms { u: vec4<f32>, }` : "";
 
     const vertexTemplate = `/*SU*/
 /*MU*/
@@ -169,11 +167,11 @@ var out: VertexOutput;
 var finalWorld = mesh.world;
 /*VW*/
 let worldPos4 = finalWorld * vec4<f32>(position, 1.0);
-out.vPositionW = worldPos4.xyz;
+out.vp = worldPos4.xyz;
 let normalWorld = mat3x3<f32>(finalWorld[0].xyz, finalWorld[1].xyz, finalWorld[2].xyz);
-out.vNormalW = normalize(normalWorld * normal);
+out.vn = normalize(normalWorld * normal);
 out.clipPos = scene.viewProjection * worldPos4;
-out.vFogDistance = (scene.view * worldPos4).xyz;
+out.vf = (scene.view * worldPos4).xyz;
 ${uvPassthrough}
 ${uv2Passthrough}
 /*VB*/
@@ -185,6 +183,7 @@ return out;
     const lightsStructs = `
 struct LightEntry { vLightData: vec4<f32>, vLightDiffuse: vec4<f32>, vLightSpecular: vec4<f32>, vLightDirection: vec4<f32> };
 struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<LightEntry, ${MAX_LIGHTS}> };
+@group(0) @binding(1) var<uniform> lights: lightsUniforms;
 `;
 
     const materialStruct = `
@@ -213,17 +212,17 @@ _1: f32,
     // reflection, shadow, bump helpers are provided by their respective fragments
 
     // Main fragment body — mirrors old composeFragmentShader exactly
-    const uvSelect = (useUV2: boolean | undefined) => (useUV2 ? "input.vUV2" : "input.vUV");
+    const uvSelect = (useUV2: boolean | undefined) => (useUV2 ? "input.vv" : "input.vu");
 
     const doubleSidedEntry = `@fragment fn main(input: FragmentInput) -> @location(0) vec4<f32> {`;
 
     // View direction
-    const viewDirCode = !disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vPositionW);` : "";
+    const viewDirCode = !disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
 
     // Normal computation — fragment can override via AC slot
     let normalCode: string;
     if (!disableLighting) {
-        normalCode = `var normalW = normalize(input.vNormalW);`;
+        normalCode = `var normalW = normalize(input.vn);`;
     } else {
         normalCode = "";
     }
@@ -234,7 +233,7 @@ _1: f32,
     // Base color + alpha test. Texture alpha used for discard only (not blended into output alpha),
     // matching BJS ALPHATEST without ALPHAFROMDIFFUSE.
     const baseColorCode = textures.diffuse
-        ? `let _ds = textureSample(diffuseTexture, diffuseSampler, ${uvSelect(config.diffuseUsesUV2)});
+        ? `let _ds = textureSample(dT, dS, ${uvSelect(config.diffuseUsesUV2)});
 if (_ds.a < mat.aCut) { discard; }
 var baseColor = _ds.rgb * mat.tl;`
         : `var baseColor = vec3<f32>(1.0, 1.0, 1.0);`;
@@ -255,11 +254,12 @@ var specularBase = vec3<f32>(0.0);
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
-let lc = min(lights.count, ${MAX_LIGHTS}u);
+let lc = min(mesh.lc, ${MAX_LIGHTS}u);
 /*AD*/
 for (var li = 0u; li < lc; li++) {
-let r = computeLighting(viewDirectionW, normalW, lights.lights[li], glossiness, input.vPositionW);
-let sf = shadowFactors[li];
+let lightIndex = mli(li);
+let r = computeLighting(viewDirectionW, normalW, lights.lights[lightIndex], glossiness, input.vp);
+let sf = shadowFactors[lightIndex];
 diffuseBase += r[0] * sf;
 specularBase += r[1] * sf;
 }
@@ -275,6 +275,7 @@ ${lightsStructs}
 ${materialStruct}
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
+${!disableLighting ? meshLightIndexWGSL("mesh") : ""}
 ${helpers.join("\n")}
 /*HF*/
 /*FB*/
@@ -294,7 +295,7 @@ ${lightingBlock}
 /*BC*/
 color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
 if (scene.vFogInfos.x > 0.0) {
-let fog = calcFogFactor(input.vFogDistance);
+let fog = calcFogFactor(input.vf);
 color = vec4<f32>(mix(scene.vFogColor.rgb, color.rgb, fog), color.a);
 }
 /*BA*/

@@ -30,8 +30,8 @@ const feature: GltfFeature = {
         const nodes = ctx.json.nodes ?? [];
         // Count lights first so we can raise MAX_LIGHTS before any pipeline is
         // compiled (loadGltf runs before addToScene which triggers pipeline
-        // creation). Matches BJS behaviour when the user raises
-        // `maxSimultaneousLights` to cover assets with >4 lights.
+        // creation). Lite's MAX_LIGHTS is scene-wide, so cover every punctual
+        // light declared by the asset rather than Babylon's per-material cap.
         let lightNodeCount = 0;
         for (let i = 0; i < nodes.length; i++) {
             if (nodes[i]?.extensions?.KHR_lights_punctual?.light !== undefined) {

@@ -11,6 +11,7 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import type { PbrTemplateExt } from "./pbr-template-ext.js";
+import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -153,9 +154,10 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         baseVaryings.push(...ext.extraVaryings);
     }
 
-    // ── Base mesh UBO fields (world matrix only — UV transforms are
+    // ── Base mesh UBO fields (world matrix + affected light indices — UV transforms are
     // per-texture now, emitted on the material UBO when hasUvTransform). ─
     const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
+    appendMeshLightUboFields(baseMeshUboFields);
 
     // ── Base material UBO fields ────────────────────────────────────
     const baseMaterialUboFields: UboField[] = [
@@ -167,7 +169,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         { name: "metallicFactor", type: "f32" },
         { name: "roughnessFactor", type: "f32" },
         { name: "normalScale", type: "f32" },
-        { name: "_mrfPad1", type: "f32" },
+        { name: "lightFalloffMode", type: "f32" },
         // Anisotropy UBO field stays on the base template because anisotropy is
         // template-only (no ShaderFragment) — the anisotropyExt just writes its
         // slice through the unified ext.writeUbo hook.
@@ -197,10 +199,6 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     if (hasSpecGloss) {
         baseBindings.push(...tex2d("specGlossTexture", "specGlossSampler"));
     }
-    if (hasSingleLight || hasMultiLight) {
-        baseBindings.push({ name: "lights", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT });
-    }
-
     // ── Vertex template ─────────────────────────────────────────
     // When morph targets are active, the morph fragment's VR
     // defines morphedPos/morphedNorm. The base template uses those instead
@@ -354,9 +352,9 @@ var directSpecular = vec3<f32>(0.0);
     const tonemapBlock = hasTonemap
         ? useAces
             ? acesTonemapCall
-            : `color *= scene.exposureLinear;
+            : `color *= scene.vImageInfos.x;
 color = 1.0 - exp2(-1.590579 * color);`
-        : `color *= scene.exposureLinear;`;
+        : `color *= scene.vImageInfos.x;`;
 
     // Alpha output
     const alphaBlock = hasAlphaBlend
@@ -374,6 +372,8 @@ return vec4<f32>(color, finalAlpha);`
     const doubleSidedFlip = hasDoubleSided ? `if (!frontFacing) { N = -N; }` : "";
 
     const lightDecls = hasMultiLight ? multiLightWGSL : hasSingleLight ? singleLightWGSL : "";
+    const lightBindingDecl = hasSingleLight || hasMultiLight ? `@group(0) @binding(1) var<uniform> lights: lightsUniforms;` : "";
+    const meshLightIndexHelper = hasSingleLight || hasMultiLight ? meshLightIndexWGSL("mesh") : "";
 
     const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
 
@@ -392,6 +392,8 @@ ${BRDF_FUNCTIONS}
 ${acesBlock}
 ${anisoBrdfBlock}
 ${lightDecls}
+${lightBindingDecl}
+${meshLightIndexHelper}
 ${fragmentHelpers}
 ${doubleSidedEntry}
 ${fragmentPrelude}/*SV*/
@@ -421,8 +423,8 @@ ${tonemapBlock}
 color = pow(color, vec3<f32>(1.0 / 2.2));
 color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 let highContrast = color * color * (3.0 - 2.0 * color);
-if (scene.contrast < 1.0) { color = mix(vec3<f32>(0.5), color, scene.contrast); }
-else { color = mix(color, highContrast, scene.contrast - 1.0); }
+if (scene.vImageInfos.y < 1.0) { color = mix(vec3<f32>(0.5), color, scene.vImageInfos.y); }
+else { color = mix(color, highContrast, scene.vImageInfos.y - 1.0); }
 color = max(color, vec3<f32>(0.0));
 /*BC*/
 ${alphaBlock}

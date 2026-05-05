@@ -395,7 +395,7 @@ Group 1 — `shadow-depth-mesh`:
 Group 0 — `pcf-depth-scene`:
 | Binding | Visibility | Type    | Content                         |
 |---------|------------|---------|---------------------------------|
-| 0       | VERTEX     | uniform | Light view-projection (64 bytes)|
+| 0       | VERTEX     | uniform | Light view-projection + `pcfBias` (80 bytes) |
 
 Group 1 — `pcf-depth-mesh`:
 | Binding | Visibility | Type    | Content                         |
@@ -405,8 +405,7 @@ Group 1 — `pcf-depth-mesh`:
 **Pipeline state:**
 - Primitive: `triangle-list`, cull: `back`, front: `ccw`
 - Depth/stencil: `depth32float`, write: `true`, compare: `less-equal`
-- `depthBias`: `Math.round(bias * 1e7)` — hardware depth bias
-- `depthBiasSlopeScale`: `normalBias > 0 ? normalBias : 2`
+- Bias handling: PCF uses Babylon-style clip-space linear bias in the depth vertex shader (`clipPos.z += scene.pcfBias.x * clipPos.w`). The shadow-pass scene UBO stores `bias * 0.5` for WebGPU half-Z depth. PCF does **not** use WebGPU pipeline `depthBias` / `depthBiasSlopeScale`.
 - **No color targets** (depth-only pass)
 - **No fragment shader** (vertex-only pipeline)
 - No multisample
@@ -478,15 +477,20 @@ The `min(87.0, ...)` prevents float overflow in `exp()`. The result is stored in
 ### Shadow Depth Vertex Shader — PCF (`shadow-pcf-depth.vertex.wgsl`)
 
 ```wgsl
-struct SceneUniforms { viewProjection: mat4x4<f32> };  // @group(0) @binding(0)
+struct SceneUniforms {
+  viewProjection: mat4x4<f32>,
+  pcfBias: vec4<f32>,
+};                                                     // @group(0) @binding(0)
 struct MeshUniforms  { world: mat4x4<f32> };           // @group(1) @binding(0)
 
 @vertex fn main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-  return scene.viewProjection * mesh.world * vec4(position, 1.0);
+  clipPos = scene.viewProjection * mesh.world * vec4(position, 1.0);
+  clipPos.z += scene.pcfBias.x * clipPos.w;
+  return clipPos;
 }
 ```
 
-No fragment shader — depth-only pass. Hardware writes `builtin(position).z` to the depth buffer. Depth bias is handled via pipeline `depthBias`/`depthBiasSlopeScale` settings.
+No fragment shader — depth-only pass. Hardware writes `builtin(position).z` to the depth buffer. Bias is applied in clip space through `scene.pcfBias`; PCF does not use WebGPU pipeline depth-bias state.
 
 ### PCF Sampling Function (injected into main pass fragment shader)
 
@@ -752,8 +756,8 @@ Reserved for future integration of shadow maps into the general render pipeline'
 - `../light/spot-light.js` — `SpotLight` interface
 - `../mesh/mesh.js` — `Mesh` interface
 - `../engine/engine.js` — `Engine`, `EngineInternal`
-- `../material/standard/standard-pipeline.js` — `registerPcfShadowShader`, `registerPcfShadowBgl`
-- Inline `SHADOW_LIGHT_VIEW_WGSL` — minimal `SceneUniforms { viewProjection }` for light-space depth rendering
+- `../material/standard/standard-flags.js` — `registerPcfShadowShader`, `registerPcfShadowBgl`
+- Inline `SHADOW_LIGHT_VIEW_WGSL` — minimal `SceneUniforms { viewProjection, pcfBias }` for light-space depth rendering
 - `./shadow-base.js` — `buildCasters`, `syncCasterMatrices`, `drawCasters`, `shadowMatrixChanged`
 - `./shadow-generator.js` — `ShadowGenerator` type
 - `../../shaders/shadow-pcf-depth.vertex.wgsl` — PCF depth vertex shader (raw import)

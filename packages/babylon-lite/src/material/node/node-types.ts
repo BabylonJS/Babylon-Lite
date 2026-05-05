@@ -119,8 +119,8 @@ export interface NodeBuildState {
     /** Set by ReflectionBlock or any block that needs scene env textures
      *  (specular cube + BRDF LUT + SH irradiance). The pipeline allocates
      *  4 group-1 bindings (env_iblTexture/sampler + env_brdfLUT/sampler) and
-     *  extends the NME scene UBO with SH coefficients + envRotationY +
-     *  lodGenerationScale + environmentIntensity. Materials without env
+     *  reads SH coefficients + envRotationY + lodGenerationScale from the
+     *  canonical frame-graph scene UBO. Materials without env
      *  pay zero — empty default. */
     usesEnv: boolean;
     /** Set by ClearCoatBlock; tells PBRMetallicRoughnessBlock to walk into

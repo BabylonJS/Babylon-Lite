@@ -29,7 +29,7 @@ export function createPointLight(position: [number, number, number], intensity =
             intensity,
             range: Number.MAX_VALUE,
 
-            _writeStandardLightUbo: (data: Float32Array, offset: number) => {
+            _writeLightUbo: (data: Float32Array, offset: number) => {
                 const o = offset;
                 const w = light.worldMatrix;
                 data[o] = w[12]!;

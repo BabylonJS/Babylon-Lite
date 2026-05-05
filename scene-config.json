@@ -362,15 +362,6 @@
         "skipPerf": true
     },
     {
-        "id": 52,
-        "slug": "scene52-rtt-override",
-        "name": "Scene 52 — RTT with material override",
-        "maxMad": 0.01,
-        "maxRawKB": 75,
-        "description": "Frame-graph multi-pass authoring: sphere A (red) and box B in main; an offscreen 512×512 RTT renders A only, with a green override material from a different camera, and the RTT color is wired as B's diffuseTexture.",
-        "tags": ["std", "procedural", "frame-graph", "rtt", "multi-pass"]
-    },
-    {
         "id": 50,
         "slug": "scene50-sprite-grid",
         "name": "Scene 50 — Sprite Grid",
@@ -516,5 +507,23 @@
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
         "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"],
         "skipParity": true
+    },
+    {
+        "id": 110,
+        "slug": "scene110-rtt-override",
+        "name": "Scene 110 — RTT with material override",
+        "maxMad": 0.01,
+        "maxRawKB": 52,
+        "description": "Frame-graph multi-pass authoring: sphere A (red) and box B in main; an offscreen 512×512 RTT renders A only, with a green override material from a different camera, and the RTT color is wired as B's diffuseTexture.",
+        "tags": ["std", "procedural", "frame-graph", "rtt", "multi-pass"]
+    },
+    {
+        "id": 111,
+        "slug": "scene111-light-selection",
+        "name": "Scene 111 — Light Selection Stress Test",
+        "maxMad": 0.01,
+        "maxRawKB": 136,
+        "description": "Stress scene for the scene-wide lights UBO: Standard, PBR, and NodeMaterial spheres on a shadow-receiving ground, 16 scene lights, per-mesh light inclusion sets, and three supported shadow generators.",
+        "tags": ["std", "pbr", "nme", "procedural", "shadow"]
     }
 ]

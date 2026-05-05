@@ -39,10 +39,8 @@ import {
 } from "./pbr-flags.js";
 
 export interface PbrComposerDeps {
-    readonly hasSingleLight: boolean;
-    readonly hasMultiLight: boolean;
     readonly singleLightWGSL: string;
-    readonly singleLightBlock: string;
+    readonly getSingleLightBlock: ((type: string) => string) | null;
     readonly multiLightWGSL: string;
     readonly multiLightLoop: string;
     readonly acesHelpers: string;
@@ -55,16 +53,15 @@ export interface PbrComposerDeps {
     readonly createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
 }
 
-export type PbrComposeFn = (features: number, features2?: number) => ComposedShader;
+export type PbrLightMode = 0 | 1 | 2;
+export type PbrComposeFn = (features: number, features2?: number, lightMode?: PbrLightMode, singleLightType?: string) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
 export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
     const cache = new Map<string, ComposedShader>();
     const {
-        hasSingleLight,
-        hasMultiLight,
         singleLightWGSL,
-        singleLightBlock,
+        getSingleLightBlock,
         multiLightWGSL,
         multiLightLoop,
         acesHelpers,
@@ -77,8 +74,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         createThinInstanceFragment,
     } = deps;
 
-    return function composePbr(features: number, features2: number = 0): ComposedShader {
-        const ckey = `${features}:${features2}`;
+    return function composePbr(features: number, features2: number = 0, lightMode: PbrLightMode = 0, singleLightType = ""): ComposedShader {
+        const ckey = `${features}:${features2}:${lightMode}:${singleLightType}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -114,10 +111,10 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                 : undefined;
 
         const template = createPbrTemplate({
-            hasSingleLight,
-            hasMultiLight,
+            hasSingleLight: lightMode === 1,
+            hasMultiLight: lightMode === 2,
             singleLightWGSL,
-            singleLightBlock,
+            singleLightBlock: lightMode === 1 && getSingleLightBlock ? getSingleLightBlock(singleLightType) : "",
             multiLightWGSL,
             multiLightLoop,
             normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",

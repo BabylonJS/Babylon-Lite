@@ -9,6 +9,11 @@
  *  `nme_computeShadowFactors(input)` dispatcher consumed by the LightBlock.
  */
 
+import { MAX_LIGHTS } from "../../light/types.js";
+
+const SHADOW_FACTORS_TYPE = `array<f32, ${MAX_LIGHTS}>`;
+const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+
 export interface ShadowBinding {
     readonly lightIndex: number;
     readonly texBinding: number;
@@ -22,7 +27,7 @@ export interface ShadowEmit {
     readonly bindings: readonly ShadowBinding[];
     /** Module-scope WGSL: struct + binding decls + compute fns. */
     readonly wgslDecls: string;
-    /** `nme_computeShadowFactors(input) -> vec4<f32>` called from LightBlock. */
+    /** `nme_computeShadowFactors(input) -> array<f32, MAX_LIGHTS>` called from light blocks. */
     readonly fragmentHelper: string;
     /** Injected into vs_main body: populates vPosFromLight_i + vDepthMetric_i varyings. */
     readonly vertexInject: string;
@@ -50,7 +55,7 @@ export function emitShadow(
         varyings.push({ name: `vDepthMetric${suf}`, type: "f32" });
     }
     const vertLines: string[] = [`let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`];
-    const dispatchLines: string[] = [`var _sf = vec4<f32>(1.0);`];
+    const dispatchLines: string[] = [`var _sf = ${SHADOW_FACTORS_ONE};`];
     let nextBinding = startBinding;
     for (const sl of shadowLights) {
         const suf = `_${sl.lightIndex}`;
@@ -67,7 +72,6 @@ export function emitShadow(
                 `@group(1) @binding(${texBinding}) var shadowTex${suf}: texture_depth_2d;`,
                 `@group(1) @binding(${sampBinding}) var shadowComp${suf}: sampler_comparison;`,
                 `fn computeShadowPCF${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
-    if (depthMetric < 0.0 || depthMetric > 1.0) { return 1.0; }
     let clipSpace = posFromLight.xyz / posFromLight.w;
     let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
@@ -137,12 +141,12 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
             buffer: { type: "uniform", minBindingSize: 96 },
         });
     }
-    dispatchLines.push(`_sf = mix(vec4<f32>(1.0), _sf, meshU.receivesShadow.x);`);
+    dispatchLines.push(`for (var _i = 0u; _i < ${MAX_LIGHTS}u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); }`);
     dispatchLines.push(`return _sf;`);
     return {
         bindings,
         wgslDecls: wgslDecls.join("\n"),
-        fragmentHelper: `fn nme_computeShadowFactors(input: VertexOut) -> vec4<f32> {\n    ${dispatchLines.join("\n    ")}\n}`,
+        fragmentHelper: `fn nme_computeShadowFactors(input: VertexOut) -> ${SHADOW_FACTORS_TYPE} {\n    ${dispatchLines.join("\n    ")}\n}`,
         vertexInject: vertLines.join("\n    "),
         bglEntries,
         bindingCount: shadowLights.length * 3,

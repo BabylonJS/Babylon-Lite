@@ -12,5 +12,5 @@ fn RRTAndODTFit(v: vec3<f32>) -> vec3<f32> { let a = v*(v+0.0245786)-0.000090537
 fn ACESFitted(color: vec3<f32>) -> vec3<f32> { var c = ACESInputMat*color; c = RRTAndODTFit(c); c = ACESOutputMat*c; return saturate(c); }
 `;
 
-export const ACES_TONEMAP_CALL_WGSL = `color *= scene.exposureLinear;
+export const ACES_TONEMAP_CALL_WGSL = `color *= scene.vImageInfos.x;
 color = ACESFitted(color);`;

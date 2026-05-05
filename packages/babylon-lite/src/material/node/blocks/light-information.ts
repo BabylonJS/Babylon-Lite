@@ -13,7 +13,7 @@ export const emitter: BlockEmitter = {
         state.usesLightsUbo = true;
         const idxRaw = block.serialized.lightId;
         const idx = typeof idxRaw === "number" ? idxRaw : 0;
-        const base = `nmeLights.lights[${idx}u]`;
+        const base = `nmeLights.lights[nli(${idx}u)]`;
         const out: Record<string, NodeExpr> = {
             direction: { expr: `${base}.vLightData.xyz`, type: "vec3f" },
             color: { expr: `${base}.vLightDiffuse.rgb`, type: "vec3f" },

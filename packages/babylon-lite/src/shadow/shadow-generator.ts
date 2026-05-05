@@ -10,7 +10,7 @@
  * Matches Babylon.js ShadowGenerator with:
  *   - useBlurExponentialShadowMap = true
  *   - useKernelBlur = true
- *   - blurKernel = 64
+ *   - blurKernel = 1 (Babylon.js default; configurable)
  *   - mapSize = 1024
  *   - depthScale = 50
  *   - bias = 0.00005
@@ -36,7 +36,6 @@ import {
 import depthVertSrc from "../../shaders/shadow-depth.vertex.wgsl?raw";
 import depthFragSrc from "../../shaders/shadow-depth.fragment.wgsl?raw";
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
-import blurFragSrc from "../../shaders/shadow-blur.fragment.wgsl?raw";
 
 /** Shadow-pass UBO: just the light's view-projection matrix (64 bytes).
  *  The shadow pass has its own per-light buffer — not the per-pass scene UBO. */
@@ -46,6 +45,8 @@ export interface ShadowGeneratorConfig {
     mapSize?: number;
     depthScale?: number;
     bias?: number;
+    /** Kernel blur sample region in pixels. Matches Babylon.js ShadowGenerator.blurKernel. Default 1. */
+    blurKernel?: number;
     blurScale?: number;
     darkness?: number;
     frustumEdgeFalloff?: number;
@@ -148,12 +149,107 @@ function computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: Me
     return { viewProj: multiply4x4(proj, view), near, far };
 }
 
+function nearestBestKernel(idealKernel: number): number {
+    const v = Math.round(Math.max(idealKernel, 1));
+    for (const k of [v, v - 1, v + 1, v - 2, v + 2]) {
+        if (k % 2 !== 0 && Math.floor(k / 2) % 2 === 0 && k > 0) {
+            return Math.max(k, 3);
+        }
+    }
+    return Math.max(v, 3);
+}
+
+function gaussianWeight(x: number): number {
+    const sigma = 1 / 3;
+    return Math.exp(-((x * x) / (2 * sigma * sigma))) / (Math.sqrt(2 * Math.PI) * sigma);
+}
+
+function createKernelBlurSamples(idealKernel: number): { offsets: number[]; weights: number[] } {
+    const n = nearestBestKernel(idealKernel);
+    const centerIndex = (n - 1) / 2;
+    const offsets: number[] = [];
+    const weights: number[] = [];
+    let totalWeight = 0;
+
+    for (let i = 0; i < n; i++) {
+        const u = i / (n - 1);
+        const weight = gaussianWeight(u * 2.0 - 1);
+        offsets[i] = i - centerIndex;
+        weights[i] = weight;
+        totalWeight += weight;
+    }
+
+    for (let i = 0; i < weights.length; i++) {
+        weights[i] = weights[i]! / totalWeight;
+    }
+
+    const linearOffsets: number[] = [];
+    const linearWeights: number[] = [];
+    for (let i = 0; i <= centerIndex; i += 2) {
+        const j = Math.min(i + 1, Math.floor(centerIndex));
+        if (i === j) {
+            linearOffsets.push(offsets[i]!);
+            linearWeights.push(weights[i]!);
+            continue;
+        }
+
+        const sharedCell = j === centerIndex;
+        const weightLinear = weights[i]! + weights[j]! * (sharedCell ? 0.5 : 1);
+        const offsetLinear = offsets[i]! + 1 / (1 + weights[i]! / weights[j]!);
+        if (offsetLinear === 0) {
+            linearOffsets.push(offsets[i]!, offsets[i + 1]!);
+            linearWeights.push(weights[i]!, weights[i + 1]!);
+        } else {
+            linearOffsets.push(offsetLinear, -offsetLinear);
+            linearWeights.push(weightLinear, weightLinear);
+        }
+    }
+
+    return { offsets: linearOffsets, weights: linearWeights };
+}
+
+function wgslFloat(value: number): string {
+    const n = Object.is(value, -0) ? 0 : value;
+    let s = n.toPrecision(10);
+    if (!/[.eE]/.test(s)) {
+        s += ".0";
+    }
+    return s;
+}
+
+function createShadowBlurFragmentWGSL(blurKernel: number): string {
+    const { offsets, weights } = createKernelBlurSamples(blurKernel);
+    const count = offsets.length;
+    return `// Generated to match Babylon.js ThinBlurPostProcess for blurKernel=${blurKernel}
+struct BlurParams {
+  delta: vec2<f32>,
+  _pad: vec2<f32>,
+};
+@group(0) @binding(0) var<uniform> params: BlurParams;
+@group(0) @binding(1) var srcTex: texture_2d<f32>;
+@group(0) @binding(2) var srcSampler: sampler;
+
+const OFFSETS = array<f32, ${count}>(${offsets.map(wgslFloat).join(", ")});
+const WEIGHTS = array<f32, ${count}>(${weights.map(wgslFloat).join(", ")});
+
+@fragment
+fn main(@location(0) sampleCenter: vec2<f32>) -> @location(0) vec4<f32> {
+  var blend = vec4<f32>(0.0);
+  for (var i = 0u; i < ${count}u; i = i + 1u) {
+    blend += textureSample(srcTex, srcSampler, sampleCenter + params.delta * OFFSETS[i]) * WEIGHTS[i];
+  }
+  return blend;
+}
+`;
+}
+
 export function createShadowGenerator(engine: EngineContext, light: DirectionalLight, casterMeshes: Mesh[], cfg: ShadowGeneratorConfig = {}): ShadowGenerator {
     const eng = engine as EngineContextInternal;
     const device = eng.device;
     const mapSize = cfg.mapSize ?? 1024;
     const depthScale = cfg.depthScale ?? 50;
     const bias = cfg.bias ?? 0.00005;
+    const blurKernel = cfg.blurKernel ?? 1;
     const blurScale = cfg.blurScale ?? 2;
     const darkness = cfg.darkness ?? 0;
     const frustumEdgeFalloff = cfg.frustumEdgeFalloff ?? 0;
@@ -165,6 +261,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
         mapSize,
         depthScale,
         bias,
+        blurKernel,
         blurScale,
         darkness,
         frustumEdgeFalloff,
@@ -217,7 +314,7 @@ export function createShadowGenerator(engine: EngineContext, light: DirectionalL
 
     // --- Blur pipeline ---
     const blurVert = device.createShaderModule({ code: blurVertSrc, label: "shadow-blur-vert" });
-    const blurFrag = device.createShaderModule({ code: blurFragSrc, label: "shadow-blur-frag" });
+    const blurFrag = device.createShaderModule({ code: createShadowBlurFragmentWGSL(blurKernel), label: "shadow-blur-frag" });
 
     const blurBGL = device.createBindGroupLayout({
         label: "shadow-blur",

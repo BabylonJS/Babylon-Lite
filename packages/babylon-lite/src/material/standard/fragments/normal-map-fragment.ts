@@ -24,14 +24,14 @@ export function createNormalMapFragment(): ShaderFragment {
         id: "normal-map",
 
         bindings: [
-            { name: "bumpTex", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "bumpSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+            { name: "bT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
+            { name: "bS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
         ],
 
         helperFunctions: WGSL_PERTURB_NORMAL,
 
         fragmentSlots: {
-            AC: `normalW = perturbNormal(input.vNormalW, input.vPositionW, input.vUV, mat.bs);`,
+            AC: `normalW = perturbNormal(input.vn, input.vp, input.vu, mat.bs);`,
         },
     };
 }

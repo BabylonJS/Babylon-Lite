@@ -2,7 +2,7 @@
  *
  *  Parallel to `standard-renderable.ts`. Each NodeMaterial owns one compile
  *  result (pipeline + BGLs); this builder creates per-mesh GPU resources
- *  (mesh UBO, node UBO, scene UBO, bind groups) and returns a Renderable
+ *  (mesh UBO, node UBO, bind groups) and returns a Renderable
  *  that emits draws in the main pass.
  */
 
@@ -10,18 +10,17 @@ import type { EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh, MeshInternal } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
-import type { Renderable, SceneUniformUpdater } from "../../render/renderable.js";
-import { getViewProjectionMatrix, getViewMatrix, getCameraPosition, getEffectiveAspectRatio } from "../../camera/camera.js";
-import { writeLightsUBO, refreshLightsUBO, getLightsUboSize, computeLightsVersion } from "../../render/lights-ubo.js";
+import type { Renderable } from "../../render/renderable.js";
 import type { NodeMaterialInternal } from "./node-material.js";
 import { writeNodeUBO } from "./node-material.js";
+import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import { MAX_LIGHTS } from "../../light/types.js";
 
 // Per-engine cached no-op morph target: a 1×1 rgba32float texture + a UBO with
 // count=0 + sensible texWidth/rowsPerBand. Meshes without their own morph
 // targets reuse this so materials that contain a MorphTargetsBlock still work
 // (the WGSL loops over `count` and passes through when zero).
 const emptyMorphByEngine = new WeakMap<EngineContextInternal, { texture: GPUTexture; weightsBuffer: GPUBuffer }>();
-let _nmeSceneScratch: Float32Array | null = null;
 function getEmptyMorph(engine: EngineContextInternal): { texture: GPUTexture; weightsBuffer: GPUBuffer } {
     const cached = emptyMorphByEngine.get(engine);
     if (cached) {
@@ -53,10 +52,13 @@ interface NodePacket {
     readonly meshScratch: Float32Array;
     _lastWorldVersion: number;
     _lastReceivesShadow: number;
+    _lastLightsCount: number;
 }
 
+type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
+
 /** Build NME renderables for a set of meshes that share a NodeMaterial. */
-export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): { renderables: Renderable[]; updater: SceneUniformUpdater } {
+export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): { renderables: Renderable[] } {
     const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
 
@@ -76,35 +78,10 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
     }
 
     const renderables: Renderable[] = [];
-    // First scene UBO wins as the shared one the updater writes into.
-    let sharedSceneUBO: GPUBuffer | null = null;
-
-    // Shared NME lights UBO — created lazily when any material requires it.
-    let nmeLightsUBO: GPUBuffer | null = null;
-    let nmeLightsScratch: Float32Array | null = null;
-    let lastLightsVersion = -1;
-    function ensureLightsUBO(): GPUBuffer {
-        if (!nmeLightsUBO) {
-            nmeLightsUBO = writeLightsUBO(engine, scene.lights);
-            nmeLightsScratch = new Float32Array(getLightsUboSize() / 4);
-            lastLightsVersion = computeLightsVersion(scene.lights);
-        }
-        return nmeLightsUBO;
-    }
 
     for (const [material, matMeshes] of byMaterial) {
         const compile = material._compile;
-        const sceneBGL = compile.sceneBGL;
         const meshBGL = compile.meshBGL;
-        const sceneUboBytes = compile.sceneUboBytes;
-
-        // One scene UBO per material (cheap; scenes are small).
-        const sceneUBO = device.createBuffer({ label: "node-scene-ubo", size: sceneUboBytes, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-        const sceneBG = device.createBindGroup({ label: "node-scene-bg", layout: sceneBGL, entries: [{ binding: 0, resource: { buffer: sceneUBO } }] });
-        material._sceneUBO = sceneUBO;
-        if (!sharedSceneUBO) {
-            sharedSceneUBO = sceneUBO;
-        }
 
         // Node UBO is per-material (same across all meshes using it).
         let nodeUBO: GPUBuffer | null = null;
@@ -116,12 +93,14 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
 
         const packets: NodePacket[] = [];
         for (const mesh of matMeshes) {
-            // Mesh UBO layout: world (64B) + receivesShadow (vec4, 16B) = 80B.
-            const meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-            const meshScratch = new Float32Array(20);
+            // Mesh UBO layout: world (64B) + receivesShadow (vec4, 16B) + lightCount/indices.
+            const meshUboBytes = 96 + 16 * Math.ceil(MAX_LIGHTS / 4);
+            const meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            const meshScratch = new Float32Array(((meshUboBytes + 15) & ~15) / 4);
             meshScratch.set(mesh.worldMatrix as unknown as Float32Array, 0);
             const recv = mesh.receiveShadows ? 1 : 0;
             meshScratch[16] = recv;
+            writeMeshLightSelection(mesh, scene.lights, meshScratch.subarray(4));
             device.queue.writeBuffer(meshUBO, 0, meshScratch);
 
             const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: { buffer: meshUBO } }];
@@ -139,9 +118,6 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 entries.push({ binding: tb.texBinding, resource: tex.view });
                 entries.push({ binding: tb.sampBinding, resource: tex.sampler });
             }
-            if (compile.lightsBinding !== null) {
-                entries.push({ binding: compile.lightsBinding, resource: { buffer: ensureLightsUBO() } });
-            }
             if (compile.morphBindings !== null) {
                 const mt = (mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } | null }).morphTargets ?? getEmptyMorph(engine);
                 entries.push({ binding: compile.morphBindings.textureBinding, resource: mt.texture.createView() });
@@ -156,17 +132,59 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 if (!sg) {
                     throw new Error(`NodeMaterial: material requires shadow generator #${si} but none was supplied to parseNodeMaterialFromSnippet({ shadowGenerators }).`);
                 }
-                entries.push({ binding: sb.texBinding, resource: sg.blurredTexture.createView(sb.shadowType === "pcf" ? { aspect: "depth-only" } : undefined) });
+                entries.push({ binding: sb.texBinding, resource: sg.blurredTexture.createView() });
                 entries.push({ binding: sb.sampBinding, resource: sg.blurredSampler });
                 entries.push({ binding: sb.uboBinding, resource: { buffer: sg.shadowUBO } });
             }
             const meshBG = device.createBindGroup({ label: "node-mesh-bg", layout: meshBGL, entries });
 
-            packets.push({ mesh, meshUBO, meshBG, meshScratch, _lastWorldVersion: mesh.worldMatrixVersion, _lastReceivesShadow: recv });
+            packets.push({
+                mesh,
+                meshUBO,
+                meshBG,
+                meshScratch,
+                _lastWorldVersion: mesh.worldMatrixVersion,
+                _lastReceivesShadow: recv,
+                _lastLightsCount: scene.lights.length,
+            });
         }
 
         // Vertex attribute order (matches compile.state — captured on material).
         const attrNames = material._vertexAttrNames;
+
+        const updatePacketUBO = (pkt: NodePacket): void => {
+            const recv = pkt.mesh.receiveShadows ? 1 : 0;
+            const worldChanged = pkt.mesh.worldMatrixVersion !== pkt._lastWorldVersion;
+            const recvChanged = recv !== pkt._lastReceivesShadow;
+            const lightsChanged = scene.lights.length !== pkt._lastLightsCount;
+            if (worldChanged || recvChanged || lightsChanged) {
+                pkt.meshScratch.set(pkt.mesh.worldMatrix as unknown as Float32Array, 0);
+                pkt.meshScratch[16] = recv;
+                writeMeshLightSelection(pkt.mesh, scene.lights, pkt.meshScratch.subarray(4));
+                device.queue.writeBuffer(pkt.meshUBO, 0, pkt.meshScratch as Float32Array<ArrayBuffer>);
+                pkt._lastWorldVersion = pkt.mesh.worldMatrixVersion;
+                pkt._lastReceivesShadow = recv;
+                pkt._lastLightsCount = scene.lights.length;
+            }
+        };
+
+        const updateNodeUBO = (): void => {
+            if (nodeUBO && material._uboDirty) {
+                material._uboDirty = false;
+                writeNodeUBO(engine, nodeUBO, material);
+            }
+        };
+
+        const drawPacket = (pass: NodeRenderPass, pkt: NodePacket): void => {
+            const g = (pkt.mesh as MeshInternal)._gpu;
+            for (let i = 0; i < attrNames.length; i++) {
+                const buf = getAttrBuffer(engine, g, attrNames[i]!);
+                pass.setVertexBuffer(i, buf);
+            }
+            pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
+            pass.setBindGroup(1, pkt.meshBG);
+            pass.drawIndexed(g.indexCount);
+        };
 
         const isTransparent = material._needsAlphaBlending;
 
@@ -179,34 +197,13 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 const cy = pkt.mesh.position?.y ?? wm[13]!;
                 const cz = pkt.mesh.position?.z ?? wm[14]!;
                 const updateUBOs = (): void => {
-                    const recv = pkt.mesh.receiveShadows ? 1 : 0;
-                    const worldChanged = pkt.mesh.worldMatrixVersion !== pkt._lastWorldVersion;
-                    const recvChanged = recv !== pkt._lastReceivesShadow;
-                    if (worldChanged || recvChanged) {
-                        pkt.meshScratch.set(pkt.mesh.worldMatrix as unknown as Float32Array, 0);
-                        pkt.meshScratch[16] = recv;
-                        device.queue.writeBuffer(pkt.meshUBO, 0, pkt.meshScratch as Float32Array<ArrayBuffer>);
-                        pkt._lastWorldVersion = pkt.mesh.worldMatrixVersion;
-                        pkt._lastReceivesShadow = recv;
-                    }
-                    if (nodeUBO && material._uboDirty) {
-                        material._uboDirty = false;
-                        writeNodeUBO(engine, nodeUBO, material);
-                    }
-                    // Update world center for sorting.
+                    updatePacketUBO(pkt);
+                    updateNodeUBO();
                     const m = pkt.mesh.worldMatrix as unknown as ArrayLike<number>;
                     rTrans._worldCenter = [m[12]!, m[13]!, m[14]!];
                 };
-                const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
-                    pass.setBindGroup(0, sceneBG);
-                    const g = (pkt.mesh as MeshInternal)._gpu;
-                    for (let i = 0; i < attrNames.length; i++) {
-                        const buf = getAttrBuffer(engine, g, attrNames[i]!);
-                        pass.setVertexBuffer(i, buf);
-                    }
-                    pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
-                    pass.setBindGroup(1, pkt.meshBG);
-                    pass.drawIndexed(g.indexCount);
+                const draw = (pass: NodeRenderPass): number => {
+                    drawPacket(pass, pkt);
                     return 1;
                 };
                 const rTrans: Renderable = {
@@ -224,34 +221,14 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
             // Opaque: batch all meshes into one renderable for state efficiency.
             const updateUBOs = (): void => {
                 for (const pkt of packets) {
-                    const recv = pkt.mesh.receiveShadows ? 1 : 0;
-                    const worldChanged = pkt.mesh.worldMatrixVersion !== pkt._lastWorldVersion;
-                    const recvChanged = recv !== pkt._lastReceivesShadow;
-                    if (worldChanged || recvChanged) {
-                        pkt.meshScratch.set(pkt.mesh.worldMatrix as unknown as Float32Array, 0);
-                        pkt.meshScratch[16] = recv;
-                        device.queue.writeBuffer(pkt.meshUBO, 0, pkt.meshScratch as Float32Array<ArrayBuffer>);
-                        pkt._lastWorldVersion = pkt.mesh.worldMatrixVersion;
-                        pkt._lastReceivesShadow = recv;
-                    }
+                    updatePacketUBO(pkt);
                 }
-                if (nodeUBO && material._uboDirty) {
-                    material._uboDirty = false;
-                    writeNodeUBO(engine, nodeUBO, material);
-                }
+                updateNodeUBO();
             };
-            const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
-                pass.setBindGroup(0, sceneBG);
+            const draw = (pass: NodeRenderPass): number => {
                 let draws = 0;
                 for (const pkt of packets) {
-                    const g = (pkt.mesh as MeshInternal)._gpu;
-                    for (let i = 0; i < attrNames.length; i++) {
-                        const buf = getAttrBuffer(engine, g, attrNames[i]!);
-                        pass.setVertexBuffer(i, buf);
-                    }
-                    pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
-                    pass.setBindGroup(1, pkt.meshBG);
-                    pass.drawIndexed(g.indexCount);
+                    drawPacket(pass, pkt);
                     draws++;
                 }
                 return draws;
@@ -267,68 +244,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
         }
     }
 
-    const updater: SceneUniformUpdater = {
-        update(eng): void {
-            const cam = scene.camera;
-            if (!cam) {
-                return;
-            }
-            const aspect = getEffectiveAspectRatio(cam, eng.canvas.width, eng.canvas.height);
-            const vp = getViewProjectionMatrix(cam, aspect);
-            const v = getViewMatrix(cam);
-            const eye = getCameraPosition(cam);
-            const eyeTuple: [number, number, number] = [eye.x, eye.y, eye.z];
-            for (const material of byMaterial.keys()) {
-                const ubo = material._sceneUBO;
-                if (!ubo) {
-                    continue;
-                }
-                // Inlined updateSceneUniforms: write vp (0..15) + view (16..31),
-                // eye (32..34), fog (36..43), and image processing (44..47)
-                // into the NME material's per-material scene UBO. NME materials own their own
-                // scene UBO (custom struct generated from the NME node graph) and hence cannot
-                // share the canonical SCENE_UBO from the active RenderPassTask.
-                // Scratch must be large enough for the LARGEST NME UBO seen (with env = 336 B / 84 floats).
-                const sizeFloats = material._compile.sceneUboBytes / 4;
-                if (!_nmeSceneScratch || _nmeSceneScratch.length < sizeFloats) {
-                    _nmeSceneScratch = new Float32Array(Math.max(sizeFloats, 64));
-                }
-                const data = _nmeSceneScratch;
-                data.fill(0, 0, sizeFloats);
-                data.set(vp as Float32Array, 0);
-                data.set(v as Float32Array, 16);
-                data[32] = eyeTuple[0];
-                data[33] = eyeTuple[1];
-                data[34] = eyeTuple[2];
-                const fog = scene.fog;
-                if (fog) {
-                    data[36] = fog.mode;
-                    data[37] = fog.start;
-                    data[38] = fog.end;
-                    data[39] = fog.density;
-                    data[40] = fog.color[0];
-                    data[41] = fog.color[1];
-                    data[42] = fog.color[2];
-                }
-                data[44] = scene.imageProcessing.exposure;
-                data[45] = scene.imageProcessing.contrast;
-                data[46] = scene.imageProcessing.toneMappingEnabled ? 1 : 0;
-                engine.device.queue.writeBuffer(ubo, 0, data.subarray(0, sizeFloats) as Float32Array<ArrayBuffer>);
-                if (material._compile.envBindings) {
-                    material._envHelpers!.writeEnvSceneTail(engine, ubo, scene);
-                }
-            }
-            if (nmeLightsUBO && nmeLightsScratch) {
-                const v2 = computeLightsVersion(scene.lights);
-                if (v2 !== lastLightsVersion) {
-                    lastLightsVersion = v2;
-                    refreshLightsUBO(engine, nmeLightsUBO, scene.lights, nmeLightsScratch);
-                }
-            }
-        },
-    };
-
-    return { renderables, updater };
+    return { renderables };
 }
 
 // Per-gpu-object cached zero buffers for attributes that a NodeMaterial's

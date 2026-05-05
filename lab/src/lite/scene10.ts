@@ -1,7 +1,7 @@
 // Scene 10: PBR Metallic-Roughness Sphere — matches Babylon #2FDQT5#12
 // PBRMetallicRoughnessMaterial with golden color, metallic=0, roughness=1, hemispheric light only.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -10,7 +10,6 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     scene.camera = createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
-    attachControl(scene.camera, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 

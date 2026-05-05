@@ -21,14 +21,14 @@ let seo = clamp((NdotVUnclamped + occlusion) * (NdotVUnclamped + occlusion) - 1.
 let eho = 1.0;
 let colorSpecularEnvReflectance = specularEnvironmentReflectance * seo * eho;
 let energyConservation = getEnergyConservationFactor(colorF0, max(environmentBrdf.y, 0.001));
-let environmentIrradiance = (scene.vSphericalL00
-  + scene.vSphericalL1_1 * N_env.y + scene.vSphericalL10 * N_env.z + scene.vSphericalL11 * N_env.x
-  + scene.vSphericalL2_2 * (N_env.y * N_env.x) + scene.vSphericalL2_1 * (N_env.y * N_env.z)
-  + scene.vSphericalL20 * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21 * (N_env.z * N_env.x)
-  + scene.vSphericalL22 * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity * 0.05;
+let environmentIrradiance = (scene.vSphericalL00.rgb
+  + scene.vSphericalL1_1.rgb * N_env.y + scene.vSphericalL10.rgb * N_env.z + scene.vSphericalL11.rgb * N_env.x
+  + scene.vSphericalL2_2.rgb * (N_env.y * N_env.x) + scene.vSphericalL2_1.rgb * (N_env.y * N_env.z)
+  + scene.vSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21.rgb * (N_env.z * N_env.x)
+  + scene.vSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity * 0.05;
 let maxLod = f32(textureNumLevels(iblTexture) - 1);
 let cubemapDim = f32(textureDimensions(iblTexture).x);
-var specLod = log2(cubemapDim * alphaG) * scene.lodGenerationScale;
+var specLod = log2(cubemapDim * alphaG) * scene.vImageInfos.z;
 var environmentRadiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(specLod, 0.0, maxLod)).rgb * material.environmentIntensity;
 environmentRadiance = mix(environmentRadiance, environmentIrradiance, alphaG);
 let finalIrradiance = environmentIrradiance * surfaceAlbedo * occlusion;

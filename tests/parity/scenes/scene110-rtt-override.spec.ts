@@ -1,25 +1,25 @@
 /**
- * Scene 52 — RTT with per-pass material override Parity Test
+ * Scene 110 — RTT with per-pass material override Parity Test
  *
  * Captures the Babylon Lite frame-graph multi-pass scene render and compares
  * against the golden reference (captured from Babylon.js using
  * RenderTargetTexture + setMaterialForRendering + per-RTT activeCamera).
  *
- * Scene id 52 — id 50 is reserved by a co-worker.
+ * Scene id 110 — moved from id 52.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(52);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene52-rtt-override");
+const sceneConfig = getSceneConfig(110);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene110-rtt-override");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test("Scene 52 — RTT with material override matches Babylon.js reference", async ({ page }) => {
+test("Scene 110 — RTT with material override matches Babylon.js reference", async ({ page }) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 52 });
+    await captureGolden(browser, { sceneId: 110 });
 
-    await page.goto("/scene52.html");
+    await page.goto("/scene110.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
     await page.waitForTimeout(500);
 

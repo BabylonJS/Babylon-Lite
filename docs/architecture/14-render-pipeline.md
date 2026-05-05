@@ -14,7 +14,7 @@ This keeps the engine render loop material-agnostic while allowing the same `Ren
 ```typescript
 export interface DrawBinding {
   readonly renderable: Renderable;
-  readonly pipeline?: GPURenderPipeline;
+  readonly pipeline: GPURenderPipeline;
   draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext): number;
   updateUBOs?(): void;
   _sortDistance?: number;
@@ -37,7 +37,7 @@ export interface PrePassRenderable {
 
 export interface MeshGroupBuildResult {
   renderables: Renderable[];
-  updater: SceneUniformUpdater;
+  updater?: SceneUniformUpdater;
   rebuildSingle: (scene: any, mesh: any, materialOverride?: any) => Renderable;
 }
 ```
@@ -175,7 +175,7 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 
 | File | Purpose |
 |---|---|
-| `src/render/renderable.ts` | `Renderable`, `DrawBinding`, `PrePassRenderable`, `SceneUniformUpdater`, `MeshGroupBuildResult`, `MeshGroupBuilder` |
+| `src/render/renderable.ts` | `Renderable`, `DrawBinding`, `PrePassRenderable`, optional `SceneUniformUpdater`, `MeshGroupBuildResult`, `MeshGroupBuilder` |
 | `src/frame-graph/task.ts` | Polymorphic frame-graph task interface |
 | `src/frame-graph/frame-graph.ts` | Ordered task list, build/execute/dispose lifecycle |
 | `src/frame-graph/frame-graph-actions.ts` | `addTask`, `addTaskAtStart`, `addTaskBefore` helpers |

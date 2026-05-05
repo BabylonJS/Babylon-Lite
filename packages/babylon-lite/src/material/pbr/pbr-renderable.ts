@@ -15,7 +15,7 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
-import type { Renderable, SceneUniformUpdater, MeshGroupBuildResult } from "../../render/renderable.js";
+import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
@@ -38,6 +38,8 @@ import { computeMeshPbrFeatures } from "./pbr-mesh-features.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
+import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import type { PbrLightMode } from "./pbr-compose.js";
 
 /** Build PBR Renderable(s) + a SceneUniformUpdater from PBR meshes. */
 export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined): Promise<MeshGroupBuildResult> {
@@ -54,9 +56,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         }
     }
     const hasSomeShadows = shadowLights.length > 0;
-    const hasAnyLight = scene.lights.length > 0;
-    const hasSingleLight = scene.lights.length === 1 && !hasSomeShadows;
-    const hasMultiLight = hasAnyLight && !hasSingleLight;
+    let hasAnyAffectedLight = false;
+    let needsSingleLightPath = false;
+    let needsMultiLightPath = false;
+    for (const mesh of meshes) {
+        const lr = writeMeshLightSelection(mesh, scene.lights);
+        const affectedCount = lr > 0 ? 1 : -lr;
+        hasAnyAffectedLight ||= affectedCount > 0;
+        if (affectedCount === 1 && !(mesh.receiveShadows && hasSomeShadows)) {
+            needsSingleLightPath = true;
+        } else if (affectedCount > 0) {
+            needsMultiLightPath = true;
+        }
+    }
 
     // ── Single O(N) scan over meshes for all scene-wide feature flags ──
     // Flags are plain locals (not an object return) so terser can mangle their names.
@@ -115,28 +127,20 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // Light/shadow helpers stay dynamic so single-light and non-shadow bundles stay lean.
     let _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null = null;
     let _singleLightWGSL = "";
-    let _singleLightBlock = "";
+    let _getSingleLightBlock: ((type: string) => string) | null = null;
     let _multiLightWGSL = "";
     let _multiLightLoop = "";
-    let _writeLightsUBO: ((engine: EngineContextInternal, lights: readonly import("../../light/types.js").LightBase[]) => GPUBuffer) | undefined;
-    let _refreshLightsUBO:
-        | ((engine: EngineContextInternal, buffer: GPUBuffer, lights: readonly import("../../light/types.js").LightBase[], scratch: Float32Array) => void)
-        | undefined;
-    let _LIGHTS_UBO_SIZE = 0;
-    if (hasAnyLight) {
-        const lightsUboMod = await import("../../render/lights-ubo.js");
-        _writeLightsUBO = lightsUboMod.writeLightsUBO;
-        _refreshLightsUBO = lightsUboMod.refreshLightsUBO;
-        _LIGHTS_UBO_SIZE = lightsUboMod.getLightsUboSize();
-        if (hasSingleLight) {
-            const single = await import("./fragments/singlelight-wgsl.js");
-            _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
-            _singleLightBlock = single.getSingleLightBlock(scene.lights[0]!.lightType);
-        } else {
-            const wgslMod = await import("./fragments/multilight-wgsl.js");
-            _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
-            _multiLightLoop = wgslMod.getMultiLightLoop();
-        }
+    if (needsSingleLightPath) {
+        const single = await import("./fragments/singlelight-wgsl.js");
+        _singleLightWGSL = single.SINGLE_LIGHT_STRUCTS;
+        _getSingleLightBlock = single.getSingleLightBlock;
+    }
+    if (needsMultiLightPath) {
+        const wgslMod = await import("./fragments/multilight-wgsl.js");
+        _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
+        _multiLightLoop = wgslMod.getMultiLightLoop();
+    }
+    if (hasAnyAffectedLight) {
         if (hasSomeShadows) {
             const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
             _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
@@ -232,10 +236,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     }
 
     const composePbr = createPbrComposer({
-        hasSingleLight,
-        hasMultiLight,
         singleLightWGSL: _singleLightWGSL,
-        singleLightBlock: _singleLightBlock,
+        getSingleLightBlock: _getSingleLightBlock,
         multiLightWGSL: _multiLightWGSL,
         multiLightLoop: _multiLightLoop,
         acesHelpers: _acesHelpers,
@@ -247,14 +249,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         shadowLights,
         createThinInstanceFragment: _createThinInstanceFragment,
     });
-
-    // Lights UBO (created once per scene; refreshed by the lights-only updater below).
-    let lightsUBOBuffer: GPUBuffer | undefined;
-    let lightsUBOScratch: Float32Array | undefined;
-    if (hasAnyLight && _writeLightsUBO) {
-        lightsUBOBuffer = _writeLightsUBO(engine, scene.lights);
-        lightsUBOScratch = new Float32Array(_LIGHTS_UBO_SIZE / 4);
-    }
 
     const featureCtx: import("./pbr-mesh-features.js").PbrFeatureCtx = { hasEnv, hasTonemap, hasSomeShadows };
     // Shadow bind group cache — within one scene build, all receiving meshes share the
@@ -269,14 +263,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const mat = mesh.material as PbrMaterialProps;
         const mi = mesh as MeshInternal;
 
+        const lr = writeMeshLightSelection(mesh, s.lights);
+        const lightCount = lr > 0 ? 1 : -lr;
+        const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !(mesh.receiveShadows && hasSomeShadows) ? 1 : 2;
+        const singleLightType = lightMode === 1 ? getPackedLightType(s.lights, lr - 1) : "";
         const { features, features2 } = computeMeshPbrFeatures(mesh, s, featureCtx);
 
-        const composed = composePbr(features, features2);
-        const bindings = getOrCreatePbrBindings(engine, features, features2, composed);
+        const composed = composePbr(features, features2, lightMode, singleLightType);
+        const bindings = getOrCreatePbrBindings(engine, features, features2, composed, `${lightMode}:${singleLightType}`);
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
         const meshUboData = new Float32Array(composed.meshUboSpec.totalBytes / 4);
         meshUboData.set(mesh.worldMatrix, 0);
+        writeMeshLightSelection(mesh, s.lights, meshUboData);
         const meshUBO = createUniformBuffer(engine, meshUboData);
 
         // Material UBO.
@@ -285,7 +284,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
 
-        const materialBindGroup = createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, lightsUBOBuffer);
+        const materialBindGroup = createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -334,10 +333,14 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const hasTIColor = (features & PBR_HAS_INSTANCE_COLOR) !== 0;
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
+        let _lastLightsCount = s.lights.length;
         const updateUBOs = (): void => {
-            if (mesh.worldMatrixVersion !== _lastWorldVersion) {
-                device.queue.writeBuffer(meshUBO, 0, mesh.worldMatrix as unknown as Float32Array<ArrayBuffer>);
+            if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+                meshUboData.set(mesh.worldMatrix, 0);
+                writeMeshLightSelection(mesh, s.lights, meshUboData);
+                device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
                 _lastWorldVersion = mesh.worldMatrixVersion;
+                _lastLightsCount = s.lights.length;
             }
             const m = mat as any;
             if (m._uboDirty) {
@@ -418,31 +421,26 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
-    // Per-frame lights UBO refresh (multi-light path only). The per-pass scene UBO
-    // itself is written by the active RenderPassTask via writePassSceneUBO.
-    let lastLightsVersion = -1;
-    const updater: SceneUniformUpdater = {
-        update(eng) {
-            if (!lightsUBOBuffer || !lightsUBOScratch || !_refreshLightsUBO) {
-                return;
-            }
-            let lightVer = 0;
-            for (const l of scene.lights) {
-                lightVer += (l as LightBaseInternal)._lightVersion ?? 0;
-            }
-            if (lightVer !== lastLightsVersion) {
-                lastLightsVersion = lightVer;
-                _refreshLightsUBO(eng as EngineContextInternal, lightsUBOBuffer, scene.lights, lightsUBOScratch);
-            }
-        },
-    };
-
     (scene as SceneContextInternal)._disposables.push(
         () => clearPbrPipelineCache(),
         () => clearSamplerCache(engine)
     );
 
-    return { renderables, updater, rebuildSingle };
+    return { renderables, rebuildSingle };
+}
+
+function getPackedLightType(lights: SceneContext["lights"], packedIndex: number): string {
+    let packed = 0;
+    for (const light of lights) {
+        if (!(light as LightBaseInternal)._writeLightUbo) {
+            continue;
+        }
+        if (packed === packedIndex) {
+            return light.lightType;
+        }
+        packed++;
+    }
+    return "";
 }
 
 /** Write material properties into a pre-allocated Float32Array.
@@ -458,6 +456,7 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
         data[off] = material.metallicFactor ?? 1.0;
         data[off + 1] = material.roughnessFactor ?? 1.0;
         data[off + 2] = material.normalTextureScale ?? 1.0;
+        data[off + 3] = material.usePhysicalLightFalloff === false ? 0 : 1;
     }
 
     for (const ext of _getPbrExts().values()) {

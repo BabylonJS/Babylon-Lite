@@ -18,6 +18,7 @@ import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderPassTask } from "../frame-graph/render-pass-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
+import type { SceneLightGpuState } from "../render/lights-ubo.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -89,6 +90,8 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
 
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     _envTextures?: EnvironmentTextures;
+    /** Scene-owned shared LightsUniforms UBO state (group 0 binding 1). */
+    _lightGpuState?: SceneLightGpuState;
 
     /** Frame graph driving this scene's rendering. Created eagerly by
      *  `createSceneContext` with a default `RenderPassTask` that mirrors
@@ -271,7 +274,9 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 ctx._deferredBuilders.push(async () => {
                     const result = await build(ctx, group!);
                     ctx._renderables.push(...result.renderables);
-                    ctx._uniformUpdaters.push(result.updater);
+                    if (result.updater) {
+                        ctx._uniformUpdaters.push(result.updater);
+                    }
                 });
             }
             group.push(mesh);

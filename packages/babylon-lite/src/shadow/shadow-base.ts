@@ -150,6 +150,15 @@ export function createShadowParamsUBO(engine: EngineContextInternal, bias: numbe
     return createUniformBuffer(engine, data);
 }
 
+/** PCF depth textures use Babylon's clip-space linear bias path. WebGPU's
+ *  half-Z NDC range applies the same 0.5 bias factor as Babylon.js. */
+export function createPcfDepthSceneData(viewProj: Float32Array, bias: number): Float32Array {
+    const data = new Float32Array(20);
+    data.set(viewProj);
+    data[16] = bias * 0.5;
+    return data;
+}
+
 /** Create the shared receiver-side shadow UBO (96 bytes), initialised from state. */
 export function createSharedShadowUBO(
     engine: EngineContextInternal,
@@ -177,6 +186,7 @@ export function drawCasters(pass: GPURenderPassEncoder, casters: ShadowCaster[])
 export interface ShadowDepthInfraOptions {
     label: string;
     viewProj: Float32Array;
+    depthSceneData?: Float32Array;
     casterMeshes: Mesh[];
     vertCode: string;
     fragCode?: string;
@@ -209,7 +219,7 @@ export function createShadowDepthInfra(engine: EngineContextInternal, opts: Shad
     }
     const depthMeshBGL = device.createBindGroupLayout({ label: `${label}-depth-mesh`, entries: meshBglEntries });
     const depthSceneBGL = createDepthSceneBGL(engine, `${label}-depth-scene`);
-    const depthSceneUBO = createUniformBuffer(engine, opts.viewProj as Float32Array<ArrayBuffer>);
+    const depthSceneUBO = createUniformBuffer(engine, (opts.depthSceneData ?? opts.viewProj) as Float32Array<ArrayBuffer>);
     const depthSceneBG = device.createBindGroup({ layout: depthSceneBGL, entries: [{ binding: 0, resource: { buffer: depthSceneUBO } }] });
 
     const casters = buildCasters(engine, opts.casterMeshes, depthMeshBGL, opts.extraMeshEntries);

@@ -43,6 +43,10 @@ export interface PbrMaterialProps extends Material {
     environmentIntensity?: number;
     /** Scale factor for direct light contribution. Default 1.0. */
     directIntensity?: number;
+    /** Whether direct point/spot lights use physical inverse-square falloff.
+     *  Default true, matching Babylon.js PBRMaterial. Set false for Standard-style
+     *  linear range + spot exponent falloff (`usePhysicalLightFalloff = false`). */
+    usePhysicalLightFalloff?: boolean;
     /** Dielectric F0 reflectance (default 0.04, glass ≈ 0.2). */
     reflectance?: number;
     /** glTF metallicFactor multiplier applied over ORM.b metallic channel. Default 1.0. */

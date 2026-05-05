@@ -3,11 +3,11 @@
  *  These are pure WGSL function strings — no bindings, no UBO declarations.
  *  Each material system wraps them with its own binding declarations. */
 
-/** Cotangent-frame bump mapping (used by Standard + PBR cotangent mode).
- *  Requires: `bumpTex` (texture_2d), `bumpSampler` (sampler) in scope. */
+/** Cotangent-frame bump mapping.
+ *  Requires: `bT` (texture_2d) and `bS` (sampler) in scope. */
 export const WGSL_PERTURB_NORMAL = `
 fn perturbNormal(vNormalW: vec3<f32>, positionW: vec3<f32>, uv: vec2<f32>, bumpScale: f32) -> vec3<f32> {
-let normalSample = textureSample(bumpTex, bumpSampler, uv).rgb * 2.0 - 1.0;
+let normalSample = textureSample(bT, bS, uv).rgb * 2.0 - 1.0;
 let N = normalize(vNormalW) * bumpScale;
 let dp1 = dpdx(positionW);
 let dp2 = -dpdy(positionW);

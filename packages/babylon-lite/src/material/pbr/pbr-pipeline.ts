@@ -50,9 +50,9 @@ export function clearPbrPipelineCache(): void {
 
 /** Get-or-build the sig-independent PBR shader bindings. Used at renderable build time
  *  so per-mesh bind groups can be created BEFORE any sig is known. */
-export function getOrCreatePbrBindings(engine: EngineContextInternal, features: number, features2: number, composed: ComposedShader): PbrShaderBindings {
+export function getOrCreatePbrBindings(engine: EngineContextInternal, features: number, features2: number, composed: ComposedShader, shaderKey = ""): PbrShaderBindings {
     ensureDevice(engine);
-    const key = `${features}:${features2}`;
+    const key = `${features}:${features2}:${shaderKey}`;
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -119,8 +119,7 @@ export function createPbrMeshBindGroup(
     materialUBO: GPUBuffer,
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
-    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null,
-    lightsUBO?: GPUBuffer
+    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null
 ): GPUBindGroup {
     const device = engine.device;
     const features = bindings.features;
@@ -180,9 +179,6 @@ export function createPbrMeshBindGroup(
     }
     if (hasSpecGloss) {
         addTex(material.specGlossTexture!);
-    }
-    if (lightsUBO) {
-        entries.push({ binding: b++, resource: { buffer: lightsUBO } });
     }
     const seenExts = new Set<import("./pbr-flags.js").PbrExt>();
     for (const fid of fragIds) {

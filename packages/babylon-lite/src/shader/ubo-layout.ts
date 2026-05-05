@@ -9,7 +9,9 @@
  *   vec2<f32>    → align 8,  size 8
  *   vec3<f32>    → align 16, size 12
  *   vec4<f32>    → align 16, size 16
+ *   vec4<u32>    → align 16, size 16
  *   mat4x4<f32>  → align 16, size 64
+ *   array<vec4<u32>, N> → align 16, size 16 × N
  *
  * The total struct size is rounded up to a multiple of 16 bytes.
  */
@@ -21,18 +23,31 @@ interface TypeInfo {
     readonly size: number;
 }
 
-const TYPE_INFO: Record<WgslScalarType, TypeInfo> = {
+const TYPE_INFO: Partial<Record<WgslScalarType, TypeInfo>> = {
     f32: { align: 4, size: 4 },
     u32: { align: 4, size: 4 },
     i32: { align: 4, size: 4 },
     "vec2<f32>": { align: 8, size: 8 },
     "vec3<f32>": { align: 16, size: 12 },
     "vec4<f32>": { align: 16, size: 16 },
+    "vec4<u32>": { align: 16, size: 16 },
     "mat4x4<f32>": { align: 16, size: 64 },
 };
 
 function alignUp(offset: number, alignment: number): number {
     return (offset + alignment - 1) & ~(alignment - 1);
+}
+
+function typeInfo(type: WgslScalarType): TypeInfo {
+    const info = TYPE_INFO[type];
+    if (info) {
+        return info;
+    }
+    const m = /^array<vec4<u32>,\s*(\d+)>$/.exec(type);
+    if (m) {
+        return { align: 16, size: Number(m[1]) * 16 };
+    }
+    throw new Error(`Unknown UBO field type: ${type}`);
 }
 
 /**
@@ -46,10 +61,7 @@ export function computeUboLayout(fields: readonly UboField[]): UboSpec {
     let cursor = 0;
 
     for (const field of fields) {
-        const info = TYPE_INFO[field.type];
-        if (!info) {
-            throw new Error(`Unknown UBO field type: ${field.type}`);
-        }
+        const info = typeInfo(field.type);
 
         cursor = alignUp(cursor, info.align);
         offsets.set(field.name, cursor);

@@ -11,7 +11,7 @@ export function createStdCubeReflectionFragment(): ShaderFragment {
             { name: "cRS", type: { kind: "sampler", samplerType: "sampler" }, visibility: 0x2 },
         ],
         fragmentSlots: {
-            AD: `{let v=normalize(input.vPositionW-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
+            AD: `{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
         },
     };
 }

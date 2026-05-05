@@ -52,6 +52,7 @@ async function main(): Promise<void> {
         mapSize: 1024,
         depthScale: 50,
         bias: 0.00005,
+        blurKernel: 64,
         blurScale: 2,
         darkness: 0,
         frustumEdgeFalloff: 0,

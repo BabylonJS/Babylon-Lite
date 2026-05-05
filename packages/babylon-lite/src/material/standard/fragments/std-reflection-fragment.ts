@@ -23,16 +23,16 @@ export function createStdReflectionFragment(): ShaderFragment {
     return {
         id: "std-reflection",
         bindings: [
-            { name: "reflectionTex", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "reflectionSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+            { name: "rT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
+            { name: "rS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
         ],
         helperFunctions: REFLECTION_HELPERS,
         fragmentSlots: {
             AD: `{
 var reflCoords: vec2<f32>;
-if (mat.rCm < 1.5) { reflCoords = computeSphericalCoords(input.vPositionW, normalW); }
-else { reflCoords = computePlanarCoords(input.vPositionW, normalW); }
-reflectionColor = textureSample(reflectionTex, reflectionSampler, reflCoords).rgb * mat.rLvl;
+if (mat.rCm < 1.5) { reflCoords = computeSphericalCoords(input.vp, normalW); }
+else { reflCoords = computePlanarCoords(input.vp, normalW); }
+reflectionColor = textureSample(rT, rS, reflCoords).rgb * mat.rLvl;
 }`,
         },
     };

@@ -39,6 +39,7 @@ import { getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
+import { ensureSceneLightState, refreshSceneLightsUBO } from "../render/lights-ubo.js";
 import type { Task } from "./task.js";
 
 export interface RenderPassTaskConfig {
@@ -91,6 +92,7 @@ export interface RenderPassTask extends Task {
      *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
     _sceneUBO: GPUBuffer;
     _sceneBG: GPUBindGroup;
+    _lightsUBO: GPUBuffer;
     _suData: Float32Array;
     _su: unknown[];
 
@@ -125,10 +127,14 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
 
     const sceneBGL = getSceneBindGroupLayout(eng);
     const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES, `${config.name}-scene-ubo`);
+    const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
     const sceneBG = eng.device.createBindGroup({
         label: `${config.name}-scene-bg`,
         layout: sceneBGL,
-        entries: [{ binding: 0, resource: { buffer: sceneUBO } }],
+        entries: [
+            { binding: 0, resource: { buffer: sceneUBO } },
+            { binding: 1, resource: { buffer: lightsUBO } },
+        ],
     });
     const task: RenderPassTask = {
         name: config.name,
@@ -150,6 +156,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         _sampleCount: sampleCount,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
+        _lightsUBO: lightsUBO,
         _suData: new Float32Array(SCENE_UBO_BYTES / 4),
         _su: [null, null, NaN, NaN, NaN, NaN, NaN],
         _pendingMeshes: [],
@@ -170,6 +177,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
                 mirrorSceneBuckets(task, sc);
             }
             buildRenderTarget(task._config.rt, eng);
+            refreshTaskSceneBindGroup(task, eng);
             buildBindings(task, eng);
             buildRenderPassDescriptor(task, swapchain);
         },
@@ -363,8 +371,14 @@ function executePass(task: RenderPassTask): number {
     const scene = task.scene;
     const camera = task._config.cam ?? scene.camera;
 
+    // The glTF lights extension can raise MAX_LIGHTS after the default frame
+    // graph task was first recorded; make sure group(0).binding(1) follows the
+    // resized scene-owned lights buffer before recording/replaying bundles.
+    refreshTaskSceneBindGroup(task, eng);
+
     // Per-pass scene UBO write — uses task config camera if set, else scene.camera.
     writePassSceneUBO(task, eng, scene, camera);
+    refreshSceneLightsUBO(eng, scene);
 
     updateBindingUBOs(task._opaqueBindings);
     updateBindingUBOs(task._transmissiveBindings);
@@ -409,6 +423,24 @@ function executePass(task: RenderPassTask): number {
     draws += drawList(pass, task._transparentBindings, eng);
     pass.end();
     return draws;
+}
+
+function refreshTaskSceneBindGroup(task: RenderPassTask, eng: EngineContextInternal): void {
+    const lightsUBO = ensureSceneLightState(eng, task.scene)._buffer;
+    if (lightsUBO === task._lightsUBO) {
+        return;
+    }
+    task._lightsUBO = lightsUBO;
+    task._sceneBG = eng.device.createBindGroup({
+        label: `${task.name}-scene-bg`,
+        layout: getSceneBindGroupLayout(eng),
+        entries: [
+            { binding: 0, resource: { buffer: task._sceneUBO } },
+            { binding: 1, resource: { buffer: lightsUBO } },
+        ],
+    });
+    task._opaqueBundles.length = 0;
+    task._lastVersion = -1;
 }
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
@@ -482,6 +514,7 @@ function writePassSceneUBO(task: RenderPassTask, eng: EngineContextInternal, sce
     data[76] = img.exposure;
     data[77] = img.contrast;
     data[78] = envTextures?.lodGenerationScale ?? 0.8;
+    data[79] = img.toneMappingEnabled ? 1 : 0;
 
     eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }

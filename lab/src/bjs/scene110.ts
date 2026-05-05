@@ -1,6 +1,6 @@
-// Scene 52 (BJS reference): RTT with material override.
+// Scene 110 (BJS reference): RTT with material override.
 //
-// Mirrors lab/src/lite/scene52.ts — sphere A and box B in main; an offscreen
+// Mirrors lab/src/lite/scene110.ts — sphere A and box B in main; an offscreen
 // 512×512 RTT renders A (with a green override material) from a different
 // camera; the RTT color is wired as B's diffuseTexture.
 

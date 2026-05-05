@@ -23,6 +23,7 @@ import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } 
 import { MAX_LIGHTS } from "../../../light/types.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
+const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function ccDirectBlock(useClearcoat: boolean, useCcTint: boolean): string {
     if (!useClearcoat) {
@@ -133,8 +134,8 @@ function ssBlock(useSubsurface: boolean, useRefraction: boolean, useAnisotropy: 
     let refrV_raw = refract(-V, ${useAnisotropy ? "aniN" : "N"}, invIor);
     let refrV = v3(refrV_raw.x * cosA + refrV_raw.z * sinA, refrV_raw.y, -refrV_raw.x * sinA + refrV_raw.z * cosA);
     let refrAlphaG = mix(alphaG, 0.0, clamp(invIor * 3.0 - 2.0, 0.0, 1.0));
-    let refrLod = log2(cubemapDim * refrAlphaG) * sceneU.lodGenerationScale;
-    let envRefr = textureSampleLevel(nmeIblTexture, nmeIblSampler, refrV, clamp(refrLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let refrLod = log2(cubemapDim * refrAlphaG) * sceneU.vImageInfos.z;
+    let envRefr = textureSampleLevel(nmeIblTexture, nmeIblSampler, refrV, clamp(refrLod, 0.0, maxLod)).rgb;
     let volumeAlbedo = nme_pbr_colorAtDistance(ssTintColor, refrTintAtDistance);
     let refrTransmittance = v3(refrIntensity) * nme_pbr_cocaLambert(volumeAlbedo, ssThickness);
     let finalRefractionRaw = envRefr * refrTransmittance * (v3(1.0) - refractionSpecEnvReflectance);
@@ -149,7 +150,7 @@ function ssBlock(useSubsurface: boolean, useRefraction: boolean, useAnisotropy: 
         + sceneU.vSphericalL1_1.xyz * nN_env.y + sceneU.vSphericalL10.xyz * nN_env.z + sceneU.vSphericalL11.xyz * nN_env.x
         + sceneU.vSphericalL2_2.xyz * (nN_env.y * nN_env.x) + sceneU.vSphericalL2_1.xyz * (nN_env.y * nN_env.z)
         + sceneU.vSphericalL20.xyz * (3.0 * nN_env.z * nN_env.z - 1.0) + sceneU.vSphericalL21.xyz * (nN_env.z * nN_env.x)
-        + sceneU.vSphericalL22.xyz * (nN_env.x * nN_env.x - nN_env.y * nN_env.y)) * sceneU.environmentIntensity;
+        + sceneU.vSphericalL22.xyz * (nN_env.x * nN_env.x - nN_env.y * nN_env.y));
     let ssRefractionIrradiance = backIrradiance * ssTransmittance;
     finalIrradiance = finalIrradiance * refractionOpacity;
     finalIrradiance = finalIrradiance * (1.0 - translucencyIntensity);`
@@ -238,8 +239,8 @@ function HELPER_WGSL(
 
     const shIblTerm =
         useEnv && useSheen
-            ? `let shSpecLod = log2(cubemapDim * shAlphaG) * sceneU.lodGenerationScale;
-    let shEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+            ? `let shSpecLod = log2(cubemapDim * shAlphaG) * sceneU.vImageInfos.z;
+    let shEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(shSpecLod, 0.0, maxLod)).rgb;
     let shBrdfBlue = textureSample(nmeBrdfLUT, nmeBrdfSampler, v2(NdotV, shRough)).b;
     let shFinalIbl = shEnvRadiance * shColorScaled * shBrdfBlue * seo * eho;
     ${
@@ -268,10 +269,10 @@ function HELPER_WGSL(
     let ccEnergyConservation = 1.0 + _coloredR0 * (1.0 / max(ccBrdfSample.y, 0.001) - 1.0);
     let ccEhoT = clamp(1.0 + 1.1 * dot(reflect(-V, ccNormalW), Ng), 0.0, 1.0);
     let ccSpecEnvRefl = ccSpecEnvReflRaw * (ccEhoT * ccEhoT);
-    let ccSpecLod = log2(cubemapDim * ccAlphaG) * sceneU.lodGenerationScale;
+    let ccSpecLod = log2(cubemapDim * ccAlphaG) * sceneU.vImageInfos.z;
     let ccR_raw = reflect(-V, ccNormalW);
     let ccR = v3(ccR_raw.x * cosA + ccR_raw.z * sinA, ccR_raw.y, -ccR_raw.x * sinA + ccR_raw.z * cosA);
-    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, ccR, clamp(ccSpecLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let ccEnvRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, ccR, clamp(ccSpecLod, 0.0, maxLod)).rgb;
     ${
         useCcTint
             ? `// Clearcoat absorption: BJS Beer-Lambert path length through the coat.
@@ -316,7 +317,7 @@ function HELPER_WGSL(
         + sceneU.vSphericalL1_1.xyz * N_env.y + sceneU.vSphericalL10.xyz * N_env.z + sceneU.vSphericalL11.xyz * N_env.x
         + sceneU.vSphericalL2_2.xyz * (N_env.y * N_env.x) + sceneU.vSphericalL2_1.xyz * (N_env.y * N_env.z)
         + sceneU.vSphericalL20.xyz * (3.0 * N_env.z * N_env.z - 1.0) + sceneU.vSphericalL21.xyz * (N_env.z * N_env.x)
-        + sceneU.vSphericalL22.xyz * (N_env.x * N_env.x - N_env.y * N_env.y)) * sceneU.environmentIntensity;
+        + sceneU.vSphericalL22.xyz * (N_env.x * N_env.x - N_env.y * N_env.y));
     let brdfSample = textureSample(nmeBrdfLUT, nmeBrdfSampler, v2(NdotV, rough_c));
     let envBrdf = brdfSample.rgb;
     let reflectanceF0Scalar = max(colorF0.r, max(colorF0.g, colorF0.b));
@@ -337,8 +338,8 @@ function HELPER_WGSL(
     let energyConservation = 1.0 + _coloredR0 * (1.0 / max(envBrdf.y, 0.001) - 1.0);
     let maxLod = f32(textureNumLevels(nmeIblTexture) - 1);
     let cubemapDim = f32(textureDimensions(nmeIblTexture).x);
-    let specLod = log2(cubemapDim * alphaG) * sceneU.lodGenerationScale;
-    var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb * sceneU.environmentIntensity;
+    let specLod = log2(cubemapDim * alphaG) * sceneU.vImageInfos.z;
+    var environmentRadiance = textureSampleLevel(nmeIblTexture, nmeIblSampler, R, clamp(specLod, 0.0, maxLod)).rgb;
     ${refractionSpecEnvReflectanceDecl}
     var finalIrradiance = environmentIrradiance * surfaceAlbedo;
     let finalRadianceScaled = environmentRadiance * colorSpecEnvReflectance * energyConservation;
@@ -500,7 +501,7 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     ssTintColor: v3, ssThickness: f32,
     ssTranslucencyIntensityIn: f32, ssDiffusionDist: v3,
     anisoIntensityIn: f32, anisoDirection: v2, anisoUv: v2,
-    shadowFactors: v4
+    shadowFactors: array<f32, ${MAX_LIGHTS}>
 ) -> NmePbrMrResult {
     var r: NmePbrMrResult;
     let Ng = normalize(geometricNormal);
@@ -542,11 +543,12 @@ ${ccSchlickFn}${charlieFn}${anisoFns}${ssFns}fn nme_pbr_mr_compute(
     var specAcc = v3(0.0);
     var aggShadow: f32 = 0.0;
     var nLights: f32 = 0.0;
-    let lc = min(nmeLights.count, ${MAX_LIGHTS}u);
+    let lc = min(meshU.lc, ${MAX_LIGHTS}u);
     for (var i: u32 = 0u; i < lc; i = i + 1u) {
-        let entry = nmeLights.lights[i];
+        let lightIndex = nli(i);
+        let entry = nmeLights.lights[lightIndex];
         let t = u32(entry.vLightData.w);
-        let sh = shadowFactors[i];
+        let sh = shadowFactors[lightIndex];
         if (t == 3u) {
             let Ldir = normalize(entry.vLightData.xyz);
             let nl = clamp(0.5 + 0.5 * dot(N, Ldir), 0.0000001, 1.0);
@@ -656,17 +658,17 @@ ${iblBlock}
             : `let _specLum = clamp(dot(specAcc, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
     r.lumOverAlpha = _specLum;`
     }
-    var colorOut = max(r.lighting, v3(0.0)) * sceneU.exposureLinear;
-    if (sceneU.toneMappingEnabled > 0.5) {
+    var colorOut = max(r.lighting, v3(0.0)) * sceneU.vImageInfos.x;
+    if (sceneU.vImageInfos.w > 0.5) {
         colorOut = 1.0 - exp2(-1.590579 * colorOut);
     }
     colorOut = pow(max(colorOut, v3(0.0)), v3(0.45454545));
     colorOut = clamp(colorOut, v3(0.0), v3(1.0));
     let highContrast = colorOut * colorOut * (v3(3.0) - colorOut * 2.0);
-    if (sceneU.contrast < 1.0) {
-        colorOut = mix(v3(0.5), colorOut, sceneU.contrast);
+    if (sceneU.vImageInfos.y < 1.0) {
+        colorOut = mix(v3(0.5), colorOut, sceneU.vImageInfos.y);
     } else {
-        colorOut = mix(colorOut, highContrast, sceneU.contrast - 1.0);
+        colorOut = mix(colorOut, highContrast, sceneU.vImageInfos.y - 1.0);
     }
     r.lighting = max(colorOut, v3(0.0));
     if (nLights > 0.0) { r.shadow = aggShadow / nLights; } else { r.shadow = 1.0; }
@@ -850,7 +852,7 @@ export const emitter: BlockEmitter = {
             const ro = resolveOptional(block, "roughness", "0.5", "f32", stage, state, ctx);
             const ao = resolveOptional(block, "ambientOcc", "1.0", "f32", stage, state, ctx);
             const baseIorExpr = resolveOptional(block, "indexOfRefraction", "1.5", "f32", stage, state, ctx);
-            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : `v4(1.0)`;
+            const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
             state.fragment.body.push(
                 `let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, ${ccIntensityExpr}, ${ccRoughnessExpr}, ${ccIorExpr}, ${ccBumpExpr}, ${ccBumpUvExpr}, ${ccTintColorExpr}, ${ccTintAtDistanceExpr}, ${ccTintThicknessExpr}, ${shIntensityExpr}, ${shColorExpr}, ${shRoughnessExpr}, ${baseIorExpr}, ${refrIntensityExpr}, ${refrIorExpr}, ${refrTintAtDistanceExpr}, ${ssTintColorExpr}, ${ssThicknessExpr}, ${ssTranslucencyIntensityExpr}, ${ssDiffusionDistExpr}, ${anisoIntensityExpr}, ${anisoDirectionExpr}, ${anisoUvExpr}, ${sf});`

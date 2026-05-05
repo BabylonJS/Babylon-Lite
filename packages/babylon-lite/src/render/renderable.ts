@@ -81,7 +81,7 @@ export interface SceneUniformUpdater {
 /** Build result from a mesh group builder. */
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
-    updater: SceneUniformUpdater;
+    updater?: SceneUniformUpdater;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The group builder stores it on itself as

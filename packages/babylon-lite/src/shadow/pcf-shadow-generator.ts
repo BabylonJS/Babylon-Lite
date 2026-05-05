@@ -27,6 +27,7 @@ import {
     multiply4x4,
     createSharedShadowUBO,
     createShadowParamsUBO,
+    createPcfDepthSceneData,
     createShadowDepthInfra,
     createShadowDirtyTracker,
     updateShadowLightMatrix,
@@ -34,8 +35,8 @@ import {
 import depthVertSrc from "../../shaders/shadow-pcf-depth.vertex.wgsl?raw";
 import { registerPcfShadowShader, registerPcfShadowBgl } from "../material/standard/standard-flags.js";
 
-/** Shadow-pass UBO: just the light's view-projection matrix (64 bytes). */
-const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
+/** Shadow-pass UBO: light view-projection plus Babylon-style PCF clip-space bias. */
+const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32>, pcfBias: vec4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
 
 // ─── PCF Shader Fragments (bundled only when PCF is used) ──────────
 
@@ -126,8 +127,6 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
     const mapSize = cfg.mapSize ?? 512;
     const bias = cfg.bias ?? 0.00005;
     const darkness = cfg.darkness ?? 0;
-    const normalBias = cfg.normalBias ?? 0;
-
     // Near/far for perspective projection — BJS uses activeCamera.minZ / maxZ
     const near = cfg.near ?? 1;
     const far = cfg.far ?? (light.range === Number.MAX_VALUE ? 10000 : light.range);
@@ -138,10 +137,9 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
     const { depthMeshBGL, depthSceneUBO, depthPipeline, depthSceneBG, casters } = createShadowDepthInfra(eng, {
         label: "shadow-pcf",
         viewProj,
+        depthSceneData: createPcfDepthSceneData(viewProj, bias),
         casterMeshes,
         vertCode: SHADOW_LIGHT_VIEW_WGSL + depthVertSrc,
-        depthBias: Math.round(bias * 1e7),
-        depthBiasSlopeScale: normalBias > 0 ? normalBias : 2,
     });
 
     // --- Depth-only texture ---
@@ -217,6 +215,7 @@ export function createPcfShadowGenerator(engine: EngineContext, light: SpotLight
             mapSize,
             depthScale: 1.0 / mapSize,
             bias,
+            blurKernel: 1,
             blurScale: 1,
             darkness,
             frustumEdgeFalloff: 0,

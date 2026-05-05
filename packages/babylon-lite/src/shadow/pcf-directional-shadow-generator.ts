@@ -26,6 +26,7 @@ import {
     multiply4x4,
     createSharedShadowUBO,
     createShadowParamsUBO,
+    createPcfDepthSceneData,
     createShadowDepthInfra,
     createShadowDirtyTracker,
     updateShadowLightMatrix,
@@ -33,8 +34,8 @@ import {
 import depthVertSrc from "../../shaders/shadow-pcf-depth.vertex.wgsl?raw";
 import { registerPcfShadowShader, registerPcfShadowBgl } from "../material/standard/standard-flags.js";
 
-/** Shadow-pass UBO: just the light's view-projection matrix (64 bytes). */
-const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
+/** Shadow-pass UBO: light view-projection plus Babylon-style PCF clip-space bias. */
+const SHADOW_LIGHT_VIEW_WGSL = `struct SceneUniforms { viewProjection: mat4x4<f32>, pcfBias: vec4<f32> }\n@group(0) @binding(0) var<uniform> scene: SceneUniforms;\n`;
 
 // Morph-aware depth vertex shader — inlined to avoid a separate import that
 // would bloat non-morph scenes. Only used when a caster has morphTargets.
@@ -50,7 +51,9 @@ struct morphUniforms { weights: vec4<f32>, count: u32, texWidth: u32, rowsPerBan
     let posBase = i32(i * 2u) * i32(morph.rowsPerBand);
     pos = pos + morph.weights[i] * textureLoad(morphTargets, vec2<i32>(co.x, posBase + co.y), 0).xyz;
   }
-  return scene.viewProjection * (mesh.world * vec4<f32>(pos, 1.0));
+  var clipPos = scene.viewProjection * (mesh.world * vec4<f32>(pos, 1.0));
+  clipPos.z = clipPos.z + scene.pcfBias.x * clipPos.w;
+  return clipPos;
 }`;
 
 // ─── Shared PCF WGSL fragments (copy of pcf-shadow-generator.ts) ───
@@ -175,7 +178,6 @@ export function createPcfDirectionalShadowGenerator(
     const mapSize = cfg.mapSize ?? 1024;
     const bias = cfg.bias ?? 0.00005;
     const darkness = cfg.darkness ?? 0;
-    const normalBias = cfg.normalBias ?? 0;
     const orthoMinZ = cfg.orthoMinZ ?? 1;
     const orthoMaxZ = cfg.orthoMaxZ ?? 10000;
 
@@ -194,19 +196,15 @@ export function createPcfDirectionalShadowGenerator(
         }
     }
 
-    const depthBias = Math.round(bias * 1e7);
-    const depthBiasSlopeScale = normalBias > 0 ? normalBias : 2;
-
     // Static (non-morphed) depth infra — standard position-only vertex shader.
     const staticInfra =
         staticMeshes.length > 0
             ? createShadowDepthInfra(eng, {
                   label: "shadow-pcf-dir",
                   viewProj,
+                  depthSceneData: createPcfDepthSceneData(viewProj, bias),
                   casterMeshes: staticMeshes,
                   vertCode: SHADOW_LIGHT_VIEW_WGSL + depthVertSrc,
-                  depthBias,
-                  depthBiasSlopeScale,
               })
             : null;
 
@@ -225,10 +223,9 @@ export function createPcfDirectionalShadowGenerator(
                       const inf = createShadowDepthInfra(eng, {
                           label: "shadow-pcf-dir-morph",
                           viewProj,
+                          depthSceneData: createPcfDepthSceneData(viewProj, bias),
                           casterMeshes: [mesh],
                           vertCode: SHADOW_LIGHT_VIEW_WGSL + DEPTH_VERT_MORPH,
-                          depthBias,
-                          depthBiasSlopeScale,
                           extraMeshBglEntries: morphBglEntries,
                           extraMeshEntries: [
                               { binding: 1, resource: mt.texture.createView() },
@@ -322,6 +319,7 @@ export function createPcfDirectionalShadowGenerator(
             mapSize,
             depthScale: 1.0 / mapSize,
             bias,
+            blurKernel: 1,
             blurScale: 1,
             darkness,
             frustumEdgeFalloff: 0,
