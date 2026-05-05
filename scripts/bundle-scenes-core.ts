@@ -128,7 +128,11 @@ function mangleInlineWgsl(code: string): string {
     for (const [from, to] of replacements) {
         out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
     }
-    return out.replace(/\b0\.0\b/g, "0.").replace(/\b1\.0\b/g, "1.").replace(/\b0\.0000001\b/g, "1e-7").replace(/\b0\.0005\b/g, "5e-4");
+    return out
+        .replace(/\b0\.0\b/g, "0.")
+        .replace(/\b1\.0\b/g, "1.")
+        .replace(/\b0\.0000001\b/g, "1e-7")
+        .replace(/\b0\.0005\b/g, "5e-4");
 }
 
 /** Strip spaces around WGSL operators inside template literal content. */
@@ -381,10 +385,7 @@ const exportKindCache = new Map<string, Record<string, BundleInfoExport["kind"]>
  * declarations. Also follows same-package `export { X } from "./path.js"`
  * re-exports so chips inherit their original kind.
  */
-function extractExportKinds(
-    absPath: string,
-    visited: Set<string> = new Set(),
-): Record<string, BundleInfoExport["kind"]> {
+function extractExportKinds(absPath: string, visited: Set<string> = new Set()): Record<string, BundleInfoExport["kind"]> {
     const cached = exportKindCache.get(absPath);
     if (cached) return cached;
     const map: Record<string, BundleInfoExport["kind"]> = {};
@@ -403,10 +404,7 @@ function extractExportKinds(
     for (const m of src.matchAll(/^\s*export\s+(?:const|let|var)\s+(\w+)(?:\s*:[^=\r\n]+)?\s*=\s*([^\r\n]{0,200})/gm)) {
         const name = m[1]!;
         const rhs = m[2]!.trimStart();
-        const looksLikeFn =
-            /^(async\s+)?function\b/.test(rhs) ||
-            /^(async\s+)?\([^)]*\)\s*(?::[^=]+)?=>/.test(rhs) ||
-            /^(async\s+)?[A-Za-z_$][\w$]*\s*=>/.test(rhs);
+        const looksLikeFn = /^(async\s+)?function\b/.test(rhs) || /^(async\s+)?\([^)]*\)\s*(?::[^=]+)?=>/.test(rhs) || /^(async\s+)?[A-Za-z_$][\w$]*\s*=>/.test(rhs);
         map[name] = looksLikeFn ? "function" : "const";
     }
     // Parse imports so we can resolve bare `export { X }` lists below.
@@ -523,14 +521,10 @@ function writeBundleInfo(scene: string, result: unknown): void {
     writeFileSync(resolve(bundleInfoDir, `${scene}.json`), JSON.stringify({ scene, chunks }, null, 2));
 }
 
-const sceneConfig: { id: number; skipBjs?: boolean }[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
+const sceneConfig: { id: number }[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
 const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") : ALL_SCENES;
-// Per-scene `skipBjs: true` opts out of the BJS oracle bundle (used for scenes
-// like 52/53 that have no BJS-side comparable composition — the oracle would
-// just be an arbitrary BJS scene and wouldn't measure anything meaningful).
-const BJS_SKIP_IDS = new Set<string>(sceneConfig.filter((s) => s.skipBjs).map((s) => `scene${s.id}`));
-const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.filter((s) => !BJS_SKIP_IDS.has(s)).map((s) => `bjs-${s}`);
+const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.map((s) => `bjs-${s}`);
 
 function getAllJsFiles(dir: string): string[] {
     const results: string[] = [];
@@ -764,7 +758,9 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
-async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }>> {
+async function measureLiveSizes(): Promise<
+    Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }>
+> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
     const manifestPath = resolve(outDir, "manifest.json");
