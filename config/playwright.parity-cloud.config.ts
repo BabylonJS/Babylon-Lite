@@ -30,7 +30,7 @@ export default defineConfig({
     testDir: "../tests/parity/scenes",
     timeout: 120_000,
     retries: 1,
-    workers: 5,
+    workers: 1,
     outputDir: "../test-results",
     reporter: [["html", { outputFolder: "../test-results/parity-report", open: "never" }], ["junit", { outputFile: "../test-results/parity-junit.xml" }], ["list"]],
     use: {
