@@ -16,10 +16,16 @@ pr:
             - master
 
 variables:
-    NODE_VERSION: "22.x"
-    PNPM_VERSION: "9.15.4"
-    CI: "true"
-    HEADLESS: "true"
+    - group: BabylonJS-BrowserStack
+    - group: BabylonJS-Deployment
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "9.15.4"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
 
 stages:
     - stage: CI
@@ -253,7 +259,7 @@ stages:
                 # Run parity tests via BrowserStack (macOS Chrome with real WebGPU)
                 # browserstack-node-sdk handles connection & local tunnel
                 # Requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY
-                # set as pipeline variables (secret)
+                # from the BabylonJS-BrowserStack variable group
                 - script: pnpm test:parity-cloud
                   displayName: "Run parity tests (BrowserStack)"
                   env:

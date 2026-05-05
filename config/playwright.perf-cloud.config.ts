@@ -16,8 +16,8 @@ export default defineConfig({
     testDir: "../tests/perf",
     timeout: 600_000,
     retries: 4,
-    workers: 5,
-    fullyParallel: true,
+    workers: 1,
+    fullyParallel: false,
     outputDir: "../test-results",
     reporter: [["html", { outputFolder: "../test-results/perf-report", open: "never" }], ["junit", { outputFile: "../test-results/perf-junit.xml" }], ["list"]],
     use: {
