@@ -110,7 +110,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 **Scope:**
 
-- `Sprite2DLayer` type + Index API. The pure-2D `SpriteRenderer` path accepts only `depth: "none"`; PR 3 adds the depth-enabled `addSprite2DLayerToScene` route.
+- `Sprite2DLayer` type + Index API. The pure-2D `SpriteRenderer` path accepts only `depth: "none"`; PR 3 adds the depth-enabled `addToScene` route.
 - `SpriteRenderer` + `SpriteRendererOptions`. **`SpriteRenderer` implements `RenderingContext` directly** — provides `_update`, `_record`, `_drawCallsPre`, `clearColor`.
 - `createSpriteRenderer(engine, opts)` / `registerSpriteRenderer(sr)` / `unregisterSpriteRenderer(sr)` / `disposeSpriteRenderer(sr)`
     - `registerSpriteRenderer` pushes onto the renderer's engine `_renderingContexts` (same list scenes use)
@@ -141,7 +141,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 - HUD overlays use the same primitives as the pure-2D path: `createSpriteRenderer(engine, { layers, clear: false, clearValue? })` + `registerSpriteRenderer(sr)` after `registerScene(engine, scene)`.
 - A new public `onSceneDispose(scene, cb)` helper is added so callers can wire HUD disposal to the scene lifetime: `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`. With this the HUD comes down on `disposeScene(scene)` automatically.
-- `addToScene` does **not** auto-route HUD layers to an internal `SpriteRenderer`. A `Sprite2DLayer { depth: "none" }` passed to `addSprite2DLayerToScene` throws and tells the caller to use `createSpriteRenderer`. This keeps `registerScene` zero-cost for non-HUD scenes (no scene/\* code references `SpriteRenderer`) and keeps HUD lifecycle explicit and caller-owned.
+- `addToScene` does **not** auto-route HUD layers to an internal `SpriteRenderer`. A `Sprite2DLayer { depth: "none" }` passed to `addToScene` throws and tells the caller to use `createSpriteRenderer`. This keeps `registerScene` zero-cost for non-HUD scenes (no scene/\* code references `SpriteRenderer`) and keeps HUD lifecycle explicit and caller-owned.
 
 **Visual proof:** lab scene `scene52-hud-on-3d` — rotating 3D scene + sprite HUD overlay; HUD disposed via `onSceneDispose`.
 
@@ -158,7 +158,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 **As-shipped scope:**
 
-- `Sprite2DLayer { depth: "test" | "test-write" }` added through `addSprite2DLayerToScene` inserts a `Renderable` into `scene._renderables` (`order = 200` transparent direct draw for blended `"test"`; `order = 100` transmissive direct draw after cached opaque meshes for `"test-write"`).
+- `Sprite2DLayer { depth: "test" | "test-write" }` added through `addToScene` inserts a `Renderable` into `scene._renderables` (`order = 200` transparent direct draw for blended `"test"`; `order = 100` transmissive direct draw after cached opaque meshes for `"test-write"`).
 - No new render pass. No new pipeline-cache plumbing. The renderable participates in the existing scene 3D pass alongside meshes.
 - The composer emits `depthCompare: "less-equal"`, `depthWriteEnabled: true|false` driven by the `depth` value; the per-instance Z (slot [10]) is consumed by the depth test.
 
@@ -166,7 +166,7 @@ _The `RenderingContext` interface, `_renderingContexts` list, `registerScene`/`u
 
 **Tests:**
 
-- `sprite-depth-hosted-routing.test.ts` — verifies `addSprite2DLayerToScene` routes `"test"` / `"test-write"` to `scene._renderables` with the correct `order`, and throws for `"none"`.
+- `sprite-depth-hosted-routing.test.ts` — verifies `addToScene` routes `"test"` / `"test-write"` to `scene._renderables` with the correct `order`, and throws for `"none"`.
 
 ---
 

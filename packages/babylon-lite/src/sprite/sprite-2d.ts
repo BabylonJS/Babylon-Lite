@@ -2,7 +2,7 @@
  * `Sprite2DLayer` — pixel-coordinate sprite layer. Pure-data interface +
  * standalone Index API for add / update / remove / setFrame. The layer is
  * owned by a `SpriteRenderer` (pure-2D / HUD `depth: "none"` path) or by a
- * scene renderable added through `addSprite2DLayerToScene` (`depth: "test" | "test-write"`).
+ * scene renderable added through `addToScene` (`depth: "test" | "test-write"`).
  *
  * The current surface exposes the Index API. Animation, clip playback, and
  * the Handle API land in later PRs.
@@ -13,7 +13,7 @@ import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 /** Output blend mode for a sprite layer. Currently supports `"alpha"` and `"premultiplied"`. */
 export type SpriteBlendMode = "alpha" | "premultiplied" | "additive" | "multiply" | "cutout";
 
-/** Depth participation. `"none"` uses `SpriteRenderer`; depth-enabled modes use `addSprite2DLayerToScene`. */
+/** Depth participation. `"none"` uses `SpriteRenderer`; depth-enabled modes use `addToScene`. */
 export type Sprite2DDepthMode = "none" | "test" | "test-write";
 
 /** Per-layer 2D camera (pan / zoom / rotation). Identity = pixel-perfect HUD. */
@@ -44,7 +44,7 @@ export interface Sprite2DLayerOptions {
     /**
      * Default NDC depth (`0` = near, `1` = far) for sprites added to this layer when their
      * `Sprite2DProps.z` is omitted. Only meaningful for `depth: "test" | "test-write"` layers
-     * (depth-hosted sprites added to a `SceneContext` via `addSprite2DLayerToScene`); ignored by pure-2D
+    * (depth-hosted sprites added to a `SceneContext` via `addToScene`); ignored by pure-2D
      * `SpriteRenderer` paths whose pipelines have no depth attachment.
      *
      * Each sprite carries its **own** Z (slot [10] of the per-instance buffer) so a single layer

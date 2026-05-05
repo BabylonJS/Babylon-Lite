@@ -99,14 +99,14 @@ for (const scene of SCENES) {
         // Scene 52 — HUD on 3D — uses SpriteRenderer for the HUD overlay; the
         // depth-hosted Renderable wrapper (sprite-renderable.js) must NOT be
         // pulled in. If it is, scene52 accidentally used the depth-hosted
-        // addSprite2DLayerToScene helper instead of the HUD SpriteRenderer path.
+        // addToScene path instead of the HUD SpriteRenderer path.
         if (scene.slug === "scene52-hud-on-3d") {
-            const offenders = runtimeModules.filter((id) => /\/sprite\/(sprite-renderable|sprite-scene)\.ts$/.test(id));
+            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-renderable\.ts$/.test(id));
             expect(offenders, `scene52 HUD must not load depth-hosted sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
-        // (proves the sprite-owned scene helper is active) and MUST load
+        // (proves the addToScene sprite admission path is active) and MUST load
         // scene-core (it is a real 3D scene, not pure-2D).
         if (scene.slug === "scene53-depth-hosted-sprites") {
             expect(
@@ -120,7 +120,7 @@ for (const scene of SCENES) {
         // NME demos with no sprites; 1-40 are core 3D.
         const SPRITE_USING_IDS = new Set([50, 51, 52, 53]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
-            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-(2d|pipeline|renderer|renderable|scene)\.ts$/.test(id));
+            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-(2d|pipeline|renderer|renderable)\.ts$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
     });

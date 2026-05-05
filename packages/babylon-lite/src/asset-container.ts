@@ -2,6 +2,7 @@ import type { SceneNode } from "./scene/scene-node.js";
 import type { LightBase } from "./light/types.js";
 import type { AnimationGroup } from "./animation/animation-group.js";
 import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
+import type { Sprite2DLayer } from "./sprite/sprite-2d.js";
 
 /**
  * Result returned by loadGltf / loadBabylon.
@@ -12,7 +13,7 @@ import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
  */
 export interface AssetContainer {
     /** Scene entities. glTF: [root TransformNode]. .babylon: root nodes + lights. */
-    entities: Array<SceneNode | LightBase>;
+    entities: Array<SceneNode | LightBase | Sprite2DLayer>;
     /** Animation groups from the file. addToScene() registers their per-frame tick automatically. */
     animationGroups?: AnimationGroup[];
     /** Scene background color declared in the file. addToScene() applies it to scene.clearColor. */

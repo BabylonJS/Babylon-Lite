@@ -5,9 +5,8 @@
  * engine's depth attachment and gets occluded by (or occludes) regular
  * geometry based on its `layerZ`.
  *
- * Used only by `addSprite2DLayerToScene` when a `Sprite2DLayer` with
- * `depth !== "none"` is added to a scene. Pure-2D scenes and mesh-only
- * scenes pay zero runtime bytes for this module.
+ * Loaded only by `addToScene` when a `Sprite2DLayer` is added to a scene.
+ * Pure-2D scenes and mesh-only scenes pay zero runtime bytes for this module.
  *
  * Per-layer GPU work (instance / UBO upload, capacity grow, change-detect)
  * is shared with `sprite-renderer.ts` via helpers in `sprite-pipeline.ts`.
@@ -62,16 +61,15 @@ interface SpriteRenderableInternal extends Renderable {
  *
  * Throws if `layer.depth === "none"` — pure-2D HUD layers must be rendered
  * via `createSpriteRenderer + registerSpriteRenderer`, not as a scene
- * `Renderable`. `addSprite2DLayerToScene` rejects this mode before
- * registering its deferred builder; this guard keeps the renderable builder
- * honest for internal callers.
+ * `Renderable`. The check lives here so `addToScene` only admits the entity;
+ * renderable construction owns the rule that scene renderables require depth.
  *
- * Caller (currently only `addSprite2DLayerToScene`) is responsible for
+ * Caller (currently only `scene-core.addToScene`) is responsible for
  * pushing `renderable` into `_renderables` and `dispose` into `_disposables`.
  */
 export function buildSpriteRenderable(engine: EngineContextInternal, layer: Sprite2DLayer): { renderable: Renderable; dispose: () => void } {
     if (layer.depth === "none") {
-        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addSprite2DLayerToScene.');
+        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addToScene.');
     }
     const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, GPUBufferUsage.INDEX);
     const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES, "sprite-depth-hosted-ubo");

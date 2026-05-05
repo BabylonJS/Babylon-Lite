@@ -134,7 +134,7 @@ caller for a feature they don't use, and the engine doesn't need to own the name
     - `layers` required.
     - `clear` optional (default `true`; HUD overlays use `false`).
     - `clearValue` optional (default `{ r: 0, g: 0, b: 0, a: 1 }`).
-    - **Off-screen attachment options (`target`, `depthView`, `resolveTarget`) are intentionally not on this interface.** The renderer draws directly to the current swapchain view with no depth attachment; depth-hosted sprites use `addSprite2DLayerToScene` instead.
+    - **Off-screen attachment options (`target`, `depthView`, `resolveTarget`) are intentionally not on this interface.** The renderer draws directly to the current swapchain view with no depth attachment; depth-hosted sprites use `addToScene` instead.
 - `createSpriteRenderer(engine, opts)` — constructs the renderer, builds the pipeline for the `(sampleCount=1, hasDepth=false)` key.
 - `registerSpriteRenderer(sr)` — pushes onto the renderer's engine `_renderingContexts`. Idempotent (double-register is a no-op).
 - `unregisterSpriteRenderer(sr)` — splices out of the renderer's engine.
@@ -234,7 +234,7 @@ Cases (each uses a stub engine / mocked `GPUDevice`; follow the pattern of exist
 
 | Item                                                                                                                                            | Lands in                                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `addSprite2DLayerToScene` scene helper                                                                                                          | PR 2                                                 |
+| `addToScene` depth-hosted scene admission                                                                                          | PR 2                                                 |
 | `_hudSpriteLayers` bucket + auto-HUD registration                                                                                               | PR 2                                                 |
 | `depth: "test"` / `"test-write"`                                                                                                                | PR 3                                                 |
 | Depth-hosted routing into `_opaqueRenderables`                                                                                                  | PR 3                                                 |

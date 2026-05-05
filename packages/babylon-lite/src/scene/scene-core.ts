@@ -18,6 +18,7 @@ import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderPassTask } from "../frame-graph/render-pass-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
+import type { Sprite2DLayer } from "../sprite/sprite-2d.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -235,9 +236,19 @@ export function getFrameGraph(scene: SceneContext): FrameGraph {
     return (scene as SceneContextInternal)._frameGraph;
 }
 
-/** Add an entity (mesh, light, camera, transform node, shadow generator, or asset container) to the scene. */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+/** Add an entity (mesh, light, camera, transform node, shadow generator, asset container, or depth-hosted sprite layer) to the scene. */
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer | Sprite2DLayer): void {
     const ctx = scene as SceneContextInternal;
+    if ((entity as Sprite2DLayer)._entityType === "sprite-2d-layer") {
+        const layer = entity as Sprite2DLayer;
+        ctx._deferredBuilders.push(async () => {
+            const m = await import("../sprite/sprite-renderable.js");
+            const built = m.buildSpriteRenderable(ctx.engine as EngineContextInternal, layer);
+            ctx._renderables.push(built.renderable);
+            ctx._disposables.push(built.dispose);
+        });
+        return;
+    }
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
         const result = entity as AssetContainer;
