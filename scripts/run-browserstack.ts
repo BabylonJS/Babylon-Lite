@@ -10,13 +10,16 @@ import { resolve } from "path";
 config({ path: ".env.local" });
 config(); // .env fallback
 
-// Tell the SDK where to find browserstack.yml (not at root)
-process.env.BROWSERSTACK_CONFIG_FILE = resolve(__dirname, "../config/browserstack.yml");
-
 // Derive a descriptive build name from the Playwright config being used
 const args = process.argv.slice(2).join(" ");
+
+// Tell the SDK where to find browserstack.yml (not at root). Perf is serialized
+// to one BrowserStack instance while parity keeps the shared parallel config.
+const isPerfCloudRun = args.includes("perf-cloud");
+process.env.BROWSERSTACK_CONFIG_FILE = resolve(__dirname, isPerfCloudRun ? "../config/browserstack.perf.yml" : "../config/browserstack.yml");
+
 if (!process.env.BROWSERSTACK_BUILD_NAME) {
-    if (args.includes("perf-cloud")) {
+    if (isPerfCloudRun) {
         process.env.BROWSERSTACK_BUILD_NAME = "Babylon-Lite Perf";
     } else if (args.includes("parity-cloud")) {
         process.env.BROWSERSTACK_BUILD_NAME = "Babylon-Lite Parity";

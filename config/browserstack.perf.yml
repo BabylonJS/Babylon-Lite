@@ -1,0 +1,30 @@
+# BrowserStack SDK Configuration for performance tests
+# Credentials: set BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY as env vars
+# (via .env.local locally, or the BabylonJS-BrowserStack variable group in CI).
+userName: BROWSERSTACK_USERNAME
+accessKey: BROWSERSTACK_ACCESS_KEY
+
+# Reporting
+projectName: Babylon-Lite
+buildName: ${BROWSERSTACK_BUILD_NAME}
+buildIdentifier: "#${BUILD_NUMBER}"
+
+# Target macOS for WebGPU support (Windows VMs lack GPU acceleration)
+platforms:
+    - os: OS X
+      osVersion: Sonoma
+      browserName: chrome
+      browserVersion: latest
+
+# Perf runs are serialized because this BrowserStack plan allows one instance.
+parallelsPerPlatform: 1
+
+# Local tunnel — required because tests hit localhost dev server
+browserstackLocal: true
+
+framework: playwright
+
+# Logging
+debug: false
+networkLogs: false
+consoleLogs: errors

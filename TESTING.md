@@ -225,7 +225,7 @@ pnpm test:bundle-size
 | ----------------- | ------------------------------------ |
 | Platform          | macOS Sonoma                         |
 | Browser           | Chrome latest                        |
-| Parallel sessions | 5                                    |
+| Parallel sessions | 5 for parity, 1 for perf             |
 | Local tunnel      | Enabled (tests hit `localhost:5174`) |
 
 Credentials are read from environment variables:
