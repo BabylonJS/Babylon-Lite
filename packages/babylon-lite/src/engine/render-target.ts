@@ -17,6 +17,10 @@ export interface RenderTargetSignature {
     readonly colorFormat: GPUTextureFormat;
     readonly depthStencilFormat?: GPUTextureFormat;
     readonly sampleCount: number;
+    /** Concrete target width in pixels, supplied by render-pass tasks after target allocation. */
+    readonly width?: number;
+    /** Concrete target height in pixels, supplied by render-pass tasks after target allocation. */
+    readonly height?: number;
     /** When true, the projection matrix's Y is flipped (offscreen RTT — see writePassSceneUBO).
      *  Pipelines must invert frontFace to keep back-face culling correct. */
     readonly flipY?: boolean;

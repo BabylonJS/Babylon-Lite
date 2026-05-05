@@ -21,10 +21,11 @@ G.GPUShaderStage ??= { VERTEX: 1, FRAGMENT: 2, COMPUTE: 4 };
 G.GPUColorWrite ??= { ALL: 0xf };
 G.GPUTextureUsage ??= { RENDER_ATTACHMENT: 16, TEXTURE_BINDING: 4 };
 
-import { createSprite2DLayer } from "../../packages/babylon-lite/src/sprite/sprite-2d";
+import { addSprite2DIndex, createSprite2DLayer } from "../../packages/babylon-lite/src/sprite/sprite-2d";
 import { addToScene, createSceneContext, disposeScene } from "../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../packages/babylon-lite/src/scene/scene-core";
 import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
+import { LAYER_UBO_BYTES } from "../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import type { SpriteAtlas } from "../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../packages/babylon-lite/src/texture/texture-2d";
 import type { EngineContext, EngineContextInternal } from "../../packages/babylon-lite/src/engine/engine";
@@ -101,6 +102,15 @@ function makeMockAtlas(): SpriteAtlas {
     };
 }
 
+function makeDrawPassMock(): GPURenderPassEncoder {
+    return {
+        setBindGroup: vi.fn(),
+        setIndexBuffer: vi.fn(),
+        setVertexBuffer: vi.fn(),
+        drawIndexed: vi.fn(),
+    } as unknown as GPURenderPassEncoder;
+}
+
 describe("addToScene with Sprite2DLayer", () => {
     it("registers a deferred builder for depth: 'none' that rejects when registerScene runs", async () => {
         const engine = makeMockEngine();
@@ -164,6 +174,49 @@ describe("addToScene with Sprite2DLayer", () => {
         expect(device.createRenderPipeline).toHaveBeenCalledTimes(2);
         descriptor = device.createRenderPipeline.mock.calls[1]![0] as GPURenderPipelineDescriptor;
         expect(descriptor.depthStencil?.format).toBe("depth24plus-stencil8");
+    });
+
+    it("uses the bound render target dimensions for the sprite layer UBO", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContextInternal;
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write" });
+        addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32] });
+        addToScene(scene, layer);
+        await registerScene(engine, scene);
+
+        const binding = scene._renderables[0]!.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth24plus-stencil8", sampleCount: 1, width: 512, height: 256 });
+        const queue = (engine.device as unknown as { queue: { writeBuffer: ReturnType<typeof vi.fn> } }).queue;
+        queue.writeBuffer.mockClear();
+        binding.updateUBOs?.();
+
+        const uboCall = queue.writeBuffer.mock.calls.find((call) => call[4] === LAYER_UBO_BYTES);
+        expect(uboCall).toBeDefined();
+        const data = uboCall![2] as ArrayBuffer;
+        const byteOffset = uboCall![3] as number;
+        const ubo = new Float32Array(data, byteOffset, LAYER_UBO_BYTES / 4);
+        expect(ubo[4]).toBe(512);
+        expect(ubo[5]).toBe(256);
+    });
+
+    it("keeps bind groups compatible with each target-specific sprite pipeline", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContextInternal;
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write" });
+        addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32] });
+        addToScene(scene, layer);
+        await registerScene(engine, scene);
+
+        const renderable = scene._renderables[0]!;
+        const first = renderable.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth24plus-stencil8", sampleCount: 1, width: 512, height: 512 });
+        const second = renderable.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth24plus-stencil8", sampleCount: 4, width: 800, height: 600 });
+        const device = engine.device as unknown as { createBindGroup: ReturnType<typeof vi.fn> };
+        const pass = makeDrawPassMock();
+        device.createBindGroup.mockClear();
+
+        first.draw(pass, engine);
+        second.draw(pass, engine);
+
+        expect(device.createBindGroup).toHaveBeenCalledTimes(2);
     });
 
     it("disposeScene runs the depth-hosted sprite disposable", async () => {

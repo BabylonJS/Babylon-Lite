@@ -16,7 +16,6 @@
  */
 
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getRenderTargetSize } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, Renderable } from "../render/renderable.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -37,6 +36,11 @@ import {
 } from "./sprite-pipeline.js";
 import type { SpritePipelineCache, SpritePipelineEntry } from "./sprite-pipeline.js";
 
+interface SpriteDrawTarget {
+    width: number;
+    height: number;
+}
+
 interface SpriteRenderableInternal extends Renderable {
     _engine: EngineContextInternal;
     _layer: Sprite2DLayer;
@@ -46,7 +50,7 @@ interface SpriteRenderableInternal extends Renderable {
     _instanceBufferCapacity: number;
     _pipelineCache: SpritePipelineCache;
     _pipelineEntry: SpritePipelineEntry | null;
-    _bindGroup: GPUBindGroup | null;
+    _bindGroups: Map<SpritePipelineEntry, GPUBindGroup>;
     _uploadedVersion: number;
     _uboUploaded: boolean;
     _lastUbo: Float32Array;
@@ -92,7 +96,7 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
         _instanceBufferCapacity: cap,
         _pipelineCache: createSpritePipelineCache(),
         _pipelineEntry: null,
-        _bindGroup: null,
+        _bindGroups: new Map(),
         _uploadedVersion: -1,
         _uboUploaded: false,
         _lastUbo: new Float32Array(LAYER_UBO_BYTES / 4),
@@ -122,13 +126,13 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContextInternal, t
     if (!entry || !isSpritePipelineEntryCurrent(engine, entry, target.colorFormat, sampleCount, true, depthWrite, target.depthStencilFormat)) {
         entry = getOrCreateSpritePipeline(engine, r._pipelineCache, target.colorFormat, sampleCount, r._layer.blendMode, true, depthWrite, target.depthStencilFormat);
         r._pipelineEntry = entry;
-        r._bindGroup = null;
     }
+    const drawTarget = { width: target.width ?? engine.canvas.width, height: target.height ?? engine.canvas.height };
     return {
         renderable: r,
         pipeline: entry.pipeline,
         updateUBOs() {
-            uploadLayer(r);
+            uploadLayer(r, drawTarget);
         },
         draw(pass) {
             return drawLayer(r, entry, pass);
@@ -137,7 +141,7 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContextInternal, t
 }
 
 /** Sync per-instance vertex data and the per-layer UBO via the shared pipeline helpers. */
-function uploadLayer(r: SpriteRenderableInternal): void {
+function uploadLayer(r: SpriteRenderableInternal, target: SpriteDrawTarget): void {
     if (r._disposed || !r._layer.visible || r._layer.count === 0) {
         return;
     }
@@ -148,8 +152,7 @@ function uploadLayer(r: SpriteRenderableInternal): void {
         r._uploadedVersion = -1;
     }
     r._uploadedVersion = uploadSpriteInstances(r._engine.device, r._layer, r._instanceBuffer, r._uploadedVersion);
-    const targetSize = getRenderTargetSize(r._engine);
-    buildSpriteLayerUbo(r._layer, targetSize.width, targetSize.height, r._scratchUbo);
+    buildSpriteLayerUbo(r._layer, target.width, target.height, r._scratchUbo);
     r._uboUploaded = writeSpriteLayerUboIfDirty(r._engine.device, r._uniformBuffer, r._scratchUbo, r._lastUbo, r._uboUploaded);
 }
 
@@ -158,10 +161,12 @@ function drawLayer(r: SpriteRenderableInternal, entry: SpritePipelineEntry, pass
     if (r._disposed || !r._layer.visible || r._layer.count === 0) {
         return 0;
     }
-    if (!r._bindGroup) {
-        r._bindGroup = createSpriteLayerBindGroup(r._engine, entry, r._layer, r._uniformBuffer);
+    let bindGroup = r._bindGroups.get(entry);
+    if (!bindGroup) {
+        bindGroup = createSpriteLayerBindGroup(r._engine, entry, r._layer, r._uniformBuffer);
+        r._bindGroups.set(entry, bindGroup);
     }
-    pass.setBindGroup(entry.spriteBindGroupIndex, r._bindGroup);
+    pass.setBindGroup(entry.spriteBindGroupIndex, bindGroup);
     pass.setIndexBuffer(r._indexBuffer, "uint16");
     pass.setVertexBuffer(0, r._instanceBuffer);
     pass.drawIndexed(6, r._layer.count, 0, 0, 0);
@@ -177,6 +182,6 @@ function disposeRenderable(r: SpriteRenderableInternal): void {
     r._uniformBuffer.destroy();
     r._indexBuffer.destroy();
     clearSpritePipelineCache(r._pipelineCache);
-    r._bindGroup = null;
+    r._bindGroups.clear();
     r._pipelineEntry = null;
 }

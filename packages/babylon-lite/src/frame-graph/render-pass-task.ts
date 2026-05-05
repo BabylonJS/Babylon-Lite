@@ -277,7 +277,7 @@ function buildBindings(task: RenderPassTask, eng: EngineContextInternal): void {
     task._opaqueBindings.length = 0;
     task._transmissiveBindings.length = 0;
     task._transparentBindings.length = 0;
-    const sig = task._targetSignature;
+    const sig: RenderTargetSignature = { ...task._targetSignature, width: task._config.rt._width, height: task._config.rt._height };
     for (const r of task._renderables) {
         const binding = r.bind(eng, sig);
         if (r.isTransparent) {
