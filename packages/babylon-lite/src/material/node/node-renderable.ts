@@ -100,6 +100,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
             meshScratch.set(mesh.worldMatrix as unknown as Float32Array, 0);
             const recv = mesh.receiveShadows ? 1 : 0;
             meshScratch[16] = recv;
+            if (compile.usesMeshAttributeFlags) {
+                writeAttributeFlags(mesh, meshScratch);
+            }
             writeMeshLightSelection(mesh, scene.lights, meshScratch.subarray(4));
             device.queue.writeBuffer(meshUBO, 0, meshScratch);
 
@@ -160,6 +163,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
             if (worldChanged || recvChanged || lightsChanged) {
                 pkt.meshScratch.set(pkt.mesh.worldMatrix as unknown as Float32Array, 0);
                 pkt.meshScratch[16] = recv;
+                if (compile.usesMeshAttributeFlags) {
+                    writeAttributeFlags(pkt.mesh, pkt.meshScratch);
+                }
                 writeMeshLightSelection(pkt.mesh, scene.lights, pkt.meshScratch.subarray(4));
                 device.queue.writeBuffer(pkt.meshUBO, 0, pkt.meshScratch as Float32Array<ArrayBuffer>);
                 pkt._lastWorldVersion = pkt.mesh.worldMatrixVersion;
@@ -199,6 +205,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 const updateUBOs = (): void => {
                     updatePacketUBO(pkt);
                     updateNodeUBO();
+                    // Update world center for sorting.
                     const m = pkt.mesh.worldMatrix as unknown as ArrayLike<number>;
                     rTrans._worldCenter = [m[12]!, m[13]!, m[14]!];
                 };
@@ -288,4 +295,11 @@ function getAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: string
         default:
             throw new Error(`NodeMaterial: unsupported attribute "${name}"`);
     }
+}
+
+function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
+    const gpu = (mesh as MeshInternal)._gpu;
+    scratch[17] = gpu.hasUv === false ? 0 : 1;
+    scratch[18] = gpu.hasTangent ? 1 : 0;
+    scratch[19] = gpu.hasColor ? 1 : 0;
 }

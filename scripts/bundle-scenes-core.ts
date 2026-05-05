@@ -695,6 +695,23 @@ export async function buildBundleScenes(): Promise<void> {
         };
     }
 
+    function minimalVitePreloadPlugin(): Plugin {
+        const id = "\0minimal-vite-preload";
+        return {
+            name: "minimal-vite-preload",
+            enforce: "pre",
+            resolveId(source) {
+                return source === "vite/preload-helper.js" ? id : null;
+            },
+            load(source) {
+                return source === id ? "export const __vitePreload = (baseModule) => baseModule();" : null;
+            },
+            transform(_code, source) {
+                return source.endsWith("vite/preload-helper.js") ? "export const __vitePreload = (baseModule) => baseModule();" : null;
+            },
+        };
+    }
+
     async function buildScene(scene: string) {
         const sceneOutDir = resolve(outDir, scene);
         const isBjs = scene.startsWith("bjs-");
@@ -704,7 +721,7 @@ export async function buildBundleScenes(): Promise<void> {
             configFile: false,
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin()],
+            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Point babylon-lite directly at TS source directory so the bundle always
                 // picks up the current code (no stale node_modules build).
@@ -720,7 +737,7 @@ export async function buildBundleScenes(): Promise<void> {
                 emptyOutDir: true,
                 minify: "esbuild",
                 sourcemap: false,
-                modulePreload: false,
+                modulePreload: { polyfill: false, resolveDependencies: () => [] },
                 rollupOptions: {
                     input: { [scene]: resolve(labDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
                     // Exclude third-party WASM runtimes from Lite bundles so the

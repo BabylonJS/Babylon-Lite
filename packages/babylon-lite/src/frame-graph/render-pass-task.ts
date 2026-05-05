@@ -481,7 +481,7 @@ function writePassSceneUBO(task: RenderPassTask, eng: EngineContextInternal, sce
     //   viewProjection  = 0    view             = 16   vEyePosition    = 32
     //   envRotationY    = 36   vSphericalL00    = 40   exposureLinear  = 76
     //   contrast        = 77   lodGenerationScale = 78 vFogInfos       = 80
-    //   vFogColor       = 84
+    //   vFogColor       = 84   clipPlane        = 88
     data.set(viewProj, 0);
     // Y-flip for offscreen passes — negate row 1 of the projection (the multiplied
     // view*proj matrix). Row 1 of a column-major mat4 lives at indices 1,5,9,13.
@@ -505,6 +505,7 @@ function writePassSceneUBO(task: RenderPassTask, eng: EngineContextInternal, sce
         data[85] = fog.color[1]!;
         data[86] = fog.color[2]!;
     }
+    data[87] = eng.canvas.width;
 
     data[36] = envRotationY;
     if (envTextures?.sphericalHarmonics) {
@@ -515,6 +516,13 @@ function writePassSceneUBO(task: RenderPassTask, eng: EngineContextInternal, sce
     data[77] = img.contrast;
     data[78] = envTextures?.lodGenerationScale ?? 0.8;
     data[79] = img.toneMappingEnabled ? 1 : 0;
+    data[37] = eng.canvas.height;
+    if (scene.clipPlane) {
+        data[88] = scene.clipPlane[0];
+        data[89] = scene.clipPlane[1];
+        data[90] = scene.clipPlane[2];
+        data[91] = scene.clipPlane[3];
+    }
 
     eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }

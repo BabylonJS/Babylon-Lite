@@ -21,7 +21,8 @@ export const emitter: BlockEmitter = {
             block.inputs.get("clearcoat")?.source ||
             block.inputs.get("sheen")?.source ||
             block.inputs.get("subsurface")?.source ||
-            block.inputs.get("anisotropy")?.source
+            block.inputs.get("anisotropy")?.source ||
+            block.inputs.get("iridescence")?.source
         ) {
             throw new Error("NodeMaterial: PBR-MR core emitter cannot emit optional PBR feature code");
         }
@@ -40,6 +41,7 @@ export const emitter: BlockEmitter = {
                 useRefraction: false,
                 useSubsurface: false,
                 useAnisotropy: false,
+                useIridescence: false,
                 useShAlbedoScaling: false,
                 useCcBump: false,
                 useCcTint: false,

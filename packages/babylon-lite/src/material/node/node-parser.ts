@@ -59,6 +59,7 @@ interface RawWithAlpha {
     alphaMode?: number;
     _needAlphaBlending?: boolean;
     forceAlphaBlending?: boolean;
+    backFaceCulling?: boolean;
 }
 
 // ─── Parse ───────────────────────────────────────────────────────────
@@ -139,12 +140,12 @@ export function parseNodeMaterialSource(source: unknown): NodeGraph {
     } else {
         // Derive from graph: blending is needed when FragmentOutputBlock's `a`
         // input is connected AND alphaMode > 0 (non-disabled).
-        const fragOut = findBlockByClassName({ blocks, namedInputs, alphaMode, needsAlphaBlending: false }, "FragmentOutputBlock");
+        const fragOut = findBlockByClassName({ blocks, namedInputs, alphaMode, needsAlphaBlending: false, backFaceCulling: true }, "FragmentOutputBlock");
         const aConn = fragOut?.inputs.get("a");
         needsAlphaBlending = alphaMode > 0 && !!aConn?.source;
     }
 
-    return { blocks, namedInputs, alphaMode, needsAlphaBlending };
+    return { blocks, namedInputs, alphaMode, needsAlphaBlending, backFaceCulling: rawAlpha.backFaceCulling !== false };
 }
 
 function stripBabylonPrefix(customType: string): string {

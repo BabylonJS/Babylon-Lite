@@ -29,6 +29,8 @@ export interface ImageProcessingConfig {
     toneMappingType?: "standard" | "aces";
 }
 
+export type ClipPlane = readonly [number, number, number, number];
+
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext {
     readonly engine: EngineContext;
@@ -45,6 +47,9 @@ export interface SceneContext {
 
     /** Fog configuration. Null = no fog. */
     fog: FogConfig | null;
+
+    /** Scene clip plane as (normal.x, normal.y, normal.z, d). Matches Babylon.js Plane dot(worldPosition, plane) > 0 discard semantics. */
+    clipPlane: ClipPlane | null;
 
     /** Shadow generators registered on this scene. */
     shadowGenerators: ShadowGenerator[];
@@ -141,6 +146,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         meshes: [],
         animationGroups: [],
         fog: null,
+        clipPlane: null,
         shadowGenerators: [],
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
         _renderables: [],

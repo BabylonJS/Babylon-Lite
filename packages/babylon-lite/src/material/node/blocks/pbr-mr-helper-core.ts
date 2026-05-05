@@ -8,6 +8,7 @@ export function buildPbrMrHelperCore(request: NodePbrMrHelperRequest): string {
         request.useRefraction ||
         request.useSubsurface ||
         request.useAnisotropy ||
+        request.useIridescence ||
         request.useShAlbedoScaling ||
         request.useCcBump ||
         request.useCcTint ||

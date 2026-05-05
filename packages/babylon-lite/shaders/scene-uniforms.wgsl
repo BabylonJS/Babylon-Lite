@@ -16,5 +16,6 @@ vSphericalL22: vec4<f32>,
 vImageInfos: vec4<f32>, // exposureLinear, contrast, lodGenerationScale, toneMappingEnabled
 vFogInfos: vec4<f32>,
 vFogColor: vec4<f32>,
+clipPlane: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;

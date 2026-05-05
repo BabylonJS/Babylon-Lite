@@ -49,6 +49,8 @@ export interface NodeGraph {
      *  Derived from the graph (FragmentOutputBlock.a is connected) plus
      *  JSON-level overrides (`_needAlphaBlending`, `forceAlphaBlending`). */
     readonly needsAlphaBlending: boolean;
+    /** Babylon.js material back-face culling flag. */
+    readonly backFaceCulling: boolean;
 }
 
 export interface NodePbrMrHelperRequest {
@@ -59,6 +61,7 @@ export interface NodePbrMrHelperRequest {
     readonly useRefraction: boolean;
     readonly useSubsurface: boolean;
     readonly useAnisotropy: boolean;
+    readonly useIridescence: boolean;
     readonly useShAlbedoScaling: boolean;
     readonly useCcBump: boolean;
     readonly useCcTint: boolean;
@@ -104,6 +107,12 @@ export interface StageState {
     readonly memo: Map<string, NodeExpr>;
 }
 
+export interface NodeLoopVariable {
+    readonly valueVar: string;
+    readonly valueType: NodeValueType;
+    readonly indexVar: string;
+}
+
 /** Build state threaded through every emit call. */
 export interface NodeBuildState {
     readonly vertex: StageState;
@@ -118,12 +127,24 @@ export interface NodeBuildState {
      *  feature-specific helper requests here and node-material resolves them
      *  through dynamic imports after graph emission. */
     readonly pbrMrHelperRequests: NodePbrMrHelperRequest[];
+    /** Active LoopBlock storage variables keyed by `${stage}|${blockId}` while
+     *  the loop body is being emitted. StorageReadBlock/StorageWriteBlock use
+     *  this to route their loopID object connection to the mutable WGSL var. */
+    readonly loopVariables: Map<string, NodeLoopVariable>;
     /** Monotonic counter for SSA temp names, shared across stages. */
     nextTemp: number;
     /** Set by any block that references the scene lights UBO (LightBlock,
      *  LightInformationBlock, …). The pipeline builder allocates a binding +
      *  struct decls + BGL entry when true. */
     usesLightsUbo: boolean;
+    /** Set by ScreenSizeBlock. The pipeline exposes the current canvas size via
+     *  spare base scene-UBO scalars (no extra bindings / no per-graph UBO size change). */
+    usesScreenSize: boolean;
+    /** Set by FragDepthBlock. The pipeline switches the fragment return type
+     *  from a bare color to a color+@builtin(frag_depth) output struct. */
+    usesFragDepth: boolean;
+    usesClipPlanes: boolean;
+    usesMeshAttributeExists: boolean;
     /** Set by MorphTargetsBlock. The pipeline allocates two vertex-only
      *  bindings (morph texture + morph UBO), declares the struct, and adds
      *  a `@builtin(vertex_index)` param to vs_main. */
@@ -153,6 +174,10 @@ export interface NodeBuildState {
      *  Currently used only to validate marker plumbing in scene 70 — at
      *  intensity=0 the BJS anisotropic path reduces to standard GGX. */
     usesAnisotropy: boolean;
+    /** Set by IridescenceBlock; tells PBRMetallicRoughnessBlock to replace the
+     *  base-layer F0 by the thin-film interference Fresnel color before direct
+     *  and IBL specular evaluation. */
+    usesIridescence: boolean;
     /** Set by SubSurfaceBlock; reserved for future SS path. Marker only. */
     usesSubsurface: boolean;
     /** When false (default), BonesBlock emits a pass-through of its `world`

@@ -145,6 +145,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         engine: engineInternal,
         format: engineInternal.format,
         msaaSamples: engineInternal.msaaSamples,
+        backFaceCulling: graph.backFaceCulling,
         alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
         envEmitter,
         shadowEmitter,
