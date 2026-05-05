@@ -1,6 +1,6 @@
 # BrowserStack SDK Configuration
 # Credentials: set BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY as env vars
-# (via .env.local locally, or pipeline secrets in CI).
+# (via .env.local locally, or the BabylonJS-BrowserStack variable group in CI).
 userName: BROWSERSTACK_USERNAME
 accessKey: BROWSERSTACK_ACCESS_KEY
 

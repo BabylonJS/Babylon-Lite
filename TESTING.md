@@ -87,7 +87,8 @@ pnpm test:parity
 ### Running on BrowserStack
 
 Requires `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY` (set in
-`.env.local` or as environment variables).
+`.env.local` or as environment variables). Azure Pipelines gets these from the
+`BabylonJS-BrowserStack` variable group.
 
 ```sh
 pnpm build:bundle-scenes
@@ -251,10 +252,27 @@ Five parallel jobs:
 | **Parity (Cloud)**  | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU) |
 | **Lint**            | ESLint + TypeScript `--noEmit` type-check              |
 
-### Required Pipeline Variables (Secrets)
+### Required Pipeline Variable Groups
+
+Azure Pipelines uses `BabylonJS-BrowserStack` for shared BrowserStack
+credentials:
 
 - `BROWSERSTACK_USERNAME`
 - `BROWSERSTACK_ACCESS_KEY`
+
+It uses `BabylonJS-Deployment` for deployment server credentials used when
+uploading failed Playwright HTML reports:
+
+- `DEPLOYMENT_SERVER`
+- `DEPLOY_TOKEN`
+
+### Required Report Upload Variables
+
+The failed-test report upload template also expects these pipeline variables:
+
+- `DEPLOY_ENDPOINT_UPLOAD`
+- `STORAGE_ACCOUNT`
+- `SERVE_DOMAIN`
 
 ### Optional Pipeline Variables
 
