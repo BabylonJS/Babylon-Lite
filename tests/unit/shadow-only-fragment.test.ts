@@ -106,11 +106,34 @@ describe("writeShadowOnlyUBO", () => {
         }
     });
 
-    it("skips fields whose offsets are absent from the layout", () => {
+    it("zeroes core env/direct intensity slots (data[0]/data[1]) for shadowOnly materials", () => {
+        // The shadow-only fragment overrides `color` and `alpha` in the BC slot, so the
+        // PBR template's post-BC `luminanceOverAlpha` boost (which sums finalRadianceScaled
+        // and finalSpecularScaled into the alpha) must not leak env IBL / direct-light into
+        // an otherwise-transparent disc. The ext writes 0 to data[0] (envIntensity) and
+        // data[1] (directIntensity) — fixed core PBR slots — to neutralize those terms.
+        // We use offsets that DON'T overlap with data[0]/data[1] so the zero-out is visible.
+        const isolatedOffsets = new Map<string, number>([
+            ["shadowOnlyColor", 32], // byte 32 → float idx 8
+            ["shadowOnlyFalloff", 48], // byte 48 → float idx 12
+        ]);
+        const data = new Float32Array(16);
+        data.fill(7);
+        writeShadowOnlyUBO(data, { mode: "shadowOnly", color: [0.5, 0.5, 0.5], falloff: 1.5 }, isolatedOffsets);
+        expect(data[0]).toBe(0); // envIntensity zeroed
+        expect(data[1]).toBe(0); // directIntensity zeroed
+        expect(data[2]).toBe(7); // other slots untouched
+        expect(data[7]).toBe(7);
+        expect(Array.from(data.subarray(8, 11))).toEqual([0.5, 0.5, 0.5]); // color at idx 8
+        expect(data[12]).toBe(1.5); // falloff at idx 12
+    });
+
+    it("skips ext-specific fields whose offsets are absent from the layout", () => {
         const data = new Float32Array(8);
         data.fill(5);
-        // Empty offsets map — writes should be skipped entirely, no crash.
+        // Empty offsets — `shadowOnlyColor` / `shadowOnlyFalloff` writes are skipped (no crash).
+        // data[0]/data[1] still get zeroed (core PBR slots — see the test above).
         writeShadowOnlyUBO(data, { mode: "shadowOnly", color: [1, 1, 1], falloff: 2 }, new Map());
-        expect(Array.from(data)).toEqual([5, 5, 5, 5, 5, 5, 5, 5]);
+        expect(Array.from(data)).toEqual([0, 0, 5, 5, 5, 5, 5, 5]);
     });
 });
