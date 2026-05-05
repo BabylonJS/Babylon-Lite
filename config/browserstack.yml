@@ -1,6 +1,6 @@
 # BrowserStack SDK Configuration
 # Credentials: set BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY as env vars
-# (via .env.local locally, or pipeline secrets in CI).
+# (via .env.local locally, or the BabylonJS-BrowserStack variable group in CI).
 userName: BROWSERSTACK_USERNAME
 accessKey: BROWSERSTACK_ACCESS_KEY
 
@@ -16,7 +16,8 @@ platforms:
       browserName: chrome
       browserVersion: latest
 
-parallelsPerPlatform: 5
+# BrowserStack runs are serialized so this pipeline uses one instance at a time.
+parallelsPerPlatform: 1
 
 # Local tunnel — required because tests hit localhost dev server
 browserstackLocal: true

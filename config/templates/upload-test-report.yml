@@ -4,8 +4,9 @@
 #   reportDir     — path to the HTML report folder (e.g. test-results/perf-report)
 #   reportType    — label used in the deploy path and PR comment (e.g. perf, parity, unit)
 #
-# Required pipeline variables (secrets):
-#   DEPLOYMENT_SERVER, DEPLOY_ENDPOINT_UPLOAD, BASIC_AUTH, STORAGE_ACCOUNT, SERVE_DOMAIN
+# Required pipeline variables:
+#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
+#   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
 # Required service connection:
 #   BabylonBotPAT — GitHub PAT service connection for PR comments
 
@@ -30,7 +31,7 @@ steps:
 
           curl $(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD) -i -X POST \
             -H "Content-Type: multipart/form-data" \
-            -H "Authorization: $(BASIC_AUTH)" \
+            -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
             -F "path=lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}" \
             -F "storageAccount=$(STORAGE_ACCOUNT)" \
             -F "zip=@_test_report.zip"
