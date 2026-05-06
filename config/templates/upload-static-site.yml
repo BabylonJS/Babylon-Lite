@@ -1,0 +1,60 @@
+# Reusable step template: upload a static site directory and post its link to the PR
+#
+# Parameters:
+#   siteDir     - path to the static site folder to zip and upload
+#   deployPath  - storage path where the site should be served
+#   siteName    - label used in display names and the PR comment
+#
+# Required pipeline variables:
+#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
+#   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
+# Required service connection:
+#   BabylonBotPAT - GitHub PAT service connection for PR comments
+
+parameters:
+    - name: siteDir
+      type: string
+    - name: deployPath
+      type: string
+    - name: siteName
+      type: string
+
+steps:
+    - script: |
+          SITE_DIR="${{ parameters.siteDir }}"
+
+          if ! test -d "$SITE_DIR"; then
+            echo "No static site directory found at $SITE_DIR"
+            exit 1
+          fi
+
+          cd "$SITE_DIR"
+          zip -r $(Build.SourcesDirectory)/_static_site.zip *
+          cd $(Build.SourcesDirectory)
+
+          curl $(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD) -i -X POST \
+            -H "Content-Type: multipart/form-data" \
+            -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+            -F "path=${{ parameters.deployPath }}" \
+            -F "storageAccount=$(STORAGE_ACCOUNT)" \
+            -F "zip=@_static_site.zip"
+
+          rm -f _static_site.zip
+      condition: succeeded()
+      continueOnError: true
+      displayName: "Upload ${{ parameters.siteName }} static site"
+
+    - task: GitHubComment@0
+      condition: succeeded()
+      continueOnError: true
+      displayName: "Post ${{ parameters.siteName }} site link to PR"
+      inputs:
+          gitHubConnection: "BabylonBotPAT"
+          repositoryName: "$(Build.Repository.Name)"
+          id: "$(System.PullRequest.PullRequestNumber)"
+          comment: |
+              ### ${{ parameters.siteName }} - Static Site
+
+              [Open deployed site]($(SERVE_DOMAIN)/${{ parameters.deployPath }}/index.html)
+
+              <sub>Build $(Build.BuildNumber) - $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>

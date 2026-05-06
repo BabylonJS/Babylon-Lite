@@ -2,6 +2,29 @@ import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
 
+function hasBuildableRootScripts(htmlFile: string): boolean {
+    const html = readFileSync(resolve(__dirname, htmlFile), "utf-8");
+    for (const match of html.matchAll(/<script\b[^>]*\bsrc=["']\/([^"']+)["']/g)) {
+        const scriptPath = match[1];
+        if (!scriptPath) {
+            continue;
+        }
+        if (!existsSync(resolve(__dirname, scriptPath)) && !existsSync(resolve(__dirname, "public", scriptPath))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function getHtmlInputs(): Record<string, string> {
+    return Object.fromEntries([
+        ["main", resolve(__dirname, "index.html")],
+        ...readdirSync(__dirname)
+            .filter((f) => f.endsWith(".html") && f !== "index.html" && hasBuildableRootScripts(f))
+            .map((f) => [f.replace(".html", ""), resolve(__dirname, f)]),
+    ]);
+}
+
 /** Serve reference images from the repo-root reference/ directory */
 function serveReferenceImages(): Plugin {
     return {
@@ -94,12 +117,7 @@ export default defineConfig({
     },
     build: {
         rollupOptions: {
-            input: Object.fromEntries([
-                ["main", resolve(__dirname, "index.html")],
-                ...readdirSync(__dirname)
-                    .filter((f) => f.endsWith(".html") && f !== "index.html")
-                    .map((f) => [f.replace(".html", ""), resolve(__dirname, f)]),
-            ]),
+            input: getHtmlInputs(),
         },
     },
 });

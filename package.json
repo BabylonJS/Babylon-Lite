@@ -7,6 +7,7 @@
         "dev:lab": "tsx scripts/build-bundle-scenes.ts && pnpm --filter @babylon-lite/lab dev",
         "build": "pnpm --filter babylon-lite build",
         "build:prod": "pnpm --filter babylon-lite build:prod",
+        "build:lab-site": "tsx scripts/build-lab-site.ts",
         "build:bundle-scenes": "tsx scripts/build-bundle-scenes.ts",
         "test": "pnpm build:bundle-scenes && pnpm test:parity",
         "test:watch": "vitest",

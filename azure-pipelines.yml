@@ -131,6 +131,17 @@ stages:
                       testResultsFiles: "test-results/bundle-ceiling-junit.xml"
                       testRunTitle: "Bundle Size"
 
+                - script: pnpm build:lab-site
+                  displayName: "Build static lab site"
+                  env:
+                      LAB_BASE_PATH: "/lite/$(Build.BuildNumber)/lab/"
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(System.DefaultWorkingDirectory)/lab/dist
+                      deployPath: lite/$(Build.BuildNumber)/lab
+                      siteName: "Lab"
+
           # ──────────────────────────────────────────────────────────────
           # Job 3: Performance Regression
           # ──────────────────────────────────────────────────────────────
