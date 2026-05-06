@@ -600,6 +600,60 @@
                 color: #f85149;
                 font-weight: 600;
             }
+            .size-info .size-delta {
+                font-size: 0.7rem;
+                font-weight: 700;
+            }
+            .size-info .size-delta-improve {
+                color: #3fb950;
+            }
+            .size-info .size-delta-regress {
+                color: #f85149;
+            }
+            .size-info .size-delta-neutral {
+                color: #8b949e;
+            }
+            .bundle-master-status {
+                color: #8b949e;
+                margin-left: 0.35rem;
+            }
+            .bundle-master-status.ready {
+                color: #3fb950;
+            }
+            .bundle-master-status.missing {
+                color: #d29922;
+            }
+            .bundle-summary-panel {
+                margin: 0 2rem 1rem;
+                padding: 0.75rem;
+                background: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+            }
+            .bundle-summary-header {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                margin-bottom: 0.6rem;
+                color: #e6edf3;
+                font-size: 0.85rem;
+            }
+            .bundle-summary-header span {
+                flex: 1;
+                color: #8b949e;
+                font-size: 0.75rem;
+            }
+            .bundle-summary-panel textarea {
+                width: 100%;
+                min-height: 20rem;
+                resize: vertical;
+                border: 1px solid #21262d;
+                border-radius: 6px;
+                padding: 0.75rem;
+                background: #0d1117;
+                color: #e6edf3;
+                font: 0.75rem/1.5 "SF Mono", "Cascadia Code", monospace;
+            }
 
             /* ── Perf Dashboard ─────────────────────────────────── */
             .perf-toolbar {
@@ -689,6 +743,7 @@
             .btn-primary:hover {
                 background: #388bfd;
             }
+            .btn.active-toggle,
             .parity-sort-btn.active,
             .bundle-sort-btn.active {
                 background: #1f6feb;
@@ -3150,14 +3205,26 @@
         </div>
 
         <div id="panel-bundle" class="tab-panel">
-            <div class="tab-hint">💡 Bundle sizes shown below come from <code>manifest.json</code>. To regenerate: <code>pnpm build:bundle-scenes</code></div>
+            <div class="tab-hint">
+                💡 Bundle sizes shown below come from <code>manifest.json</code>. Deltas compare against master via <code>master-manifest.json</code>. To regenerate:
+                <code>pnpm build:bundle-scenes</code><span id="bundle-master-status" class="bundle-master-status"></span>
+            </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="bundle-filter-pills"></div>
                 <div style="flex: 1"></div>
                 <button class="btn bundle-sort-btn active" onclick="sortBundleGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('asc')" data-sort="asc" title="Sort by Lite min size ascending">Size ↑</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('desc')" data-sort="desc" title="Sort by Lite min size descending">Size ↓</button>
+                <button class="btn" id="bundle-summary-btn" onclick="toggleBundleSummary()" title="Show copy-pastable bundle delta summary">📋 Summary</button>
                 <button class="btn" id="bundle-filter-btn" onclick="toggleBundleOverFilter()" title="Show only scenes over their size ceiling">🔴 Over Only</button>
+            </div>
+            <div class="bundle-summary-panel" id="bundle-summary-panel" hidden>
+                <div class="bundle-summary-header">
+                    <strong>Bundle delta summary</strong>
+                    <span>Markdown table, one row per scene, comparing current bundle size to master.</span>
+                    <button class="btn" id="bundle-summary-copy-btn" onclick="copyBundleSummary()">Copy</button>
+                </div>
+                <textarea id="bundle-summary-text" readonly spellcheck="false"></textarea>
             </div>
             <div class="grid" id="bundle-grid"></div>
         </div>
@@ -4038,16 +4105,168 @@
             }
 
             // ── Consolidated config fetch + init ──
-            function loadBundleManifest() {
-                fetch("/bundle/manifest.json")
+            function fetchOptionalJson(url) {
+                return fetch(url + "?t=" + Date.now(), { cache: "no-store" })
                     .then(function (r) {
-                        return r.json();
+                        return r.ok ? r.json() : null;
                     })
-                    .then(function (manifest) {
+                    .catch(function () {
+                        return null;
+                    });
+            }
+
+            function setBundleMasterStatus(masterManifest) {
+                var el = document.getElementById("bundle-master-status");
+                if (!el) return;
+                if (masterManifest) {
+                    el.textContent = " · comparing with master";
+                    el.className = "bundle-master-status ready";
+                } else {
+                    el.textContent = " · no master baseline";
+                    el.className = "bundle-master-status missing";
+                }
+            }
+
+            var bundleSummaryText = "";
+
+            function getBundleDelta(sizes, masterSizes) {
+                var currentRaw = parseFloat(sizes && sizes.rawKB);
+                var masterRaw = parseFloat(masterSizes && masterSizes.rawKB);
+                if (!isFinite(currentRaw) || !isFinite(masterRaw)) return null;
+
+                var roundedDelta = Math.round((currentRaw - masterRaw) * 10) / 10;
+                return {
+                    currentRaw: currentRaw,
+                    masterRaw: masterRaw,
+                    roundedDelta: roundedDelta,
+                    change: roundedDelta > 0 ? "increase" : roundedDelta < 0 ? "decrease" : "same",
+                };
+            }
+
+            function renderBundleMasterDelta(sizes, masterSizes) {
+                var delta = getBundleDelta(sizes, masterSizes);
+                if (!delta) return "";
+
+                if (delta.roundedDelta === 0) {
+                    return '<span class="size-delta size-delta-neutral" title="Master baseline: ' + delta.masterRaw + ' KB min">0.0 KB vs master</span>';
+                }
+
+                var cls = delta.roundedDelta > 0 ? "size-delta-regress" : "size-delta-improve";
+                var sign = delta.roundedDelta > 0 ? "+" : "-";
+                return (
+                    '<span class="size-delta ' +
+                    cls +
+                    '" title="Master baseline: ' +
+                    delta.masterRaw +
+                    ' KB min">' +
+                    sign +
+                    Math.abs(delta.roundedDelta).toFixed(1) +
+                    " KB vs master</span>"
+                );
+            }
+
+            function formatBundleDeltaValue(delta) {
+                if (!delta) return "\u2014";
+                if (delta.roundedDelta === 0) return "0.0 KB";
+                return (delta.roundedDelta > 0 ? "+" : "-") + Math.abs(delta.roundedDelta).toFixed(1) + " KB";
+            }
+
+            function buildBundleSummaryText(manifest, masterManifest) {
+                var scenes = (window.SCENE_CONFIG || []).map(function (cfg) {
+                    return "scene" + cfg.id;
+                });
+                if (scenes.length === 0) scenes = Object.keys(manifest || {});
+
+                var lines = ["| Scene | Change | Delta | Current | Master |", "| --- | --- | ---: | ---: | ---: |"];
+                scenes.forEach(function (scene) {
+                    var sizes = manifest && manifest[scene];
+                    var masterSizes = masterManifest && masterManifest[scene];
+                    if (!sizes) return;
+                    var delta = getBundleDelta(sizes, masterSizes);
+                    if (!delta || delta.roundedDelta === 0) return;
+                    lines.push(
+                        "| " +
+                            scene +
+                            " | " +
+                            delta.change +
+                            " | " +
+                            formatBundleDeltaValue(delta) +
+                            " | " +
+                            sizes.rawKB +
+                            " KB | " +
+                            (masterSizes && masterSizes.rawKB != null ? masterSizes.rawKB + " KB" : "\u2014") +
+                            " |"
+                    );
+                });
+                if (lines.length === 2) {
+                    return "No bundle size changes vs master.";
+                }
+                return lines.join("\n");
+            }
+
+            function updateBundleSummaryText(text) {
+                bundleSummaryText = text;
+                var textarea = document.getElementById("bundle-summary-text");
+                if (textarea) textarea.value = text;
+            }
+
+            function toggleBundleSummary() {
+                var panel = document.getElementById("bundle-summary-panel");
+                var btn = document.getElementById("bundle-summary-btn");
+                var textarea = document.getElementById("bundle-summary-text");
+                if (!panel || !textarea) return;
+                panel.hidden = !panel.hidden;
+                if (btn) btn.classList.toggle("active-toggle", !panel.hidden);
+                textarea.value = bundleSummaryText || "No bundle manifest loaded yet.";
+                if (!panel.hidden) {
+                    textarea.focus();
+                    textarea.select();
+                }
+            }
+
+            function copyBundleSummary() {
+                var textarea = document.getElementById("bundle-summary-text");
+                var btn = document.getElementById("bundle-summary-copy-btn");
+                if (!textarea) return;
+                textarea.value = bundleSummaryText || textarea.value;
+                textarea.focus();
+                textarea.select();
+                var markCopied = function () {
+                    if (!btn) return;
+                    var old = btn.textContent;
+                    btn.textContent = "Copied";
+                    setTimeout(function () {
+                        btn.textContent = old;
+                    }, 1200);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(textarea.value).then(markCopied).catch(function () {
+                        document.execCommand("copy");
+                        markCopied();
+                    });
+                } else {
+                    document.execCommand("copy");
+                    markCopied();
+                }
+            }
+
+            function loadBundleManifest() {
+                Promise.all([
+                    fetch("/bundle/manifest.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) {
+                        return r.json();
+                    }),
+                    fetchOptionalJson("/bundle/master-manifest.json"),
+                ])
+                    .then(function (r) {
+                        var manifest = r[0];
+                        var masterManifest = r[1];
+                        setBundleMasterStatus(masterManifest);
+                        updateBundleSummaryText(buildBundleSummaryText(manifest, masterManifest));
                         var bjsCount = 0;
                         for (var scene in manifest) {
                             if (!manifest.hasOwnProperty(scene)) continue;
                             var sizes = manifest[scene];
+                            var masterSizes = masterManifest && masterManifest[scene];
                             var card = document.querySelector('[data-scene="' + scene + '"] .size-info');
                             if (!card) continue;
                             var html =
@@ -4057,7 +4276,9 @@
                                 "</span> KB min</span>" +
                                 '<span class="size-gzip">' +
                                 sizes.gzipKB +
-                                " KB gzip</span></div>";
+                                " KB gzip</span>" +
+                                renderBundleMasterDelta(sizes, masterSizes) +
+                                "</div>";
                             var cfg = (window.SCENE_CONFIG || []).find(function (c) {
                                 return "scene" + c.id === scene;
                             });
@@ -4090,11 +4311,19 @@
                                     ratio +
                                     "\u00d7</span></div>";
                             }
+                            var sceneCard = card.closest(".card");
                             card.innerHTML = html;
-                            card.closest(".card").dataset.rawKb = sizes.rawKB;
-                            card.closest(".card").dataset.gzipKb = sizes.gzipKB;
+                            sceneCard.dataset.rawKb = sizes.rawKB;
+                            sceneCard.dataset.gzipKb = sizes.gzipKB;
+                            if (masterSizes && masterSizes.rawKB != null) {
+                                sceneCard.dataset.masterRawKb = masterSizes.rawKB;
+                                sceneCard.dataset.bundleDeltaKb = (sizes.rawKB - masterSizes.rawKB).toFixed(1);
+                            } else {
+                                delete sceneCard.dataset.masterRawKb;
+                                delete sceneCard.dataset.bundleDeltaKb;
+                            }
                             if (cfg && cfg.maxRawKB != null) {
-                                card.closest(".card").dataset.maxRawKb = cfg.maxRawKB;
+                                sceneCard.dataset.maxRawKb = cfg.maxRawKB;
                             }
                         }
                         // Re-apply stored sort now that size data is available
@@ -4281,7 +4510,7 @@
                         var prev = _lastSig;
                         _lastSig = sig;
                         if (!prev) return;
-                        if (sig.bundle !== prev.bundle) {
+                        if (sig.bundle !== prev.bundle || sig.bundleMaster !== prev.bundleMaster) {
                             loadBundleManifest();
                         }
                         if (sig.perf !== prev.perf) {

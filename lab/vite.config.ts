@@ -32,9 +32,10 @@ function serveReferenceImages(): Plugin {
                     // so the dashboard can auto-refresh only when data actually changes.
                     const sig: {
                         bundle: number | null;
+                        bundleMaster: number | null;
                         perf: number | null;
                         parity: Record<string, number>;
-                    } = { bundle: null, perf: null, parity: {} };
+                    } = { bundle: null, bundleMaster: null, perf: null, parity: {} };
                     const mtime = (p: string): number | null => {
                         try {
                             return existsSync(p) ? statSync(p).mtimeMs : null;
@@ -43,6 +44,7 @@ function serveReferenceImages(): Plugin {
                         }
                     };
                     sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json"));
+                    sig.bundleMaster = mtime(resolve(__dirname, "public/bundle/master-manifest.json"));
                     sig.perf = mtime(resolve(__dirname, "public/perf-manifest.json"));
                     try {
                         const cfgPath = resolve(__dirname, "../scene-config.json");

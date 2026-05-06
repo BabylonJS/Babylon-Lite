@@ -10,6 +10,7 @@
  * correctly excluded from the manifest numbers.
  */
 import { build, type Plugin } from "vite";
+import { execFileSync } from "child_process";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { initialize as initMiniray, minify as minifyWgslMiniray } from "miniray";
@@ -416,6 +417,47 @@ export const labDir = resolve(ROOT, "lab");
 export const outDir = resolve(labDir, "public/bundle");
 export const bundleInfoDir = resolve(outDir, "bundle-info");
 export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
+const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
+const MANIFEST_FILE = "manifest.json";
+const MASTER_MANIFEST_FILE = "master-manifest.json";
+
+interface BundleManifestEntry {
+    rawKB: number;
+    gzipKB: number;
+    ignoredRawKB?: number;
+    bjsRawKB?: number;
+    bjsGzipKB?: number;
+    runtimeChunks?: string[];
+}
+
+type BundleManifest = Record<string, BundleManifestEntry>;
+
+function readMasterBundleManifest(): { ref: string; manifest: BundleManifest } | null {
+    const errors: string[] = [];
+    for (const ref of ["origin/master", "master"]) {
+        try {
+            const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+            return { ref, manifest: JSON.parse(json) as BundleManifest };
+        } catch (err) {
+            errors.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    console.warn(`Could not read ${MANIFEST_GIT_PATH} from master; bundle delta UI will not have a master baseline. ${errors.join(" | ")}`);
+    return null;
+}
+
+function writeMasterBundleManifest(): void {
+    const masterManifestPath = resolve(outDir, MASTER_MANIFEST_FILE);
+    const baseline = readMasterBundleManifest();
+    if (!baseline) {
+        rmSync(masterManifestPath, { force: true });
+        return;
+    }
+
+    writeFileSync(masterManifestPath, JSON.stringify(baseline.manifest, null, 2));
+    console.log(`✓ Bundle master baseline manifest (${baseline.ref}) written to ${masterManifestPath}`);
+}
 
 /**
  * Normalize an absolute module id to a compact, repo-relative display path.
@@ -668,6 +710,7 @@ export async function buildBundleScenes(): Promise<void> {
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).
     mkdirSync(outDir, { recursive: true });
+    writeMasterBundleManifest();
 
     // ── 1. Build all scenes ──────────────────────────────────────────────
     const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
@@ -785,8 +828,8 @@ export async function buildBundleScenes(): Promise<void> {
     }
 
     // Load existing manifest to check for cached BJS sizes
-    const manifestPath = resolve(outDir, "manifest.json");
-    let existingManifest: Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }> = {};
+    const manifestPath = resolve(outDir, MANIFEST_FILE);
+    let existingManifest: BundleManifest = {};
     if (existsSync(manifestPath)) {
         try {
             existingManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -866,13 +909,13 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
-async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }>> {
+async function measureLiveSizes(): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
-    const manifestPath = resolve(outDir, "manifest.json");
+    const manifestPath = resolve(outDir, MANIFEST_FILE);
 
     // Load existing manifest so we can update incrementally (UI can refresh mid-build)
-    let manifest: Record<string, { rawKB: number; gzipKB: number; ignoredRawKB?: number; bjsRawKB?: number; bjsGzipKB?: number; runtimeChunks?: string[] }> = {};
+    let manifest: BundleManifest = {};
     if (existsSync(manifestPath)) {
         try {
             manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
@@ -921,6 +964,16 @@ async function measureLiveSizes(): Promise<Record<string, { rawKB: number; gzipK
         await browser.close();
     } finally {
         server.close();
+    }
+
+    if (!process.env.BUNDLE_SCENES) {
+        const currentScenes = new Set(SCENES);
+        for (const scene of Object.keys(manifest)) {
+            if (!currentScenes.has(scene)) {
+                delete manifest[scene];
+            }
+        }
+        flush();
     }
 
     return manifest;
