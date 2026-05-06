@@ -35,7 +35,7 @@ import type { ExtrudeShapeOptions } from "./create-extrude.js";
 
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
-function createMeshFromData(
+export function createMeshFromData(
     engine: EngineContextInternal,
     name: string,
     positions: Float32Array,

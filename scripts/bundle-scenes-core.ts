@@ -657,12 +657,12 @@ const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") : ALL_SCENES;
 const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.map((s) => `bjs-${s}`);
 
-function getAllJsFiles(dir: string): string[] {
+function getAllBundleFiles(dir: string): string[] {
     const results: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const fullPath = join(dir, entry.name);
-        if (entry.isDirectory()) results.push(...getAllJsFiles(fullPath));
-        else if (entry.name.endsWith(".js")) results.push(fullPath);
+        if (entry.isDirectory()) results.push(...getAllBundleFiles(fullPath));
+        else results.push(fullPath);
     }
     return results;
 }
@@ -760,6 +760,7 @@ export async function buildBundleScenes(): Promise<void> {
         const buildResult = await build({
             root: labDir,
             configFile: false,
+            base: "./",
             publicDir: false,
             logLevel: "warn",
             plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
@@ -783,7 +784,7 @@ export async function buildBundleScenes(): Promise<void> {
                     input: { [scene]: resolve(labDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
-                    ...(!isBjs && { external: ["@babylonjs/havok"] }),
+                    ...(!isBjs && { external: ["@babylonjs/havok", "manifold-3d"] }),
                     output: {
                         format: "es",
                         entryFileNames: "[name].js",
@@ -807,9 +808,9 @@ export async function buildBundleScenes(): Promise<void> {
         // Atomically replace this scene's files in outDir:
         // 1. Write all new files (overwriting existing ones).
         // 2. Remove any stale old chunk files that didn't appear in the new build.
-        const jsFiles = getAllJsFiles(sceneOutDir);
+        const bundleFiles = getAllBundleFiles(sceneOutDir);
         const newNames = new Set<string>();
-        for (const f of jsFiles) {
+        for (const f of bundleFiles) {
             const name = f.substring(sceneOutDir.length + 1).replace(/\\/g, "/");
             newNames.add(name);
             const dest = resolve(outDir, name);
@@ -879,6 +880,19 @@ export async function buildBundleScenes(): Promise<void> {
         }
     } catch {
         /* @babylonjs/havok not installed — skip vendor copy */
+    }
+    try {
+        const _require = createRequire(resolve(labDir, "package.json"));
+        const manifoldJsSrc = _require.resolve("manifold-3d/manifold.js");
+        const manifoldDir = resolve(vendorDir, "manifold-3d");
+        mkdirSync(manifoldDir, { recursive: true });
+        writeFileSync(resolve(manifoldDir, "manifold.js"), readFileSync(manifoldJsSrc));
+        const manifoldWasmSrc = resolve(dirname(manifoldJsSrc), "manifold.wasm");
+        if (existsSync(manifoldWasmSrc)) {
+            writeFileSync(resolve(manifoldDir, "manifold.wasm"), readFileSync(manifoldWasmSrc));
+        }
+    } catch {
+        /* manifold-3d not installed — skip vendor copy */
     }
     // ── 2. Measure real runtime sizes via headless browser ───────────────
     if (process.env.SKIP_MEASURE) {

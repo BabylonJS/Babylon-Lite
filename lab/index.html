@@ -1961,6 +1961,12 @@
                             <td>✅</td>
                             <td>Scene 76 — Texture2D + sampler binding via setEffectTexture()</td>
                         </tr>
+                        <tr>
+                            <td>Frame-Graph RTT Material Override</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 110 — offscreen pass renders selected meshes with an override material and camera, then samples the RTT in the main pass</td>
+                        </tr>
 
                         <!-- Materials -->
                         <tr class="feat-cat">
@@ -2076,9 +2082,9 @@
                         </tr>
                         <tr>
                             <td>Node Material</td>
-                            <td>⚡</td>
                             <td>✅</td>
-                            <td>NME snippet parser + core blocks (Scenes 60-73); not full Babylon NodeMaterial editor/runtime</td>
+                            <td>✅</td>
+                            <td>NME snippet parser with lab-proven core, compatibility, PBR, math/modes, color, UV/texture/procedural, normal/screen/depth/matrix/scene-state, loop, and storage blocks (Scenes 60-89)</td>
                         </tr>
                         <tr>
                             <td>Shader Material</td>
@@ -2126,7 +2132,7 @@
                             <td>PBR Iridescence</td>
                             <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>Native PBR material/glTF iridescence pending</td>
                         </tr>
 
                         <!-- Lights -->
@@ -2162,6 +2168,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Dynamic UBO packing</td>
+                        </tr>
+                        <tr>
+                            <td>Per-Mesh Light Inclusion</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 111 — includedOnlyMeshIds-style light selection across Standard, PBR, NME, and supported shadow generators</td>
                         </tr>
                         <tr>
                             <td>Light Intensity / Color</td>
@@ -2313,9 +2325,9 @@
                         </tr>
                         <tr>
                             <td>CSG (Boolean Ops)</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>✅</td>
+                            <td>Scenes 90/91 — mesh-based subtract, intersect, and union/add operations</td>
                         </tr>
                         <tr>
                             <td>Instanced Meshes</td>
@@ -2873,7 +2885,7 @@
                             <td>Render Target Textures</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Frame-graph RTT + sampled Texture2D (Scenes 52, 75)</td>
+                            <td>Frame-graph RTT + sampled Texture2D, including pass-local material override (Scenes 75, 110)</td>
                         </tr>
                         <tr>
                             <td>Multi-Render Targets</td>

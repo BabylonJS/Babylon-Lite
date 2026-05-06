@@ -38,6 +38,7 @@
         "vite-plugin-dts": "^4.5.4"
     },
     "dependencies": {
-        "draco3d": "^1.5.7"
+        "draco3d": "^1.5.7",
+        "manifold-3d": "3.4.0"
     }
 }
