@@ -5,9 +5,9 @@
  * engine's depth attachment and gets occluded by (or occludes) regular
  * geometry based on its `layerZ`.
  *
- * Loaded only by `addDepthHostedSpriteLayer` when a depth-hosted `Sprite2DLayer`
- * is added to a scene.
- * Pure-2D scenes and mesh-only scenes pay zero runtime bytes for this module.
+ * Reached through `addDepthHostedSpriteLayer` when a depth-hosted `Sprite2DLayer`
+ * is added to a scene. Pure-2D scenes and mesh-only scenes pay zero runtime bytes
+ * for this module when the depth-hosted sprite API is not imported.
  *
  * Per-layer GPU work (instance / UBO upload, capacity grow, change-detect)
  * is shared with `sprite-renderer.ts` via helpers in `sprite-pipeline.ts`.
@@ -43,8 +43,7 @@ import type { SpritePipelineCache } from "./sprite-pipeline.js";
 // Refcounted so the cache (and its compiled GPUShaderModule + pipelines) is
 // released exactly when the last depth-hosted renderable is disposed; device
 // changes are handled inside `getOrCreateSpritePipeline` via its per-device cache.
-// Pure 3D scenes never load this module so they pay
-// nothing; the SpriteRenderer (HUD) path uses its own per-renderer cache.
+// The SpriteRenderer (HUD) path uses its own per-renderer cache.
 let _sharedPipelineCache: SpritePipelineCache | null = null;
 let _sharedPipelineCacheRefs = 0;
 

@@ -22,10 +22,11 @@
 > via `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`.
 > Depth-hosted `Sprite2DLayer`s (those with `depth: "test" | "test-write"`)
 > are added through `addDepthHostedSpriteLayer(scene, layer)`. That opt-in
-> sprite module function queues a lazy `sprite-renderable` import through the
-> scene's generic deferred-renderable hook; the builder inserts a generic
-> `Renderable` into the scene, and the frame graph then buckets it alongside
-> meshes by `isTransparent` / `isTransmissive`.
+> sprite module function registers a deferred scene builder; because callers
+> explicitly import this function when they want scene-hosted sprites, its
+> static `sprite-renderable` import is limited to that opt-in graph. The
+> builder inserts a generic `Renderable` into the scene, and the frame graph
+> then buckets it alongside meshes by `isTransparent` / `isTransmissive`.
 >
 > This document contains the full specification needed to implement the
 > module from scratch — public API, internal architecture, GPU layouts,
@@ -393,13 +394,18 @@ export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 ```
 
 The scene module exposes one generic optional-renderable hook. The sprite
-module uses it from `addDepthHostedSpriteLayer` and lazy-loads the
-sprite-owned renderable builder:
+module uses it from `addDepthHostedSpriteLayer`; that opt-in helper statically
+imports the sprite-owned renderable builder because calling the helper is the
+explicit feature choice:
 
 ```typescript
+import { buildSpriteRenderable } from "./sprite-renderable.js";
+
 export function addDepthHostedSpriteLayer(scene: SceneContext, layer: Sprite2DLayer): void {
-    addDeferredSceneRenderables(scene, async (engine) => {
-        const { buildSpriteRenderable } = await import("./sprite-renderable.js");
+    if (layer.depth === "none") {
+        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
+    }
+    addDeferredSceneRenderables(scene, (engine) => {
         const built = buildSpriteRenderable(engine, layer);
         return { renderables: [built.renderable], dispose: built.dispose };
     });
@@ -432,15 +438,15 @@ addToScene(scene, await loadGltf(engine, "world.glb"));
 addToScene(scene, createYawLockedBillboardSystem(treeAtlas));
 
 // Depth-hosted anchored labels: same Sprite2DLayer factory, depth:"test"
-// routes it through addToScene → sprite-renderable, drawn inside the
-// scene's 3D pass.
+// routes it through addDepthHostedSpriteLayer → sprite-renderable, drawn
+// inside the scene's 3D pass.
 const labels = createSprite2DLayer(labelAtlas, { depth: "test" });
 addAnchoredSprite2D(labels, {
     anchor: createWorldAnchor([0, 1.8, 0]),
     sizePx: [128, 32],
     frame: "name-bg",
 });
-addToScene(scene, labels);
+addDepthHostedSpriteLayer(scene, labels);
 
 await registerScene(engine, scene);
 
@@ -466,10 +472,11 @@ Index API, with the per-layer instance layout fixed at creation. The
   or HUD); never goes through `addToScene`. The layer uses a 10-float /
   40-byte instance layout and the pure shader keeps clip-space Z constant.
 - `depth: "test" | "test-write"` → caller passes the layer to
-  `addDepthHostedSpriteLayer`, which dynamic-imports the depth-hosted renderable
-  builder; layer is drawn inside the scene's 3D pass and sorts against
-  meshes by per-instance Z. The layer uses the 11-float / 44-byte layout
-  with slot [10] exposed to the shader as `@location(6) iZ`.
+  `addDepthHostedSpriteLayer`, which statically imports the depth-hosted
+  renderable builder inside the opt-in scene integration module; layer is
+  drawn inside the scene's 3D pass and sorts against meshes by per-instance
+  Z. The layer uses the 11-float / 44-byte layout with slot [10] exposed to
+  the shader as `@location(6) iZ`.
 
 The `addAnchoredSprite2D` helper attaches an `AnchorSource` and ensures
 the per-frame projection hook is installed.
@@ -1630,7 +1637,7 @@ Renderable construction and depth-mode validation stay in `sprite-renderable.ts`
 addDepthHostedSpriteLayer(scene, layer)
   └─> rejects depth === "none"
   └─> addDeferredSceneRenderables(scene, builder)
-        └─> dynamic-import sprite-renderable.ts
+  └─> call statically imported buildSpriteRenderable
         └─> buildSpriteRenderable(engine, layer)
         └─> push renderable/disposable into the scene
 ```
@@ -1644,13 +1651,12 @@ separate `SpriteRenderer` and register it on the engine after
 ### Build (at `registerScene`)
 
 `registerScene(engine, scene)` runs each `_deferredBuild`. The sprite deferred builder
-dynamic-imports `sprite-renderable.ts`, calls `buildSpriteRenderable`, builds the pipeline
-(cache-keyed), allocates the per-layer GPU instance buffer + UBO, and
-creates bind groups. The depth-hosted `Renderable` (one per Sprite2D
-layer added through `addDepthHostedSpriteLayer`) is pushed into `scene._renderables`
-with `order = 100` (cutout / `depth: "test-write"`) or `order = 200`
-(blended / `depth: "test"`) so the scene's existing renderable loop
-picks it up alongside opaque and transparent meshes.
+calls the statically imported `buildSpriteRenderable`, builds the pipeline (cache-keyed),
+allocates the per-layer GPU instance buffer + UBO, and creates bind groups. The
+depth-hosted `Renderable` (one per Sprite2D layer added through
+`addDepthHostedSpriteLayer`) is pushed into `scene._renderables` with `order = 100`
+(cutout / `depth: "test-write"`) or `order = 200` (blended / `depth: "test"`) so the
+scene's existing renderable loop picks it up alongside opaque and transparent meshes.
 
 `registerScene` does **not** create or own any `SpriteRenderer`. HUD
 overlays are entirely caller-managed.
@@ -1951,6 +1957,8 @@ Imports:
 - `EngineContext` from `../engine/engine.js`
 - `createPipelineCache` from `../material/pipeline-cache.js`
 - (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `SceneContext` from `../scene/scene-core.js`, type-only
+- (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `addDeferredSceneRenderables` from `../scene/scene-core.js`
+- (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `buildSpriteRenderable` from `./sprite-renderable.js`
 
 Lazy / dynamic-imported (never on the static graph of `sprite-2d.ts`):
 

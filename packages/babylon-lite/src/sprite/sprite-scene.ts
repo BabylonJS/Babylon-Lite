@@ -1,6 +1,7 @@
 import type { SceneContext } from "../scene/scene-core.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
+import { buildSpriteRenderable } from "./sprite-renderable.js";
 
 /**
  * Add a depth-hosted Sprite2D layer to a SceneContext via the scene's optional
@@ -11,9 +12,8 @@ export function addDepthHostedSpriteLayer(scene: SceneContext, layer: Sprite2DLa
     if (layer.depth === "none") {
         throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
     }
-    addDeferredSceneRenderables(scene, async (engine) => {
-        const m = await import("./sprite-renderable.js");
-        const built = m.buildSpriteRenderable(engine, layer);
+    addDeferredSceneRenderables(scene, (engine) => {
+        const built = buildSpriteRenderable(engine, layer);
         return { renderables: [built.renderable], dispose: built.dispose };
     });
 }
