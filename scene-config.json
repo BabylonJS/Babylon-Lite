@@ -89,7 +89,7 @@
         "slug": "scene10-pbr-rough",
         "name": "Scene 10 — PBR Rough Sphere",
         "maxMad": 0.011,
-        "maxRawKB": 54.4,
+        "maxRawKB": 54.1,
         "description": "PBR metallic-roughness sphere: golden base, metallic=0, roughness=1, hemispheric light only.",
         "tags": ["pbr", "procedural"]
     },
@@ -346,7 +346,7 @@
         "slug": "scene38-procedural-builders",
         "name": "Scene 38 — Procedural Builders",
         "maxMad": 0.02,
-        "maxRawKB": 62.6,
+        "maxRawKB": 62.3,
         "description": "Cylinder, cone, plane, disc, ring, polyhedron, ribbon, tube, and extruded shape rendered with StandardMaterial. Parity check against BJS MeshBuilder.",
         "tags": ["std", "procedural"]
     },

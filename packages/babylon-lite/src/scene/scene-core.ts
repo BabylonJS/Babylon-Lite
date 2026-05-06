@@ -18,7 +18,6 @@ import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderPassTask } from "../frame-graph/render-pass-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
-import type { Sprite2DLayer } from "../sprite/sprite-2d.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 
 /** Image processing configuration. */
@@ -244,31 +243,33 @@ export function getFrameGraph(scene: SceneContext): FrameGraph {
     return (scene as SceneContextInternal)._frameGraph;
 }
 
-/**
- * Add an entity (mesh, light, camera, transform node, shadow generator, asset container,
- * or depth-hosted sprite layer) to the scene.
- *
- * **`Sprite2DLayer` lifetime note.** A depth-hosted layer added here lives until
- * `disposeScene` — there is no `removeFromScene(layer)`. A layer is a *container*
- * for sprites (its mesh-equivalent is the whole `MeshGroupBuilder` output, not a single
- * mesh). To hide or clear a layer at runtime without removing it, use
- * `layer.visible = false` (free GPU cull via degenerate quads) or `layer.count = 0`.
- * Per-sprite churn goes through `addSprite2DIndex` / `removeSprite2DIndex`.
- * `disposeScene` releases the layer's GPU resources (instance / UBO / index buffers,
- * pipeline cache, bind groups).
- */
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer | Sprite2DLayer): void {
+export interface DeferredSceneRenderables {
+    renderables: readonly Renderable[];
+    dispose?: () => void;
+}
+
+/** @internal Register optional scene-hosted render work without teaching `addToScene` about the feature. */
+export function addDeferredSceneRenderables(
+    scene: SceneContext,
+    build: (engine: EngineContextInternal, scene: SceneContextInternal) => DeferredSceneRenderables | Promise<DeferredSceneRenderables>
+): void {
     const ctx = scene as SceneContextInternal;
-    if ((entity as Sprite2DLayer)._entityType === "sprite-2d-layer") {
-        const layer = entity as Sprite2DLayer;
-        ctx._deferredBuilders.push(async () => {
-            const m = await import("../sprite/sprite-renderable.js");
-            const built = m.buildSpriteRenderable(ctx.engine as EngineContextInternal, layer);
-            ctx._renderables.push(built.renderable);
+    ctx._deferredBuilders.push(async () => {
+        const built = await build(ctx.engine as EngineContextInternal, ctx);
+        ctx._renderables.push(...built.renderables);
+        if (built.dispose) {
             ctx._disposables.push(built.dispose);
-        });
-        return;
-    }
+        }
+    });
+}
+
+/**
+ * Add an entity (mesh, light, camera, transform node, shadow generator, or asset container)
+ * to the scene. Optional scene-hosted systems such as depth-hosted sprites expose their own
+ * opt-in add functions so mesh-only scenes do not pay feature-specific routing bytes here.
+ */
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
+    const ctx = scene as SceneContextInternal;
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
         const result = entity as AssetContainer;

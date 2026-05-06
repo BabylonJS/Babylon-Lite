@@ -66,8 +66,8 @@ export interface SpriteRendererOptions {
  *      *after* `registerScene` so it draws on top.
  *
  * Scene 52 demonstrates pattern (2). For depth-hosted sprites that should
- * sort against 3D meshes, use `addToScene(scene, layer)` with a depth-enabled
- * `Sprite2DLayer` instead — that route is fully owned by the scene.
+ * sort against 3D meshes, use `addDepthHostedSpriteLayer(scene, layer)` with
+ * a depth-enabled `Sprite2DLayer` instead — that route is fully owned by the scene.
  */
 export interface SpriteRenderer extends RenderingContext {
     readonly _kind: typeof KIND;
@@ -235,7 +235,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
 function assertSpriteRendererLayers(layers: readonly Sprite2DLayer[]): void {
     for (const layer of layers) {
         if (layer.depth !== "none") {
-            throw new Error('SpriteRenderer only supports Sprite2DLayer with depth: "none". Use addToScene(scene, layer) for depth-hosted sprites.');
+            throw new Error('SpriteRenderer only supports Sprite2DLayer with depth: "none". Use addDepthHostedSpriteLayer(scene, layer) for depth-hosted sprites.');
         }
     }
 }

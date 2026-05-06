@@ -21,10 +21,11 @@
 > scene so it draws on top; the HUD's GPU lifetime is tied to the scene
 > via `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`.
 > Depth-hosted `Sprite2DLayer`s (those with `depth: "test" | "test-write"`)
-> are added through `addToScene`. The scene admission branch queues a lazy
-> `sprite-renderable` import; that builder inserts a generic `Renderable`
-> into the scene, and the frame graph then buckets it alongside meshes by
-> `isTransparent` / `isTransmissive`.
+> are added through `addDepthHostedSpriteLayer(scene, layer)`. That opt-in
+> sprite module function queues a lazy `sprite-renderable` import through the
+> scene's generic deferred-renderable hook; the builder inserts a generic
+> `Renderable` into the scene, and the frame graph then buckets it alongside
+> meshes by `isTransparent` / `isTransmissive`.
 >
 > This document contains the full specification needed to implement the
 > module from scratch — public API, internal architecture, GPU layouts,
@@ -54,8 +55,9 @@ The module exposes **two** sprite families:
       scene via `onSceneDispose`. HUD layers (`depth: "none"`) **never**
       go through `addToScene`.
     - **Depth-hosted sprites** that sort against 3D meshes
-      (`depth: "test"` or `"test-write"`): added via `addToScene(scene, layer)`.
-      `addToScene` queues them into the existing renderable system so they
+      (`depth: "test"` or `"test-write"`): added via
+      `addDepthHostedSpriteLayer(scene, layer)`. That opt-in function queues
+      them into the existing renderable system so they
       participate in the 3D depth attachment.
 
     World-anchored sprites are not a separate family. They are
@@ -93,8 +95,8 @@ across both families and orthogonal to family.
   walks `engine._renderingContexts` once per frame. Pure-2D apps
   register one or more `SpriteRenderer`s; HUD-on-3D apps register a
   `SceneContext` followed by a separate `SpriteRenderer` for the HUD.
-  Depth-hosted Sprite2D layers go through `addToScene` and are drawn
-  inside the scene's 3D pass via the existing renderable system. The
+  Depth-hosted Sprite2D layers go through `addDepthHostedSpriteLayer` and
+  are drawn inside the scene's 3D pass via the existing renderable system. The
   engine has no notion of "2D vs 3D" — it just iterates registrations;
   scene contexts execute their frame graph, and sprite renderers open a
   sprite-only swapchain pass.
@@ -222,18 +224,19 @@ apps register a `SceneContext` first, construct a separate
 draws on top, and tie its disposal to the scene via
 `onSceneDispose(scene, () => disposeSpriteRenderer(hud))`. Depth-hosted
 Sprite2D layers (`depth: "test" | "test-write"`) are added through
-`addToScene`, which registers a deferred builder that inserts
-a generic renderable into the scene so it sorts and composites against 3D
-meshes inside the scene's 3D pass.**
+`addDepthHostedSpriteLayer`, which registers a deferred builder through the
+scene's generic optional-renderable hook. The hook inserts a generic renderable
+into the scene so it sorts and composites against 3D meshes inside the scene's
+3D pass.**
 
 The `SceneContext` shape, the `addToScene` switch body, and the default
-frame graph are otherwise unchanged. The sprite module does not add a second scene type or an
+frame graph stay sprite-agnostic. The sprite module does not add a second scene type or an
 implicit HUD layer list to `SceneContext`; composition remains explicit
 at the engine-registration level.
 
 ### Rejected alternatives
 
-| Alternative | Why rejected |\n| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| Add a `Scene2DContext` parallel to `SceneContext` | Two parallel APIs for the same operation. Both kinds of registerable already share `RenderingContext` — no new umbrella type is required. |\n| Force pure-2D apps through `SceneContext` | A Lottie/Rive-class app then carries `SceneContext`'s shape and any per-frame branching it implies. Pure-2D experiences should not pay for scene infrastructure. |\n| Pure-2D users own their own `requestAnimationFrame` loop and call a free `renderSprite2DLayers(engine, layers, target)` function | Two different loop owners (engine for scene-based, user for pure-2D) means two first-frame-ready handshakes, two fixed-delta contracts, two device-loss recovery paths. Making the engine the sole loop owner via `register*` is a smaller surface area and frame-graph-shaped. |\n| Auto-route HUD layers through `addToScene` and have `registerScene` lazily create + register an internal `SpriteRenderer` | Adds bytes to scenes that don't have HUDs (everyone pays for the lazy-init code path), couples the sprite module's lifecycle to the scene module, and makes "what is registered on the engine" non-obvious to the caller. Explicit `createSpriteRenderer + registerSpriteRenderer + onSceneDispose` is three lines of caller code and zero bytes for non-HUD scenes. |\n| Refactor `addToScene` into method-on-entity routing + per-stage wrappers | Public objects must remain pure state; a small `addToScene` admission branch keeps the public API uniform while sprite renderable construction stays lazy and sprite-owned. |\n| Extract every sprite GPU detail into the scene render loop | Couples sprite rendering to scene orchestration. Then the pure-2D path either re-implements the GPU draws (forking) or pulls in scene infrastructure to reach them (wasted bytes). |
+| Alternative | Why rejected |\n| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |\n| Add a `Scene2DContext` parallel to `SceneContext` | Two parallel APIs for the same operation. Both kinds of registerable already share `RenderingContext` — no new umbrella type is required. |\n| Force pure-2D apps through `SceneContext` | A Lottie/Rive-class app then carries `SceneContext`'s shape and any per-frame branching it implies. Pure-2D experiences should not pay for scene infrastructure. |\n| Pure-2D users own their own `requestAnimationFrame` loop and call a free `renderSprite2DLayers(engine, layers, target)` function | Two different loop owners (engine for scene-based, user for pure-2D) means two first-frame-ready handshakes, two fixed-delta contracts, two device-loss recovery paths. Making the engine the sole loop owner via `register*` is a smaller surface area and frame-graph-shaped. |\n| Auto-route HUD layers through `addToScene` and have `registerScene` lazily create + register an internal `SpriteRenderer` | Adds bytes to scenes that don't have HUDs (everyone pays for the lazy-init code path), couples the sprite module's lifecycle to the scene module, and makes "what is registered on the engine" non-obvious to the caller. Explicit `createSpriteRenderer + registerSpriteRenderer + onSceneDispose` is three lines of caller code and zero bytes for non-HUD scenes. |\n| Refactor `addToScene` into method-on-entity routing + per-stage wrappers | Public objects must remain pure state; optional scene-hosted systems use standalone add helpers plus the generic deferred-renderable hook instead of attaching behavior to public data. |\n| Extract every sprite GPU detail into the scene render loop | Couples sprite rendering to scene orchestration. Then the pure-2D path either re-implements the GPU draws (forking) or pulls in scene infrastructure to reach them (wasted bytes). |
 
 ### The engine's registration list
 
@@ -387,26 +390,23 @@ export function unregisterScene(engine: EngineContext, scene: SceneContext): voi
 export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 ```
 
-The scene module admits **depth-hosted** Sprite2D layers through `addToScene`
-and lazy-loads the sprite-owned renderable builder:
+The scene module exposes one generic optional-renderable hook. The sprite
+module uses it from `addDepthHostedSpriteLayer` and lazy-loads the
+sprite-owned renderable builder:
 
 ```typescript
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Sprite2DLayer | ...): void {
-  if (entity._entityType === "sprite-2d-layer") {
-    ctx._deferredBuilders.push(async () => {
-      const { buildSpriteRenderable } = await import("../sprite/sprite-renderable.js");
-      const built = buildSpriteRenderable(engine, entity);
-      ctx._renderables.push(built.renderable);
-      ctx._disposables.push(built.dispose);
-    });
-    return;
-  }
-  // Existing mesh/light/container routing...
+export function addDepthHostedSpriteLayer(scene: SceneContext, layer: Sprite2DLayer): void {
+  addDeferredSceneRenderables(scene, async (engine) => {
+    const { buildSpriteRenderable } = await import("./sprite-renderable.js");
+    const built = buildSpriteRenderable(engine, layer);
+    return { renderables: [built.renderable], dispose: built.dispose };
+  });
 }
 ```
 
 `buildSpriteRenderable` rejects `depth: "none"`, because scene renderables
-require a depth policy. HUD layers use `SpriteRenderer` directly.
+require a depth policy. `addDepthHostedSpriteLayer` performs the same check
+before queuing work. HUD layers use `SpriteRenderer` directly.
 
 The existing `"billboard-sprite-system"` branch stays as today (with its
 own `_deferredBuild` hook); billboards are pushed into the existing
@@ -464,7 +464,7 @@ Index API, with the per-layer instance layout fixed at creation. The
   or HUD); never goes through `addToScene`. The layer uses a 10-float /
   40-byte instance layout and the pure shader keeps clip-space Z constant.
 - `depth: "test" | "test-write"` → caller passes the layer to
-  `addToScene`, which dynamic-imports the depth-hosted renderable
+  `addDepthHostedSpriteLayer`, which dynamic-imports the depth-hosted renderable
   builder; layer is drawn inside the scene's 3D pass and sorts against
   meshes by per-instance Z. The layer uses the 11-float / 44-byte layout
   with slot [10] exposed to the shader as `@location(6) iZ`.
@@ -609,9 +609,9 @@ export interface Sprite2DLayerOptions {
     pivot?: [number, number];
     /**
      * Depth participation:
-     *  - "none"        (default) → drawn by a `SpriteRenderer` registered on the engine. Pipeline has no depth attachment; the per-instance layout has no Z slot. HUD overlays must use this mode and live on a `SpriteRenderer` (not on `addToScene`).
-     *  - "test"                  → drawn inside the scene's 3D pass via `addToScene` with `depthCompare: "less-equal"`, `depthWrite: false`. Sprites occlude behind 3D geometry but do not write depth.
-     *  - "test-write"            → drawn inside the scene's 3D pass via `addToScene` with `depthCompare: "less-equal"`, `depthWrite: true`. Sprites direct-draw after cached opaque meshes and before transparent renderables.
+     *  - "none"        (default) → drawn by a `SpriteRenderer` registered on the engine. Pipeline has no depth attachment; the per-instance layout has no Z slot. HUD overlays must use this mode and live on a `SpriteRenderer` (not on `addDepthHostedSpriteLayer`).
+     *  - "test"                  → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "less-equal"`, `depthWrite: false`. Sprites occlude behind 3D geometry but do not write depth.
+     *  - "test-write"            → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "less-equal"`, `depthWrite: true`. Sprites direct-draw after cached opaque meshes and before transparent renderables.
      *  Each value is a pipeline-cache key bit, baked at composition time. No runtime branch.
      *  Pure-2D engines (no scene) can only use `"none"` — they have no depth attachment.
      */
@@ -1179,8 +1179,8 @@ loses one tick of animation in the captured image. All sprite families
 | Layer `depth`  | Drawn via                                                                     | Depth attachment        | Depth compare | Depth write | Instance layout / Z                  | Render order                                                |
 | -------------- | ----------------------------------------------------------------------------- | ----------------------- | ------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
 | `"none"`       | A `SpriteRenderer` registered on the engine                                   | none                    | none          | `false`     | 40 B / 10 floats; no slot [10]       | engine registration order; layer order within the renderer  |
-| `"test"`       | `addToScene` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `less-equal`  | `false`     | 44 B / 11 floats; slot [10] consumed | scene transparent queue (after opaque meshes)               |
-| `"test-write"` | `addToScene` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `less-equal`  | `true`      | 44 B / 11 floats; slot [10] consumed | direct-drawn after cached opaque meshes, before transparent |
+| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `less-equal`  | `false`     | 44 B / 11 floats; slot [10] consumed | scene transparent queue (after opaque meshes)               |
+| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `less-equal`  | `true`      | 44 B / 11 floats; slot [10] consumed | direct-drawn after cached opaque meshes, before transparent |
 
 The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`. `SpriteRenderer`
 layers always request `hasDepth = false` and `sampleCount = 1`, so their pipelines are built without a depth-stencil descriptor. Depth-hosted layers request `hasDepth = true`, use the target depth-stencil format provided by the frame graph, and set `depthWrite` from the layer's `depth` mode.
@@ -1469,9 +1469,9 @@ never a pipeline recompile. This matches how Lite handles mesh `alpha`.
 | Family / variant                      | Drawn through                                                      | Render slot                                           | Per-instance Z                              | Blend     | Depth write |
 | ------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------- | ------------------------------------------- | --------- | ----------- |
 | Sprite2DLayer `depth: "none"`         | a `SpriteRenderer` registered on the engine                        | engine `_renderingContexts` (after the scene context) | none; no Z slot                             | per-blend | off         |
-| Sprite2DLayer `depth: "test"` blended | `addToScene` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write | per-blend | off         |
-| Sprite2DLayer `depth: "test"` cutout  | `addToScene` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write | none      | off         |
-| Sprite2DLayer `depth: "test-write"`   | `addToScene` → `sprite-renderable.ts` (`order = 100`) | direct draw after cached opaque meshes                | consumed; per-instance depth test + write   | per-blend | on          |
+| Sprite2DLayer `depth: "test"` blended | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write | per-blend | off         |
+| Sprite2DLayer `depth: "test"` cutout  | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write | none      | off         |
+| Sprite2DLayer `depth: "test-write"`   | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 100`) | direct draw after cached opaque meshes                | consumed; per-instance depth test + write   | per-blend | on          |
 | Billboard blended                     | `addToScene` → `billboard-renderable.ts` (`order = 200`)           | scene transparent queue                               | per-sprite view-Z (sort-indirection buffer) | per-blend | off         |
 | Billboard cutout                      | `addToScene` → `billboard-renderable.ts` (`order = 200`)           | scene transparent queue                               | per-sprite view-Z (sort-indirection buffer) | none      | on          |
 
@@ -1619,15 +1619,17 @@ createYawLockedBillboardSystem(atlas, opts)
 
 ### Depth-Hosted Scene Admission
 
-Depth-hosted sprite admission lives in `addToScene` as a small
-`_entityType: "sprite-2d-layer"` branch, while renderable construction and
-depth-mode validation stay in `sprite-renderable.ts`:
+Depth-hosted sprite admission lives in the sprite module as an opt-in
+`addDepthHostedSpriteLayer` helper. Scene core exposes only a generic
+`addDeferredSceneRenderables` hook; `addToScene` remains sprite-agnostic.
+Renderable construction and depth-mode validation stay in `sprite-renderable.ts`:
 
 ```
-addToScene(scene, layer)
-  └─> queues a deferred builder
+addDepthHostedSpriteLayer(scene, layer)
+  └─> rejects depth === "none"
+  └─> addDeferredSceneRenderables(scene, builder)
+        └─> dynamic-import sprite-renderable.ts
         └─> buildSpriteRenderable(engine, layer)
-            └─> rejects depth === "none"
         └─> push renderable/disposable into the scene
 ```
 
@@ -1635,15 +1637,15 @@ Pure-2D-only apps never call `addToScene` at all — they create a
 `SpriteRenderer` directly, register it on the engine, and own their
 layers without any scene. HUD-on-3D apps hand their HUD layers to a
 separate `SpriteRenderer` and register it on the engine after
-`registerScene`; depth-hosted layers go through `addToScene`.
+`registerScene`; depth-hosted layers go through `addDepthHostedSpriteLayer`.
 
 ### Build (at `registerScene`)
 
-`registerScene(engine, scene)` runs each `_deferredBuild`. The addToScene deferred builder
-calls `buildSpriteRenderable`, builds the pipeline
+`registerScene(engine, scene)` runs each `_deferredBuild`. The sprite deferred builder
+dynamic-imports `sprite-renderable.ts`, calls `buildSpriteRenderable`, builds the pipeline
 (cache-keyed), allocates the per-layer GPU instance buffer + UBO, and
 creates bind groups. The depth-hosted `Renderable` (one per Sprite2D
-layer added through `addToScene`) is pushed into `scene._renderables`
+layer added through `addDepthHostedSpriteLayer`) is pushed into `scene._renderables`
 with `order = 100` (cutout / `depth: "test-write"`) or `order = 200`
 (blended / `depth: "test"`) so the scene's existing renderable loop
 picks it up alongside opaque and transparent meshes.
@@ -1946,7 +1948,7 @@ Imports:
 - `Texture2D`, `loadTexture2D` from `../texture/texture-2d.js`
 - `EngineContext` from `../engine/engine.js`
 - `createPipelineCache` from `../material/pipeline-cache.js`
-- (only in `addToScene` integration code, not in pure-2D bundles) `SceneContext` from `../scene/scene-core.js`, type-only
+- (only in `addDepthHostedSpriteLayer` integration code, not in pure-2D bundles) `SceneContext` from `../scene/scene-core.js`, type-only
 
 Lazy / dynamic-imported (never on the static graph of `sprite-2d.ts`):
 
@@ -1987,7 +1989,7 @@ NOT depended on:
 - `sprite-handle-anchor.test.ts` — `handle.anchor = createWorldAnchor([…])` lazy-imports `sprite-anchor.ts` and installs the projection.
 - `sprite-renderer.test.ts` — `createSpriteRenderer(engine, opts)` + `registerSpriteRenderer(sr)` + `startEngine(engine)` produces a deterministic frame with no `SceneContext` in scope; verifies `disposeSpriteRenderer` releases buffers/pipelines and that `unregisterSpriteRenderer` removes it from the engine's render list.
 - `rendering-context-registration.test.ts` — `engine._renderingContexts` is appended to in registration order; the first registered context's `clearValue` is used for the frame's `loadOp: "clear"`; subsequent contexts use `loadOp: "load"` automatically.
-- `sprite-depth-hosted-routing.test.ts` — `addToScene(scene, layer)` for a `Sprite2DLayer { depth: "test" | "test-write" }` pushes a `Renderable` (with `order = 200` for `"test"`, `order = 100` for `"test-write"`) into `scene._renderables`; for `depth: "none"`, `registerScene` rejects from `buildSpriteRenderable` and tells the caller to use `createSpriteRenderer`.
+- `sprite-depth-hosted-routing.test.ts` — `addDepthHostedSpriteLayer(scene, layer)` for a `Sprite2DLayer { depth: "test" | "test-write" }` pushes a `Renderable` (with `order = 200` for `"test"`, `order = 100` for `"test-write"`) into `scene._renderables`; for `depth: "none"`, the add helper rejects before queuing scene work and tells the caller to use `createSpriteRenderer`.
 
 ### Visualization (Playwright)
 
@@ -1996,7 +1998,7 @@ because the projection math is the same):
 
 - **Scene NN-sprites-2d** — pure `Sprite2DLayer` driven by a `SpriteRenderer` registered on the engine; no `SceneContext` exists.
 - **Scene NN-sprites-overlay** — a 3D scene plus a separately-registered `SpriteRenderer` for the HUD layers; HUD disposal wired via `onSceneDispose`.
-- **Scene NN-sprites-anchored** — `Sprite2DLayer { depth: "test" }` added to the scene via `addToScene`, with `createWorldAnchor` labels pinned to mesh anchors.
+- **Scene NN-sprites-anchored** — `Sprite2DLayer { depth: "test" }` added to the scene via `addDepthHostedSpriteLayer`, with `createWorldAnchor` labels pinned to mesh anchors.
 - **Scene NN-sprites-billboard-yaw** — unchanged.
 - **Scene NN-sprites-billboard-facing** — unchanged.
 - **Scene NN-sprites-cutout-vs-blend** — unchanged.
@@ -2076,7 +2078,7 @@ export { startEngine } from "./engine/engine.js";
 
 // ─── Scene ───────────────────────────────────────────────────────────
 // The existing scene API is unchanged. Depth-hosted Sprite2D layers use
-// `addToScene`; HUD overlays use `createSpriteRenderer` +
+// `addDepthHostedSpriteLayer`; HUD overlays use `createSpriteRenderer` +
 // `registerSpriteRenderer`.
 // `onSceneDispose(scene, cb)` is the public hook for tying caller-owned
 // resources (typically a HUD `SpriteRenderer`) to the scene's lifetime.

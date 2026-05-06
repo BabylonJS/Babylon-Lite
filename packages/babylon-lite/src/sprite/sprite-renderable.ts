@@ -5,7 +5,8 @@
  * engine's depth attachment and gets occluded by (or occludes) regular
  * geometry based on its `layerZ`.
  *
- * Loaded only by `addToScene` when a `Sprite2DLayer` is added to a scene.
+ * Loaded only by `addDepthHostedSpriteLayer` when a depth-hosted `Sprite2DLayer`
+ * is added to a scene.
  * Pure-2D scenes and mesh-only scenes pay zero runtime bytes for this module.
  *
  * Per-layer GPU work (instance / UBO upload, capacity grow, change-detect)
@@ -94,15 +95,15 @@ interface SpriteRenderableInternal extends Renderable {
  *
  * Throws if `layer.depth === "none"` — pure-2D HUD layers must be rendered
  * via `createSpriteRenderer + registerSpriteRenderer`, not as a scene
- * `Renderable`. The check lives here so `addToScene` only admits the entity;
- * renderable construction owns the rule that scene renderables require depth.
+ * `Renderable`. The check lives here as a second line of defense; the public
+ * opt-in scene add function also rejects pure HUD layers before registration.
  *
- * Caller (currently only `scene-core.addToScene`) is responsible for
+ * Caller is responsible for
  * pushing `renderable` into `_renderables` and `dispose` into `_disposables`.
  */
 export function buildSpriteRenderable(engine: EngineContextInternal, layer: Sprite2DLayer): { renderable: Renderable; dispose: () => void } {
     if (layer.depth === "none") {
-        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addToScene.');
+        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
     }
     const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, GPUBufferUsage.INDEX);
     const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES, "sprite-depth-hosted-ubo");
