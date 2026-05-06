@@ -40,7 +40,7 @@ const KIND = "sprite-renderer" as const;
 /** Options accepted by `createSpriteRenderer`. */
 export interface SpriteRendererOptions {
     /** Layers to draw, in registration order. The renderer also re-sorts internally each frame. */
-    layers: Sprite2DLayer[];
+    layers: readonly Sprite2DLayer[];
     /** Default true. Set false for HUD overlays so the sprite pass preserves existing scene color. */
     clear?: boolean;
     /** Default `{ r: 0, g: 0, b: 0, a: 1 }`. */
@@ -50,7 +50,7 @@ export interface SpriteRendererOptions {
 /**
  * A `SpriteRenderer` — pure data, plugs into `engine._renderingContexts`.
  * Inherits `clearColor`, `_drawCallsPre`, `_update`, `_record` from `RenderingContext`;
- * adds only its discriminator tag and the mutable layer list.
+ * adds only its discriminator tag and the renderer-owned layer list.
  *
  * **Lifecycle.** A `SpriteRenderer` is independent of any `SceneContext` — it is
  * registered directly on the engine, opens its own sampleCount=1 swapchain pass, and
@@ -71,8 +71,8 @@ export interface SpriteRendererOptions {
  */
 export interface SpriteRenderer extends RenderingContext {
     readonly _kind: typeof KIND;
-    /** Mutable: callers may push / splice layers between frames. */
-    layers: Sprite2DLayer[];
+    /** Renderer-owned layer membership. Use `addSpriteRendererLayer` / `removeSpriteRendererLayer` to mutate. */
+    readonly layers: readonly Sprite2DLayer[];
 }
 
 /** @internal Per-layer GPU resources owned by the renderer. */
@@ -96,7 +96,7 @@ interface LayerGpu {
     /** False until the first UBO upload. Forces an unconditional first write so `lastUbo` is real. */
     uboUploaded: boolean;
     /** Pre-recorded GPU command bundle: `setIndexBuffer` + `setPipeline` + `setBindGroup` +
-     *  `setVertexBuffer` + `drawIndexed`. Replayed via `pass.executeBundles([bundle])` for
+     *  `setVertexBuffer` + `drawIndexed`. Collected into a reused bundle array for
      *  near-zero per-frame CPU command-recording cost (the big WebGPU win for static scenes —
      *  see `scene-core.ts._record` for the same pattern). Invalidated when `layer.count` changes
      *  (the `drawIndexed` instance count is baked into the bundle) or when the instance buffer is
@@ -112,6 +112,8 @@ interface SpriteRendererInternal extends SpriteRenderer {
     _indexBuffer: GPUBuffer;
     _pipelineCache: SpritePipelineCache;
     _layerGpu: Map<Sprite2DLayer, LayerGpu>;
+    layers: Sprite2DLayer[];
+    _visibleBundles: GPURenderBundle[];
     /** Captured each `_update`, read in `_record`. */
     _targetWidth: number;
     _targetHeight: number;
@@ -170,6 +172,11 @@ function uploadLayer(rr: SpriteRendererInternal, lg: LayerGpu): void {
     lg.uboUploaded = writeSpriteLayerUboIfDirty(rr._engine.device, lg.uniformBuffer, _scratchUbo, lg.lastUbo, lg.uboUploaded);
 }
 
+function disposeLayerGpu(lg: LayerGpu): void {
+    lg.instanceBuffer.destroy();
+    lg.uniformBuffer.destroy();
+}
+
 const _scratchUbo = new Float32Array(LAYER_UBO_BYTES / 4);
 
 /**
@@ -209,6 +216,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
         _indexBuffer: indexBuffer,
         _pipelineCache: createSpritePipelineCache(),
         _layerGpu: new Map(),
+        _visibleBundles: [],
         _targetWidth: targetSize.width,
         _targetHeight: targetSize.height,
         _disposed: false,
@@ -234,9 +242,13 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
 
 function assertSpriteRendererLayers(layers: readonly Sprite2DLayer[]): void {
     for (const layer of layers) {
-        if (layer.depth !== "none") {
-            throw new Error('SpriteRenderer only supports Sprite2DLayer with depth: "none". Use addDepthHostedSpriteLayer(scene, layer) for depth-hosted sprites.');
-        }
+        assertSpriteRendererLayer(layer);
+    }
+}
+
+function assertSpriteRendererLayer(layer: Sprite2DLayer): void {
+    if (layer.depth !== "none") {
+        throw new Error('SpriteRenderer only supports Sprite2DLayer with depth: "none". Use addDepthHostedSpriteLayer(scene, layer) for depth-hosted sprites.');
     }
 }
 
@@ -277,7 +289,7 @@ function spriteRendererUpdate(rr: SpriteRendererInternal): void {
  * Per-frame **record** pass (called by the engine after `_update`).
  * For each visible non-empty layer: builds (or reuses) a `GPURenderBundle` that bakes
  * `setIndexBuffer` + `setPipeline` + `setBindGroup` + `setVertexBuffer` + `drawIndexed`,
- * then replays it via `pass.executeBundles([bundle])`. The bundle is the per-frame
+ * then queues it for a single `pass.executeBundles(...)` replay. The bundle is the per-frame
  * fast path — it skips Chromium's per-call WebGPU validation and IPC, which dominates
  * CPU cost for static scenes at multi-kHz framerates. Bundle is rebuilt only when
  * `layer.count` changes or the instance buffer was reallocated.
@@ -306,6 +318,8 @@ function spriteRendererRecord(rr: SpriteRendererInternal): number {
         ],
     });
     let drawCalls = 0;
+    const visibleBundles = rr._visibleBundles;
+    visibleBundles.length = 0;
 
     for (const layer of rr.layers) {
         if (!layer.visible || layer.count === 0) {
@@ -341,12 +355,45 @@ function spriteRendererRecord(rr: SpriteRendererInternal): number {
             lg.renderBundle = be.finish();
             lg.bundleCount = layer.count;
         }
-        pass.executeBundles([lg.renderBundle]);
+        visibleBundles.push(lg.renderBundle!);
         drawCalls++;
     }
 
+    if (visibleBundles.length > 0) {
+        pass.executeBundles(visibleBundles);
+    }
     pass.end();
     return drawCalls;
+}
+
+/** Add a pure-2D layer to the renderer. No-op if the layer is already present. */
+export function addSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLayer): void {
+    const rr = sr as SpriteRendererInternal;
+    if (rr._disposed) {
+        throw new Error("SpriteRenderer has been disposed.");
+    }
+    assertSpriteRendererLayer(layer);
+    if (rr.layers.includes(layer)) {
+        return;
+    }
+    rr.layers.push(layer);
+    getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false);
+}
+
+/** Remove a layer from the renderer and destroy any GPU resources cached for it. */
+export function removeSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLayer): boolean {
+    const rr = sr as SpriteRendererInternal;
+    const index = rr.layers.indexOf(layer);
+    if (index < 0) {
+        return false;
+    }
+    rr.layers.splice(index, 1);
+    const lg = rr._layerGpu.get(layer);
+    if (lg) {
+        disposeLayerGpu(lg);
+        rr._layerGpu.delete(layer);
+    }
+    return true;
 }
 
 /** Push the renderer onto its engine's `_renderingContexts`. Idempotent — a second call is a no-op. */
@@ -373,10 +420,10 @@ export function disposeSpriteRenderer(sr: SpriteRenderer): void {
     unregisterSpriteRenderer(rr);
     rr._disposed = true;
     for (const lg of rr._layerGpu.values()) {
-        lg.instanceBuffer.destroy();
-        lg.uniformBuffer.destroy();
+        disposeLayerGpu(lg);
     }
     rr._layerGpu.clear();
+    rr._visibleBundles.length = 0;
     rr._indexBuffer.destroy();
     clearSpritePipelineCache(rr._pipelineCache);
     rr.layers.length = 0;

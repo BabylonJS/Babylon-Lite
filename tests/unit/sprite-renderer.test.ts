@@ -1,7 +1,7 @@
 /**
  * Sprite renderer unit tests — pure CPU. Exercises the public lifecycle
  * (`createSpriteRenderer` / `registerSpriteRenderer` /
- * `unregisterSpriteRenderer` / `disposeSpriteRenderer`) plus the
+ * `unregisterSpriteRenderer` / `disposeSpriteRenderer`) plus layer membership,
  * pipeline-cache and depth-mode guard rails. Real GPU draws are covered
  * by the `scene50-sprite-grid` parity test.
  *
@@ -26,6 +26,8 @@ import {
 } from "../../packages/babylon-lite/src/sprite/sprite-2d";
 import {
     createSpriteRenderer,
+    addSpriteRendererLayer,
+    removeSpriteRendererLayer,
     registerSpriteRenderer,
     unregisterSpriteRenderer,
     disposeSpriteRenderer,
@@ -160,13 +162,6 @@ describe("createSpriteRenderer", () => {
         expect(counters.buffersCreated).toBe(0);
     });
 
-    it("rejects depth-hosted layers pushed after creation", () => {
-        const { engine } = makeMockEngine();
-        const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        sr.layers.push(createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }));
-        expect(() => sr._update()).toThrow(/depth: "none"/);
-    });
-
     it("builds pure-2D pipelines with a 40-byte instance stride and no z attribute", () => {
         const { engine } = makeMockEngine();
         createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
@@ -182,6 +177,41 @@ describe("createSpriteRenderer", () => {
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).not.toContain("iZ");
         expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 0.0, 1.0)");
+    });
+});
+
+describe("addSpriteRendererLayer / removeSpriteRendererLayer", () => {
+    it("adds layers through the renderer lifecycle API and prewarms their pipeline", () => {
+        const { engine } = makeMockEngine();
+        const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: "premultiplied" });
+        const sr = createSpriteRenderer(engine, { layers: [] });
+
+        addSpriteRendererLayer(sr, layer);
+        addSpriteRendererLayer(sr, layer);
+
+        expect(sr.layers).toEqual([layer]);
+        expect(_spriteRendererPipelineCacheSize(sr)).toBe(1);
+    });
+
+    it("rejects depth-hosted layers added after creation", () => {
+        const { engine } = makeMockEngine();
+        const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
+        expect(() => addSpriteRendererLayer(sr, createSprite2DLayer(makeMockAtlas(), { depth: "test-write" }))).toThrow(/depth: "none"/);
+    });
+
+    it("removes layers and destroys their per-layer GPU buffers", () => {
+        const { engine, counters } = makeMockEngine();
+        const layer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(layer, { positionPx: [10, 10], sizePx: [32, 32], frame: 0 });
+        const sr = createSpriteRenderer(engine, { layers: [layer] });
+
+        sr._update();
+        const destroyedBefore = counters.buffersDestroyed;
+
+        expect(removeSpriteRendererLayer(sr, layer)).toBe(true);
+        expect(sr.layers.length).toBe(0);
+        expect(counters.buffersDestroyed - destroyedBefore).toBe(2);
+        expect(removeSpriteRendererLayer(sr, layer)).toBe(false);
     });
 });
 

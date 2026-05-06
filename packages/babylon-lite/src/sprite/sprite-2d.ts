@@ -62,7 +62,7 @@ export interface Sprite2DLayer {
     readonly _entityType: "sprite-2d-layer";
     readonly atlas: SpriteAtlas;
     readonly depth: Sprite2DDepthMode;
-    blendMode: SpriteBlendMode;
+    readonly blendMode: SpriteBlendMode;
     opacity: number;
     visible: boolean;
     order: number;

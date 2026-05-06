@@ -286,7 +286,7 @@ import type { Sprite2DLayer } from "./sprite-2d.js";
 export interface SpriteRendererOptions {
     /** Layers to draw, in registration order. The renderer also re-sorts internally
      *  by `layer.order` each frame (TimSort is O(n) on already-sorted input). */
-    layers: Sprite2DLayer[];
+    layers: readonly Sprite2DLayer[];
     /** Default true. Set false for HUD overlays so the sprite pass preserves existing scene color. */
     clear?: boolean;
     /** Default `{ r: 0, g: 0, b: 0, a: 1 }`. Used when `clear` is true. */
@@ -296,11 +296,13 @@ export interface SpriteRendererOptions {
 /** A `SpriteRenderer` — pure data, plugs into `engine._renderingContexts`. */
 export interface SpriteRenderer extends RenderingContext {
     readonly _kind: "sprite-renderer";
-    /** Mutable: callers may push/splice layers between frames. */
-    layers: Sprite2DLayer[];
+    /** Renderer-owned layer membership. Use add/remove helpers to mutate. */
+    readonly layers: readonly Sprite2DLayer[];
 }
 
 export function createSpriteRenderer(engine: EngineContext, opts: SpriteRendererOptions): SpriteRenderer;
+export function addSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLayer): void;
+export function removeSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLayer): boolean;
 export function registerSpriteRenderer(sr: SpriteRenderer): void;
 export function unregisterSpriteRenderer(sr: SpriteRenderer): void;
 export function disposeSpriteRenderer(sr: SpriteRenderer): void;
@@ -318,7 +320,7 @@ per-instance Z.
 Internally `SpriteRenderer._update`:
 
 1. Refreshes cached target dimensions (canvas may have resized).
-2. Sorts `this.layers` in place by `layer.order` (skipped for the
+2. Sorts the renderer-owned layer list in place by `layer.order` (skipped for the
    single-layer case).
 3. For each visible non-empty layer: ensures GPU resources exist, writes
    per-instance data and per-layer UBO via `device.queue.writeBuffer`
@@ -332,7 +334,7 @@ Internally `SpriteRenderer._record`:
    `setBindGroup` + `setVertexBuffer` + `drawIndexed(6, count)`. The
    bundle is rebuilt only when the layer's sprite count changes or its
    instance buffer is reallocated.
-2. Replays each bundle via `pass.executeBundles([bundle])` — skips
+2. Replays all visible bundles with one reused `pass.executeBundles(...)` array — skips
    per-call WebGPU validation and IPC, near-zero CPU cost in the steady
    state.
 
@@ -396,11 +398,11 @@ sprite-owned renderable builder:
 
 ```typescript
 export function addDepthHostedSpriteLayer(scene: SceneContext, layer: Sprite2DLayer): void {
-  addDeferredSceneRenderables(scene, async (engine) => {
-    const { buildSpriteRenderable } = await import("./sprite-renderable.js");
-    const built = buildSpriteRenderable(engine, layer);
-    return { renderables: [built.renderable], dispose: built.dispose };
-  });
+    addDeferredSceneRenderables(scene, async (engine) => {
+        const { buildSpriteRenderable } = await import("./sprite-renderable.js");
+        const built = buildSpriteRenderable(engine, layer);
+        return { renderables: [built.renderable], dispose: built.dispose };
+    });
 }
 ```
 
@@ -631,7 +633,7 @@ export interface Sprite2DLayer {
     readonly _entityType: "sprite-2d-layer";
     readonly atlas: SpriteAtlas;
     readonly depth: Sprite2DDepthMode;
-    blendMode: SpriteBlendMode;
+    readonly blendMode: SpriteBlendMode;
     opacity: number;
     visible: boolean;
     order: number;
@@ -909,8 +911,8 @@ renderable.
 
 Depth-hosted layers use the same first 40 bytes, plus:
 
-| Offset (bytes) | Slot | Field | Vertex attr        | Notes                                                            |
-| -------------- | ---- | ----- | ------------------ | ---------------------------------------------------------------- |
+| Offset (bytes) | Slot | Field | Vertex attr        | Notes                                                             |
+| -------------- | ---- | ----- | ------------------ | ----------------------------------------------------------------- |
 | 40..43         | [10] | `z`   | `@location(6)` f32 | NDC depth (`0` = near, `1` = far), consumed by the scene pipeline |
 
 Slot [9] is laid out as 4 bytes inside the homogeneous `Float32Array` backing
@@ -1176,9 +1178,9 @@ loses one tick of animation in the captured image. All sprite families
 
 ### Sprite2DLayer per-`depth` Pipeline State
 
-| Layer `depth`  | Drawn via                                                                     | Depth attachment        | Depth compare | Depth write | Instance layout / Z                  | Render order                                                |
-| -------------- | ----------------------------------------------------------------------------- | ----------------------- | ------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
-| `"none"`       | A `SpriteRenderer` registered on the engine                                   | none                    | none          | `false`     | 40 B / 10 floats; no slot [10]       | engine registration order; layer order within the renderer  |
+| Layer `depth`  | Drawn via                                                                       | Depth attachment        | Depth compare | Depth write | Instance layout / Z                  | Render order                                                |
+| -------------- | ------------------------------------------------------------------------------- | ----------------------- | ------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
+| `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none          | `false`     | 40 B / 10 floats; no slot [10]       | engine registration order; layer order within the renderer  |
 | `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `less-equal`  | `false`     | 44 B / 11 floats; slot [10] consumed | scene transparent queue (after opaque meshes)               |
 | `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `less-equal`  | `true`      | 44 B / 11 floats; slot [10] consumed | direct-drawn after cached opaque meshes, before transparent |
 
@@ -1466,14 +1468,14 @@ never a pipeline recompile. This matches how Lite handles mesh `alpha`.
 
 ## Sorting and Transparency
 
-| Family / variant                      | Drawn through                                                      | Render slot                                           | Per-instance Z                              | Blend     | Depth write |
-| ------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------- | ------------------------------------------- | --------- | ----------- |
-| Sprite2DLayer `depth: "none"`         | a `SpriteRenderer` registered on the engine                        | engine `_renderingContexts` (after the scene context) | none; no Z slot                             | per-blend | off         |
+| Family / variant                      | Drawn through                                                        | Render slot                                           | Per-instance Z                              | Blend     | Depth write |
+| ------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------- | --------- | ----------- |
+| Sprite2DLayer `depth: "none"`         | a `SpriteRenderer` registered on the engine                          | engine `_renderingContexts` (after the scene context) | none; no Z slot                             | per-blend | off         |
 | Sprite2DLayer `depth: "test"` blended | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write | per-blend | off         |
 | Sprite2DLayer `depth: "test"` cutout  | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 200`) | scene transparent queue (after opaque meshes)         | consumed; per-instance depth test, no write | none      | off         |
 | Sprite2DLayer `depth: "test-write"`   | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (`order = 100`) | direct draw after cached opaque meshes                | consumed; per-instance depth test + write   | per-blend | on          |
-| Billboard blended                     | `addToScene` → `billboard-renderable.ts` (`order = 200`)           | scene transparent queue                               | per-sprite view-Z (sort-indirection buffer) | per-blend | off         |
-| Billboard cutout                      | `addToScene` → `billboard-renderable.ts` (`order = 200`)           | scene transparent queue                               | per-sprite view-Z (sort-indirection buffer) | none      | on          |
+| Billboard blended                     | `addToScene` → `billboard-renderable.ts` (`order = 200`)             | scene transparent queue                               | per-sprite view-Z (sort-indirection buffer) | per-blend | off         |
+| Billboard cutout                      | `addToScene` → `billboard-renderable.ts` (`order = 200`)             | scene transparent queue                               | per-sprite view-Z (sort-indirection buffer) | none      | on          |
 
 Depth-hosted Sprite2D layers do **not** sort sprites individually — each
 layer becomes one `Renderable` and the GPU's depth test resolves

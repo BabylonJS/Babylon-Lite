@@ -701,7 +701,7 @@
     "bjsGzipKB": 203
   },
   "scene51": {
-    "rawKB": 16.1,
+    "rawKB": 16.2,
     "gzipKB": 6.6,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -1476,8 +1476,8 @@
     "bjsGzipKB": 597.9
   },
   "scene52": {
-    "rawKB": 56.7,
-    "gzipKB": 21.7,
+    "rawKB": 56.8,
+    "gzipKB": 21.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene52-standard-renderable-BU9SnSa-.js",
