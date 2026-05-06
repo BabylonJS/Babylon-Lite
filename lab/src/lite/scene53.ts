@@ -38,11 +38,17 @@ import {
     createSprite2DLayer,
     createStandardMaterial,
     loadSpriteAtlas,
+    onBeforeRender,
     registerScene,
     startEngine,
+    updateSprite2DIndex,
 } from "babylon-lite";
 import type { Sprite2DLayer } from "babylon-lite";
 import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
+
+const DESIGN_HEIGHT = 720;
+const SPRITE_SIZE = 180;
+const SPRITE_SPACING = 200;
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -87,7 +93,17 @@ async function main(): Promise<void> {
         blendMode: "alpha",
         depth: "test-write",
     });
-    addPerInstanceZSprites(sprites, canvas);
+    const spriteIndices = addPerInstanceZSprites(sprites, canvas);
+    let lastLayoutWidth = canvas.width;
+    let lastLayoutHeight = canvas.height;
+    onBeforeRender(scene, () => {
+        if (canvas.width === lastLayoutWidth && canvas.height === lastLayoutHeight) {
+            return;
+        }
+        lastLayoutWidth = canvas.width;
+        lastLayoutHeight = canvas.height;
+        updatePerInstanceZSprites(sprites, spriteIndices, canvas);
+    });
     addDepthHostedSpriteLayer(scene, sprites);
 
     await registerScene(engine, scene);
@@ -99,16 +115,13 @@ async function main(): Promise<void> {
 
 /** Three side-by-side sprites at canvas centre, each with its own NDC depth.
  *  Sized + positioned so each one overlaps a box and the next sprite. */
-function addPerInstanceZSprites(layer: Sprite2DLayer, canvas: HTMLCanvasElement): void {
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    const size = 180;
-    const dx = 200; // horizontal spacing — sprites touch but don't overlap each other
+function addPerInstanceZSprites(layer: Sprite2DLayer, canvas: HTMLCanvasElement): [number, number, number] {
+    const layout = getSpriteLayout(canvas);
 
     // A — yellow "0", z = 0.6 → in front of both boxes (NDC 0.842 / 0.909).
-    addSprite2DIndex(layer, {
-        positionPx: [cx - dx, cy],
-        sizePx: [size, size],
+    const a = addSprite2DIndex(layer, {
+        positionPx: layout.a.position,
+        sizePx: layout.size,
         frame: 24, // tally digit "0"
         color: [1.0, 0.95, 0.4, 1.0],
         z: 0.6,
@@ -116,9 +129,9 @@ function addPerInstanceZSprites(layer: Sprite2DLayer, canvas: HTMLCanvasElement)
 
     // B — cyan "1", z = 0.87 → between front (0.842) and back (0.909): front
     // box occludes B's left edge; B occludes back box's left edge.
-    addSprite2DIndex(layer, {
-        positionPx: [cx, cy],
-        sizePx: [size, size],
+    const b = addSprite2DIndex(layer, {
+        positionPx: layout.b.position,
+        sizePx: layout.size,
         frame: 25, // tally digit "1"
         color: [0.4, 0.9, 1.0, 1.0],
         z: 0.87,
@@ -126,13 +139,41 @@ function addPerInstanceZSprites(layer: Sprite2DLayer, canvas: HTMLCanvasElement)
 
     // C — magenta "2", z = 0.95 → behind back box (0.909): back box occludes
     // most of C; only C's rightmost slice peeks out past the box silhouette.
-    addSprite2DIndex(layer, {
-        positionPx: [cx + dx, cy],
-        sizePx: [size, size],
+    const c = addSprite2DIndex(layer, {
+        positionPx: layout.c.position,
+        sizePx: layout.size,
         frame: 26, // tally digit "2"
         color: [1.0, 0.5, 0.9, 1.0],
         z: 0.95,
     });
+
+    return [a, b, c];
+}
+
+function updatePerInstanceZSprites(layer: Sprite2DLayer, [a, b, c]: readonly [number, number, number], canvas: HTMLCanvasElement): void {
+    const layout = getSpriteLayout(canvas);
+    updateSprite2DIndex(layer, a, { positionPx: layout.a.position, sizePx: layout.size });
+    updateSprite2DIndex(layer, b, { positionPx: layout.b.position, sizePx: layout.size });
+    updateSprite2DIndex(layer, c, { positionPx: layout.c.position, sizePx: layout.size });
+}
+
+function getSpriteLayout(canvas: HTMLCanvasElement): {
+    a: { position: [number, number] };
+    b: { position: [number, number] };
+    c: { position: [number, number] };
+    size: [number, number];
+} {
+    const scale = canvas.height / DESIGN_HEIGHT;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const size = SPRITE_SIZE * scale;
+    const dx = SPRITE_SPACING * scale;
+    return {
+        a: { position: [cx - dx, cy] },
+        b: { position: [cx, cy] },
+        c: { position: [cx + dx, cy] },
+        size: [size, size],
+    };
 }
 
 main().catch((err) => {

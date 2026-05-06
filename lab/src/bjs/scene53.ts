@@ -40,6 +40,10 @@ import "@babylonjs/core/ShadersWGSL/sprites.fragment";
 
 import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
+const DESIGN_HEIGHT = 720;
+const SPRITE_SIZE = 180;
+const SPRITE_SPACING = 200;
+
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -75,19 +79,23 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     const sprites = new SpriteManager("sprites", getSpriteAtlasDataUrl(), 4, { width: SPRITE_ATLAS_INFO.cellWidthPx, height: SPRITE_ATLAS_INFO.cellHeightPx }, scene, 0);
 
     const a = new Sprite("a", sprites);
-    positionProjectedSprite(a, canvas, cam, 640 - 200, 360, 0.6, 180);
     a.cellIndex = 24;
     a.color = new Color4(1.0, 0.95, 0.4, 1.0);
 
     const b = new Sprite("b", sprites);
-    positionProjectedSprite(b, canvas, cam, 640, 360, 0.87, 180);
     b.cellIndex = 25;
     b.color = new Color4(0.4, 0.9, 1.0, 1.0);
 
     const c = new Sprite("c", sprites);
-    positionProjectedSprite(c, canvas, cam, 640 + 200, 360, 0.95, 180);
     c.cellIndex = 26;
     c.color = new Color4(1.0, 0.5, 0.9, 1.0);
+
+    const projectedSprites = [
+        { sprite: a, ndcZ: 0.6 },
+        { sprite: b, ndcZ: 0.87 },
+        { sprite: c, ndcZ: 0.95 },
+    ];
+    layoutProjectedSprites(projectedSprites, canvas, cam);
 
     const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };
     scene.onBeforeRenderObservable.add(() => {
@@ -99,7 +107,10 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
+    window.addEventListener("resize", () => {
+        engine.resize();
+        layoutProjectedSprites(projectedSprites, canvas, cam);
+    });
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
@@ -107,6 +118,27 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
     // eslint-disable-next-line no-console
     console.error(err);
 });
+
+function layoutProjectedSprites(sprites: readonly { sprite: Sprite; ndcZ: number }[], canvas: HTMLCanvasElement, camera: ArcRotateCamera): void {
+    const layout = getSpriteLayout(canvas);
+    positionProjectedSprite(sprites[0]!.sprite, canvas, camera, layout.a.position[0], layout.a.position[1], sprites[0]!.ndcZ, layout.size);
+    positionProjectedSprite(sprites[1]!.sprite, canvas, camera, layout.b.position[0], layout.b.position[1], sprites[1]!.ndcZ, layout.size);
+    positionProjectedSprite(sprites[2]!.sprite, canvas, camera, layout.c.position[0], layout.c.position[1], sprites[2]!.ndcZ, layout.size);
+}
+
+function getSpriteLayout(canvas: HTMLCanvasElement): { a: { position: [number, number] }; b: { position: [number, number] }; c: { position: [number, number] }; size: number } {
+    const scale = canvas.height / DESIGN_HEIGHT;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const size = SPRITE_SIZE * scale;
+    const dx = SPRITE_SPACING * scale;
+    return {
+        a: { position: [cx - dx, cy] },
+        b: { position: [cx, cy] },
+        c: { position: [cx + dx, cy] },
+        size,
+    };
+}
 
 function positionProjectedSprite(sprite: Sprite, canvas: HTMLCanvasElement, camera: ArcRotateCamera, xPx: number, yPx: number, ndcZ: number, sizePx: number): void {
     const near = camera.minZ;
