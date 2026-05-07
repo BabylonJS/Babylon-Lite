@@ -137,6 +137,7 @@ async function main(): Promise<void> {
 - **Agents MUST NOT run `pnpm test:perf`.** Performance tests are machine-sensitive and reserved for the user / CI; running them from an agent session wastes time and produces unreliable signal.
 - **Agents run only:** `pnpm build:bundle-scenes` and `pnpm test:parity` (or the individual spec via `npx playwright test tests/parity/scenes/<spec>.spec.ts`). These cover parity MAD + bundle-size ceilings, which are the agent-enforceable guardrails.
 - `pnpm test` chains build + parity (no perf), which is acceptable.
+- **Lab-only UI changes do not require parity/test suites.** When a task only changes the lab UI or static lab presentation, do not run parity or other test suites unless explicitly requested; use lightweight static inspection or a lab build only if validation is needed.
 - **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `npx playwright test tests/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
 - If perf validation is needed, ask the user to run `pnpm test:perf` locally.
 

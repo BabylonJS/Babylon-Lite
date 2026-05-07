@@ -629,6 +629,7 @@
                 background: #161b22;
                 border: 1px solid #30363d;
                 border-radius: 8px;
+                position: relative;
             }
             .bundle-summary-header {
                 display: flex;
@@ -643,16 +644,126 @@
                 color: #8b949e;
                 font-size: 0.75rem;
             }
-            .bundle-summary-panel textarea {
-                width: 100%;
-                min-height: 20rem;
-                resize: vertical;
-                border: 1px solid #21262d;
-                border-radius: 6px;
-                padding: 0.75rem;
+            .bundle-summary-metrics {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 0.6rem;
+                margin-bottom: 0.8rem;
+            }
+            .bundle-summary-metric {
+                padding: 0.65rem 0.75rem;
+                border: 1px solid #30363d;
+                border-radius: 8px;
                 background: #0d1117;
+            }
+            .bundle-summary-metric-label {
+                color: #8b949e;
+                font-size: 0.68rem;
+                font-weight: 700;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+            }
+            .bundle-summary-metric-value {
+                margin-top: 0.25rem;
                 color: #e6edf3;
-                font: 0.75rem/1.5 "SF Mono", "Cascadia Code", monospace;
+                font-size: 1.2rem;
+                font-weight: 700;
+            }
+            .bundle-summary-metric-note {
+                margin-top: 0.15rem;
+                color: #8b949e;
+                font-size: 0.72rem;
+            }
+            .bundle-summary-table-wrap {
+                overflow-x: auto;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                background: #0d1117;
+            }
+            .bundle-summary-table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.78rem;
+            }
+            .bundle-summary-table th,
+            .bundle-summary-table td {
+                padding: 0.55rem 0.65rem;
+                border-bottom: 1px solid #21262d;
+                text-align: left;
+                white-space: nowrap;
+            }
+            .bundle-summary-table th {
+                color: #8b949e;
+                font-size: 0.68rem;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                background: #161b22;
+            }
+            .bundle-summary-table tr:last-child td {
+                border-bottom: 0;
+            }
+            .bundle-summary-scene {
+                color: #e6edf3;
+                font-weight: 700;
+            }
+            .bundle-summary-name {
+                display: block;
+                color: #8b949e;
+                font-size: 0.68rem;
+                margin-top: 0.1rem;
+            }
+            .bundle-summary-badge {
+                display: inline-flex;
+                align-items: center;
+                border-radius: 999px;
+                padding: 0.15rem 0.5rem;
+                font-size: 0.68rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                border: 1px solid #30363d;
+            }
+            .bundle-summary-badge.increase {
+                color: #ff7b72;
+                background: rgba(248, 81, 73, 0.12);
+                border-color: rgba(248, 81, 73, 0.35);
+            }
+            .bundle-summary-badge.decrease {
+                color: #3fb950;
+                background: rgba(63, 185, 80, 0.12);
+                border-color: rgba(63, 185, 80, 0.35);
+            }
+            .bundle-summary-badge.new {
+                color: #79c0ff;
+                background: rgba(88, 166, 255, 0.12);
+                border-color: rgba(88, 166, 255, 0.35);
+            }
+            .bundle-summary-delta.increase {
+                color: #ff7b72;
+                font-weight: 700;
+            }
+            .bundle-summary-delta.decrease {
+                color: #3fb950;
+                font-weight: 700;
+            }
+            .bundle-summary-delta.new {
+                color: #79c0ff;
+                font-weight: 700;
+            }
+            .bundle-summary-empty {
+                padding: 1rem;
+                border: 1px dashed #30363d;
+                border-radius: 8px;
+                color: #8b949e;
+                background: #0d1117;
+            }
+            .bundle-summary-copy-source {
+                position: absolute;
+                left: -9999px;
+                width: 1px;
+                height: 1px;
+                opacity: 0;
+                pointer-events: none;
             }
 
             /* ── Perf Dashboard ─────────────────────────────────── */
@@ -3215,16 +3326,32 @@
                 <button class="btn bundle-sort-btn active" onclick="sortBundleGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('asc')" data-sort="asc" title="Sort by Lite min size ascending">Size ↑</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('desc')" data-sort="desc" title="Sort by Lite min size descending">Size ↓</button>
-                <button class="btn" id="bundle-summary-btn" onclick="toggleBundleSummary()" title="Show copy-pastable bundle delta summary">📋 Summary</button>
+                <button class="btn" id="bundle-summary-btn" onclick="toggleBundleSummary()" title="Show bundle delta summary">📋 Summary</button>
                 <button class="btn" id="bundle-filter-btn" onclick="toggleBundleOverFilter()" title="Show only scenes over their size ceiling">🔴 Over Only</button>
             </div>
             <div class="bundle-summary-panel" id="bundle-summary-panel" hidden>
                 <div class="bundle-summary-header">
                     <strong>Bundle delta summary</strong>
-                    <span>Markdown table, one row per scene, comparing current bundle size to master.</span>
+                    <span>Current bundle size changes compared with master.</span>
                     <button class="btn" id="bundle-summary-copy-btn" onclick="copyBundleSummary()">Copy</button>
                 </div>
-                <textarea id="bundle-summary-text" readonly spellcheck="false"></textarea>
+                <div class="bundle-summary-metrics" id="bundle-summary-metrics"></div>
+                <div class="bundle-summary-empty" id="bundle-summary-empty" hidden>No bundle manifest loaded yet.</div>
+                <div class="bundle-summary-table-wrap" id="bundle-summary-table-wrap" hidden>
+                    <table class="bundle-summary-table">
+                        <thead>
+                            <tr>
+                                <th>Scene</th>
+                                <th>Change</th>
+                                <th>Delta</th>
+                                <th>Current</th>
+                                <th>Master</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bundle-summary-rows"></tbody>
+                    </table>
+                </div>
+                <textarea class="bundle-summary-copy-source" id="bundle-summary-text" readonly spellcheck="false" aria-hidden="true" tabindex="-1"></textarea>
             </div>
             <div class="grid" id="bundle-grid"></div>
         </div>
@@ -4171,66 +4298,183 @@
                 return (delta.roundedDelta > 0 ? "+" : "-") + Math.abs(delta.roundedDelta).toFixed(1) + " KB";
             }
 
-            function buildBundleSummaryText(manifest, masterManifest) {
-                var scenes = (window.SCENE_CONFIG || []).map(function (cfg) {
+            function buildBundleSummaryData(manifest, masterManifest) {
+                var config = window.SCENE_CONFIG || [];
+                var scenes = config.map(function (cfg) {
                     return "scene" + cfg.id;
                 });
-                if (scenes.length === 0) scenes = Object.keys(manifest || {});
+                Object.keys(manifest || {}).forEach(function (scene) {
+                    if (scenes.indexOf(scene) === -1) scenes.push(scene);
+                });
 
-                var lines = ["| Scene | Change | Delta | Current | Master |", "| --- | --- | ---: | ---: | ---: |"];
+                var rows = [];
+                var stats = {
+                    changed: 0,
+                    increases: 0,
+                    decreases: 0,
+                    newScenes: 0,
+                    comparableScenes: 0,
+                    netDelta: 0,
+                    newRawKB: 0,
+                };
+
                 scenes.forEach(function (scene) {
                     var sizes = manifest && manifest[scene];
-                    var masterSizes = masterManifest && masterManifest[scene];
                     if (!sizes) return;
+                    var cfg = config.find(function (c) {
+                        return "scene" + c.id === scene;
+                    });
+                    var masterSizes = masterManifest && masterManifest[scene];
                     var delta = getBundleDelta(sizes, masterSizes);
-                    if (!delta || delta.roundedDelta === 0) return;
-                    lines.push(
-                        "| " +
-                            scene +
-                            " | " +
-                            delta.change +
-                            " | " +
-                            formatBundleDeltaValue(delta) +
-                            " | " +
-                            sizes.rawKB +
-                            " KB | " +
-                            (masterSizes && masterSizes.rawKB != null ? masterSizes.rawKB + " KB" : "\u2014") +
-                            " |"
-                    );
+
+                    if (delta) {
+                        stats.comparableScenes++;
+                        stats.netDelta += sizes.rawKB - masterSizes.rawKB;
+                        if (delta.roundedDelta === 0) return;
+                        stats.changed++;
+                        if (delta.roundedDelta > 0) stats.increases++;
+                        else stats.decreases++;
+                        rows.push({
+                            scene: scene,
+                            name: cfg ? cfg.name : "",
+                            change: delta.change,
+                            deltaText: formatBundleDeltaValue(delta),
+                            currentText: sizes.rawKB + " KB",
+                            masterText: masterSizes.rawKB + " KB",
+                        });
+                        return;
+                    }
+
+                    if (masterManifest && sizes && (!masterSizes || masterSizes.rawKB == null)) {
+                        var newRawKB = parseFloat(sizes.rawKB);
+                        stats.changed++;
+                        stats.newScenes++;
+                        if (isFinite(newRawKB)) stats.newRawKB += newRawKB;
+                        rows.push({
+                            scene: scene,
+                            name: cfg ? cfg.name : "",
+                            change: "new",
+                            deltaText: "new",
+                            currentText: sizes.rawKB + " KB",
+                            masterText: "\u2014",
+                        });
+                    }
+                });
+
+                stats.netDelta = Math.round(stats.netDelta * 10) / 10;
+                stats.newRawKB = Math.round(stats.newRawKB * 10) / 10;
+                return { rows: rows, stats: stats, hasMaster: !!masterManifest };
+            }
+
+            function buildBundleSummaryText(manifest, masterManifest) {
+                var data = buildBundleSummaryData(manifest, masterManifest);
+                var lines = ["| Scene | Change | Delta | Current | Master |", "| --- | --- | ---: | ---: | ---: |"];
+                data.rows.forEach(function (row) {
+                    lines.push("| " + row.scene + " | " + row.change + " | " + row.deltaText + " | " + row.currentText + " | " + row.masterText + " |");
                 });
                 if (lines.length === 2) {
-                    return "No bundle size changes vs master.";
+                    return data.hasMaster ? "No bundle size changes vs master." : "No master bundle baseline loaded yet.";
                 }
                 return lines.join("\n");
             }
 
-            function updateBundleSummaryText(text) {
+            function escapeBundleSummaryHtml(s) {
+                return String(s).replace(/[&<>"]/g, function (c) {
+                    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+                });
+            }
+
+            function renderBundleSummary(manifest, masterManifest) {
+                var data = buildBundleSummaryData(manifest, masterManifest);
+                var metrics = document.getElementById("bundle-summary-metrics");
+                var empty = document.getElementById("bundle-summary-empty");
+                var tableWrap = document.getElementById("bundle-summary-table-wrap");
+                var rowsEl = document.getElementById("bundle-summary-rows");
+                if (!metrics || !empty || !tableWrap || !rowsEl) return;
+
+                var netClass = data.stats.netDelta > 0 ? "increase" : data.stats.netDelta < 0 ? "decrease" : "";
+                var netText = data.hasMaster ? (data.stats.netDelta > 0 ? "+" : "") + data.stats.netDelta.toFixed(1) + " KB" : "\u2014";
+                metrics.innerHTML =
+                    '<div class="bundle-summary-metric"><div class="bundle-summary-metric-label">Changed</div><div class="bundle-summary-metric-value">' +
+                    data.stats.changed +
+                    '</div><div class="bundle-summary-metric-note">non-zero or new scenes</div></div>' +
+                    '<div class="bundle-summary-metric"><div class="bundle-summary-metric-label">Increases</div><div class="bundle-summary-metric-value bundle-summary-delta increase">' +
+                    data.stats.increases +
+                    '</div><div class="bundle-summary-metric-note">existing scenes larger</div></div>' +
+                    '<div class="bundle-summary-metric"><div class="bundle-summary-metric-label">Decreases</div><div class="bundle-summary-metric-value bundle-summary-delta decrease">' +
+                    data.stats.decreases +
+                    '</div><div class="bundle-summary-metric-note">existing scenes smaller</div></div>' +
+                    '<div class="bundle-summary-metric"><div class="bundle-summary-metric-label">Net existing delta</div><div class="bundle-summary-metric-value bundle-summary-delta ' +
+                    netClass +
+                    '">' +
+                    netText +
+                    '</div><div class="bundle-summary-metric-note">' +
+                    data.stats.comparableScenes +
+                    " scenes vs master</div></div>" +
+                    '<div class="bundle-summary-metric"><div class="bundle-summary-metric-label">New scene bytes</div><div class="bundle-summary-metric-value bundle-summary-delta new">' +
+                    data.stats.newRawKB.toFixed(1) +
+                    ' KB</div><div class="bundle-summary-metric-note">' +
+                    data.stats.newScenes +
+                    " new scene" +
+                    (data.stats.newScenes === 1 ? "" : "s") +
+                    "</div></div>";
+
+                if (data.rows.length === 0) {
+                    empty.hidden = false;
+                    empty.textContent = data.hasMaster ? "No bundle size changes vs master." : "No master bundle baseline loaded yet.";
+                    tableWrap.hidden = true;
+                    rowsEl.innerHTML = "";
+                    return;
+                }
+
+                empty.hidden = true;
+                tableWrap.hidden = false;
+                rowsEl.innerHTML = data.rows
+                    .map(function (row) {
+                        return (
+                            "<tr><td><span class=\"bundle-summary-scene\">" +
+                            escapeBundleSummaryHtml(row.scene) +
+                            '</span><span class="bundle-summary-name">' +
+                            escapeBundleSummaryHtml(row.name || "") +
+                            '</span></td><td><span class="bundle-summary-badge ' +
+                            row.change +
+                            '">' +
+                            escapeBundleSummaryHtml(row.change) +
+                            '</span></td><td class="bundle-summary-delta ' +
+                            row.change +
+                            '">' +
+                            escapeBundleSummaryHtml(row.deltaText) +
+                            "</td><td>" +
+                            escapeBundleSummaryHtml(row.currentText) +
+                            "</td><td>" +
+                            escapeBundleSummaryHtml(row.masterText) +
+                            "</td></tr>"
+                        );
+                    })
+                    .join("");
+            }
+
+            function updateBundleSummary(manifest, masterManifest) {
+                var text = buildBundleSummaryText(manifest, masterManifest);
                 bundleSummaryText = text;
                 var textarea = document.getElementById("bundle-summary-text");
                 if (textarea) textarea.value = text;
+                renderBundleSummary(manifest, masterManifest);
             }
 
             function toggleBundleSummary() {
                 var panel = document.getElementById("bundle-summary-panel");
                 var btn = document.getElementById("bundle-summary-btn");
-                var textarea = document.getElementById("bundle-summary-text");
-                if (!panel || !textarea) return;
+                if (!panel) return;
                 panel.hidden = !panel.hidden;
                 if (btn) btn.classList.toggle("active-toggle", !panel.hidden);
-                textarea.value = bundleSummaryText || "No bundle manifest loaded yet.";
-                if (!panel.hidden) {
-                    textarea.focus();
-                    textarea.select();
-                }
             }
 
             function copyBundleSummary() {
                 var textarea = document.getElementById("bundle-summary-text");
                 var btn = document.getElementById("bundle-summary-copy-btn");
-                if (!textarea) return;
-                textarea.value = bundleSummaryText || textarea.value;
-                textarea.focus();
-                textarea.select();
+                var text = bundleSummaryText || "No bundle manifest loaded yet.";
+                if (textarea) textarea.value = text;
                 var markCopied = function () {
                     if (!btn) return;
                     var old = btn.textContent;
@@ -4240,12 +4484,20 @@
                     }, 1200);
                 };
                 if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(textarea.value).then(markCopied).catch(function () {
-                        document.execCommand("copy");
+                    navigator.clipboard.writeText(text).then(markCopied).catch(function () {
+                        if (textarea) {
+                            textarea.focus();
+                            textarea.select();
+                            document.execCommand("copy");
+                        }
                         markCopied();
                     });
                 } else {
-                    document.execCommand("copy");
+                    if (textarea) {
+                        textarea.focus();
+                        textarea.select();
+                        document.execCommand("copy");
+                    }
                     markCopied();
                 }
             }
@@ -4261,7 +4513,7 @@
                         var manifest = r[0];
                         var masterManifest = r[1];
                         setBundleMasterStatus(masterManifest);
-                        updateBundleSummaryText(buildBundleSummaryText(manifest, masterManifest));
+                        updateBundleSummary(manifest, masterManifest);
                         var bjsCount = 0;
                         for (var scene in manifest) {
                             if (!manifest.hasOwnProperty(scene)) continue;
