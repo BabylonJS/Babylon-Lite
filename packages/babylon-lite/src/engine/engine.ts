@@ -162,17 +162,26 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         _cbs: [],
     };
 
+    resizeEngine(engine);
+
     return engine;
 }
 
 /** Resize the swapchain backing-store to match the canvas client size. When the size
- *  changes, reconfigures the swapchain and asks every registered rendering context
- *  to rebuild its canvas-sized GPU resources via the optional `_resize` hook. */
+ *  changes, asks every registered rendering context to rebuild its canvas-sized GPU
+ *  resources via the optional `_resize` hook. If the canvas has not been laid out yet,
+ *  preserves its explicit backing-store size. */
 export function resizeEngine(engine: EngineContext): void {
     const eng = engine as EngineContextInternal;
     const canvas = eng.canvas;
-    const w = (canvas.clientWidth * devicePixelRatio) | 0;
-    const h = (canvas.clientHeight * devicePixelRatio) | 0;
+    const clientWidth = canvas.clientWidth;
+    const clientHeight = canvas.clientHeight;
+    if (!(clientWidth > 0 && clientHeight > 0)) {
+        return;
+    }
+    const scale = globalThis.devicePixelRatio || 1;
+    const w = (clientWidth * scale) | 0;
+    const h = (clientHeight * scale) | 0;
     if (w === canvas.width && h === canvas.height) {
         return;
     }

@@ -29,6 +29,21 @@ const MASTER_MANIFEST_PATH = resolve(__dirname, "../../lab/public/bundle/master-
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
 const SCENES = allScenes.filter((s) => s.maxRawKB != null);
 
+interface BundleInfoModule {
+    id: string;
+}
+
+interface BundleInfoChunk {
+    file: string;
+    modules: BundleInfoModule[];
+}
+
+function getRuntimeModuleIds(sceneKey: string, runtimeFiles: readonly string[]): string[] {
+    const info = JSON.parse(readFileSync(resolve(BUNDLE_INFO_DIR, `${sceneKey}.json`), "utf-8")) as { chunks: BundleInfoChunk[] };
+    const loaded = new Set(runtimeFiles);
+    return info.chunks.filter((chunk) => loaded.has(chunk.file)).flatMap((chunk) => chunk.modules.map((module) => module.id.replace(/\\/g, "/")));
+}
+
 interface BundleManifestEntry {
     rawKB?: number;
 }
@@ -106,13 +121,51 @@ for (const scene of SCENES) {
             console.log(d);
         }
 
+        const runtimeFiles = jsPayloads.map((p) => p.file);
+        const runtimeModules = getRuntimeModuleIds(`scene${scene.id}`, runtimeFiles);
+
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 
-        // Pure-2D ceiling: scenes 50/51 must NOT pull any scene/* code.
+        // Pure-2D ceiling: scenes 50/51 must NOT pull any scene/* code, the depth-hosted
+        // sprite renderable wrapper, or scene-helpers (scene BGL etc.). Tree-shaking
+        // currently strips these from the pure-2D path; a future edit that accidentally
+        // pulls them in (e.g. a top-level reference to getSceneBindGroupLayout in
+        // sprite-pipeline.ts) must trip this guard rather than silently regressing.
         if (scene.slug === "scene50-sprite-grid" || scene.slug === "scene51-sprite-grid") {
-            const forbidden = /scene-core|scene-camera|scene-node|asset-container/;
-            const offenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => forbidden.test(f));
-            expect(offenders, `pure-2D ${scene.slug} must not load scene/* chunks; found: ${offenders.join(", ")}`).toEqual([]);
+            const forbiddenChunks = /scene-core|scene-camera|scene-node|asset-container|scene-helpers|sprite-renderable/;
+            const chunkOffenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => forbiddenChunks.test(f));
+            expect(chunkOffenders, `pure-2D ${scene.slug} must not load scene/* chunks; found: ${chunkOffenders.join(", ")}`).toEqual([]);
+            const forbiddenModules = /\/(scene\/scene-core|scene\/scene-camera|scene\/scene-node|asset-container|render\/scene-helpers|sprite\/sprite-renderable)\.ts$/;
+            const moduleOffenders = runtimeModules.filter((id) => forbiddenModules.test(id));
+            expect(moduleOffenders, `pure-2D ${scene.slug} must not load scene/* modules; found: ${moduleOffenders.join(", ")}`).toEqual([]);
+        }
+
+        // Scene 52 — HUD on 3D — uses SpriteRenderer for the HUD overlay; the
+        // depth-hosted Renderable wrapper (sprite-renderable.js) must NOT be
+        // pulled in. If it is, scene52 accidentally used the depth-hosted
+        // addToScene path instead of the HUD SpriteRenderer path.
+        if (scene.slug === "scene52-hud-on-3d") {
+            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-renderable\.ts$/.test(id));
+            expect(offenders, `scene52 HUD must not load depth-hosted sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        // Scene 53 — depth-hosted sprites — MUST load sprite-renderable.js
+        // (proves the addToScene sprite admission path is active) and MUST load
+        // scene-core (it is a real 3D scene, not pure-2D).
+        if (scene.slug === "scene53-depth-hosted-sprites") {
+            expect(
+                runtimeModules.some((id) => /\/sprite\/sprite-renderable\.ts$/.test(id)),
+                `scene53 depth-hosted MUST include sprite-renderable.ts; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+        }
+
+        // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
+        // List excludes the sprite-using scenes (50, 51, 52, 53). 60-series are
+        // NME demos with no sprites; 1-40 are core 3D.
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53]);
+        if (!SPRITE_USING_IDS.has(scene.id)) {
+            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-(2d|pipeline|renderer|renderable)\.ts$/.test(id));
+            expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
     });
 }

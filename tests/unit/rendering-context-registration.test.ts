@@ -8,7 +8,10 @@ import {
     type EngineContextInternal,
     type RenderingContext,
 } from "../../packages/babylon-lite/src/engine/engine";
+import { addTaskAtStart } from "../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
+import type { Task } from "../../packages/babylon-lite/src/frame-graph/task";
 import { createSceneContext, disposeScene, registerScene, unregisterScene } from "../../packages/babylon-lite/src/scene/scene";
+import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
 
 const gpuGlobals = globalThis as typeof globalThis & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -43,17 +46,14 @@ function makeMockEngine(): EngineContext {
         device,
         context: {} as GPUCanvasContext,
         format: "bgra8unorm",
-        _targets: {
-            msaaTexture: {} as GPUTexture,
-            msaaView: {} as GPUTextureView,
-            depthTexture: {} as GPUTexture,
-            depthView: {} as GPUTextureView,
-            width: 800,
-            height: 600,
-        } as EngineContextInternal["_targets"],
+        alphaMode: "opaque",
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
+        _currentEncoder: {} as GPUCommandEncoder,
+        _swapchainView: {} as GPUTextureView,
+        _currentDelta: 0,
+        _cbs: [],
     } as EngineContextInternal;
 }
 
@@ -61,8 +61,8 @@ function makeRenderingContext(): RenderingContext {
     return {
         _drawCallsPre: 0,
         clearColor: { r: 0, g: 0, b: 0, a: 1 },
-        _update(encoder: GPUCommandEncoder): GPUCommandEncoder {
-            return encoder;
+        _update(): void {
+            return;
         },
         _record(): number {
             return 0;
@@ -114,5 +114,30 @@ describe("registerScene / unregisterScene", () => {
         disposeScene(scene);
 
         expect(list).toEqual([]);
+    });
+
+    it("records frame-graph tasks added before scene registration", async () => {
+        const engine = makeMockEngine() as EngineContextInternal;
+        const scene = createSceneContext(engine) as SceneContextInternal;
+        let recorded = false;
+        const task: Task = {
+            name: "pre-scene-task",
+            engine,
+            scene,
+            record(): void {
+                recorded = true;
+            },
+            execute(): number {
+                return 1;
+            },
+            dispose(): void {
+                return;
+            },
+        };
+
+        addTaskAtStart(scene, task);
+        await registerScene(engine, scene);
+
+        expect(recorded).toBe(true);
     });
 });

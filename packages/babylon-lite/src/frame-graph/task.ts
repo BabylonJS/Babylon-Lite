@@ -10,7 +10,7 @@
  * Lifecycle:
  *   - Engine and scene are captured at task creation and exposed as
  *     `engine` / `scene`.
- *   - `record()` is called when the frame graph is built (via
+ *   - `record()` is called synchronously when the frame graph is built (via
  *     `FrameGraph.build()`). Tasks use this to allocate GPU resources, build
  *     their render-pass descriptor, and finalize anything that needs the
  *     final canvas / target size.
@@ -29,8 +29,8 @@ export interface Task {
     readonly engine: EngineContextInternal;
     readonly scene: SceneContextInternal;
 
-    /** Called once when the frame graph is built. May be async. */
-    record(): Promise<void> | void;
+    /** Called once when the frame graph is built. Must complete synchronously. */
+    record(): void;
 
     /** Called once per frame. Reads the current encoder via `engine._currentEncoder`.
      *  Returns the number of GPU draw calls issued. */

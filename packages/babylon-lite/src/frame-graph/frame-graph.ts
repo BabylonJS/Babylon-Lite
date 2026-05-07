@@ -10,7 +10,7 @@
  *   1. createFrameGraph(engine, scene)      → empty graph
  *   2. addTask{,AtStart,Before}             → register tasks
  *      (createSceneContext registers a default scene-render task)
- *   3. await fg.build()                     → record every task
+ *   3. fg.build()                           → record every task
  *      (allocate render-target textures, build pass descriptors)
  *   4. fg.execute()                         → drain every task into the
  *      current command encoder (called from scene._record)
@@ -32,7 +32,7 @@ export interface FrameGraph {
     _scene: SceneContextInternal;
 
     /** Build (or rebuild) every task in execute order. */
-    build(): Promise<void>;
+    build(): void;
 
     /** Execute every task. Each task reads the current encoder via
      *  `engine._currentEncoder`. Returns total draw calls.
@@ -52,9 +52,9 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
         _engine: eng,
         _scene: scene,
 
-        async build(): Promise<void> {
+        build(): void {
             for (let i = 0; i < fg._tasks.length; i++) {
-                await fg._tasks[i]!.record();
+                fg._tasks[i]!.record();
             }
             fg._ready = true;
         },

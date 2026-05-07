@@ -382,6 +382,24 @@
         "skipPerf": true
     },
     {
+        "id": 52,
+        "slug": "scene52-hud-on-3d",
+        "name": "Scene 52 — HUD on 3D",
+        "maxMad": 0.02,
+        "maxRawKB": 65,
+        "description": "3D scene (sphere + StandardMaterial under a directional light) with a pure-2D HUD sprite overlay rendered AFTER the 3D pass via createSpriteRenderer + registerSpriteRenderer. HUD layer uses depth: \"none\". BJS reference renders the same 3D scene plus a pixel-space SpriteRenderer HUD for parity.",
+        "tags": ["sprites", "2d", "hud"]
+    },
+    {
+        "id": 53,
+        "slug": "scene53-depth-hosted-sprites",
+        "name": "Scene 53 — Depth-Hosted Sprites Mixed With 3D",
+        "maxMad": 0.02,
+        "maxRawKB": 65,
+        "description": "Two boxes at different camera-distances + a Sprite2DLayer added via addToScene with depth: \"test-write\" and per-instance z. The front box occludes the sprite; the sprite occludes the back box. BJS reference uses SpriteManager sprites projected to the same pixel centers and depths for parity.",
+        "tags": ["sprites", "2d", "depth"]
+    },
+    {
         "id": 60,
         "slug": "scene60-nme-flat",
         "name": "Scene 60 — NME Flat Colour",

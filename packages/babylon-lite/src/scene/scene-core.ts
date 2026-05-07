@@ -190,10 +190,8 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         },
         _resize(): void {
             // Canvas backing-store changed: rebuild the frame graph so canvas-sized
-            // render targets get re-allocated at the new pixel size. Build is async
-            // (a task may have async work) but render-pass-task records synchronously,
-            // so the rebuild typically finishes before the next frame.
-            void ctx._frameGraph.build();
+            // render targets get re-allocated at the new pixel size before the next record.
+            ctx._frameGraph.build();
         },
     };
 
@@ -223,7 +221,6 @@ export function createSceneContext(engine: EngineContext): SceneContext {
             ctx
         )
     );
-    void fg.build();
     ctx._disposables.push(() => fg.dispose());
     return ctx;
 }
@@ -233,12 +230,42 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
     (scene as SceneContextInternal)._beforeRender.unshift(cb);
 }
 
+/** Register a callback to run when `disposeScene` is called. Used to tie
+ *  user-owned GPU resources (e.g. a `SpriteRenderer`) to the scene's lifetime. */
+export function onSceneDispose(scene: SceneContext, cb: () => void): void {
+    (scene as SceneContextInternal)._disposables.push(cb);
+}
+
 /** Get the scene's frame graph. Always non-null — created in `createSceneContext`. */
 export function getFrameGraph(scene: SceneContext): FrameGraph {
     return (scene as SceneContextInternal)._frameGraph;
 }
 
-/** Add an entity (mesh, light, camera, transform node, shadow generator, or asset container) to the scene. */
+export interface DeferredSceneRenderables {
+    renderables: readonly Renderable[];
+    dispose?: () => void;
+}
+
+/** @internal Register optional scene-hosted render work without teaching `addToScene` about the feature. */
+export function addDeferredSceneRenderables(
+    scene: SceneContext,
+    build: (engine: EngineContextInternal, scene: SceneContextInternal) => DeferredSceneRenderables | Promise<DeferredSceneRenderables>
+): void {
+    const ctx = scene as SceneContextInternal;
+    ctx._deferredBuilders.push(async () => {
+        const built = await build(ctx.engine as EngineContextInternal, ctx);
+        ctx._renderables.push(...built.renderables);
+        if (built.dispose) {
+            ctx._disposables.push(built.dispose);
+        }
+    });
+}
+
+/**
+ * Add an entity (mesh, light, camera, transform node, shadow generator, or asset container)
+ * to the scene. Optional scene-hosted systems such as depth-hosted sprites expose their own
+ * opt-in add functions so mesh-only scenes do not pay feature-specific routing bytes here.
+ */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     const ctx = scene as SceneContextInternal;
     // AssetContainer from loadGltf / loadBabylon — process each field present
@@ -356,6 +383,7 @@ export async function registerScene(engine: EngineContext, scene: SceneContext):
     }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
+    ctx._frameGraph.build();
     registerRenderingContext(engine, ctx);
 }
 

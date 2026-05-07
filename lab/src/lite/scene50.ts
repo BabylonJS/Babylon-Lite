@@ -12,11 +12,7 @@ async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
-    // MSAA 1 by default (sprite edges come from texture alpha, not geometry).
-    // Parity tests pass `?msaa=4` to match the BJS oracle's default 4x MSAA.
-    const msaaParam = new URLSearchParams(window.location.search).get("msaa");
-    const msaaSamples: 1 | 4 = msaaParam === "4" ? 4 : 1;
-    const engine = await createEngine(canvas, { msaaSamples });
+    const engine = await createEngine(canvas);
     // Default sprite atlas configuration: straight-alpha bits (PNG-on-disk
     // convention) rendered with the `"alpha"` blend pipeline. This matches
     // BJS's default `SpriteRenderer.blendMode = ALPHA_COMBINE` codepath, so

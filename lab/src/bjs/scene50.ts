@@ -33,7 +33,7 @@ import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atla
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: false });
+    const engine = new WebGPUEngine(canvas, { antialias: false, adaptToDeviceRatio: false });
     await engine.initAsync();
 
     const clearColor = new Color4(0.07, 0.08, 0.12, 1);

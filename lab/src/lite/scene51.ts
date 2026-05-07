@@ -25,8 +25,8 @@ async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
-    // MSAA 1 by default (sprite edges come from texture alpha, not geometry).
-    // Parity tests pass `?msaa=4` to match the BJS oracle's default 4x MSAA.
+    // The SpriteRenderer records a direct sampleCount=1 pass; this engine MSAA
+    // query hook is retained for parity harness compatibility.
     const msaaParam = new URLSearchParams(window.location.search).get("msaa");
     const msaaSamples: 1 | 4 = msaaParam === "4" ? 4 : 1;
     const engine = await createEngine(canvas, { msaaSamples });

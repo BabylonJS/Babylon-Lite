@@ -202,7 +202,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 const cx = pkt.mesh.position?.x ?? wm[12]!;
                 const cy = pkt.mesh.position?.y ?? wm[13]!;
                 const cz = pkt.mesh.position?.z ?? wm[14]!;
-                const updateUBOs = (): void => {
+                const update = (): void => {
                     updatePacketUBO(pkt);
                     updateNodeUBO();
                     // Update world center for sorting.
@@ -219,14 +219,14 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                     mesh: pkt.mesh,
                     _worldCenter: [cx, cy, cz],
                     bind() {
-                        return { renderable: rTrans, pipeline: compile.pipeline, updateUBOs, draw };
+                        return { renderable: rTrans, pipeline: compile.pipeline, update, draw };
                     },
                 };
                 renderables.push(rTrans);
             }
         } else {
             // Opaque: batch all meshes into one renderable for state efficiency.
-            const updateUBOs = (): void => {
+            const update = (): void => {
                 for (const pkt of packets) {
                     updatePacketUBO(pkt);
                 }
@@ -244,7 +244,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 order: 100,
                 isTransparent: false,
                 bind() {
-                    return { renderable: rOpaque, pipeline: compile.pipeline, updateUBOs, draw };
+                    return { renderable: rOpaque, pipeline: compile.pipeline, update, draw };
                 },
             };
             renderables.push(rOpaque);

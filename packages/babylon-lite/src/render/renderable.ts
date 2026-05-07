@@ -10,6 +10,12 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 
+/** Dynamic per-pass data available before a binding draws. */
+export interface DrawUpdateContext {
+    readonly targetWidth: number;
+    readonly targetHeight: number;
+}
+
 /**
  * A per-pass draw binding produced by `Renderable.bind(engine, target)`.
  *
@@ -29,10 +35,10 @@ export interface DrawBinding {
      *  it changed. The closure handles per-mesh / per-material bind groups,
      *  vertex/index buffers, and drawIndexed. Returns the number of GPU draw calls. */
     draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext): number;
-    /** Update dirty UBOs (world matrix, material UBO) before draw. Called once per frame
-     *  per binding. Per-mesh state (e.g. world matrix) shared across bindings should be
+    /** Update dirty per-pass state before draw. Called once per frame per binding.
+     *  Per-mesh state (e.g. world matrix) shared across bindings should be
      *  version-guarded to avoid redundant writes. */
-    updateUBOs?(): void;
+    update?(context: DrawUpdateContext): void;
     /** Scratch: squared distance from camera for transparent sorting (per-pass). */
     _sortDistance?: number;
 }

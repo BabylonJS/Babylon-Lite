@@ -4,7 +4,17 @@
 // ─── Core ────────────────────────────────────────────────────────────
 export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
 export type { EngineContext, EngineOptions } from "./engine/engine.js";
-export { createSceneContext, createDefaultCamera, removeFromScene, onBeforeRender, addToScene, disposeScene, registerScene, unregisterScene } from "./scene/scene.js";
+export {
+    createSceneContext,
+    createDefaultCamera,
+    removeFromScene,
+    onBeforeRender,
+    onSceneDispose,
+    addToScene,
+    disposeScene,
+    registerScene,
+    unregisterScene,
+} from "./scene/scene.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
@@ -164,7 +174,7 @@ export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 
 // ─── Low-level (for advanced/custom rendering) ──────────────────────
 export type { EnvironmentTextures } from "./loader-env/load-env.js";
-export type { Renderable, PrePassRenderable, SceneUniformUpdater, DrawBinding } from "./render/renderable.js";
+export type { Renderable, PrePassRenderable, SceneUniformUpdater, DrawBinding, DrawUpdateContext } from "./render/renderable.js";
 export type { RenderTargetSignature } from "./engine/render-target.js";
 
 // ─── Sprites (2D) ────────────────────────────────────────────────────
@@ -172,8 +182,16 @@ export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAt
 export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export { createSprite2DLayer, addSprite2DIndex, updateSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex } from "./sprite/sprite-2d.js";
+export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
 export type { SpriteRenderer, SpriteRendererOptions } from "./sprite/sprite-renderer.js";
-export { createSpriteRenderer, registerSpriteRenderer, unregisterSpriteRenderer, disposeSpriteRenderer } from "./sprite/sprite-renderer.js";
+export {
+    createSpriteRenderer,
+    addSpriteRendererLayer,
+    removeSpriteRendererLayer,
+    registerSpriteRenderer,
+    unregisterSpriteRenderer,
+    disposeSpriteRenderer,
+} from "./sprite/sprite-renderer.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {

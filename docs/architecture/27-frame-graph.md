@@ -41,7 +41,7 @@ export interface FrameGraph {
     _ready: boolean;
     _engine: EngineContextInternal;
     _scene: SceneContextInternal;
-    build(): Promise<void>;
+    build(): void;
     execute(): number;
     dispose(): void;
 }
@@ -56,7 +56,7 @@ export interface Task {
     readonly name: string;
     readonly engine: EngineContextInternal;
     readonly scene: SceneContextInternal;
-    record(): Promise<void> | void;
+    record(): void;
     execute(): number;
     dispose(): void;
 }
@@ -64,11 +64,11 @@ export interface Task {
 
 Task lifecycle:
 
-| Method      | Called by                             | Purpose                                                                 |
-| ----------- | ------------------------------------- | ----------------------------------------------------------------------- |
-| `record()`  | `FrameGraph.build()`                  | Allocate/rebuild GPU resources and finalize descriptors. May be async.  |
-| `execute()` | `FrameGraph.execute()` once per frame | Encode GPU work into `engine._currentEncoder`. Returns draw-call count. |
-| `dispose()` | `FrameGraph.dispose()`                | Release task-owned GPU resources.                                       |
+| Method      | Called by                             | Purpose                                                                               |
+| ----------- | ------------------------------------- | ------------------------------------------------------------------------------------- |
+| `record()`  | `FrameGraph.build()`                  | Allocate/rebuild GPU resources and finalize descriptors. Must complete synchronously. |
+| `execute()` | `FrameGraph.execute()` once per frame | Encode GPU work into `engine._currentEncoder`. Returns draw-call count.               |
+| `dispose()` | `FrameGraph.dispose()`                | Release task-owned GPU resources.                                                     |
 
 At the time of this PR, `RenderPassTask` is the only implementation of `Task`. The interface exists so future frame-graph work can add other ordered task types without changing `FrameGraph` itself, for example compute tasks, copy/resolve tasks, post-process tasks, or resource-transition/helper tasks.
 
@@ -206,6 +206,13 @@ At record/re-sync time, `RenderPassTask` converts renderables into `DrawBinding`
 const binding = renderable.bind(engine, targetSignature);
 ```
 
+During `record()`, the task also builds/refreshes its `RenderTarget` and stores an update context from the resolved dimensions:
+
+```typescript
+task._updateContext.targetWidth = rt._width;
+task._updateContext.targetHeight = rt._height;
+```
+
 Bindings are partitioned into:
 
 | Bucket       | Renderable flags                    | Execution                                                      |
@@ -217,6 +224,8 @@ Bindings are partitioned into:
 Opaque and transmissive buckets currently sort by `renderable.order`. Transparent is sorted by squared distance from the active pass camera and must not be pipeline-sorted.
 
 `DrawBinding.pipeline` is mandatory. `RenderPassTask` owns `setPipeline()` and deduplicates consecutive bindings with the same pipeline before calling the binding's `draw()` closure.
+
+Before opening the pass each frame, `RenderPassTask` calls `binding.update?.(_updateContext)` for opaque, transmissive, and transparent bindings. This refreshes dirty per-binding UBOs with the pass target dimensions while allowing opaque render bundles to stay cached.
 
 ## Per-Pass Scene UBO
 
@@ -317,12 +326,12 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 
 ## File Manifest
 
-| File                                     | Purpose                                                                |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| `src/frame-graph/task.ts`                | Polymorphic task interface                                             |
-| `src/frame-graph/frame-graph.ts`         | Ordered task list and build/execute/dispose lifecycle                  |
-| `src/frame-graph/frame-graph-actions.ts` | Public task insertion helpers                                          |
-| `src/frame-graph/render-pass-task.ts`    | Render-pass task, per-pass scene UBO, target binding, draw buckets     |
-| `src/engine/render-target.ts`            | Render target descriptors, allocation, disposal, target signatures     |
-| `src/texture/rtt.ts`                     | Eager render-target texture helper                                     |
-| `src/render/renderable.ts`               | `Renderable` and `DrawBinding` contracts consumed by render-pass tasks |
+| File                                     | Purpose                                                                                      |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `src/frame-graph/task.ts`                | Polymorphic task interface                                                                   |
+| `src/frame-graph/frame-graph.ts`         | Ordered task list and build/execute/dispose lifecycle                                        |
+| `src/frame-graph/frame-graph-actions.ts` | Public task insertion helpers                                                                |
+| `src/frame-graph/render-pass-task.ts`    | Render-pass task, per-pass scene UBO, target binding, draw buckets                           |
+| `src/engine/render-target.ts`            | Render target descriptors, allocation, disposal, target signatures                           |
+| `src/texture/rtt.ts`                     | Eager render-target texture helper                                                           |
+| `src/render/renderable.ts`               | `Renderable`, `DrawBinding`, and `DrawUpdateContext` contracts consumed by render-pass tasks |

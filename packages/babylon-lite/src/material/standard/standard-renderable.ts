@@ -27,7 +27,7 @@ import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
- *  every Standard renderable since `updateUBOs()` is single-threaded per frame. */
+ *  every Standard renderable since binding updates are single-threaded per frame. */
 const _stdMatScratch = new Float32Array(24);
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
@@ -157,7 +157,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
-        const updateUBOs = (): void => {
+        const update = (): void => {
             if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
                 meshUboData.set(mesh.worldMatrix, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
@@ -217,7 +217,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 return {
                     renderable: r,
                     pipeline: getOrCreateStandardPipeline(eng as EngineContextInternal, sig, bindings),
-                    updateUBOs,
+                    update,
                     draw,
                 };
             },

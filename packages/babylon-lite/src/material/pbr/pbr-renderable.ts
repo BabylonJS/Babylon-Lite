@@ -334,7 +334,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
-        const updateUBOs = (): void => {
+        const update = (): void => {
             if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
                 meshUboData.set(mesh.worldMatrix, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
@@ -411,7 +411,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 return {
                     renderable: r,
                     pipeline: getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings),
-                    updateUBOs,
+                    update,
                     draw,
                 };
             },

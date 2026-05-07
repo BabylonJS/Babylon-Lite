@@ -129,7 +129,11 @@ function mangleInlineWgsl(code: string): string {
     for (const [from, to] of replacements) {
         out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
     }
-    return out.replace(/\b0\.0\b/g, "0.").replace(/\b1\.0\b/g, "1.").replace(/\b0\.0000001\b/g, "1e-7").replace(/\b0\.0005\b/g, "5e-4");
+    return out
+        .replace(/\b0\.0\b/g, "0.")
+        .replace(/\b1\.0\b/g, "1.")
+        .replace(/\b0\.0000001\b/g, "1e-7")
+        .replace(/\b0\.0005\b/g, "5e-4");
 }
 
 /** Strip spaces around WGSL operators inside template literal content. */
@@ -512,10 +516,7 @@ const exportKindCache = new Map<string, Record<string, BundleInfoExport["kind"]>
  * declarations. Also follows same-package `export { X } from "./path.js"`
  * re-exports so chips inherit their original kind.
  */
-function extractExportKinds(
-    absPath: string,
-    visited: Set<string> = new Set(),
-): Record<string, BundleInfoExport["kind"]> {
+function extractExportKinds(absPath: string, visited: Set<string> = new Set()): Record<string, BundleInfoExport["kind"]> {
     const cached = exportKindCache.get(absPath);
     if (cached) return cached;
     const map: Record<string, BundleInfoExport["kind"]> = {};
@@ -534,10 +535,7 @@ function extractExportKinds(
     for (const m of src.matchAll(/^\s*export\s+(?:const|let|var)\s+(\w+)(?:\s*:[^=\r\n]+)?\s*=\s*([^\r\n]{0,200})/gm)) {
         const name = m[1]!;
         const rhs = m[2]!.trimStart();
-        const looksLikeFn =
-            /^(async\s+)?function\b/.test(rhs) ||
-            /^(async\s+)?\([^)]*\)\s*(?::[^=]+)?=>/.test(rhs) ||
-            /^(async\s+)?[A-Za-z_$][\w$]*\s*=>/.test(rhs);
+        const looksLikeFn = /^(async\s+)?function\b/.test(rhs) || /^(async\s+)?\([^)]*\)\s*(?::[^=]+)?=>/.test(rhs) || /^(async\s+)?[A-Za-z_$][\w$]*\s*=>/.test(rhs);
         map[name] = looksLikeFn ? "function" : "const";
     }
     // Parse imports so we can resolve bare `export { X }` lists below.

@@ -1,8 +1,8 @@
 // Scene 110 (BJS reference): RTT with material override.
 //
-// Mirrors lab/src/lite/scene110.ts — sphere A and box B in main; an offscreen
-// 512×512 RTT renders A (with a green override material) from a different
-// camera; the RTT color is wired as B's diffuseTexture.
+// Mirrors lab/src/lite/scene110.ts: sphere A and box B in main; an offscreen
+// 512x512 RTT renders A with a green override material from a different camera;
+// the RTT color is wired as B's diffuseTexture.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
@@ -60,14 +60,12 @@ import { Scene } from "@babylonjs/core/scene";
     matB.diffuseTexture = rtt;
     boxB.material = matB;
 
-    const eng = engine as any;
+    const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };
     scene.onBeforeRenderObservable.add(() => {
-        if (eng._drawCalls) {
-            eng._drawCalls.fetchNewFrame();
-        }
+        eng._drawCalls?.fetchNewFrame();
     });
     scene.onAfterRenderObservable.add(() => {
-        canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);
+        canvas.dataset.drawCalls = String(eng._drawCalls?.current ?? 0);
     });
 
     await scene.whenReadyAsync();

@@ -262,6 +262,10 @@
                 background: #14333a;
                 color: #56d4dd;
             }
+            .badge-premultiplied {
+                background: #2e2a45;
+                color: #c8b6ff;
+            }
             .badge-bjs {
                 background: #3d2200;
                 color: #d29922;
@@ -1707,7 +1711,9 @@
                 👁 Show Hidden <span id="hidden-count" style="font-size: 0.65rem; opacity: 0.7"></span>
             </button>
             <button class="docs-toggle" id="hide-all-toggle" onclick="hideAllScenes()" style="margin-left: 0.5rem" title="Hide every scene card" disabled>🙈 Hide All</button>
-            <button class="docs-toggle" id="unhide-all-toggle" onclick="unhideAllScenes()" style="margin-left: 0.5rem" title="Restore every hidden scene" disabled>↩ Unhide All</button>
+            <button class="docs-toggle" id="unhide-all-toggle" onclick="unhideAllScenes()" style="margin-left: 0.5rem" title="Restore every hidden scene" disabled>
+                ↩ Unhide All
+            </button>
         </header>
 
         <div id="docs-panel" class="docs-panel">
@@ -3250,7 +3256,10 @@
         </div>
 
         <div id="panel-perfreg" class="tab-panel">
-            <div class="tab-hint">💡 Current Babylon-Lite vs upstream-Lite baseline (per-scene RAF frame time). Run <code>pnpm test:perf-regression</code> to refresh. <span id="perfreg-manifest-status" style="color: #3fb950"></span></div>
+            <div class="tab-hint">
+                💡 Current Babylon-Lite vs upstream-Lite baseline (per-scene RAF frame time). Run <code>pnpm test:perf-regression</code> to refresh.
+                <span id="perfreg-manifest-status" style="color: #3fb950"></span>
+            </div>
             <div class="perf-toolbar">
                 <div style="flex: 1"></div>
                 <button class="btn perfreg-sort-btn active" onclick="sortPerfRegGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
@@ -3281,6 +3290,7 @@
                 env: { label: "HDR", cls: "badge-env" },
                 sprites: { label: "Sprites", cls: "badge-sprites" },
                 "2d": { label: "2D", cls: "badge-2d" },
+                premultiplied: { label: "Premult", cls: "badge-premultiplied" },
             };
 
             function renderBadges(tags) {
@@ -4369,9 +4379,9 @@
                 return sign + pct.toFixed(1) + "%";
             }
             function deltaColor(pct, limit) {
-                if (pct > limit) return "#f85149";   // red
-                if (pct > 0)     return "#d29922";   // amber
-                return "#3fb950";                    // green
+                if (pct > limit) return "#f85149"; // red
+                if (pct > 0) return "#d29922"; // amber
+                return "#3fb950"; // green
             }
             function perfRegVerdict(e) {
                 return e.verdict || (e.avgDeltaPct > 0 ? "slower" : "faster");
@@ -4397,15 +4407,21 @@
                 var sortMode = (document.querySelector(".perfreg-sort-btn.active") || {}).dataset;
                 sortMode = sortMode ? sortMode.sort : "num";
                 if (sortMode === "worst") {
-                    keys.sort(function(a,b){ return manifest.scenes[b].avgDeltaPct - manifest.scenes[a].avgDeltaPct; });
+                    keys.sort(function (a, b) {
+                        return manifest.scenes[b].avgDeltaPct - manifest.scenes[a].avgDeltaPct;
+                    });
                 } else if (sortMode === "best") {
-                    keys.sort(function(a,b){ return manifest.scenes[a].avgDeltaPct - manifest.scenes[b].avgDeltaPct; });
+                    keys.sort(function (a, b) {
+                        return manifest.scenes[a].avgDeltaPct - manifest.scenes[b].avgDeltaPct;
+                    });
                 } else {
-                    keys.sort(function(a,b){ return manifest.scenes[a].id - manifest.scenes[b].id; });
+                    keys.sort(function (a, b) {
+                        return manifest.scenes[a].id - manifest.scenes[b].id;
+                    });
                 }
 
                 var shown = 0;
-                keys.forEach(function(key){
+                keys.forEach(function (key) {
                     var e = manifest.scenes[key];
                     var verdict = perfRegVerdict(e);
                     if (window._perfRegFilterRegressionsOnly && (verdict !== "slower" || e.avgDeltaPct <= limit)) return;
@@ -4413,19 +4429,62 @@
                     var card = document.createElement("div");
                     card.className = "perf-scene-card";
                     var color = perfRegColor(e, limit);
-                    var runs = e.runs ? e.runs.map(function(r, i) { return "#" + (i + 1) + " " + fmtDelta(r.avgDeltaPct); }).join(", ") : "";
+                    var runs = e.runs
+                        ? e.runs
+                              .map(function (r, i) {
+                                  return "#" + (i + 1) + " " + fmtDelta(r.avgDeltaPct);
+                              })
+                              .join(", ")
+                        : "";
                     card.innerHTML =
                         '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">' +
-                        '  <div style="font-weight:600">#' + e.id + ' ' + e.name + '</div>' +
-                        '  <div style="font-size:18px;font-weight:700;color:' + color + '">' + perfRegLabel(e) + '</div>' +
-                        '</div>' +
+                        '  <div style="font-weight:600">#' +
+                        e.id +
+                        " " +
+                        e.name +
+                        "</div>" +
+                        '  <div style="font-size:18px;font-weight:700;color:' +
+                        color +
+                        '">' +
+                        perfRegLabel(e) +
+                        "</div>" +
+                        "</div>" +
                         '<table style="width:100%;font-size:12px;color:#8b949e">' +
                         '  <tr><th></th><th style="text-align:right">current</th><th style="text-align:right">baseline</th><th style="text-align:right">Δ</th></tr>' +
-                        '  <tr><td>result</td><td colspan="3" style="text-align:right;color:' + color + '">' + verdict + (runs ? " (" + runs + ")" : "") + '</td></tr>' +
-                        '  <tr><td>avg</td><td style="text-align:right;color:#c9d1d9">' + e.current.avgMs + 'ms</td><td style="text-align:right">' + e.baseline.avgMs + 'ms</td><td style="text-align:right;color:' + color + '">' + fmtDelta(e.avgDeltaPct) + '</td></tr>' +
-                        '  <tr><td>p95</td><td style="text-align:right;color:#c9d1d9">' + e.current.p95Ms + 'ms</td><td style="text-align:right">' + e.baseline.p95Ms + 'ms</td><td style="text-align:right;color:' + deltaColor(e.p95DeltaPct, limit) + '">' + fmtDelta(e.p95DeltaPct) + '</td></tr>' +
-                        '  <tr><td>median</td><td style="text-align:right;color:#c9d1d9">' + e.current.medianMs + 'ms</td><td style="text-align:right">' + e.baseline.medianMs + 'ms</td><td style="text-align:right;color:' + deltaColor(e.medianDeltaPct, limit) + '">' + fmtDelta(e.medianDeltaPct) + '</td></tr>' +
-                        '</table>';
+                        '  <tr><td>result</td><td colspan="3" style="text-align:right;color:' +
+                        color +
+                        '">' +
+                        verdict +
+                        (runs ? " (" + runs + ")" : "") +
+                        "</td></tr>" +
+                        '  <tr><td>avg</td><td style="text-align:right;color:#c9d1d9">' +
+                        e.current.avgMs +
+                        'ms</td><td style="text-align:right">' +
+                        e.baseline.avgMs +
+                        'ms</td><td style="text-align:right;color:' +
+                        color +
+                        '">' +
+                        fmtDelta(e.avgDeltaPct) +
+                        "</td></tr>" +
+                        '  <tr><td>p95</td><td style="text-align:right;color:#c9d1d9">' +
+                        e.current.p95Ms +
+                        'ms</td><td style="text-align:right">' +
+                        e.baseline.p95Ms +
+                        'ms</td><td style="text-align:right;color:' +
+                        deltaColor(e.p95DeltaPct, limit) +
+                        '">' +
+                        fmtDelta(e.p95DeltaPct) +
+                        "</td></tr>" +
+                        '  <tr><td>median</td><td style="text-align:right;color:#c9d1d9">' +
+                        e.current.medianMs +
+                        'ms</td><td style="text-align:right">' +
+                        e.baseline.medianMs +
+                        'ms</td><td style="text-align:right;color:' +
+                        deltaColor(e.medianDeltaPct, limit) +
+                        '">' +
+                        fmtDelta(e.medianDeltaPct) +
+                        "</td></tr>" +
+                        "</table>";
                     grid.appendChild(card);
                 });
 
@@ -4433,7 +4492,9 @@
                 if (status) status.textContent = shown + " / " + keys.length + " scenes";
             }
             function sortPerfRegGrid(mode) {
-                document.querySelectorAll(".perfreg-sort-btn").forEach(function(b){ b.classList.toggle("active", b.dataset.sort === mode); });
+                document.querySelectorAll(".perfreg-sort-btn").forEach(function (b) {
+                    b.classList.toggle("active", b.dataset.sort === mode);
+                });
                 renderPerfRegGrid();
             }
             function togglePerfRegFilter() {
@@ -4444,8 +4505,10 @@
             }
             function loadPerfRegManifest() {
                 fetch("/perf-regression-manifest.json?t=" + Date.now())
-                    .then(function(r) { return r.ok ? r.json() : null; })
-                    .then(function(manifest) {
+                    .then(function (r) {
+                        return r.ok ? r.json() : null;
+                    })
+                    .then(function (manifest) {
                         if (!manifest || !manifest.scenes) {
                             document.getElementById("perfreg-status").textContent = "No data \u2014 run pnpm test:perf-regression";
                             return;
@@ -4453,10 +4516,10 @@
                         window._perfRegManifest = manifest;
                         var count = Object.keys(manifest.scenes).length;
                         var el = document.getElementById("perfreg-manifest-status");
-                        if (el) el.textContent = "\ud83d\udcca " + count + " scenes (limit \u00b1" + (manifest.regressionPct||5) + "%)";
+                        if (el) el.textContent = "\ud83d\udcca " + count + " scenes (limit \u00b1" + (manifest.regressionPct || 5) + "%)";
                         renderPerfRegGrid();
                     })
-                    .catch(function() {
+                    .catch(function () {
                         document.getElementById("perfreg-status").textContent = "Failed to load perf-regression-manifest.json";
                     });
             }

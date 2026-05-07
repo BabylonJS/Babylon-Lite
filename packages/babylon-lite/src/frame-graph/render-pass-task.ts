@@ -29,7 +29,7 @@ import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Camera } from "../camera/camera.js";
-import type { Renderable, DrawBinding } from "../render/renderable.js";
+import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
 import type { Material, MaterialInternal } from "../material/material.js";
@@ -71,6 +71,7 @@ export interface RenderPassTask extends Task {
     _opaqueBindings: DrawBinding[];
     _transmissiveBindings: DrawBinding[];
     _transparentBindings: DrawBinding[];
+    _updateContext: { targetWidth: number; targetHeight: number };
 
     /** Cached opaque render bundle. Invalidated by renderable list mutations
      *  (`_lastVersion`) and visibility changes (`_lastVis`). */
@@ -146,6 +147,7 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
         _opaqueBindings: [],
         _transmissiveBindings: [],
         _transparentBindings: [],
+        _updateContext: { targetWidth: 0, targetHeight: 0 },
         _opaqueBundles: [],
         _lastVersion: -1,
         _lastVis: 0,
@@ -177,6 +179,8 @@ export function createRenderPassTask(config: RenderPassTaskConfig, engine: Engin
                 mirrorSceneBuckets(task, sc);
             }
             buildRenderTarget(task._config.rt, eng);
+            task._updateContext.targetWidth = task._config.rt._width;
+            task._updateContext.targetHeight = task._config.rt._height;
             refreshTaskSceneBindGroup(task, eng);
             buildBindings(task, eng);
             buildRenderPassDescriptor(task, swapchain);
@@ -285,9 +289,8 @@ function buildBindings(task: RenderPassTask, eng: EngineContextInternal): void {
     task._opaqueBindings.length = 0;
     task._transmissiveBindings.length = 0;
     task._transparentBindings.length = 0;
-    const sig = task._targetSignature;
     for (const r of task._renderables) {
-        const binding = r.bind(eng, sig);
+        const binding = r.bind(eng, task._targetSignature);
         if (r.isTransparent) {
             task._transparentBindings.push(binding);
         } else if (r.isTransmissive) {
@@ -380,9 +383,9 @@ function executePass(task: RenderPassTask): number {
     writePassSceneUBO(task, eng, scene, camera);
     refreshSceneLightsUBO(eng, scene);
 
-    updateBindingUBOs(task._opaqueBindings);
-    updateBindingUBOs(task._transmissiveBindings);
-    updateBindingUBOs(task._transparentBindings);
+    updateBindings(task._opaqueBindings, task._updateContext);
+    updateBindings(task._transmissiveBindings, task._updateContext);
+    updateBindings(task._transparentBindings, task._updateContext);
 
     const pass = encoder.beginRenderPass(task._renderPassDescriptor);
     const v = camera?.viewport;
@@ -527,11 +530,9 @@ function writePassSceneUBO(task: RenderPassTask, eng: EngineContextInternal, sce
     eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
-function updateBindingUBOs(list: readonly DrawBinding[]): void {
+function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext): void {
     for (const b of list) {
-        if (b.updateUBOs) {
-            b.updateUBOs();
-        }
+        b.update?.(context);
     }
 }
 

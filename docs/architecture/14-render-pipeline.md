@@ -1,4 +1,5 @@
 # Module: Renderable + Frame-Graph Architecture
+
 > Package paths: `packages/babylon-lite/src/render/renderable.ts`, `packages/babylon-lite/src/frame-graph/`
 
 ## Purpose
@@ -12,56 +13,63 @@ This keeps the engine render loop material-agnostic while allowing the same `Ren
 ### Renderable contract (`render/renderable.ts`)
 
 ```typescript
+export interface DrawUpdateContext {
+    readonly targetWidth: number;
+    readonly targetHeight: number;
+}
+
 export interface DrawBinding {
-  readonly renderable: Renderable;
-  readonly pipeline: GPURenderPipeline;
-  draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext): number;
-  updateUBOs?(): void;
-  _sortDistance?: number;
+    readonly renderable: Renderable;
+    readonly pipeline: GPURenderPipeline;
+    draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext): number;
+    update?(context: DrawUpdateContext): void;
+    _sortDistance?: number;
 }
 
 export interface Renderable {
-  readonly order: number;
-  readonly isTransparent: boolean;
-  readonly isTransmissive?: boolean;
-  readonly mesh?: Mesh;
-  _sortDistance?: number;
-  _worldCenter?: [number, number, number];
-  _lastMaterial?: any;
-  bind(engine: EngineContext, target: RenderTargetSignature): DrawBinding;
+    readonly order: number;
+    readonly isTransparent: boolean;
+    readonly isTransmissive?: boolean;
+    readonly mesh?: Mesh;
+    _sortDistance?: number;
+    _worldCenter?: [number, number, number];
+    _lastMaterial?: any;
+    bind(engine: EngineContext, target: RenderTargetSignature): DrawBinding;
 }
 
 export interface PrePassRenderable {
-  execute(encoder: GPUCommandEncoder, engine: EngineContext): number;
+    execute(encoder: GPUCommandEncoder, engine: EngineContext): number;
 }
 
 export interface MeshGroupBuildResult {
-  renderables: Renderable[];
-  updater?: SceneUniformUpdater;
-  rebuildSingle: (scene: any, mesh: any, materialOverride?: any) => Renderable;
+    renderables: Renderable[];
+    updater?: SceneUniformUpdater;
+    rebuildSingle: (scene: any, mesh: any, materialOverride?: any) => Renderable;
 }
 ```
 
 `Renderable.bind(engine, target)` is the key split: material modules resolve the pipeline for the pass target once and return a `DrawBinding` closure. The `RenderPassTask` owns the scene bind group (group 0), so renderables never set bind group 0 themselves.
 
+`DrawBinding.update(context)` is called once per frame per binding before the render pass is opened. The context contains the current pass target dimensions (`targetWidth`, `targetHeight`) so bindings can refresh target-size-dependent UBOs without rebuilding their pipelines or bind groups. Mesh/material UBO updates that do not need the target dimensions still use this hook and version-guard their writes.
+
 ### Frame graph (`frame-graph/`)
 
 ```typescript
 export interface Task {
-  readonly name: string;
-  readonly engine: EngineContextInternal;
-  readonly scene: SceneContextInternal;
-  record(): Promise<void> | void;
-  execute(): number;
-  dispose(): void;
+    readonly name: string;
+    readonly engine: EngineContextInternal;
+    readonly scene: SceneContextInternal;
+    record(): void;
+    execute(): number;
+    dispose(): void;
 }
 
 export interface FrameGraph {
-  _tasks: Task[];
-  _ready: boolean;
-  build(): Promise<void>;
-  execute(): number;
-  dispose(): void;
+    _tasks: Task[];
+    _ready: boolean;
+    build(): void;
+    execute(): number;
+    dispose(): void;
 }
 ```
 
@@ -73,23 +81,23 @@ export interface FrameGraph {
 
 ```typescript
 export interface RenderPassTaskConfig {
-  name: string;
-  rt: RenderTarget;
-  clrColor?: GPUColorDict;
-  clr?: boolean;
-  cam?: Camera | null;
-  cs?: boolean;
+    name: string;
+    rt: RenderTarget;
+    clrColor?: GPUColorDict;
+    clr?: boolean;
+    cam?: Camera | null;
+    cs?: boolean;
 }
 ```
 
 Important fields:
 
-| Field | Meaning |
-|---|---|
-| `rt` | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures. |
-| `clr` | `true`/undefined clears color+depth; `false` loads previous content for overlays/multi-scene composition. |
-| `cam` | Per-pass camera override; defaults to `scene.camera`. |
-| `cs` | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect. |
+| Field | Meaning                                                                                                                             |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `rt`  | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                    |
+| `clr` | `true`/undefined clears color+depth; `false` loads previous content for overlays/multi-scene composition.                           |
+| `cam` | Per-pass camera override; defaults to `scene.camera`.                                                                               |
+| `cs`  | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect. |
 
 ## Runtime Flow
 
@@ -110,17 +118,17 @@ startEngine/registerScene frame:
       -> each task.execute()
 ```
 
-`FrameGraph.build()` calls `record()` on every task. `record()` is where `RenderPassTask` builds the pass descriptor, auto-fills from scene renderables when `_renderables` is empty, resolves pending `addToPass()` material overrides, and creates per-target `DrawBinding` lists.
+`FrameGraph.build()` calls `record()` on every task. `record()` is where `RenderPassTask` builds the render target, stores the current target dimensions in its update context, builds the pass descriptor, auto-fills from scene renderables when `_renderables` is empty, resolves pending `addToPass()` material overrides, and creates per-target `DrawBinding` lists.
 
 ## RenderPassTask Buckets
 
 At record/re-sync time, a render pass task partitions bindings into:
 
-| Bucket | Source flag | Draw path |
-|---|---|---|
-| Opaque | `!isTransparent && !isTransmissive` | Cached `GPURenderBundle` when visibility/version state is unchanged |
-| Transmissive | `isTransmissive` | Direct draw after opaque bundle |
-| Transparent | `isTransparent` | Direct draw, distance-sorted back-to-front per pass |
+| Bucket       | Source flag                         | Draw path                                                           |
+| ------------ | ----------------------------------- | ------------------------------------------------------------------- |
+| Opaque       | `!isTransparent && !isTransmissive` | Cached `GPURenderBundle` when visibility/version state is unchanged |
+| Transmissive | `isTransmissive`                    | Direct draw after opaque bundle                                     |
+| Transparent  | `isTransparent`                     | Direct draw, distance-sorted back-to-front per pass                 |
 
 Opaque and transmissive bindings are sorted by `renderable.order`. Transparent bindings must remain distance-sorted and are not pipeline-sorted.
 
@@ -154,15 +162,15 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `FrameGraph` + `Task` | Frame graph / render graph scheduling |
-| `RenderPassTask` | Render pass task that binds target + camera state |
-| `Renderable.bind()` | Material/effect submesh binding for a target |
-| `DrawBinding` | Prepared draw item / submesh draw packet |
-| Task-owned scene UBO | Per-pass scene uniform state |
-| Opaque/transmissive/transparent buckets | Rendering group draw lists |
-| `renderable.order` | Rendering order / group sorting |
+| Babylon Lite                            | Babylon.js                                        |
+| --------------------------------------- | ------------------------------------------------- |
+| `FrameGraph` + `Task`                   | Frame graph / render graph scheduling             |
+| `RenderPassTask`                        | Render pass task that binds target + camera state |
+| `Renderable.bind()`                     | Material/effect submesh binding for a target      |
+| `DrawBinding`                           | Prepared draw item / submesh draw packet          |
+| Task-owned scene UBO                    | Per-pass scene uniform state                      |
+| Opaque/transmissive/transparent buckets | Rendering group draw lists                        |
+| `renderable.order`                      | Rendering order / group sorting                   |
 
 ## Dependencies
 
@@ -173,10 +181,10 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
-| `src/render/renderable.ts` | `Renderable`, `DrawBinding`, `PrePassRenderable`, optional `SceneUniformUpdater`, `MeshGroupBuildResult`, `MeshGroupBuilder` |
-| `src/frame-graph/task.ts` | Polymorphic frame-graph task interface |
-| `src/frame-graph/frame-graph.ts` | Ordered task list, build/execute/dispose lifecycle |
-| `src/frame-graph/frame-graph-actions.ts` | `addTask`, `addTaskAtStart`, `addTaskBefore` helpers |
-| `src/frame-graph/render-pass-task.ts` | Render-pass task implementation, per-pass scene UBO, renderable bucketing, RTT/swapchain pass execution |
+| File                                     | Purpose                                                                                                                      |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `src/render/renderable.ts`               | `Renderable`, `DrawBinding`, `PrePassRenderable`, optional `SceneUniformUpdater`, `MeshGroupBuildResult`, `MeshGroupBuilder` |
+| `src/frame-graph/task.ts`                | Polymorphic frame-graph task interface                                                                                       |
+| `src/frame-graph/frame-graph.ts`         | Ordered task list, build/execute/dispose lifecycle                                                                           |
+| `src/frame-graph/frame-graph-actions.ts` | `addTask`, `addTaskAtStart`, `addTaskBefore` helpers                                                                         |
+| `src/frame-graph/render-pass-task.ts`    | Render-pass task implementation, per-pass scene UBO, renderable bucketing, RTT/swapchain pass execution                      |
