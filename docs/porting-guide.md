@@ -23,10 +23,11 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `MeshBuilder.CreateGround("g", {}, scene)` | `createGround(engine, opts)` |
 | `new StandardMaterial("mat", scene)` | `createStandardMaterial()` |
 | `new PBRMaterial("pbr", scene)` | `createPbrMaterial()` |
-| `SceneLoader.ImportMeshAsync("", url, file, scene)` | `await loadGltf(scene, url)` |
+| `SceneLoader.ImportMeshAsync("", url, file, scene)` | `addToScene(scene, await loadGltf(engine, url))` |
 | `new CubeTexture(url, scene)` + `createDefaultEnvironment()` | `await loadEnvironment(scene, url, opts)` |
 | `new Texture(url, scene)` | `await loadTexture2D(engine, url)` |
-| KTX/KTX2 compressed 2D texture | `await loadKtxTexture2D(engine, baseUrl, suffixes)` |
+| KTX1 compressed 2D texture | `await loadKtxTexture2D(engine, baseUrl, suffixes)` |
+| glTF KTX2 / `KHR_texture_basisu` texture source | `addToScene(scene, await loadGltf(engine, ktx2GltfUrl))` *(auto-detected)* |
 | Basis Universal (.basis) 2D texture | `await loadBasisTexture2D(engine, url)` |
 | `new ShadowGenerator(size, light)` | `createShadowGenerator(engine, light, casters, opts)` |
 | `sg.usePercentageCloserFiltering = true` | `createPcfShadowGenerator(engine, light, casters, opts)` |
@@ -103,9 +104,9 @@ scene.camera = camera;
 attachControl(camera, canvas, scene);
 ```
 
-### 5. Loaders Auto-Add to Scene
+### 5. Loaders and Scene Registration
 
-`loadGltf()` and `loadEnvironment()` add entities to the scene internally — no need to call `addToScene()` for their results.
+`loadEnvironment()` adds its environment data/renderables to the scene internally. `loadGltf()` returns an asset container; pass it to `addToScene()` so transform-node hierarchies, meshes, and animation groups are registered explicitly.
 
 ```typescript
 // ❌ Babylon.js
@@ -114,7 +115,7 @@ scene.environmentTexture = new CubeTexture(envUrl, scene);
 scene.createDefaultEnvironment({ createSkybox: true, skyboxSize: 1000 });
 
 // ✅ Babylon Lite
-await loadGltf(scene, "model.glb");
+addToScene(scene, await loadGltf(engine, "model.glb"));
 await loadEnvironment(scene, envUrl, {
     skyboxUrl: "skybox.dds",
     skyboxSize: 1000,
@@ -236,7 +237,7 @@ engine.runRenderLoop(() => scene.render());
 const engine = await createEngine(canvas);
 const scene = createSceneContext(engine);
 
-await loadGltf(scene, "BoomBox.glb");
+addToScene(scene, await loadGltf(engine, "BoomBox.glb"));
 await loadEnvironment(scene, envUrl, {
     skyboxUrl: "skybox.dds",
     skyboxSize: 1000,
@@ -257,13 +258,14 @@ await startEngine(engine, scene);
 
 | Gotcha | Details |
 |---|---|
-| **No auto-add** | Meshes, lights, and transform nodes must be explicitly added with `addToScene()`. Exception: `loadGltf()` and `loadEnvironment()` add internally. |
+| **No auto-add** | Meshes, lights, transform nodes, and `loadGltf()` asset containers must be explicitly added with `addToScene()`. `loadEnvironment()` adds its environment data/renderables internally. |
 | **No `new` keyword** | Everything is created via factory functions, not constructors. |
 | **Assign camera explicitly** | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually. |
 | **Materials are optional** | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`. |
 | **WebGPU only** | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable. |
 | **No `dispose()` on meshes** | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything. |
 | **Tree-shakable imports** | Import only what you use. Unused features are stripped from the bundle. |
+| **KTX2 is glTF-scoped** | KTX1 has a direct `loadKtxTexture2D()` helper. KTX2/BasisU texture sources are handled through glTF `KHR_texture_basisu` during `loadGltf()` so non-KTX2 scenes pay zero runtime bundle cost. |
 | **Material property animation** | Mutating material props at runtime requires marking the material dirty. See Material Animation section below. |
 
 ---
@@ -330,8 +332,9 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | `KHR_materials_ior` | ✅ | Auto-detected; index of refraction for dielectrics (Scene 30) |
 | `KHR_materials_specular` | ✅ | Auto-detected; dielectric specular intensity + color (Scene 30) |
 | `KHR_materials_volume` | ✅ | Auto-detected; attenuation color/distance + thickness (Scene 30) |
-| `KHR_materials_transmission` | ⚡ | V1 env-only refraction via IBL cube + Beer-Lambert (Scene 30). Full opaque-scene RTT refraction pending frame-graph. |
+| `KHR_materials_transmission` | ⚡ | Env-only refraction by default (Scene 30); Scene 112 uses the scene-scoped opaque RTT refraction helper for FlightHelmetKTX parity. |
 | `KHR_texture_transform` | ✅ | Auto-resolved at load (material-wide UV transform) |
+| `KHR_texture_basisu` | ✅ | Auto-detected; dynamically loads KTX2 decoder/upload path only for glTF assets that declare the extension (Scene 112) |
 | `KHR_draco_mesh_compression` | ✅ | Auto-detected; loads `draco_decoder.js` + `.wasm` on demand from site root (override via `setDracoBaseUrl()`) |
 | `KHR_materials_emissive_strength` | ✅ | Auto-detected; multiplies emissive output (Scene 31) |
 | `KHR_materials_unlit` | ✅ | Auto-detected; emits base color directly with no lighting (Scene 32) |

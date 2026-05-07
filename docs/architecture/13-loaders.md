@@ -1,6 +1,7 @@
 # Module: Loaders (glTF + .env + HDR + .babylon + Skybox)
 > Package paths:
 > - `packages/babylon-lite/src/loader-gltf/load-gltf.ts` — GLB 2.0 loader
+> - `packages/babylon-lite/src/loader-gltf/gltf-ext-basisu.ts` — glTF `KHR_texture_basisu` feature module
 > - `packages/babylon-lite/src/loader-env/load-env.ts` — Babylon .env environment loader
 > - `packages/babylon-lite/src/loader-env/load-dds-env.ts` — DDS cubemap environment loader
 > - `packages/babylon-lite/src/loader-env/env-helpers.ts` — Shared environment assembly helpers
@@ -14,9 +15,9 @@
 
 ## Purpose
 
-The Loaders module provides six asset loading pipelines:
+The Loaders module provides six asset loading pipelines plus dynamic glTF feature modules:
 
-1. **glTF Loader** — Parses `.glb` (binary glTF 2.0) files, extracts mesh geometry (positions, normals, tangents, UVs, indices), resolves the node hierarchy to compute world matrices with RH→LH conversion, extracts PBR metallic-roughness material data (textures + factors), uploads everything to GPU buffers and textures with mipmaps.
+1. **glTF Loader** — Parses `.glb` / `.gltf` 2.0 files, dynamically imports feature modules based on `extensionsUsed` and material/primitive content, extracts mesh geometry (positions, normals, tangents, UVs, indices), resolves the node hierarchy to compute world matrices with RH→LH conversion, extracts PBR metallic-roughness material data (textures + factors), uploads everything to GPU buffers and textures with mipmaps. Optional features such as `KHR_texture_basisu` live in separate dynamic modules so assets that do not use them pay zero runtime bytes.
 
 2. **Environment Loader (.env)** — Parses Babylon.js `.env` files, decodes RGBD-encoded specular cubemap faces to `rgba16float`, decodes a pre-baked BRDF integration LUT from an RGBD-encoded PNG via GPU compute, extracts spherical harmonics irradiance coefficients, and uploads everything to GPU textures.
 
@@ -130,6 +131,10 @@ parseGlbContainer(buffer)
   ↓
 { json, binChunk: DataView }
   ↓
+loadFeatureModules(json)              // dynamic imports, e.g. KHR_texture_basisu
+  ├── preMesh hooks                   // Draco, KTX2 strided FLOAT accessor decode, etc.
+  └── material hooks                  // feature-owned texture/material overrides
+  ↓
 extractAllMeshes(json, binChunk)       // for each node with mesh
   ├── resolveAccessor() × N            // positions, normals, tangents, UVs, indices
   ├── extractMaterial()                 // PBR factors + textures
@@ -140,6 +145,7 @@ GltfMeshData[]
   ↓
 uploadMeshes(device, meshDatas)
   ├── uploadTexture() × 4              // → Texture2D objects (cached per bitmap + sRGB)
+  ├── runMatExts()                     // feature-owned material overrides, e.g. KTX2 textures
   ├── createBufferFromData() × 5       // pos, norm, tan, uv, idx
   ├── computeWorldBounds()             // world-space AABB
   └── assemble PbrMaterialProps        // { baseColorTexture, normalTexture, ormTexture, emissiveTexture?, _buildGroup: pbrGroupBuilder }
@@ -152,7 +158,7 @@ LoaderResult { entities: [root], animationGroups }
   → returned to caller; scene.add() dispatches entities + registers animation ticks
 ```
 
-**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. Uses a `Map<string, Texture2D>` with key format `${bitmapId}:${srgb?1:0}`.
+**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. The hot-path cache uses a numeric key (`bitmapId * 2 + +srgb`) so plain-image glTF assets do not pay string-key overhead. Feature modules can maintain their own caches for extension-owned image sources.
 
 **Animation support**: `loadGltf` extracts glTF animations, creates `AnimationGroup[]` via `createAnimationGroups()`, and returns them in `LoaderResult.animationGroups`. `scene.add()` registers `_beforeRender` callbacks for playback.
 
@@ -233,6 +239,37 @@ ORM packing follows glTF convention:
 - **B** = Metallic
 
 If only `metallicRoughnessImage` or `occlusionImage` is available, it's used for the ORM texture (they may be the same image in glTF).
+
+### `KHR_texture_basisu` / KTX2 Texture Sources
+
+The `KHR_texture_basisu` implementation is a glTF feature module, not core loader logic:
+
+```
+extensionsUsed includes "KHR_texture_basisu"
+  ↓
+dynamic import("./gltf-ext-basisu.js")
+  ↓
+preMesh(json, binChunk, baseUrl)
+  ├─ marks materials that reference KTX2 images
+  ├─ strips KTX2 textureInfos before core image parsing
+  └─ deinterleaves strided FLOAT vertex accessors when needed by the KTX2 asset
+  ↓
+core material parse runs with non-KTX2 textureInfos only
+  ↓
+applyMaterial(mat, ctx)
+  ├─ fetches KTX2 bytes from image.uri or bufferView
+  ├─ uploadKtx2Texture2D(ctx.engine, bytes, sRGB)
+  ├─ composes ORM when metallic-roughness and occlusion are distinct KTX2 images
+  └─ returns Partial<PbrMaterialProps> with feature-owned Texture2D values
+```
+
+Design constraints:
+
+- No `KHR_texture_basisu` branches in the core material parser or PBR renderer.
+- `ktx2-loader.ts` is reached only through `gltf-ext-basisu.ts`.
+- The Babylon KTX2 decoder script is loaded lazily after a KTX2 asset is encountered.
+- Core texture cache keys remain image-bitmap based; KTX2 feature caches by glTF texture index and sRGB flag.
+- Scene 112 (`FlightHelmetKTX`) validates the path and keeps existing scene runtime bundle sizes unchanged.
 
 ### Bounding Box Computation
 
@@ -423,7 +460,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 | Babylon Lite | Babylon.js |
 |---|---|
-| `loadGltf(scene, url)` | `BABYLON.SceneLoader.Append(url, scene)` |
+| `addToScene(scene, await loadGltf(engine, url))` | `BABYLON.SceneLoader.Append(url, scene)` |
 | `Mesh` (with `_gpu` field) | Internal mesh representation |
 | `RH_TO_LH_ROOT` | Root node rotation `[0,1,0,0]` + scale `[1,1,-1]` |
 | `loadEnvironment(scene, url, { brdfUrl })` | `scene.environmentTexture = new BABYLON.CubeTexture.CreateFromPrefilteredData(url)` |
@@ -432,6 +469,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `generateBrdfLut()` (GPU compute, RGBD PNG decode, in rgbd-decode.ts) | Babylon ships pre-baked BRDF LUT (also option for runtime) |
 | `polynomialToPreScaledHarmonics()` | `SphericalHarmonics.FromPolynomial()` + `preScaleForRendering()` |
 | `uploadCubemapRGBD()` | Internal cubemap processing in `HDRCubeTexture` |
+| `KHR_texture_basisu` feature + `uploadKtx2Texture2D()` | BJS `KHR_texture_basisu` loader + `KTX2Decoder` texture upload |
 | Staging buffer RGBD decode | Avoids Canvas 2D premultiplication issue |
 | `loadDdsEnvironment(scene, url, opts)` | `BABYLON.CubeTexture.CreateFromPrefilteredData(url)` with DDS file |
 | `computeSH()` (from DDS mip 0) | BJS `SphericalPolynomial.FromHarmonics` on cubemap |
@@ -452,7 +490,8 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 ## Dependencies
 
-- **`load-gltf.ts` imports**: `Engine` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `LoaderResult` from `../loader-results.js`.
+- **`load-gltf.ts` imports**: `Engine` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `LoaderResult` from `../loader-results.js`; dynamic glTF feature imports including `gltf-ext-basisu.ts`.
+- **`gltf-ext-basisu.ts` imports**: `decodeKtx2ImageBitmapFromBuffer`, `uploadKtx2Texture2D` from `../texture/ktx2-loader.js`; `resolveAccessor` from `./gltf-parser.js`; PBR and Texture2D types.
 - **`load-env.ts` imports**: `SceneContext` from `../scene/scene.js`.
 - **`load-dds-env.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `EnvironmentTextures` from `./load-env.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `./env-helpers.js`; dynamic import of `./rgbd-decode.js`.
 - **`env-helpers.ts` imports**: `EnvironmentTextures`, `polynomialToPreScaledHarmonics` from `./load-env.js`; `getOrCreateSampler` from `../resource/gpu-pool.js`.
@@ -481,6 +520,8 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `uploadTexture sRGB format` | baseColor uses rgba8unorm-srgb |
 | `uploadTexture null fallback` | 1×1 white texture |
 | `computeWorldBounds` | Known positions × identity matrix → correct AABB |
+| `KHR_texture_basisu` | Scene 112 FlightHelmetKTX loads KTX2 texture sources and matches Babylon.js within `maxMad: 0.02` |
+| `KHR_texture_basisu bundle isolation` | Existing scenes have no positive runtime-loaded JS deltas when KTX2 support is present |
 | **.env** | |
 | `.env magic validation` | Bad magic → throws |
 | `RGBD decode` | Known RGBD values → correct linear HDR |

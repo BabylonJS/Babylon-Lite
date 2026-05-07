@@ -143,15 +143,15 @@ Usage:
 ```typescript
 // Manual creation
 const mat = createPbrMaterial({
-  baseColorTexture: await loadTexture2D(device, 'albedo.png'),
-  normalTexture: await loadTexture2D(device, 'normal.png'),
-  ormTexture: await loadTexture2D(device, 'orm.png'),
+  baseColorTexture: await loadTexture2D(engine, 'albedo.png'),
+  normalTexture: await loadTexture2D(engine, 'normal.png'),
+  ormTexture: await loadTexture2D(engine, 'orm.png'),
   clearCoat: { isEnabled: true, intensity: 1, roughness: 0.1 },
   sheen: { isEnabled: true, color: [1, 1, 1], roughness: 0.5 },
 });
 
 // From glTF (automatic — loadGltf() builds PbrMaterialProps internally)
-await loadGltf(scene, 'model.glb');
+addToScene(scene, await loadGltf(engine, 'model.glb'));
 ```
 
 ### Pipeline (`pbr-pipeline.ts`)

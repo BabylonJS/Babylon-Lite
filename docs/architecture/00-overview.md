@@ -4,12 +4,12 @@
 > It must be so complete that if all source code were deleted, an LLM could perfectly
 > regenerate the entire engine from this document alone. Treat this as the ground truth.
 >
-> **Revision scope**: Scenes 1–27 (BoomBox PBR, Sphere+DirectionalLight, Fog+Boxes+Skybox, Shadows+ESM,
+> **Revision scope**: Scenes 1–112 (BoomBox PBR, Sphere+DirectionalLight, Fog+Boxes+Skybox, Shadows+ESM,
 > Alien PBR+Skeleton, PBR Gold Sphere, ChibiRex Animated, HDR Glass Sphere, Sponza, PBR Rough Sphere,
 > Shark GLB, PBR Shader Balls, PBR Spheres Grid, Flight Helmet, SpotLights+Ground, Thin Instances,
 > PBR+Standard Thin Instances, Spotlight Hard Shadows (PCF), PBR Clearcoat, PBR Emissive Spheres Grid,
 > PBR Sheen Cloth, PBR Shadows, PBR Anisotropy, Hill Valley (.babylon), KTX Texture, PBR Subsurface,
-> Material Variants (KHR_materials_variants)).
+> Material Variants (KHR_materials_variants), CSG/CSG2, and FlightHelmetKTX via `KHR_texture_basisu`).
 > Detailed per-module specs are in the companion docs listed below.
 
 ## Architecture Document Index
@@ -18,7 +18,7 @@
 |-----|--------|-------|
 | [00-overview.md](00-overview.md) | Overview | Repository structure, public API |
 | [01-shadow-generator.md](01-shadow-generator.md) | Shadow Generator | ESM + PCF shadows, depth pass, Gaussian blur |
-| [03-texture-2d.md](03-texture-2d.md) | Texture2D | Image upload, mipmap gen, invertY |
+| [03-texture-2d.md](03-texture-2d.md) | Texture2D | Image upload, KTX1/KTX2, mipmap gen, invertY |
 | [04-mesh-generators.md](04-mesh-generators.md) | Mesh Generators | Ground/heightmap, torus, sphere, box, cylinder, plane, disc, polyhedron, ribbon, tube, extrude |
 | [05-lights.md](05-lights.md) | Lights | Hemispheric, directional, point, spot + shared lights UBO for Standard/PBR |
 | [06-engine.md](06-engine.md) | Engine | GPU init, MSAA, render loop, swap chain |
@@ -28,7 +28,7 @@
 | [10-pbr-material.md](10-pbr-material.md) | PBR Material | ShaderFragment composition, GGX/IBL, clearcoat, sheen |
 | [11-standard-material.md](11-standard-material.md) | Standard Material | ShaderFragment composition, Blinn-Phong |
 | [12-background-skybox.md](12-background-skybox.md) | Background/Skybox | DDS/HDR/cubemap skybox, ground, background material |
-| [13-loaders.md](13-loaders.md) | Loaders | glTF 2.0, .env, .hdr, .babylon, skybox |
+| [13-loaders.md](13-loaders.md) | Loaders | glTF 2.0, dynamic glTF features, .env, .hdr, .babylon, skybox |
 | [14-render-pipeline.md](14-render-pipeline.md) | Renderable Architecture | Renderable interfaces, entity-owned pipelines |
 | [15-morph-targets.md](15-morph-targets.md) | Morph Targets | Vertex extension, GPU texture weights |
 | [16-animation-parity-testing.md](16-animation-parity-testing.md) | Animation Parity | Animated scene test methodology |
@@ -191,11 +191,15 @@ babylon-lite/
 │   │   │   ├── solid-texture.ts   # 1×1 solid-color texture factory
 │   │   │   ├── cube-texture.ts    # 6-face cube texture loader
 │   │   │   ├── rtt.ts             # Eager render-target texture helper
+│   │   │   ├── ktx2-loader.ts      # KTX2/BasisU upload for KHR_texture_basisu
+│   │   │   ├── rtt-mip.ts          # Mipmapped render-target texture helper
+│   │   │   ├── record-mipmaps.ts   # Encoder-local mipmap recording
 │   │   │   └── generate-mipmaps.ts # GPU mipmap generation
 │   │   ├── loader-gltf/
 │   │   │   ├── load-gltf.ts       # GLB parser, GPU upload
 │   │   │   ├── gltf-parser.ts     # glTF JSON parsing helpers
 │   │   │   ├── gltf-material.ts   # glTF material → PbrMaterialProps
+│   │   │   ├── gltf-ext-basisu.ts # KHR_texture_basisu dynamic feature
 │   │   │   └── gltf-animation.ts  # glTF animation extraction
 │   │   ├── loader-env/
 │   │   │   ├── load-env.ts        # .env parser, RGBD decode, cubemap upload
@@ -212,14 +216,15 @@ babylon-lite/
 │   │       ├── load-skybox.ts     # High-level skybox loader
 │   │       └── skybox-renderable.ts # Skybox → deferred Renderable builder
 │
-├── lab/               # Dev sandbox (Scenes 1–76)
+├── lab/               # Dev sandbox (Scenes 1–112)
 │   ├── index.html
 │   ├── src/lite/scene1.ts          # Scene 1: BoomBox PBR
 │   ├── src/lite/scene2.ts          # Scene 2: Sphere + DirectionalLight
-│   ├── ...                         # Scenes 3–73
+│   ├── ...                         # Scenes 3–111
 │   ├── src/lite/scene74.ts         # Scene 74: EffectRenderer fullscreen pass
 │   ├── src/lite/scene75.ts         # Scene 75: EffectWrapper render-to-texture sphere
 │   ├── src/lite/scene76.ts         # Scene 76: EffectWrapper texture binding
+│   ├── src/lite/scene112.ts        # Scene 112: FlightHelmetKTX / KHR_texture_basisu
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── vite.config.ts
@@ -227,10 +232,11 @@ babylon-lite/
 ├── reference/                     # Per-scene reference data
 │   ├── scene1-boombox/            # Scene 1 reference data
 │   ├── scene2-sphere/             # Scene 2 reference data
-│   ├── ...                        # Scenes 3–73
+│   ├── ...                        # Scenes 3–111
 │   ├── scene74-effect-renderer/   # EffectRenderer fullscreen golden
 │   ├── scene75-effect-rtt-sphere/ # EffectWrapper RTT golden
 │   ├── scene76-effect-texture/    # EffectWrapper texture-binding golden
+│   ├── scene112-khr-texture-basisu/ # KHR_texture_basisu golden
 │   └── (each contains golden screenshots for parity tests)
 │
 └── docs/architecture/
@@ -861,10 +867,12 @@ interface SceneUniformUpdater { update(engine): void; }
 
 ### 3.8 glTF Loader (`loader-gltf/load-gltf.ts`)
 
-Parses GLB containers (binary glTF 2.0). Not a general-purpose loader — optimized for
-the meshes we encounter in reference scenes. Returns `Mesh[]` (not `GpuMesh[]` — that interface no longer exists).
+Parses GLB/glTF containers (glTF 2.0). Not a general-purpose loader — optimized for
+the meshes we encounter in reference scenes. Returns an asset container whose root can be passed to `addToScene()`.
 
-**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. Uses a `Map<string, Texture2D>` with key format `${bitmapId}:${srgb?1:0}`.
+Optional glTF capabilities are dynamic feature modules (`gltf-ext-*.ts` / `gltf-feature-*.ts`). `load-gltf.ts` inspects `extensionsUsed`, materials, and primitives, then imports only the modules needed by the current asset. `KHR_texture_basisu` is handled by `gltf-ext-basisu.ts`, which strips KTX2 textureInfos before core image parsing and uploads them through `texture/ktx2-loader.ts`; scenes without that extension fetch none of those chunks.
+
+**Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. The hot path uses a numeric key (`bitmapId * 2 + +srgb`); feature modules can keep their own extension-source caches.
 
 **Animation extraction**: Creates `AnimationGroup[]` from glTF animations via `createAnimationGroups()`, registers `_beforeRender` callbacks on the scene for playback.
 
@@ -884,15 +892,18 @@ TypedArray = new T(binChunk.buffer, binChunk.byteOffset + byteOffset, count * co
 **Component types**: FLOAT=5126, UNSIGNED_SHORT=5123, UNSIGNED_INT=5125, UNSIGNED_BYTE=5121
 
 **Mesh extraction flow**:
-1. Walk nodes → find nodes with `mesh` property
-2. Compute world matrix via node TRS + parent chain
-3. Resolve accessors: POSITION, NORMAL, TANGENT, TEXCOORD_0, indices
-4. Resolve material: pbrMetallicRoughness textures → ImageBitmap (with `colorSpaceConversion: 'none'`)
+1. Discover dynamic feature modules (`KHR_texture_basisu`, Draco, variants, skins, morphs, etc.)
+2. Run feature `preMesh` hooks to decode feature-owned primitive data (for example strided FLOAT accessors used by FlightHelmetKTX)
+3. Walk nodes → find nodes with `mesh` property
+4. Compute world matrix via node TRS + parent chain
+5. Resolve accessors: POSITION, NORMAL, TANGENT, TEXCOORD_0, indices
+6. Resolve material: pbrMetallicRoughness textures → ImageBitmap (with `colorSpaceConversion: 'none'`) plus extension-owned overrides
 
 **GPU upload**:
 - Vertex/index buffers: `mappedAtCreation`, copy bytes, unmap
-- Textures: `copyExternalImageToTexture` with `premultipliedAlpha: false`, format `rgba8unorm`
-- Mipmaps: `mipLevelCount: 1` (TODO: mipmap generation)
+- Textures: `copyExternalImageToTexture` with `premultipliedAlpha: false`, `rgba8unorm` or `rgba8unorm-srgb`
+- KTX2 textures: decoder-provided mip chain uploaded by `uploadKtx2Texture2D()` for `KHR_texture_basisu`
+- Mipmaps: generated for image textures via GPU blit; preserved from KTX2 decoder output for KTX2 textures
 - Null textures → 1×1 opaque white fallback
 - Bounding box: computed from positions × world matrix during upload
 
@@ -1075,8 +1086,8 @@ main.ts (e.g. scene1.ts)
   ├─→ createEngine(canvas)           → Engine { device, context, format, msaaSamples }
   ├─→ createSceneContext(engine)      → SceneContext { engine, clearColor, camera:null, ... }
   │
-  ├─→ loadGltf(scene, url)           → Fetches GLB, parses, uploads to GPU
-  │     Returns Mesh[]                  Registers deferred builder → buildPbrRenderables()
+  ├─→ loadGltf(engine, url)          → Fetches glTF/GLB, parses, uploads to GPU
+  │     Returns AssetContainer          addToScene(scene, container) registers deferred builders
   │
   ├─→ loadEnvironment(scene, url)    → Fetches .env, generates BRDF LUT, uploads cubemap
   │     Sets scene._envTextures         Registers deferred builder → buildBackgroundRenderables()
@@ -1105,7 +1116,7 @@ main.ts (e.g. scene1.ts)
 |-----------|-------------|-------|
 | `new Engine(canvas)` | `createEngine(canvas)` | Async, returns Promise |
 | `new Scene(engine)` | `createSceneContext(engine)` | Flat struct, no observables |
-| `SceneLoader.Append(url)` | `loadGltf(scene, url)` | GLB only, no plugins |
+| `SceneLoader.Append(url)` | `addToScene(scene, await loadGltf(engine, url))` | glTF/GLB with scoped extension modules |
 | `scene.createDefaultEnvironment()` | `loadEnvironment(scene, url)` | Explicit URL |
 | `scene.createDefaultCameraOrLight()` | `createDefaultCamera(scene)` + `createHemisphericLight()` | Separate functions |
 | `new HemisphericLight(...)` | `createHemisphericLight(dir, intensity)` | Returns plain data |
@@ -1263,10 +1274,14 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/texture/solid-texture.ts` | 1×1 solid-color factory | — |
 | `src/texture/cube-texture.ts` | 6-face cube texture loader | 141 |
 | `src/texture/rtt.ts` | Render-target texture helper | — |
+| `src/texture/ktx2-loader.ts` | KTX2/BasisU upload for `KHR_texture_basisu` | — |
+| `src/texture/rtt-mip.ts` | Mipmapped render-target texture helper | — |
+| `src/texture/record-mipmaps.ts` | Encoder-local mipmap recording | — |
 | `src/texture/generate-mipmaps.ts` | GPU mipmap generation | — |
 | `src/loader-gltf/load-gltf.ts` | GLB parser + GPU upload | 390 |
 | `src/loader-gltf/gltf-parser.ts` | glTF JSON parsing helpers | — |
 | `src/loader-gltf/gltf-material.ts` | glTF material → PbrMaterialProps | — |
+| `src/loader-gltf/gltf-ext-basisu.ts` | `KHR_texture_basisu` dynamic feature | — |
 | `src/loader-gltf/gltf-animation.ts` | glTF animation extraction | — |
 | `src/loader-env/load-env.ts` | .env parser + RGBD decode | 240 |
 | `src/loader-env/load-dds-env.ts` | DDS environment loading | — |
@@ -1279,4 +1294,4 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/loader-skybox/load-skybox.ts` | High-level skybox loader | — |
 | `src/loader-skybox/skybox-renderable.ts` | Skybox → Renderable builder | — |
 | `lab/src/lite/scene1.ts` | Scene 1: BoomBox PBR | 44 |
-| `lab/src/lite/scene*.ts` | Scenes 1–76 (dev sandbox) | — |
+| `lab/src/lite/scene*.ts` | Scenes 1–112 (dev sandbox) | — |
