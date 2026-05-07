@@ -69,3 +69,6 @@ let normVariance = varianceAmount / 255.0;
 return mix(-normVariance, normVariance, rand);
 }
 `;
+
+/** Noise-disabled replacement for shaders that still call dither(). */
+export const WGSL_NO_DITHER = "fn dither(a:vec2<f32>,b:f32)->f32{return 0.0;}";

@@ -1,7 +1,7 @@
 // Scene 112: Flight Helmet KTX2 — glTF KHR_texture_basisu validation.
 
 import { addToScene, attachControl, createDefaultCamera, createEngine, createHemisphericLight, createSceneContext, loadEnvironment, loadGltf, registerScene, startEngine } from "babylon-lite";
-import { addNoNoiseDdsBackground } from "../../../packages/babylon-lite/src/material/pbr/background-no-noise.js";
+import { addDdsEnvironmentBackground } from "../../../packages/babylon-lite/src/material/pbr/background-dds-environment.js";
 import { enablePbrOpaqueRefraction, usePbrOpaqueRefraction } from "../../../packages/babylon-lite/src/material/pbr/pbr-refraction-setup.js";
 
 const MODEL_URL = "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/FlightHelmetKTX/FlightHelmet.gltf";
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
         skyboxSize: 1000,
         brdfUrl: "/brdf-lut.png",
     });
-    addNoNoiseDdsBackground(scene, engine, { groundTextureUrl, skyboxUrl, skyboxSize: 1000 });
+    addDdsEnvironmentBackground(scene, { groundTextureUrl, skyboxUrl, skyboxSize: 1000, enableNoise: false });
 
     const cam = createDefaultCamera(scene);
     cam.alpha = Math.PI / 2;

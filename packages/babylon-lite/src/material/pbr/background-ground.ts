@@ -13,8 +13,8 @@ import { targetSignatureKey } from "../../engine/render-target.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";
 import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw";
 import { createMappedBuffer } from "../../resource/gpu-buffers.js";
-import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
+import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
 
 // ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
 //    don't pay for the image-processing helper in the shared wgsl-helpers chunk). ──
@@ -48,9 +48,11 @@ export async function buildGroundRenderable(
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
     groundTextureUrl?: string,
-    groundImagePromise?: Promise<ImageBitmap>
+    groundImagePromise?: Promise<ImageBitmap>,
+    enableNoise = true
 ): Promise<Renderable> {
-    const gndMat = createGroundMaterial();
+    const fragCode = SCENE_UBO_WGSL + WGSL_IMAGE_PROCESSING + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + groundFragSrc;
+    const gndMat = createGroundMaterial(enableNoise, fragCode);
 
     // Ground world: rotated 90° X (XY→XZ), translated to rootPosition
     // Column-major for WGSL: ground quad in XY plane, normal +Z → world +Y
@@ -104,13 +106,13 @@ interface GroundMaterial {
     createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler): GPUBindGroup;
 }
 
-/** Module-global pipeline cache — keyed by full target signature (color/depth/samples/flipY).
+/** Module-global pipeline cache — keyed by noise mode + full target signature (color/depth/samples/flipY).
  *  All ground renderables share this cache. */
 const _gndPipelines = new Map<string, GPURenderPipeline>();
 let _gndLayout: GPUBindGroupLayout | null = null;
 let _gndCachedDevice: GPUDevice | null = null;
 
-function createGroundMaterial(): GroundMaterial {
+function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMaterial {
     function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
         const device = engine.device;
         if (_gndLayout && _gndCachedDevice === device) {
@@ -124,6 +126,7 @@ function createGroundMaterial(): GroundMaterial {
                 { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
             ],
         });
+        _gndCachedDevice = device;
         return _gndLayout;
     }
 
@@ -135,13 +138,13 @@ function createGroundMaterial(): GroundMaterial {
                 _gndLayout = null;
                 _gndCachedDevice = device;
             }
-            const key = targetSignatureKey(sig);
+            const key = `${+enableNoise}|${targetSignatureKey(sig)}`;
             const cached = _gndPipelines.get(key);
             if (cached) {
                 return cached;
             }
             const vertModule = device.createShaderModule({ code: SCENE_UBO_WGSL + groundVertSrc, label: "ground-vert" });
-            const fragModule = device.createShaderModule({ code: SCENE_UBO_WGSL + WGSL_IMAGE_PROCESSING + WGSL_DITHER + groundFragSrc, label: "ground-frag" });
+            const fragModule = device.createShaderModule({ code: fragCode, label: "ground-frag" });
 
             // Matches BJS rp_8: premultiplied alpha blend, depthWrite=false
             const pipeline = device.createRenderPipeline({

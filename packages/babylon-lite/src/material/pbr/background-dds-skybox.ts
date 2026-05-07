@@ -7,7 +7,7 @@ import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
+import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import ddsSkyboxVertSrc from "../../../shaders/skybox-dds.vertex.wgsl?raw";
@@ -57,7 +57,8 @@ export async function buildDdsSkyboxRenderable(
     skyHalfSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
-    skyboxTextureUrl?: string
+    skyboxTextureUrl?: string,
+    enableNoise = true
 ): Promise<Renderable> {
     const engine = scene.engine as EngineContextInternal;
 
@@ -66,7 +67,8 @@ export async function buildDdsSkyboxRenderable(
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
-    const mat = createCubemapSkyboxMaterial("skybox-dds", SCENE_UBO_WGSL + ddsSkyboxVertSrc, WGSL_DITHER + ddsSkyboxFragSrc);
+    const fragCode = (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + ddsSkyboxFragSrc;
+    const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
     const ubo = createDdsMeshUBO(engine, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);
 

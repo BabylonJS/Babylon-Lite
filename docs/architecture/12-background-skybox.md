@@ -4,6 +4,7 @@
 > - `packages/babylon-lite/src/material/pbr/background-renderable.ts` — Skybox + Ground → Renderables orchestrator, scene size computation
 > - `packages/babylon-lite/src/material/pbr/background-ground.ts` — Ground material, geometry, texture loading, UBO
 > - `packages/babylon-lite/src/material/pbr/background-dds-skybox.ts` — DDS cubemap skybox renderable
+> - `packages/babylon-lite/src/material/pbr/background-dds-environment.ts` — scene-scoped DDS skybox + ground orchestration
 > - `packages/babylon-lite/src/material/pbr/background-hdr-skybox.ts` — HDR cubemap skybox renderable
 > - `packages/babylon-lite/src/material/standard/skybox-cubemap.ts` — CubeMap skybox for StandardMaterial scenes
 > - `packages/babylon-lite/src/texture/cube-texture.ts` — 6-face cube texture loader
@@ -96,11 +97,18 @@ Local normal `(0,0,1)` transforms to world `(0,1,0)` (pointing UP). Y offset = `
 export async function loadEnvironment(
   scene: SceneContext,
   url: string,
-  options?: { groundTextureUrl?: string },
+  options: {
+    brdfUrl: string;
+    groundTextureUrl?: string;
+    skipSkybox?: boolean;
+    skipGround?: boolean;
+    skyboxUrl?: string;
+    skyboxSize?: number;
+  },
 ): Promise<EnvironmentTextures>;
 ```
 
-The `groundTextureUrl` option is passed through to `buildBackgroundRenderables` which fetches and uploads the texture to GPU. This keeps texture assets out of the engine bundle.
+The `groundTextureUrl` option is passed through to the ground builder, which fetches and uploads the texture to GPU. Standard `loadEnvironment()` backgrounds keep BJS-style background dithering enabled.
 
 ### `background-material.ts`
 
@@ -174,6 +182,7 @@ export async function buildGroundRenderable(
   primaryColor: [number, number, number],
   groundTextureUrl?: string,
   groundImagePromise?: Promise<ImageBitmap>,
+  enableNoise?: boolean,
 ): Promise<Renderable>;
 ```
 
@@ -187,8 +196,25 @@ export async function buildDdsSkyboxRenderable(
   sceneBindGroup: GPUBindGroup,
   skyboxTextureUrl?: string,  // default: backgroundSkybox.dds from BJS CDN
   skyboxSize?: number,
+  enableNoise?: boolean,
 ): Promise<Renderable>;
 ```
+
+### `background-dds-environment.ts`
+
+```typescript
+export function addDdsEnvironmentBackground(
+  scene: SceneContext,
+  options: {
+    skyboxUrl: string;
+    groundTextureUrl: string;
+    skyboxSize: number;
+    enableNoise?: boolean; // Default true; matches BJS BackgroundMaterial.enableNoise
+  },
+): void;
+```
+
+This helper only orchestrates the existing DDS skybox and ground builders. Scene 112 uses it with `enableNoise: false` after loading environment lighting with `skipSkybox` and `skipGround`, avoiding duplicated skybox/ground implementations while keeping the no-noise path scene-scoped.
 
 ### `background-hdr-skybox.ts`
 
@@ -463,7 +489,7 @@ Pipeline:
 
 Orchestrates the creation of background renderables:
 1. If `!options.skipSkybox`: creates solid-color skybox via `createSkyboxMaterial()`
-2. If `!options.skipGround`: dynamically imports `background-ground.js` → `buildGroundRenderable()`
+2. If `!options.skipGround`: dynamically imports `background-ground.js` → `buildGroundRenderable(..., enableNoise)`
 3. Ground is dynamically imported to enable tree-shaking for scenes without ground
 
 Both DDS and HDR skybox callers (in `load-env.ts`, `load-hdr.ts`, `load-dds-env.ts`) use `buildBackgroundRenderables()` with `skipSkybox: true` when they provide their own cubemap skybox.
