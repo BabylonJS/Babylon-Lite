@@ -64,10 +64,10 @@ function setupPbrRefraction(scene: SceneContext, engine: EngineContextInternal):
     addTaskAtStart(scene, mips);
     addTaskAtStart(scene, pass);
     sc._deferredBuilders.push(() => {
-        sc._deferredBuilders.push(async () => {
+        sc._deferredBuilders.push(() => {
             pass._renderables.length = 0;
             pass._renderables.push(...sc._renderables.filter((r) => !r.isTransmissive));
-            await sc._frameGraph.build();
+            sc._frameGraph.build();
         });
     });
     return rtt.texture;
