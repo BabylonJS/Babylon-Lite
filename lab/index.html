@@ -4394,7 +4394,7 @@
                         return;
                     }
 
-                    if (masterManifest && sizes && (!masterSizes || masterSizes.rawKB == null)) {
+                    if (masterManifest && (!masterSizes || masterSizes.rawKB == null)) {
                         var newRawKB = parseFloat(sizes.rawKB);
                         stats.changed++;
                         stats.newScenes++;
