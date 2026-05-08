@@ -167,6 +167,8 @@ async function main(): Promise<void> {
 
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.28, 4.2, { x: 0, y: 0, z: 0 });
     camera.fov = 0.74;
+    camera.nearPlane = 1;
+    camera.farPlane = 10000;
     scene.camera = camera;
 
     const sphere = createSphere(engine, { segments: 32, diameter: 1.8 });

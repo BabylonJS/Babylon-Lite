@@ -80,8 +80,8 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         radius: 0 as number,
         target: new ObservableVec3(target.x, target.y, target.z, onDirty) as unknown as Vec3,
         fov: 0.8,
-        nearPlane: 1,
-        farPlane: 10000,
+        nearPlane: 0.1,
+        farPlane: 1000,
         children: [] as SceneNode[],
 
         inertia: 0.9,

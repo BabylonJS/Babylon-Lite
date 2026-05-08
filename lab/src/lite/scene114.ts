@@ -208,6 +208,8 @@ async function main(): Promise<void> {
 
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5.5, { x: 0.15, y: 0, z: 0 });
     camera.fov = 0.72;
+    camera.nearPlane = 1;
+    camera.farPlane = 10000;
     scene.camera = camera;
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
