@@ -754,11 +754,19 @@ never pays for `viewProjection` on the CPU.
 
 ### Family 2 — `*BillboardSpriteSystem`
 
+The current implementation slice is deliberately narrower than the full
+billboard roadmap: it ships **Facing** billboards only, with the low-level
+index API and an explicit scene opt-in helper. Yaw-locked and axis-locked
+variants, handle objects, clip playback, parenting, picking, sorted
+transparent indirection, cutout/depth-write mode, and additive/multiply
+blend modes are additive follow-up modules. That split keeps the first
+billboard path small and keeps pure-2D sprite bundles from importing scene
+rendering code.
+
 ```typescript
-// src/sprite/billboard/sprite-billboard-shared.ts
-import type { SpriteAtlas, SpriteFrameRef } from "../shared/sprite-atlas.js";
-import type { SpriteBlendMode } from "../sprite-2d.js";
-import type { SpriteClipState } from "../shared/sprite-animation.js";
+// src/sprite/billboard-sprite.ts
+import type { SpriteAtlas } from "./shared/sprite-atlas.js";
+import type { SpriteBlendMode } from "./sprite-2d.js";
 
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
@@ -766,66 +774,57 @@ export interface BillboardSpriteSystemOptions {
     opacity?: number;
     visible?: boolean;
     order?: number;
-    depthWrite?: boolean;
-    alphaCutoff?: number;
 }
 
 export interface BillboardSpriteSystem {
-    readonly _entityType: "billboard-sprite-system";
+    readonly _entityType: "facing-billboard-sprite-system";
     readonly atlas: SpriteAtlas;
-    blendMode: SpriteBlendMode;
+    readonly blendMode: SpriteBlendMode;
     opacity: number;
     visible: boolean;
     order: number;
-    depthWrite: boolean;
-    alphaCutoff: number;
     count: number;
+
+    _capacity: number;
+    readonly _instanceFloatsPerSprite: number;
+    readonly _instanceStrideBytes: number;
+    _instanceData: Float32Array;
+    _instanceDataU32: Uint32Array;
+    _savedSize: Float32Array;
+    _version: number;
+    _dirtyMin: number;
+    _dirtyMax: number;
 }
 
 export interface BillboardSpriteInit {
     position: [number, number, number];
     sizeWorld: [number, number];
-    frame?: SpriteFrameRef;
+    frame?: number;
     rotation?: number;
     pivot?: [number, number];
     color?: [number, number, number, number];
     flipX?: boolean;
     flipY?: boolean;
     visible?: boolean;
-    pickable?: boolean;
-    clip?: SpriteClipState | null;
 }
 
 export function createFacingBillboardSystem(atlas: SpriteAtlas, opts?: BillboardSpriteSystemOptions): BillboardSpriteSystem;
-export function createYawLockedBillboardSystem(atlas: SpriteAtlas, opts?: BillboardSpriteSystemOptions): BillboardSpriteSystem;
-export function createAxisLockedBillboardSystem(atlas: SpriteAtlas, axis: [number, number, number], opts?: BillboardSpriteSystemOptions): BillboardSpriteSystem;
 
-// Index API — low-level, parallels ThinInstance.
+  // Index API — low-level, parallels ThinInstance and existing Sprite2DLayer index calls.
 export function addBillboardSpriteIndex(system: BillboardSpriteSystem, init: BillboardSpriteInit): number;
 export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index: number, patch: Partial<BillboardSpriteInit>): void;
 export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index: number): void;
-export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: SpriteFrameRef): void;
-export function playBillboardSpriteClipIndex(system: BillboardSpriteSystem, index: number, clip: string, loop?: boolean): void;
-export function stopBillboardSpriteClipIndex(system: BillboardSpriteSystem, index: number): void;
+  export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: number): void;
 
-// Handle API — observable + parentable, returns BillboardSpriteHandle.
-// Lives in src/sprite/billboard/sprite-billboard-handle.ts (separate module so
-// Index-only scenes never load handle code).
-export function addBillboardSprite(system: BillboardSpriteSystem, init: BillboardSpriteInit): BillboardSpriteHandle;
-export function updateBillboardSprite(handle: BillboardSpriteHandle, patch: Partial<BillboardSpriteInit>): void;
-export function removeBillboardSprite(handle: BillboardSpriteHandle): void;
-export function setBillboardSpriteFrame(handle: BillboardSpriteHandle, frame: SpriteFrameRef): void;
-export function playBillboardSpriteClip(handle: BillboardSpriteHandle, clip: string, loop?: boolean): void;
-export function stopBillboardSpriteClip(handle: BillboardSpriteHandle): void;
+  // src/sprite/billboard-scene.ts
+  export function addFacingBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem): void;
 ```
 
-Each billboard factory's `_deferredBuild` callback (registered through
-`addToScene`'s existing `"billboard-sprite-system"` branch) pushes the
-system into the scene's `ctx._billboardSystems` array and queues the
-renderable build. The first billboard added also lazy-allocates the
-shared 3D scene UBO (`ctx._sprite3dSceneUBO`) and registers its updater.
-Pure-2D scenes never reach this code — they don't import `addToScene`,
-let alone register a billboard system.
+  `addFacingBillboardSystem(scene, system)` is the scene integration point.
+  It queues a deferred renderable builder through `addDeferredSceneRenderables`
+  so `scene-core` and `addToScene` stay sprite-agnostic. A scene that never
+  imports `billboard-scene.ts` never imports `billboard-renderable.ts`,
+  `billboard-pipeline.ts`, `getSceneBindGroupLayout`, or any billboard WGSL.
 
 ### Picking — two pickers, not three
 
@@ -955,11 +954,38 @@ target dimensions; written via `device.queue.writeBuffer` only when the
 Total 48 bytes — `vec4<f32>` forces 16-byte struct alignment and 48 = 3 × 16 is naturally
 aligned; no padding required.
 
-#### BillboardSpriteSystem (96 B = 24 floats)
+#### Current FacingBillboardSpriteSystem instance layout (52 B = 13 floats)
 
-Storage-buffer-bound at `@group(1) @binding(3)` (not a vertex buffer —
-3D sprite families read sprite data through a storage buffer indexed by
-a sort-indirection vertex attribute, see below). The 24-float layout:
+The first facing-billboard slice uses a compact per-instance vertex buffer,
+not a storage buffer or sort indirection. The buffer is bound as the sole
+vertex buffer with `stepMode: "instance"`; the shader uses
+`@builtin(vertex_index)` for the four quad corners and `drawIndexed(6,
+system.count, 0, 0, 0)` for all active sprites.
+
+| Offset (floats) | Field       | Vertex format | Notes                                                   |
+| --------------- | ----------- | ------------- | ------------------------------------------------------- |
+| 0..2            | `position`  | `float32x3`   | world-space anchor                                      |
+| 3..4            | `sizeWorld` | `float32x2`   | zeroed when hidden; true size mirrored in `_savedSize`  |
+| 5..6            | `uvMin`     | `float32x2`   | frame UV minimum, swapped with max when flipped         |
+| 7..8            | `uvMax`     | `float32x2`   | frame UV maximum, swapped with min when flipped         |
+| 9               | `rotation`  | `float32`     | radians, applied in camera-facing local space           |
+| 10..11          | `pivot`     | `float32x2`   | normalized [0,1] pivot                                  |
+| 12              | `color`     | `unorm8x4`    | packed little-endian RGBA tint in the Float32/U32 alias |
+
+The current system UBO is 16 bytes: `opacityMul: vec4<f32>`. Straight
+alpha writes `(1, 1, 1, opacity)`; premultiplied writes
+`(opacity, opacity, opacity, opacity)`. The render pipeline uses the
+scene UBO at group 0 and the billboard UBO/atlas bind group at group 1,
+depth compare `less-equal`, depth write off, no culling, and alpha or
+premultiplied blending. Unsupported `additive`, `multiply`, and `cutout`
+blend modes throw during system creation in this slice.
+
+#### Future target BillboardSpriteSystem (96 B = 24 floats)
+
+The later handle/picking/sorted-transparency roadmap moves billboard data
+to a storage buffer at `@group(1) @binding(3)` (not a vertex buffer — 3D
+sprite families read sprite data through a storage buffer indexed by a
+sort-indirection vertex attribute, see below). The 24-float layout:
 
 | Offset (floats) | Field         | Notes                                               |
 | --------------- | ------------- | --------------------------------------------------- |

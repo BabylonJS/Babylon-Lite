@@ -132,10 +132,11 @@ for (const scene of SCENES) {
         // pulls them in (e.g. a top-level reference to getSceneBindGroupLayout in
         // sprite-pipeline.ts) must trip this guard rather than silently regressing.
         if (scene.slug === "scene50-sprite-grid" || scene.slug === "scene51-sprite-grid") {
-            const forbiddenChunks = /scene-core|scene-camera|scene-node|asset-container|scene-helpers|sprite-renderable/;
+            const forbiddenChunks = /scene-core|scene-camera|scene-node|asset-container|scene-helpers|sprite-renderable|billboard-/;
             const chunkOffenders = jsPayloads.map((p) => p.url.split("/").pop()!).filter((f) => forbiddenChunks.test(f));
             expect(chunkOffenders, `pure-2D ${scene.slug} must not load scene/* chunks; found: ${chunkOffenders.join(", ")}`).toEqual([]);
-            const forbiddenModules = /\/(scene\/scene-core|scene\/scene-camera|scene\/scene-node|asset-container|render\/scene-helpers|sprite\/sprite-renderable)\.ts$/;
+            const forbiddenModules =
+                /\/(scene\/scene-core|scene\/scene-camera|scene\/scene-node|asset-container|render\/scene-helpers|sprite\/sprite-renderable|sprite\/billboard-(sprite|scene|renderable|pipeline))\.ts$/;
             const moduleOffenders = runtimeModules.filter((id) => forbiddenModules.test(id));
             expect(moduleOffenders, `pure-2D ${scene.slug} must not load scene/* modules; found: ${moduleOffenders.join(", ")}`).toEqual([]);
         }
@@ -145,7 +146,7 @@ for (const scene of SCENES) {
         // pulled in. If it is, scene52 accidentally used the depth-hosted
         // addToScene path instead of the HUD SpriteRenderer path.
         if (scene.slug === "scene52-hud-on-3d") {
-            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-renderable\.ts$/.test(id));
+            const offenders = runtimeModules.filter((id) => /\/sprite\/(sprite-renderable|billboard-(sprite|scene|renderable|pipeline))\.ts$/.test(id));
             expect(offenders, `scene52 HUD must not load depth-hosted sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
@@ -159,12 +160,19 @@ for (const scene of SCENES) {
             ).toBe(true);
         }
 
+        if (scene.slug === "scene54-facing-billboards") {
+            expect(
+                runtimeModules.some((id) => /\/sprite\/billboard-renderable\.ts$/.test(id)),
+                `scene54 facing billboards MUST include billboard-renderable.ts; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+        }
+
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
-        // List excludes the sprite-using scenes (50, 51, 52, 53). 60-series are
+        // List excludes the sprite-using scenes (50, 51, 52, 53, 54). 60-series are
         // NME demos with no sprites; 1-40 are core 3D.
-        const SPRITE_USING_IDS = new Set([50, 51, 52, 53]);
+        const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
-            const offenders = runtimeModules.filter((id) => /\/sprite\/sprite-(2d|pipeline|renderer|renderable)\.ts$/.test(id));
+            const offenders = runtimeModules.filter((id) => /\/sprite\/(sprite-(2d|pipeline|renderer|renderable)|billboard-(sprite|scene|pipeline|renderable))\.ts$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
     });

@@ -400,6 +400,15 @@
         "tags": ["sprites", "2d", "depth"]
     },
     {
+        "id": 54,
+        "slug": "scene54-facing-billboards",
+        "name": "Scene 54 — Facing Billboards",
+        "maxMad": 0.6,
+        "maxRawKB": 75,
+        "description": "World-space camera-facing rectangular sprite cards rendered through the opt-in FacingBillboardSpriteSystem path from an off-axis camera, depth-tested against diagonal opaque boxes with transparent alpha and no depth write. BJS reference uses SpriteManager.",
+        "tags": ["sprites", "billboards", "depth"]
+    },
+    {
         "id": 60,
         "slug": "scene60-nme-flat",
         "name": "Scene 60 — NME Flat Colour",

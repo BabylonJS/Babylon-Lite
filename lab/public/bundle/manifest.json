@@ -327,20 +327,10 @@
     "bjsGzipKB": 423.7
   },
   "scene20": {
-    "rawKB": 77.3,
-    "gzipKB": 30.7,
+    "rawKB": 34.4,
+    "gzipKB": 13.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene20-background-dds-skybox-BBU4QyV_.js",
-      "scene20-background-ground-UYpv_IHd.js",
-      "scene20-cubemap-skybox-material-Bm7bWgxI.js",
-      "scene20-emissive-fragment-DoSG291u.js",
-      "scene20-ibl-fragment-DrBXphGI.js",
-      "scene20-pbr-renderable-MsmmQWzu.js",
-      "scene20-rgbd-decode-O-q0NvD4.js",
-      "scene20-scene-uniforms-FTYH6Ct0.js",
-      "scene20-singlelight-wgsl-fUZki6dl.js",
-      "scene20-wgsl-helpers-BgB2AJrF.js",
       "scene20.js"
     ],
     "bjsRawKB": 2313.1,
@@ -384,19 +374,10 @@
     "bjsGzipKB": 468.3
   },
   "scene23": {
-    "rawKB": 75.3,
-    "gzipKB": 29.6,
+    "rawKB": 32.1,
+    "gzipKB": 12.2,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene23-anisotropy-fragment-CzH9VTFL.js",
-      "scene23-background-dds-skybox-BtEEWq2g.js",
-      "scene23-background-ground-Ch8HMSs5.js",
-      "scene23-cubemap-skybox-material-C0qXbrzb.js",
-      "scene23-ibl-fragment-CLdI_W3l.js",
-      "scene23-pbr-renderable-aBilBA9h.js",
-      "scene23-rgbd-decode-O-q0NvD4.js",
-      "scene23-scene-uniforms-FTYH6Ct0.js",
-      "scene23-wgsl-helpers-BgB2AJrF.js",
       "scene23.js"
     ],
     "bjsRawKB": 2295.9,
@@ -978,23 +959,10 @@
     "bjsGzipKB": 554.3
   },
   "scene71": {
-    "rawKB": 86,
-    "gzipKB": 34.3,
+    "rawKB": 45.6,
+    "gzipKB": 19.3,
     "ignoredRawKB": 12.9,
     "runtimeChunks": [
-      "scene71-_math-factory-DFVyS8gB.js",
-      "scene71-fragment-output-CfRmfbPv.js",
-      "scene71-input-block-8REhujaW.js",
-      "scene71-node-env-D3Vz5b_4.js",
-      "scene71-node-registry-DX3khsuM.js",
-      "scene71-node-renderable-CDrJTPgA.js",
-      "scene71-pbr-metallic-roughness-block-full-CTml40It.js",
-      "scene71-reflection-block-CIXuH-z0.js",
-      "scene71-refraction-block-CNhcdLis.js",
-      "scene71-rgbd-decode-O-q0NvD4.js",
-      "scene71-subsurface-block-DAwWnSbB.js",
-      "scene71-transform-block-DmQXXRvt.js",
-      "scene71-vertex-output-C7G5u6Y0.js",
       "scene71.js"
     ],
     "bjsRawKB": 2386.9,
@@ -1547,5 +1515,17 @@
     ],
     "bjsRawKB": 2772.2,
     "bjsGzipKB": 658.2
+  },
+  "scene54": {
+    "rawKB": 55.1,
+    "gzipKB": 21,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene54-standard-renderable-CxxY16oa.js",
+      "scene54-wgsl-helpers-WTsokIfK.js",
+      "scene54.js"
+    ],
+    "bjsRawKB": 1545.6,
+    "bjsGzipKB": 368.5
   }
 }
