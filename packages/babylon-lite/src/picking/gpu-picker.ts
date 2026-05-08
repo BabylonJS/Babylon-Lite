@@ -23,7 +23,7 @@ const _tiUboScratch = new Uint32Array(4);
 /** GPU-based picker — pure state. Use pickAsync() and disposePicker() standalone functions. */
 export interface GpuPicker {
     /** Optional hook for detailed picking (Phase 2). */
-    _detailedPick: ((info: PickingInfo, ray: { origin: [number, number, number]; direction: [number, number, number]; length: number }) => void) | null;
+    _detailedPick: ((info: PickingInfo, ray: { origin: [number, number, number]; direction: [number, number, number]; length: number }) => void | Promise<void>) | null;
     /** @internal */
     _scene: SceneContext;
     /** @internal 1×1 render targets (lazily created). */
@@ -309,7 +309,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
         const ray = createPickingRay(px, py, vp, w, h);
         if (ray) {
             info.ray = ray;
-            picker._detailedPick(info, ray);
+            await picker._detailedPick(info, ray);
         }
     }
 

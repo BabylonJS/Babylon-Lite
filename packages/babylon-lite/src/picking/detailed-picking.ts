@@ -3,7 +3,7 @@ import type { MeshInternal } from "../mesh/mesh.js";
 import type { GpuPicker } from "./gpu-picker.js";
 import type { PickingInfo } from "./picking-info.js";
 import type { Ray } from "./ray.js";
-import { computeDeformedPositions, hasCpuDeformation } from "./deformed-geometry.js";
+import type * as DeformedGeometry from "./deformed-geometry.js";
 
 /**
  * Enable detailed picking on a GPU picker.
@@ -15,14 +15,18 @@ export function enableDetailedPicking(picker: GpuPicker): void {
     picker._detailedPick = detailedPick;
 }
 
-function detailedPick(info: PickingInfo, ray: Ray): void {
+async function detailedPick(info: PickingInfo, ray: Ray): Promise<void> {
     const mesh = info.pickedMesh;
     const mi = mesh as MeshInternal | null;
     if (!mi || !mi._cpuPositions || !mi._cpuIndices) {
         return;
     }
 
-    const deformedPositions = hasCpuDeformation(mi) ? computeDeformedPositions(mi) : null;
+    let deformedGeometry: typeof DeformedGeometry | null = null;
+    if (hasCpuDeformationData(mi)) {
+        deformedGeometry = await import("./deformed-geometry.js");
+    }
+    const deformedPositions = deformedGeometry?.computeDeformedPositions(mi) ?? null;
     const positions = deformedPositions ?? mi._cpuPositions;
     const indices = mi._cpuIndices;
 
@@ -108,6 +112,12 @@ function detailedPick(info: PickingInfo, ray: Ray): void {
 
 function clampBarycentric(value: number): number {
     return Math.abs(value) < 1e-12 ? 0 : value;
+}
+
+function hasCpuDeformationData(mesh: MeshInternal): boolean {
+    const morph = mesh.morphTargets;
+    const skeleton = mesh.skeleton;
+    return (!!morph?.targets && !!morph.weights) || (!!skeleton?.boneMatrices && !!skeleton.joints && !!skeleton.weights);
 }
 
 /** Möller-Trumbore ray-triangle intersection with Babylon.js Ray epsilon semantics.

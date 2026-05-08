@@ -1,6 +1,5 @@
 import type { PickingInfo } from "./picking-info.js";
 import type { MeshInternal } from "../mesh/mesh.js";
-import { computeDeformedNormals, hasCpuDeformation } from "./deformed-geometry.js";
 
 /**
  * Get the interpolated normal at the picked point.
@@ -13,8 +12,7 @@ export function getPickedNormal(info: PickingInfo, useWorldCoordinates = false):
         return null;
     }
 
-    const deformedNormals = hasCpuDeformation(mi) ? computeDeformedNormals(mi) : null;
-    const normals = deformedNormals ?? mi._cpuNormals;
+    const normals = mi._cpuNormals;
     const indices = mi._cpuIndices;
     const face = info.faceId;
 

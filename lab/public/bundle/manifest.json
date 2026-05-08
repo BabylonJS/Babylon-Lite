@@ -1549,8 +1549,8 @@
     "bjsGzipKB": 658.2
   },
   "scene113": {
-    "rawKB": 58.2,
-    "gzipKB": 21.7,
+    "rawKB": 56.3,
+    "gzipKB": 21.3,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene113-standard-renderable-BaYogAwn.js",
@@ -1561,10 +1561,11 @@
     "bjsGzipKB": 347.5
   },
   "scene114": {
-    "rawKB": 74.6,
-    "gzipKB": 27.2,
+    "rawKB": 74.8,
+    "gzipKB": 27.5,
     "ignoredRawKB": 0,
     "runtimeChunks": [
+      "scene114-deformed-geometry-DZKrPJjj.js",
       "scene114-morph-fragment-C3jzgyD8.js",
       "scene114-pbr-renderable-DHjPTlEx.js",
       "scene114-singlelight-wgsl-CNmchTZy.js",
