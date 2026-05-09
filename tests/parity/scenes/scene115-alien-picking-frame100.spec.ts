@@ -115,7 +115,7 @@ test("Scene 115 - Alien precise picking at frame 100 matches Babylon.js referenc
     test.setTimeout(120_000);
 
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: SCENE_ID, seekTime: SEEK_TIME, timeout: 120_000, settleMs: 1_000 });
+    await captureGolden(browser, { sceneId: SCENE_ID, seekTime: SEEK_TIME, force: true, timeout: 120_000, settleMs: 1_000 });
     const bjsState = await readBjsPickState(browser);
     expectMarkerState(bjsState, "Babylon.js");
 
