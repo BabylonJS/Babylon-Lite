@@ -1,5 +1,6 @@
-/** Single-light WGSL helpers for mixed-light PBR scenes.
- *  Used when a scene needs the compact single-light path for more than one light type. */
+/** Single-light WGSL helpers for the PBR template.
+ *  Used for exactly one non-shadow affected mesh light; avoids the generic multi-light loop. */
+
 import { MAX_LIGHTS } from "../../../light/types.js";
 
 export const SINGLE_LIGHT_STRUCTS = `

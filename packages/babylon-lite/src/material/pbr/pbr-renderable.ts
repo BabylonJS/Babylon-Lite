@@ -38,8 +38,6 @@ import { computeMeshPbrFeatures } from "./pbr-mesh-features.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
-import type * as AnisotropyFragment from "./fragments/anisotropy-fragment.js";
-import type { createPbrTemplateExt } from "./pbr-template-ext.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { PbrLightMode } from "./pbr-compose.js";
 
@@ -149,6 +147,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         }
     }
 
+    // ── Per-mesh fragment creators (imported if any mesh needs them) ──
+    // Inline `if` blocks (rather than a descriptor array) keep the awaited `import()`
+    // sites literal AND let terser shorten each block independently, saving ~1 KB
+    // in scene1's pbr-renderable chunk. Registration runs sequentially in source
+    // order, which is the iteration order consumed by `_getPbrExts().values()` on
+    // the hot paths (composePbr, writeMaterialData, collectPbrBoundTextures,
+    // computeMeshPbrFeatures).
     if (hasMetallicReflectance) {
         const mod = await import("./fragments/reflectance-fragment.js");
         _registerPbrExt(mod.reflectanceExt);
@@ -190,14 +195,20 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _registerPbrExt(mod.uvTransformExt);
     }
 
-    let _anisoExt: typeof AnisotropyFragment | null = null;
+    // Anisotropy needs its module reference retained (for ANISO_BRDF_FUNCTIONS /
+    // makeAnisotropyTBBlock / ANISO_DIRECT_DG / ANISO_BENT_NORMAL strings consumed
+    // by the template below), so it keeps the full module binding.
+    let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
     if (hasAnyAnisotropy) {
         _anisoExt = await import("./fragments/anisotropy-fragment.js");
         _registerPbrExt(_anisoExt.anisotropyExt);
     }
 
-    let _createPbrTemplateExt: typeof createPbrTemplateExt | null = null;
-    if (hasAnyUvTransform || hasAnyVertexColor || hasAnyUv2) {
+    // Lazy-load pbr-template-ext when any advanced features are present.
+    // Scene1 has none of these, so it won't pay the ~1.5KB cost.
+    let _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null = null;
+    const hasAnyExt = hasAnyUvTransform || hasAnyVertexColor || hasAnyUv2;
+    if (hasAnyExt) {
         const extMod = await import("./pbr-template-ext.js");
         _createPbrTemplateExt = extMod.createPbrTemplateExt;
     }
