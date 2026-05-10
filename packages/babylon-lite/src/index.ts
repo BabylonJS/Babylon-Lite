@@ -81,7 +81,7 @@ export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
-export { createStandardMaterial } from "./material/standard/standard-material.js";
+export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
@@ -118,7 +118,10 @@ export type { MorphTargetData } from "./animation/types.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";
-export { mat4Translation, mat4Identity, mat4Scale, mat4Compose } from "./math/mat4.js";
+export { mat4Translation } from "./math/mat4-translation.js";
+export { mat4Identity } from "./math/mat4-identity.js";
+export { mat4Scale } from "./math/mat4-scale.js";
+export { mat4Compose } from "./math/mat4-compose.js";
 export type { Vec3, Vec3Tuple } from "./math/types.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────

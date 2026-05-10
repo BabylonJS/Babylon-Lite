@@ -9,7 +9,7 @@
 
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4MultiplyInto } from "../math/mat4.js";
+import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */

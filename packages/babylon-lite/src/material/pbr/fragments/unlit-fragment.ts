@@ -13,7 +13,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR2_HAS_UNLIT } from "../pbr-flags.js";
+import { PBR2_HAS_UNLIT } from "../pbr-flag-bits.js";
 
 export function createUnlitFragment(hasIbl: boolean): ShaderFragment {
     const assign = `color = baseColor * material.unlitColor;`;

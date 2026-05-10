@@ -1,7 +1,7 @@
 import type { SceneContext } from "./scene-core.js";
 import type { ArcRotateCamera } from "../camera/arc-rotate.js";
 import { createArcRotateCamera } from "../camera/arc-rotate.js";
-import { vec3 } from "../math/vec3.js";
+import { vec3 } from "../math/vec3-ctor.js";
 
 /** Create an ArcRotateCamera framed to fit all loaded meshes, assign it to scene.
  *  Only the scene knows its contents — auto-framing logic lives here.

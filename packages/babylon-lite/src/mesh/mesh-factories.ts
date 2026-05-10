@@ -10,7 +10,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "./mesh.js";
 import type { MeshInternal } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
-import { computeAabb } from "../math/aabb.js";
+import { computeAabb } from "../math/compute-aabb.js";
 import { createSphereData } from "./create-sphere.js";
 import type { SphereOptions } from "./create-sphere.js";
 import { createBoxData } from "./create-box.js";

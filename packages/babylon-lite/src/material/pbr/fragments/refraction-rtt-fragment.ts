@@ -3,7 +3,7 @@ import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { AssetContainer } from "../../../asset-container.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR2_HAS_REFRACTION, PBR2_HAS_VOLUME, PBR2_LINEAR_IMAGE_PROCESSING } from "../pbr-flags.js";
+import { PBR2_HAS_REFRACTION, PBR2_HAS_VOLUME, PBR2_LINEAR_IMAGE_PROCESSING } from "../pbr-flag-bits.js";
 
 let opaqueSceneTexture: Texture2D | null = null;
 type OpaqueRefractionMat = PbrMaterialProps & { _opaqueRefractionIntensity?: number; _linearImageProcessing?: boolean };

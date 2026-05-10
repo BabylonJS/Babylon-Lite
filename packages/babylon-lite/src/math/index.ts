@@ -1,15 +1,24 @@
 export type { Vec3, Vec4, Color3, Color4, Mat4, Quat } from "./types.js";
-export { vec3, Vec3Up, addVec3, subVec3, scaleVec3, dotVec3, crossVec3, lengthVec3, normalizeVec3, negateVec3, lerpVec3, writeVec3 } from "./vec3.js";
-export {
-    mat4Identity,
-    mat4Multiply,
-    mat4LookAtLH,
-    mat4PerspectiveLH,
-    mat4Invert,
-    mat4Scale,
-    mat4Translation,
-    mat4FromQuat,
-    mat4Compose,
-    mat4ComposeInto,
-    mat4MultiplyInto,
-} from "./mat4.js";
+export { vec3 } from "./vec3-ctor.js";
+export { Vec3Up } from "./vec3-up.js";
+export { addVec3 } from "./add-vec3.js";
+export { subVec3 } from "./sub-vec3.js";
+export { scaleVec3 } from "./scale-vec3.js";
+export { dotVec3 } from "./dot-vec3.js";
+export { crossVec3 } from "./cross-vec3.js";
+export { lengthVec3 } from "./length-vec3.js";
+export { normalizeVec3 } from "./normalize-vec3-object.js";
+export { negateVec3 } from "./negate-vec3.js";
+export { lerpVec3 } from "./lerp-vec3.js";
+export { writeVec3 } from "./write-vec3.js";
+export { mat4Identity } from "./mat4-identity.js";
+export { mat4Multiply } from "./mat4-multiply.js";
+export { mat4LookAtLH } from "./mat4-look-at-lh.js";
+export { mat4PerspectiveLH } from "./mat4-perspective-lh.js";
+export { mat4Invert } from "./mat4-invert.js";
+export { mat4Scale } from "./mat4-scale.js";
+export { mat4Translation } from "./mat4-translation.js";
+export { mat4FromQuat } from "./mat4-from-quat.js";
+export { mat4Compose } from "./mat4-compose.js";
+export { mat4ComposeInto } from "./mat4-compose-into.js";
+export { mat4MultiplyInto } from "./mat4-multiply-into.js";

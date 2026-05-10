@@ -6,7 +6,8 @@ import type { GltfAnimationData, AnimationClip } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
 import { evaluateSampler } from "../animation/evaluate.js";
-import { mat4ComposeInto, mat4MultiplyInto } from "../math/mat4.js";
+import { mat4ComposeInto } from "../math/mat4-compose-into.js";
+import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 
 // RH→LH root transform (same as load-gltf.ts): diag(-1, 1, 1, 1)
 // prettier-ignore

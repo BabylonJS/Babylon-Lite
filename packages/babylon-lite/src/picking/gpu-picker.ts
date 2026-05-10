@@ -6,7 +6,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type * as DeformedGeometry from "./deformed-geometry.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
-import { mat4Invert } from "../math/mat4.js";
+import { mat4Invert } from "../math/mat4-invert.js";
 import { getPickingPipeline, getPickingTIPipeline, getPickingSceneBGL, getPickingMeshBGL, getPickingTIMeshBGL } from "./picking-pipeline.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";

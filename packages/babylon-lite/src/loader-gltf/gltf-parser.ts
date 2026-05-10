@@ -6,7 +6,8 @@
  * - Node hierarchy traversal with memoized world-matrix computation
  */
 import type { Mat4 } from "../math/types.js";
-import { mat4ComposeInto, mat4MultiplyInto } from "../math/mat4.js";
+import { mat4ComposeInto } from "../math/mat4-compose-into.js";
+import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 
 // glTF 2.0 component types
 const FLOAT = 5126;

@@ -9,7 +9,7 @@ import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshInternal } from "../../mesh/mesh.js";
 import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
-import { collectStdBoundTextures } from "./standard-material.js";
+import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";

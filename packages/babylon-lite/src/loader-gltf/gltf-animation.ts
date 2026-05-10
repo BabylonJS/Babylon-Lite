@@ -11,7 +11,9 @@ import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding } from "../animation/types.js";
 import { INTERP_LINEAR, INTERP_STEP, INTERP_CUBICSPLINE, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
-import { mat4Invert, mat4Identity, mat4MultiplyInto } from "../math/mat4.js";
+import { mat4Identity } from "../math/mat4-identity.js";
+import { mat4Invert } from "../math/mat4-invert.js";
+import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import { resolveAccessor, computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
 import type { SceneNode } from "../scene/scene-node.js";
 

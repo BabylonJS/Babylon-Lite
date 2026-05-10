@@ -47,7 +47,7 @@ export function createMorphFragment(): ShaderFragment {
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_MORPH_TARGETS } from "../pbr-flags.js";
+import { PBR_HAS_MORPH_TARGETS } from "../pbr-flag-bits.js";
 
 export const morphExt: PbrExt = {
     id: "morph",

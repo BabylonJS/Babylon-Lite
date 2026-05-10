@@ -25,7 +25,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR2_HAS_REFRACTION, PBR2_HAS_VOLUME } from "../pbr-flags.js";
+import { PBR2_HAS_REFRACTION, PBR2_HAS_VOLUME } from "../pbr-flag-bits.js";
 
 // `dependencies: ["ibl"]` guarantees the IBL fragment's AI slot has already run,
 // so the following symbols are in scope when this slot executes:

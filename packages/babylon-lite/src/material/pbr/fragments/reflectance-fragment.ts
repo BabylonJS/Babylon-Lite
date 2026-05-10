@@ -11,7 +11,7 @@
 import type { ShaderFragment, BindingDecl } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV2 } from "../pbr-flags.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV2 } from "../pbr-flag-bits.js";
 
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;

@@ -70,7 +70,7 @@ export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SKELETON, PBR_HAS_SKELETON_8 } from "../pbr-flags.js";
+import { PBR_HAS_SKELETON, PBR_HAS_SKELETON_8 } from "../pbr-flag-bits.js";
 
 export const skeletonExt: PbrExt = {
     id: "skeleton",

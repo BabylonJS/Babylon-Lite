@@ -1,7 +1,7 @@
 import type { Camera } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
-import { Vec3Up } from "../math/vec3.js";
-import { mat4LookAtLH } from "../math/mat4.js";
+import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
+import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";

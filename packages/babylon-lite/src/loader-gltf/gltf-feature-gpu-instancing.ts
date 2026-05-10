@@ -17,9 +17,10 @@
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh, MeshInternal } from "../mesh/mesh.js";
 import { resolveAccessor } from "./gltf-parser.js";
-import { mat4ComposeInto, mat4Multiply } from "../math/mat4.js";
+import { computeAabb } from "../math/compute-aabb.js";
+import { mat4ComposeInto } from "../math/mat4-compose-into.js";
+import { mat4Multiply } from "../math/mat4-multiply.js";
 import type { Mat4 } from "../math/types.js";
-import { computeAabb } from "../math/aabb.js";
 import { setThinInstances } from "../mesh/thin-instance.js";
 
 /** Collect every Mesh child (direct children only — matches buildNodeHierarchy). */

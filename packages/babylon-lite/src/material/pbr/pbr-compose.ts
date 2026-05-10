@@ -22,21 +22,20 @@ import {
     PBR_HAS_RECEIVE_SHADOWS,
     PBR_HAS_THIN_INSTANCES,
     PBR_HAS_INSTANCE_COLOR,
-} from "./pbr-pipeline.js";
+} from "./pbr-flag-bits.js";
 import {
-    _getPbrExts,
+    PBR_HAS_ANISOTROPY,
+    PBR_HAS_COTANGENT_NORMAL,
+    PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_EMISSIVE,
     PBR_HAS_ENV,
-    PBR_HAS_TONEMAP,
     PBR_HAS_MORPH_TARGETS,
-    PBR_HAS_SPEC_GLOSS,
-    PBR_HAS_DOUBLE_SIDED,
-    PBR_HAS_COTANGENT_NORMAL,
     PBR_HAS_OCCLUSION,
-    PBR_HAS_ANISOTROPY,
     PBR_HAS_SKYBOX,
-    type PbrFragCtx,
-} from "./pbr-flags.js";
+    PBR_HAS_SPEC_GLOSS,
+    PBR_HAS_TONEMAP,
+} from "./pbr-flag-bits.js";
+import { _getPbrExts, type PbrFragCtx } from "./pbr-flags.js";
 
 export interface PbrComposerDeps {
     readonly singleLightWGSL: string;

@@ -4,7 +4,7 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { Material } from "../material/material.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh, MeshInternal } from "./mesh.js";
-import { mat4Invert } from "../math/mat4.js";
+import { mat4Invert } from "../math/mat4-invert.js";
 import { normalizeVec3 } from "../math/normalize-vec3.js";
 import { createMeshFromData } from "./mesh-factories.js";
 

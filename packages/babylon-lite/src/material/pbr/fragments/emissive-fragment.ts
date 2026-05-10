@@ -10,7 +10,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_EMISSIVE_COLOR, PBR_HAS_EMISSIVE } from "../pbr-flags.js";
+import { PBR_HAS_EMISSIVE_COLOR, PBR_HAS_EMISSIVE } from "../pbr-flag-bits.js";
 
 /**
  * Create an emissive-color fragment.

@@ -1,5 +1,5 @@
 import type { Mat4 } from "../math/types.js";
-import { computeAabb } from "../math/aabb.js";
+import { computeAabb } from "../math/compute-aabb.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";

@@ -99,7 +99,7 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_ENV } from "../pbr-flags.js";
+import { PBR_HAS_ENV } from "../pbr-flag-bits.js";
 
 export const iblExt: PbrExt = {
     id: "ibl",

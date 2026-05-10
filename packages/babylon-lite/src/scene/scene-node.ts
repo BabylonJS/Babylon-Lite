@@ -5,7 +5,8 @@
 
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4Compose, mat4Identity } from "../math/mat4.js";
+import { mat4Compose } from "../math/mat4-compose.js";
+import { mat4Identity } from "../math/mat4-identity.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import { createWorldMatrixState } from "./world-matrix-state.js";

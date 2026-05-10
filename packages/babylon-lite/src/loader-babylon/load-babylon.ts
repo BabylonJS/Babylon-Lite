@@ -18,7 +18,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createTransformNode } from "../scene/transform-node.js";
-import { createStandardMaterial } from "../material/standard/standard-material.js";
+import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { uploadMeshToGPU, initMeshTransform } from "../mesh/mesh.js";
 import type { MeshInternal } from "../mesh/mesh.js";

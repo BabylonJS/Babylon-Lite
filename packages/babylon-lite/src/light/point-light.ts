@@ -4,7 +4,7 @@
 
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { mat4Translation } from "../math/mat4.js";
+import { mat4Translation } from "../math/mat4-translation.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 
 export interface PointLight extends LightBase {

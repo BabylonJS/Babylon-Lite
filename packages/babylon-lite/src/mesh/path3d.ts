@@ -7,7 +7,11 @@
  */
 
 import type { Vec3 } from "../math/types.js";
-import { crossVec3, lengthVec3, normalizeVec3, subVec3, vec3 } from "../math/vec3.js";
+import { crossVec3 } from "../math/cross-vec3.js";
+import { lengthVec3 } from "../math/length-vec3.js";
+import { normalizeVec3 } from "../math/normalize-vec3-object.js";
+import { subVec3 } from "../math/sub-vec3.js";
+import { vec3 } from "../math/vec3-ctor.js";
 
 const EPSILON = 0.001;
 

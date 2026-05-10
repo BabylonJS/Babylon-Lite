@@ -3,7 +3,8 @@
 
 import type { EngineContextInternal } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { mat4Compose, mat4Identity } from "../math/mat4.js";
+import { mat4Compose } from "../math/mat4-compose.js";
+import { mat4Identity } from "../math/mat4-identity.js";
 import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";

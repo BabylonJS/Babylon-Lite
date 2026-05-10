@@ -15,7 +15,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP, PBR2_HAS_THICKNESS_GLTF_CHANNEL } from "../pbr-flags.js";
+import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP, PBR2_HAS_THICKNESS_GLTF_CHANNEL } from "../pbr-flag-bits.js";
 
 const SS_HELPERS = `
 fn transmittanceBRDF_Burley(tintColor: vec3<f32>, diffusionDistance: vec3<f32>, thickness: f32) -> vec3<f32> {

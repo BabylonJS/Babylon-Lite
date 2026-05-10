@@ -1,5 +1,5 @@
 import type { Mat4 } from "../math/types.js";
-import { mat4Invert } from "../math/mat4.js";
+import { mat4Invert } from "../math/mat4-invert.js";
 
 /** A ray defined by origin, direction, and length. */
 export interface Ray {

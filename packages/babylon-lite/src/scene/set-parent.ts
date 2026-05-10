@@ -9,7 +9,8 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4Invert, mat4Multiply } from "../math/mat4.js";
+import { mat4Invert } from "../math/mat4-invert.js";
+import { mat4Multiply } from "../math/mat4-multiply.js";
 import type { Mat4 } from "../math/types.js";
 
 export function setParent(child: Mesh, parent: IWorldMatrixProvider | null): void {

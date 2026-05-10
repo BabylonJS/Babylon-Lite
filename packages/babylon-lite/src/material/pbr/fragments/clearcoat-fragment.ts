@@ -28,7 +28,7 @@ import {
     PBR2_CC_ROUGH_MAP,
     PBR2_CC_NORMAL_MAP,
     PBR2_CC_F0_REMAP_OFF,
-} from "../pbr-flags.js";
+} from "../pbr-flag-bits.js";
 
 const STAGE_FRAGMENT = 0x2;
 

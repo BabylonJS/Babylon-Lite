@@ -7,75 +7,7 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
-import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Material, MaterialInternal } from "../material.js";
-import { _getStdExts, _registerStdExt } from "./standard-flags.js";
-
-// ─── Standard Group Builder ──────────────────────────────────────────
-
-/** Lazy-imports the standard renderable builder and builds the pipeline. */
-// Material-property → fragment-module dispatch table. Each entry is a plain
-// extension: if any mesh's material has the named property, dynamic-import
-// the fragment module and register the named StdExt export. Keeping this as
-// a data table rather than an if-ladder keeps core size flat as extensions
-// grow.
-const _STD_MAT_EXTS: ReadonlyArray<readonly [keyof StandardMaterialProps, () => Promise<any>, string]> = [
-    ["bumpTexture", () => import("./fragments/normal-map-fragment.js"), "bumpStdExt"],
-    ["emissiveTexture", () => import("./fragments/std-emissive-fragment.js"), "stdEmissiveExt"],
-    ["specularTexture", () => import("./fragments/std-specular-fragment.js"), "stdSpecularExt"],
-    ["ambientTexture", () => import("./fragments/std-ambient-fragment.js"), "stdAmbientExt"],
-    ["lightmapTexture", () => import("./fragments/std-lightmap-fragment.js"), "stdLightmapExt"],
-    ["opacityTexture", () => import("./fragments/std-opacity-fragment.js"), "stdOpacityExt"],
-    ["reflectionTexture", () => import("./fragments/std-reflection-fragment.js"), "stdReflectionExt"],
-    ["reflectionCubeTexture", () => import("./fragments/std-cube-reflection-fragment.js"), "stdCubeReflectionExt"],
-];
-
-export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
-    const hasTI = meshes.some((m) => !!m.thinInstances);
-    const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
-
-    let tiSync: ((engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
-    let tiFragment: any;
-    let shadowFragment: any;
-
-    const imports: Promise<any>[] = [];
-    if (hasTI) {
-        imports.push(
-            import("../../mesh/thin-instance-gpu.js").then((m) => {
-                tiSync = m.syncThinInstanceBuffers;
-            }),
-            import("../../shader/fragments/thin-instance-fragment.js").then((m) => {
-                tiFragment = m.createThinInstanceFragment;
-            })
-        );
-    }
-    if (hasShadow) {
-        imports.push(
-            import("./fragments/std-shadow-fragment.js").then((m) => {
-                shadowFragment = m.createStdShadowFragment;
-            })
-        );
-    }
-    for (const [prop, load, key] of _STD_MAT_EXTS) {
-        if (meshes.some((m) => !!(m.material as any)[prop])) {
-            imports.push(load().then((mod) => _registerStdExt(mod[key])));
-        }
-    }
-    if (imports.length > 0) {
-        await Promise.all(imports);
-    }
-
-    const renderableMod = await import("./standard-renderable.js");
-    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, {
-        tiSync,
-        tiFragment,
-        shadowFragment,
-    });
-    // Wire the per-mesh rebuild closure used by material swap + per-pass override.
-    standardGroupBuilder._rebuildSingle = result.rebuildSingle;
-    return result;
-};
 
 // ─── Shared Types ────────────────────────────────────────────────────
 
@@ -149,51 +81,6 @@ export interface FogConfig {
     color: [number, number, number];
 }
 
-/** Create StandardMaterial with Babylon defaults. */
-export function createStandardMaterial(): StandardMaterialProps {
-    return {
-        diffuseColor: [1, 1, 1],
-        alpha: 1,
-        specularColor: [1, 1, 1],
-        specularPower: 64,
-        emissiveColor: [0, 0, 0],
-        ambientColor: [0, 0, 0],
-        diffuseTexture: null,
-        diffuseCoordIndex: 0,
-        emissiveTexture: null,
-        bumpTexture: null,
-        bumpLevel: 1,
-        specularTexture: null,
-        specularCoordIndex: 0,
-        ambientTexture: null,
-        ambientTexLevel: 1,
-        ambientCoordIndex: 0,
-        lightmapTexture: null,
-        lightmapLevel: 1,
-        lightmapCoordIndex: 1,
-        opacityTexture: null,
-        opacityLevel: 1,
-        opacityFromRGB: false,
-        alphaCutOff: 0,
-        reflectionTexture: null,
-        reflectionCubeTexture: null,
-        reflectionLevel: 1,
-        reflectionCoordMode: 1,
-        uvScale: [1, 1],
-        backFaceCulling: true,
-        disableLighting: false,
-        _buildGroup: standardGroupBuilder,
-    } as StandardMaterialProps;
-}
-
-/** Collect all non-null textures referenced by a Standard material (for acquire/release). */
-export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[] {
-    const t: Texture2D[] = [];
-    if (mat.diffuseTexture) {
-        t.push(mat.diffuseTexture);
-    }
-    for (const ext of _getStdExts().values()) {
-        ext.textures?.(mat, t);
-    }
-    return t;
-}
+export { collectStdBoundTextures } from "./collect-std-bound-textures.js";
+export { createStandardMaterial } from "./create-standard-material.js";
+export { standardGroupBuilder } from "./standard-group-builder.js";

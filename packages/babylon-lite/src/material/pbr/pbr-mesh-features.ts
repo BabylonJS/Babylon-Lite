@@ -8,27 +8,32 @@
 import type { Mesh } from "../../mesh/mesh.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
-import { PBR_HAS_SKELETON_8, PBR_HAS_SPECULAR_AA, PBR_HAS_RECEIVE_SHADOWS, PBR_HAS_GAMMA_ALBEDO, PBR_HAS_THIN_INSTANCES, PBR_HAS_INSTANCE_COLOR } from "./pbr-pipeline.js";
 import {
-    _getPbrExts,
+    PBR2_HAS_UV2,
+    PBR2_HAS_UV_TRANSFORM,
+    PBR2_HAS_VERTEX_COLOR,
+    PBR_HAS_ALPHA_BLEND,
+    PBR_HAS_ANISOTROPY,
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_COTANGENT_NORMAL,
+    PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_EMISSIVE,
     PBR_HAS_EMISSIVE_COLOR,
     PBR_HAS_ENV,
+    PBR_HAS_GAMMA_ALBEDO,
+    PBR_HAS_INSTANCE_COLOR,
     PBR_HAS_SKELETON,
     PBR_HAS_TONEMAP,
     PBR_HAS_MORPH_TARGETS,
-    PBR_HAS_ALPHA_BLEND,
-    PBR_HAS_SPEC_GLOSS,
-    PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_OCCLUSION,
-    PBR_HAS_ANISOTROPY,
+    PBR_HAS_RECEIVE_SHADOWS,
+    PBR_HAS_SKELETON_8,
     PBR_HAS_SKYBOX,
-    PBR2_HAS_UV_TRANSFORM,
-    PBR2_HAS_VERTEX_COLOR,
-    PBR2_HAS_UV2,
-} from "./pbr-flags.js";
+    PBR_HAS_SPEC_GLOSS,
+    PBR_HAS_SPECULAR_AA,
+    PBR_HAS_THIN_INSTANCES,
+} from "./pbr-flag-bits.js";
+import { _getPbrExts } from "./pbr-flags.js";
 
 /** Scene-level context cached once by the caller (all constant across meshes). */
 export interface PbrFeatureCtx {
