@@ -96,13 +96,17 @@ babylon-lite/
 │   │   │   ├── directional-light.ts # createDirectionalLight()
 │   │   │   └── spot-light.ts      # createSpotLight()
 │   │   ├── material/
+│   │   │   ├── material.ts          # Shared Material / MaterialView interfaces
+│   │   │   ├── material-view.ts     # createMaterialView(), source normalization
+│   │   │   ├── material-dirty.ts    # markMaterialUboDirty()
+│   │   │   ├── material-rebuild.ts  # rebuildMaterial()
 │   │   │   ├── pbr/               # PBR metallic-roughness material
 │   │   │   │   ├── pbr-material.ts      # PbrMaterialProps + createPbrMaterial()
 │   │   │   │   ├── pbr-template.ts      # PBR shader template (WGSL generation)
 │   │   │   │   ├── pbr-flags.ts         # PBR feature flag bitmask
 │   │   │   │   ├── pbr-pipeline.ts      # Pipeline cache + feature flags
-│   │   │   │   ├── pbr-renderable.ts    # buildPbrRenderables()
-│   │   │   │   ├── pbr-single-rebuild.ts     # Single-mesh pipeline rebuild
+│   │   │   │   ├── pbr-renderable.ts    # buildPbrRenderables() + single-mesh rebuild closure
+│   │   │   │   ├── shadow-depth-view.ts # PBR shadow/depth MaterialView helper
 │   │   │   │   ├── fragments/singlelight-wgsl.ts # Non-looping one-light WGSL
 │   │   │   │   ├── fragments/multilight-wgsl.ts  # Generic multi-light WGSL
 │   │   │   │   ├── background-material.ts    # Skybox + Ground material factories
@@ -121,10 +125,11 @@ babylon-lite/
 │   │   │   │       └── skeleton-fragment.ts
 │   │   │   └── standard/          # Standard Blinn-Phong material
 │   │   │       ├── standard-material.ts    # Types, factory, texture collection
+│   │   │       ├── standard-group-builder.ts # Dynamic imports + group builder
 │   │   │       ├── standard-template.ts    # Standard shader template (WGSL generation)
 │   │   │       ├── standard-pipeline.ts    # Pipeline cache + feature flags
-│   │   │       ├── standard-renderable.ts  # buildStandardMeshRenderables()
-│   │   │       ├── standard-single-rebuild.ts # Single-mesh pipeline rebuild
+│   │   │       ├── standard-renderable.ts  # buildStandardMeshRenderables() + single-mesh rebuild closure
+│   │   │       ├── shadow-depth-view.ts    # Standard shadow/depth MaterialView helper
 │   │   │       ├── skybox-cubemap.ts       # CubeMap skybox for StandardMaterial scenes
 │   │   │       └── fragments/             # Standard ShaderFragment modules
 │   │   │           ├── normal-map-fragment.ts
@@ -945,6 +950,10 @@ contribution = hemiColor * intensity
 
 **Pipeline caching**: Both materials cache pipelines per `(features, format, msaaSamples)` tuple. Meshes with the same features share a pipeline.
 
+**Material views**: A `MaterialView` is a lightweight pass-specific view over a source material. It owns only material render-feature bits (`features`, optional `features2`) and reads all textures, UBO data, samplers, alpha/culling state, and extension data from `source`. Render tasks can pass a material view to `addMesh(mesh, { material })` to draw the same mesh through a different material feature set (for example shadow-depth generation) without mutating `mesh.material` or duplicating the material.
+
+**Material mutations**: Scalar/vector UBO-only changes call `markMaterialUboDirty(materialOrView)`, which increments the source material's `_uboVersion` so all renderables/views can observe the update independently. Feature/layout changes call `rebuildMaterial(scene, materialOrView)`, which rebuilds the affected mesh renderables and, by default, views created from the same source.
+
 **Bind group layout (scene group 0)**: binding 0 is the per-pass `SceneUniforms` UBO owned by `RenderTask`; binding 1 is the scene-owned `LightsUniforms` UBO.
 
 **Bind group layout (PBR group 1)**: Bindings assigned sequentially — mesh UBO (world + per-mesh light indices), baseColor, [normal], ORM, [emissive], [BRDF LUT, IBL cube]. Binding count varies by features.
@@ -963,6 +972,10 @@ interface DrawUpdateContext {
 interface Renderable {
     order: number;
     bind(engine, target): DrawBinding;
+}
+interface MaterialView {
+    source: Material;
+    _renderFeatures: { features: number; features2?: number };
 }
 interface DrawBinding {
     pipeline: GPURenderPipeline;
@@ -1367,8 +1380,8 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/material/pbr/pbr-template.ts` | PBR shader template (WGSL gen) | 230 |
 | `src/material/pbr/pbr-flags.ts` | PBR feature flag bitmask | — |
 | `src/material/pbr/pbr-pipeline.ts` | PBR pipeline cache | 170 |
-| `src/material/pbr/pbr-renderable.ts` | PBR renderable builder | 140 |
-| `src/material/pbr/pbr-single-rebuild.ts` | Single-mesh PBR rebuild | — |
+| `src/material/pbr/pbr-renderable.ts` | PBR renderable builder + single-mesh rebuild closure | 140 |
+| `src/material/pbr/shadow-depth-view.ts` | PBR shadow/depth material view helper | — |
 | `src/material/pbr/fragments/singlelight-wgsl.ts` | Non-looping single-light PBR WGSL | — |
 | `src/material/pbr/fragments/multilight-wgsl.ts` | Generic multi-light PBR WGSL | — |
 | `src/material/pbr/background-material.ts` | Skybox + Ground material factories | 217 |
@@ -1380,8 +1393,8 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/material/standard/standard-material.ts` | Standard types + factory | 93 |
 | `src/material/standard/standard-template.ts` | Standard shader template (WGSL gen) | 230 |
 | `src/material/standard/standard-pipeline.ts` | Standard pipeline cache | 280 |
-| `src/material/standard/standard-renderable.ts` | Standard renderable builder | 115 |
-| `src/material/standard/standard-single-rebuild.ts` | Single-mesh Standard rebuild | — |
+| `src/material/standard/standard-renderable.ts` | Standard renderable builder + single-mesh rebuild closure | 115 |
+| `src/material/standard/shadow-depth-view.ts` | Standard shadow/depth material view helper | — |
 | `src/material/standard/skybox-cubemap.ts` | CubeMap skybox pipeline | 104 |
 | `src/material/standard/fragments/` | Standard ShaderFragment modules | — |
 | `src/shader/shader-composer.ts` | ShaderFragment composer engine | — |

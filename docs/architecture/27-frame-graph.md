@@ -275,10 +275,10 @@ A render task can be explicitly populated with:
 
 ```typescript
 task.addMesh(mesh);
-task.addMesh(mesh, { material: overrideMaterial });
+task.addMesh(mesh, { material: overrideMaterialOrView });
 ```
 
-`addMesh()` resolves at `record()` time through the material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run.
+`addMesh()` accepts a source material or `MaterialView` and resolves at `record()` time through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example depth-only Standard/PBR variants used by shadow/depth RTTs.
 
 If a task has explicit renderables, it does **not** auto-mirror the scene.
 
@@ -323,8 +323,6 @@ Before opening the pass each frame, the `RenderPass` before-execute hook install
 5. Mirror live `scene.clearColor` (auto-filled tasks) or `_config.clrColor` plus `_config.clr !== false` onto every owned pass — so the pass picks them up when patching its color attachment.
 
 Then the task iterates `_passes` calling `_execute()`. Each `RenderPass._execute()` patches the swapchain view + clearColor + loadOp, calls `beginRenderPass`, runs `executePassBody(task, enc)` (the closure captured at record time), and ends the pass.
-
-Before opening the pass each frame, `RenderPassTask` calls `binding.update?.(_updateContext)` for opaque, transmissive, and transparent bindings. This refreshes dirty per-binding UBOs with the pass target dimensions while allowing opaque render bundles to stay cached.
 
 ## Per-Pass Scene UBO
 

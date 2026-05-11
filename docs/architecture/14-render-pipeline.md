@@ -44,13 +44,11 @@ export interface PrePassRenderable {
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
     updater?: SceneUniformUpdater;
-    rebuildSingle: (scene: any, mesh: any, materialOverride?: any) => Renderable;
+    rebuildSingle: (scene: SceneContext, mesh: Mesh, materialOverride?: MaterialOrView) => Renderable;
 }
 ```
 
 `Renderable.bind(engine, target)` is the key split: material modules resolve the pipeline for the pass target once and return a `DrawBinding` closure. The `RenderTask` owns the scene bind group (group 0), so renderables never set bind group 0 themselves.
-
-`DrawBinding.update(context)` is called once per frame per binding before the render pass is opened. The context contains the current pass target dimensions (`targetWidth`, `targetHeight`) so bindings can refresh target-size-dependent UBOs without rebuilding their pipelines or bind groups. Mesh/material UBO updates that do not need the target dimensions still use this hook and version-guard their writes.
 
 `DrawBinding.update(context)` is called once per frame per binding before the render pass is opened. The context contains the current pass target dimensions (`targetWidth`, `targetHeight`) so bindings can refresh target-size-dependent UBOs without rebuilding their pipelines or bind groups. Mesh/material UBO updates that do not need the target dimensions still use this hook and version-guard their writes.
 
@@ -100,6 +98,8 @@ Important fields:
 | `clr` | `true`/undefined clears color+depth; `false` loads previous content for overlays/multi-scene composition.                           |
 | `cam` | Per-pass camera override; defaults to `scene.camera`.                                                                               |
 | `cs`  | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect. |
+
+`RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the source material family's `_buildGroup._rebuildSingle` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`.
 
 ## Runtime Flow
 
@@ -157,6 +157,41 @@ Material renderable builders remain responsible for:
 
 The frame graph never imports material-specific shader code.
 
+## Material Views
+
+Material views are lightweight pass-specific views over a source material. They are used when a render task needs different render features for the same source material state, for example rendering Standard/PBR meshes into shadow-depth RTTs.
+
+```typescript
+export interface Material {
+    readonly _buildGroup: MeshGroupBuilder;
+    _renderFeatures: MaterialRenderFeatures;
+    _uboVersion: number;
+    _views?: MaterialView[];
+}
+
+export interface MaterialRenderFeatures {
+    features: number;
+    features2?: number;
+}
+
+export interface MaterialView {
+    readonly source: Material;
+    readonly _renderFeatures: MaterialRenderFeatures;
+}
+
+export type MaterialOrView = Material | MaterialView;
+
+export function createMaterialView(source: MaterialOrView, renderFeatures: MaterialRenderFeatures): MaterialView;
+export function markMaterialUboDirty(materialOrView: MaterialOrView): void;
+export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrView, options?: RebuildMaterialOptions): void;
+```
+
+`createMaterialView()` stores only render feature bits and a `source` pointer. Textures, samplers, uniforms, alpha/culling state, extension data, and UBO versions stay owned by the source material. Creating a view from another view collapses to the original source and registers the new view in `source._views`.
+
+Material renderables resolve a `MaterialOrView` by reading source material state plus view-owned render features. Plain materials compute/store `material._renderFeatures`; views use `view._renderFeatures` exactly while binding UBO/textures from `view.source`. Mesh/pass feature bits remain separate and are computed per renderable.
+
+`markMaterialUboDirty()` increments `source._uboVersion`, so every renderable/view derived from that source can observe scalar/vector UBO changes independently. `rebuildMaterial()` rebuilds meshes using the source and, by default, any views created from that source; use it for feature/layout changes such as texture changes, sampler/layout changes, alpha/culling changes, or view feature changes.
+
 ## `_buildGroup` Pattern
 
 Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` groups meshes by builder, and deferred builders run before rendering to produce renderables.
@@ -171,6 +206,7 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 | `RenderTask`                            | Render pass task that binds target + camera state |
 | `Renderable.bind()`                     | Material/effect submesh binding for a target      |
 | `DrawBinding`                           | Prepared draw item / submesh draw packet          |
+| `MaterialView`                          | Pass-specific material variant / render override  |
 | Task-owned scene UBO                    | Per-pass scene uniform state                      |
 | Opaque/transmissive/transparent buckets | Rendering group draw lists                        |
 | `renderable.order`                      | Rendering order / group sorting                   |
@@ -181,6 +217,7 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 - `frame-graph/frame-graph.ts` depends on `Task`, `EngineContextInternal`, and `SceneContextInternal`.
 - `frame-graph/render-task.ts` depends on render targets, camera matrices, canonical scene UBO helpers, and the `Renderable`/`DrawBinding` contracts.
 - Material modules depend on `Renderable` and return target-bindable renderables; the frame graph does not depend on material modules.
+- `material/material-view.ts`, `material/material-dirty.ts`, and `material/material-rebuild.ts` own the shared material-view and material-rebuild helpers used by render tasks and material families.
 
 ## File Manifest
 
@@ -191,3 +228,7 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 | `src/frame-graph/frame-graph.ts`         | Ordered task list, build/execute/dispose lifecycle                                                                           |
 | `src/frame-graph/frame-graph-actions.ts` | `addTask`, `addTaskAtStart`, `addTaskBefore` helpers                                                                         |
 | `src/frame-graph/render-task.ts`         | Render task implementation, per-pass scene UBO, renderable bucketing, RTT/swapchain pass execution                           |
+| `src/material/material.ts`               | Shared material, material-view, and render-feature interfaces                                                                 |
+| `src/material/material-view.ts`          | Lightweight material view creation and source normalization                                                                    |
+| `src/material/material-dirty.ts`         | Source-material UBO version bump helper                                                                                        |
+| `src/material/material-rebuild.ts`       | Rebuild helpers for source materials and their views                                                                           |
