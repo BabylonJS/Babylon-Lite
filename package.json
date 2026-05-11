@@ -23,7 +23,8 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"packages/**/src/**/*.ts\" \"apps/**/src/**/*.ts\" \"tests/**/*.ts\"",
         "format:check": "prettier --check \"packages/**/src/**/*.ts\" \"apps/**/src/**/*.ts\" \"tests/**/*.ts\"",
-        "analyze-bundle": "tsx scripts/analyze-bundle.ts"
+        "analyze-bundle": "tsx scripts/analyze-bundle.ts",
+        "coverage:scene": "tsx scripts/coverage-scene.ts"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
