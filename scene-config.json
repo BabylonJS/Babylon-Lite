@@ -523,8 +523,7 @@
         "maxMad": 0.05,
         "maxRawKB": 140,
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
-        "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"],
-        "skipParity": true
+        "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"]
     },
     {
         "id": 74,
