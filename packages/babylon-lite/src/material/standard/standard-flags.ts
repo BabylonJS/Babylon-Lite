@@ -25,25 +25,24 @@ export function getPcfShadowExt(): ShadowShaderExt | null {
 
 export const HAS_DIFFUSE_TEXTURE = 1 << 0;
 export const HAS_EMISSIVE_TEXTURE = 1 << 1;
-export const RECEIVE_SHADOWS = 1 << 2;
-export const HAS_BUMP_TEXTURE = 1 << 3;
-export const HAS_SPECULAR_TEXTURE = 1 << 4;
-export const HAS_AMBIENT_TEXTURE = 1 << 5;
-export const HAS_LIGHTMAP_TEXTURE = 1 << 6;
-export const HAS_OPACITY_TEXTURE = 1 << 7;
-export const LIGHTMAP_USES_UV2 = 1 << 8;
-export const AMBIENT_USES_UV2 = 1 << 9;
-export const DOUBLE_SIDED = 1 << 10;
-export const DIFFUSE_USES_UV2 = 1 << 11;
-export const SPECULAR_USES_UV2 = 1 << 12;
-export const OPACITY_FROM_RGB = 1 << 13;
-export const HAS_REFLECTION_TEXTURE = 1 << 14;
-export const THIN_INSTANCES = 1 << 15;
-export const THIN_INSTANCE_COLOR = 1 << 16;
-export const DISABLE_LIGHTING = 1 << 17;
-export const PCF_SHADOWS = 1 << 18;
-export const MATERIAL_ALPHA_BLEND = 1 << 19;
-export const HAS_CUBE_REFLECTION = 1 << 20;
+export const HAS_BUMP_TEXTURE = 1 << 2;
+export const HAS_SPECULAR_TEXTURE = 1 << 3;
+export const HAS_AMBIENT_TEXTURE = 1 << 4;
+export const HAS_LIGHTMAP_TEXTURE = 1 << 5;
+export const HAS_OPACITY_TEXTURE = 1 << 6;
+export const LIGHTMAP_USES_UV2 = 1 << 7;
+export const AMBIENT_USES_UV2 = 1 << 8;
+export const DOUBLE_SIDED = 1 << 9;
+export const DIFFUSE_USES_UV2 = 1 << 10;
+export const SPECULAR_USES_UV2 = 1 << 11;
+export const OPACITY_FROM_RGB = 1 << 12;
+export const HAS_REFLECTION_TEXTURE = 1 << 13;
+export const DISABLE_LIGHTING = 1 << 14;
+export const PCF_SHADOWS = 1 << 15;
+export const MATERIAL_ALPHA_BLEND = 1 << 16;
+export const HAS_CUBE_REFLECTION = 1 << 17;
+export const GENERATE_DEPTH_FOR_SHADOWS = 1 << 18;
+export const HAS_DEPTH_EMISSIVE_TEXTURE = 1 << 19;
 
 // ─── Pluggable Shadow Pipeline Extensions (tree-shakable) ──────────
 // PCF bind group layout config is registered at runtime by createPcfShadowGenerator().

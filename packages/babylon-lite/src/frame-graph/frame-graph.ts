@@ -20,7 +20,6 @@
 import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { SceneContextInternal } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
-import { _executeTask } from "./task.js";
 
 /** The frame graph — an ordered list of tasks. */
 export interface FrameGraph {
@@ -66,11 +65,8 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
                 const task = fg._tasks[i]!;
                 task._passes.length = 0;
                 fg._currentProcessedTask = task;
-                try {
-                    task.record();
-                } finally {
-                    fg._currentProcessedTask = null;
-                }
+                task.record();
+                fg._currentProcessedTask = null;
             }
             // Phase 2 — initialize. Runs after every task has finished recording
             // so passes can safely reference resources allocated by other tasks
@@ -90,7 +86,13 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
             }
             let drawCalls = 0;
             for (const task of fg._tasks) {
-                drawCalls += _executeTask(task);
+                if (task.execute) {
+                    drawCalls += task.execute();
+                } else {
+                    for (const pass of task._passes) {
+                        drawCalls += pass._execute();
+                    }
+                }
             }
             return drawCalls;
         },

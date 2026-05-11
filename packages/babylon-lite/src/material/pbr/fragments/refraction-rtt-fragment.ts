@@ -137,11 +137,11 @@ export const refractionRttExt: PbrExt = {
         return { f: 0, f2 };
     },
     frag(ctx) {
-        const linearImageProcessing = (ctx.features2 & PBR2_LINEAR_IMAGE_PROCESSING) !== 0;
-        if (!(ctx.features2 & PBR2_HAS_REFRACTION)) {
+        const linearImageProcessing = (ctx._features2 & PBR2_LINEAR_IMAGE_PROCESSING) !== 0;
+        if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
             return linearImageProcessing ? createLinearImageProcessingFragment() : null;
         }
-        return createRefractionRttFragment((ctx.features2 & PBR2_HAS_VOLUME) !== 0, linearImageProcessing);
+        return createRefractionRttFragment((ctx._features2 & PBR2_HAS_VOLUME) !== 0, linearImageProcessing);
     },
     writeUbo(data, mat, offsets) {
         if (offsets.has("refractionParams")) {
@@ -149,7 +149,7 @@ export const refractionRttExt: PbrExt = {
         }
     },
     bind(ctx, entries, b) {
-        if (!(ctx.features2 & PBR2_HAS_REFRACTION)) {
+        if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
             return b;
         }
         if (!opaqueSceneTexture) {

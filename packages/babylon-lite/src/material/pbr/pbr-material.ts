@@ -6,8 +6,23 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { SceneContextInternal } from "../../scene/scene.js";
-import type { Material, MaterialInternal } from "../material.js";
-import { _getPbrExts } from "./pbr-flags.js";
+import type { Material } from "../material.js";
+import {
+    _getPbrExts,
+    PBR2_HAS_UV_TRANSFORM,
+    PBR2_HAS_UV2,
+    PBR_HAS_ALPHA_BLEND,
+    PBR_HAS_ANISOTROPY,
+    PBR_HAS_DOUBLE_SIDED,
+    PBR_HAS_EMISSIVE,
+    PBR_HAS_EMISSIVE_COLOR,
+    PBR_HAS_GAMMA_ALBEDO,
+    PBR_HAS_NORMAL_MAP,
+    PBR_HAS_OCCLUSION,
+    PBR_HAS_SKYBOX,
+    PBR_HAS_SPECULAR_AA,
+    PBR_HAS_SPEC_GLOSS,
+} from "./pbr-flags.js";
 
 /** Lazy-imports the PBR renderable builder and builds the pipeline.
  *  Thin instances are handled by the fragment composer automatically. */
@@ -107,11 +122,68 @@ export interface PbrMaterialProps extends Material {
 }
 
 /** @internal Extended PbrMaterialProps with internal build group. */
-export interface PbrMaterialPropsInternal extends PbrMaterialProps, MaterialInternal {
+export interface PbrMaterialPropsInternal extends PbrMaterialProps {
     /** @internal True when any of the material's textures carries `_hasTx=true`
      *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
      *  so the renderer doesn't re-scan 5 textures per mesh. */
     _hasUvTx?: boolean;
+}
+
+/** @internal Compute PBR material-only feature bits. Mesh/pass bits are added per renderable. */
+export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: number; features2: number } {
+    let features =
+        (mat.emissiveTexture ? PBR_HAS_EMISSIVE : 0) |
+        (mat.emissiveColor ? PBR_HAS_EMISSIVE_COLOR : 0) |
+        (mat.normalTexture ? PBR_HAS_NORMAL_MAP : 0) |
+        (mat.alphaBlend === true || mat.alpha! < 1 ? PBR_HAS_ALPHA_BLEND : 0) |
+        (mat.specGlossTexture ? PBR_HAS_SPEC_GLOSS : 0) |
+        (mat.doubleSided ? PBR_HAS_DOUBLE_SIDED : 0);
+    if ((mat.occlusionStrength ?? 1.0) > 0) {
+        features |= PBR_HAS_OCCLUSION;
+    }
+    if (mat.enableSpecularAA) {
+        features |= PBR_HAS_SPECULAR_AA;
+    }
+    if (mat.gammaAlbedo) {
+        features |= PBR_HAS_GAMMA_ALBEDO;
+    }
+    if (mat.anisotropy?.isEnabled) {
+        features |= PBR_HAS_ANISOTROPY;
+    }
+    if (mat.skyboxMode) {
+        features |= PBR_HAS_SKYBOX;
+    }
+
+    let features2 = 0;
+    for (const ext of _getPbrExts().values()) {
+        if (ext.detect) {
+            const d = ext.detect(mat);
+            features |= d.f;
+            features2 |= d.f2;
+        }
+    }
+    if ((mat as { _hasUvTx?: boolean })._hasUvTx) {
+        features2 |= PBR2_HAS_UV_TRANSFORM;
+    }
+    if (mat.occlusionTexCoord) {
+        features2 |= PBR2_HAS_UV2;
+    }
+    return { features, features2 };
+}
+
+/** @internal Key for PBR shader features, including mesh/pass and scene features. */
+export function _pbrFeatureKey(features: number, features2: number, meshFeatures: number, sceneFeatures: number, variant = ""): string {
+    return `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${variant}`;
+}
+
+/** @internal Key for PBR shader variants inside a feature set. */
+export function _pbrShaderVariantKey(
+    lightMode: number,
+    singleLightType = "",
+    shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" }[] = []
+): string {
+    const shadowKey = shadowLights.length === 0 ? "" : shadowLights.map((sl) => `${sl.lightIndex}${sl.shadowType === "pcf" ? "p" : "e"}`).join(",");
+    return shadowKey ? `${lightMode}:${singleLightType}:${shadowKey}` : `${lightMode}:${singleLightType}`;
 }
 
 /** Clearcoat layer properties. Maps to BJS PBRMaterial.clearCoat sub-object. */
@@ -246,10 +318,13 @@ export interface SubSurfaceProps {
 
 /** Create a PbrMaterialProps with optional overrides. */
 export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMaterialProps {
-    return {
+    const mat = {
         ...props,
+        _renderFeatures: { features: 0 },
         _buildGroup: pbrGroupBuilder,
-    } as PbrMaterialProps;
+        _uboVersion: 0,
+    } as PbrMaterialPropsInternal;
+    return mat;
 }
 
 /** Collect all non-null textures referenced by a PBR material (for acquire/release). */

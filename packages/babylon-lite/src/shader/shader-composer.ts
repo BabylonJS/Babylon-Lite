@@ -97,7 +97,7 @@ function bglEntry(binding: number, decl: BindingDecl): GPUBindGroupLayoutEntry {
             break;
         }
         case "sampler":
-            e.sampler = { type: decl.type.samplerType === "sampler_comparison" ? "comparison" : "filtering" };
+            e.sampler = { type: decl.type.samplerType === "sampler_comparison" ? "comparison" : decl.type.samplerType === "sampler_non_filtering" ? "non-filtering" : "filtering" };
             break;
         case "storage-texture":
             e.storageTexture = { access: decl.type.access as GPUStorageTextureAccess, format: decl.type.format as GPUTextureFormat };
@@ -113,7 +113,7 @@ function declWGSL(g: number, b: number, d: BindingDecl): string {
         case "texture":
             return `@group(${g}) @binding(${b}) var ${d.name}: ${d.type.textureType};`;
         case "sampler":
-            return `@group(${g}) @binding(${b}) var ${d.name}: ${d.type.samplerType};`;
+            return `@group(${g}) @binding(${b}) var ${d.name}: ${d.type.samplerType === "sampler_non_filtering" ? "sampler" : d.type.samplerType};`;
         case "storage-texture":
             return `@group(${g}) @binding(${b}) var ${d.name}: texture_storage_2d<${d.type.format}, ${d.type.access}>;`;
     }

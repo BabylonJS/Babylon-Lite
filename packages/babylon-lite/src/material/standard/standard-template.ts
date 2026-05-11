@@ -242,7 +242,6 @@ var baseColor = _ds.rgb * mat.tl;`
     const diffuseColorCode = `let diffuseColor = mat.dc.rgb;`;
     const emissiveCode = `var emissiveContrib = mat.ec;`;
     const specularColorCode = !disableLighting ? `var specularColor = mat.sc.rgb;` : "";
-
     // Lighting block (only when lighting enabled)
     let lightingBlock: string;
     if (!disableLighting) {

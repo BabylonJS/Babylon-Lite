@@ -5,7 +5,7 @@
  * The "Bundle" tab in the lab gallery loads these pre-built files directly,
  * showing what a real consumer gets after tree-shaking + minification.
  *
- * Also writes manifest.json with per-scene sizes for the gallery UI.
+ * Also writes local-manifest.json with per-scene sizes for the gallery UI.
  *
  * Usage: npx tsx scripts/build-bundle-scenes.ts
  */

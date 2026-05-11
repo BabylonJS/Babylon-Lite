@@ -4,8 +4,6 @@
  *  Feature flags (bitmask):
  *    HAS_DIFFUSE_TEXTURE  — diffuse texture sampling + UV attribute
  *    HAS_EMISSIVE_TEXTURE — emissive texture sampling + UV attribute
- *    RECEIVE_SHADOWS      — ESM shadow map + light-space transform
- *
  *  Derived flag (computed automatically):
  *    NEEDS_UV = HAS_DIFFUSE_TEXTURE | HAS_EMISSIVE_TEXTURE
  *
@@ -15,6 +13,7 @@
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps } from "./standard-material.js";
+import { _standardFeatureKey } from "./standard-material.js";
 import { getSceneBindGroupLayout, clearSceneBGLCache } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
 import { composeShader } from "../../shader/shader-composer.js";
@@ -28,7 +27,6 @@ import {
     DOUBLE_SIDED,
     HAS_AMBIENT_TEXTURE,
     HAS_BUMP_TEXTURE,
-    HAS_CUBE_REFLECTION,
     HAS_DIFFUSE_TEXTURE,
     HAS_EMISSIVE_TEXTURE,
     HAS_LIGHTMAP_TEXTURE,
@@ -37,75 +35,15 @@ import {
     HAS_SPECULAR_TEXTURE,
     LIGHTMAP_USES_UV2,
     MATERIAL_ALPHA_BLEND,
+    GENERATE_DEPTH_FOR_SHADOWS,
     NEEDS_UV,
     NEEDS_UV2,
     OPACITY_FROM_RGB,
     PCF_SHADOWS,
-    RECEIVE_SHADOWS,
     SPECULAR_USES_UV2,
     _getStdExtsSorted,
 } from "./standard-flags.js";
-
-/** Compute feature bitmask from a mesh's material + receiveShadows flag. */
-export function computeFeatures(material: StandardMaterialProps, receiveShadows: boolean): number {
-    const m = material;
-    let f = 0;
-    if (m.diffuseTexture) {
-        f |= HAS_DIFFUSE_TEXTURE;
-        if (m.diffuseCoordIndex === 1) {
-            f |= DIFFUSE_USES_UV2;
-        }
-    }
-    if (m.emissiveTexture) {
-        f |= HAS_EMISSIVE_TEXTURE;
-    }
-    if (receiveShadows) {
-        f |= RECEIVE_SHADOWS;
-    }
-    if (m.bumpTexture) {
-        f |= HAS_BUMP_TEXTURE;
-    }
-    if (m.specularTexture) {
-        f |= HAS_SPECULAR_TEXTURE;
-        if (m.specularCoordIndex === 1) {
-            f |= SPECULAR_USES_UV2;
-        }
-    }
-    if (m.ambientTexture) {
-        f |= HAS_AMBIENT_TEXTURE;
-        if (m.ambientCoordIndex === 1) {
-            f |= AMBIENT_USES_UV2;
-        }
-    }
-    if (m.lightmapTexture) {
-        f |= HAS_LIGHTMAP_TEXTURE;
-        if (m.lightmapCoordIndex === 1) {
-            f |= LIGHTMAP_USES_UV2;
-        }
-    }
-    if (m.opacityTexture) {
-        f |= HAS_OPACITY_TEXTURE;
-        if (m.opacityFromRGB) {
-            f |= OPACITY_FROM_RGB;
-        }
-    }
-    if (!m.backFaceCulling) {
-        f |= DOUBLE_SIDED;
-    }
-    if (m.reflectionTexture) {
-        f |= HAS_REFLECTION_TEXTURE;
-    }
-    if ((m as any).reflectionCubeTexture) {
-        f |= HAS_CUBE_REFLECTION;
-    }
-    if (m.disableLighting) {
-        f |= DISABLE_LIGHTING;
-    }
-    if (m.alpha < 1) {
-        f |= MATERIAL_ALPHA_BLEND;
-    }
-    return f;
-}
+import { MESH_RECEIVE_SHADOWS } from "../mesh-features.js";
 
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
@@ -113,8 +51,9 @@ export function computeFeatures(material: StandardMaterialProps, receiveShadows:
 // the generic composer, enabling fragment-based extensions in Phase 2.
 
 /** Convert feature bitmask to a StandardTemplateConfig for the composer. */
-export function featuresToTemplateConfig(features: number) {
+export function featuresToTemplateConfig(features: number, meshFeatures = 0) {
     const has = (bit: number) => (features & bit) !== 0;
+    const hasMesh = (bit: number) => (meshFeatures & bit) !== 0;
     return {
         textures: {
             diffuse: has(HAS_DIFFUSE_TEXTURE),
@@ -132,7 +71,7 @@ export function featuresToTemplateConfig(features: number) {
         ambientUsesUV2: has(AMBIENT_USES_UV2),
         diffuseUsesUV2: has(DIFFUSE_USES_UV2),
         specularUsesUV2: has(SPECULAR_USES_UV2),
-        hasShadow: has(RECEIVE_SHADOWS),
+        hasShadow: hasMesh(MESH_RECEIVE_SHADOWS),
         hasPcfShadow: has(PCF_SHADOWS),
         opacityFromRGB: has(OPACITY_FROM_RGB),
         disableLighting: has(DISABLE_LIGHTING),
@@ -141,8 +80,8 @@ export function featuresToTemplateConfig(features: number) {
 
 /** Compose Standard shader via the generic ShaderComposer.
  *  @param fragments Optional extra fragments (e.g. thin-instance). */
-export function composeStandardShader(features: number, fragments: ShaderFragment[] = []): ComposedShader {
-    const config = featuresToTemplateConfig(features);
+export function composeStandardShader(features: number, meshFeatures = 0, fragments: ShaderFragment[] = []): ComposedShader {
+    const config = featuresToTemplateConfig(features, meshFeatures);
     const template = createStandardTemplate(config);
     return composeShader(template, fragments);
 }
@@ -153,12 +92,13 @@ export function composeStandardShader(features: number, fragments: ShaderFragmen
  *  per-sig pipeline cache. Created once at renderable build time, shared across
  *  all sig-specific pipelines. */
 export interface StandardShaderBindings {
-    features: number;
-    meshBGL: GPUBindGroupLayout;
-    shadowBGL: GPUBindGroupLayout | null;
-    composed: ComposedShader;
+    _features: number;
+    _meshFeatures: number;
+    _meshBGL: GPUBindGroupLayout;
+    _shadowBGL: GPUBindGroupLayout | null;
+    _composed: ComposedShader;
     /** Per-sig pipeline cache. Key = `targetSignatureKey(sig)`. */
-    pipelines: Map<string, GPURenderPipeline>;
+    _pipelines: Map<string, GPURenderPipeline>;
 }
 
 // ─── Caches ─────────────────────────────────────────────────────────
@@ -192,22 +132,18 @@ export function clearStandardPipelineCache(): void {
     _cachedDevice = null;
 }
 
-function fragmentKey(fragments: ShaderFragment[]): string {
-    return fragments.length === 0
-        ? ""
-        : fragments
-              .map((f) => f.id)
-              .sort()
-              .join(",");
-}
-
 /** Get-or-build the sig-independent shader bindings for a given feature/fragment set.
  *  Used at renderable build time so per-mesh bind groups can be created BEFORE the
  *  first bind() call (when sig is known). */
-export function getOrCreateStandardBindings(engine: EngineContextInternal, features: number, fragments: ShaderFragment[] = []): StandardShaderBindings {
+export function getOrCreateStandardBindings(
+    engine: EngineContextInternal,
+    features: number,
+    meshFeatures: number,
+    fragments: ShaderFragment[] = [],
+    shaderKey = ""
+): StandardShaderBindings {
     ensureDevice(engine);
-    const fk = fragmentKey(fragments);
-    const key = fk ? `${features}:${fk}` : `${features}`;
+    const key = _standardFeatureKey(features, meshFeatures, shaderKey);
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -216,24 +152,25 @@ export function getOrCreateStandardBindings(engine: EngineContextInternal, featu
     const cc = getComposedCache();
     let composed = cc.get(key);
     if (!composed) {
-        composed = composeStandardShader(features, fragments);
+        composed = composeStandardShader(features, meshFeatures, fragments);
         cc.set(key, composed);
     }
 
     const device = engine.device;
     const meshBGL = device.createBindGroupLayout(composed.meshBGLDescriptor);
     let shadowBGL: GPUBindGroupLayout | null = null;
-    const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
+    const hasShadow = (meshFeatures & MESH_RECEIVE_SHADOWS) !== 0;
     if (hasShadow && composed.shadowBGLDescriptor) {
         shadowBGL = device.createBindGroupLayout(composed.shadowBGLDescriptor);
     }
 
     const bindings: StandardShaderBindings = {
-        features,
-        meshBGL,
-        shadowBGL,
-        composed,
-        pipelines: new Map(),
+        _features: features,
+        _meshFeatures: meshFeatures,
+        _meshBGL: meshBGL,
+        _shadowBGL: shadowBGL,
+        _composed: composed,
+        _pipelines: new Map(),
     };
     _bindingsCache.set(key, bindings);
     return bindings;
@@ -243,41 +180,44 @@ export function getOrCreateStandardBindings(engine: EngineContextInternal, featu
 export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
     ensureDevice(engine);
     const key = targetSignatureKey(sig);
-    const cached = bindings.pipelines.get(key);
+    const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
     }
 
     const device = engine.device;
-    const composed = bindings.composed;
-    const features = bindings.features;
+    const composed = bindings._composed;
+    const features = bindings._features;
     const sceneBGL = getSceneBindGroupLayout(engine);
-    const bgls: GPUBindGroupLayout[] = bindings.shadowBGL ? [sceneBGL, bindings.meshBGL, bindings.shadowBGL] : [sceneBGL, bindings.meshBGL];
+    const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
     const vertModule = device.createShaderModule({ code: composed.vertexWGSL });
-    const fragModule = device.createShaderModule({ code: composed.fragmentWGSL });
+    const depthOnly = (features & GENERATE_DEPTH_FOR_SHADOWS) !== 0;
+    const fragModule = depthOnly || !sig.colorFormat || composed.fragmentWGSL == null ? null : device.createShaderModule({ code: composed.fragmentWGSL });
 
     const needsBlend = (features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0;
     const colorTarget: GPUColorTargetState = needsBlend
         ? {
-              format: sig.colorFormat,
+              format: sig.colorFormat!,
               blend: {
                   color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
                   alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
               },
           }
-        : { format: sig.colorFormat };
+        : { format: sig.colorFormat! };
 
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed.vertexBufferLayouts },
-        fragment: { module: fragModule, entryPoint: "main", targets: [colorTarget] },
-        ...(sig.depthStencilFormat ? { depthStencil: { format: sig.depthStencilFormat, depthCompare: "less-equal" as GPUCompareFunction, depthWriteEnabled: !needsBlend } } : {}),
+        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: [colorTarget] } } : {}),
+        ...(sig.depthStencilFormat
+            ? { depthStencil: { format: sig.depthStencilFormat, depthCompare: "less-equal" as GPUCompareFunction, depthWriteEnabled: depthOnly || !needsBlend } }
+            : {}),
         multisample: { count: sig.sampleCount },
         primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: sig.flipY ? "cw" : "ccw" },
     });
 
-    bindings.pipelines.set(key, pipeline);
+    bindings._pipelines.set(key, pipeline);
     return pipeline;
 }
 
@@ -297,7 +237,7 @@ export function createStandardMeshBindGroup(
     material: StandardMaterialProps
 ): GPUBindGroup {
     const device = engine.device;
-    const features = bindings.features;
+    const features = bindings._features;
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
 
@@ -341,7 +281,7 @@ export function createStandardMeshBindGroup(
         }
     }
 
-    return device.createBindGroup({ layout: bindings.meshBGL, entries });
+    return device.createBindGroup({ layout: bindings._meshBGL, entries });
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────

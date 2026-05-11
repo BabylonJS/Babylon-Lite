@@ -229,22 +229,22 @@ export const sheenExt: PbrExt = {
         return { f, f2 };
     },
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_SHEEN)) {
+        if (!(ctx._features & PBR_HAS_SHEEN)) {
             return null;
         }
         return createSheenFragment(
-            (ctx.features & PBR_HAS_SHEEN_TEXTURE) !== 0,
-            ctx.hasIbl,
-            (ctx.features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
-            (ctx.features2 & PBR2_HAS_SHEEN_UV_TX) !== 0
+            (ctx._features & PBR_HAS_SHEEN_TEXTURE) !== 0,
+            ctx._hasIbl,
+            (ctx._features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
+            (ctx._features2 & PBR2_HAS_SHEEN_UV_TX) !== 0
         );
     },
     writeUbo: writeSheenUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        if ((ctx.features & PBR_HAS_SHEEN_TEXTURE) === 0) {
+        if ((ctx._features & PBR_HAS_SHEEN_TEXTURE) === 0) {
             return b;
         }
-        const sh = (ctx.material as PbrMaterialProps).sheen as SheenProps | undefined;
+        const sh = (ctx._material as PbrMaterialProps).sheen as SheenProps | undefined;
         if (sh?.texture) {
             entries.push({ binding: b++, resource: sh.texture.view });
             entries.push({ binding: b++, resource: sh.texture.sampler });

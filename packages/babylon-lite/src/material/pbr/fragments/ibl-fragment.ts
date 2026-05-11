@@ -99,25 +99,24 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_ENV } from "../pbr-flag-bits.js";
 
 export const iblExt: PbrExt = {
     id: "ibl",
     phase: "ibl",
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_ENV)) {
+        if (!ctx._hasIbl) {
             return null;
         }
-        return createIblFragment(ctx.hasAnyNormal, ctx.anisoBentNormalCode ?? "", ctx.iblSkyboxCalc ?? "");
+        return createIblFragment(ctx._hasAnyNormal, ctx._anisoBentNormalCode ?? "", ctx._iblSkyboxCalc ?? "");
     },
     bind(ctx, entries, b) {
-        if (!(ctx.features & PBR_HAS_ENV) || !ctx.env) {
+        if (!ctx._env) {
             return b;
         }
-        entries.push({ binding: b++, resource: ctx.env.brdfLutView });
-        entries.push({ binding: b++, resource: ctx.env.brdfSampler });
-        entries.push({ binding: b++, resource: ctx.env.specularCubeView });
-        entries.push({ binding: b++, resource: ctx.env.cubeSampler });
+        entries.push({ binding: b++, resource: ctx._env.brdfLutView });
+        entries.push({ binding: b++, resource: ctx._env.brdfSampler });
+        entries.push({ binding: b++, resource: ctx._env.specularCubeView });
+        entries.push({ binding: b++, resource: ctx._env.cubeSampler });
         return b;
     },
 };

@@ -40,17 +40,9 @@ export interface Task {
     /** Called once when the frame graph is built. Must complete synchronously. */
     record(): void;
 
+    /** Optional fast path for built-in tasks that execute without recorded Pass objects. */
+    execute?(): number;
+
     /** Free all GPU resources owned by this task. */
     dispose(): void;
-}
-
-/** Internal shared task execution. Mirrors BJS: a task executes by draining
- *  its recorded passes in order. Task-specific per-frame work belongs inside
- *  the pass implementation, not in per-task execute methods. */
-export function _executeTask(task: Task): number {
-    let draws = 0;
-    for (const pass of task._passes) {
-        draws += pass._execute();
-    }
-    return draws;
 }

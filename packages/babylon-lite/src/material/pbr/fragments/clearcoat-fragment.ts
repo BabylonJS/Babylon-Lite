@@ -281,16 +281,16 @@ export const clearcoatExt: PbrExt = {
         }
         return { f: PBR_HAS_CLEARCOAT, f2 };
     },
-    frag: (ctx) => createClearcoatFragment(ctx.features, ctx.features2, ctx.hasIbl, ctx.hasAnyNormal, ctx.hasSpecularAA),
+    frag: (ctx) => createClearcoatFragment(ctx._features, ctx._features2, ctx._hasIbl, ctx._hasAnyNormal, ctx._hasSpecularAA),
     writeUbo: writeClearcoatUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        const cc = (ctx.material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        const cc = (ctx._material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
         if (!cc) {
             return b;
         }
         for (const [flag, key] of CC_TEX) {
             const tex = cc[key];
-            if ((ctx.features2 & flag) !== 0 && tex) {
+            if ((ctx._features2 & flag) !== 0 && tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });
             }

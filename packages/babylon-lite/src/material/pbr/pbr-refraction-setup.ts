@@ -40,21 +40,15 @@ function setupPbrRefraction(scene: SceneContext, engine: EngineContextInternal):
         engine,
         scene
     );
-    const record = pass.record;
-    pass.record = () => {
-        record();
-        for (const recordedPass of pass._passes) {
-            const execute = recordedPass._execute;
-            recordedPass._execute = () => {
-                const imageProcessing = sc.imageProcessing as { toneMappingEnabled: boolean | number };
-                const toneMappingEnabled = imageProcessing.toneMappingEnabled;
-                imageProcessing.toneMappingEnabled = -1;
-                try {
-                    return execute();
-                } finally {
-                    imageProcessing.toneMappingEnabled = toneMappingEnabled;
-                }
-            };
+    const execute = pass.execute!;
+    pass.execute = () => {
+        const imageProcessing = sc.imageProcessing as { toneMappingEnabled: boolean | number };
+        const toneMappingEnabled = imageProcessing.toneMappingEnabled;
+        imageProcessing.toneMappingEnabled = -1;
+        try {
+            return execute();
+        } finally {
+            imageProcessing.toneMappingEnabled = toneMappingEnabled;
         }
     };
     const mips: Task = {

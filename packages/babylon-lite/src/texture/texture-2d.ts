@@ -35,6 +35,8 @@ export interface Texture2D {
      *  UV-transform time in the material, so compressed-format textures (where
      *  in-place row flipping is impractical) remain correct. */
     invertY?: boolean;
+    /** @internal Depth textures require texture_depth_2d shader bindings. */
+    _sampleType?: "float" | "depth";
 }
 
 /** Create a fresh Texture2D wrapper that shares GPU resources with `base`

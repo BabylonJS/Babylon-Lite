@@ -49,7 +49,7 @@ export function createMeshFromData(
     const [min, max] = computeAabb(positions);
     const mesh = {
         name,
-        material: null as any,
+        material: null as unknown,
         receiveShadows: false,
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,

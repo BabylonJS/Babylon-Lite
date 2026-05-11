@@ -6,15 +6,15 @@
  * phase (`buildRenderTarget`) and freed on dispose or rebuild.
  *
  * `createRenderTargetTexture` (texture/rtt.ts) eagerly allocates and marks
- * the target so subsequent build calls are no-ops, allowing the color view
- * to be wired as a `SampledTexture` before the frame graph is built.
+ * the target so subsequent build calls are no-ops, allowing the color or depth
+ * view to be wired as a sampled texture before the frame graph is built.
  */
 
 import type { EngineContextInternal } from "./engine.js";
 
 /** Signature of a render target's attachment set — enough to key a GPURenderPipeline. */
 export interface RenderTargetSignature {
-    readonly colorFormat: GPUTextureFormat;
+    readonly colorFormat?: GPUTextureFormat;
     readonly depthStencilFormat?: GPUTextureFormat;
     readonly sampleCount: number;
     /** When true, the projection matrix's Y is flipped (offscreen RTT — see writePassSceneUBO).
@@ -25,7 +25,7 @@ export interface RenderTargetSignature {
 /** Description of a render target — what to create, not the GPU objects themselves. */
 export interface RenderTargetDescriptor {
     label?: string;
-    colorFormat: GPUTextureFormat;
+    colorFormat?: GPUTextureFormat;
     depthStencilFormat?: GPUTextureFormat;
     sampleCount: number;
     /** 'canvas' means match the canvas pixel size. Otherwise explicit pixels. */
@@ -40,7 +40,7 @@ export interface RenderTargetDescriptor {
 
 /** Stringified signature used to key pipelines against a render target's attachment set. */
 export function targetSignatureKey(desc: RenderTargetSignature): string {
-    return `${desc.colorFormat}|${desc.depthStencilFormat ?? "-"}|${desc.sampleCount}|${desc.flipY ? "flipY" : ""}`;
+    return `${desc.colorFormat ?? "-"}|${desc.depthStencilFormat ?? "-"}|${desc.sampleCount}|${desc.flipY ? "flipY" : ""}`;
 }
 
 /** Allocated GPU state for a render target. */
@@ -88,13 +88,13 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
     rt._height = height;
 
     const device = engine.device;
-    const allocColor = !desc.resolveToSwapchain || desc.sampleCount > 1;
+    const allocColor = !!desc.colorFormat && (!desc.resolveToSwapchain || desc.sampleCount > 1);
 
     if (allocColor) {
         rt._colorTexture = device.createTexture({
             label: desc.label,
             size: { width, height },
-            format: desc.colorFormat,
+            format: desc.colorFormat!,
             sampleCount: desc.sampleCount,
             usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
@@ -107,7 +107,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
             size: { width, height },
             format: desc.depthStencilFormat,
             sampleCount: desc.sampleCount,
-            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
         });
         rt._depthView = rt._depthTexture.createView();
     }

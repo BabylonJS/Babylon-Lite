@@ -119,6 +119,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         hasOcclusion = false,
         hasEmissiveColor = false,
         hasReflectanceExt = false,
+        hasIbl = false,
         hasAnisotropy = false,
         anisoBrdfFunctions = "",
         anisoTBBlock = "",
@@ -303,7 +304,6 @@ let metallic=orm.b*material.metallicFactor;`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
     const occlusionDefault = hasReflectanceExt ? `` : ext?.occlusionOverride ? ext.occlusionOverride : hasOcclusion ? `let occlusion=orm.r;` : `let occlusion=1.0;`;
-
     // F0 computation (overridden by reflectance fragment's MF slot)
     const f0Default = hasReflectanceExt
         ? ``
@@ -361,7 +361,7 @@ color=1.0-exp2(-1.590579*color);`
         ? `var finalAlpha=alpha*material.materialAlpha;
 var luminanceOverAlpha=0.0;
 /*BA*/
-luminanceOverAlpha+=dot(finalSpecularScaled,vec3<f32>(0.2126,0.7152,0.0722));
+luminanceOverAlpha+=dot(${hasIbl ? "finalSpecularScaled" : "directSpecular"},vec3<f32>(0.2126,0.7152,0.0722));
 finalAlpha=saturate(finalAlpha+luminanceOverAlpha*luminanceOverAlpha);
 return vec4<f32>(color,finalAlpha);`
         : `return vec4<f32>(color,alpha*material.materialAlpha);`;

@@ -47,10 +47,10 @@ export const unlitExt: PbrExt = {
         return (mat as PbrMaterialProps).unlit ? { f: 0, f2: PBR2_HAS_UNLIT } : { f: 0, f2: 0 };
     },
     frag(ctx) {
-        if (!(ctx.features2 & PBR2_HAS_UNLIT)) {
+        if (!(ctx._features2 & PBR2_HAS_UNLIT)) {
             return null;
         }
-        return createUnlitFragment(ctx.hasIbl);
+        return createUnlitFragment(ctx._hasIbl);
     },
     writeUbo: writeUnlitUBO as PbrExt["writeUbo"],
 };

@@ -5,8 +5,6 @@ import { buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSigna
 import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "../frame-graph/task.js";
-import { setRenderPassBeforeExecute, setRenderPassExecuteFunc } from "../frame-graph/pass.js";
-import { createRenderPass, setRenderPassClear, setRenderPassRenderTarget } from "../frame-graph/render-pass.js";
 
 const DEFAULT_VERTEX_WGSL = `struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
 @vertex fn effectFullscreenVertex(@builtin(vertex_index) vertexIndex:u32)->EffectVertexOutput{var positions=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));let p=positions[vertexIndex];var out:EffectVertexOutput;out.position=vec4<f32>(p,0.0,1.0);out.uv=p*0.5+vec2<f32>(0.5,0.5);return out;}`;
@@ -76,6 +74,8 @@ export interface EffectRenderTask extends Task {
 
 interface EffectRenderTaskInternal extends EffectRenderTask {
     _targetSignature: RenderTargetSignature;
+    _renderPassDescriptor: GPURenderPassDescriptor;
+    _colorAttachment: GPURenderPassColorAttachment;
     _pipeline: GPURenderPipeline | null;
     _bindGroup: GPUBindGroup | null;
 }
@@ -178,6 +178,7 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
         colorFormat: rt.descriptor.colorFormat,
         sampleCount,
     };
+    const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const task: EffectRenderTaskInternal = {
         name: config.name,
         _config: config,
@@ -186,35 +187,32 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
         _passes: [],
         _rt: rt,
         _targetSignature: targetSignature,
+        _renderPassDescriptor: { label: config.name, colorAttachments: [colorAttachment] },
+        _colorAttachment: colorAttachment,
         _pipeline: null,
         _bindGroup: null,
         record(): void {
             buildRenderTarget(rt, eng);
             task._pipeline = getEffectPipeline(effect, task._targetSignature);
             task._bindGroup = getEffectBindGroup(effect);
-            const pass = createRenderPass(config.name, task);
-            setRenderPassRenderTarget(pass, rt);
-            setRenderPassBeforeExecute(pass, () => {
-                task._bindGroup = getEffectBindGroup(effect);
-                setRenderPassClear(pass, task._config.clear !== false, task._config.clearColor!);
-            });
-            setRenderPassExecuteFunc(pass, (encoder) => {
-                const pipeline = task._pipeline;
-                if (!pipeline) {
-                    throw new Error(`EffectRenderTask "${task.name}" executed before record().`);
-                }
-                encoder.setPipeline(pipeline);
-                if (task._bindGroup) {
-                    encoder.setBindGroup(0, task._bindGroup);
-                }
-                encoder.draw(3);
-                return 1;
-            });
+        },
+        execute(): number {
+            const pipeline = task._pipeline;
+            if (!pipeline) {
+                throw new Error(`EffectRenderTask "${task.name}" executed before record().`);
+            }
+            task._bindGroup = getEffectBindGroup(effect);
+            applyColorAttachmentState(task._colorAttachment, rt, eng, task._config.clear !== false, task._config.clearColor!);
+            const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+            pass.setPipeline(pipeline);
+            if (task._bindGroup) {
+                pass.setBindGroup(0, task._bindGroup);
+            }
+            pass.draw(3);
+            pass.end();
+            return 1;
         },
         dispose(): void {
-            for (const pass of task._passes) {
-                pass._dispose();
-            }
             task._passes.length = 0;
             disposeRenderTarget(task._rt);
             task._pipeline = null;
@@ -412,7 +410,7 @@ function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: Rend
         fragment: {
             module: getShaderModule(wrapper),
             entryPoint: "effectFragment",
-            targets: [{ format: targetSignature.colorFormat, blend: wrapper.options.blend }],
+            targets: [{ format: targetSignature.colorFormat!, blend: wrapper.options.blend }],
         },
         primitive: { topology: "triangle-list" },
         multisample: { count: targetSignature.sampleCount },

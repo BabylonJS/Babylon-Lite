@@ -137,10 +137,10 @@ export const refractionExt: PbrExt = {
         return { f: 0, f2 };
     },
     frag(ctx) {
-        if (!(ctx.features2 & PBR2_HAS_REFRACTION)) {
+        if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
             return null;
         }
-        return createRefractionFragment((ctx.features2 & PBR2_HAS_VOLUME) !== 0);
+        return createRefractionFragment((ctx._features2 & PBR2_HAS_VOLUME) !== 0);
     },
     writeUbo(data, mat, offsets) {
         if (offsets.has("refractionParams")) {

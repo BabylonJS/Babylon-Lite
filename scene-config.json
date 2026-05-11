@@ -741,5 +741,14 @@
         "maxRawKB": 120,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"]
+    },
+    {
+        "id": 116,
+        "slug": "scene116-shadow-depth-materials",
+        "name": "Scene 116 — Shadow Depth Materials",
+        "maxMad": 0.01,
+        "maxRawKB": 82,
+        "description": "Frame-graph RTT demo for Standard and PBR material views with shadow-depth feature overrides; the normal source materials render in the main pass and the depth RTTs are displayed on planes.",
+        "tags": ["std", "pbr", "frame-graph", "rtt", "shadow"]
     }
 ]

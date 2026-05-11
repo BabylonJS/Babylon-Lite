@@ -66,8 +66,8 @@ function serveReferenceImages(): Plugin {
                             return null;
                         }
                     };
-                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json"));
-                    sig.bundleMaster = mtime(resolve(__dirname, "public/bundle/master-manifest.json"));
+                    sig.bundle = mtime(resolve(__dirname, "public/bundle/local-manifest.json"));
+                    sig.bundleMaster = mtime(resolve(__dirname, "public/bundle/manifest.json"));
                     sig.perf = mtime(resolve(__dirname, "public/perf-manifest.json"));
                     try {
                         const cfgPath = resolve(__dirname, "../scene-config.json");

@@ -175,10 +175,10 @@ export const subsurfaceExt: PbrExt = {
         return { f, f2 };
     },
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_SUBSURFACE)) {
+        if (!(ctx._features & PBR_HAS_SUBSURFACE)) {
             return null;
         }
-        return createSubsurfaceFragment((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0, ctx.hasIbl, (ctx.features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
+        return createSubsurfaceFragment((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0, ctx._hasIbl, (ctx._features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
     },
     writeUbo(data, mat, offsets) {
         const m = mat as PbrMaterialProps;
@@ -187,8 +187,8 @@ export const subsurfaceExt: PbrExt = {
         }
     },
     bind(ctx, entries, b) {
-        if ((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0) {
-            const tex = (ctx.material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+        if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
+            const tex = (ctx._material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
             if (tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });

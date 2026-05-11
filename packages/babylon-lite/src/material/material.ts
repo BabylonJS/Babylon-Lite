@@ -1,22 +1,35 @@
 /** Base material interface — the polymorphic anchor shared by every concrete
  *  material kind (Standard, PBR, …).
  *
- *  Public surface is intentionally empty: concrete materials add their own
- *  user-facing properties (colors, textures, factors). The shared engine-side
- *  contract lives on {@link MaterialInternal} below — accessed by the renderer
- *  through a single cast at the dispatch site. */
-export interface Material {}
-
+ *  Concrete materials add their own user-facing properties (colors, textures,
+ *  factors), while the shared `_buildGroup` hook lets the renderer dispatch
+ *  source materials through a common path. */
 import type { MeshGroupBuilder } from "../render/renderable.js";
 
-/** @internal Engine-side view of a Material.
- *
- *  Concrete material props (StandardMaterialPropsInternal, PbrMaterialPropsInternal)
- *  extend this so the renderer can:
- *   - dispatch group / single-mesh builds polymorphically via `_buildGroup`
- *   - skip redundant material-UBO uploads via `_uboDirty`. */
-export interface MaterialInternal extends Material {
+export interface Material {
     readonly _buildGroup: MeshGroupBuilder;
-    /** Set to true when a UBO-relevant property changes. Cleared after upload. */
-    _uboDirty?: boolean;
+    /** Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
+    _renderFeatures: MaterialRenderFeatures;
+    /** Monotonic source-material UBO version. Renderables track their last seen value independently. */
+    _uboVersion: number;
+    /** Views created from this material. Used by rebuild helpers to include framework-created views. */
+    _views?: MaterialView[];
 }
+
+/** Exact material render-feature override used by MaterialView.
+ *  Feature bits are interpreted by each concrete material family. */
+export interface MaterialRenderFeatures {
+    features: number;
+    features2?: number;
+}
+
+/** A lightweight render view over an editable source material.
+ *  The view owns only render-feature bits; all material state (UBO data,
+ *  textures, samplers, culling, alpha cutoff, extension data) is read from
+ *  {@link source}. */
+export interface MaterialView {
+    readonly source: Material;
+    readonly _renderFeatures: MaterialRenderFeatures;
+}
+
+export type MaterialOrView = Material | MaterialView;

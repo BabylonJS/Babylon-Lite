@@ -48,10 +48,10 @@ export const emissiveColorExt: PbrExt = {
     id: "emissive-color",
     phase: "fragment",
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_EMISSIVE_COLOR)) {
+        if (!(ctx._features & PBR_HAS_EMISSIVE_COLOR)) {
             return null;
         }
-        return createEmissiveColorFragment((ctx.features & PBR_HAS_EMISSIVE) !== 0);
+        return createEmissiveColorFragment((ctx._features & PBR_HAS_EMISSIVE) !== 0);
     },
     writeUbo: writeEmissiveUBO as PbrExt["writeUbo"],
 };

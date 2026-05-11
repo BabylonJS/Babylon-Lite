@@ -68,7 +68,6 @@ const ext: GltfFeature = {
             // default IOR. Only write when the factor meaningfully differs.
             if (ior !== 1.5) {
                 out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
-                (out as { _hasReflExt?: boolean })._hasReflExt = true;
             }
             subsurface.refraction = { indexOfRefraction: ior };
         }
@@ -77,15 +76,15 @@ const ext: GltfFeature = {
             // specularFactor replaces the base dielectric F0 scalar. When ior was
             // also specified, this overrides it (spec says specular wins).
             if (typeof eSp.specularFactor === "number") {
-                out.metallicF0Factor = eSp.specularFactor;
                 if (Math.abs(eSp.specularFactor - 1) > 1e-6) {
-                    (out as { _hasReflExt?: boolean })._hasReflExt = true;
+                    out.metallicF0Factor = eSp.specularFactor;
+                } else {
+                    delete out.metallicF0Factor;
                 }
             }
             if (Array.isArray(eSp.specularColorFactor) && eSp.specularColorFactor.length === 3) {
-                out.metallicReflectanceColor = [eSp.specularColorFactor[0], eSp.specularColorFactor[1], eSp.specularColorFactor[2]];
                 if (eSp.specularColorFactor[0] !== 1 || eSp.specularColorFactor[1] !== 1 || eSp.specularColorFactor[2] !== 1) {
-                    (out as { _hasReflExt?: boolean })._hasReflExt = true;
+                    out.metallicReflectanceColor = [eSp.specularColorFactor[0], eSp.specularColorFactor[1], eSp.specularColorFactor[2]];
                 }
             }
             if (specTex) {

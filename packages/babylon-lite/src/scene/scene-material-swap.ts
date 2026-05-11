@@ -16,7 +16,7 @@ export function processMaterialSwaps(scene: SceneContext): void {
         }
 
         const mat = mesh.material;
-        const builder = mat ? (mat as any)._buildGroup : undefined;
+        const builder = mat?._buildGroup;
         if (!builder) {
             continue;
         }

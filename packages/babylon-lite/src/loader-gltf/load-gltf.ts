@@ -41,7 +41,6 @@ export interface GltfMeshData {
     _decoded?: DecodedPrimitive;
 }
 
-/** Options for loadGltf. */
 /**
  * Load a .glb or .gltf file, parse it, and upload mesh + material data to GPU.
  * Supports both binary GLB and separate .gltf + .bin + image files.

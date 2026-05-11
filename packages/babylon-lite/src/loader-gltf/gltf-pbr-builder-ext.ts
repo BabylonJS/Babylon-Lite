@@ -116,5 +116,6 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         ...(hasAnyUvTx ? { _hasUvTx: true } : undefined),
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
-    } satisfies PbrMaterialPropsInternal;
+        _uboVersion: 0,
+    } as PbrMaterialPropsInternal;
 }

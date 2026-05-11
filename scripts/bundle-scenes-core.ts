@@ -399,11 +399,14 @@ function terserPropertyManglePlugin(): Plugin {
                         },
                     },
                     nameCache,
-                    sourceMap: false,
+                    sourceMap: chunk.map ? { content: chunk.map as object, asObject: true } : false,
                 });
 
                 if (result.code) {
                     chunk.code = result.code;
+                }
+                if (result.map) {
+                    chunk.map = result.map as typeof chunk.map;
                 }
             }
         },
@@ -423,7 +426,8 @@ export const bundleInfoDir = resolve(outDir, "bundle-info");
 export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
 const MANIFEST_FILE = "manifest.json";
-const MASTER_MANIFEST_FILE = "master-manifest.json";
+const LOCAL_MANIFEST_FILE = "local-manifest.json";
+const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
 
 interface BundleManifestEntry {
     rawKB: number;
@@ -438,7 +442,7 @@ type BundleManifest = Record<string, BundleManifestEntry>;
 
 function readMasterBundleManifest(): { ref: string; manifest: BundleManifest } | null {
     const errors: string[] = [];
-    for (const ref of ["origin/master", "master"]) {
+    for (const ref of ["upstream/master", "origin/master", "master"]) {
         try {
             const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
             return { ref, manifest: JSON.parse(json) as BundleManifest };
@@ -447,12 +451,12 @@ function readMasterBundleManifest(): { ref: string; manifest: BundleManifest } |
         }
     }
 
-    console.warn(`Could not read ${MANIFEST_GIT_PATH} from master; bundle delta UI will not have a master baseline. ${errors.join(" | ")}`);
+    console.warn(`Could not read ${MANIFEST_GIT_PATH} from master refs; bundle delta UI will not have a master baseline. ${errors.join(" | ")}`);
     return null;
 }
 
 function writeMasterBundleManifest(): void {
-    const masterManifestPath = resolve(outDir, MASTER_MANIFEST_FILE);
+    const masterManifestPath = resolve(outDir, MANIFEST_FILE);
     const baseline = readMasterBundleManifest();
     if (!baseline) {
         rmSync(masterManifestPath, { force: true });
@@ -471,7 +475,7 @@ function writeMasterBundleManifest(): void {
  * - Windows backslashes are normalized to forward slashes.
  * - Virtual ids (starting with `\0`) and query suffixes (e.g. `?raw`) are preserved.
  */
-function normalizeModuleId(id: string): string {
+function normalizeModuleId(id: string, sourceRoot = ROOT): string {
     let out = id.replace(/\\/g, "/");
     // Split query suffix (e.g. "?raw") so we don't interfere with path logic.
     const qIdx = out.indexOf("?");
@@ -481,7 +485,7 @@ function normalizeModuleId(id: string): string {
     // Virtual modules (Rollup convention) — keep as-is.
     if (out.startsWith("\u0000")) return out + query;
 
-    const rootFwd = ROOT.replace(/\\/g, "/") + "/";
+    const rootFwd = sourceRoot.replace(/\\/g, "/") + "/";
     if (out.startsWith(rootFwd)) out = out.slice(rootFwd.length);
 
     // Collapse pnpm virtual store paths.
@@ -507,7 +511,103 @@ interface BundleInfoChunk {
     modules: BundleInfoModule[];
 }
 
+interface SourceMapLike {
+    sources: string[];
+    mappings: string;
+}
+
 const exportKindCache = new Map<string, Record<string, BundleInfoExport["kind"]>>();
+
+const VLQ_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const VLQ_VALUES = new Map([...VLQ_CHARS].map((ch, i) => [ch, i]));
+
+function decodeVlq(segment: string, index: { value: number }): number {
+    let result = 0;
+    let shift = 0;
+    let continuation = 0;
+    do {
+        const value = VLQ_VALUES.get(segment[index.value++]!) ?? 0;
+        continuation = value & 32;
+        result += (value & 31) << shift;
+        shift += 5;
+    } while (continuation);
+    const negate = result & 1;
+    result >>= 1;
+    return negate ? -result : result;
+}
+
+function decodeMappings(mappings: string): number[][][] {
+    let source = 0;
+    let originalLine = 0;
+    let originalColumn = 0;
+    let name = 0;
+    return mappings.split(";").map((line) => {
+        let generatedColumn = 0;
+        return line
+            .split(",")
+            .filter(Boolean)
+            .map((raw) => {
+                const index = { value: 0 };
+                generatedColumn += decodeVlq(raw, index);
+                if (index.value >= raw.length) return [generatedColumn];
+                source += decodeVlq(raw, index);
+                originalLine += decodeVlq(raw, index);
+                originalColumn += decodeVlq(raw, index);
+                const segment = [generatedColumn, source, originalLine, originalColumn];
+                if (index.value < raw.length) {
+                    name += decodeVlq(raw, index);
+                    segment.push(name);
+                }
+                return segment;
+            });
+    });
+}
+
+function normalizeSourceMapId(source: string, sourceRoot: string): string {
+    let clean = source.replace(/^file:\/\//, "").replace(/^\/([A-Za-z]:\/)/, "$1").split("?")[0]!;
+    const marker = clean.match(/(?:^|\/)((?:packages\/babylon-lite|lab|node_modules)\/.*)$/);
+    if (marker) {
+        clean = resolve(sourceRoot, marker[1]!);
+    }
+    if (clean.startsWith("../") || clean.startsWith("./")) {
+        return normalizeModuleId(resolve(sourceRoot, "lab", clean), sourceRoot);
+    }
+    return normalizeModuleId(clean, sourceRoot);
+}
+
+function lineStarts(code: string): number[] {
+    const starts = [0];
+    for (let i = 0; i < code.length; i++) {
+        if (code.charCodeAt(i) === 10) starts.push(i + 1);
+    }
+    return starts;
+}
+
+function lineEnd(code: string, starts: number[], line: number): number {
+    const next = starts[line + 1];
+    return next == null ? code.length : Math.max(starts[line]!, next - 1);
+}
+
+function minifiedModuleBytes(code: string, map: SourceMapLike | null | undefined, sourceRoot: string): Record<string, number> {
+    if (!map?.mappings || !Array.isArray(map.sources)) return {};
+    const starts = lineStarts(code);
+    const decoded = decodeMappings(map.mappings);
+    const bytes: Record<string, number> = {};
+    decoded.forEach((segments, line) => {
+        for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i]!;
+            const sourceIndex = segment[1];
+            if (sourceIndex == null) continue;
+            const nextSegment = segments[i + 1];
+            const start = starts[line]! + segment[0]!;
+            const end = starts[line]! + (nextSegment ? nextSegment[0]! : lineEnd(code, starts, line) - starts[line]!);
+            if (end <= start) continue;
+            const id = normalizeSourceMapId(map.sources[sourceIndex]!, sourceRoot);
+            bytes[id] = (bytes[id] ?? 0) + Buffer.byteLength(code.slice(start, end), "utf8");
+        }
+    });
+    return bytes;
+}
 
 /**
  * Parse a .ts / .js source file to classify each exported binding as
@@ -607,7 +707,7 @@ function extractExportKinds(absPath: string, visited: Set<string> = new Set()): 
  * Consumed by the lab "Bundle" tab to show which .ts files contribute to each
  * chunk (with rendered sizes) and which named exports survived tree-shaking.
  */
-function writeBundleInfo(scene: string, result: unknown): void {
+function writeBundleInfoToDir(scene: string, result: unknown, infoDir: string, sourceRoot = ROOT): void {
     // Vite build() returns RollupOutput | RollupOutput[] (one per output format).
     // We configure a single ES output, so take the first.
     const output = Array.isArray(result) ? result[0] : result;
@@ -622,11 +722,14 @@ function writeBundleInfo(scene: string, result: unknown): void {
             code?: string;
             isEntry?: boolean;
             modules?: Record<string, { renderedLength?: number; renderedExports?: string[] }>;
+            map?: SourceMapLike | null;
         };
         if (it.type !== "chunk" || !it.fileName) continue;
+        const minifiedBytes = minifiedModuleBytes(it.code ?? "", it.map, sourceRoot);
         const modules: BundleInfoModule[] = [];
         for (const [rawId, m] of Object.entries(it.modules ?? {})) {
-            const bytes = m.renderedLength ?? 0;
+            const normalizedId = normalizeModuleId(rawId, sourceRoot);
+            const bytes = minifiedBytes[normalizedId] ?? 0;
             if (bytes <= 0) continue;
             const rawNames = Array.isArray(m.renderedExports) ? [...m.renderedExports].sort() : [];
             // Resolve kinds from the source file on disk (strip any ?query suffix).
@@ -636,7 +739,7 @@ function writeBundleInfo(scene: string, result: unknown): void {
                 name,
                 kind: kinds[name] ?? "unknown",
             }));
-            modules.push({ id: normalizeModuleId(rawId), bytes, exports });
+            modules.push({ id: normalizedId, bytes, exports });
         }
         modules.sort((a, b) => b.bytes - a.bytes);
         chunks.push({
@@ -648,8 +751,12 @@ function writeBundleInfo(scene: string, result: unknown): void {
     }
     chunks.sort((a, b) => Number(b.isEntry) - Number(a.isEntry) || b.bytes - a.bytes);
 
-    mkdirSync(bundleInfoDir, { recursive: true });
-    writeFileSync(resolve(bundleInfoDir, `${scene}.json`), JSON.stringify({ scene, chunks }, null, 2));
+    mkdirSync(infoDir, { recursive: true });
+    writeFileSync(resolve(infoDir, `${scene}.json`), JSON.stringify({ scene, chunks }, null, 2));
+}
+
+function writeBundleInfo(scene: string, result: unknown): void {
+    writeBundleInfoToDir(scene, result, bundleInfoDir, ROOT);
 }
 
 const sceneConfig: { id: number }[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
@@ -703,6 +810,69 @@ function elapsed(startMs: number): string {
     return `${((performance.now() - startMs) / 1000).toFixed(1)}s`;
 }
 
+function minimalVitePreloadPlugin(): Plugin {
+    const id = "\0minimal-vite-preload";
+    return {
+        name: "minimal-vite-preload",
+        enforce: "pre",
+        resolveId(source) {
+            return source === "vite/preload-helper.js" ? id : null;
+        },
+        load(source) {
+            return source === id ? "export const __vitePreload = (baseModule) => baseModule();" : null;
+        },
+        transform(_code, source) {
+            return source.endsWith("vite/preload-helper.js") ? "export const __vitePreload = (baseModule) => baseModule();" : null;
+        },
+    };
+}
+
+function isLiteBundleExternal(id: string): boolean {
+    return id === "@babylonjs/havok" || id === "manifold-3d" || id.startsWith("manifold-3d/");
+}
+
+export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string, infoDir: string): Promise<void> {
+    const sourceLabDir = resolve(sourceRoot, "lab");
+    const sourceSrcDir = resolve(sourceRoot, "packages/babylon-lite/src");
+    const sceneOutDir = resolve(ROOT, ".bundle-size-tmp/master-bundle-info-build", scene);
+    rmSync(sceneOutDir, { recursive: true, force: true });
+
+    const buildResult = await build({
+        root: sourceLabDir,
+        configFile: false,
+        base: "./",
+        publicDir: false,
+        logLevel: "warn",
+        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        resolve: {
+            alias: {
+                "babylon-lite": sourceSrcDir,
+            },
+            dedupe: ["@babylonjs/core"],
+        },
+        build: {
+            outDir: sceneOutDir,
+            emptyOutDir: true,
+            minify: "esbuild",
+            sourcemap: "hidden",
+            modulePreload: { polyfill: false, resolveDependencies: () => [] },
+            rollupOptions: {
+                input: { [scene]: resolve(sourceLabDir, `src/lite/${scene}.ts`) },
+                external: isLiteBundleExternal,
+                output: {
+                    format: "es",
+                    entryFileNames: "[name].js",
+                    chunkFileNames: `${scene}-[name]-[hash].js`,
+                    banner: NAME_POLYFILL,
+                },
+            },
+        },
+    });
+
+    writeBundleInfoToDir(scene, buildResult, infoDir, sourceRoot);
+    rmSync(sceneOutDir, { recursive: true, force: true });
+}
+
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
@@ -711,8 +881,6 @@ export async function buildBundleScenes(): Promise<void> {
     writeMasterBundleManifest();
 
     // ── 1. Build all scenes ──────────────────────────────────────────────
-    const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
-
     /** Modules that must keep side effects (they patch prototypes via bare import). */
     const BJS_SIDE_EFFECT_MODULES = ["thinInstanceMesh"];
     function isBjsSideEffectModule(id: string): boolean {
@@ -778,7 +946,7 @@ export async function buildBundleScenes(): Promise<void> {
                 outDir: sceneOutDir,
                 emptyOutDir: true,
                 minify: "esbuild",
-                sourcemap: false,
+                sourcemap: "hidden",
                 modulePreload: { polyfill: false, resolveDependencies: () => [] },
                 rollupOptions: {
                     input: { [scene]: resolve(labDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
@@ -812,6 +980,7 @@ export async function buildBundleScenes(): Promise<void> {
         const newNames = new Set<string>();
         for (const f of bundleFiles) {
             const name = f.substring(sceneOutDir.length + 1).replace(/\\/g, "/");
+            if (name.endsWith(".map")) continue;
             newNames.add(name);
             const dest = resolve(outDir, name);
             mkdirSync(dirname(dest), { recursive: true });
@@ -827,7 +996,7 @@ export async function buildBundleScenes(): Promise<void> {
     }
 
     // Load existing manifest to check for cached BJS sizes
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
+    const manifestPath = resolve(outDir, LOCAL_MANIFEST_FILE);
     let existingManifest: BundleManifest = {};
     if (existsSync(manifestPath)) {
         try {
@@ -932,7 +1101,16 @@ export async function buildBundleScenes(): Promise<void> {
 async function measureLiveSizes(): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
+    const manifestPath = resolve(outDir, LOCAL_MANIFEST_FILE);
+    const masterManifestPath = resolve(outDir, MANIFEST_FILE);
+    let masterManifest: BundleManifest = {};
+    if (existsSync(masterManifestPath)) {
+        try {
+            masterManifest = JSON.parse(readFileSync(masterManifestPath, "utf-8"));
+        } catch {
+            /* no master baseline */
+        }
+    }
 
     // Load existing manifest so we can update incrementally (UI can refresh mid-build)
     let manifest: BundleManifest = {};
@@ -957,7 +1135,8 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         // Measure Lite scenes (write after each)
         for (const scene of SCENES) {
             const tPage = performance.now();
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `bundle-${scene}.html`, "/bundle/");
+            const masterIgnoredRawKB = masterManifest[scene]?.ignoredRawKB;
+            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `bundle-${scene}.html`, "/bundle/", masterIgnoredRawKB);
             manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flush();
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
@@ -1004,7 +1183,8 @@ async function measurePage(
     port: number,
     scene: string,
     htmlFile: string,
-    bundlePath: string
+    bundlePath: string,
+    ignoredRawKBOverride?: number
 ): Promise<{ rawKB: number; gzipKB: number; ignoredRawKB: number; chunks: string[] }> {
     const page = await browser.newPage();
     const jsPayloads: RuntimeJsPayload[] = [];
@@ -1035,12 +1215,14 @@ async function measurePage(
 
     await Promise.all(responseReads);
     const summary = summarizeRuntimeBundle(jsPayloads, bundleInfoDir, scene);
+    const ignoredRawKB = ignoredRawKBOverride ?? bytesToRoundedKB(summary.ignoredRawBytes);
+    const rawBytes = ignoredRawKBOverride == null ? summary.rawBytes : Math.max(0, summary.fetchedRawBytes - ignoredRawKBOverride * 1024);
 
     await page.close();
     return {
-        rawKB: bytesToRoundedKB(summary.rawBytes),
+        rawKB: bytesToRoundedKB(rawBytes),
         gzipKB: bytesToRoundedKB(summary.gzipBytes),
-        ignoredRawKB: bytesToRoundedKB(summary.ignoredRawBytes),
+        ignoredRawKB,
         chunks: Array.from(new Set(chunkFiles)).sort(),
     };
 }

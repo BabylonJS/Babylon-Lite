@@ -64,7 +64,7 @@ export type BindingKind =
           readonly textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_2d<u32>";
           readonly sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
       }
-    | { readonly kind: "sampler"; readonly samplerType: "sampler" | "sampler_comparison" }
+    | { readonly kind: "sampler"; readonly samplerType: "sampler" | "sampler_non_filtering" | "sampler_comparison" }
     | { readonly kind: "storage-texture"; readonly access: "read" | "write" | "read_write"; readonly format: string };
 
 export interface BindingDecl {

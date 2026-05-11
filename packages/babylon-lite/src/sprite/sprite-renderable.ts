@@ -146,7 +146,7 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContextInternal, t
     const pipeline = getOrCreateSpritePipeline(
         engine,
         r._pipelineCache,
-        target.colorFormat,
+        target.colorFormat!,
         sampleCount,
         r._layer.blendMode,
         true,

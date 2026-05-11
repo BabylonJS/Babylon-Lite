@@ -61,3 +61,5 @@ export const PBR2_HAS_UV2 = 1 << 12;
 export const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
 /** Material participates in the opaque-scene refraction prepass and must be authored in linear space. */
 export const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
+/** Render depth encoded as color for shadow-map generation/debug passes. */
+export const PBR2_GENERATE_DEPTH_FOR_SHADOWS = 1 << 15;

@@ -13,7 +13,7 @@
  *
  * Ceilings are set ~5 KB above baseline to catch regressions while allowing
  * natural growth.  Per-scene ceilings live in scene-config.json (maxRawKB).
- * If lab/public/bundle/master-manifest.json is available, bundle-size increases
+ * If lab/public/bundle/manifest.json is available, bundle-size increases
  * relative to master are emitted as warnings only; ceilings remain the blocker.
  */
 import { test, expect } from "@playwright/test";
@@ -25,7 +25,7 @@ import { IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle } from "../../scr
 
 const CONFIG_PATH = resolve(__dirname, "../../scene-config.json");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../lab/public/bundle/bundle-info");
-const MASTER_MANIFEST_PATH = resolve(__dirname, "../../lab/public/bundle/master-manifest.json");
+const MASTER_MANIFEST_PATH = resolve(__dirname, "../../lab/public/bundle/manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
 const SCENES = allScenes.filter((s) => s.maxRawKB != null);
 
@@ -46,6 +46,7 @@ function getRuntimeModuleIds(sceneKey: string, runtimeFiles: readonly string[]):
 
 interface BundleManifestEntry {
     rawKB?: number;
+    ignoredRawKB?: number;
 }
 
 type BundleManifest = Record<string, BundleManifestEntry>;
@@ -97,13 +98,14 @@ for (const scene of SCENES) {
             details.push(`    ${file}: ${rawKB.toFixed(1)} KB raw`);
         }
         const summary = summarizeRuntimeBundle(jsPayloads, BUNDLE_INFO_DIR, `scene${scene.id}`);
-        const rawKB = summary.rawBytes / 1024;
-        const gzipKB = summary.gzipBytes / 1024;
-        const ignoredRawKB = summary.ignoredRawBytes / 1024;
         const sceneKey = `scene${scene.id}`;
+        const masterEntry = MASTER_MANIFEST?.[sceneKey];
+        const ignoredRawKB = masterEntry?.ignoredRawKB ?? summary.ignoredRawBytes / 1024;
+        const rawKB = masterEntry?.ignoredRawKB != null ? Math.max(0, summary.fetchedRawBytes / 1024 - masterEntry.ignoredRawKB) : summary.rawBytes / 1024;
+        const gzipKB = summary.gzipBytes / 1024;
 
         console.log(`  ${scene.name}: ${rawKB.toFixed(1)} KB raw (limit: ${scene.maxRawKB} KB), ${gzipKB.toFixed(1)} KB gzip (informational)`);
-        const masterRawKB = MASTER_MANIFEST?.[sceneKey]?.rawKB;
+        const masterRawKB = masterEntry?.rawKB;
         const currentRawKB = roundedKB(rawKB);
         if (masterRawKB != null && currentRawKB > masterRawKB) {
             console.warn(

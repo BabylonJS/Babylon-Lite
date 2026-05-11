@@ -67,7 +67,7 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
                     vertModule,
                     fragModule,
                     vertexBuffers: SKYBOX_POS_BUFFER,
-                    format: sig.colorFormat,
+                    format: sig.colorFormat!,
                     depthStencilFormat: sig.depthStencilFormat,
                     msaaSamples: sig.sampleCount,
                     depthWriteEnabled: false,

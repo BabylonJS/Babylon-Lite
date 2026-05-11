@@ -7,7 +7,27 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
-import type { Material, MaterialInternal } from "../material.js";
+import type { Material } from "../material.js";
+import {
+    AMBIENT_USES_UV2,
+    DIFFUSE_USES_UV2,
+    DISABLE_LIGHTING,
+    DOUBLE_SIDED,
+    HAS_AMBIENT_TEXTURE,
+    HAS_BUMP_TEXTURE,
+    HAS_CUBE_REFLECTION,
+    HAS_DEPTH_EMISSIVE_TEXTURE,
+    HAS_DIFFUSE_TEXTURE,
+    HAS_EMISSIVE_TEXTURE,
+    HAS_LIGHTMAP_TEXTURE,
+    HAS_OPACITY_TEXTURE,
+    HAS_REFLECTION_TEXTURE,
+    HAS_SPECULAR_TEXTURE,
+    LIGHTMAP_USES_UV2,
+    MATERIAL_ALPHA_BLEND,
+    OPACITY_FROM_RGB,
+    SPECULAR_USES_UV2,
+} from "./standard-flags.js";
 
 // ─── Shared Types ────────────────────────────────────────────────────
 
@@ -70,7 +90,77 @@ export interface StandardMaterialProps extends Material {
 }
 
 /** @internal Extended StandardMaterialProps with internal build group. */
-export interface StandardMaterialPropsInternal extends StandardMaterialProps, MaterialInternal {}
+export interface StandardMaterialPropsInternal extends StandardMaterialProps {}
+
+/** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable. */
+export function _computeStandardMaterialFeatures(m: StandardMaterialProps): number {
+    let f = 0;
+    if (m.diffuseTexture) {
+        f |= HAS_DIFFUSE_TEXTURE;
+        if (m.diffuseCoordIndex === 1) {
+            f |= DIFFUSE_USES_UV2;
+        }
+    }
+    if (m.emissiveTexture) {
+        f |= HAS_EMISSIVE_TEXTURE;
+        if (m.emissiveTexture._sampleType === "depth") {
+            f |= HAS_DEPTH_EMISSIVE_TEXTURE;
+        }
+    }
+    if (m.bumpTexture) {
+        f |= HAS_BUMP_TEXTURE;
+    }
+    if (m.specularTexture) {
+        f |= HAS_SPECULAR_TEXTURE;
+        if (m.specularCoordIndex === 1) {
+            f |= SPECULAR_USES_UV2;
+        }
+    }
+    if (m.ambientTexture) {
+        f |= HAS_AMBIENT_TEXTURE;
+        if (m.ambientCoordIndex === 1) {
+            f |= AMBIENT_USES_UV2;
+        }
+    }
+    if (m.lightmapTexture) {
+        f |= HAS_LIGHTMAP_TEXTURE;
+        if (m.lightmapCoordIndex === 1) {
+            f |= LIGHTMAP_USES_UV2;
+        }
+    }
+    if (m.opacityTexture) {
+        f |= HAS_OPACITY_TEXTURE;
+        if (m.opacityFromRGB) {
+            f |= OPACITY_FROM_RGB;
+        }
+    }
+    if (!m.backFaceCulling) {
+        f |= DOUBLE_SIDED;
+    }
+    if (m.reflectionTexture) {
+        f |= HAS_REFLECTION_TEXTURE;
+    }
+    if (m.reflectionCubeTexture) {
+        f |= HAS_CUBE_REFLECTION;
+    }
+    if (m.disableLighting) {
+        f |= DISABLE_LIGHTING;
+    }
+    if (m.alpha < 1) {
+        f |= MATERIAL_ALPHA_BLEND;
+    }
+    return f;
+}
+
+/** @internal Key for Standard shader features, including mesh/pass features. */
+export function _standardFeatureKey(features: number, meshFeatures: number, variant = ""): string {
+    return variant ? `${features}:${meshFeatures}:${variant}` : `${features}:${meshFeatures}`;
+}
+
+/** @internal Key for Standard scene-driven shader variants not encoded in feature bits. */
+export function _standardShaderVariantKey(shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" }[]): string {
+    return shadowLights.length === 0 ? "" : shadowLights.map((sl) => `${sl.lightIndex}${sl.shadowType === "pcf" ? "p" : "e"}`).join(",");
+}
 
 /** Fog configuration — plain data. */
 export interface FogConfig {
