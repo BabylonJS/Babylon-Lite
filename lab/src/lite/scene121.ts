@@ -7,7 +7,7 @@
 // uncommitted parity test can read it back and compare against the BJS
 // reference scene byte-by-byte.
 
-import { addToScene, attachControl, createArcRotateCamera, createEngine, createSceneContext, loadSplat, registerScene, startEngine } from "babylon-lite";
+import { attachControl, createArcRotateCamera, createEngine, createSceneContext, loadSplat, registerScene, startEngine } from "babylon-lite";
 import type { GaussianSplattingMesh } from "babylon-lite";
 
 const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master/Halo_Believe.splat";
@@ -25,13 +25,11 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const container = await loadSplat(engine, SPLAT_URL);
-    addToScene(scene, container);
+    const gs: GaussianSplattingMesh = await loadSplat(scene, SPLAT_URL);
 
     await registerScene(engine, scene);
     await startEngine(engine);
 
-    const gs = container.entities[0] as GaussianSplattingMesh;
     await gs.firstSortReady;
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
 

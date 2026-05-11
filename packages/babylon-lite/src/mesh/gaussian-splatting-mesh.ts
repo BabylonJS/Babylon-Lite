@@ -5,9 +5,9 @@
  *  All behaviour lives in standalone functions in this file or in
  *  `gaussian-splatting-pipeline.ts`.
  *
- *  addToScene() recognises the `_kind === "gs-mesh"` discriminator and queues
- *  a deferred builder that creates the GS renderable + scene-level uniform
- *  updater the first time the scene is registered. */
+ *  Renderable + dispose hook registration is performed by `loadSplat()` via
+ *  `attachGaussianSplattingMesh()` — scene-core stays GS-agnostic so non-GS
+ *  scenes never pull in this pipeline. */
 
 import type { SceneNode } from "../scene/scene-node.js";
 import type { EngineContextInternal } from "../engine/engine.js";
@@ -40,8 +40,8 @@ export interface GaussianSplattingGpu {
     splatIndexCpu: Float32Array;
 }
 
-/** Public Gaussian-splatting mesh handle.
- *  `_kind === "gs-mesh"` is the discriminator addToScene branches on. */
+/** Public Gaussian-splatting mesh handle.  `_kind` is a brand so consumers can
+ *  narrow on it; the renderable is wired up by `loadSplat()` directly. */
 export interface GaussianSplattingMesh extends SceneNode {
     readonly _kind: "gs-mesh";
     /** Number of splats in the cloud. */

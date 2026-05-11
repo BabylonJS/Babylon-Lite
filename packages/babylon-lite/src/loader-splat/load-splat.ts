@@ -1,24 +1,29 @@
 /** Public Gaussian-Splatting loader.
  *
- *  `loadSplat(engine, url)` fetches a `.ply` (or pre-converted `.splat`) asset,
+ *  `loadSplat(scene, url)` fetches a `.ply` (or pre-converted `.splat`) asset,
  *  parses it on the main thread, uploads its textures + thin-instance buffer
- *  to the GPU, spawns the sort worker, and returns an `AssetContainer` whose
- *  single entity is a `GaussianSplattingMesh`.
+ *  to the GPU, spawns the sort worker, registers the GS renderable on the
+ *  scene, and returns the resulting `GaussianSplattingMesh`.
  *
- *  Pass the result to `addToScene()`. The scene's deferred-builder pass then
- *  registers the GS renderable.  `mesh.firstSortReady` resolves once the
- *  worker has produced its first depth-sorted splat-index buffer — wait on
- *  that promise before flagging the canvas as ready in your scene script. */
+ *  Mirrors the convention of `loadSkybox` / `loadHdrEnvironment`: loaders that
+ *  push renderables take `scene` directly so non-GS scenes never pull any
+ *  GS-aware code into their bundle.
+ *
+ *  `mesh.firstSortReady` resolves once the worker has produced its first
+ *  depth-sorted splat-index buffer — wait on that promise before flagging the
+ *  canvas as ready in your scene script. */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
-import type { AssetContainer } from "../asset-container.js";
+import type { EngineContextInternal } from "../engine/engine.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { isPly, convertPlyToSplat } from "./splat-ply-parser.js";
 import { buildSplatGeometry } from "./splat-data.js";
+import type { GaussianSplattingMesh } from "../mesh/gaussian-splatting-mesh.js";
 import { createGaussianSplattingMesh } from "../mesh/gaussian-splatting-mesh.js";
+import { attachGaussianSplattingMesh } from "../mesh/gaussian-splatting-pipeline.js";
 import SplatSortWorker from "./splat-sort-worker.ts?worker&inline";
 
-/** Fetch + parse a Gaussian-splat asset and return it as an AssetContainer. */
-export async function loadSplat(engine: EngineContext, url: string): Promise<AssetContainer> {
+/** Fetch + parse a Gaussian-splat asset and attach it to `scene`. */
+export async function loadSplat(scene: SceneContext, url: string): Promise<GaussianSplattingMesh> {
     const response = await fetch(url);
     if (!response.ok) {
         throw new Error(`loadSplat: HTTP ${response.status} for ${url}`);
@@ -38,7 +43,7 @@ export async function loadSplat(engine: EngineContext, url: string): Promise<Ass
 
     const geom = buildSplatGeometry(splatBuffer);
     const worker = new SplatSortWorker({ name: "babylon-lite-splat-sort" });
-    const eng = engine as EngineContextInternal;
+    const eng = scene.engine as EngineContextInternal;
     const name = url.substring(url.lastIndexOf("/") + 1) || "splat";
     const mesh = createGaussianSplattingMesh(eng, name, geom, worker, splatBuffer);
 
@@ -55,9 +60,6 @@ export async function loadSplat(engine: EngineContext, url: string): Promise<Ass
     // `up_axis` properties so BJS' net transform is just `scaling.y = -1`.
     mesh.scaling.y = -1;
 
-    // Pipeline registration is performed lazily by `addToScene()` when it
-    // sees the `_kind === "gs-mesh"` discriminator — see scene-core.ts.
-    // Keeping that branch in addToScene (instead of an `_setup` callback
-    // attached here) lets `AssetContainer` stay loader-agnostic.
-    return { entities: [mesh] };
+    attachGaussianSplattingMesh(scene, mesh);
+    return mesh;
 }

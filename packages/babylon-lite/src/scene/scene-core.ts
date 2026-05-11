@@ -18,7 +18,6 @@ import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { createRenderTask } from "../frame-graph/render-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
-import type { GaussianSplattingMesh } from "../mesh/gaussian-splatting-mesh.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 
 /** Image processing configuration. */
@@ -317,15 +316,6 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         }
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
-    } else if ("_kind" in entity && (entity as { _kind?: string })._kind === "gs-mesh") {
-        // Gaussian-Splatting mesh: dynamic-import the pipeline so scenes that
-        // never call loadSplat() pay zero GS bundle bytes.  attach() pushes a
-        // Renderable + dispose hook on the scene.
-        const gsMesh = entity as unknown as GaussianSplattingMesh;
-        ctx._deferredBuilders.push(async () => {
-            const m = await import("../mesh/gaussian-splatting-pipeline.js");
-            m.attachGaussianSplattingMesh(scene, gsMesh);
-        });
     }
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
