@@ -1,31 +1,10 @@
 // Scene 2: Sphere + DirectionalLight — matches Babylon #20OAV9#1
 
-import {
-    addToScene,
-    startEngine,
-    createEngine,
-    createSceneContext,
-    createArcRotateCamera,
-    createDirectionalLight,
-    createSphere,
-    createStandardMaterial,
-    attachControl,
-    registerScene,
-} from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSphere, createStandardMaterial, attachControl, registerScene } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-
-    // DRAFT-ONLY BUNDLE-SIZE CHECK: intentionally unnecessary scene code.
-    // Remove this before marking the PR ready; it only verifies the CI PR comment.
-    canvas.dataset.bundleSizeDraftProbe =
-        "scene2-draft-bundle-size-comment-check:" +
-        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" +
-        "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg" +
-        "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh" +
-        "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii" +
-        "jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj";
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
