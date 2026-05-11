@@ -1,6 +1,17 @@
 // Scene 2: Sphere + DirectionalLight — matches Babylon #20OAV9#1
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSphere, createStandardMaterial, attachControl, registerScene } from "babylon-lite";
+import {
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createArcRotateCamera,
+    createDirectionalLight,
+    createSphere,
+    createStandardMaterial,
+    attachControl,
+    registerScene,
+} from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();

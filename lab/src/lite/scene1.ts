@@ -1,4 +1,15 @@
-import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, createHemisphericLight, attachControl, registerScene } from "babylon-lite";
+import {
+    addToScene,
+    startEngine,
+    createEngine,
+    createSceneContext,
+    createDefaultCamera,
+    loadEnvironment,
+    loadGltf,
+    createHemisphericLight,
+    attachControl,
+    registerScene,
+} from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
