@@ -748,8 +748,7 @@
         "maxMad": 1,
         "maxRawKB": 35,
         "description": "Loads Halo_Believe.ply via loadSplat(); renders the splat cloud with a back-to-front sort produced by an inline worker thread.",
-        "tags": ["gaussian-splatting", "ply"],
-        "skipPerf": true
+        "tags": ["gaussian-splatting", "ply"]
     },
     {
         "id": 121,
@@ -758,7 +757,6 @@
         "maxMad": 50,
         "maxRawKB": 35,
         "description": "Loads Halo_Believe.splat with keepInRam, modifies the first 30 000 splats' Y by -2, then calls gs.updateData().",
-        "tags": ["gaussian-splatting", "splat"],
-        "skipPerf": true
+        "tags": ["gaussian-splatting", "splat"]
     }
 ]

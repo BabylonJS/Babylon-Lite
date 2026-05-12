@@ -47,19 +47,6 @@ export async function loadSplat(scene: SceneContext, url: string): Promise<Gauss
     const name = url.substring(url.lastIndexOf("/") + 1) || "splat";
     const mesh = createGaussianSplattingMesh(eng, name, geom, worker, splatBuffer);
 
-    // Apply the BJS PLY-loader's Y-flip via the mesh's worldMatrix (mirrors
-    // `gaussianSplatting.scaling.y *= -1.0` in @babylonjs/loaders' SPLAT/
-    // splatFileLoader.ts).  Doing it via worldMatrix — rather than baking the
-    // flip into the centres — is critical for visual parity: the
-    // EWA / Vrk projection uses `modelView = view * world` so a worldMatrix-
-    // level Y-flip reflects BOTH each splat's centre AND its covariance Σ.
-    // Baking the flip into centres alone leaves Σ in PLY-space and the
-    // anisotropic gaussians point in the wrong direction relative to their
-    // world positions, dimming the rendered haze (visible as ~25/255 MAD vs
-    // BJS).  Standard 3DGS PLYs (like Halo_Believe) carry no `chirality`/
-    // `up_axis` properties so BJS' net transform is just `scaling.y = -1`.
-    mesh.scaling.y = -1;
-
     attachGaussianSplattingMesh(scene, mesh);
     return mesh;
 }

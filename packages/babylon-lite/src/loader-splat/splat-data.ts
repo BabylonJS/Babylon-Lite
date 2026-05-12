@@ -9,23 +9,14 @@
  *
  *  The math mirrors BJS `GaussianSplattingMesh._loadData`: rotate-then-scale
  *  the unit covariance matrix and store its 6 unique upper-triangle entries as
- *  two RGB triples (covA[xy/zw split via vec3+vec3]).
- *
- *  Y-flip note: BJS' SPLAT loader plugin calls `updateData(..., {flipY:false})`
- *  for PLY files and instead applies the flip via `gaussianSplatting.scaling.y *= -1`.
- *  We mirror that here — `centersRGBA` holds *raw* PLY-space centres so the
- *  shader's `worldMatrix` (with `scaling.y = -1`, set by `loadSplat`) can rotate
- *  both the centre AND the projected covariance Σ consistently.  The
- *  CPU-side `positions[]` and AABB are kept in *world* space (Y-flipped) since
- *  the sort worker computes view-space depth from them and assumes worldMatrix
- *  has already been baked in.  This matches the BJS architecture exactly. */
+ *  two RGB triples (covA[xy/zw split via vec3+vec3]). */
 
 const ROW_LENGTH = 32;
 
 export interface SplatGeometry {
     /** Number of splats parsed from the buffer. */
     vertexCount: number;
-    /** Tight world-space AABB across all splat centres. */
+    /** Tight AABB across all splat centres (PLY-space). */
     boundMin: [number, number, number];
     boundMax: [number, number, number];
     /** Texture dimensions. width × height ≥ vertexCount, padded to texture row. */
@@ -82,26 +73,18 @@ export function buildSplatGeometry(splatBuffer: ArrayBuffer): SplatGeometry {
         const fi = i * 8; // 8 floats per row before the colour/rot tail
         const ui = i * ROW_LENGTH;
 
-        // PLY-space centres (un-flipped). World-space Y-flip is applied via the
-        // mesh's `scaling.y = -1` in `loadSplat` so the GPU shader rotates both
-        // the centre AND the covariance Σ together via the worldMatrix.
         const x = f[fi]!;
-        const yPly = f[fi + 1]!;
+        const y = -f[fi + 1]!;
         const z = f[fi + 2]!;
 
-        // CPU-side positions go to the sort worker which needs *world*-space
-        // depth (so it can compute camera-space Z directly from the view
-        // matrix without re-multiplying by world). Same for the AABB used by
-        // camera-framing — it must reflect the rendered (Y-flipped) bounds.
-        const yWorld = -yPly;
         positions[i * 3] = x;
-        positions[i * 3 + 1] = yWorld;
+        positions[i * 3 + 1] = y;
         positions[i * 3 + 2] = z;
         if (x < minX) {
             minX = x;
         }
-        if (yWorld < minY) {
-            minY = yWorld;
+        if (y < minY) {
+            minY = y;
         }
         if (z < minZ) {
             minZ = z;
@@ -109,16 +92,16 @@ export function buildSplatGeometry(splatBuffer: ArrayBuffer): SplatGeometry {
         if (x > maxX) {
             maxX = x;
         }
-        if (yWorld > maxY) {
-            maxY = yWorld;
+        if (y > maxY) {
+            maxY = y;
         }
         if (z > maxZ) {
             maxZ = z;
         }
 
-        // centresTexture: vec4(xyz, 1) in *PLY* space — un-flipped.
+        // centresTexture: vec4(xyz, 1).
         centersRGBA[i * 4] = x;
-        centersRGBA[i * 4 + 1] = yPly;
+        centersRGBA[i * 4 + 1] = y;
         centersRGBA[i * 4 + 2] = z;
         centersRGBA[i * 4 + 3] = 1;
 
@@ -137,9 +120,9 @@ export function buildSplatGeometry(splatBuffer: ArrayBuffer): SplatGeometry {
         // matrix-multiply (which actually computes S · R, not R · S) results in
         // Σ = R_orig · diag((2s)²) · R_orig^T via column-norms.  Our path computes
         // Σ via row-norms of M = R · diag(2s) — both converge to the same Σ.
-        let qw = (u[ui + 28]! - 127.5) / 127.5;
+        let qw = -(u[ui + 28]! - 127.5) / 127.5; // flip here to compensate flip on Y position
         let qx = (u[ui + 29]! - 127.5) / 127.5;
-        let qy = (u[ui + 30]! - 127.5) / 127.5;
+        let qy = -(u[ui + 30]! - 127.5) / 127.5; // flip here to compensate flip on Y position
         let qz = (u[ui + 31]! - 127.5) / 127.5;
         const qLen = Math.hypot(qw, qx, qy, qz) || 1;
         const qInv = 1 / qLen;

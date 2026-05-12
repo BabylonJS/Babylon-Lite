@@ -8,8 +8,9 @@
  *
  *  Per-frame the binding's `update` hook:
  *    1. refreshes the per-mesh UBO (world / view / projection / focal / viewport),
- *    2. derives the camera direction (3rd column of view·world) and posts a new
- *       sort job to the worker when it has changed enough since the last sort,
+ *    2. checks whether the world matrix, camera-forward (view[2,6,10]) or
+ *       camera world position has drifted past `SORT_EPS` since the last sort
+ *       (mirrors BJS `_isSortStateDirty`) and, if so, posts a fresh sort job,
  *    3. lets the GS-mesh `onmessage` handler upload the freshly-sorted
  *       splatIndex buffer back to the GPU.
  *
@@ -20,7 +21,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Renderable, DrawBinding } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import { targetSignatureKey } from "../engine/render-target.js";
-import { getViewMatrix, getProjectionMatrix } from "../camera/camera.js";
+import { getViewMatrix, getProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { getRenderTargetSize } from "../engine/engine.js";
 import { disposeGaussianSplattingMesh, type GaussianSplattingMesh } from "./gaussian-splatting-mesh.js";
@@ -144,9 +145,10 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
         return bg;
     };
 
-    // Re-sort threshold mirrors BJS: |dot - 1| ≥ 0.01 between current and last
-    // 3rd-row triple of model-view (the camera direction in splat space).
-    const SORT_EPS = 0.01;
+    // Per-element epsilon used to decide whether the camera/world state has
+    // changed enough to warrant a fresh sort. Mirrors BJS `viewUpdateThreshold`
+    // default (`_DefaultViewUpdateThreshold = 1e-4`).
+    const SORT_EPS = 1e-4;
 
     const update = (): void => {
         const cam = scene.camera;
@@ -170,22 +172,62 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
         device.queue.writeBuffer(ubo, 0, cpu.buffer, 0, UBO_BYTES);
 
         // ── Sort gating ────────────────────────────────────────────
-        // modelView = view * world. We only need its 3rd row (indices 2/6/10)
-        // — that's the camera direction expressed in splat-local space.
-        const w = world,
-            v = view;
-        const mv2 = v[2]! * w[0]! + v[6]! * w[1]! + v[10]! * w[2]!;
-        const mv6 = v[2]! * w[4]! + v[6]! * w[5]! + v[10]! * w[6]!;
-        const mv10 = v[2]! * w[8]! + v[6]! * w[9]! + v[10]! * w[10]!;
-        const dot = mesh._lastDirX * mv2 + mesh._lastDirY * mv6 + mesh._lastDirZ * mv10;
-        if (mesh._canPostToWorker && Math.abs(dot - 1) >= SORT_EPS) {
-            mesh._lastDirX = mv2;
-            mesh._lastDirY = mv6;
-            mesh._lastDirZ = mv10;
-            mesh._canPostToWorker = false;
-            const viewArr = new Float32Array(view);
-            mesh._worker.postMessage({ view: viewArr, depthMix: mesh._depthMix }, [mesh._depthMix.buffer]);
+        // Mirrors BJS `_isSortStateDirty` (gaussianSplattingMeshBase.ts:849):
+        // re-sort when any element of the world matrix changes, or when the
+        // camera's world-space forward (view[2,6,10]) or world-space position
+        // moves by more than SORT_EPS. The previous Lite gating used a single
+        // `|dot - 1| ≥ 0.01` check on the modelView 3rd row, which missed
+        // pure-translation moves and non-identity world matrix changes.
+        if (!mesh._canPostToWorker) {
+            return;
         }
+
+        const camPos = getCameraPosition(cam);
+        const cf0 = view[2]!,
+            cf1 = view[6]!,
+            cf2 = view[10]!;
+
+        let dirty = false;
+        const lastW = mesh._sortWorldMatrix;
+        for (let i = 0; i < 16; i++) {
+            if (Math.abs(lastW[i]! - world[i]!) > SORT_EPS) {
+                dirty = true;
+                break;
+            }
+        }
+        if (!dirty) {
+            const lastCf = mesh._sortCameraForward;
+            if (Math.abs(lastCf[0]! - cf0) > SORT_EPS || Math.abs(lastCf[1]! - cf1) > SORT_EPS || Math.abs(lastCf[2]! - cf2) > SORT_EPS) {
+                dirty = true;
+            }
+        }
+        if (!dirty) {
+            const lastCp = mesh._sortCameraPosition;
+            if (Math.abs(lastCp[0]! - camPos.x) > SORT_EPS || Math.abs(lastCp[1]! - camPos.y) > SORT_EPS || Math.abs(lastCp[2]! - camPos.z) > SORT_EPS) {
+                dirty = true;
+            }
+        }
+        if (!dirty) {
+            return;
+        }
+
+        mesh._sortWorldMatrix.set(world);
+        mesh._sortCameraForward[0] = cf0;
+        mesh._sortCameraForward[1] = cf1;
+        mesh._sortCameraForward[2] = cf2;
+        mesh._sortCameraPosition[0] = camPos.x;
+        mesh._sortCameraPosition[1] = camPos.y;
+        mesh._sortCameraPosition[2] = camPos.z;
+        mesh._canPostToWorker = false;
+        mesh._worker.postMessage(
+            {
+                worldMatrix: new Float32Array(world),
+                cameraForward: new Float32Array([cf0, cf1, cf2]),
+                cameraPosition: new Float32Array([camPos.x, camPos.y, camPos.z]),
+                depthMix: mesh._depthMix,
+            },
+            [mesh._depthMix.buffer]
+        );
     };
 
     const r: Renderable = {

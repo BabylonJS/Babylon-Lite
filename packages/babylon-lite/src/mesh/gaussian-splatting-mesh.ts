@@ -56,10 +56,14 @@ export interface GaussianSplattingMesh extends SceneNode {
     _worker: Worker;
     /** Scratch for the worker round-trip. high-32 = depth, low-32 = index. */
     _depthMix: BigInt64Array;
-    /** Last view matrix posted to the worker (3rd-row triple). */
-    _lastDirX: number;
-    _lastDirY: number;
-    _lastDirZ: number;
+    /** Snapshot of the world matrix posted to the worker on the last sort.
+     *  Used to decide whether a re-sort is needed this frame. Mirrors BJS
+     *  `ICameraViewInfo.sortWorldMatrix`. */
+    _sortWorldMatrix: Float32Array;
+    /** Snapshot of the camera-forward vector (`view[2,6,10]`) on the last sort. */
+    _sortCameraForward: Float32Array;
+    /** Snapshot of the camera world-space position on the last sort. */
+    _sortCameraPosition: Float32Array;
     /** True between postMessage and onmessage; throttles re-sort requests. */
     _canPostToWorker: boolean;
     /** Resolves on the first sort completion. The lab scene awaits this
@@ -151,9 +155,9 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
         boundMax: geom.boundMax.slice() as [number, number, number],
         _worker: worker,
         _depthMix: new BigInt64Array(geom.vertexCount),
-        _lastDirX: 0,
-        _lastDirY: 0,
-        _lastDirZ: 0,
+        _sortWorldMatrix: new Float32Array(16),
+        _sortCameraForward: new Float32Array(3),
+        _sortCameraPosition: new Float32Array(3),
         _canPostToWorker: true,
         firstSortReady,
         _firstSortResolve: firstResolve,
@@ -205,13 +209,14 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
         // flight, the message queues behind it and the worker swaps to the
         // new positions when it lands.
         mesh._worker.postMessage({ positions: newGeom.positions, vertexCount: newGeom.vertexCount }, [newGeom.positions.buffer]);
-        // Force a re-sort on the next eligible frame. (`_canPostToWorker` is
-        // left untouched — it's owned by the worker protocol and toggling it
-        // here would risk double-posting a `_depthMix` buffer that's still
-        // detached on the worker side.)
-        mesh._lastDirX = 0;
-        mesh._lastDirY = 0;
-        mesh._lastDirZ = 0;
+        // Force a re-sort on the next eligible frame by zeroing the snapshot
+        // state — any real camera/world state will differ by more than the
+        // gating threshold. (`_canPostToWorker` is left untouched — it's owned
+        // by the worker protocol and toggling it here would risk double-posting
+        // a `_depthMix` buffer that's still detached on the worker side.)
+        mesh._sortWorldMatrix.fill(0);
+        mesh._sortCameraForward.fill(0);
+        mesh._sortCameraPosition.fill(0);
 
         retainedSplatsData = newBuffer;
     };
