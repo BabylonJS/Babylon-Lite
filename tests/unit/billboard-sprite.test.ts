@@ -129,7 +129,7 @@ function findInstanceUploadFloats(writeBuffer: ReturnType<typeof vi.fn>, spriteC
 }
 
 describe("FacingBillboardSpriteSystem index API", () => {
-    it("uses a 52-byte instance layout with position, size, UVs, rotation, pivot, and packed color", () => {
+    it("uses a 64-byte instance layout with position, size, UVs, rotation, pivot, and float color", () => {
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1 });
         const index = addBillboardSpriteIndex(system, {
             position: [1, 2, 3],
@@ -147,8 +147,7 @@ describe("FacingBillboardSpriteSystem index API", () => {
         expect(system._instanceFloatsPerSprite).toBe(BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
         expect(system._instanceStrideBytes).toBe(BILLBOARD_INSTANCE_STRIDE_BYTES);
         expect(system._instanceData.length).toBe(BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
-        expect(Array.from(system._instanceData.slice(0, 12))).toEqual([1, 2, 3, 1.5, 2.5, 0.25, 0, 0.5, 0.25, 0.25, 0.25, 0.75]);
-        expect(system._instanceDataU32[12]).toBe(0x80bf8040);
+        expect(Array.from(system._instanceData)).toEqual([1, 2, 3, 1.5, 2.5, 0.25, 0, 0.5, 0.25, 0.25, 0.25, 0.75, 0.25, 0.5, 0.75, 0.5]);
     });
 
     it("hides by zeroing GPU size and restores the true size on visible update", () => {
@@ -340,6 +339,9 @@ describe("addFacingBillboardSystem", () => {
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         expect(descriptor.depthStencil?.depthCompare).toBe("less-equal");
         expect(descriptor.depthStencil?.depthWriteEnabled).toBe(true);
+        const vertexBuffer = descriptor.vertex.buffers![0]!;
+        expect(vertexBuffer.arrayStride).toBe(BILLBOARD_INSTANCE_STRIDE_BYTES);
+        expect(vertexBuffer.attributes).toContainEqual({ shaderLocation: 6, offset: 48, format: "float32x4" });
         const target = (descriptor.fragment!.targets as GPUColorTargetState[])[0]!;
         expect(target.blend).toBeUndefined();
 

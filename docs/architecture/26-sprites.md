@@ -957,7 +957,7 @@ target dimensions; written via `device.queue.writeBuffer` only when the
 Total 48 bytes — `vec4<f32>` forces 16-byte struct alignment and 48 = 3 × 16 is naturally
 aligned; no padding required.
 
-#### Current BillboardSpriteSystem instance layout (52 B = 13 floats)
+#### Current BillboardSpriteSystem instance layout (64 B = 16 floats)
 
 The first facing-billboard slice uses a compact per-instance vertex buffer,
 not a storage buffer or sort indirection. The buffer is bound as the sole
@@ -965,15 +965,15 @@ vertex buffer with `stepMode: "instance"`; the shader uses
 `@builtin(vertex_index)` for the four quad corners and `drawIndexed(6,
 system.count, 0, 0, 0)` for all active sprites.
 
-| Offset (floats) | Field       | Vertex format | Notes                                                   |
-| --------------- | ----------- | ------------- | ------------------------------------------------------- |
-| 0..2            | `position`  | `float32x3`   | world-space anchor                                      |
-| 3..4            | `sizeWorld` | `float32x2`   | zeroed when hidden; true size mirrored in `_savedSize`  |
-| 5..6            | `uvMin`     | `float32x2`   | frame UV minimum, swapped with max when flipped         |
-| 7..8            | `uvMax`     | `float32x2`   | frame UV maximum, swapped with min when flipped         |
-| 9               | `rotation`  | `float32`     | radians, applied in camera-facing local space           |
-| 10..11          | `pivot`     | `float32x2`   | normalized [0,1] pivot                                  |
-| 12              | `color`     | `unorm8x4`    | packed little-endian RGBA tint in the Float32/U32 alias |
+| Offset (floats) | Field       | Vertex format | Notes                                                  |
+| --------------- | ----------- | ------------- | ------------------------------------------------------ |
+| 0..2            | `position`  | `float32x3`   | world-space anchor                                     |
+| 3..4            | `sizeWorld` | `float32x2`   | zeroed when hidden; true size mirrored in `_savedSize` |
+| 5..6            | `uvMin`     | `float32x2`   | frame UV minimum, swapped with max when flipped        |
+| 7..8            | `uvMax`     | `float32x2`   | frame UV maximum, swapped with min when flipped        |
+| 9               | `rotation`  | `float32`     | radians, applied in camera-facing local space          |
+| 10..11          | `pivot`     | `float32x2`   | normalized [0,1] pivot                                 |
+| 12..15          | `color`     | `float32x4`   | RGBA tint stored as four float32 channels              |
 
 The current system UBO is 32 bytes:
 
@@ -996,7 +996,7 @@ Transparent billboard systems sort per billboard before upload, not by
 mutating `system._instanceData`. When `DrawUpdateContext` supplies the active
 pass `camera`, the billboard renderable gets the cached camera view matrix and
 fills renderable-owned scratch arrays: view-space depths, stable index order,
-and a sorted 52-byte-instance staging buffer. Depth is the view-space z of
+and a sorted 64-byte-instance staging buffer. Depth is the view-space z of
 each anchor (`view[2] * x + view[6] * y + view[10] * z + view[14]`), sorted
 descending so farther billboards upload first. The same compact GPU vertex
 buffer is written from the sorted staging buffer with one full
@@ -1338,7 +1338,7 @@ wasted bytes for non-anchored sprites.
 
 ### Billboard Vertex Shaders
 
-The current billboard path uses a compact 52-byte per-instance vertex buffer
+The current billboard path uses a 64-byte per-instance vertex buffer
 and `@builtin(vertex_index)` for the four quad corners. The shared composer
 emits one of two basis functions from `system._orientation`; the rest of the
 vertex shader is identical.
@@ -1429,7 +1429,7 @@ overlap between sprites in the same layer (cutout) or between layers
 that share the depth buffer. Within a depth-hosted layer, sprites draw in insertion
 order, and the per-instance Z (slot [10]) is used as the depth-test
 value. Pure-2D layers have no slot [10]. Current transparent billboard systems
-sort into renderable-owned scratch buffers and upload the sorted 52-byte
+sort into renderable-owned scratch buffers and upload the sorted 64-byte
 instances without mutating `system._instanceData`. Cutout billboard systems skip
 the sort and upload dirty ranges in logical insertion order.
 
@@ -1969,7 +1969,7 @@ packages/babylon-lite/src/
     sprite-pipeline.ts                           # Sprite2D WGSL, pipeline cache, dirty upload helpers
     sprite-renderer.ts                           # createSpriteRenderer / registerSpriteRenderer / unregisterSpriteRenderer / disposeSpriteRenderer + (sampleCount, hasDepth) pipeline cache
 
-    billboard-sprite.ts                          # BillboardSpriteSystem factories + Index API + compact 52-byte instance storage
+    billboard-sprite.ts                          # BillboardSpriteSystem factories + Index API + 64-byte float-color instance storage
     billboard-scene.ts                           # addFacingBillboardSystem / addAxisLockedBillboardSystem; dynamically imports the renderable builder
     billboard-renderable.ts                      # Scene Renderable wrapper, transparent CPU sort, world-center maintenance, GPU resource lifetime
     billboard-pipeline.ts                        # Billboard WGSL composer, pipeline cache, UBO and instance upload helpers

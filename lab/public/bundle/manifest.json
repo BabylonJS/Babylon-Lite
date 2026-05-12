@@ -1549,11 +1549,11 @@
     "bjsGzipKB": 658.2
   },
   "scene54": {
-    "rawKB": 58.2,
-    "gzipKB": 22.7,
+    "rawKB": 58,
+    "gzipKB": 22.6,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene54-billboard-renderable-xkF418Y_.js",
+      "scene54-billboard-renderable-Bpmr3QaB.js",
       "scene54-scene-uniforms-FTYH6Ct0.js",
       "scene54-standard-renderable-C6L5V-Pe.js",
       "scene54-wgsl-helpers-WTsokIfK.js",
@@ -1563,22 +1563,22 @@
     "bjsGzipKB": 368.5
   },
   "scene55": {
-    "rawKB": 30.3,
+    "rawKB": 30.1,
     "gzipKB": 12.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene55-billboard-renderable-DTBgDeSm.js",
+      "scene55-billboard-renderable-BUWzj-9q.js",
       "scene55.js"
     ],
     "bjsRawKB": 1000.2,
     "bjsGzipKB": 240.4
   },
   "scene56": {
-    "rawKB": 58.5,
-    "gzipKB": 22.8,
+    "rawKB": 58.3,
+    "gzipKB": 22.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene56-billboard-renderable-CrzPazS2.js",
+      "scene56-billboard-renderable-DwgqJeug.js",
       "scene56-scene-uniforms-FTYH6Ct0.js",
       "scene56-standard-renderable-CIH3th4n.js",
       "scene56-wgsl-helpers-WTsokIfK.js",
@@ -1588,11 +1588,11 @@
     "bjsGzipKB": 1336.6
   },
   "scene57": {
-    "rawKB": 58.5,
+    "rawKB": 58.3,
     "gzipKB": 22.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene57-billboard-renderable-CNdjctbC.js",
+      "scene57-billboard-renderable-mFNHR4L3.js",
       "scene57-scene-uniforms-FTYH6Ct0.js",
       "scene57-standard-renderable-CumBs1nD.js",
       "scene57-wgsl-helpers-WTsokIfK.js",

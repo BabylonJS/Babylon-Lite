@@ -43,10 +43,8 @@ export interface BillboardSpriteSystem {
     readonly _instanceFloatsPerSprite: number;
     /** @internal Per-instance stride in bytes. */
     readonly _instanceStrideBytes: number;
-    /** @internal Packed billboard instance data. */
+    /** @internal Billboard instance data. */
     _instanceData: Float32Array;
-    /** @internal Uint32 alias used for packed unorm8x4 color writes. */
-    _instanceDataU32: Uint32Array;
     /** @internal True size shadow, unaffected by `visible: false`. */
     _savedSize: Float32Array;
     /** @internal Bumped on any instance edit. */
@@ -69,7 +67,7 @@ export interface BillboardSpriteInit {
     visible?: boolean;
 }
 
-export const BILLBOARD_INSTANCE_FLOATS_PER_SPRITE = 13;
+export const BILLBOARD_INSTANCE_FLOATS_PER_SPRITE = 16;
 export const BILLBOARD_INSTANCE_STRIDE_BYTES = BILLBOARD_INSTANCE_FLOATS_PER_SPRITE * 4;
 export const BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE = 2;
 
@@ -132,7 +130,6 @@ function createBillboardSystem(atlas: SpriteAtlas, orientation: BillboardOrienta
         _instanceFloatsPerSprite: BILLBOARD_INSTANCE_FLOATS_PER_SPRITE,
         _instanceStrideBytes: BILLBOARD_INSTANCE_STRIDE_BYTES,
         _instanceData: instanceData,
-        _instanceDataU32: new Uint32Array(instanceData.buffer),
         _savedSize: new Float32Array(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE),
         _version: 0,
         _dirtyMin: 0,
@@ -148,24 +145,14 @@ function growCapacity(system: BillboardSpriteSystem, minCapacity: number): void 
     const next = new Float32Array(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
     next.set(system._instanceData);
     system._instanceData = next;
-    system._instanceDataU32 = new Uint32Array(next.buffer);
     const nextSavedSize = new Float32Array(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE);
     nextSavedSize.set(system._savedSize);
     system._savedSize = nextSavedSize;
     system._capacity = capacity;
 }
 
-function packColor(red: number, green: number, blue: number, alpha: number): number {
-    const redByte = Math.max(0, Math.min(255, Math.round(red * 255)));
-    const greenByte = Math.max(0, Math.min(255, Math.round(green * 255)));
-    const blueByte = Math.max(0, Math.min(255, Math.round(blue * 255)));
-    const alphaByte = Math.max(0, Math.min(255, Math.round(alpha * 255)));
-    return (redByte | (greenByte << 8) | (blueByte << 16) | (alphaByte << 24)) >>> 0;
-}
-
 function writeInstance(system: BillboardSpriteSystem, slotIndex: number, props: Partial<BillboardSpriteInit>, prev: Float32Array | null): void {
     const data = system._instanceData;
-    const dataU32 = system._instanceDataU32;
     const base = slotIndex * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
     const savedBase = slotIndex * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE;
     const isAdd = prev === null;
@@ -249,9 +236,15 @@ function writeInstance(system: BillboardSpriteSystem, slotIndex: number, props: 
     data[base + 10] = pivotX;
     data[base + 11] = pivotY;
     if (props.color) {
-        dataU32[base + 12] = packColor(props.color[0], props.color[1], props.color[2], props.color[3]);
+        data[base + 12] = props.color[0];
+        data[base + 13] = props.color[1];
+        data[base + 14] = props.color[2];
+        data[base + 15] = props.color[3];
     } else if (isAdd) {
-        dataU32[base + 12] = 0xffffffff;
+        data[base + 12] = 1;
+        data[base + 13] = 1;
+        data[base + 14] = 1;
+        data[base + 15] = 1;
     }
 }
 

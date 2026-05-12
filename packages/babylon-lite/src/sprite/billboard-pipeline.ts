@@ -397,7 +397,7 @@ function buildBillboardPipeline(
                         { shaderLocation: 3, offset: 28, format: "float32x2" },
                         { shaderLocation: 4, offset: 36, format: "float32" },
                         { shaderLocation: 5, offset: 40, format: "float32x2" },
-                        { shaderLocation: 6, offset: 48, format: "unorm8x4" },
+                        { shaderLocation: 6, offset: 48, format: "float32x4" },
                     ],
                 },
             ],
