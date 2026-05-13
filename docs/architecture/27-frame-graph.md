@@ -315,14 +315,12 @@ Opaque and direct buckets currently sort by `renderable.order`. Transparent is s
 Before opening the pass each frame, the `RenderPass` before-execute hook installed by `RenderTask` runs pre-pass work outside the encoder:
 
 1. Auto-resync the renderable list if the scene's `_renderableVersion` has changed.
-2. Sort transparent bindings back-to-front from the active camera.
-3. Refresh the task's scene bind group (the scene-wide lights buffer can be resized after this task was first recorded).
-4. Write the per-task scene UBO, refresh the scene-wide lights UBO, and call `binding.update?.(_updateContext)` for opaque, direct, and transparent bindings. This refreshes dirty per-binding UBOs with the pass target dimensions while allowing opaque render bundles to stay cached.
+2. Refresh the task's scene bind group (the scene-wide lights buffer can be resized after this task was first recorded).
+3. Write the per-task scene UBO, refresh the scene-wide lights UBO, set `_updateContext._camera`, and call `binding.update?.(_updateContext)` for opaque, direct, and transparent bindings. This refreshes dirty per-binding UBOs with the pass target dimensions while allowing opaque render bundles to stay cached.
+4. Sort transparent bindings back-to-front from the active camera, after updates so renderables can refresh `_worldCenter` first.
 5. Mirror live `scene.clearColor` (auto-filled tasks) or `_config.clrColor` plus `_config.clr !== false` onto every owned pass — so the pass picks them up when patching its color attachment.
 
 Then the task iterates `_passes` calling `_execute()`. Each `RenderPass._execute()` patches the swapchain view + clearColor + loadOp, calls `beginRenderPass`, runs `executePassBody(task, enc)` (the closure captured at record time), and ends the pass.
-
-Before opening the pass each frame, `RenderPassTask` calls `binding.update?.(_updateContext)` for opaque, direct, and transparent bindings. This refreshes dirty per-binding UBOs with the pass target dimensions while allowing opaque render bundles to stay cached.
 
 ## Per-Pass Scene UBO
 

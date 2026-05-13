@@ -133,7 +133,7 @@ At record/re-sync time, a render pass task partitions bindings into:
 | Direct      | `_direct`                    | Direct draw after opaque bundle                                     |
 | Transparent | `isTransparent`              | Direct draw, distance-sorted back-to-front per pass                 |
 
-Opaque and direct bindings are sorted by `renderable.order`. Transparent bindings must remain distance-sorted and are not pipeline-sorted. `_direct` selects the non-transparent direct-draw bucket; `isTransmissive` is reserved for true refractive surfaces and excludes only those surfaces from the opaque-scene refraction RTT.
+Opaque and direct bindings are sorted by `renderable.order`. Transparent bindings must remain distance-sorted and are not pipeline-sorted. `_direct` selects the non-transparent direct-draw bucket; PBR transmissive renderables set `_direct` and `isTransmissive`, while mutable depth-writing sprite/billboard batches set `_direct` without `isTransmissive` so they still appear in the opaque-scene refraction RTT.
 
 ## Per-Pass Scene UBO
 
