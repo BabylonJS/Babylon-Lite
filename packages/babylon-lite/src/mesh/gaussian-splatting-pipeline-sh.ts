@@ -498,12 +498,13 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
 
 /** SH-aware variant of `attachGaussianSplattingMesh`. Dynamic-imported by
  *  `attachParsedSplat` (in `load-splat.ts`) when the parsed asset carries SH
- *  coefficients. Creates the `rgba32uint` SH textures (1..5 depending on
- *  `shDegree`), patches `mesh.shDegree` + `mesh._gs.shTextures` in place, and
- *  installs the SH renderable. */
-export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: GaussianSplattingMesh, shFlat: Uint8Array, shDegree: number): void {
+ *  coefficients. Reads `mesh.shDegree` (set at mesh construction), creates
+ *  the `rgba32uint` SH textures (1..5 depending on degree), patches
+ *  `mesh._gs.shTextures` in place, and installs the SH renderable. */
+export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: GaussianSplattingMesh, shFlat: Uint8Array): void {
     const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
+    const shDegree = mesh.shDegree;
     const shVectorCount = (shDegree + 1) * (shDegree + 1) - 1;
     const shCoefficientCount = shVectorCount * 3;
     const textureCount = Math.ceil(shCoefficientCount / 16);
@@ -538,7 +539,6 @@ export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: Gaussia
     }
     (mesh._gs as { shTextures: GPUTexture[]; shViews: GPUTextureView[] }).shTextures = textures;
     (mesh._gs as { shTextures: GPUTexture[]; shViews: GPUTextureView[] }).shViews = views;
-    (mesh as { shDegree: number }).shDegree = shDegree;
 
     const ctx = scene as unknown as { _renderables: Renderable[]; _disposables: (() => void)[] };
     ctx._renderables.push(buildGaussianSplattingRenderableSH(scene, mesh));

@@ -62,7 +62,7 @@ function parseSpz(data: ArrayBuffer): ParsedSplat {
     /* const flags = ubuf[14]; */
     const reserved = ubuf[15]!;
     const version = ubuf32[1]!;
-    if (reserved !== 0 || ubuf32[0] !== MAGIC_NGSP || version < 2 || version > 4) {
+    if (reserved !== 0 || ubuf32[0] !== MAGIC_NGSP || version < 2 || version > 3) {
         throw new Error(`loadSPZ: unsupported SPZ stream (magic=0x${ubuf32[0]!.toString(16)} version=${version})`);
     }
 

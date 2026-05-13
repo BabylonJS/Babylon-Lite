@@ -153,12 +153,12 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
     let retainedSplatsData = parsed.data;
 
     // ── Compose mesh ─────────────────────────────────────────────────
-    // SH textures (and `shDegree`) start unset. The SH attacher
-    // (`gaussian-splatting-pipeline-sh.ts`, dynamic-imported when
-    // `parsed.shDegree > 0`) creates the rgba32uint textures and patches
-    // `mesh.shDegree` / `mesh._gs.shTextures` in place. Keeping all SH-
-    // specific code out of this module lets scenes that only need the
-    // static splat path stay below their bundle ceilings.
+    // `shDegree` comes from the parser (0 means "no view-dependent SH").
+    // The SH attacher (`gaussian-splatting-pipeline-sh.ts`, dynamic-imported
+    // when `parsed.shDegree > 0`) creates the rgba32uint textures and
+    // patches `mesh._gs.shTextures` in place. Keeping all SH-specific code
+    // out of this module lets scenes that only need the static splat path
+    // stay below their bundle ceilings.
     const mesh = {
         _kind: "gs-mesh",
         name,
@@ -167,7 +167,7 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
         textureHeight: geom.textureHeight,
         boundMin: geom.boundMin.slice() as [number, number, number],
         boundMax: geom.boundMax.slice() as [number, number, number],
-        shDegree: 0,
+        shDegree: parsed.shDegree ?? 0,
         _worker: worker,
         _depthMix: new BigInt64Array(geom.vertexCount),
         _sortWorldMatrix: new Float32Array(16),

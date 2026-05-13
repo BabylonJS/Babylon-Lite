@@ -35,7 +35,7 @@ export async function attachParsedSplat(scene: SceneContext, name: string, parse
 
     if (parsed.sh && parsed.shDegree && parsed.shDegree > 0) {
         const { attachGaussianSplattingMeshSH } = await import("../mesh/gaussian-splatting-pipeline-sh.js");
-        attachGaussianSplattingMeshSH(scene, mesh, parsed.sh, parsed.shDegree);
+        attachGaussianSplattingMeshSH(scene, mesh, parsed.sh);
     } else {
         attachGaussianSplattingMesh(scene, mesh);
     }
