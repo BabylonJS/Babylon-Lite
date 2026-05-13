@@ -854,7 +854,7 @@ registerScene runs deferred builders → requestAnimationFrame → resize() → 
 3. For each registered rendering context, run `_record()`:
     - `scene._frameGraph.execute()` drains its ordered tasks
 
-- each `RenderTask` acquires/patches the swapchain or RTT views, writes its per-pass scene UBO, calls `DrawBinding.update({ targetWidth, targetHeight })`, and draws bucketed `DrawBinding`s
+- each `RenderTask` acquires/patches the swapchain or RTT views, writes its per-pass scene UBO, calls `DrawBinding.update({ targetWidth, targetHeight, _camera })`, and draws bucketed `DrawBinding`s
 
 4. Submit the command buffer
 

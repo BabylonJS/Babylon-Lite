@@ -26,8 +26,9 @@
 > explicitly import this function when they want scene-hosted sprites, its
 > static `sprite-renderable` import is limited to that opt-in graph. The
 > builder inserts a generic `Renderable` into the scene, and the frame graph
-> then buckets it alongside meshes by `isTransparent` / `isTransmissive` /
-> `isDynamicDepthWrite`.
+> then buckets it alongside meshes by `isTransparent` / `_direct`; PBR
+> refraction setup separately uses `isTransmissive` to exclude true refractive
+> surfaces from the opaque-scene RTT.
 >
 > This document contains the full specification needed to implement the
 > module from scratch — public API, internal architecture, GPU layouts,
@@ -836,8 +837,8 @@ transparent renderables. The render pass runs binding updates before
 transparent-bucket sorting so `_worldCenter` reflects any same-frame
 billboard mutations before draw order is chosen. Cutout systems have no blend state,
 discard fragments whose sampled texture alpha is below `alphaCutoff`, write
-depth, and route through the non-transparent direct-draw bucket with
-`isDynamicDepthWrite` rather than `isTransmissive`.
+depth, and route through the non-transparent direct-draw bucket with `_direct`
+rather than `isTransmissive`.
 
 Yaw-locked billboards (world-Y axis constraint) are created via
 `createAxisLockedBillboardSystem(atlas, [0, 1, 0], opts)`.
@@ -1613,7 +1614,7 @@ calls the statically imported `buildSpriteRenderable`, builds the pipeline (cach
 allocates the per-layer GPU instance buffer + UBO, and creates bind groups. The
 depth-hosted `Renderable` (one per Sprite2D layer added through
 `addDepthHostedSpriteLayer`) is pushed into `scene._renderables` with `order = 100`
-and `isDynamicDepthWrite = true` for `depth: "test-write"`, or `order = 200` for
+and `_direct = true` for `depth: "test-write"`, or `order = 200` for
 blended / `depth: "test"`, so the scene's existing renderable loop picks it up
 alongside opaque and transparent meshes.
 

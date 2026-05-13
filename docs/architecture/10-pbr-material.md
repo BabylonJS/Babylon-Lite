@@ -467,7 +467,7 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 4. Builds per-mesh mesh/material UBOs and bind groups; the mesh UBO stores `lc` and packed `li` scene-light indices
 5. For each mesh: `computePbrFeatures()` → compose shader → `getOrCreatePbrPipeline()` → create mesh UBO → `createPbrMeshBindGroup()`
 6. Returns one `Renderable` per mesh; each renderable binds target-specific `DrawBinding`s for frame-graph passes
-7. Uses opaque order = 100, transparent order = 200, and marks transmissive materials for the direct pass bucket while keeping `isTransmissive` reserved for refraction surfaces
+7. Uses opaque order = 100, transparent order = 200, and sets `_direct` on transmissive materials while keeping `isTransmissive` reserved for refraction surfaces
 8. Returns `rebuildSingle` so material swaps and per-pass material overrides can rebuild one mesh without rebuilding the whole scene
 9. Sets up disposal to clear pipeline cache and samplers on scene teardown
 

@@ -74,7 +74,7 @@ export function buildBillboardRenderable(engine: EngineContextInternal, system: 
         order: system.order,
         isTransparent,
         isTransmissive: false,
-        isDynamicDepthWrite: !isTransparent,
+        _direct: !isTransparent,
         _engine: engine,
         _system: system,
         _indexBuffer: indexBuffer,
@@ -168,7 +168,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
         renderable._uploadedCameraViewVersion = -1;
         renderable._uploadedSorted = false;
     }
-    const camera = context.camera;
+    const camera = context._camera;
     if (renderable._system._depthMode === "transparent" && camera) {
         const cameraViewMatrix = getViewMatrix(camera);
         if (

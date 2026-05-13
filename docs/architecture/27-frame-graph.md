@@ -302,11 +302,11 @@ setRenderPassExecuteFunc(pass, (enc) => executePassBody(task, enc));
 
 Bindings are partitioned into:
 
-| Bucket      | Renderable flags                                            | Execution                                                |
-| ----------- | ----------------------------------------------------------- | -------------------------------------------------------- | -------------------- | ------------------------ |
-| Opaque      | `!isTransparent && !isTransmissive && !isDynamicDepthWrite` | Cached `GPURenderBundle`                                 |
-| Direct      | `isTransmissive                                             |                                                          | isDynamicDepthWrite` | Direct draw after opaque |
-| Transparent | `isTransparent`                                             | Direct draw after direct, sorted back-to-front per frame |
+| Bucket      | Renderable flags             | Execution                                                |
+| ----------- | ---------------------------- | -------------------------------------------------------- |
+| Opaque      | `!isTransparent && !_direct` | Cached `GPURenderBundle`                                 |
+| Direct      | `_direct`                    | Direct draw after opaque                                 |
+| Transparent | `isTransparent`              | Direct draw after direct, sorted back-to-front per frame |
 
 Opaque and direct buckets currently sort by `renderable.order`. Transparent is sorted by squared distance from the active pass camera and must not be pipeline-sorted.
 

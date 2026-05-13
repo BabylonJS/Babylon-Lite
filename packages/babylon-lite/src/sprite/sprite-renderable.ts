@@ -103,14 +103,14 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
     const instanceBuffer = createSpriteInstanceBuffer(engine.device, layer, "sprite-depth-hosted-instances");
 
     const isTransparent = layer.depth === "test";
-    const isDynamicDepthWrite = layer.depth === "test-write";
+    const isDirect = layer.depth === "test-write";
     const renderable: SpriteRenderableInternal = {
         // Depth-write sprite layers are mutable instanced batches, so route them through
         // the direct-draw phase after cached opaque meshes and before transparent draws.
         order: isTransparent ? 200 : 100,
         isTransparent,
         isTransmissive: false,
-        isDynamicDepthWrite,
+        _direct: isDirect,
         _engine: engine,
         _layer: layer,
         _indexBuffer: indexBuffer,

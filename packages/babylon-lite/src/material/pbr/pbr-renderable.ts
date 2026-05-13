@@ -421,6 +421,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             order,
             isTransparent,
             isTransmissive,
+            _direct: isTransmissive,
             mesh,
             bind(eng, sig) {
                 return {

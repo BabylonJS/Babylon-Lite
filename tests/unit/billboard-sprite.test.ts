@@ -308,7 +308,7 @@ describe("addFacingBillboardSystem", () => {
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(true);
         expect(scene._renderables[0]!.isTransmissive).toBe(false);
-        expect(scene._renderables[0]!.isDynamicDepthWrite).toBe(false);
+        expect(scene._renderables[0]!._direct).toBe(false);
         expect(scene._renderables[0]!.order).toBe(230);
     });
 
@@ -323,7 +323,7 @@ describe("addFacingBillboardSystem", () => {
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(false);
         expect(scene._renderables[0]!.isTransmissive).toBe(false);
-        expect(scene._renderables[0]!.isDynamicDepthWrite).toBe(true);
+        expect(scene._renderables[0]!._direct).toBe(true);
         expect(scene._renderables[0]!.order).toBe(120);
     });
 
@@ -421,7 +421,7 @@ describe("addFacingBillboardSystem", () => {
         device.queue.writeBuffer.mockClear();
 
         const camera = makeIdentityCamera();
-        binding.update?.({ targetWidth: 512, targetHeight: 256, camera });
+        binding.update?.({ targetWidth: 512, targetHeight: 256, _camera: camera });
 
         const uploaded = findInstanceUploadFloats(device.queue.writeBuffer, 3);
         expect([uploaded[2], uploaded[BILLBOARD_INSTANCE_FLOATS_PER_SPRITE + 2], uploaded[BILLBOARD_INSTANCE_FLOATS_PER_SPRITE * 2 + 2]]).toEqual([10, 2, 1]);
@@ -433,11 +433,11 @@ describe("addFacingBillboardSystem", () => {
         expect(scene._renderables[0]!._worldCenter).toEqual([50.5, 0, 5.5]);
 
         device.queue.writeBuffer.mockClear();
-        binding.update?.({ targetWidth: 512, targetHeight: 256, camera });
+        binding.update?.({ targetWidth: 512, targetHeight: 256, _camera: camera });
         expect(device.queue.writeBuffer.mock.calls.some((call) => call[4] === 3 * BILLBOARD_INSTANCE_STRIDE_BYTES)).toBe(false);
 
         updateBillboardSpriteIndex(system, 0, { position: [200, 0, 4] });
-        binding.update?.({ targetWidth: 512, targetHeight: 256, camera });
+        binding.update?.({ targetWidth: 512, targetHeight: 256, _camera: camera });
         expect(scene._renderables[0]!._worldCenter).toEqual([150, 0, 6]);
     });
 
@@ -452,7 +452,7 @@ describe("addFacingBillboardSystem", () => {
 
         const binding = scene._renderables[0]!.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth32float", sampleCount: 1 });
         const camera = makeIdentityCamera();
-        binding.update?.({ targetWidth: 512, targetHeight: 256, camera });
+        binding.update?.({ targetWidth: 512, targetHeight: 256, _camera: camera });
         expect(scene._renderables[0]!._worldCenter).toEqual([1, 2, 3]);
 
         const visiblePass = makeDrawPassMock();
@@ -460,7 +460,7 @@ describe("addFacingBillboardSystem", () => {
         expect(visiblePass.drawIndexed).toHaveBeenCalledWith(6, 2, 0, 0, 0);
 
         updateBillboardSpriteIndex(system, visibleIndex, { visible: false });
-        binding.update?.({ targetWidth: 512, targetHeight: 256, camera });
+        binding.update?.({ targetWidth: 512, targetHeight: 256, _camera: camera });
         expect(scene._renderables[0]!._worldCenter).toEqual([0, 0, 0]);
 
         const hiddenPass = makeDrawPassMock();
@@ -503,7 +503,7 @@ describe("addFacingBillboardSystem", () => {
         device.queue.writeBuffer.mockClear();
 
         const camera = makeIdentityCamera();
-        binding.update?.({ targetWidth: 512, targetHeight: 256, camera });
+        binding.update?.({ targetWidth: 512, targetHeight: 256, _camera: camera });
 
         const uploaded = findInstanceUploadFloats(device.queue.writeBuffer, 3);
         expect([uploaded[2], uploaded[BILLBOARD_INSTANCE_FLOATS_PER_SPRITE + 2], uploaded[BILLBOARD_INSTANCE_FLOATS_PER_SPRITE * 2 + 2]]).toEqual([1, 2, 3]);

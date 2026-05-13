@@ -113,16 +113,12 @@ function makeTransparentRenderable(id: string, initialCenter: [number, number, n
     return renderable;
 }
 
-function makeDrawOrderRenderable(
-    id: string,
-    flags: Partial<Pick<Renderable, "order" | "isTransparent" | "isTransmissive" | "isDynamicDepthWrite">>,
-    drawOrder: string[]
-): Renderable {
+function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "order" | "isTransparent" | "isTransmissive" | "_direct">>, drawOrder: string[]): Renderable {
     const renderable: Renderable = {
         order: flags.order ?? 100,
         isTransparent: flags.isTransparent ?? false,
         isTransmissive: flags.isTransmissive ?? false,
-        isDynamicDepthWrite: flags.isDynamicDepthWrite ?? false,
+        _direct: flags._direct ?? false,
         bind(): DrawBinding {
             return {
                 renderable,
@@ -163,8 +159,8 @@ describe("RenderPassTask transparent sorting", () => {
 
         scene._renderables.push(
             makeDrawOrderRenderable("opaque", { order: 100 }, drawOrder),
-            makeDrawOrderRenderable("dynamic-depth-write", { order: 110, isDynamicDepthWrite: true }, drawOrder),
-            makeDrawOrderRenderable("transmissive", { order: 140, isTransmissive: true }, drawOrder),
+            makeDrawOrderRenderable("dynamic-depth-write", { order: 110, _direct: true }, drawOrder),
+            makeDrawOrderRenderable("transmissive", { order: 140, isTransmissive: true, _direct: true }, drawOrder),
             makeDrawOrderRenderable("transparent", { order: 200, isTransparent: true }, drawOrder)
         );
 
@@ -177,7 +173,7 @@ describe("RenderPassTask transparent sorting", () => {
     it("keeps dynamic depth-write renderables in the opaque refraction RTT and excludes true transmissive surfaces", () => {
         const drawOrder: string[] = [];
         const opaque = makeDrawOrderRenderable("opaque", { order: 100 }, drawOrder);
-        const dynamicDepthWrite = makeDrawOrderRenderable("dynamic-depth-write", { order: 110, isDynamicDepthWrite: true }, drawOrder);
+        const dynamicDepthWrite = makeDrawOrderRenderable("dynamic-depth-write", { order: 110, _direct: true }, drawOrder);
         const transmissive = makeDrawOrderRenderable("transmissive", { order: 140, isTransmissive: true }, drawOrder);
 
         expect(selectOpaqueSceneRefractionRenderables([opaque, dynamicDepthWrite, transmissive])).toEqual([opaque, dynamicDepthWrite]);

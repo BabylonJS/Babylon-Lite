@@ -104,7 +104,7 @@ export interface RenderTask extends Task {
 interface MutableDrawUpdateContext {
     targetWidth: number;
     targetHeight: number;
-    camera?: Camera | null;
+    _camera?: Camera | null;
 }
 
 /** Create a render pass task. GPU resources (target textures + descriptor)
@@ -246,16 +246,15 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContextInternal): void 
 }
 
 /** Per-frame back-to-front sort for transparent bindings using the active camera. */
-function sortTransparentBindings(task: RenderTask): void {
+function sortTransparentBindings(task: RenderTask, camera: Camera | null | undefined): void {
     const arr = task._transparentBindings;
     if (arr.length <= 1) {
         return;
     }
-    const cam = task._config.cam ?? task.scene.camera;
-    if (!cam) {
+    if (!camera) {
         return;
     }
-    const w = cam.worldMatrix;
+    const w = camera.worldMatrix;
     const cx = w[12]!;
     const cy = w[13]!;
     const cz = w[14]!;
@@ -282,7 +281,7 @@ function buildBindings(task: RenderTask, eng: EngineContextInternal, targetSigna
         const binding = r.bind(eng, targetSignature);
         if (r.isTransparent) {
             transparent.push(binding);
-        } else if (r.isTransmissive || r.isDynamicDepthWrite) {
+        } else if (r._direct) {
             direct.push(binding);
         } else {
             opaque.push(binding);
@@ -342,14 +341,14 @@ function prepareRenderTaskPass(
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
     // depths during their update.
-    (context as MutableDrawUpdateContext).camera = camera;
+    (context as MutableDrawUpdateContext)._camera = camera;
     updateBindings(task._opaqueBindings, context);
     updateBindings(task._directBindings, context);
     updateBindings(task._transparentBindings, context);
     // Per-frame back-to-front sort for transparent bindings — must run AFTER
     // updateBindings so renderables that compute `_worldCenter` inside their
     // own `update()` (billboard systems) are seen with current values.
-    sortTransparentBindings(task);
+    sortTransparentBindings(task, camera);
 }
 
 function executePass(

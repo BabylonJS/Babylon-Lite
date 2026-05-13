@@ -16,7 +16,7 @@ export interface DrawUpdateContext {
     readonly targetWidth: number;
     readonly targetHeight: number;
     /** Active pass camera. Null for camera-less passes. */
-    readonly camera?: Camera | null;
+    readonly _camera?: Camera | null;
 }
 
 /**
@@ -54,12 +54,11 @@ export interface Renderable {
     readonly order: number;
     /** Whether this renderable is transparent (auto-derived from material). */
     readonly isTransparent: boolean;
-    /** Whether this renderable is a true transmissive/refractive surface. These non-transparent
-     *  surfaces draw directly after the opaque-scene RTT is built and are excluded from that RTT. */
+    /** Whether this renderable is a true transmissive/refractive surface. These surfaces are
+     *  excluded from the opaque-scene RTT; PBR transmissive renderables also set `_direct`. */
     readonly isTransmissive?: boolean;
-    /** Whether this non-transparent renderable must direct-draw after cached opaque bundles because
-     *  its mutable depth-writing contents cannot be safely captured in a reusable opaque bundle. */
-    readonly isDynamicDepthWrite?: boolean;
+    /** Whether this non-transparent renderable must direct-draw after cached opaque bundles. */
+    readonly _direct?: boolean;
     /** Reference to the source mesh (for distance sort + material-change detection). */
     readonly mesh?: Mesh;
     /** Scratch: squared distance from camera for transparent sorting. */

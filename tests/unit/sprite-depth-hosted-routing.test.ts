@@ -140,7 +140,7 @@ describe("addDepthHostedSpriteLayer", () => {
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(true);
         expect(scene._renderables[0]!.isTransmissive).toBe(false);
-        expect(scene._renderables[0]!.isDynamicDepthWrite).toBe(false);
+        expect(scene._renderables[0]!._direct).toBe(false);
         expect(scene._renderables[0]!.order).toBe(200);
     });
 
@@ -152,7 +152,7 @@ describe("addDepthHostedSpriteLayer", () => {
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(false);
         expect(scene._renderables[0]!.isTransmissive).toBe(false);
-        expect(scene._renderables[0]!.isDynamicDepthWrite).toBe(true);
+        expect(scene._renderables[0]!._direct).toBe(true);
         expect(scene._renderables[0]!.order).toBe(100);
     });
 

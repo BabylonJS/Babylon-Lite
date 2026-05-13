@@ -403,7 +403,7 @@
         "id": 54,
         "slug": "scene54-facing-billboards",
         "name": "Scene 54 — Facing Billboards",
-        "maxMad": 0.6,
+        "maxMad": 0.02,
         "maxRawKB": 75,
         "description": "World-space camera-facing rectangular sprite cards rendered through the opt-in FacingBillboardSpriteSystem path from an off-axis camera, depth-tested against diagonal opaque boxes with transparent alpha and no depth write. BJS reference uses SpriteManager.",
         "tags": ["sprites", "billboards", "depth"]
@@ -412,7 +412,7 @@
         "id": 55,
         "slug": "scene55-billboard-sorting",
         "name": "Scene 55 — Billboard Sorting",
-        "maxMad": 0.6,
+        "maxMad": 0.02,
         "maxRawKB": 65,
         "description": "Overlapping transparent world-space billboards inserted near-to-far in Lite and far-to-near in the Babylon.js SpriteManager reference, exercising CPU-side per-billboard sorting before compact vertex-buffer upload.",
         "tags": ["sprites", "billboards", "sorting"]
@@ -421,7 +421,7 @@
         "id": 56,
         "slug": "scene56-axis-locked-billboards",
         "name": "Scene 56 — Axis-Locked Billboards",
-        "maxMad": 0.6,
+        "maxMad": 0.02,
         "maxRawKB": 75,
         "description": "Axis-locked world-space billboards constrain rotation to an arbitrary normalized axis. BJS reference uses explicit meshes with axis-aligned basis vectors computed from the camera and lock axis.",
         "tags": ["sprites", "billboards", "axis-locked"]
@@ -430,7 +430,7 @@
         "id": 57,
         "slug": "scene57-cutout-billboards",
         "name": "Scene 57 — Cutout Billboards",
-        "maxMad": 0.6,
+        "maxMad": 0.02,
         "maxRawKB": 75,
         "description": "Hard-alpha world-space billboard cards rendered with blendMode: \"cutout\", alpha cutoff, and depth writes. Front cutout pixels occlude later overlapping cards and opaque geometry while transparent holes leave the background visible.",
         "tags": ["sprites", "billboards", "depth"]
