@@ -477,13 +477,13 @@ Index API, with the per-layer instance layout fixed at creation. The
 `depth` option chooses which path the layer ends up in:
 
 - `depth: "none"` → caller hands the layer to a `SpriteRenderer` (pure-2D
-  or HUD); never goes through `addToScene`. The layer uses a 10-float /
-  40-byte instance layout and the pure shader keeps clip-space Z constant.
+  or HUD); never goes through `addToScene`. The layer uses a 13-float /
+  52-byte instance layout and the pure shader keeps clip-space Z constant.
 - `depth: "test" | "test-write"` → caller passes the layer to
   `addDepthHostedSpriteLayer`, which statically imports the depth-hosted
   renderable builder inside the opt-in scene integration module; layer is
   drawn inside the scene's 3D pass and sorts against meshes by per-instance
-  Z. The layer uses the 11-float / 44-byte layout with slot [10] exposed to
+  Z. The layer uses the 14-float / 56-byte layout with slot [13] exposed to
   the shader as `@location(6) iZ`.
 
 The world-anchor adapter described below is roadmap. The current depth-hosted
@@ -740,34 +740,34 @@ import type { SpriteBlendMode } from "./sprite-2d.js";
 
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
-    blendMode?: SpriteBlendMode;
+    blendMode?: BillboardBlendMode;
     alphaCutoff?: number;
     opacity?: number;
     visible?: boolean;
     order?: number;
 }
 
+export type BillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
 export type BillboardOrientation = "facing" | "axis-locked";
 export type BillboardDepthMode = "transparent" | "cutout";
 
 export interface BillboardSpriteSystem {
     readonly _entityType: "billboard-sprite-system";
     readonly atlas: SpriteAtlas;
-    readonly blendMode: SpriteBlendMode;
+    readonly blendMode: BillboardBlendMode;
     alphaCutoff: number;
     opacity: number;
     visible: boolean;
     order: number;
-    count: number;
+    readonly count: number;
 
     readonly _orientation: BillboardOrientation;
     readonly _depthMode: BillboardDepthMode;
-    readonly _axis: [number, number, number];
+    readonly _axis: readonly [number, number, number];
     _capacity: number;
     readonly _instanceFloatsPerSprite: number;
     readonly _instanceStrideBytes: number;
     _instanceData: Float32Array;
-    _instanceDataU32: Uint32Array;
     _savedSize: Float32Array;
     _version: number;
     _dirtyMin: number;
@@ -793,6 +793,7 @@ export function createAxisLockedBillboardSystem(atlas: SpriteAtlas, axis: readon
 export function addBillboardSpriteIndex(system: BillboardSpriteSystem, init: BillboardSpriteInit): number;
 export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index: number, patch: Partial<BillboardSpriteInit>): void;
 export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index: number): void;
+export function clearBillboardSprites(system: BillboardSpriteSystem): void;
 export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: number): void;
 
 // src/sprite/billboard-scene.ts
@@ -817,8 +818,11 @@ Internally, the shared renderable routes through `system._orientation` and
 derive `"cutout"` for `blendMode: "cutout"`. Transparent systems are
 alpha-blended, depth-tested, depth-write disabled, maintain a `_worldCenter`
 for the scene's transparent bucket sort, and sort individual billboard
-instances far-to-near before upload. The render pass runs binding updates
-before transparent-bucket sorting so `_worldCenter` reflects any same-frame
+instances far-to-near before upload. `_worldCenter` is the center of the
+active anchor bounds, not the arithmetic mean, because it is a proxy for the
+system footprint when the render task sorts this one renderable against other
+transparent renderables. The render pass runs binding updates before
+transparent-bucket sorting so `_worldCenter` reflects any same-frame
 billboard mutations before draw order is chosen. Cutout systems have no blend state,
 discard fragments whose sampled texture alpha is below `alphaCutoff`, write
 depth, and route through the non-transparent direct-draw bucket without
@@ -891,43 +895,38 @@ frame `if (sprite.kind === ...)`. The two families have separate composers,
 separate renderables, separate WGSL. The unification happens at the
 **scene** layer, not at the sprite-shader layer. The `AnchorSource`
 projection is a CPU step on a sparse per-layer map; it writes into the
-owning layer's already-fixed instance layout (40 B for pure-2D, 44 B for
+owning layer's already-fixed instance layout (52 B for pure-2D, 56 B for
 depth-hosted).
 
 ### Per-Instance GPU Layout
 
 `Sprite2DLayer` fixes its instance stride at creation from `depth`.
-`depth: "none"` uses 40 bytes / 10 floats and has no Z lane. `depth:
-"test" | "test-write"` uses 44 bytes / 11 floats and exposes slot [10]
+`depth: "none"` uses 52 bytes / 13 floats and has no Z lane. `depth:
+"test" | "test-write"` uses 56 bytes / 14 floats and exposes slot [13]
 as the per-instance depth attribute. Anchor data lives off-instance in a
 sparse JS map. Per-layer constants (view, screen size, pivot, opacity)
 live in a separate 48-byte UBO bound at `@group(0) @binding(0)` for the
 pure renderer and `@group(1) @binding(0)` for the depth-hosted scene
 renderable.
 
-#### Sprite2DLayer pure per-instance vertex buffer (40 B = 10 floats)
+#### Sprite2DLayer pure per-instance vertex buffer (52 B = 13 floats)
 
-| Offset (bytes) | Slot   | Field        | Vertex attr             | Notes                                                                      |
-| -------------- | ------ | ------------ | ----------------------- | -------------------------------------------------------------------------- |
-| 0..7           | [0..1] | `positionPx` | `@location(0)` f32×2    | layer-space pixels; for anchored sprites, written by the CPU sync hook     |
-| 8..15          | [2..3] | `sizePx`     | `@location(1)` f32×2    | width/height in pixels; zeroed when `visible: false` (degenerate quad)     |
-| 16..23         | [4..5] | `uvMin`      | `@location(2)` f32×2    | atlas UV min                                                               |
-| 24..31         | [6..7] | `uvMax`      | `@location(3)` f32×2    | atlas UV max                                                               |
-| 32..35         | [8]    | `rotation`   | `@location(4)` f32      | radians; vertex shader takes `sin`/`cos` once per vertex                   |
-| 36..39         | [9]    | `colorRGBA`  | `@location(5)` unorm8x4 | packed via the cached `Uint32Array` view aliased on `_instanceData.buffer` |
+| Offset (bytes) | Slot    | Field        | Vertex attr          | Notes                                                                     |
+| -------------- | ------- | ------------ | -------------------- | ------------------------------------------------------------------------- |
+| 0..7           | [0..1]  | `positionPx` | `@location(0)` f32×2 | layer-space pixels; for anchored sprites, written by the CPU sync hook    |
+| 8..15          | [2..3]  | `sizePx`     | `@location(1)` f32×2 | width/height in pixels; zeroed when `visible: false` (degenerate quad)    |
+| 16..23         | [4..5]  | `uvMin`      | `@location(2)` f32×2 | atlas UV min                                                              |
+| 24..31         | [6..7]  | `uvMax`      | `@location(3)` f32×2 | atlas UV max                                                              |
+| 32..35         | [8]     | `rotation`   | `@location(4)` f32   | radians; vertex shader takes `sin`/`cos` once per vertex                  |
+| 36..51         | [9..12] | `colorRGBA`  | `@location(5)` f32×4 | four float32 channels, matching Babylon.js SpriteRenderer color precision |
 
-#### Sprite2DLayer depth-hosted extension (44 B = 11 floats)
+#### Sprite2DLayer depth-hosted extension (56 B = 14 floats)
 
-Depth-hosted layers use the same first 40 bytes, plus:
+Depth-hosted layers use the same first 52 bytes, plus:
 
 | Offset (bytes) | Slot | Field | Vertex attr        | Notes                                                             |
 | -------------- | ---- | ----- | ------------------ | ----------------------------------------------------------------- |
-| 40..43         | [10] | `z`   | `@location(6)` f32 | NDC depth (`0` = near, `1` = far), consumed by the scene pipeline |
-
-Slot [9] is laid out as 4 bytes inside the homogeneous `Float32Array` backing
-store; the bits are written via the cached `_instanceDataU32` view on
-`layer._instanceData.buffer`. The renderer treats it as a `unorm8x4` vertex
-attribute on the GPU.
+| 52..55         | [13] | `z`   | `@location(6)` f32 | NDC depth (`0` = near, `1` = far), consumed by the scene pipeline |
 
 Visibility (`visible: false`) is implemented by zeroing slots [2..3]; the
 sprite's true size lives in `layer._savedSize` so a later `visible: true`
@@ -985,7 +984,7 @@ bind group at group 1, with pipeline keys including render target format,
 sample count, `_orientation`, blend mode, `_depthMode`, and depth format. The
 shader module cache also keys by `_depthMode`: transparent shaders have no
 discard path, while cutout shaders sample texture alpha, discard below
-`billboards.axis.w`, and return the sampled color multiplied by tint and
+`billboards.axisAndCutoff.w`, and return the sampled color multiplied by tint and
 `opacityMul`. The `"transparent"` depth mode uses depth compare `less-equal`,
 depth write off, no culling, and alpha or premultiplied blending. The
 `"cutout"` depth mode uses depth compare `less-equal`, depth write on, no
@@ -1000,12 +999,19 @@ and a sorted 64-byte-instance staging buffer. Depth is the view-space z of
 each anchor (`view[2] * x + view[6] * y + view[10] * z + view[14]`), sorted
 descending so farther billboards upload first. The same compact GPU vertex
 buffer is written from the sorted staging buffer with one full
-`queue.writeBuffer` when either the system version or camera view identity /
+`queue.writeBuffer` when either the system version, camera identity, or
 `camera.worldMatrixVersion` changes. Repeated frames with unchanged system data and unchanged
 camera view skip the instance upload. Cutout billboard systems skip this
 transparent sort path entirely and upload dirty ranges directly from
 `system._instanceData` in logical insertion order, matching the direct
 depth-write bucket semantics used by depth-hosted sprite layers.
+
+This camera-dependent transparent sort is intentionally conservative: when
+the camera moves, relative billboard order may change, so the renderable
+recomputes depths and uploads the sorted compact buffer. Large transparent
+systems should be split by region or depth band if exact interleaving with
+other transparent renderables matters; one billboard system remains one
+transparent renderable in the global scene sort.
 
 #### Future target BillboardSpriteSystem (96 B = 24 floats)
 
@@ -1124,14 +1130,14 @@ export interface SpriteSortState {
     lastCamZ: number;
     lastUploadedCount: number;
     blended: boolean;
-    centroid: [number, number, number];
+    boundsCenter: [number, number, number];
 }
 ```
 
-**Centroid for engine-wide transparent sort.**
-`computeSpriteCentroid(state, storage)` walks the first three floats of
-every active slot, computes the mean world position, writes it into
-`state.centroid`, and returns it. The renderable copies this into
+**Bounds center for engine-wide transparent sort.**
+`computeSpriteBoundsCenter(state, storage)` walks the first three floats of
+every active slot, computes the center of the active anchor bounds, writes it into
+`state.boundsCenter`, and returns it. The renderable copies this into
 `Renderable._worldCenter` every frame so the engine-wide transparent
 sort orders billboard systems correctly against transparent meshes.
 
@@ -1139,7 +1145,7 @@ sort orders billboard systems correctly against transparent meshes.
 
 - `createSpriteSortState(blended)` — allocate state. GPU buffer is created lazily on first sync.
 - `syncSpriteSortIndices(engine, state, storage, sortVersion, camX, camY, camZ, label)` — ensures capacity, runs sort if any trigger fired, uploads via a single `writeBuffer`.
-- `computeSpriteCentroid(state, storage)` — mean world position of all active slots.
+- `computeSpriteBoundsCenter(state, storage)` — center of active anchor bounds.
 - `disposeSpriteSortState(state)` — release the GPU index buffer.
 
 ### Vertexless Quad
@@ -1241,9 +1247,9 @@ loses one tick of animation in the captured image. All sprite families
 
 | Layer `depth`  | Drawn via                                                                       | Depth attachment        | Depth compare | Depth write | Instance layout / Z                  | Render order                                                |
 | -------------- | ------------------------------------------------------------------------------- | ----------------------- | ------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
-| `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none          | `false`     | 40 B / 10 floats; no slot [10]       | engine registration order; layer order within the renderer  |
-| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `less-equal`  | `false`     | 44 B / 11 floats; slot [10] consumed | scene transparent queue (after opaque meshes)               |
-| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `less-equal`  | `true`      | 44 B / 11 floats; slot [10] consumed | direct-drawn after cached opaque meshes, before transparent |
+| `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none          | `false`     | 52 B / 13 floats; no slot [13]       | engine registration order; layer order within the renderer  |
+| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `less-equal`  | `false`     | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
+| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `less-equal`  | `true`      | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
 
 The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`. `SpriteRenderer`
 layers always request `hasDepth = false` and `sampleCount = 1`, so their pipelines are built without a depth-stencil descriptor. Depth-hosted layers request `hasDepth = true`, use the target depth-stencil format provided by the frame graph, and set `depthWrite` from the layer's `depth` mode.
@@ -1265,14 +1271,14 @@ dynamic import in `billboard-scene.ts`.
 
 The billboard bind group is group 1:
 
-| Binding | Resource              | Shader stages     | Notes                                              |
-| ------- | --------------------- | ----------------- | -------------------------------------------------- |
-| 0       | `BillboardSystem` UBO | vertex + fragment | 32 B: `opacityMul: vec4<f32>`, `axis: vec4<f32>`   |
-| 1       | atlas texture         | fragment          | `texture_2d<f32>` from `system.atlas.texture.view` |
-| 2       | atlas sampler         | fragment          | filtering sampler from the atlas texture           |
+| Binding | Resource              | Shader stages     | Notes                                                     |
+| ------- | --------------------- | ----------------- | --------------------------------------------------------- |
+| 0       | `BillboardSystem` UBO | vertex + fragment | 32 B: `opacityMul: vec4<f32>`, `axisAndCutoff: vec4<f32>` |
+| 1       | atlas texture         | fragment          | `texture_2d<f32>` from `system.atlas.texture.view`        |
+| 2       | atlas sampler         | fragment          | filtering sampler from the atlas texture                  |
 
-`BillboardSystem.axis.xyz` is the normalized lock axis for axis-locked systems
-and zero for facing systems. `axis.w` is the runtime `alphaCutoff` consumed only
+`BillboardSystem.axisAndCutoff.xyz` is the normalized lock axis for axis-locked systems
+and zero for facing systems. `axisAndCutoff.w` is the runtime `alphaCutoff` consumed only
 by cutout shaders. `opacityMul` is CPU-shaped per blend mode: straight-alpha
 and cutout write `(1, 1, 1, opacity)`, while premultiplied writes
 `(opacity, opacity, opacity, opacity)` so the fragment shader has no blend-mode
@@ -1357,7 +1363,7 @@ fn getBillboardBasis(_anchor: vec3<f32>) -> BillboardBasis {
 
 ```wgsl
 fn getBillboardBasis(_anchor: vec3<f32>) -> BillboardBasis {
-  let lockAxis = normalize(billboards.axis.xyz);
+  let lockAxis = normalize(billboards.axisAndCutoff.xyz);
   let cameraRight = normalize(vec3<f32>(scene.view[0][0], scene.view[1][0], scene.view[2][0]));
   let projectedRight = cameraRight - lockAxis * dot(cameraRight, lockAxis);
   let projectedRightLen = length(projectedRight);
@@ -1394,13 +1400,13 @@ fn vs(in: VIn) -> VOut {
 
 Transparent billboard shaders sample the atlas and return `sampleColor * tint *
 billboards.opacityMul`. Cutout billboard shaders use the same multiply but first
-discard fragments whose sampled alpha is below `billboards.axis.w`.
+discard fragments whose sampled alpha is below `billboards.axisAndCutoff.w`.
 
 ```wgsl
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
   let sampleColor = textureSample(atlasTex, atlasSamp, in.uv);
-  if (sampleColor.a < billboards.axis.w) {
+  if (sampleColor.a < billboards.axisAndCutoff.w) {
     discard;
   }
   return sampleColor * in.tint * billboards.opacityMul;
@@ -1427,8 +1433,8 @@ Depth-hosted Sprite2D layers do **not** sort sprites individually — each
 layer becomes one `Renderable` and the GPU's depth test resolves
 overlap between sprites in the same layer (cutout) or between layers
 that share the depth buffer. Within a depth-hosted layer, sprites draw in insertion
-order, and the per-instance Z (slot [10]) is used as the depth-test
-value. Pure-2D layers have no slot [10]. Current transparent billboard systems
+order, and the per-instance Z (slot [13]) is used as the depth-test
+value. Pure-2D layers have no slot [13]. Current transparent billboard systems
 sort into renderable-owned scratch buffers and upload the sorted 64-byte
 instances without mutating `system._instanceData`. Cutout billboard systems skip
 the sort and upload dirty ranges in logical insertion order.
@@ -2018,8 +2024,16 @@ export {
     addBillboardSpriteIndex,
     updateBillboardSpriteIndex,
     removeBillboardSpriteIndex,
+    clearBillboardSprites,
     setBillboardSpriteFrameIndex,
 } from "./sprite/billboard-sprite.js";
 export { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "./sprite/billboard-scene.js";
-export type { BillboardSpriteSystem, BillboardSpriteSystemOptions, BillboardSpriteInit, BillboardOrientation, BillboardDepthMode } from "./sprite/billboard-sprite.js";
+export type {
+    BillboardSpriteSystem,
+    BillboardSpriteSystemOptions,
+    BillboardSpriteInit,
+    BillboardOrientation,
+    BillboardDepthMode,
+    BillboardBlendMode,
+} from "./sprite/billboard-sprite.js";
 ```

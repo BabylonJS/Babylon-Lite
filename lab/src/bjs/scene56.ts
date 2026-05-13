@@ -19,6 +19,9 @@ const CAMERA_ALPHA = -Math.PI / 4;
 const CAMERA_BETA = 1.15;
 const LOCK_AXIS = new Vector3(0.35, 1, 0.2).normalize();
 
+// Babylon.js has no matching built-in axis-locked billboard primitive here. This reference
+// bakes the static camera-pose basis once for visual parity, not for camera-motion behavior.
+
 interface SpriteCell {
     position: [number, number, number];
     sizeWorld: [number, number];

@@ -1,8 +1,7 @@
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
-import type { SpriteBlendMode } from "./sprite-2d.js";
-import type { BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
+import type { BillboardBlendMode, BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
 import { BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
 
 export interface BillboardPipelineDeviceCache {
@@ -12,12 +11,9 @@ export interface BillboardPipelineDeviceCache {
 
 export interface BillboardPipelineCache {
     _devices: WeakMap<GPUDevice, BillboardPipelineDeviceCache>;
-    _lastDeviceCache: BillboardPipelineDeviceCache | null;
 }
 
-type SupportedBillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
-
-const BLEND_MODE_TABLE: Readonly<Record<SupportedBillboardBlendMode, { index: number; descriptor?: GPUBlendState }>> = {
+const BLEND_MODE_TABLE: Readonly<Record<BillboardBlendMode, { index: number; descriptor?: GPUBlendState }>> = {
     alpha: {
         index: 0,
         descriptor: {
@@ -53,7 +49,7 @@ export interface BillboardInstanceSortScratch {
     _sortDepths: Float32Array;
 }
 
-function getBlendModeEntry(blendMode: SpriteBlendMode): (typeof BLEND_MODE_TABLE)[SupportedBillboardBlendMode] {
+function getBlendModeEntry(blendMode: BillboardBlendMode): (typeof BLEND_MODE_TABLE)[BillboardBlendMode] {
     if (blendMode === "alpha" || blendMode === "premultiplied" || blendMode === "cutout") {
         return BLEND_MODE_TABLE[blendMode];
     }
@@ -82,7 +78,7 @@ right: vec3<f32>,
 up: vec3<f32>,
 };
 fn getBillboardBasis(_anchor: vec3<f32>) -> BillboardBasis {
-let lockAxis = normalize(billboards.axis.xyz);
+let lockAxis = normalize(billboards.axisAndCutoff.xyz);
 let cameraRight = normalize(vec3<f32>(scene.view[0][0], scene.view[1][0], scene.view[2][0]));
 let projectedRight = cameraRight - lockAxis * dot(cameraRight, lockAxis);
 let projectedRightLen = length(projectedRight);
@@ -101,7 +97,7 @@ function makeBillboardFragmentWgsl(depthMode: BillboardDepthMode): string {
         return `@fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
 let sampleColor = textureSample(atlasTex, atlasSamp, in.uv);
-if (sampleColor.a < billboards.axis.w) {
+if (sampleColor.a < billboards.axisAndCutoff.w) {
 discard;
 }
 return sampleColor * in.tint * billboards.opacityMul;
@@ -118,7 +114,7 @@ function makeBillboardWgsl(orientation: BillboardOrientation, depthMode: Billboa
     return `${SCENE_UBO_WGSL}
 struct BillboardSystem {
 opacityMul: vec4<f32>,
-axis: vec4<f32>,
+axisAndCutoff: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> billboards: BillboardSystem;
 @group(1) @binding(1) var atlasTex: texture_2d<f32>;
@@ -160,13 +156,11 @@ ${makeBillboardFragmentWgsl(depthMode)}`;
 export function createBillboardPipelineCache(): BillboardPipelineCache {
     return {
         _devices: new WeakMap(),
-        _lastDeviceCache: null,
     };
 }
 
 export function clearBillboardPipelineCache(cache: BillboardPipelineCache): void {
     cache._devices = new WeakMap();
-    cache._lastDeviceCache = null;
 }
 
 export function getOrCreateBillboardPipeline(
@@ -217,6 +211,8 @@ export function uploadSortedBillboardInstances(
 ): void {
     const count = system.count;
     if (count === 0) {
+        system._dirtyMin = 0;
+        system._dirtyMax = 0;
         return;
     }
     ensureBillboardInstanceSortScratch(scratch, count);
@@ -260,8 +256,13 @@ export function ensureBillboardInstanceBuffer(
 }
 
 export function uploadBillboardInstances(device: GPUDevice, system: BillboardSpriteSystem, instanceBuffer: GPUBuffer, uploadedVersion: number): number {
-    if (uploadedVersion === system._version || system.count === 0) {
+    if (uploadedVersion === system._version) {
         return uploadedVersion;
+    }
+    if (system.count === 0) {
+        system._dirtyMin = 0;
+        system._dirtyMax = 0;
+        return system._version;
     }
     let lowIndex: number;
     let highIndex: number;
@@ -311,8 +312,8 @@ export function buildBillboardSystemUbo(system: BillboardSpriteSystem, ubo: Floa
     ubo[7] = system.alphaCutoff;
 }
 
-export function writeBillboardSystemUboIfDirty(device: GPUDevice, uniformBuffer: GPUBuffer, scratchUbo: Float32Array, lastUbo: Float32Array, alreadyUploaded: boolean): boolean {
-    let dirty = !alreadyUploaded;
+export function writeBillboardSystemUboIfDirty(device: GPUDevice, uniformBuffer: GPUBuffer, scratchUbo: Float32Array, lastUbo: Float32Array, forceWrite: boolean): void {
+    let dirty = forceWrite;
     if (!dirty) {
         for (let index = 0; index < BILLBOARD_SYSTEM_UBO_FLOATS; index++) {
             if (lastUbo[index] !== scratchUbo[index]) {
@@ -325,7 +326,6 @@ export function writeBillboardSystemUboIfDirty(device: GPUDevice, uniformBuffer:
         device.queue.writeBuffer(uniformBuffer, 0, scratchUbo.buffer, scratchUbo.byteOffset, BILLBOARD_SYSTEM_UBO_BYTES);
         lastUbo.set(scratchUbo);
     }
-    return true;
 }
 
 export function createBillboardSystemBindGroup(engine: EngineContextInternal, pipeline: GPURenderPipeline, system: BillboardSpriteSystem, uniformBuffer: GPUBuffer): GPUBindGroup {
@@ -346,7 +346,6 @@ function getBillboardPipelineDeviceCache(engine: EngineContextInternal, cache: B
         deviceCache = { _shaderModules: new Map(), _pipelines: new Map() };
         cache._devices.set(engine.device, deviceCache);
     }
-    cache._lastDeviceCache = deviceCache;
     return deviceCache;
 }
 

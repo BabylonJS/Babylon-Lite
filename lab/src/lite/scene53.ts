@@ -4,7 +4,7 @@
 //   1. Sprites participating in the scene's depth attachment via
 //      `addDepthHostedSpriteLayer(scene, layer)` + `depth: "test-write"` — they can occlude /
 //      be occluded by 3D meshes.
-//   2. Per-instance Z (slot [10] of the per-instance vertex buffer) —
+//   2. Per-instance Z (slot [13] of the per-instance vertex buffer) —
 //      multiple sprites in the SAME layer at DIFFERENT depths.
 //
 // Setup (1280×720 canvas, FoV=0.8, near=1, far=100):

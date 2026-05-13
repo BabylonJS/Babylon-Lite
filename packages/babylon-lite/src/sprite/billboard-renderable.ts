@@ -1,7 +1,7 @@
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
-import type { Mat4 } from "../math/types.js";
+import type { Camera } from "../camera/camera.js";
 import { getViewMatrix } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -54,7 +54,7 @@ interface BillboardRenderableInternal extends Renderable {
     _pipelineCache: BillboardPipelineCache;
     _bindGroups: Map<GPURenderPipeline, GPUBindGroup>;
     _uploadedVersion: number;
-    _uploadedCameraViewMatrix: Mat4 | null;
+    _uploadedCamera: Camera | null;
     _uploadedCameraViewVersion: number;
     _uploadedSorted: boolean;
     _centerVersion: number;
@@ -83,7 +83,7 @@ export function buildBillboardRenderable(engine: EngineContextInternal, system: 
         _pipelineCache: acquireSharedPipelineCache(),
         _bindGroups: new Map(),
         _uploadedVersion: -1,
-        _uploadedCameraViewMatrix: null,
+        _uploadedCamera: null,
         _uploadedCameraViewVersion: -1,
         _uploadedSorted: false,
         _centerVersion: -1,
@@ -142,6 +142,12 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
     }
     refreshBillboardWorldCenter(renderable);
     if (!renderable._system.visible || renderable._system.count === 0) {
+        if (renderable._system.count === 0) {
+            renderable._system._dirtyMin = 0;
+            renderable._system._dirtyMax = 0;
+            renderable._uploadedVersion = renderable._system._version;
+            renderable._uploadedSorted = false;
+        }
         return;
     }
     const grown = ensureBillboardInstanceBuffer(
@@ -155,7 +161,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
         renderable._instanceBuffer = grown.buffer;
         renderable._instanceBufferCapacity = grown.capacity;
         renderable._uploadedVersion = -1;
-        renderable._uploadedCameraViewMatrix = null;
+        renderable._uploadedCamera = null;
         renderable._uploadedCameraViewVersion = -1;
         renderable._uploadedSorted = false;
     }
@@ -165,30 +171,25 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
         if (
             !renderable._uploadedSorted ||
             renderable._uploadedVersion !== renderable._system._version ||
-            renderable._uploadedCameraViewMatrix !== cameraViewMatrix ||
+            renderable._uploadedCamera !== camera ||
             renderable._uploadedCameraViewVersion !== camera.worldMatrixVersion
         ) {
             uploadSortedBillboardInstances(renderable._engine.device, renderable._system, renderable._instanceBuffer, renderable._instanceSortScratch, cameraViewMatrix);
             renderable._uploadedVersion = renderable._system._version;
-            renderable._uploadedCameraViewMatrix = cameraViewMatrix;
+            renderable._uploadedCamera = camera;
             renderable._uploadedCameraViewVersion = camera.worldMatrixVersion;
             renderable._uploadedSorted = true;
         }
     } else {
         const uploadedVersion = renderable._uploadedSorted ? -1 : renderable._uploadedVersion;
         renderable._uploadedVersion = uploadBillboardInstances(renderable._engine.device, renderable._system, renderable._instanceBuffer, uploadedVersion);
-        renderable._uploadedCameraViewMatrix = null;
+        renderable._uploadedCamera = null;
         renderable._uploadedCameraViewVersion = -1;
         renderable._uploadedSorted = false;
     }
     buildBillboardSystemUbo(renderable._system, renderable._scratchUbo);
-    renderable._uboUploaded = writeBillboardSystemUboIfDirty(
-        renderable._engine.device,
-        renderable._uniformBuffer,
-        renderable._scratchUbo,
-        renderable._lastUbo,
-        renderable._uboUploaded
-    );
+    writeBillboardSystemUboIfDirty(renderable._engine.device, renderable._uniformBuffer, renderable._scratchUbo, renderable._lastUbo, !renderable._uboUploaded);
+    renderable._uboUploaded = true;
 }
 
 function refreshBillboardWorldCenter(renderable: BillboardRenderableInternal): void {
@@ -206,19 +207,39 @@ function refreshBillboardWorldCenter(renderable: BillboardRenderableInternal): v
     }
     const data = system._instanceData;
     const stride = system._instanceFloatsPerSprite;
-    let centerX = 0;
-    let centerY = 0;
-    let centerZ = 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
     for (let index = 0; index < system.count; index++) {
         const base = index * stride;
-        centerX += data[base]!;
-        centerY += data[base + 1]!;
-        centerZ += data[base + 2]!;
+        const x = data[base]!;
+        const y = data[base + 1]!;
+        const z = data[base + 2]!;
+        if (x < minX) {
+            minX = x;
+        }
+        if (y < minY) {
+            minY = y;
+        }
+        if (z < minZ) {
+            minZ = z;
+        }
+        if (x > maxX) {
+            maxX = x;
+        }
+        if (y > maxY) {
+            maxY = y;
+        }
+        if (z > maxZ) {
+            maxZ = z;
+        }
     }
-    const invCount = 1 / system.count;
-    center[0] = centerX * invCount;
-    center[1] = centerY * invCount;
-    center[2] = centerZ * invCount;
+    center[0] = (minX + maxX) * 0.5;
+    center[1] = (minY + maxY) * 0.5;
+    center[2] = (minZ + maxZ) * 0.5;
     renderable._centerVersion = system._version;
 }
 
@@ -242,6 +263,5 @@ function disposeRenderable(renderable: BillboardRenderableInternal): void {
     renderable._uniformBuffer.destroy();
     renderable._indexBuffer.destroy();
     renderable._bindGroups.clear();
-    (renderable as unknown as { _system: BillboardSpriteSystem | null })._system = null;
     releaseSharedPipelineCache();
 }

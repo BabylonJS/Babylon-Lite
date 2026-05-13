@@ -9,9 +9,11 @@ import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { SpriteBlendMode } from "./sprite-2d.js";
 
+export type BillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
+
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
-    blendMode?: SpriteBlendMode;
+    blendMode?: BillboardBlendMode;
     alphaCutoff?: number;
     opacity?: number;
     visible?: boolean;
@@ -24,19 +26,19 @@ export type BillboardDepthMode = "transparent" | "cutout";
 export interface BillboardSpriteSystem {
     readonly _entityType: "billboard-sprite-system";
     readonly atlas: SpriteAtlas;
-    readonly blendMode: SpriteBlendMode;
+    readonly blendMode: BillboardBlendMode;
     alphaCutoff: number;
     opacity: number;
     visible: boolean;
     order: number;
-    count: number;
+    readonly count: number;
 
     /** @internal Orientation shader path for this system. */
     readonly _orientation: BillboardOrientation;
     /** @internal Depth/blend pipeline path for this system. */
     readonly _depthMode: BillboardDepthMode;
     /** @internal Normalized lock axis for axis-locked systems; zero for facing. */
-    readonly _axis: [number, number, number];
+    readonly _axis: readonly [number, number, number];
     /** @internal Capacity of the per-instance buffer in sprites. */
     _capacity: number;
     /** @internal Per-instance stride in floats. */
@@ -73,10 +75,56 @@ export const BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE = 2;
 
 const DEFAULT_CAPACITY = 16;
 
-function assertBlendSupported(blendMode: SpriteBlendMode): void {
+function assertBlendSupported(blendMode: SpriteBlendMode): asserts blendMode is BillboardBlendMode {
     if (blendMode !== "alpha" && blendMode !== "premultiplied" && blendMode !== "cutout") {
         throw new Error(`BillboardSpriteSystem: blendMode: "${blendMode}" is not supported. Use "alpha", "premultiplied", or "cutout".`);
     }
+}
+
+function assertFiniteNumber(label: string, value: number): void {
+    if (!Number.isFinite(value)) {
+        throw new Error(`${label} must contain finite numbers.`);
+    }
+}
+
+function assertFiniteTuple2(label: string, value: readonly [number, number]): void {
+    assertFiniteNumber(label, value[0]);
+    assertFiniteNumber(label, value[1]);
+}
+
+function assertFiniteTuple3(label: string, value: readonly [number, number, number]): void {
+    assertFiniteNumber(label, value[0]);
+    assertFiniteNumber(label, value[1]);
+    assertFiniteNumber(label, value[2]);
+}
+
+function assertFiniteTuple4(label: string, value: readonly [number, number, number, number]): void {
+    assertFiniteNumber(label, value[0]);
+    assertFiniteNumber(label, value[1]);
+    assertFiniteNumber(label, value[2]);
+    assertFiniteNumber(label, value[3]);
+}
+
+function validateBillboardSpritePatch(helperName: string, patch: Partial<BillboardSpriteInit>): void {
+    if (patch.position) {
+        assertFiniteTuple3(`${helperName}: props.position`, patch.position);
+    }
+    if (patch.sizeWorld) {
+        assertFiniteTuple2(`${helperName}: props.sizeWorld`, patch.sizeWorld);
+    }
+    if (patch.rotation !== undefined) {
+        assertFiniteNumber(`${helperName}: props.rotation`, patch.rotation);
+    }
+    if (patch.pivot) {
+        assertFiniteTuple2(`${helperName}: props.pivot`, patch.pivot);
+    }
+    if (patch.color) {
+        assertFiniteTuple4(`${helperName}: props.color`, patch.color);
+    }
+}
+
+function setBillboardCount(system: BillboardSpriteSystem, count: number): void {
+    (system as { count: number }).count = count;
 }
 
 function resolveAlphaCutoff(opts: BillboardSpriteSystemOptions, depthMode: BillboardDepthMode): number {
@@ -87,7 +135,15 @@ function resolveAlphaCutoff(opts: BillboardSpriteSystemOptions, depthMode: Billb
     return cutoff;
 }
 
-function resolveBillboardDepthMode(blendMode: SpriteBlendMode): BillboardDepthMode {
+function resolveOpacity(opts: BillboardSpriteSystemOptions): number {
+    const opacity = opts.opacity ?? 1;
+    if (!Number.isFinite(opacity)) {
+        throw new Error("BillboardSpriteSystem: opacity must be a finite number.");
+    }
+    return opacity;
+}
+
+function resolveBillboardDepthMode(blendMode: BillboardBlendMode): BillboardDepthMode {
     return blendMode === "cutout" ? "cutout" : "transparent";
 }
 
@@ -108,7 +164,12 @@ export function createAxisLockedBillboardSystem(atlas: SpriteAtlas, axis: readon
     return createBillboardSystem(atlas, "axis-locked", normalized, opts);
 }
 
-function createBillboardSystem(atlas: SpriteAtlas, orientation: BillboardOrientation, axis: [number, number, number], opts: BillboardSpriteSystemOptions): BillboardSpriteSystem {
+function createBillboardSystem(
+    atlas: SpriteAtlas,
+    orientation: BillboardOrientation,
+    axis: readonly [number, number, number],
+    opts: BillboardSpriteSystemOptions
+): BillboardSpriteSystem {
     const blendMode = opts.blendMode ?? "alpha";
     assertBlendSupported(blendMode);
     const depthMode = resolveBillboardDepthMode(blendMode);
@@ -119,7 +180,7 @@ function createBillboardSystem(atlas: SpriteAtlas, orientation: BillboardOrienta
         atlas,
         blendMode,
         alphaCutoff: resolveAlphaCutoff(opts, depthMode),
-        opacity: opts.opacity ?? 1,
+        opacity: resolveOpacity(opts),
         visible: opts.visible ?? true,
         order: opts.order ?? (depthMode === "transparent" ? 200 : 100),
         count: 0,
@@ -270,12 +331,13 @@ export function addBillboardSpriteIndex(system: BillboardSpriteSystem, props: Bi
     if (props.sizeWorld === undefined) {
         throw new Error("addBillboardSpriteIndex: props.sizeWorld is required.");
     }
+    validateBillboardSpritePatch("addBillboardSpriteIndex", props);
     const index = system.count;
     if (index >= system._capacity) {
         growCapacity(system, index + 1);
     }
     writeInstance(system, index, props, null);
-    system.count++;
+    setBillboardCount(system, system.count + 1);
     markDirty(system, index, index + 1);
     return index;
 }
@@ -284,6 +346,7 @@ export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index:
     if (index < 0 || index >= system.count) {
         throw new Error(`updateBillboardSpriteIndex: index ${index} out of range [0, ${system.count})`);
     }
+    validateBillboardSpritePatch("updateBillboardSpriteIndex", patch);
     const base = index * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
     const prev = system._instanceData.subarray(base, base + BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
     writeInstance(system, index, patch, prev);
@@ -309,8 +372,20 @@ export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index:
     }
     system._savedSize[last * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE] = 0;
     system._savedSize[last * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE + 1] = 0;
+    setBillboardCount(system, last);
     markDirty(system, index, index + 1);
-    system.count--;
+}
+
+export function clearBillboardSprites(system: BillboardSpriteSystem): void {
+    const count = system.count;
+    system._dirtyMin = 0;
+    system._dirtyMax = 0;
+    if (count === 0) {
+        return;
+    }
+    system._savedSize.fill(0, 0, count * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE);
+    setBillboardCount(system, 0);
+    system._version = (system._version + 1) | 0;
 }
 
 export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: number): void {

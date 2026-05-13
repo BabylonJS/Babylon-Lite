@@ -4,7 +4,8 @@ import type { BillboardSpriteSystem } from "./billboard-sprite.js";
 
 function addBillboardSystem(scene: SceneContext, system: BillboardSpriteSystem, orientation: BillboardSpriteSystem["_orientation"], helperName: string): void {
     if (system._orientation !== orientation) {
-        throw new Error(`${helperName}: expected a ${orientation} BillboardSpriteSystem, got ${system._orientation}.`);
+        const article = orientation === "axis-locked" ? "an" : "a";
+        throw new Error(`${helperName}: expected ${article} ${orientation} BillboardSpriteSystem, got ${system._orientation}.`);
     }
     addDeferredSceneRenderables(scene, async (engine) => {
         const { buildBillboardRenderable } = await import("./billboard-renderable.js");

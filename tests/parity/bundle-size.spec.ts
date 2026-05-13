@@ -177,7 +177,7 @@ for (const scene of SCENES) {
         // NME demos with no sprites; 1-40 are core 3D.
         const SPRITE_USING_IDS = new Set([50, 51, 52, 53, 54, 55, 56, 57]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
-            const offenders = runtimeModules.filter((id) => /\/sprite\/(sprite-(2d|pipeline|renderer|renderable)|billboard-(sprite|scene|pipeline|renderable))\.ts$/.test(id));
+            const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.ts$/.test(id));
             expect(offenders, `non-sprite ${scene.slug} must not load sprite modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
     });

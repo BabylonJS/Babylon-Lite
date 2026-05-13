@@ -185,7 +185,7 @@ describe("addDepthHostedSpriteLayer", () => {
         expect(vertexBuffer.attributes.map((attr) => attr.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
     });
 
-    it("allocates and uploads depth-hosted instances as 44 bytes per sprite", async () => {
+    it("allocates and uploads depth-hosted instances as 56 bytes per sprite", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test-write", capacity: 1 });

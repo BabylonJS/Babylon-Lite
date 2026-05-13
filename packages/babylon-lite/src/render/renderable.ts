@@ -40,7 +40,8 @@ export interface DrawBinding {
     draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, engine: EngineContext): number;
     /** Update dirty per-pass state before draw. Called once per frame per binding.
      *  Per-mesh state (e.g. world matrix) shared across bindings should be
-     *  version-guarded to avoid redundant writes. */
+     *  version-guarded to avoid redundant writes. Render task transparent sorting
+     *  runs after these updates, so renderables may refresh `_worldCenter` here. */
     update?(context: DrawUpdateContext): void;
     /** Scratch: squared distance from camera for transparent sorting (per-pass). */
     _sortDistance?: number;
