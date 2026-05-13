@@ -1639,8 +1639,8 @@
     "bjsGzipKB": 361.9
   },
   "scene122": {
-    "rawKB": 46.3,
-    "gzipKB": 17.5,
+    "rawKB": 47,
+    "gzipKB": 17.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene122-gaussian-splatting-pipeline-sh--fArtqLF.js",
@@ -1648,8 +1648,8 @@
     ]
   },
   "scene123": {
-    "rawKB": 43.1,
-    "gzipKB": 16.5,
+    "rawKB": 43.7,
+    "gzipKB": 16.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene123-gaussian-splatting-pipeline-sh-DqbMQKcx.js",

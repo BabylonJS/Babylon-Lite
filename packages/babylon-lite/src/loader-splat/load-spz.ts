@@ -27,6 +27,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { ParsedSplat } from "./splat-data.js";
 import type { GaussianSplattingMesh } from "../mesh/gaussian-splatting-mesh.js";
 import { attachParsedSplat } from "./load-splat.js";
+import { applyUpAxisCorrection } from "./splat-orientation.js";
 
 const SH_C0 = 0.28209479177387814;
 const MAGIC_NGSP = 0x5053474e; // 'NGSP' little-endian
@@ -178,7 +179,17 @@ function parseSpz(data: ArrayBuffer): ParsedSplat {
     return { data: buffer };
 }
 
-/** Fetch + parse a `.spz` asset and attach the splat cloud to `scene`. */
+/** Fetch + parse a `.spz` asset and attach the splat cloud to `scene`.
+ *
+ *  The returned mesh is **pre-rotated** so it renders upright with an
+ *  identity scene-node rotation. SPZ assets are authored "Y-down" (the
+ *  BJS reference compensates with `mesh.rotation.x = Math.PI`); Babylon-Lite
+ *  instead bakes that `R_x(π)` correction into the row buffer +
+ *  spherical-harmonics coefficients at load time — see
+ *  {@link applyUpAxisCorrection} for the derivation. Consumers therefore do
+ *  **not** need to set `mesh.rotation.x = Math.PI`, and
+ *  {@link GaussianSplattingMesh.splatsData} exposes the post-correction row
+ *  buffer rather than the original asset bytes. */
 export async function loadSPZ(scene: SceneContext, url: string): Promise<GaussianSplattingMesh> {
     const response = await fetch(url);
     if (!response.ok) {
@@ -191,6 +202,7 @@ export async function loadSPZ(scene: SceneContext, url: string): Promise<Gaussia
         ? ((await decompressGzip(raw)).buffer as ArrayBuffer)
         : (raw.buffer as ArrayBuffer);
     const parsed = parseSpz(data);
+    applyUpAxisCorrection(parsed);
     const friendly = url.substring(url.lastIndexOf("/") + 1) || "spz";
     return await attachParsedSplat(scene, friendly, parsed);
 }
