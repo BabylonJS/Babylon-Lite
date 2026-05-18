@@ -138,6 +138,8 @@ function createDepthPreviewTexture(scene: Scene, rtt: RenderTargetTexture, name:
 
     await scene.whenReadyAsync();
     canvas.dataset.initMs = String(performance.now() - initStart);
-    canvas.dataset.ready = "true";
+    window.setTimeout(() => {
+        canvas.dataset.ready = "true";
+    }, 500);
     engine.runRenderLoop(() => scene.render());
 })().catch(console.error);

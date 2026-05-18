@@ -110,6 +110,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     const sc = scene as SceneContextInternal;
     const rt = config.rt;
     config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
+    config.clr ??= true;
     const swapchain = rt.descriptor.resolveToSwapchain === true;
     const sampleCount = rt.descriptor.sampleCount ?? 1;
     // Offscreen RTTs need a Y-flipped projection so the result texture samples
@@ -356,7 +357,7 @@ function executePass(
     const cfg = task._config;
     if (cfg.rt._colorView || swapchain) {
         att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
-        att.loadOp = cfg.clr !== false ? "clear" : "load";
+        att.loadOp = cfg.clr ? "clear" : "load";
     }
     if (swapchain) {
         const swapView = eng._swapchainView;

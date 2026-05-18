@@ -330,7 +330,6 @@ function mangleWgslIdentifiers(code: string): string {
         ["AA_factor_x", "aax"],
         ["AA_factor_y", "aay"],
         ["alphaG", "ag"],
-        ["N_geom", "ng"],
         ["NdotV", "nv"],
         ["rangeAtten", "ra"],
         ["rangeAtt", "rat"],
@@ -564,7 +563,10 @@ function decodeMappings(mappings: string): number[][][] {
 }
 
 function normalizeSourceMapId(source: string, sourceRoot: string): string {
-    let clean = source.replace(/^file:\/\//, "").replace(/^\/([A-Za-z]:\/)/, "$1").split("?")[0]!;
+    let clean = source
+        .replace(/^file:\/\//, "")
+        .replace(/^\/([A-Za-z]:\/)/, "$1")
+        .split("?")[0]!;
     const marker = clean.match(/(?:^|\/)((?:packages\/babylon-lite|lab|node_modules)\/.*)$/);
     if (marker) {
         clean = resolve(sourceRoot, marker[1]!);
@@ -1210,14 +1212,14 @@ async function measurePage(
         const url = resp.url();
         if (url.includes(bundlePath) && url.endsWith(".js") && resp.ok()) {
             const read = (async () => {
-                    const idx = url.indexOf(bundlePath);
-                    const fileName = url.slice(idx + bundlePath.length).split("?")[0];
-                    const body = await resp.body();
-                    jsPayloads.push({ file: fileName, body });
-                    chunkFiles.push(fileName);
-                })().catch((err: unknown) => {
-                    responseReadErrors.push(err);
-                });
+                const idx = url.indexOf(bundlePath);
+                const fileName = url.slice(idx + bundlePath.length).split("?")[0];
+                const body = await resp.body();
+                jsPayloads.push({ file: fileName, body });
+                chunkFiles.push(fileName);
+            })().catch((err: unknown) => {
+                responseReadErrors.push(err);
+            });
             responseReads.push(read);
         }
     });
