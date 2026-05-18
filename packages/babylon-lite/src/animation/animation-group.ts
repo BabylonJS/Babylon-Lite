@@ -2,7 +2,7 @@
 // Stored on scene.animationGroups[]. Pure state interface.
 
 import type { EngineContext } from "../engine/engine.js";
-import type { AnimationChannel, AnimationSampler, GltfAnimationData } from "./types.js";
+import type { AnimationChannel, AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
 import { PATH_POINTER } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
@@ -10,6 +10,7 @@ import type { AnimationController } from "../skeleton/skeleton-updater.js";
 const DEFAULT_FRAME_RATE = 60;
 
 export type AnimationPropertyMixer = readonly [readonly AnimationChannel[], readonly AnimationSampler[], number, number, number];
+export type AnimationGltfMixer = readonly [AnimationClip, readonly NodeRest[], readonly SkeletonBinding[]];
 
 /** User-facing animation group — one per glTF animation clip. Pure state. */
 export interface AnimationGroup {
@@ -33,6 +34,8 @@ export interface AnimationGroup {
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
     _pm?: AnimationPropertyMixer;
+    /** @internal glTF skeleton metadata used by the optional weighted mixer. */
+    _gm?: AnimationGltfMixer;
     /** @internal Whether stop() was called (suppresses _tick). */
     _stopped: boolean;
 }
@@ -133,6 +136,7 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
 
             weight: 1,
             _ctrl: ctrl,
+            _gm: animData.skeletons.length > 0 ? [clip, animData.nodes, animData.skeletons] : undefined,
             _stopped: false,
         };
         return group;

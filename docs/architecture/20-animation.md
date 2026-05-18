@@ -161,6 +161,7 @@ export interface AnimationGroup {
     currentFrame: number;                  // current time in seconds (not frames!)
     speedRatio: number;                    // default 1
     loopAnimation: boolean;               // default true
+    weight: number;                        // default 1
     _stopped: boolean;
     readonly _ctrl?: AnimationController;
 }
@@ -177,6 +178,10 @@ export function removeAnimationGroup(manager: AnimationManager, group: Animation
 export function updateAnimationManager(manager: AnimationManager, deltaMs: number): void;
 export function startAnimationManager(manager: AnimationManager): void;
 export function stopAnimationManager(manager: AnimationManager): void;
+export function setAnimationWeight(group: AnimationGroup, weight: number): void;
+export function fadeAnimationWeight(manager: AnimationManager, group: AnimationGroup, options: FadeAnimationWeightOptions): void;
+export function crossFadeAnimationGroups(manager: AnimationManager, fromGroup: AnimationGroup, toGroup: AnimationGroup, options: CrossFadeAnimationGroupsOptions): void;
+export function enableGltfAnimationWeights(manager: AnimationManager): void;
 
 export function createPropertyAnimationClip(
     name: string,
@@ -306,6 +311,24 @@ setAnimationWeight(run, 0);
 crossFadeAnimationGroups(manager, walk, run, { durationMs: 300 });
 ```
 
+Weighted glTF skeleton blend:
+
+```typescript
+const xbot = await loadGltf(engine, "https://playground.babylonjs.com/scenes/Xbot.glb");
+addToScene(scene, xbot, { registerAnimationGroups: false });
+
+const manager = createAnimationManager({ engine });
+addAnimationGroups(manager, xbot.animationGroups ?? []);
+
+for (const group of xbot.animationGroups ?? []) {
+    setAnimationWeight(group, 0);
+}
+setAnimationWeight(xbot.animationGroups!.find((group) => group.name === "walk")!, 0.5);
+setAnimationWeight(xbot.animationGroups!.find((group) => group.name === "run")!, 0.5);
+enableGltfAnimationWeights(manager);
+onBeforeRender(scene, (deltaMs) => updateAnimationManager(manager, deltaMs));
+```
+
 ### AnimationGroup Creation
 
 `createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. All groups auto-play by default (matching BJS behavior).
@@ -327,6 +350,12 @@ Bindings are target-specific; `PropertyAnimationClip` is reusable, while the gen
 Manual property weights are optional and live outside the default direct evaluator. Calling `setAnimationWeight()` installs a manager-side mixer for manual pointer tracks that share the same target and property path. The mixer advances group time once, samples each contributing clip with `evaluateSampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
 
 Weights intentionally use Babylon-style weighted sums for this first layer: `final = sum(group.weight * sampledValue)` for the groups targeting the same property. The mixer does not normalize totals and does not blend toward rest pose. `crossFadeAnimationGroups()` builds on the same weights by scheduling deterministic duration-based fade jobs inside the manager.
+
+### glTF Skeleton Weight Mixing
+
+Weighted glTF skeleton blending is kept behind `enableGltfAnimationWeights(manager)` so manual-only or direct glTF playback does not load the skeletal mixer. Once enabled, groups sharing the same parsed glTF node array are evaluated into one mixed TRS pose and each affected skeleton uploads its bone texture once per update.
+
+The default blend semantics match Babylon.js weights: translation and scale use weighted sums, rotation uses weighted quaternion accumulation with hemisphere correction and final normalization, and weights are not normalized. The current glTF mixer covers skeleton TRS channels; morph target and additive layers are planned as follow-on mixer passes.
 
 ## Pipeline Configuration
 
@@ -372,7 +401,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `AnimationGroup.goToFrame(f)` | `goToFrame(group, f)` (uses `group.frameRate`) |
 | `AnimationGroup.speedRatio` | `group.speedRatio` |
 | `AnimationGroup.loopAnimation` | `group.loopAnimation` |
-| `AnimationGroup.weight` / `setWeightForAllAnimatables()` | `setAnimationWeight(group, weight)` |
+| `AnimationGroup.weight` / `setWeightForAllAnimatables()` | `setAnimationWeight(group, weight)`; call `enableGltfAnimationWeights(manager)` for weighted glTF skeleton clips |
 | manual weight ramp / blending speed | `fadeAnimationWeight(manager, group, { to, durationMs })` |
 | manual cross-fade | `crossFadeAnimationGroups(manager, from, to, { durationMs })` |
 | `scene.animationGroups` | `scene.animationGroups` |
@@ -387,6 +416,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 - `../loader-gltf/gltf-parser.ts` — `resolveAccessor`, `computeNodeWorldMatrix`, `findParent`
 - `./animation-manager.ts` — standalone manager, property clip builder, property path binding
 - `./weighted-pointer-mixer.ts` — optional manual property weight mixer and duration-based weight fades
+- `./weighted-gltf-mixer.ts` — optional glTF skeleton weight mixer, loaded only when explicitly imported/enabled
 
 ## Test Specification
 
@@ -405,6 +435,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 13. **Bad path failure**: Verify invalid property paths throw during binding
 14. **Manual weighted blend**: Verify two groups targeting one scalar write a single weighted result independent of group order
 15. **Manual cross-fade**: Verify manager fade jobs update group weights by elapsed duration
+16. **glTF weighted skeleton blend**: Verify Xbot walk/run weighted TRS blending matches Babylon.js reference
 
 ## File Manifest
 
@@ -415,3 +446,4 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `animation-group.ts` | User-facing AnimationGroup factory; wraps AnimationController per clip |
 | `animation-manager.ts` | Standalone manager, manual property animation clip builder, and cached property bindings |
 | `weighted-pointer-mixer.ts` | Optional manual property weight mixer plus fade/cross-fade scheduling |
+| `weighted-gltf-mixer.ts` | Optional glTF skeleton weighted mixer with single skeleton upload per blended target |

@@ -1,0 +1,331 @@
+import { tickAnimation } from "./animation-group.js";
+import type { AnimationGltfMixer, AnimationGroup } from "./animation-group.js";
+import type { AnimationManager } from "./animation-manager-core.js";
+import type { NodeRest, SkeletonBinding } from "./types.js";
+import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
+import { evaluateSampler } from "./evaluate.js";
+import type { EngineContextInternal } from "../engine/engine.js";
+import { mat4ComposeInto } from "../math/mat4-compose-into.js";
+import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+
+const GLTF_CLIP = 0;
+const GLTF_NODES = 1;
+const GLTF_SKELETONS = 2;
+const TRS_STRIDE = 12;
+const T_OFF = 0;
+const R_OFF = 3;
+const S_OFF = 7;
+
+// RH->LH root transform (same as skeleton-updater.ts)
+// prettier-ignore
+const RH_TO_LH = new Float32Array([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+const _boneTmp = new Float32Array(16);
+
+interface WeightedGltfTarget {
+    readonly nodes: readonly NodeRest[];
+    readonly skeletons: readonly SkeletonBinding[];
+    readonly trs: Float32Array;
+    readonly localMat: Float32Array;
+    readonly worldMat: Float32Array;
+    readonly topoOrder: Int32Array;
+    readonly tWeight: Float32Array;
+    readonly rWeight: Float32Array;
+    readonly sWeight: Float32Array;
+    active: boolean;
+}
+
+interface WeightedGltfScratch {
+    readonly keys: Set<object>;
+    readonly targets: Map<object, WeightedGltfTarget>;
+    readonly sample: Float32Array;
+}
+
+const _scratch = new WeakMap<AnimationManager, WeightedGltfScratch>();
+
+/** Enable weighted glTF skeleton blending for a manager. Kept opt-in so manual-only weights do not pay for skeletal mixing code. */
+export function enableGltfAnimationWeights(manager: AnimationManager): void {
+    manager._wu = updateWeightedGltfAnimations;
+}
+
+function getScratch(manager: AnimationManager): WeightedGltfScratch {
+    let scratch = _scratch.get(manager);
+    if (!scratch) {
+        scratch = {
+            keys: new Set<object>(),
+            targets: new Map<object, WeightedGltfTarget>(),
+            sample: new Float32Array(16),
+        };
+        _scratch.set(manager, scratch);
+    }
+    return scratch;
+}
+
+function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number): boolean {
+    const scratch = getScratch(manager);
+    const keys = scratch.keys;
+    keys.clear();
+
+    for (const group of manager.animationGroups) {
+        const mixer = group._gm;
+        if (group._stopped || group.weight === 1 || !mixer) {
+            continue;
+        }
+        keys.add(mixer[GLTF_NODES]);
+    }
+
+    if (keys.size === 0) {
+        return false;
+    }
+
+    for (const target of scratch.targets.values()) {
+        target.active = false;
+        target.tWeight.fill(0);
+        target.rWeight.fill(0);
+        target.sWeight.fill(0);
+        resetTarget(target);
+    }
+
+    for (const group of manager.animationGroups) {
+        if (group._stopped) {
+            continue;
+        }
+
+        const mixer = group._gm;
+        if (mixer && keys.has(mixer[GLTF_NODES])) {
+            accumulateGroup(manager, scratch, group, mixer, deltaMs);
+            continue;
+        }
+
+        tickAnimation(group, deltaMs, manager.engine);
+    }
+
+    for (const [key, target] of scratch.targets) {
+        if (target.active && keys.has(key)) {
+            uploadTarget(manager, target);
+        }
+    }
+
+    return true;
+}
+
+function getTarget(scratch: WeightedGltfScratch, mixer: AnimationGltfMixer): WeightedGltfTarget {
+    const nodes = mixer[GLTF_NODES];
+    let target = scratch.targets.get(nodes);
+    if (!target) {
+        const numNodes = nodes.length;
+        target = {
+            nodes,
+            skeletons: mixer[GLTF_SKELETONS],
+            trs: new Float32Array(numNodes * TRS_STRIDE),
+            localMat: new Float32Array(numNodes * 16),
+            worldMat: new Float32Array(numNodes * 16),
+            topoOrder: computeTopoOrder(nodes),
+            tWeight: new Float32Array(numNodes),
+            rWeight: new Float32Array(numNodes),
+            sWeight: new Float32Array(numNodes),
+            active: false,
+        };
+        scratch.targets.set(nodes, target);
+    }
+    return target;
+}
+
+function resetTarget(target: WeightedGltfTarget): void {
+    const { nodes, trs } = target;
+    for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!;
+        const off = i * TRS_STRIDE;
+        trs[off + T_OFF] = n.tx;
+        trs[off + T_OFF + 1] = n.ty;
+        trs[off + T_OFF + 2] = n.tz;
+        trs[off + R_OFF] = n.rx;
+        trs[off + R_OFF + 1] = n.ry;
+        trs[off + R_OFF + 2] = n.rz;
+        trs[off + R_OFF + 3] = n.rw;
+        trs[off + S_OFF] = n.sx;
+        trs[off + S_OFF + 1] = n.sy;
+        trs[off + S_OFF + 2] = n.sz;
+    }
+}
+
+function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch, group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): void {
+    if (!manager.engine) {
+        throw new Error("Weighted glTF animation requires an AnimationManager engine");
+    }
+
+    const target = getTarget(scratch, mixer);
+    const t = advanceGroupTime(group, mixer, deltaMs);
+    const weight = group.weight;
+    target.active = true;
+    if (weight === 0) {
+        return;
+    }
+
+    const clip = mixer[GLTF_CLIP];
+    for (const ch of clip.channels) {
+        const sampler = clip.samplers[ch.samplerIdx]!;
+        const nodeIdx = ch.nodeIdx;
+        const base = nodeIdx * TRS_STRIDE;
+        switch (ch.path) {
+            case PATH_TRANSLATION:
+                evaluateSampler(sampler, t, 3, false, scratch.sample, 0);
+                if (target.tWeight[nodeIdx] === 0) {
+                    target.trs[base + T_OFF] = 0;
+                    target.trs[base + T_OFF + 1] = 0;
+                    target.trs[base + T_OFF + 2] = 0;
+                }
+                target.trs[base + T_OFF] = target.trs[base + T_OFF]! + scratch.sample[0]! * weight;
+                target.trs[base + T_OFF + 1] = target.trs[base + T_OFF + 1]! + scratch.sample[1]! * weight;
+                target.trs[base + T_OFF + 2] = target.trs[base + T_OFF + 2]! + scratch.sample[2]! * weight;
+                target.tWeight[nodeIdx] = target.tWeight[nodeIdx]! + weight;
+                break;
+            case PATH_SCALE:
+                evaluateSampler(sampler, t, 3, false, scratch.sample, 0);
+                if (target.sWeight[nodeIdx] === 0) {
+                    target.trs[base + S_OFF] = 0;
+                    target.trs[base + S_OFF + 1] = 0;
+                    target.trs[base + S_OFF + 2] = 0;
+                }
+                target.trs[base + S_OFF] = target.trs[base + S_OFF]! + scratch.sample[0]! * weight;
+                target.trs[base + S_OFF + 1] = target.trs[base + S_OFF + 1]! + scratch.sample[1]! * weight;
+                target.trs[base + S_OFF + 2] = target.trs[base + S_OFF + 2]! + scratch.sample[2]! * weight;
+                target.sWeight[nodeIdx] = target.sWeight[nodeIdx]! + weight;
+                break;
+            case PATH_ROTATION: {
+                evaluateSampler(sampler, t, 4, true, scratch.sample, 0);
+                if (target.rWeight[nodeIdx] === 0) {
+                    target.trs[base + R_OFF] = 0;
+                    target.trs[base + R_OFF + 1] = 0;
+                    target.trs[base + R_OFF + 2] = 0;
+                    target.trs[base + R_OFF + 3] = 0;
+                }
+                const n = target.nodes[nodeIdx]!;
+                const dot = n.rx * scratch.sample[0]! + n.ry * scratch.sample[1]! + n.rz * scratch.sample[2]! + n.rw * scratch.sample[3]!;
+                const sign = dot < 0 ? -1 : 1;
+                target.trs[base + R_OFF] = target.trs[base + R_OFF]! + scratch.sample[0]! * weight * sign;
+                target.trs[base + R_OFF + 1] = target.trs[base + R_OFF + 1]! + scratch.sample[1]! * weight * sign;
+                target.trs[base + R_OFF + 2] = target.trs[base + R_OFF + 2]! + scratch.sample[2]! * weight * sign;
+                target.trs[base + R_OFF + 3] = target.trs[base + R_OFF + 3]! + scratch.sample[3]! * weight * sign;
+                target.rWeight[nodeIdx] = target.rWeight[nodeIdx]! + weight;
+                break;
+            }
+        }
+    }
+}
+
+function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): number {
+    const clip = mixer[GLTF_CLIP];
+    if (group.isPlaying) {
+        group.currentFrame += (deltaMs / 1000) * group.speedRatio;
+    }
+
+    const ctrl = group._ctrl;
+    const fromTime = Math.max(0, Math.min(ctrl?.fromTime ?? 0, clip.duration));
+    const rawToTime = ctrl?.toTime ?? clip.duration;
+    const toTime = rawToTime > fromTime ? Math.min(rawToTime, clip.duration) : clip.duration;
+    const duration = Math.max(0, toTime - fromTime);
+    if (duration <= 0) {
+        return fromTime;
+    }
+
+    if (group.loopAnimation) {
+        group.currentFrame = fromTime + ((group.currentFrame - fromTime) % duration);
+        if (group.currentFrame < fromTime) {
+            group.currentFrame += duration;
+        }
+    } else {
+        group.currentFrame = Math.min(Math.max(group.currentFrame, fromTime), toTime);
+    }
+    return group.currentFrame;
+}
+
+function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): void {
+    if (!manager.engine) {
+        throw new Error("Weighted glTF animation requires an AnimationManager engine");
+    }
+    const device = (manager.engine as EngineContextInternal).device;
+    const { nodes, trs, localMat, worldMat } = target;
+
+    for (let i = 0; i < nodes.length; i++) {
+        if (target.rWeight[i]! > 0) {
+            normalizeQuaternionAt(trs, i * TRS_STRIDE + R_OFF);
+        }
+    }
+
+    for (let idx = 0; idx < nodes.length; idx++) {
+        const nodeIdx = target.topoOrder[idx]!;
+        const off = nodeIdx * TRS_STRIDE;
+        mat4ComposeInto(
+            localMat,
+            nodeIdx * 16,
+            trs[off + T_OFF]!,
+            trs[off + T_OFF + 1]!,
+            trs[off + T_OFF + 2]!,
+            trs[off + R_OFF]!,
+            trs[off + R_OFF + 1]!,
+            trs[off + R_OFF + 2]!,
+            trs[off + R_OFF + 3]!,
+            trs[off + S_OFF]!,
+            trs[off + S_OFF + 1]!,
+            trs[off + S_OFF + 2]!
+        );
+
+        const parentIdx = nodes[nodeIdx]!.parentIdx;
+        if (parentIdx >= 0) {
+            mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
+        } else {
+            mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+        }
+    }
+
+    for (const skel of target.skeletons) {
+        const boneData = skel.boneMatrices;
+        for (let bi = 0; bi < skel.boneCount; bi++) {
+            const jointIdx = skel.jointNodes[bi]!;
+            const ibmOff = bi * 16;
+            mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
+            mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
+        }
+
+        const texWidth = skel.boneCount * 4;
+        device.queue.writeTexture({ texture: skel.boneTexture }, boneData.buffer, { bytesPerRow: texWidth * 16 }, { width: texWidth, height: 1 });
+    }
+}
+
+function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int32Array {
+    const order = new Int32Array(nodes.length);
+    const visited = new Uint8Array(nodes.length);
+    let cursor = 0;
+
+    function visit(idx: number): void {
+        if (visited[idx]!) {
+            return;
+        }
+        visited[idx] = 1;
+        const p = nodes[idx]!.parentIdx;
+        if (p >= 0) {
+            visit(p);
+        }
+        order[cursor++] = idx;
+    }
+
+    for (let i = 0; i < nodes.length; i++) {
+        visit(i);
+    }
+    return order;
+}
+
+function normalizeQuaternionAt(values: Float32Array, offset: number): void {
+    const x = values[offset]!;
+    const y = values[offset + 1]!;
+    const z = values[offset + 2]!;
+    const w = values[offset + 3]!;
+    const lenSq = x * x + y * y + z * z + w * w;
+    if (lenSq > 0) {
+        const inv = 1 / Math.sqrt(lenSq);
+        values[offset] = x * inv;
+        values[offset + 1] = y * inv;
+        values[offset + 2] = z * inv;
+        values[offset + 3] = w * inv;
+    }
+}

@@ -118,6 +118,7 @@ export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-sh
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 export { crossFadeAnimationGroups, fadeAnimationWeight, setAnimationWeight } from "./animation/animation-weight.js";
+export { enableGltfAnimationWeights } from "./animation/weighted-gltf-mixer.js";
 export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/animation-weight.js";
 export {
     addAnimationGroup,

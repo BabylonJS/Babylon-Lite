@@ -1667,7 +1667,7 @@
     ]
   },
   "scene150": {
-    "rawKB": 56,
+    "rawKB": 56.1,
     "gzipKB": 21,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -1733,8 +1733,8 @@
     "bjsGzipKB": 350.9
   },
   "scene155": {
-    "rawKB": 58.9,
-    "gzipKB": 21.9,
+    "rawKB": 59,
+    "gzipKB": 22,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene155-standard-renderable-Bn0kDtDG.js",
@@ -1745,8 +1745,8 @@
     "bjsGzipKB": 353.8
   },
   "scene156": {
-    "rawKB": 59.7,
-    "gzipKB": 22.1,
+    "rawKB": 59.8,
+    "gzipKB": 22.2,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene156-standard-renderable-B4JYmPmA.js",
@@ -1755,5 +1755,24 @@
     ],
     "bjsRawKB": 1495.1,
     "bjsGzipKB": 353.9
+  },
+  "scene157": {
+    "rawKB": 91,
+    "gzipKB": 34.7,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene157-create-skeleton-tYVgbjJ3.js",
+      "scene157-generate-mipmaps-B1B7aG2f.js",
+      "scene157-gltf-animation-BclEgqGr.js",
+      "scene157-gltf-feature-animations-QgBbTtWP.js",
+      "scene157-gltf-feature-skeleton-BZG2F0g1.js",
+      "scene157-gltf-glb-parser-BdYiApo0.js",
+      "scene157-multilight-wgsl-Bg9nXHrC.js",
+      "scene157-pbr-renderable-BD1-aFIs.js",
+      "scene157-skeleton-fragment-c5UEmxyF.js",
+      "scene157.js"
+    ],
+    "bjsRawKB": 2180.1,
+    "bjsGzipKB": 512.1
   }
 }

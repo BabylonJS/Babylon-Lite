@@ -791,7 +791,7 @@
         "slug": "scene150-manual-x-slide",
         "name": "Scene 150 — Manual X Slide Animation",
         "maxMad": 0.08,
-        "maxRawKB": 56,
+        "maxRawKB": 57,
         "description": "Standalone AnimationManager drives a manual position.x float track matching Babylon.js beginDirectAnimation.",
         "tags": ["std", "procedural", "anim"]
     },
@@ -848,5 +848,14 @@
         "maxRawKB": 61,
         "description": "Two manual property animation groups cross-fade by duration-driven weight transitions.",
         "tags": ["std", "procedural", "anim"]
+    },
+    {
+        "id": 157,
+        "slug": "scene157-gltf-weighted-blend",
+        "name": "Scene 157 — glTF Weighted Animation Blend",
+        "maxMad": 0.05,
+        "maxRawKB": 96,
+        "description": "One AnimationManager blends Xbot walk and run glTF animation groups with equal weights before a single skeleton upload.",
+        "tags": ["pbr", "gltf", "anim"]
     }
 ]
