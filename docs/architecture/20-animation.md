@@ -295,6 +295,17 @@ createPropertyAnimationGroup(manager, camera, cameraClip, { loop: true });
 onBeforeRender(scene, (deltaMs) => updateAnimationManager(manager, deltaMs));
 ```
 
+Weighted manual animation and deterministic cross-fade:
+
+```typescript
+const walk = createPropertyAnimationGroup(manager, box, walkClip);
+const run = createPropertyAnimationGroup(manager, box, runClip);
+
+setAnimationWeight(walk, 1);
+setAnimationWeight(run, 0);
+crossFadeAnimationGroups(manager, walk, run, { durationMs: 300 });
+```
+
 ### AnimationGroup Creation
 
 `createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. All groups auto-play by default (matching BJS behavior).
@@ -310,6 +321,12 @@ Manual property bindings are resolved once when the group is created:
 - invalid paths throw immediately during `createPropertyAnimationGroup()` so typos never fail silently.
 
 Bindings are target-specific; `PropertyAnimationClip` is reusable, while the generated pointer-only `AnimationClip` is owned by the returned `AnimationGroup`.
+
+### Manual Weight Mixing
+
+Manual property weights are optional and live outside the default direct evaluator. Calling `setAnimationWeight()` installs a manager-side mixer for manual pointer tracks that share the same target and property path. The mixer advances group time once, samples each contributing clip with `evaluateSampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
+
+Weights intentionally use Babylon-style weighted sums for this first layer: `final = sum(group.weight * sampledValue)` for the groups targeting the same property. The mixer does not normalize totals and does not blend toward rest pose. `crossFadeAnimationGroups()` builds on the same weights by scheduling deterministic duration-based fade jobs inside the manager.
 
 ## Pipeline Configuration
 
@@ -355,6 +372,9 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `AnimationGroup.goToFrame(f)` | `goToFrame(group, f)` (uses `group.frameRate`) |
 | `AnimationGroup.speedRatio` | `group.speedRatio` |
 | `AnimationGroup.loopAnimation` | `group.loopAnimation` |
+| `AnimationGroup.weight` / `setWeightForAllAnimatables()` | `setAnimationWeight(group, weight)` |
+| manual weight ramp / blending speed | `fadeAnimationWeight(manager, group, { to, durationMs })` |
+| manual cross-fade | `crossFadeAnimationGroups(manager, from, to, { durationMs })` |
 | `scene.animationGroups` | `scene.animationGroups` |
 | `Animation.ANIMATIONTYPE_QUATERNION` | `PATH_ROTATION = 1` |
 | `Animation.ANIMATIONTYPE_VECTOR3` | `PATH_TRANSLATION = 0`, `PATH_SCALE = 2` |
@@ -366,6 +386,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 - `../loader-gltf/gltf-animation.ts` — `parseAnimationData` (glTF → `GltfAnimationData`)
 - `../loader-gltf/gltf-parser.ts` — `resolveAccessor`, `computeNodeWorldMatrix`, `findParent`
 - `./animation-manager.ts` — standalone manager, property clip builder, property path binding
+- `./weighted-pointer-mixer.ts` — optional manual property weight mixer and duration-based weight fades
 
 ## Test Specification
 
@@ -382,6 +403,8 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 11. **Manual vector animation**: Verify `position` calls `.set(x, y, z)` and marks world matrices dirty
 12. **Standalone manager**: Verify `updateAnimationManager()` works without a scene or engine for pointer-only clips
 13. **Bad path failure**: Verify invalid property paths throw during binding
+14. **Manual weighted blend**: Verify two groups targeting one scalar write a single weighted result independent of group order
+15. **Manual cross-fade**: Verify manager fade jobs update group weights by elapsed duration
 
 ## File Manifest
 
@@ -391,3 +414,4 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `evaluate.ts` | Keyframe interpolation engine (LINEAR, STEP, CUBICSPLINE); binary search; zero-allocation |
 | `animation-group.ts` | User-facing AnimationGroup factory; wraps AnimationController per clip |
 | `animation-manager.ts` | Standalone manager, manual property animation clip builder, and cached property bindings |
+| `weighted-pointer-mixer.ts` | Optional manual property weight mixer plus fade/cross-fade scheduling |

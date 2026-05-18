@@ -248,4 +248,4 @@ Certain scene number ranges are reserved for specific feature areas. When adding
 | 120–129 | Gaussian Splatting   | PLY splat clouds, splat renderers, sort workers |
 | 130–139 | Particle scenes      | Particles                                       |
 | 140–149 | Frame Graphs         | Frame Graph related features                    |
-| 150–154 | Animations           | Top-level/manual animation API                  |
+| 150–158 | Animations           | Top-level/manual animation API, weights, blending, additive |

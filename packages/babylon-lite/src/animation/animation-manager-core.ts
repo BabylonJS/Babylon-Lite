@@ -14,11 +14,17 @@ export interface AnimationManager {
     running: boolean;
     readonly engine?: EngineContext;
     readonly onUpdate?: (deltaMs: number) => void;
+    /** @internal Optional feature updater installed by weighted animation helpers. */
+    _wu?: (manager: AnimationManager, deltaMs: number) => boolean;
     _rafId: number;
     _lastTime: number;
 }
 
 const _animationGroupOwners = new WeakMap<AnimationGroup, AnimationManager>();
+
+export function getAnimationGroupOwner(group: AnimationGroup): AnimationManager | undefined {
+    return _animationGroupOwners.get(group);
+}
 
 export function createAnimationManager(options?: AnimationManagerOptions): AnimationManager {
     return {
@@ -67,6 +73,9 @@ export function clearAnimationManager(manager: AnimationManager): void {
 
 export function updateAnimationManager(manager: AnimationManager, deltaMs: number): void {
     const step = manager.fixedDeltaMs > 0 ? manager.fixedDeltaMs : deltaMs;
+    if (manager._wu?.(manager, step) === true) {
+        return;
+    }
     for (const group of manager.animationGroups) {
         tickAnimation(group, step, manager.engine);
     }

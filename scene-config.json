@@ -830,5 +830,23 @@
         "maxRawKB": 58,
         "description": "Manual property animation uses second-based keyframes and STEP interpolation, matching Babylon.js AnimationKeyInterpolation.STEP.",
         "tags": ["std", "procedural", "anim"]
+    },
+    {
+        "id": 155,
+        "slug": "scene155-manual-weighted-blend",
+        "name": "Scene 155 — Manual Weighted Animation Blend",
+        "maxMad": 0.02,
+        "maxRawKB": 60,
+        "description": "Two manual property animation groups blend weighted contributions into the same position.x property.",
+        "tags": ["std", "procedural", "anim"]
+    },
+    {
+        "id": 156,
+        "slug": "scene156-manual-cross-fade",
+        "name": "Scene 156 — Manual Cross-Fade Animation",
+        "maxMad": 0.02,
+        "maxRawKB": 61,
+        "description": "Two manual property animation groups cross-fade by duration-driven weight transitions.",
+        "tags": ["std", "procedural", "anim"]
     }
 ]

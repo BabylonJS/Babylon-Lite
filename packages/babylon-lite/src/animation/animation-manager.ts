@@ -66,9 +66,13 @@ export interface CreatePropertyAnimationGroupOptions {
 
 type PropertyWriter = (output: Float32Array, offset: number) => void;
 
+type PropertyBinding = readonly [object, PropertyWriter, number];
+
 interface PathSettable {
     set: (...values: number[]) => void;
 }
+
+const _propertyBindings = new WeakMap<object, Map<string, PropertyBinding>>();
 
 export function createPropertyAnimationClip(name: string, tracks: readonly PropertyAnimationTrackOptions[], options?: PropertyAnimationClipOptions): PropertyAnimationClip {
     if (tracks.length === 0) {
@@ -103,6 +107,7 @@ export function createPropertyAnimationGroup(
     const channels: AnimationChannel[] = [];
     for (let i = 0; i < clip.tracks.length; i++) {
         const track = clip.tracks[i]!;
+        const binding = resolvePropertyBinding(target, track.path, track.stride);
         samplers.push(track.sampler);
         channels.push({
             samplerIdx: i,
@@ -110,7 +115,8 @@ export function createPropertyAnimationGroup(
             path: PATH_POINTER,
             pointerArity: track.stride,
             pointerQuaternion: track.quaternion,
-            pointerWriter: resolvePropertyWriter(target, track.path, track.stride),
+            pointerWriter: binding[1],
+            _mk: binding[0],
         });
     }
 
@@ -143,6 +149,7 @@ export function createPropertyAnimationGroup(
     group._ctrl.time = fromTime;
     group.loopAnimation = options?.loop ?? true;
     group.speedRatio = options?.speedRatio ?? 1;
+    group._pm = [channels, samplers, fromTime, toTime, clip.duration];
     playAnimation(group);
     addAnimationGroup(manager, group);
     return group;
@@ -215,7 +222,20 @@ function writeKeyValue(path: string, value: AnimationKeyframeValue, stride: numb
     }
 }
 
-function resolvePropertyWriter(target: object, path: string, stride: number): PropertyWriter {
+function resolvePropertyBinding(target: object, path: string, stride: number): PropertyBinding {
+    let bindings = _propertyBindings.get(target);
+    if (!bindings) {
+        bindings = new Map<string, PropertyBinding>();
+        _propertyBindings.set(target, bindings);
+    }
+    const cached = bindings.get(path);
+    if (cached) {
+        if (cached[2] !== stride) {
+            throw new Error("Stride mismatch");
+        }
+        return cached;
+    }
+
     const parts = path.split(".");
     if (parts.length === 0 || parts.some((p) => p.length === 0)) {
         throw new Error(`Invalid animation property path "${path}"`);
@@ -237,19 +257,25 @@ function resolvePropertyWriter(target: object, path: string, stride: number): Pr
         throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
     }
 
+    let writer: PropertyWriter;
     if (stride === 1) {
-        return (output, offset) => {
+        writer = (output, offset) => {
             record[property] = output[offset]!;
         };
+    } else {
+        const targetValue = record[property];
+        const settable = isSettable(targetValue) ? targetValue : null;
+        if (settable) {
+            writer = createSetWriter(settable, stride, path);
+        } else {
+            const valueRecord = asRecord(targetValue, path);
+            writer = createComponentWriter(valueRecord, stride, path);
+        }
     }
 
-    const targetValue = record[property];
-    const settable = isSettable(targetValue) ? targetValue : null;
-    if (settable) {
-        return createSetWriter(settable, stride, path);
-    }
-    const valueRecord = asRecord(targetValue, path);
-    return createComponentWriter(valueRecord, stride, path);
+    const binding: PropertyBinding = [{}, writer, stride];
+    bindings.set(path, binding);
+    return binding;
 }
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {

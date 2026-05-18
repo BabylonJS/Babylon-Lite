@@ -2,12 +2,14 @@
 // Stored on scene.animationGroups[]. Pure state interface.
 
 import type { EngineContext } from "../engine/engine.js";
-import type { GltfAnimationData } from "./types.js";
+import type { AnimationChannel, AnimationSampler, GltfAnimationData } from "./types.js";
 import { PATH_POINTER } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
 const DEFAULT_FRAME_RATE = 60;
+
+export type AnimationPropertyMixer = readonly [readonly AnimationChannel[], readonly AnimationSampler[], number, number, number];
 
 /** User-facing animation group — one per glTF animation clip. Pure state. */
 export interface AnimationGroup {
@@ -25,8 +27,12 @@ export interface AnimationGroup {
     speedRatio: number;
     /** Whether animation loops (default true). */
     loopAnimation: boolean;
+    /** Weighted contribution used by AnimationManager mixing (default 1). */
+    weight: number;
     /** Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;
+    /** @internal Manual property animation metadata used by the optional weighted mixer. */
+    _pm?: AnimationPropertyMixer;
     /** @internal Whether stop() was called (suppresses _tick). */
     _stopped: boolean;
 }
@@ -125,6 +131,7 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
                 ctrl.loop = v;
             },
 
+            weight: 1,
             _ctrl: ctrl,
             _stopped: false,
         };

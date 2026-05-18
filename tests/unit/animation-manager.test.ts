@@ -7,6 +7,7 @@ import {
     updateAnimationManager,
 } from "../../packages/babylon-lite/src/animation/animation-manager";
 import { goToFrame } from "../../packages/babylon-lite/src/animation/animation-group";
+import { crossFadeAnimationGroups, setAnimationWeight } from "../../packages/babylon-lite/src/animation/animation-weight";
 
 describe("AnimationManager", () => {
     it("updates a Babylon-style position.x frame animation without a scene or engine", () => {
@@ -113,5 +114,95 @@ describe("AnimationManager", () => {
         ]);
 
         expect(() => createPropertyAnimationGroup(manager, { position: { x: 0 } }, clip)).toThrow(/position\.q/);
+    });
+
+    it("blends weighted manual property groups that target the same scalar", () => {
+        function run(order: "positive-first" | "negative-first"): number {
+            const manager = createAnimationManager();
+            const target = { position: { x: 0 } };
+            const positive = createPropertyAnimationClip("positive", [
+                {
+                    path: "position.x",
+                    keys: [
+                        { time: 0, value: 0 },
+                        { time: 1, value: 10 },
+                    ],
+                },
+            ]);
+            const negative = createPropertyAnimationClip("negative", [
+                {
+                    path: "position.x",
+                    keys: [
+                        { time: 0, value: 0 },
+                        { time: 1, value: -10 },
+                    ],
+                },
+            ]);
+
+            const first = order === "positive-first" ? positive : negative;
+            const second = order === "positive-first" ? negative : positive;
+            const firstGroup = createPropertyAnimationGroup(manager, target, first, { loop: false });
+            const secondGroup = createPropertyAnimationGroup(manager, target, second, { loop: false });
+            setAnimationWeight(firstGroup, order === "positive-first" ? 0.25 : 0.75);
+            setAnimationWeight(secondGroup, order === "positive-first" ? 0.75 : 0.25);
+
+            updateAnimationManager(manager, 1000);
+            return target.position.x;
+        }
+
+        expect(run("positive-first")).toBeCloseTo(-5);
+        expect(run("negative-first")).toBeCloseTo(-5);
+    });
+
+    it("rejects invalid animation weights", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0 } };
+        const clip = createPropertyAnimationClip("positive", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 1 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip);
+
+        expect(() => setAnimationWeight(group, -0.1)).toThrow(/between 0 and 1/);
+        expect(() => setAnimationWeight(group, Number.NaN)).toThrow(/between 0 and 1/);
+    });
+
+    it("cross-fades manual property animation weights over a deterministic duration", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0 } };
+        const positive = createPropertyAnimationClip("positive", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 2 },
+                    { time: 2, value: 2 },
+                ],
+            },
+        ]);
+        const negative = createPropertyAnimationClip("negative", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: -2 },
+                    { time: 2, value: -2 },
+                ],
+            },
+        ]);
+        const positiveGroup = createPropertyAnimationGroup(manager, target, positive, { loop: false });
+        const negativeGroup = createPropertyAnimationGroup(manager, target, negative, { loop: false });
+        setAnimationWeight(positiveGroup, 1);
+        setAnimationWeight(negativeGroup, 0);
+
+        crossFadeAnimationGroups(manager, positiveGroup, negativeGroup, { durationMs: 1000 });
+        updateAnimationManager(manager, 250);
+
+        expect(positiveGroup.weight).toBeCloseTo(0.75);
+        expect(negativeGroup.weight).toBeCloseTo(0.25);
+        expect(target.position.x).toBeCloseTo(1);
     });
 });
