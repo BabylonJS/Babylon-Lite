@@ -853,7 +853,7 @@
         "id": 157,
         "slug": "scene157-gltf-weighted-blend",
         "name": "Scene 157 — glTF Weighted Animation Blend",
-        "maxMad": 1.0,
+        "maxMad": 0.02,
         "maxRawKB": 96,
         "description": "One AnimationManager blends Xbot walk and run glTF animation groups with equal weights before a single skeleton upload.",
         "tags": ["pbr", "gltf", "anim"]
@@ -862,9 +862,9 @@
         "id": 158,
         "slug": "scene158-additive-animation-blend",
         "name": "Scene 158 — Additive Animation Blend",
-        "maxMad": 1.7,
+        "maxMad": 0.02,
         "maxRawKB": 98,
-        "description": "Xbot walk base animation blends with weighted additive pose and head motion layers.",
+        "description": "Xbot idle base animation blends with a full-weight additive sad pose.",
         "tags": ["pbr", "gltf", "anim"]
     }
 ]

@@ -30,32 +30,19 @@ const POSE_FRAME = 2;
 
     await SceneLoader.ImportMeshAsync("", "https://playground.babylonjs.com/scenes/", "Xbot.glb", scene);
 
-    const walk = requireGroup(scene.animationGroups, "walk");
+    const idle = requireGroup(scene.animationGroups, "idle");
     const sadPose = AnimationGroup.MakeAnimationAdditive(requireGroup(scene.animationGroups, "sad_pose"));
-    const sneakPose = AnimationGroup.MakeAnimationAdditive(requireGroup(scene.animationGroups, "sneak_pose"));
-    const headShake = AnimationGroup.MakeAnimationAdditive(requireGroup(scene.animationGroups, "headShake"));
-    const agree = AnimationGroup.MakeAnimationAdditive(requireGroup(scene.animationGroups, "agree"));
 
     for (const group of scene.animationGroups) {
         group.stop();
         group.weight = 0;
     }
-    const activeGroups = [walk, sadPose, sneakPose, headShake, agree];
-    for (const group of activeGroups) {
-        group.loopAnimation = true;
-        group.play(true);
-    }
 
-    walk.weight = 1;
-    sadPose.weight = 0.35;
-    sneakPose.weight = 0.2;
-    headShake.weight = 0.6;
-    agree.weight = 0.25;
-
-    sadPose.goToFrame(POSE_FRAME, true);
-    sadPose.pause();
-    sneakPose.goToFrame(POSE_FRAME, true);
-    sneakPose.pause();
+    idle.loopAnimation = true;
+    idle.play(true);
+    idle.weight = 1;
+    sadPose.weight = 1;
+    sadPose.start(true, 1, POSE_FRAME, POSE_FRAME);
 
     engine.getDeltaTime = function () {
         return 16;
@@ -65,10 +52,14 @@ const POSE_FRAME = 2;
     const seekTime = parseFloat(new URLSearchParams(window.location.search).get("seekTime") || "");
     if (Number.isFinite(seekTime)) {
         const seekFrame = seekTime * 60;
-        for (const group of activeGroups) {
-            group.goToFrame(group === sadPose || group === sneakPose ? POSE_FRAME : seekFrame, true);
-            group.pause();
-        }
+        idle.pause();
+        sadPose.pause();
+        const applyFrozenPose = () => {
+            idle.goToFrame(seekFrame, true);
+            sadPose.goToFrame(POSE_FRAME, true);
+        };
+        scene.onBeforeAnimationsObservable.add(applyFrozenPose);
+        applyFrozenPose();
         canvas.dataset.animationFrozen = "true";
     }
 

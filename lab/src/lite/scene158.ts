@@ -47,33 +47,27 @@ async function main(): Promise<void> {
 
     const manager = createAnimationManager({ engine });
     const groups = xbot.animationGroups ?? [];
-    addAnimationGroups(manager, groups);
     for (const group of groups) {
         stopAnimation(group);
         setAnimationWeight(group, 0);
     }
 
-    const walk = requireGroup(groups, "walk");
+    const idle = requireGroup(groups, "idle");
     const sadPose = requireGroup(groups, "sad_pose");
-    const sneakPose = requireGroup(groups, "sneak_pose");
-    const headShake = requireGroup(groups, "headShake");
-    const agree = requireGroup(groups, "agree");
+    const activeGroups = [idle, sadPose];
+    addAnimationGroups(manager, activeGroups);
 
-    walk.loopAnimation = true;
-    playAnimation(walk);
-    setAnimationWeight(walk, 1);
+    idle.loopAnimation = true;
+    playAnimation(idle);
+    setAnimationWeight(idle, 1);
 
-    setAdditivePose(sadPose, 0.35);
-    setAdditivePose(sneakPose, 0.2);
-    setAdditiveLoop(headShake, 0.6);
-    setAdditiveLoop(agree, 0.25);
-    const activeGroups = [walk, sadPose, sneakPose, headShake, agree];
+    setAdditivePose(sadPose, 1);
     enableAnimationBlending(manager);
 
     const seekTime = parseFloat(new URLSearchParams(window.location.search).get("seekTime") || "");
     if (Number.isFinite(seekTime)) {
         for (const group of activeGroups) {
-            group.currentFrame = group === sadPose || group === sneakPose ? POSE_TIME : seekTime;
+            group.currentFrame = group === sadPose ? POSE_TIME : seekTime;
             pauseAnimation(group);
         }
         canvas.dataset.animationFrozen = "true";
@@ -102,13 +96,6 @@ function setAdditivePose(group: AnimationGroup, weight: number): void {
     setAnimationWeight(group, weight);
     group.currentFrame = POSE_TIME;
     pauseAnimation(group);
-}
-
-function setAdditiveLoop(group: AnimationGroup, weight: number): void {
-    group.loopAnimation = true;
-    playAnimation(group);
-    setAnimationAdditive(group, { referenceFrame: 0 });
-    setAnimationWeight(group, weight);
 }
 
 main().catch(console.error);

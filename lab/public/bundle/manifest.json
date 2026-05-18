@@ -1758,7 +1758,7 @@
   },
   "scene157": {
     "rawKB": 92.7,
-    "gzipKB": 35.2,
+    "gzipKB": 35.3,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene157-create-skeleton-tYVgbjJ3.js",
@@ -1776,7 +1776,7 @@
     "bjsGzipKB": 512.1
   },
   "scene158": {
-    "rawKB": 93.3,
+    "rawKB": 93.1,
     "gzipKB": 35.4,
     "ignoredRawKB": 0,
     "runtimeChunks": [

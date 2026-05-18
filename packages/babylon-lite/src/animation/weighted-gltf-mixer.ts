@@ -271,19 +271,28 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
             case PATH_ROTATION: {
                 evaluateSampler(sampler, t, 4, true, scratch.sample, 0);
                 if (target.rWeight[nodeIdx] === 0) {
-                    target.trs[base + R_OFF] = 0;
-                    target.trs[base + R_OFF + 1] = 0;
-                    target.trs[base + R_OFF + 2] = 0;
-                    target.trs[base + R_OFF + 3] = 0;
+                    target.trs[base + R_OFF] = scratch.sample[0]!;
+                    target.trs[base + R_OFF + 1] = scratch.sample[1]!;
+                    target.trs[base + R_OFF + 2] = scratch.sample[2]!;
+                    target.trs[base + R_OFF + 3] = scratch.sample[3]!;
+                    target.rWeight[nodeIdx] = weight;
+                    break;
                 }
-                const n = target.nodes[nodeIdx]!;
-                const dot = n.rx * scratch.sample[0]! + n.ry * scratch.sample[1]! + n.rz * scratch.sample[2]! + n.rw * scratch.sample[3]!;
-                const sign = dot < 0 ? -1 : 1;
-                target.trs[base + R_OFF] = target.trs[base + R_OFF]! + scratch.sample[0]! * weight * sign;
-                target.trs[base + R_OFF + 1] = target.trs[base + R_OFF + 1]! + scratch.sample[1]! * weight * sign;
-                target.trs[base + R_OFF + 2] = target.trs[base + R_OFF + 2]! + scratch.sample[2]! * weight * sign;
-                target.trs[base + R_OFF + 3] = target.trs[base + R_OFF + 3]! + scratch.sample[3]! * weight * sign;
-                target.rWeight[nodeIdx] = target.rWeight[nodeIdx]! + weight;
+                const accumulatedWeight = target.rWeight[nodeIdx]!;
+                quatSlerpInto(
+                    target.trs,
+                    base + R_OFF,
+                    target.trs[base + R_OFF]!,
+                    target.trs[base + R_OFF + 1]!,
+                    target.trs[base + R_OFF + 2]!,
+                    target.trs[base + R_OFF + 3]!,
+                    scratch.sample[0]!,
+                    scratch.sample[1]!,
+                    scratch.sample[2]!,
+                    scratch.sample[3]!,
+                    weight / (accumulatedWeight + weight)
+                );
+                target.rWeight[nodeIdx] = accumulatedWeight + weight;
                 break;
             }
         }
@@ -292,7 +301,8 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
 
 function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): number {
     const clip = mixer[GLTF_CLIP];
-    if (group.isPlaying) {
+    const isPlaying = group.isPlaying;
+    if (isPlaying) {
         group.currentFrame += (deltaMs / 1000) * group.speedRatio;
     }
 
@@ -305,7 +315,7 @@ function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, delt
         return fromTime;
     }
 
-    if (group.loopAnimation) {
+    if (group.loopAnimation && isPlaying) {
         group.currentFrame = fromTime + ((group.currentFrame - fromTime) % duration);
         if (group.currentFrame < fromTime) {
             group.currentFrame += duration;
@@ -324,7 +334,12 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
     const { nodes, trs, localMat, worldMat } = target;
 
     for (let i = 0; i < nodes.length; i++) {
-        if (target.rWeight[i]! > 0) {
+        const rotationWeight = target.rWeight[i]!;
+        if (rotationWeight > 0 && rotationWeight < 1) {
+            const off = i * TRS_STRIDE + R_OFF;
+            const node = nodes[i]!;
+            quatSlerpInto(trs, off, node.rx, node.ry, node.rz, node.rw, trs[off]!, trs[off + 1]!, trs[off + 2]!, trs[off + 3]!, rotationWeight);
+        } else if (rotationWeight > 0) {
             normalizeQuaternionAt(trs, i * TRS_STRIDE + R_OFF);
         }
     }

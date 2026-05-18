@@ -44,7 +44,6 @@ async function main(): Promise<void> {
     addToScene(scene, xbot, { registerAnimationGroups: false });
 
     const manager = createAnimationManager({ engine });
-    addAnimationGroups(manager, xbot.animationGroups ?? []);
     const walk = xbot.animationGroups?.find((group) => group.name === "walk");
     const run = xbot.animationGroups?.find((group) => group.name === "run");
     if (!walk || !run) {
@@ -58,6 +57,7 @@ async function main(): Promise<void> {
         group.loopAnimation = true;
         playAnimation(group);
     }
+    addAnimationGroups(manager, [walk, run]);
     setAnimationWeight(walk, WALK_WEIGHT);
     setAnimationWeight(run, RUN_WEIGHT);
     enableAnimationBlending(manager);
