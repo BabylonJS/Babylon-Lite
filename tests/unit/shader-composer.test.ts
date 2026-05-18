@@ -12,92 +12,92 @@ const FRAGMENT = 0x2;
 describe("computeUboLayout", () => {
     it("returns zero bytes for empty fields", () => {
         const spec = computeUboLayout([]);
-        expect(spec.totalBytes).toBe(0);
-        expect(spec.offsets.size).toBe(0);
-        expect(spec.structBody).toBe("");
+        expect(spec._totalBytes).toBe(0);
+        expect(spec._offsets.size).toBe(0);
+        expect(spec._structBody).toBe("");
     });
 
     it("lays out a single f32 at offset 0, total 16 (aligned)", () => {
-        const spec = computeUboLayout([{ name: "x", type: "f32" }]);
-        expect(spec.offsets.get("x")).toBe(0);
-        expect(spec.totalBytes).toBe(16); // rounded up to 16
+        const spec = computeUboLayout([{ _name: "x", _type: "f32" }]);
+        expect(spec._offsets.get("x")).toBe(0);
+        expect(spec._totalBytes).toBe(16); // rounded up to 16
     });
 
     it("lays out vec4<f32> at offset 0, total 16", () => {
-        const spec = computeUboLayout([{ name: "color", type: "vec4<f32>" }]);
-        expect(spec.offsets.get("color")).toBe(0);
-        expect(spec.totalBytes).toBe(16);
+        const spec = computeUboLayout([{ _name: "color", _type: "vec4<f32>" }]);
+        expect(spec._offsets.get("color")).toBe(0);
+        expect(spec._totalBytes).toBe(16);
     });
 
     it("lays out mat4x4<f32> at offset 0, total 64", () => {
-        const spec = computeUboLayout([{ name: "world", type: "mat4x4<f32>" }]);
-        expect(spec.offsets.get("world")).toBe(0);
-        expect(spec.totalBytes).toBe(64);
+        const spec = computeUboLayout([{ _name: "world", _type: "mat4x4<f32>" }]);
+        expect(spec._offsets.get("world")).toBe(0);
+        expect(spec._totalBytes).toBe(64);
     });
 
     it("aligns vec3<f32> to 16 bytes", () => {
         const fields: UboField[] = [
-            { name: "a", type: "f32" }, // offset 0, size 4
-            { name: "b", type: "vec3<f32>" }, // needs 16-byte alignment → offset 16, size 12
+            { _name: "a", _type: "f32" }, // offset 0, size 4
+            { _name: "b", _type: "vec3<f32>" }, // needs 16-byte alignment → offset 16, size 12
         ];
         const spec = computeUboLayout(fields);
-        expect(spec.offsets.get("a")).toBe(0);
-        expect(spec.offsets.get("b")).toBe(16);
-        expect(spec.totalBytes).toBe(32); // 16 + 12 = 28, aligned to 32
+        expect(spec._offsets.get("a")).toBe(0);
+        expect(spec._offsets.get("b")).toBe(16);
+        expect(spec._totalBytes).toBe(32); // 16 + 12 = 28, aligned to 32
     });
 
     it("aligns vec2<f32> to 8 bytes", () => {
         const fields: UboField[] = [
-            { name: "a", type: "f32" }, // offset 0
-            { name: "b", type: "vec2<f32>" }, // needs 8-byte alignment → offset 8
+            { _name: "a", _type: "f32" }, // offset 0
+            { _name: "b", _type: "vec2<f32>" }, // needs 8-byte alignment → offset 8
         ];
         const spec = computeUboLayout(fields);
-        expect(spec.offsets.get("a")).toBe(0);
-        expect(spec.offsets.get("b")).toBe(8);
-        expect(spec.totalBytes).toBe(16);
+        expect(spec._offsets.get("a")).toBe(0);
+        expect(spec._offsets.get("b")).toBe(8);
+        expect(spec._totalBytes).toBe(16);
     });
 
     it("handles PBR-like base UBO layout: mat4 + 4 floats", () => {
         const fields: UboField[] = [
-            { name: "world", type: "mat4x4<f32>" }, // offset 0, 64 bytes
-            { name: "envIntensity", type: "f32" }, // offset 64
-            { name: "directIntensity", type: "f32" }, // offset 68
-            { name: "reflectance", type: "f32" }, // offset 72
-            { name: "alpha", type: "f32" }, // offset 76
+            { _name: "world", _type: "mat4x4<f32>" }, // offset 0, 64 bytes
+            { _name: "envIntensity", _type: "f32" }, // offset 64
+            { _name: "directIntensity", _type: "f32" }, // offset 68
+            { _name: "reflectance", _type: "f32" }, // offset 72
+            { _name: "alpha", _type: "f32" }, // offset 76
         ];
         const spec = computeUboLayout(fields);
-        expect(spec.offsets.get("world")).toBe(0);
-        expect(spec.offsets.get("envIntensity")).toBe(64);
-        expect(spec.offsets.get("directIntensity")).toBe(68);
-        expect(spec.offsets.get("reflectance")).toBe(72);
-        expect(spec.offsets.get("alpha")).toBe(76);
-        expect(spec.totalBytes).toBe(80); // 80 is already 16-aligned
+        expect(spec._offsets.get("world")).toBe(0);
+        expect(spec._offsets.get("envIntensity")).toBe(64);
+        expect(spec._offsets.get("directIntensity")).toBe(68);
+        expect(spec._offsets.get("reflectance")).toBe(72);
+        expect(spec._offsets.get("alpha")).toBe(76);
+        expect(spec._totalBytes).toBe(80); // 80 is already 16-aligned
     });
 
     it("handles clearcoat-like extension fields after base", () => {
         const fields: UboField[] = [
-            { name: "world", type: "mat4x4<f32>" },
-            { name: "envIntensity", type: "f32" },
-            { name: "directIntensity", type: "f32" },
-            { name: "reflectance", type: "f32" },
-            { name: "alpha", type: "f32" },
-            { name: "ccParams", type: "vec4<f32>" }, // needs 16-align → offset 80
-            { name: "ccRefraction", type: "vec4<f32>" }, // offset 96
+            { _name: "world", _type: "mat4x4<f32>" },
+            { _name: "envIntensity", _type: "f32" },
+            { _name: "directIntensity", _type: "f32" },
+            { _name: "reflectance", _type: "f32" },
+            { _name: "alpha", _type: "f32" },
+            { _name: "ccParams", _type: "vec4<f32>" }, // needs 16-align → offset 80
+            { _name: "ccRefraction", _type: "vec4<f32>" }, // offset 96
         ];
         const spec = computeUboLayout(fields);
-        expect(spec.offsets.get("ccParams")).toBe(80);
-        expect(spec.offsets.get("ccRefraction")).toBe(96);
-        expect(spec.totalBytes).toBe(112);
+        expect(spec._offsets.get("ccParams")).toBe(80);
+        expect(spec._offsets.get("ccRefraction")).toBe(96);
+        expect(spec._totalBytes).toBe(112);
     });
 
     it("generates correct WGSL struct body", () => {
         const fields: UboField[] = [
-            { name: "world", type: "mat4x4<f32>" },
-            { name: "alpha", type: "f32" },
+            { _name: "world", _type: "mat4x4<f32>" },
+            { _name: "alpha", _type: "f32" },
         ];
         const spec = computeUboLayout(fields);
-        expect(spec.structBody).toContain("world: mat4x4<f32>,");
-        expect(spec.structBody).toContain("alpha: f32,");
+        expect(spec._structBody).toContain("world: mat4x4<f32>,");
+        expect(spec._structBody).toContain("alpha: f32,");
     });
 });
 
@@ -106,7 +106,7 @@ describe("computeUboLayout", () => {
 /** Minimal template for testing */
 function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
     return {
-        vertexTemplate: [
+        _vertexTemplate: [
             "/*SU*/",
             "@group(0) @binding(0) var<uniform> scene: SceneUniforms;",
             "/*MU*/",
@@ -122,7 +122,7 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
             "return out;",
             "}",
         ].join("\n"),
-        fragmentTemplate: [
+        _fragmentTemplate: [
             "/*SU*/",
             "@group(0) @binding(0) var<uniform> scene: SceneUniforms;",
             "/*MU*/",
@@ -145,15 +145,14 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
             "return color;",
             "}",
         ].join("\n"),
-        baseMeshUboFields: [{ name: "world", type: "mat4x4<f32>" }],
-        baseSceneUboFields: [{ name: "viewProj", type: "mat4x4<f32>" }],
-        baseVertexAttributes: [
-            { name: "position", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
-            { name: "normal", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
+        _baseMeshUboFields: [{ _name: "world", _type: "mat4x4<f32>" }],
+        _baseVertexAttributes: [
+            { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
+            { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
         ],
-        baseVaryings: [
-            { name: "worldPos", type: "vec3<f32>" },
-            { name: "worldNormal", type: "vec3<f32>" },
+        _baseVaryings: [
+            { _name: "worldPos", _type: "vec3<f32>" },
+            { _name: "worldNormal", _type: "vec3<f32>" },
         ],
         ...overrides,
     };
@@ -162,72 +161,72 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
 describe("composeShader", () => {
     it("composes with zero fragments", () => {
         const result = composeShader(makeTemplate(), []);
-        expect(result.fragmentKey).toBe("");
-        expect(result.vertexWGSL).toContain("struct SceneUniforms");
-        expect(result.vertexWGSL).toContain("struct MeshUniforms");
-        expect(result.vertexWGSL).toContain("struct VertexInput");
-        expect(result.vertexWGSL).toContain("struct VertexOutput");
-        expect(result.fragmentWGSL).toContain("struct FragmentInput");
-        expect(result.meshUboSpec.totalBytes).toBe(64); // just world mat4
-        expect(result.vertexWGSL).toContain("viewProjection: mat4x4<f32>");
-        expect(result.fragmentWGSL).toContain("@group(0) @binding(0) var<uniform> scene: SceneUniforms");
+        expect(result._fragmentKey).toBe("");
+        expect(result._vertexWGSL).toContain("struct SceneUniforms");
+        expect(result._vertexWGSL).toContain("struct MeshUniforms");
+        expect(result._vertexWGSL).toContain("struct VertexInput");
+        expect(result._vertexWGSL).toContain("struct VertexOutput");
+        expect(result._fragmentWGSL).toContain("struct FragmentInput");
+        expect(result._meshUboSpec._totalBytes).toBe(64); // just world mat4
+        expect(result._vertexWGSL).toContain("viewProjection: mat4x4<f32>");
+        expect(result._fragmentWGSL).toContain("@group(0) @binding(0) var<uniform> scene: SceneUniforms");
     });
 
     it("generates correct fragment key from sorted fragment IDs", () => {
-        const fragA: ShaderFragment = { id: "alpha" };
-        const fragB: ShaderFragment = { id: "beta", dependencies: ["alpha"] };
+        const fragA: ShaderFragment = { _id: "alpha" };
+        const fragB: ShaderFragment = { _id: "beta", _dependencies: ["alpha"] };
         const result = composeShader(makeTemplate(), [fragB, fragA]); // given out of order
-        expect(result.fragmentKey).toBe("alpha|beta");
+        expect(result._fragmentKey).toBe("alpha|beta");
     });
 
     it("appends fragment UBO fields to mesh UBO", () => {
         const frag: ShaderFragment = {
-            id: "clearcoat",
-            uboFields: [
-                { name: "ccParams", type: "vec4<f32>" },
-                { name: "ccRefraction", type: "vec4<f32>" },
+            _id: "clearcoat",
+            _uboFields: [
+                { _name: "ccParams", _type: "vec4<f32>" },
+                { _name: "ccRefraction", _type: "vec4<f32>" },
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.meshUboSpec.totalBytes).toBe(96); // 64 (world) + 16 + 16
-        expect(result.meshUboSpec.offsets.get("ccParams")).toBe(64);
-        expect(result.meshUboSpec.offsets.get("ccRefraction")).toBe(80);
+        expect(result._meshUboSpec._totalBytes).toBe(96); // 64 (world) + 16 + 16
+        expect(result._meshUboSpec._offsets.get("ccParams")).toBe(64);
+        expect(result._meshUboSpec._offsets.get("ccRefraction")).toBe(80);
     });
 
     it("uses the canonical scene UBO layout for all fragments", () => {
-        const frag: ShaderFragment = { id: "ibl" };
+        const frag: ShaderFragment = { _id: "ibl" };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.vertexWGSL).toContain("vSphericalL00");
-        expect(result.fragmentWGSL).toContain("vFogColor");
+        expect(result._vertexWGSL).toContain("vSphericalL00");
+        expect(result._fragmentWGSL).toContain("vFogColor");
     });
 
     it("injects fragment slot code into the template", () => {
         const frag: ShaderFragment = {
-            id: "test",
-            fragmentSlots: {
+            _id: "test",
+            _fragmentSlots: {
                 SV: "var myVar = 1.0;",
                 AI: "color += vec4<f32>(0.1);",
             },
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.fragmentWGSL).toContain("var myVar = 1.0;");
-        expect(result.fragmentWGSL).toContain("color += vec4<f32>(0.1);");
+        expect(result._fragmentWGSL).toContain("var myVar = 1.0;");
+        expect(result._fragmentWGSL).toContain("color += vec4<f32>(0.1);");
         // Slot markers should be replaced (not present)
-        expect(result.fragmentWGSL).not.toMatch(/\/\*SV\*\//);
+        expect(result._fragmentWGSL).not.toMatch(/\/\*SV\*\//);
     });
 
     it("concatenates multiple fragment contributions at the same slot", () => {
         const fragA: ShaderFragment = {
-            id: "alpha",
-            fragmentSlots: { AD: "// from alpha" },
+            _id: "alpha",
+            _fragmentSlots: { AD: "// from alpha" },
         };
         const fragB: ShaderFragment = {
-            id: "beta",
-            fragmentSlots: { AD: "// from beta" },
+            _id: "beta",
+            _fragmentSlots: { AD: "// from beta" },
         };
         const result = composeShader(makeTemplate(), [fragA, fragB]);
-        const idx1 = result.fragmentWGSL.indexOf("// from alpha");
-        const idx2 = result.fragmentWGSL.indexOf("// from beta");
+        const idx1 = result._fragmentWGSL.indexOf("// from alpha");
+        const idx2 = result._fragmentWGSL.indexOf("// from beta");
         expect(idx1).toBeGreaterThan(-1);
         expect(idx2).toBeGreaterThan(-1);
         expect(idx1).toBeLessThan(idx2); // alpha before beta (alphabetical, both have no deps)
@@ -235,30 +234,30 @@ describe("composeShader", () => {
 
     it("injects vertex slot code", () => {
         const frag: ShaderFragment = {
-            id: "skeleton",
-            vertexSlots: {
+            _id: "skeleton",
+            _vertexSlots: {
                 VW: "let finalWorld = computeSkinning();",
             },
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.vertexWGSL).toContain("let finalWorld = computeSkinning();");
+        expect(result._vertexWGSL).toContain("let finalWorld = computeSkinning();");
     });
 
     it("adds fragment vertex attributes to VertexInput and pipeline layouts", () => {
         const frag: ShaderFragment = {
-            id: "ti",
-            vertexAttributes: [
-                { name: "world0", type: "vec4<f32>", gpuFormat: "float32x4", arrayStride: 64, stepMode: "instance", bufferGroup: "ti", offset: 0 },
-                { name: "world1", type: "vec4<f32>", gpuFormat: "float32x4", arrayStride: 64, stepMode: "instance", bufferGroup: "ti", offset: 16 },
+            _id: "ti",
+            _vertexAttributes: [
+                { _name: "world0", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 64, _stepMode: "instance", _bufferGroup: "ti", _offset: 0 },
+                { _name: "world1", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 64, _stepMode: "instance", _bufferGroup: "ti", _offset: 16 },
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.vertexWGSL).toContain("@location(2) world0: vec4<f32>");
-        expect(result.vertexWGSL).toContain("@location(3) world1: vec4<f32>");
+        expect(result._vertexWGSL).toContain("@location(2) world0: vec4<f32>");
+        expect(result._vertexWGSL).toContain("@location(3) world1: vec4<f32>");
 
         // Should have 3 vertex buffer layouts: position, normal (ungrouped) + ti group
-        expect(result.vertexBufferLayouts.length).toBe(3);
-        const tiLayout = result.vertexBufferLayouts.find((l) => l.stepMode === "instance");
+        expect(result._vertexBufferLayouts.length).toBe(3);
+        const tiLayout = result._vertexBufferLayouts.find((l) => l.stepMode === "instance");
         expect(tiLayout).toBeDefined();
         expect(tiLayout!.arrayStride).toBe(64);
         expect(tiLayout!.attributes.length).toBe(2);
@@ -266,120 +265,120 @@ describe("composeShader", () => {
 
     it("adds fragment varyings to VertexOutput and FragmentInput", () => {
         const frag: ShaderFragment = {
-            id: "ti",
-            varyings: [{ name: "vInstanceColor", type: "vec4<f32>" }],
+            _id: "ti",
+            _varyings: [{ _name: "vInstanceColor", _type: "vec4<f32>" }],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.vertexWGSL).toContain("vInstanceColor: vec4<f32>");
-        expect(result.fragmentWGSL).toContain("vInstanceColor: vec4<f32>");
+        expect(result._vertexWGSL).toContain("vInstanceColor: vec4<f32>");
+        expect(result._fragmentWGSL).toContain("vInstanceColor: vec4<f32>");
     });
 
     it("auto-assigns binding indices for fragment bindings", () => {
         const frag: ShaderFragment = {
-            id: "env",
-            bindings: [
-                { name: "brdfLUT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: FRAGMENT },
-                { name: "brdfSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: FRAGMENT },
+            _id: "env",
+            _bindings: [
+                { _name: "brdfLUT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: FRAGMENT },
+                { _name: "brdfSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: FRAGMENT },
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
         // mesh UBO at binding 0, then fragment bindings start at 1
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(1) var brdfLUT: texture_2d<f32>");
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(2) var brdfSampler_: sampler");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(1) var brdfLUT: texture_2d<f32>");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(2) var brdfSampler_: sampler");
     });
 
     it("puts shadow bindings in group 2", () => {
         const frag: ShaderFragment = {
-            id: "shadow",
-            bindings: [
-                { name: "shadowTex", type: { kind: "texture", textureType: "texture_depth_2d" }, group: "shadow", visibility: FRAGMENT },
-                { name: "shadowSamp", type: { kind: "sampler", samplerType: "sampler_comparison" }, group: "shadow", visibility: FRAGMENT },
+            _id: "shadow",
+            _bindings: [
+                { _name: "shadowTex", _type: { _kind: "texture", _textureType: "texture_depth_2d" }, _group: "shadow", _visibility: FRAGMENT },
+                { _name: "shadowSamp", _type: { _kind: "sampler", _samplerType: "sampler_comparison" }, _group: "shadow", _visibility: FRAGMENT },
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result.fragmentWGSL).toContain("@group(2) @binding(0) var shadowTex: texture_depth_2d");
-        expect(result.fragmentWGSL).toContain("@group(2) @binding(1) var shadowSamp: sampler_comparison");
-        expect(result.shadowBGLDescriptor).not.toBeNull();
-        expect(result.shadowBGLDescriptor!.entries.length).toBe(2);
+        expect(result._fragmentWGSL).toContain("@group(2) @binding(0) var shadowTex: texture_depth_2d");
+        expect(result._fragmentWGSL).toContain("@group(2) @binding(1) var shadowSamp: sampler_comparison");
+        expect(result._shadowBGLDescriptor).not.toBeNull();
+        expect(result._shadowBGLDescriptor!.entries.length).toBe(2);
     });
 
     it("throws on duplicate fragment IDs", () => {
-        const frag: ShaderFragment = { id: "dupe" };
+        const frag: ShaderFragment = { _id: "dupe" };
         expect(() => composeShader(makeTemplate(), [frag, frag])).toThrow("Duplicate fragment id");
     });
 
     it("throws on missing dependency", () => {
-        const frag: ShaderFragment = { id: "child", dependencies: ["nonexistent"] };
+        const frag: ShaderFragment = { _id: "child", _dependencies: ["nonexistent"] };
         expect(() => composeShader(makeTemplate(), [frag])).toThrow('depends on unknown fragment "nonexistent"');
     });
 
     it("throws on circular dependency", () => {
-        const a: ShaderFragment = { id: "a", dependencies: ["b"] };
-        const b: ShaderFragment = { id: "b", dependencies: ["a"] };
+        const a: ShaderFragment = { _id: "a", _dependencies: ["b"] };
+        const b: ShaderFragment = { _id: "b", _dependencies: ["a"] };
         expect(() => composeShader(makeTemplate(), [a, b])).toThrow("Cycle detected");
     });
 
     it("respects dependency order for slot injection", () => {
         const base: ShaderFragment = {
-            id: "base-ext",
-            fragmentSlots: { SV: "// base-ext first" },
+            _id: "base-ext",
+            _fragmentSlots: { SV: "// base-ext first" },
         };
         const dependent: ShaderFragment = {
-            id: "dependent",
-            dependencies: ["base-ext"],
-            fragmentSlots: { SV: "// dependent second" },
+            _id: "dependent",
+            _dependencies: ["base-ext"],
+            _fragmentSlots: { SV: "// dependent second" },
         };
         // Provide in reverse order to prove topoSort works
         const result = composeShader(makeTemplate(), [dependent, base]);
-        const idx1 = result.fragmentWGSL.indexOf("// base-ext first");
-        const idx2 = result.fragmentWGSL.indexOf("// dependent second");
+        const idx1 = result._fragmentWGSL.indexOf("// base-ext first");
+        const idx2 = result._fragmentWGSL.indexOf("// dependent second");
         expect(idx1).toBeLessThan(idx2);
     });
 
     it("generates mesh BGL descriptor with correct entries", () => {
         const frag: ShaderFragment = {
-            id: "env",
-            bindings: [
-                { name: "tex", type: { kind: "texture", textureType: "texture_cube<f32>" }, visibility: FRAGMENT },
-                { name: "samp", type: { kind: "sampler", samplerType: "sampler" }, visibility: FRAGMENT },
+            _id: "env",
+            _bindings: [
+                { _name: "tex", _type: { _kind: "texture", _textureType: "texture_cube<f32>" }, _visibility: FRAGMENT },
+                { _name: "samp", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: FRAGMENT },
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
         // mesh UBO + 2 fragment bindings = 3 entries
-        expect(result.meshBGLDescriptor.entries.length).toBe(3);
-        const firstEntry = result.meshBGLDescriptor.entries[0] as GPUBindGroupLayoutEntry;
+        expect(result._meshBGLDescriptor.entries.length).toBe(3);
+        const firstEntry = result._meshBGLDescriptor.entries[0] as GPUBindGroupLayoutEntry;
         expect(firstEntry.binding).toBe(0);
         expect(firstEntry.buffer).toEqual({ type: "uniform" });
     });
 
     it("deduplicates vertex attributes by name", () => {
         const frag: ShaderFragment = {
-            id: "test",
-            vertexAttributes: [
+            _id: "test",
+            _vertexAttributes: [
                 // Same as base "position" — should be deduped
-                { name: "position", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
+                { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
         // Should only have 2 vertex buffer layouts (position + normal), not 3
-        expect(result.vertexBufferLayouts.length).toBe(2);
+        expect(result._vertexBufferLayouts.length).toBe(2);
     });
 
     it("handles base template bindings before fragment bindings", () => {
         const template = makeTemplate({
-            baseBindings: [
-                { name: "baseColorTex", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: FRAGMENT },
-                { name: "baseColorSamp", type: { kind: "sampler", samplerType: "sampler" }, visibility: FRAGMENT },
+            _baseBindings: [
+                { _name: "baseColorTex", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: FRAGMENT },
+                { _name: "baseColorSamp", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: FRAGMENT },
             ],
         });
         const frag: ShaderFragment = {
-            id: "env",
-            bindings: [{ name: "envTex", type: { kind: "texture", textureType: "texture_cube<f32>" }, visibility: FRAGMENT }],
+            _id: "env",
+            _bindings: [{ _name: "envTex", _type: { _kind: "texture", _textureType: "texture_cube<f32>" }, _visibility: FRAGMENT }],
         };
         const result = composeShader(template, [frag]);
         // binding 0 = mesh UBO, 1 = baseColorTex, 2 = baseColorSamp, 3 = envTex
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(1) var baseColorTex");
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(2) var baseColorSamp");
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(3) var envTex");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(1) var baseColorTex");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(2) var baseColorSamp");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(3) var envTex");
     });
 });
