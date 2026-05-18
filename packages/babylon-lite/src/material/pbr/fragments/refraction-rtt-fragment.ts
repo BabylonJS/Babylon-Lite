@@ -1,4 +1,4 @@
-import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import type { ShaderFragment, UboField } from "../../../shader/fragment-types.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { AssetContainer } from "../../../asset-container.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
@@ -68,25 +68,25 @@ color = finalIrradiance * refrOpacity
 
 function createLinearImageProcessingFragment(): ShaderFragment {
     return {
-        id: "opaque-linear",
-        fragmentSlots: LINEAR_IMAGE_PROCESSING_SLOTS,
+        _id: "opaque-linear",
+        _fragmentSlots: LINEAR_IMAGE_PROCESSING_SLOTS,
     };
 }
 
 function createRefractionRttFragment(hasVolume: boolean, linearImageProcessing: boolean): ShaderFragment {
-    const uboFields: { name: string; type: "vec4<f32>" }[] = [{ name: "refractionParams", type: "vec4<f32>" as const }];
+    const uboFields: UboField[] = [{ _name: "refractionParams", _type: "vec4<f32>" as const }];
     if (hasVolume) {
-        uboFields.push({ name: "volumeParams", type: "vec4<f32>" as const });
+        uboFields.push({ _name: "volumeParams", _type: "vec4<f32>" as const });
     }
     return {
-        id: "refraction",
-        dependencies: ["ibl"],
-        uboFields,
-        bindings: [
-            { name: "refractionTexture", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: 2 },
-            { name: "refractionSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: 2 },
+        _id: "refraction",
+        _dependencies: ["ibl"],
+        _uboFields: uboFields,
+        _bindings: [
+            { _name: "refractionTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: 2 },
+            { _name: "refractionSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: 2 },
         ],
-        fragmentSlots: linearImageProcessing ? { AI: makeRefractionMod(hasVolume), ...LINEAR_IMAGE_PROCESSING_SLOTS } : { AI: makeRefractionMod(hasVolume) },
+        _fragmentSlots: linearImageProcessing ? { AI: makeRefractionMod(hasVolume), ...LINEAR_IMAGE_PROCESSING_SLOTS } : { AI: makeRefractionMod(hasVolume) },
     };
 }
 

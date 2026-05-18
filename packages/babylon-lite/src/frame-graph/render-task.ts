@@ -36,7 +36,7 @@ import type { Camera } from "../camera/camera.js";
 import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
-import type { Material, MaterialOrView, MaterialView } from "../material/material.js";
+import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
@@ -97,8 +97,8 @@ export interface RenderTask extends Task {
      *  Resolved at `record()` time via `material._buildGroup._rebuildSingle`,
      *  so the mesh's material family must already have been registered with
      *  the scene (so its batch builder has run). */
-    addMesh(mesh: Mesh, opts?: { material?: MaterialOrView }): void;
-    _pendingMeshes: { mesh: Mesh; material: MaterialOrView }[];
+    addMesh(mesh: Mesh, opts?: { material?: Material }): void;
+    _pendingMeshes: { mesh: Mesh; material: Material }[];
 }
 
 /** Create a render pass task. GPU resources (target textures + descriptor)
@@ -226,7 +226,7 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContextInternal): void 
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const buildGroup = ((material as MaterialView).source ?? (material as Material))._buildGroup;
+        const buildGroup = material._buildGroup;
         const rebuild = buildGroup?._rebuildSingle;
         if (!rebuild) {
             throw new Error();
@@ -289,12 +289,8 @@ function buildBindings(task: RenderTask, eng: EngineContextInternal, targetSigna
 }
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
-    if (rt._colorView) {
-        task._colorAttachment.view = rt._colorView;
-        task._renderPassDescriptor.colorAttachments = [task._colorAttachment];
-    } else {
-        task._renderPassDescriptor.colorAttachments = [];
-    }
+    task._colorAttachment.view = rt._colorView!;
+    task._renderPassDescriptor.colorAttachments = rt._colorView ? [task._colorAttachment] : [];
 
     const depthView = rt._depthView;
     let depthAttachment: GPURenderPassDepthStencilAttachment | null = null;

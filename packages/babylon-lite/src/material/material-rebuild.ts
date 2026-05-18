@@ -1,6 +1,6 @@
 import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { Material, MaterialOrView } from "./material.js";
+import type { Material } from "./material.js";
 import { getMaterialSource, isMaterialView } from "./material-view.js";
 
 export interface RebuildMaterialOptions {
@@ -13,7 +13,7 @@ export interface RebuildMaterialOptions {
 /** Rebuild renderables whose pipeline/bind-group feature state depends on a material.
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
-export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrView, options?: RebuildMaterialOptions): void {
+export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void {
     const ctx = scene as SceneContextInternal;
     const source = getMaterialSource(materialOrView);
     const rebuildViews = options?.rebuildViews !== false;
@@ -34,7 +34,7 @@ export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrV
     }
 }
 
-function matchesMaterial(meshMaterial: Material | null, source: Material, materialOrView: MaterialOrView, rebuildViews: boolean): boolean {
+function matchesMaterial(meshMaterial: Material | null, source: Material, materialOrView: Material, rebuildViews: boolean): boolean {
     if (!meshMaterial) {
         return false;
     }

@@ -29,38 +29,38 @@ for (var i = 0u; i < morph.count; i = i + 1u) {
  */
 export function createMorphFragment(): ShaderFragment {
     return {
-        id: "morph",
+        _id: "morph",
 
-        vertexBuiltins: [{ name: "vertexIndex", builtin: "vertex_index", type: "u32" }],
+        _vertexBuiltins: [{ _name: "vertexIndex", _builtin: "vertex_index", _type: "u32" }],
 
-        vertexHelperFunctions: `struct morphUniforms {\nweights: vec4<f32>,\ncount: u32,\ntexWidth: u32,\nrowsPerBand: u32,\n_p0: u32,\n}`,
+        _vertexHelperFunctions: `struct morphUniforms {\nweights: vec4<f32>,\ncount: u32,\ntexWidth: u32,\nrowsPerBand: u32,\n_p0: u32,\n}`,
 
-        vertexBindings: [
-            { name: "morphTargets", type: { kind: "texture", textureType: "texture_2d<f32>" as const, sampleType: "unfilterable-float" as const }, visibility: STAGE_VERTEX },
-            { name: "morph", type: { kind: "uniform-buffer" as const }, visibility: STAGE_VERTEX },
+        _vertexBindings: [
+            { _name: "morphTargets", _type: { _kind: "texture", _textureType: "texture_2d<f32>" as const, _sampleType: "unfilterable-float" as const }, _visibility: STAGE_VERTEX },
+            { _name: "morph", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_VERTEX },
         ],
 
-        vertexSlots: {
+        _vertexSlots: {
             VR: MORPH_PRE_SKINNING,
         },
     };
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { MESH_HAS_MORPH_TARGETS } from "../../mesh-features.js";
+import { MSH_HAS_MORPH_TARGETS } from "../../mesh-features.js";
 
 export const morphExt: PbrExt = {
     id: "morph",
     phase: "vertex",
     frag(ctx) {
-        if (!(ctx._meshFeatures & MESH_HAS_MORPH_TARGETS)) {
+        if (!(ctx._meshFeatures & MSH_HAS_MORPH_TARGETS)) {
             return null;
         }
         return createMorphFragment();
     },
     bind(ctx, entries, b) {
         const mesh = ctx._mesh;
-        if (!(ctx._meshFeatures & MESH_HAS_MORPH_TARGETS) || !mesh?.morphTargets) {
+        if (!(ctx._meshFeatures & MSH_HAS_MORPH_TARGETS) || !mesh?.morphTargets) {
             return b;
         }
         entries.push({ binding: b++, resource: mesh.morphTargets.texture.createView() });

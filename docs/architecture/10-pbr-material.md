@@ -47,9 +47,7 @@ pbr-renderable.ts:
 | `PBR_HAS_NORMAL_MAP` | `1 << 0` | Mesh has tangent buffer | Tangent vertex attr + normal texture + TBN transform |
 | `PBR_HAS_EMISSIVE` | `1 << 1` | Material has emissive texture | Emissive texture sampling |
 | `PBR_HAS_ENV` | `1 << 2` | Environment loaded | IBL (BRDF LUT + specular cubemap + SH irradiance) |
-| `PBR_HAS_SKELETON` | `1 << 3` | Mesh has skeleton | Bone texture sampling + skinning matrix |
 | `PBR_HAS_TONEMAP` | `1 << 4` | Tone mapping enabled | Exposure/contrast/gamma post-processing |
-| `PBR_HAS_MORPH_TARGETS` | `1 << 5` | Mesh has morph targets | Morph target texture + weight accumulation |
 | `PBR_HAS_ALPHA_BLEND` | `1 << 6` | Material has alpha blend | Alpha blend pipeline state |
 | `PBR_HAS_SPEC_GLOSS` | `1 << 7` | Specular-glossiness workflow | SpecGloss texture instead of ORM |
 | `PBR_HAS_DOUBLE_SIDED` | `1 << 8` | Material is double-sided | `cullMode: 'none'` + front-facing normal flip |
@@ -58,15 +56,11 @@ pbr-renderable.ts:
 | `PBR_HAS_REFLECTANCE_MAP` | `1 << 11` | Has reflectance map | Reflectance map sampling |
 | `PBR_HAS_USE_ALPHA_ONLY_MR` | `1 << 12` | Use alpha-only from MR map | Alpha-only metallic reflectance |
 | `PBR_HAS_OCCLUSION` | `1 << 15` | Has occlusion strength | ORM/separate occlusion with strength factor |
-| `PBR_HAS_SKELETON_8` | `1 << 16` | 8-bone skinning | 8-bone influence blending |
 | `PBR_HAS_SPECULAR_AA` | `1 << 17` | Specular anti-aliasing | Geometric AA roughness adjustment |
-| `PBR_HAS_THIN_INSTANCES` | `1 << 18` | Mesh has thin instances | Instance matrix attributes + instanced draw |
-| `PBR_HAS_INSTANCE_COLOR` | `1 << 19` | Per-instance color | Instance color varying |
 | `PBR_HAS_CLEARCOAT` | `1 << 20` | Clearcoat layer enabled | Clearcoat BRDF + energy conservation |
 | `PBR_HAS_EMISSIVE_COLOR` | `1 << 21` | Non-zero emissive uniform | Emissive color uniform contribution |
 | `PBR_HAS_SHEEN` | `1 << 22` | Sheen layer enabled | Sheen BRDF (Charlie NDF + Ashikhmin visibility) |
 | `PBR_HAS_SHEEN_TEXTURE` | `1 << 23` | Sheen has texture | Sheen texture sampling |
-| `PBR_HAS_RECEIVE_SHADOWS` | `1 << 24` | Mesh receives shadows | Shadow map sampling + shadow factors |
 | `PBR_HAS_GAMMA_ALBEDO` | `1 << 25` | Base color in gamma space | Gamma-to-linear decode |
 | `PBR_HAS_ANISOTROPY` | `1 << 26` | Anisotropy enabled | Anisotropic specular BRDF |
 | `PBR_HAS_SUBSURFACE` | `1 << 27` | Subsurface enabled | Translucency / scattering / volume feature root |
@@ -74,13 +68,15 @@ pbr-renderable.ts:
 | `PBR_HAS_SKYBOX` | `1 << 29` | PBR skybox mode | Direct environment lookup |
 | `PBR_HAS_SHEEN_ALBEDO_SCALING` | `1 << 30` | Sheen albedo scaling enabled | Energy compensation for sheen |
 
-Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, vertex color, UV2 occlusion, linear image processing for refraction, and `PBR2_GENERATE_DEPTH_FOR_SHADOWS` for depth-only material views.
+Mesh/pass feature bits live in `mesh-features.ts` (`MSH_HAS_SKELETON`, `MSH_HAS_MORPH_TARGETS`, `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR`, `MSH_HAS_VERTEX_COLOR`, `MSH_HAS_UV2`, `MSH_RECEIVE_SHADOWS`). Do not duplicate a mesh feature as `PBR_HAS_*` or `PBR2_HAS_*`; the mesh flag takes precedence.
+
+Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_GENERATE_DEPTH_FOR_SHADOWS` for depth-only material views.
 
 Light type bits are also shifted into the feature mask via `getLightTypeFeatureBits()` (hemispheric=1, directional=2, point=3).
 
 Base color + ORM textures are always present (core PBR workflow).
 
-PBR caches are two-tiered: sig-independent shader bindings are cached per `_pbrFeatureKey(features, features2, meshFeatures, sceneFeatures, shaderKey)`, then each binding caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
+PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, then each binding caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
 
 ## Public API Surface
 
@@ -368,10 +364,10 @@ Base vertex buffers are defined by the template. Fragment modules add additional
 | Attribute | Source | When |
 |---|---|---|
 | Tangent (`float32x4`) | Template | `PBR_HAS_NORMAL_MAP` (tangent mode) |
-| Joints (`uint16x4`) + Weights (`float32x4`) | `skeleton-fragment` | `PBR_HAS_SKELETON` |
-| Joints1 + Weights1 | `skeleton-fragment` | `PBR_HAS_SKELETON_8` |
-| Instance matrix (4× `float32x4`) | `thin-instance-fragment` | `PBR_HAS_THIN_INSTANCES` |
-| Instance color (`float32x4`) | `thin-instance-fragment` | `PBR_HAS_INSTANCE_COLOR` |
+| Joints (`uint16x4`) + Weights (`float32x4`) | `skeleton-fragment` | `MSH_HAS_SKELETON` |
+| Joints1 + Weights1 | `skeleton-fragment` | `MSH_HAS_SKELETON_8` |
+| Instance matrix (4× `float32x4`) | `thin-instance-fragment` | `MSH_HAS_THIN_INSTANCES` |
+| Instance color (`float32x4`) | `thin-instance-fragment` | `MSH_HAS_INSTANCE_COLOR` |
 
 ### Pipeline State
 
@@ -399,8 +395,8 @@ Base vertex buffers are defined by the template. Fragment modules add additional
 Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assigned sequentially by the composer based on which fragments are active. The order follows fragment topological sort:
 
 - Mesh UBO — always (binding 0)
-- Morph target texture + UBO — if `PBR_HAS_MORPH_TARGETS`
-- Bone sampler texture — if `PBR_HAS_SKELETON`
+- Morph target texture + UBO — if `MSH_HAS_MORPH_TARGETS`
+- Bone sampler texture — if `MSH_HAS_SKELETON`
 - Base color texture + sampler — always
 - Normal texture + sampler — if `PBR_HAS_NORMAL_MAP`
 - ORM texture + sampler — always (or specGloss texture)
@@ -409,7 +405,7 @@ Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assi
 - Reflectance maps + samplers — if reflectance extension
 - Sheen texture + sampler — if `PBR_HAS_SHEEN_TEXTURE`
 
-**Group 2 — Shadow** (only when `PBR_HAS_RECEIVE_SHADOWS`):
+**Group 2 — Shadow** (only when `MSH_RECEIVE_SHADOWS`):
 
 Per-light shadow info UBOs, shadow textures, and shadow samplers.
 
@@ -490,8 +486,8 @@ The `rebuildSingle(scene, mesh, materialOverride?)` closure returned from `build
 **Inputs**: position (`vec3`), normal (`vec3`), uv (`vec2`), optional tangent (`vec4`), optional joints/weights, optional instance matrix.
 
 **Processing**:
-1. `/*VR*/` — Morph target application (if `PBR_HAS_MORPH_TARGETS`): accumulates position/normal deltas from morph texture
-2. `/*VW*/` — Skinning (if `PBR_HAS_SKELETON`): `finalWorld = mesh.world * boneInfluence`; otherwise `finalWorld = mesh.world`
+1. `/*VR*/` — Morph target application (if `MSH_HAS_MORPH_TARGETS`): accumulates position/normal deltas from morph texture
+2. `/*VW*/` — Skinning (if `MSH_HAS_SKELETON`): `finalWorld = mesh.world * boneInfluence`; otherwise `finalWorld = mesh.world`
 3. `worldPos = finalWorld × vec4(position, 1.0)`
 4. `clipPos = scene.viewProjection × worldPos`
 5. `worldNormal = normalize((finalWorld × vec4(normalize(normal), 0)).xyz)`
@@ -503,7 +499,7 @@ The `rebuildSingle(scene, mesh, materialOverride?)` closure returned from `build
    worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
    worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
    ```
-7. `/*VB*/` — Shadow light-space transform (if `PBR_HAS_RECEIVE_SHADOWS`)
+7. `/*VB*/` — Shadow light-space transform (if `MSH_RECEIVE_SHADOWS`)
 
 **Outputs**: `worldPos`, `worldNormal`, [`worldTangent`, `worldBitangent`], `uv`, optional shadow varyings.
 
@@ -578,9 +574,9 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | `PBR_HAS_ENV` | `#define REFLECTION` + `#define SS_REFRACTION` |
 | `PBR_HAS_CLEARCOAT` | `#define CLEARCOAT` |
 | `PBR_HAS_SHEEN` | `#define SHEEN` |
-| `PBR_HAS_SKELETON` | `#define BONES` |
-| `PBR_HAS_MORPH_TARGETS` | `#define MORPHTARGETS` |
-| `PBR_HAS_RECEIVE_SHADOWS` | `#define SHADOW0` |
+| `MSH_HAS_SKELETON` | `#define BONES` |
+| `MSH_HAS_MORPH_TARGETS` | `#define MORPHTARGETS` |
+| `MSH_RECEIVE_SHADOWS` | `#define SHADOW0` |
 | `PBR_HAS_SPEC_GLOSS` | `#define SPECULARGLOSSINESS` |
 | `PBR_HAS_SPECULAR_AA` | `#define SPECULARAA` |
 | `rebuildSingle` closure | `Material._markAllSubMeshesAsAllDirty()` |

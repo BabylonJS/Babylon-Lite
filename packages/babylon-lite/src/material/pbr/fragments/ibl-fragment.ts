@@ -77,21 +77,21 @@ color = finalIrradiance + finalRadianceScaled + finalSpecularScaled + directDiff
  */
 export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: string = "", skyboxCalculation: string = ""): ShaderFragment {
     return {
-        id: "ibl",
+        _id: "ibl",
 
         // SH coefficients are in the PBR template's baseSceneUboFields (not here)
         // to preserve fixed scene UBO layout compatibility.
 
-        bindings: [
-            { name: "brdfLUT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "brdfSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
-            { name: "iblTexture", type: { kind: "texture", textureType: "texture_cube<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "iblSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        _bindings: [
+            { _name: "brdfLUT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "brdfSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
+            { _name: "iblTexture", _type: { _kind: "texture", _textureType: "texture_cube<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "iblSampler", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
 
-        helperFunctions: IBL_HELPERS,
+        _helperFunctions: IBL_HELPERS,
 
-        fragmentSlots: {
+        _fragmentSlots: {
             AI: makeIblCalculation(hasNormalMap, anisoBentNormalCode, skyboxCalculation),
             BA: `luminanceOverAlpha += dot(finalRadianceScaled, vec3<f32>(0.2126, 0.7152, 0.0722));`,
         },

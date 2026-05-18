@@ -34,7 +34,6 @@ export function createStandardMaterial(): StandardMaterialProps {
         uvScale: [1, 1],
         backFaceCulling: true,
         disableLighting: false,
-        _renderFeatures: { features: 0 },
         _buildGroup: standardGroupBuilder,
         _uboVersion: 0,
     } as StandardMaterialProps;

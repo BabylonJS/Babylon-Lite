@@ -145,7 +145,7 @@ export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
-export type { Material, MaterialOrView, MaterialRenderFeatures, MaterialView } from "./material/material.js";
+export type { Material, MaterialRenderFeatures, MaterialView } from "./material/material.js";
 export type {
     PbrMaterialProps,
     ClearCoatProps,

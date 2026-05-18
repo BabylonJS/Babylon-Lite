@@ -174,9 +174,9 @@ export interface MaterialRenderFeatures {
     features2?: number;
 }
 
-export interface MaterialView {
+export interface MaterialView extends Material {
     readonly source: Material;
-    readonly _renderFeatures: MaterialRenderFeatures;
+    _renderFeatures: MaterialRenderFeatures;
 }
 
 export type MaterialOrView = Material | MaterialView;
@@ -186,9 +186,9 @@ export function markMaterialUboDirty(materialOrView: MaterialOrView): void;
 export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrView, options?: RebuildMaterialOptions): void;
 ```
 
-`createMaterialView()` stores only render feature bits and a `source` pointer. Textures, samplers, uniforms, alpha/culling state, extension data, and UBO versions stay owned by the source material. Creating a view from another view collapses to the original source and registers the new view in `source._views`.
+`createMaterialView()` creates a material-compatible object whose prototype is the source material, then stores only view-owned render feature bits and a `source` pointer. Textures, samplers, uniforms, alpha/culling state, extension data, `_buildGroup`, and UBO versions are inherited from the source material. Creating a view from another view collapses to the original source and registers the new view in `source._views`.
 
-Material renderables resolve a `MaterialOrView` by reading source material state plus view-owned render features. Plain materials compute/store `material._renderFeatures`; views use `view._renderFeatures` exactly while binding UBO/textures from `view.source`. Mesh/pass feature bits remain separate and are computed per renderable.
+Material renderables intentionally do not import material-view helpers or unwrap the source material. They read the selected material object normally: plain materials recompute/store `material._renderFeatures` at build time, while views provide their own `_renderFeatures` and inherit every other property from the source. This keeps material-view helper bytes isolated to scenes that import `createMaterialView()` or family-specific view helpers. Mesh/pass feature bits remain separate and are computed per renderable.
 
 `markMaterialUboDirty()` increments `source._uboVersion`, so every renderable/view derived from that source can observe scalar/vector UBO changes independently. `rebuildMaterial()` rebuilds meshes using the source and, by default, any views created from that source; use it for feature/layout changes such as texture changes, sampler/layout changes, alpha/culling changes, or view feature changes.
 

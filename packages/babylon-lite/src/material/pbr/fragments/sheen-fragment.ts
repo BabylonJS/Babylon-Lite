@@ -132,30 +132,30 @@ sheenRoughnessAdjusted *= sheenMapData.a;
     const bindings: BindingDecl[] = [];
     if (hasSheenTexture) {
         bindings.push(
-            { name: "sheenTexture_", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "sheenSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "sheenTexture_", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "sheenSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
 
     const uboFields: UboField[] = [
-        { name: "sheenParams", type: "vec4<f32>" },
-        { name: "sheenParams2", type: "vec4<f32>" },
+        { _name: "sheenParams", _type: "vec4<f32>" },
+        { _name: "sheenParams2", _type: "vec4<f32>" },
     ];
     if (hasSheenUvTx) {
-        uboFields.push({ name: "sheenUVm", type: "vec4<f32>" }, { name: "sheenUVt", type: "vec4<f32>" });
+        uboFields.push({ _name: "sheenUVm", _type: "vec4<f32>" }, { _name: "sheenUVt", _type: "vec4<f32>" });
     }
 
     return {
-        id: "sheen",
-        dependencies: hasIbl ? ["ibl"] : undefined,
+        _id: "sheen",
+        _dependencies: hasIbl ? ["ibl"] : undefined,
 
-        uboFields,
+        _uboFields: uboFields,
 
-        bindings,
+        _bindings: bindings,
 
-        helperFunctions: SHEEN_HELPERS,
+        _helperFunctions: SHEEN_HELPERS,
 
-        fragmentSlots: slots,
+        _fragmentSlots: slots,
     };
 }
 

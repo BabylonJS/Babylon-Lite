@@ -9,12 +9,16 @@ const STAGE_FRAGMENT = 0x2;
 
 export function createStdEmissiveFragment(depthTexture: boolean): ShaderFragment {
     return {
-        id: "std-emissive",
-        bindings: [
-            { name: "eT", type: { kind: "texture", textureType: "texture_2d<f32>", sampleType: depthTexture ? "unfilterable-float" : undefined }, visibility: STAGE_FRAGMENT },
-            { name: "eS", type: { kind: "sampler", samplerType: depthTexture ? "sampler_non_filtering" : "sampler" }, visibility: STAGE_FRAGMENT },
+        _id: "std-emissive",
+        _bindings: [
+            {
+                _name: "eT",
+                _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: depthTexture ? "unfilterable-float" : undefined },
+                _visibility: STAGE_FRAGMENT,
+            },
+            { _name: "eS", _type: { _kind: "sampler", _samplerType: depthTexture ? "sampler_non_filtering" : "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
-        fragmentSlots: {
+        _fragmentSlots: {
             AT: `emissiveContrib = mat.ec + textureSample(eT, eS, input.vu).rgb * mat.tl;`,
         },
     };

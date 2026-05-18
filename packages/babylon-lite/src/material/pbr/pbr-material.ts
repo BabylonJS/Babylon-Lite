@@ -171,21 +171,6 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
     return { features, features2 };
 }
 
-/** @internal Key for PBR shader features, including mesh/pass and scene features. */
-export function _pbrFeatureKey(features: number, features2: number, meshFeatures: number, sceneFeatures: number, variant = ""): string {
-    return `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${variant}`;
-}
-
-/** @internal Key for PBR shader variants inside a feature set. */
-export function _pbrShaderVariantKey(
-    lightMode: number,
-    singleLightType = "",
-    shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" }[] = []
-): string {
-    const shadowKey = shadowLights.length === 0 ? "" : shadowLights.map((sl) => `${sl.lightIndex}${sl.shadowType === "pcf" ? "p" : "e"}`).join(",");
-    return shadowKey ? `${lightMode}:${singleLightType}:${shadowKey}` : `${lightMode}:${singleLightType}`;
-}
-
 /** Clearcoat layer properties. Maps to BJS PBRMaterial.clearCoat sub-object. */
 export interface ClearCoatProps {
     /** Whether clearcoat is active. Default false. */
@@ -320,7 +305,6 @@ export interface SubSurfaceProps {
 export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMaterialProps {
     const mat = {
         ...props,
-        _renderFeatures: { features: 0 },
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
     } as PbrMaterialPropsInternal;

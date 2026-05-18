@@ -16,8 +16,8 @@ export const emitter: BlockEmitter = {
         const memoKey = `_clip_${block.id}`;
         if (!state.vertex.memo.has(memoKey)) {
             const worldPosition = ctx.cast(ctx.resolve(block, "worldPosition", "vertex", state), "vec4f");
-            if (!state.varyings.find((v) => v.name === "vClipDistance")) {
-                state.varyings.push({ name: "vClipDistance", type: "f32" });
+            if (!state.varyings.find((v) => v._name === "vClipDistance")) {
+                state.varyings.push({ _name: "vClipDistance", _type: "f32" });
             }
             state.vertex.body.push(`out.vClipDistance = dot(${worldPosition.expr}, sceneU.clipPlane);`);
             state.vertex.memo.set(memoKey, { expr: "out.vClipDistance", type: "f32" });

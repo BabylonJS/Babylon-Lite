@@ -18,14 +18,14 @@ import { PBR_HAS_EMISSIVE_COLOR, PBR_HAS_EMISSIVE } from "../pbr-flag-bits.js";
  */
 export function createEmissiveColorFragment(hasEmissiveTexture: boolean): ShaderFragment {
     return {
-        id: "emissive-color",
+        _id: "emissive-color",
 
-        uboFields: [
-            { name: "emissiveColor", type: "vec3<f32>" },
-            { name: "_emissiveColorPad", type: "f32" },
+        _uboFields: [
+            { _name: "emissiveColor", _type: "vec3<f32>" },
+            { _name: "_emissiveColorPad", _type: "f32" },
         ],
 
-        fragmentSlots: {
+        _fragmentSlots: {
             AT: hasEmissiveTexture
                 ? `let emissive = material.emissiveColor * textureSample(emissiveTexture, emissiveSampler, input.uv).rgb;`
                 : `let emissive = material.emissiveColor;`,

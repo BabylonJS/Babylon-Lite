@@ -1,24 +1,28 @@
-import type { Material, MaterialOrView, MaterialRenderFeatures, MaterialView } from "./material.js";
+import type { Material, MaterialRenderFeatures, MaterialView } from "./material.js";
 
 /** Create a material view that references source state and overrides render features exactly. */
-export function createMaterialView(source: MaterialOrView, renderFeatures: MaterialRenderFeatures): MaterialView {
+export function createMaterialView(source: Material, renderFeatures: MaterialRenderFeatures): MaterialView {
     const src = getMaterialSource(source);
-    const view: MaterialView = {
-        source: src,
+    const view = Object.create(src, {
+        source: { value: src, enumerable: true },
         _renderFeatures: {
-            features: renderFeatures.features,
-            features2: renderFeatures.features2,
+            value: {
+                features: renderFeatures.features,
+                features2: renderFeatures.features2,
+            },
+            writable: true,
+            enumerable: true,
+            configurable: true,
         },
-    };
-    (src._views ??= []).push(view);
+    }) as MaterialView;
     return view;
 }
 
-export function isMaterialView(material: MaterialOrView): material is MaterialView {
+export function isMaterialView(material: Material): material is MaterialView {
     const maybeView = material as Partial<MaterialView>;
     return !!maybeView.source && !!maybeView._renderFeatures;
 }
 
-export function getMaterialSource(material: MaterialOrView): Material {
+export function getMaterialSource(material: Material): Material {
     return isMaterialView(material) ? material.source : material;
 }

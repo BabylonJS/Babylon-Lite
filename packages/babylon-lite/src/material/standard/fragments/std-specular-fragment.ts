@@ -10,12 +10,12 @@ const STAGE_FRAGMENT = 0x2;
 export function createStdSpecularFragment(usesUV2: boolean): ShaderFragment {
     const uv = usesUV2 ? "input.vv" : "input.vu";
     return {
-        id: "std-specular",
-        bindings: [
-            { name: "sT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "sS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        _id: "std-specular",
+        _bindings: [
+            { _name: "sT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "sS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
-        fragmentSlots: {
+        _fragmentSlots: {
             AT: `specularColor = textureSample(sT, sS, ${uv}).rgb;`,
         },
     };

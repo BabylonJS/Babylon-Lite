@@ -6,12 +6,12 @@
 
 import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
-import { _computePbrMaterialFeatures, type PbrMaterialProps } from "./pbr-material.js";
+import type { PbrMaterialProps } from "./pbr-material.js";
 import { PBR_HAS_ALPHA_BLEND, PBR2_GENERATE_DEPTH_FOR_SHADOWS } from "./pbr-flags.js";
 
 /** Create a shadow-depth view over a PBR source material.
  *  The view references the source; material state is never copied. */
 export function createPbrShadowDepthMaterialView(source: PbrMaterialProps): MaterialView {
-    const features = source._renderFeatures ?? (source._renderFeatures = _computePbrMaterialFeatures(source));
+    const features = source._renderFeatures ?? { features: 0, features2: 0 };
     return createMaterialView(source, { features: features.features & ~PBR_HAS_ALPHA_BLEND, features2: (features.features2 ?? 0) | PBR2_GENERATE_DEPTH_FOR_SHADOWS });
 }

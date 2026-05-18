@@ -21,13 +21,13 @@ return vec2<f32>(coords.x, 1.0 - coords.y);
 
 export function createStdReflectionFragment(): ShaderFragment {
     return {
-        id: "std-reflection",
-        bindings: [
-            { name: "rT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "rS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        _id: "std-reflection",
+        _bindings: [
+            { _name: "rT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "rS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
-        helperFunctions: REFLECTION_HELPERS,
-        fragmentSlots: {
+        _helperFunctions: REFLECTION_HELPERS,
+        _fragmentSlots: {
             AD: `{
 var reflCoords: vec2<f32>;
 if (mat.rCm < 1.5) { reflCoords = computeSphericalCoords(input.vp, normalW); }

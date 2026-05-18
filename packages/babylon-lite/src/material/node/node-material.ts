@@ -220,7 +220,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         uniformValues.set(fieldName, { name: fieldName, type, offsetBytes: offset, values: arr });
     }
 
-    const attrNames = state.vertexAttributes.map((a) => a.name);
+    const attrNames = state.vertexAttributes.map((a) => a._name);
 
     // Per-texture handles (populated from options.textures, then exposed via inputs).
     const textureSlots = new Map<string, { current: Texture2D | null }>();

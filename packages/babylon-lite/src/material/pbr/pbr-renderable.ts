@@ -32,14 +32,14 @@ import {
     PBR_HAS_TONEMAP,
 } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
-import { _computePbrMaterialFeatures, _pbrShaderVariantKey } from "./pbr-material.js";
+import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { PbrLightMode } from "./pbr-compose.js";
-import type { MaterialOrView, MaterialRenderFeatures, MaterialView } from "../material.js";
-import { _computeMeshFeatures, MESH_HAS_INSTANCE_COLOR, MESH_HAS_THIN_INSTANCES, MESH_HAS_UV2, MESH_HAS_VERTEX_COLOR } from "../mesh-features.js";
+import type { Material, MaterialRenderFeatures } from "../material.js";
+import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
 interface SingleLightWgslModule {
@@ -101,10 +101,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyVertexColor = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
-        const mat = m.material as PbrMaterialProps & { _hasUvTx?: boolean };
+        const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
         const mi = m as MeshInternal;
         hasSkybox ||= !!mat.skyboxMode;
-        hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat.metallicF0Factor != null || mat.metallicReflectanceColor);
+        hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
         hasClearcoat ||= !!mat.clearCoat?.isEnabled;
         hasSheen ||= !!mat.sheen?.isEnabled;
         hasAnyAnisotropy ||= !!mat.anisotropy?.isEnabled;
@@ -273,11 +273,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
     // Captures the per-scene context — no separate WeakMap needed.
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: MaterialOrView): Renderable => {
-        const materialInput = (materialOverride ?? mesh.material) as PbrMaterialProps | MaterialView;
-        const source = (materialInput as MaterialView).source;
-        const mat = (source ?? materialInput) as PbrMaterialProps;
-        const renderFeatures = (source ? materialInput._renderFeatures : (mat._renderFeatures = _computePbrMaterialFeatures(mat))) as MaterialRenderFeatures;
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+        const materialInput = (materialOverride ?? mesh.material) as PbrMaterialProps;
+        const mat = materialInput;
+        const renderFeatures = (mat._renderFeatures ??= _computePbrMaterialFeatures(mat)) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
         const mi = mesh as MeshInternal;
 
@@ -290,18 +289,17 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const features2 = renderFeatures.features2 ?? 0;
 
         const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType);
-        const shaderKey = _pbrShaderVariantKey(lightMode, singleLightType, mesh.receiveShadows && hasSomeShadows ? shadowLights : []);
-        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, shaderKey);
+        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}`);
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
-        const meshUboData = new Float32Array(composed.meshUboSpec.totalBytes / 4);
+        const meshUboData = new Float32Array(composed._meshUboSpec._totalBytes / 4);
         meshUboData.set(mesh.worldMatrix, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
         const meshUBO = createUniformBuffer(engine, meshUboData);
 
         // Material UBO.
-        const materialSpec = composed.materialUboSpec!;
-        const matInitData = new Float32Array(materialSpec.totalBytes / 4);
+        const materialSpec = composed._materialUboSpec!;
+        const matInitData = new Float32Array(materialSpec._totalBytes / 4);
         writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
 
@@ -309,7 +307,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
-        const meshShadowLights = mesh.receiveShadows ? shadowLights : [];
+        const meshShadowLights = mesh.receiveShadows && hasSomeShadows ? shadowLights : [];
         if (meshShadowLights.length > 0 && bindings._shadowBGL) {
             let cached = shadowBGCache.get(bindings._shadowBGL);
             if (!cached) {
@@ -348,10 +346,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const order = mesh.renderOrder ?? (isTransparent ? 150 : isTransmissive ? 140 : 100);
 
         const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0;
-        const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MESH_HAS_UV2) !== 0;
-        const hasVertexColor = (meshFeatures & MESH_HAS_VERTEX_COLOR) !== 0;
-        const hasTI = (meshFeatures & MESH_HAS_THIN_INSTANCES) !== 0;
-        const hasTIColor = (meshFeatures & MESH_HAS_INSTANCE_COLOR) !== 0;
+        const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0;
+        const hasVertexColor = (meshFeatures & MSH_HAS_VERTEX_COLOR) !== 0;
+        const hasTI = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
+        const hasTIColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
@@ -366,10 +364,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             const uboVersion = mat._uboVersion;
             if (uboVersion !== _lastUboVersion) {
                 _lastUboVersion = uboVersion;
-                let data = materialScratch.get(materialSpec.totalBytes);
+                let data = materialScratch.get(materialSpec._totalBytes);
                 if (!data) {
-                    data = new Float32Array(materialSpec.totalBytes / 4);
-                    materialScratch.set(materialSpec.totalBytes, data);
+                    data = new Float32Array(materialSpec._totalBytes / 4);
+                    materialScratch.set(materialSpec._totalBytes, data);
                 } else {
                     data.fill(0);
                 }
@@ -490,8 +488,8 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
     data[1] = material.directIntensity ?? 1.0;
     data[2] = material.reflectance ?? 0.04;
     data[3] = material.alpha ?? 1.0;
-    if (spec.offsets.has("metallicFactor")) {
-        const off = spec.offsets.get("metallicFactor")! / 4;
+    if (spec._offsets.has("metallicFactor")) {
+        const off = spec._offsets.get("metallicFactor")! / 4;
         data[off] = material.metallicFactor ?? 1.0;
         data[off + 1] = material.roughnessFactor ?? 1.0;
         data[off + 2] = material.normalTextureScale ?? 1.0;
@@ -500,7 +498,7 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
 
     for (const ext of _getPbrExts().values()) {
         if (ext.writeUbo) {
-            ext.writeUbo(data, material, spec.offsets);
+            ext.writeUbo(data, material, spec._offsets);
         }
     }
 }

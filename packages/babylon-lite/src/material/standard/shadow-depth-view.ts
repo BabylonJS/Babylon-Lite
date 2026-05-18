@@ -12,5 +12,6 @@ import type { StandardMaterialProps } from "./standard-material.js";
 /** Create a shadow-depth view over a Standard source material.
  *  The view references the source; material state is never copied. */
 export function createStandardShadowDepthMaterialView(source: StandardMaterialProps): MaterialView {
-    return createMaterialView(source, { features: source._renderFeatures.features | GENERATE_DEPTH_FOR_SHADOWS });
+    const features = source._renderFeatures ?? { features: 0 };
+    return createMaterialView(source, { features: features.features | GENERATE_DEPTH_FOR_SHADOWS });
 }

@@ -8,12 +8,12 @@
  *  relevant code is bundled. Scenes using only PBR materials never pull in
  *  Standard tracking code, and vice versa. */
 
-import type { Material, MaterialOrView } from "./material.js";
+import type { Material } from "./material.js";
 import { getMaterialSource } from "./material-view.js";
 
 /** Enable automatic dirty tracking on a PBR or Standard material.
  *  After calling this, any UBO-backed property mutation marks the source material UBO dirty. */
-export async function enableMaterialTracking(material: MaterialOrView & { specularPower?: unknown }): Promise<void> {
+export async function enableMaterialTracking(material: Material & { specularPower?: unknown }): Promise<void> {
     const source = getMaterialSource(material) as Material & { specularPower?: unknown };
     if ("specularPower" in source) {
         const { installStdTracking } = await import("./tracking/std-tracking.js");

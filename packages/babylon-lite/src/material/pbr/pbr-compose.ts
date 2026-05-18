@@ -5,7 +5,6 @@
 
 import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
-import { _pbrFeatureKey, _pbrShaderVariantKey } from "./pbr-material.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import { createPbrTemplate } from "./pbr-template.js";
 import {
@@ -30,13 +29,13 @@ import {
 } from "./pbr-flag-bits.js";
 import { _getPbrExts, type _PbrFragCtx } from "./pbr-flags.js";
 import {
-    MESH_HAS_TANGENTS,
-    MESH_HAS_MORPH_TARGETS,
-    MESH_RECEIVE_SHADOWS,
-    MESH_HAS_THIN_INSTANCES,
-    MESH_HAS_INSTANCE_COLOR,
-    MESH_HAS_VERTEX_COLOR,
-    MESH_HAS_UV2,
+    MSH_HAS_TANGENTS,
+    MSH_HAS_MORPH_TARGETS,
+    MSH_RECEIVE_SHADOWS,
+    MSH_HAS_THIN_INSTANCES,
+    MSH_HAS_INSTANCE_COLOR,
+    MSH_HAS_VERTEX_COLOR,
+    MSH_HAS_UV2,
 } from "../mesh-features.js";
 
 interface PbrComposerDeps {
@@ -83,7 +82,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
     } = deps;
 
     return function composePbr(features: number, features2: number = 0, meshFeatures = 0, sceneFeatures = 0, lightMode: PbrLightMode = 0, singleLightType = ""): ComposedShader {
-        const ckey = _pbrFeatureKey(features, features2, meshFeatures, sceneFeatures, _pbrShaderVariantKey(lightMode, singleLightType));
+        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -92,20 +91,20 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const has = (bit: number) => (features & bit) !== 0;
         const hasMesh = (bit: number) => (meshFeatures & bit) !== 0;
         const hasScene = (bit: number) => (sceneFeatures & bit) !== 0;
-        const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MESH_HAS_TANGENTS);
-        const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MESH_HAS_TANGENTS);
+        const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MSH_HAS_TANGENTS);
+        const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
         const hasReflExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         const hasIbl = hasScene(PBR_HAS_ENV);
-        const hasMorph = hasMesh(MESH_HAS_MORPH_TARGETS);
-        const hasShadow = hasMesh(MESH_RECEIVE_SHADOWS);
+        const hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
+        const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const hasAniso = has(PBR_HAS_ANISOTROPY);
         const hasEmCol = has(PBR_HAS_EMISSIVE_COLOR);
         const hasEmTex = has(PBR_HAS_EMISSIVE);
-        const hasTI = hasMesh(MESH_HAS_THIN_INSTANCES);
+        const hasTI = hasMesh(MSH_HAS_THIN_INSTANCES);
 
         const hasUvTx = (features2 & PBR2_HAS_UV_TRANSFORM) !== 0;
-        const hasVC = hasMesh(MESH_HAS_VERTEX_COLOR);
-        const hasU2 = (features2 & PBR2_HAS_UV2) !== 0 && hasMesh(MESH_HAS_UV2);
+        const hasVC = hasMesh(MSH_HAS_VERTEX_COLOR);
+        const hasU2 = (features2 & PBR2_HAS_UV2) !== 0 && hasMesh(MSH_HAS_UV2);
         const needsExt = hasUvTx || hasVC || hasU2;
         const ext =
             needsExt && _createPbrTemplateExt
@@ -175,7 +174,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             frags.push(_createPbrShadowFragment(slots));
         }
         if (hasTI && _createThinInstanceFragment) {
-            frags.push(_createThinInstanceFragment(hasMesh(MESH_HAS_INSTANCE_COLOR)));
+            frags.push(_createThinInstanceFragment(hasMesh(MSH_HAS_INSTANCE_COLOR)));
         }
 
         const composed = composeShader(template, frags);

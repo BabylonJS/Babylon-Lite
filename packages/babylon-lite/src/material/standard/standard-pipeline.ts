@@ -43,7 +43,7 @@ import {
     SPECULAR_USES_UV2,
     _getStdExtsSorted,
 } from "./standard-flags.js";
-import { MESH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
@@ -71,7 +71,7 @@ export function featuresToTemplateConfig(features: number, meshFeatures = 0) {
         ambientUsesUV2: has(AMBIENT_USES_UV2),
         diffuseUsesUV2: has(DIFFUSE_USES_UV2),
         specularUsesUV2: has(SPECULAR_USES_UV2),
-        hasShadow: hasMesh(MESH_RECEIVE_SHADOWS),
+        hasShadow: hasMesh(MSH_RECEIVE_SHADOWS),
         hasPcfShadow: has(PCF_SHADOWS),
         opacityFromRGB: has(OPACITY_FROM_RGB),
         disableLighting: has(DISABLE_LIGHTING),
@@ -157,11 +157,11 @@ export function getOrCreateStandardBindings(
     }
 
     const device = engine.device;
-    const meshBGL = device.createBindGroupLayout(composed.meshBGLDescriptor);
+    const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     let shadowBGL: GPUBindGroupLayout | null = null;
-    const hasShadow = (meshFeatures & MESH_RECEIVE_SHADOWS) !== 0;
-    if (hasShadow && composed.shadowBGLDescriptor) {
-        shadowBGL = device.createBindGroupLayout(composed.shadowBGLDescriptor);
+    const hasShadow = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
+    if (hasShadow && composed._shadowBGLDescriptor) {
+        shadowBGL = device.createBindGroupLayout(composed._shadowBGLDescriptor);
     }
 
     const bindings: StandardShaderBindings = {
@@ -191,9 +191,9 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
-    const vertModule = device.createShaderModule({ code: composed.vertexWGSL });
+    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
     const depthOnly = (features & GENERATE_DEPTH_FOR_SHADOWS) !== 0;
-    const fragModule = depthOnly || !sig.colorFormat || composed.fragmentWGSL == null ? null : device.createShaderModule({ code: composed.fragmentWGSL });
+    const fragModule = depthOnly || !sig.colorFormat || composed._fragmentWGSL == null ? null : device.createShaderModule({ code: composed._fragmentWGSL });
 
     const needsBlend = (features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0;
     const colorTarget: GPUColorTargetState = needsBlend
@@ -208,7 +208,7 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
 
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
-        vertex: { module: vertModule, entryPoint: "main", buffers: composed.vertexBufferLayouts },
+        vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
         ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: [colorTarget] } } : {}),
         ...(sig.depthStencilFormat
             ? { depthStencil: { format: sig.depthStencilFormat, depthCompare: "less-equal" as GPUCompareFunction, depthWriteEnabled: depthOnly || !needsBlend } }

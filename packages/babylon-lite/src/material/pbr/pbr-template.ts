@@ -130,75 +130,75 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     const hasAnyNormal = hasNormal || hasCotangentNormal;
 
     // ── Base vertex attributes ──────────────────────────────────
-    const baseVertexAttributes: VertexAttribute[] = [
-        { name: "position", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
-        { name: "normal", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
+    const _baseVertexAttributes: VertexAttribute[] = [
+        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
+        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
     ];
     if (hasNormal) {
-        baseVertexAttributes.push({ name: "tangent", type: "vec4<f32>", gpuFormat: "float32x4", arrayStride: 16 });
+        _baseVertexAttributes.push({ _name: "tangent", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 });
     }
-    baseVertexAttributes.push({ name: "uv", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     if (ext) {
-        baseVertexAttributes.push(...ext.extraVertexAttributes);
+        _baseVertexAttributes.push(...ext.extraVertexAttributes);
     }
 
     // ── Base varyings ───────────────────────────────────────────
-    const baseVaryings: Varying[] = [
-        { name: "worldPos", type: "vec3<f32>" },
-        { name: "worldNormal", type: "vec3<f32>" },
+    const _baseVaryings: Varying[] = [
+        { _name: "worldPos", _type: "vec3<f32>" },
+        { _name: "worldNormal", _type: "vec3<f32>" },
     ];
     if (hasNormal) {
-        baseVaryings.push({ name: "worldTangent", type: "vec3<f32>" }, { name: "worldBitangent", type: "vec3<f32>" });
+        _baseVaryings.push({ _name: "worldTangent", _type: "vec3<f32>" }, { _name: "worldBitangent", _type: "vec3<f32>" });
     }
-    baseVaryings.push({ name: "uv", type: "vec2<f32>" });
+    _baseVaryings.push({ _name: "uv", _type: "vec2<f32>" });
     if (ext) {
-        baseVaryings.push(...ext.extraVaryings);
+        _baseVaryings.push(...ext.extraVaryings);
     }
 
     // ── Base mesh UBO fields (world matrix + affected light indices — UV transforms are
     // per-texture now, emitted on the material UBO when hasUvTransform). ─
-    const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
-    appendMeshLightUboFields(baseMeshUboFields);
+    const _baseMeshUboFields: UboField[] = [{ _name: "world", _type: "mat4x4<f32>" }];
+    appendMeshLightUboFields(_baseMeshUboFields);
 
     // ── Base material UBO fields ────────────────────────────────────
-    const baseMaterialUboFields: UboField[] = [
-        { name: "environmentIntensity", type: "f32" },
-        { name: "directIntensity", type: "f32" },
-        { name: "reflectance", type: "f32" },
-        { name: "materialAlpha", type: "f32" },
+    const _baseMaterialUboFields: UboField[] = [
+        { _name: "environmentIntensity", _type: "f32" },
+        { _name: "directIntensity", _type: "f32" },
+        { _name: "reflectance", _type: "f32" },
+        { _name: "materialAlpha", _type: "f32" },
         // glTF metallicFactor / roughnessFactor (default 1.0) — applied over MR texture channels.
-        { name: "metallicFactor", type: "f32" },
-        { name: "roughnessFactor", type: "f32" },
-        { name: "normalScale", type: "f32" },
-        { name: "lightFalloffMode", type: "f32" },
+        { _name: "metallicFactor", _type: "f32" },
+        { _name: "roughnessFactor", _type: "f32" },
+        { _name: "normalScale", _type: "f32" },
+        { _name: "lightFalloffMode", _type: "f32" },
         // Anisotropy UBO field stays on the base template because anisotropy is
         // template-only (no ShaderFragment) — the anisotropyExt just writes its
         // slice through the unified ext.writeUbo hook.
-        ...(hasAnisotropy ? [{ name: "anisotropyParams", type: "vec4<f32>" as const }] : []),
+        ...(hasAnisotropy ? [{ _name: "anisotropyParams", _type: "vec4<f32>" as const }] : []),
         // ── Extension fields (per-texture UV transforms, etc.) ─
         ...(ext ? ext.extraMaterialUboFields : []),
     ];
 
     // ── Helper: texture + sampler binding pair ────────────────────
     const tex2d = (name: string, sampler: string): BindingDecl[] => [
-        { name, type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-        { name: sampler, type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        { _name: name, _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+        { _name: sampler, _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
     ];
 
     // ── Base bindings (always-present textures) ─────────────────
-    const baseBindings: BindingDecl[] = [...tex2d("baseColorTexture", "baseColorSampler")];
+    const _baseBindings: BindingDecl[] = [...tex2d("baseColorTexture", "baseColorSampler")];
     if (hasAnyNormal) {
-        baseBindings.push(...tex2d("normalTexture", "normalSampler_"));
+        _baseBindings.push(...tex2d("normalTexture", "normalSampler_"));
     }
-    baseBindings.push(...tex2d("ormTexture", "ormSampler"));
+    _baseBindings.push(...tex2d("ormTexture", "ormSampler"));
     if (ext) {
-        baseBindings.push(...ext.extraBindings);
+        _baseBindings.push(...ext.extraBindings);
     }
     if (hasEmissiveTexture) {
-        baseBindings.push(...tex2d("emissiveTexture", "emissiveSampler"));
+        _baseBindings.push(...tex2d("emissiveTexture", "emissiveSampler"));
     }
     if (hasSpecGloss) {
-        baseBindings.push(...tex2d("specGlossTexture", "specGlossSampler"));
+        _baseBindings.push(...tex2d("specGlossTexture", "specGlossSampler"));
     }
     // ── Vertex template ─────────────────────────────────────────
     // When morph targets are active, the morph fragment's VR
@@ -217,7 +217,7 @@ out.worldTangent=(finalWorld*vec4<f32>(T_local,0.0)).xyz;
 out.worldBitangent=(finalWorld*vec4<f32>(B_local,0.0)).xyz;`
         : "";
 
-    const vertexTemplate = `/*SU*/
+    const _vertexTemplate = `/*SU*/
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*VH*/
@@ -382,7 +382,7 @@ return vec4<f32>(color,finalAlpha);`
     const baseColorUV = ext?.uvForBaseColor ?? "input.uv";
     const ormUV = ext?.uvForOrm ?? "input.uv";
 
-    const fragmentTemplate = `/*SU*/
+    const _fragmentTemplate = `/*SU*/
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*HF*/
@@ -431,12 +431,12 @@ ${alphaBlock}
 }`;
 
     return {
-        vertexTemplate,
-        fragmentTemplate,
-        baseMeshUboFields,
-        baseMaterialUboFields,
-        baseVertexAttributes,
-        baseVaryings,
-        baseBindings,
+        _vertexTemplate,
+        _fragmentTemplate,
+        _baseMeshUboFields,
+        _baseMaterialUboFields,
+        _baseVertexAttributes,
+        _baseVaryings,
+        _baseBindings,
     };
 }

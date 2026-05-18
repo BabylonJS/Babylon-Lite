@@ -68,6 +68,7 @@ const ext: GltfFeature = {
             // default IOR. Only write when the factor meaningfully differs.
             if (ior !== 1.5) {
                 out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
+                (out as { _hasReflExt?: boolean })._hasReflExt = true;
             }
             subsurface.refraction = { indexOfRefraction: ior };
         }
@@ -78,6 +79,7 @@ const ext: GltfFeature = {
             if (typeof eSp.specularFactor === "number") {
                 if (Math.abs(eSp.specularFactor - 1) > 1e-6) {
                     out.metallicF0Factor = eSp.specularFactor;
+                    (out as { _hasReflExt?: boolean })._hasReflExt = true;
                 } else {
                     delete out.metallicF0Factor;
                 }
@@ -85,6 +87,7 @@ const ext: GltfFeature = {
             if (Array.isArray(eSp.specularColorFactor) && eSp.specularColorFactor.length === 3) {
                 if (eSp.specularColorFactor[0] !== 1 || eSp.specularColorFactor[1] !== 1 || eSp.specularColorFactor[2] !== 1) {
                     out.metallicReflectanceColor = [eSp.specularColorFactor[0], eSp.specularColorFactor[1], eSp.specularColorFactor[2]];
+                    (out as { _hasReflExt?: boolean })._hasReflExt = true;
                 }
             }
             if (specTex) {
