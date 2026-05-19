@@ -126,7 +126,7 @@ function injectSlots(tpl: string, sorted: readonly ShaderFragment[], key: "_frag
     return tpl.replace(SLOT_RE, (_, slot: string) => {
         const parts: string[] = [];
         for (const f of sorted) {
-            const s = f[key] as Partial<Record<string, string>> | undefined;
+            const s = f[key] as Partial<Record<FragmentSlot | VertexSlot, string>> | undefined;
             if (s?.[slot as FragmentSlot | VertexSlot]) {
                 parts.push(s[slot as FragmentSlot | VertexSlot]!);
             }
@@ -280,6 +280,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     _vertexWGSL = _vertexWGSL.replace("/*VD*/", vDecls.join("\n"));
     _vertexWGSL = _vertexWGSL.replace("/*VP*/", vParams);
     _vertexWGSL = _vertexWGSL.replace("/*VH*/", vHelpers.join("\n"));
+    // These dynamic keys are reserved from Terser property mangling in bundle-scenes-core.ts.
     _vertexWGSL = injectSlots(_vertexWGSL, sorted, "_vertexSlots");
 
     let _fragmentWGSL = template._fragmentTemplate;

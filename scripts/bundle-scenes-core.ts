@@ -394,7 +394,23 @@ function terserPropertyManglePlugin(): Plugin {
                             // `_malloc`/`_free` are emscripten exports accessed on
                             // externally-loaded modules (e.g. draco_decoder.js) whose
                             // glue isn't in the bundle, so wasmReserved can't detect them.
-                            reserved: ["_pad", "_pad0", "_pad1", "_pad2", "_pad3", "_pad4", "_imgPad0", "_imgPad1", "_malloc", "_free", ...wasmReserved],
+                            // Shader slots are intentionally read through dynamic keys.
+                            // Terser cannot rewrite f[key], so keep the backing property names stable.
+                            reserved: [
+                                "_pad",
+                                "_pad0",
+                                "_pad1",
+                                "_pad2",
+                                "_pad3",
+                                "_pad4",
+                                "_imgPad0",
+                                "_imgPad1",
+                                "_malloc",
+                                "_free",
+                                "_vertexSlots",
+                                "_fragmentSlots",
+                                ...wasmReserved,
+                            ],
                         },
                     },
                     nameCache,
