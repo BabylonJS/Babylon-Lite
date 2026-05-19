@@ -1,9 +1,7 @@
 export const PBR_HAS_NORMAL_MAP = 1 << 0;
 export const PBR_HAS_EMISSIVE = 1 << 1;
 export const PBR_HAS_ENV = 1 << 2;
-export const PBR_HAS_SKELETON = 1 << 3;
 export const PBR_HAS_TONEMAP = 1 << 4;
-export const PBR_HAS_MORPH_TARGETS = 1 << 5;
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;
 export const PBR_HAS_DOUBLE_SIDED = 1 << 8;
@@ -12,15 +10,11 @@ export const PBR_HAS_METALLIC_REFLECTANCE_MAP = 1 << 10;
 export const PBR_HAS_REFLECTANCE_MAP = 1 << 11;
 export const PBR_HAS_USE_ALPHA_ONLY_MR = 1 << 12;
 export const PBR_HAS_OCCLUSION = 1 << 15;
-export const PBR_HAS_SKELETON_8 = 1 << 16;
 export const PBR_HAS_SPECULAR_AA = 1 << 17;
-export const PBR_HAS_THIN_INSTANCES = 1 << 18;
-export const PBR_HAS_INSTANCE_COLOR = 1 << 19;
 export const PBR_HAS_CLEARCOAT = 1 << 20;
 export const PBR_HAS_EMISSIVE_COLOR = 1 << 21;
 export const PBR_HAS_SHEEN = 1 << 22;
 export const PBR_HAS_SHEEN_TEXTURE = 1 << 23;
-export const PBR_HAS_RECEIVE_SHADOWS = 1 << 24;
 export const PBR_HAS_GAMMA_ALBEDO = 1 << 25;
 export const PBR_HAS_ANISOTROPY = 1 << 26;
 export const PBR_HAS_SUBSURFACE = 1 << 27;
@@ -52,12 +46,12 @@ export const PBR2_HAS_UV_TRANSFORM = 1 << 9;
 /** Material has non-default metallicF0Factor or metallicReflectanceColor
  *  without reflectance textures (factor-only KHR_materials_specular). */
 export const PBR2_HAS_REFLECTANCE_FACTORS = 1 << 10;
-/** Mesh has per-vertex COLOR_0 data. */
-export const PBR2_HAS_VERTEX_COLOR = 1 << 11;
-/** Mesh has a second UV set (TEXCOORD_1) and the material uses it for occlusion. */
-export const PBR2_HAS_UV2 = 1 << 12;
+/** Material samples occlusion from TEXCOORD_1 when the mesh provides UV2. */
+export const PBR2_HAS_UV2 = 1 << 11;
 /** Material has a sheen texture with a KHR_texture_transform. Sheen owns its
  *  own `sheenUVm`/`sheenUVt` UBO fields and applies txfUV locally. */
 export const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
 /** Material participates in the opaque-scene refraction prepass and must be authored in linear space. */
 export const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
+/** Render depth encoded as color for shadow-map generation/debug passes. */
+export const PBR2_GENERATE_DEPTH_FOR_SHADOWS = 1 << 15;

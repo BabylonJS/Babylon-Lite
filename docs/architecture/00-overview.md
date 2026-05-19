@@ -96,13 +96,17 @@ babylon-lite/
 │   │   │   ├── directional-light.ts # createDirectionalLight()
 │   │   │   └── spot-light.ts      # createSpotLight()
 │   │   ├── material/
+│   │   │   ├── material.ts          # Shared Material / MaterialView interfaces
+│   │   │   ├── material-view.ts     # createMaterialView(), source normalization
+│   │   │   ├── material-dirty.ts    # markMaterialUboDirty()
+│   │   │   ├── material-rebuild.ts  # rebuildMaterial()
 │   │   │   ├── pbr/               # PBR metallic-roughness material
 │   │   │   │   ├── pbr-material.ts      # PbrMaterialProps + createPbrMaterial()
 │   │   │   │   ├── pbr-template.ts      # PBR shader template (WGSL generation)
 │   │   │   │   ├── pbr-flags.ts         # PBR feature flag bitmask
 │   │   │   │   ├── pbr-pipeline.ts      # Pipeline cache + feature flags
-│   │   │   │   ├── pbr-renderable.ts    # buildPbrRenderables()
-│   │   │   │   ├── pbr-single-rebuild.ts     # Single-mesh pipeline rebuild
+│   │   │   │   ├── pbr-renderable.ts    # buildPbrRenderables() + single-mesh rebuild closure
+│   │   │   │   ├── shadow-depth-view.ts # PBR shadow/depth MaterialView helper
 │   │   │   │   ├── fragments/singlelight-wgsl.ts # Non-looping one-light WGSL
 │   │   │   │   ├── fragments/multilight-wgsl.ts  # Generic multi-light WGSL
 │   │   │   │   ├── background-material.ts    # Skybox + Ground material factories
@@ -121,10 +125,11 @@ babylon-lite/
 │   │   │   │       └── skeleton-fragment.ts
 │   │   │   └── standard/          # Standard Blinn-Phong material
 │   │   │       ├── standard-material.ts    # Types, factory, texture collection
+│   │   │       ├── standard-group-builder.ts # Dynamic imports + group builder
 │   │   │       ├── standard-template.ts    # Standard shader template (WGSL generation)
 │   │   │       ├── standard-pipeline.ts    # Pipeline cache + feature flags
-│   │   │       ├── standard-renderable.ts  # buildStandardMeshRenderables()
-│   │   │       ├── standard-single-rebuild.ts # Single-mesh pipeline rebuild
+│   │   │       ├── standard-renderable.ts  # buildStandardMeshRenderables() + single-mesh rebuild closure
+│   │   │       ├── shadow-depth-view.ts    # Standard shadow/depth MaterialView helper
 │   │   │       ├── skybox-cubemap.ts       # CubeMap skybox for StandardMaterial scenes
 │   │   │       └── fragments/             # Standard ShaderFragment modules
 │   │   │           ├── normal-map-fragment.ts
@@ -945,6 +950,10 @@ contribution = hemiColor * intensity
 
 **Pipeline caching**: Both materials cache pipelines per `(features, format, msaaSamples)` tuple. Meshes with the same features share a pipeline.
 
+**Material views**: A `MaterialView` is a lightweight pass-specific material-compatible object over a source material. It owns only material render-feature bits (`features`, optional `features2`), keeps a `source` pointer, and inherits textures, UBO data/version, samplers, alpha/culling state, extension data, and `_buildGroup` from the source through the prototype chain. Render tasks can pass a material view to `addMesh(mesh, { material })` to draw the same mesh through a different material feature set (for example shadow-depth generation) without mutating `mesh.material` or duplicating the material. Ordinary render paths read materials normally and do not retain material-view unwrap branches.
+
+**Material mutations**: Scalar/vector UBO-only changes call `markMaterialUboDirty(materialOrView)`, which increments the source material's `_uboVersion` so all renderables/views can observe the update independently. Feature/layout changes call `rebuildMaterial(scene, materialOrView)`, which rebuilds the affected mesh renderables and, by default, views created from the same source.
+
 **Bind group layout (scene group 0)**: binding 0 is the per-pass `SceneUniforms` UBO owned by `RenderTask`; binding 1 is the scene-owned `LightsUniforms` UBO.
 
 **Bind group layout (PBR group 1)**: Bindings assigned sequentially — mesh UBO (world + per-mesh light indices), baseColor, [normal], ORM, [emissive], [BRDF LUT, IBL cube]. Binding count varies by features.
@@ -963,6 +972,10 @@ interface DrawUpdateContext {
 interface Renderable {
     order: number;
     bind(engine, target): DrawBinding;
+}
+interface MaterialView {
+    source: Material;
+    _renderFeatures: { features: number; features2?: number };
 }
 interface DrawBinding {
     pipeline: GPURenderPipeline;
@@ -1334,111 +1347,111 @@ For production builds, switch to `"./dist/index.js"`.
 
 ## 10. File Manifest
 
-| File                                               | Purpose                                            | Lines (approx) |
-| -------------------------------------------------- | -------------------------------------------------- | -------------- |
-| `src/index.ts`                                     | Public API barrel                                  | 95             |
-| `src/math/types.ts`                                | Math type definitions                              | 45             |
-| `src/math/vec3.ts`                                 | Vec3 pure functions                                | 68             |
-| `src/math/mat4.ts`                                 | Mat4 pure functions                                | 185            |
-| `src/math/observable-vec3.ts`                      | Reactive Vec3 (position/target)                    | —              |
-| `src/math/observable-quat.ts`                      | Reactive Quat (rotation)                           | —              |
-| `src/engine/engine.ts`                             | WebGPU device + render loop                        | 150            |
-| `src/scene/scene.ts`                               | Scene context struct + add()                       | 130            |
-| `src/scene/scene-core.ts`                          | Core scene logic                                   | —              |
-| `src/scene/scene-camera.ts`                        | Camera management                                  | —              |
-| `src/scene/scene-remove.ts`                        | removeFromScene()                                  | —              |
-| `src/scene/set-parent.ts`                          | setParent() — parent/child transforms              | —              |
-| `src/scene/parentable.ts`                          | IWorldMatrixProvider, IParentable                  | —              |
-| `src/scene/transform-node.ts`                      | TransformNode factory + collectMeshes              | —              |
-| `src/scene/world-matrix-state.ts`                  | Version-based world matrix propagation             | —              |
-| `src/camera/camera.ts`                             | Camera interface                                   | —              |
-| `src/camera/arc-rotate.ts`                         | ArcRotateCamera                                    | 85             |
-| `src/camera/arc-rotate-controls.ts`                | Orbit controls                                     | 70             |
-| `src/camera/free-camera.ts`                        | FreeCamera                                         | —              |
-| `src/camera/free-camera-controls.ts`               | WASD/arrow controls                                | —              |
-| `src/light/light-base.ts`                          | Shared light base                                  | —              |
-| `src/light/types.ts`                               | LightBase type, LightBaseInternal, MAX_LIGHTS      | —              |
-| `src/light/light-matrix.ts`                        | Light view-projection for shadows                  | —              |
-| `src/light/hemispheric.ts`                         | Hemispheric light factory                          | 16             |
-| `src/light/point-light.ts`                         | Point light factory                                | 20             |
-| `src/light/directional-light.ts`                   | Directional light factory                          | 20             |
-| `src/light/spot-light.ts`                          | Spot light factory                                 | —              |
-| `src/material/pbr/pbr-material.ts`                 | PBR material props + factory                       | 25             |
-| `src/material/pbr/pbr-template.ts`                 | PBR shader template (WGSL gen)                     | 230            |
-| `src/material/pbr/pbr-flags.ts`                    | PBR feature flag bitmask                           | —              |
-| `src/material/pbr/pbr-pipeline.ts`                 | PBR pipeline cache                                 | 170            |
-| `src/material/pbr/pbr-renderable.ts`               | PBR renderable builder                             | 140            |
-| `src/material/pbr/pbr-single-rebuild.ts`           | Single-mesh PBR rebuild                            | —              |
-| `src/material/pbr/fragments/singlelight-wgsl.ts`   | Non-looping single-light PBR WGSL                  | —              |
-| `src/material/pbr/fragments/multilight-wgsl.ts`    | Generic multi-light PBR WGSL                       | —              |
-| `src/material/pbr/background-material.ts`          | Skybox + Ground material factories                 | 217            |
-| `src/material/pbr/background-renderable.ts`        | Background renderable builder                      | 96             |
-| `src/material/pbr/background-dds-skybox.ts`        | DDS environment skybox                             | —              |
-| `src/material/pbr/background-hdr-skybox.ts`        | HDR environment skybox                             | —              |
-| `src/material/pbr/background-ground.ts`            | Background ground plane                            | —              |
-| `src/material/pbr/fragments/`                      | PBR ShaderFragment modules                         | —              |
-| `src/material/standard/standard-material.ts`       | Standard types + factory                           | 93             |
-| `src/material/standard/standard-template.ts`       | Standard shader template (WGSL gen)                | 230            |
-| `src/material/standard/standard-pipeline.ts`       | Standard pipeline cache                            | 280            |
-| `src/material/standard/standard-renderable.ts`     | Standard renderable builder                        | 115            |
-| `src/material/standard/standard-single-rebuild.ts` | Single-mesh Standard rebuild                       | —              |
-| `src/material/standard/skybox-cubemap.ts`          | CubeMap skybox pipeline                            | 104            |
-| `src/material/standard/fragments/`                 | Standard ShaderFragment modules                    | —              |
-| `src/shader/shader-composer.ts`                    | ShaderFragment composer engine                     | —              |
-| `src/shader/fragment-types.ts`                     | ShaderFragment interface definitions               | —              |
-| `src/shader/ubo-layout.ts`                         | UBO layout helpers                                 | —              |
-| `src/shader/wgsl-helpers.ts`                       | WGSL code-gen utilities                            | —              |
-| `src/render/renderable.ts`                         | Renderable/PrePass/Updater interfaces              | 20             |
-| `src/render/scene-helpers.ts`                      | Shared helper utilities                            | —              |
-| `src/render/lights-ubo.ts`                         | Multi-light UBO packing                            | —              |
-| `src/mesh/mesh.ts`                                 | Mesh type and GPU upload                           | 80             |
-| `src/mesh/mesh-factories.ts`                       | High-level mesh factories                          | 50             |
-| `src/mesh/thin-instance.ts`                        | Thin instance CPU data + public API                | —              |
-| `src/mesh/thin-instance-gpu.ts`                    | Thin instance GPU sync                             | —              |
-| `src/skeleton/create-skeleton.ts`                  | Skeleton data creation from glTF                   | —              |
-| `src/skeleton/skeleton-updater.ts`                 | Joint matrix computation                           | —              |
-| `src/animation/animation-group.ts`                 | AnimationGroup creation                            | —              |
-| `src/animation/evaluate.ts`                        | Keyframe interpolation                             | —              |
-| `src/animation/types.ts`                           | Animation type definitions                         | —              |
-| `src/morph/create-morph-targets.ts`                | Morph target data + GPU texture                    | —              |
-| `src/picking/gpu-picker.ts`                        | GPU ID-pass picking                                | —              |
-| `src/picking/picking-pipeline.ts`                  | Picking render pipeline                            | —              |
-| `src/picking/picking-shader.ts`                    | Picking WGSL shaders                               | —              |
-| `src/picking/picking-helpers.ts`                   | getPickedNormal(), getPickedUV()                   | —              |
-| `src/picking/picking-info.ts`                      | PickingInfo type                                   | —              |
-| `src/picking/detailed-picking.ts`                  | CPU ray/triangle intersection                      | —              |
-| `src/picking/ray.ts`                               | Ray intersection math                              | —              |
-| `src/resource/gpu-pool.ts`                         | GPU buffer/texture pooling                         | —              |
-| `src/shadow/shadow-base.ts`                        | Shared shadow logic                                | —              |
-| `src/shadow/shadow-generator.ts`                   | ESM shadow generator                               | 150            |
-| `src/shadow/pcf-shadow-generator.ts`               | PCF shadow generator                               | —              |
-| `src/shadow/shadow-renderable.ts`                  | Shadow PrePassRenderable                           | 80             |
-| `src/frame-graph/task.ts`                          | Frame-graph task interface                         | —              |
-| `src/frame-graph/frame-graph.ts`                   | Ordered frame-graph task list                      | —              |
-| `src/frame-graph/frame-graph-actions.ts`           | Task insertion helpers                             | —              |
-| `src/frame-graph/render-pass-task.ts`              | Render-pass task, per-pass scene UBO, draw buckets | —              |
-| `src/texture/texture-2d.ts`                        | 2D texture loader                                  | 60             |
-| `src/texture/solid-texture.ts`                     | 1×1 solid-color factory                            | —              |
-| `src/texture/cube-texture.ts`                      | 6-face cube texture loader                         | 141            |
-| `src/texture/rtt.ts`                               | Render-target texture helper                       | —              |
-| `src/texture/ktx2-loader.ts`                       | KTX2/BasisU upload for `KHR_texture_basisu`        | —              |
-| `src/texture/rtt-mip.ts`                           | Mipmapped render-target texture helper             | —              |
-| `src/texture/record-mipmaps.ts`                    | Encoder-local mipmap recording                     | —              |
-| `src/texture/generate-mipmaps.ts`                  | GPU mipmap generation                              | —              |
-| `src/loader-gltf/load-gltf.ts`                     | GLB parser + GPU upload                            | 390            |
-| `src/loader-gltf/gltf-parser.ts`                   | glTF JSON parsing helpers                          | —              |
-| `src/loader-gltf/gltf-material.ts`                 | glTF material → PbrMaterialProps                   | —              |
-| `src/loader-gltf/gltf-ext-basisu.ts`               | `KHR_texture_basisu` dynamic feature               | —              |
-| `src/loader-gltf/gltf-animation.ts`                | glTF animation extraction                          | —              |
-| `src/loader-env/load-env.ts`                       | .env parser + RGBD decode                          | 240            |
-| `src/loader-env/load-dds-env.ts`                   | DDS environment loading                            | —              |
-| `src/loader-env/env-helpers.ts`                    | Environment helper utilities                       | —              |
-| `src/loader-env/rgbd-decode.ts`                    | Shared RGBD decode helpers                         | —              |
-| `src/loader-hdr/load-hdr.ts`                       | HDR environment pipeline                           | —              |
-| `src/loader-hdr/hdr-parser.ts`                     | RGBE file parser                                   | —              |
-| `src/loader-hdr/hdr-ibl-pipeline.ts`               | GPU compute IBL from HDR                           | —              |
-| `src/loader-babylon/load-babylon.ts`               | .babylon format parser                             | —              |
-| `src/loader-skybox/load-skybox.ts`                 | High-level skybox loader                           | —              |
-| `src/loader-skybox/skybox-renderable.ts`           | Skybox → Renderable builder                        | —              |
-| `lab/src/lite/scene1.ts`                           | Scene 1: BoomBox PBR                               | 44             |
-| `lab/src/lite/scene*.ts`                           | Scenes 1–112 (dev sandbox)                         | —              |
+| File | Purpose | Lines (approx) |
+|------|---------|------|
+| `src/index.ts` | Public API barrel | 95 |
+| `src/math/types.ts` | Math type definitions | 45 |
+| `src/math/vec3.ts` | Vec3 pure functions | 68 |
+| `src/math/mat4.ts` | Mat4 pure functions | 185 |
+| `src/math/observable-vec3.ts` | Reactive Vec3 (position/target) | — |
+| `src/math/observable-quat.ts` | Reactive Quat (rotation) | — |
+| `src/engine/engine.ts` | WebGPU device + render loop | 150 |
+| `src/scene/scene.ts` | Scene context struct + add() | 130 |
+| `src/scene/scene-core.ts` | Core scene logic | — |
+| `src/scene/scene-camera.ts` | Camera management | — |
+| `src/scene/scene-remove.ts` | removeFromScene() | — |
+| `src/scene/set-parent.ts` | setParent() — parent/child transforms | — |
+| `src/scene/parentable.ts` | IWorldMatrixProvider, IParentable | — |
+| `src/scene/transform-node.ts` | TransformNode factory + collectMeshes | — |
+| `src/scene/world-matrix-state.ts` | Version-based world matrix propagation | — |
+| `src/camera/camera.ts` | Camera interface | — |
+| `src/camera/arc-rotate.ts` | ArcRotateCamera | 85 |
+| `src/camera/arc-rotate-controls.ts` | Orbit controls | 70 |
+| `src/camera/free-camera.ts` | FreeCamera | — |
+| `src/camera/free-camera-controls.ts` | WASD/arrow controls | — |
+| `src/light/light-base.ts` | Shared light base | — |
+| `src/light/types.ts` | LightBase type, LightBaseInternal, MAX_LIGHTS | — |
+| `src/light/light-matrix.ts` | Light view-projection for shadows | — |
+| `src/light/hemispheric.ts` | Hemispheric light factory | 16 |
+| `src/light/point-light.ts` | Point light factory | 20 |
+| `src/light/directional-light.ts` | Directional light factory | 20 |
+| `src/light/spot-light.ts` | Spot light factory | — |
+| `src/material/pbr/pbr-material.ts` | PBR material props + factory | 25 |
+| `src/material/pbr/pbr-template.ts` | PBR shader template (WGSL gen) | 230 |
+| `src/material/pbr/pbr-flags.ts` | PBR feature flag bitmask | — |
+| `src/material/pbr/pbr-pipeline.ts` | PBR pipeline cache | 170 |
+| `src/material/pbr/pbr-renderable.ts` | PBR renderable builder + single-mesh rebuild closure | 140 |
+| `src/material/pbr/shadow-depth-view.ts` | PBR shadow/depth material view helper | — |
+| `src/material/pbr/fragments/singlelight-wgsl.ts` | Non-looping single-light PBR WGSL | — |
+| `src/material/pbr/fragments/multilight-wgsl.ts` | Generic multi-light PBR WGSL | — |
+| `src/material/pbr/background-material.ts` | Skybox + Ground material factories | 217 |
+| `src/material/pbr/background-renderable.ts` | Background renderable builder | 96 |
+| `src/material/pbr/background-dds-skybox.ts` | DDS environment skybox | — |
+| `src/material/pbr/background-hdr-skybox.ts` | HDR environment skybox | — |
+| `src/material/pbr/background-ground.ts` | Background ground plane | — |
+| `src/material/pbr/fragments/` | PBR ShaderFragment modules | — |
+| `src/material/standard/standard-material.ts` | Standard types + factory | 93 |
+| `src/material/standard/standard-template.ts` | Standard shader template (WGSL gen) | 230 |
+| `src/material/standard/standard-pipeline.ts` | Standard pipeline cache | 280 |
+| `src/material/standard/standard-renderable.ts` | Standard renderable builder + single-mesh rebuild closure | 115 |
+| `src/material/standard/shadow-depth-view.ts` | Standard shadow/depth material view helper | — |
+| `src/material/standard/skybox-cubemap.ts` | CubeMap skybox pipeline | 104 |
+| `src/material/standard/fragments/` | Standard ShaderFragment modules | — |
+| `src/shader/shader-composer.ts` | ShaderFragment composer engine | — |
+| `src/shader/fragment-types.ts` | ShaderFragment interface definitions | — |
+| `src/shader/ubo-layout.ts` | UBO layout helpers | — |
+| `src/shader/wgsl-helpers.ts` | WGSL code-gen utilities | — |
+| `src/render/renderable.ts` | Renderable/PrePass/Updater interfaces | 20 |
+| `src/render/scene-helpers.ts` | Shared helper utilities | — |
+| `src/render/lights-ubo.ts` | Multi-light UBO packing | — |
+| `src/mesh/mesh.ts` | Mesh type and GPU upload | 80 |
+| `src/mesh/mesh-factories.ts` | High-level mesh factories | 50 |
+| `src/mesh/thin-instance.ts` | Thin instance CPU data + public API | — |
+| `src/mesh/thin-instance-gpu.ts` | Thin instance GPU sync | — |
+| `src/skeleton/create-skeleton.ts` | Skeleton data creation from glTF | — |
+| `src/skeleton/skeleton-updater.ts` | Joint matrix computation | — |
+| `src/animation/animation-group.ts` | AnimationGroup creation | — |
+| `src/animation/evaluate.ts` | Keyframe interpolation | — |
+| `src/animation/types.ts` | Animation type definitions | — |
+| `src/morph/create-morph-targets.ts` | Morph target data + GPU texture | — |
+| `src/picking/gpu-picker.ts` | GPU ID-pass picking | — |
+| `src/picking/picking-pipeline.ts` | Picking render pipeline | — |
+| `src/picking/picking-shader.ts` | Picking WGSL shaders | — |
+| `src/picking/picking-helpers.ts` | getPickedNormal(), getPickedUV() | — |
+| `src/picking/picking-info.ts` | PickingInfo type | — |
+| `src/picking/detailed-picking.ts` | CPU ray/triangle intersection | — |
+| `src/picking/ray.ts` | Ray intersection math | — |
+| `src/resource/gpu-pool.ts` | GPU buffer/texture pooling | — |
+| `src/shadow/shadow-base.ts` | Shared shadow logic | — |
+| `src/shadow/shadow-generator.ts` | ESM shadow generator | 150 |
+| `src/shadow/pcf-shadow-generator.ts` | PCF shadow generator | — |
+| `src/shadow/shadow-renderable.ts` | Shadow PrePassRenderable | 80 |
+| `src/frame-graph/task.ts` | Frame-graph task interface | — |
+| `src/frame-graph/frame-graph.ts` | Ordered frame-graph task list | — |
+| `src/frame-graph/frame-graph-actions.ts` | Task insertion helpers | — |
+| `src/frame-graph/render-pass-task.ts` | Render-pass task, per-pass scene UBO, draw buckets | — |
+| `src/texture/texture-2d.ts` | 2D texture loader | 60 |
+| `src/texture/solid-texture.ts` | 1×1 solid-color factory | — |
+| `src/texture/cube-texture.ts` | 6-face cube texture loader | 141 |
+| `src/texture/rtt.ts` | Render-target texture helper | — |
+| `src/texture/ktx2-loader.ts` | KTX2/BasisU upload for `KHR_texture_basisu` | — |
+| `src/texture/rtt-mip.ts` | Mipmapped render-target texture helper | — |
+| `src/texture/record-mipmaps.ts` | Encoder-local mipmap recording | — |
+| `src/texture/generate-mipmaps.ts` | GPU mipmap generation | — |
+| `src/loader-gltf/load-gltf.ts` | GLB parser + GPU upload | 390 |
+| `src/loader-gltf/gltf-parser.ts` | glTF JSON parsing helpers | — |
+| `src/loader-gltf/gltf-material.ts` | glTF material → PbrMaterialProps | — |
+| `src/loader-gltf/gltf-ext-basisu.ts` | `KHR_texture_basisu` dynamic feature | — |
+| `src/loader-gltf/gltf-animation.ts` | glTF animation extraction | — |
+| `src/loader-env/load-env.ts` | .env parser + RGBD decode | 240 |
+| `src/loader-env/load-dds-env.ts` | DDS environment loading | — |
+| `src/loader-env/env-helpers.ts` | Environment helper utilities | — |
+| `src/loader-env/rgbd-decode.ts` | Shared RGBD decode helpers | — |
+| `src/loader-hdr/load-hdr.ts` | HDR environment pipeline | — |
+| `src/loader-hdr/hdr-parser.ts` | RGBE file parser | — |
+| `src/loader-hdr/hdr-ibl-pipeline.ts` | GPU compute IBL from HDR | — |
+| `src/loader-babylon/load-babylon.ts` | .babylon format parser | — |
+| `src/loader-skybox/load-skybox.ts` | High-level skybox loader | — |
+| `src/loader-skybox/skybox-renderable.ts` | Skybox → Renderable builder | — |
+| `lab/src/lite/scene1.ts` | Scene 1: BoomBox PBR | 44 |
+| `lab/src/lite/scene*.ts` | Scenes 1–112 (dev sandbox) | — |

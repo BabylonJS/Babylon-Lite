@@ -5,6 +5,7 @@ import { getTrilinearSampler } from "../resource/gpu-pool.js";
 import type { Texture2D } from "./texture-2d.js";
 
 export interface MipRenderTargetDescriptor extends Omit<RenderTargetDescriptor, "sampleCount" | "size"> {
+    readonly colorFormat: GPUTextureFormat;
     readonly size: { width: number; height: number };
     readonly mipLevelCount: number;
 }

@@ -202,37 +202,37 @@ export function createClearcoatFragment(features: number, features2: number, has
     const bindings: BindingDecl[] = [];
     if (hasIntensityMap) {
         bindings.push(
-            { name: "ccIntensityTexture", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "ccIntensitySampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "ccIntensityTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "ccIntensitySampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
     if (hasRoughnessMap) {
         bindings.push(
-            { name: "ccRoughnessTexture", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "ccRoughnessSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "ccRoughnessTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "ccRoughnessSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
     if (hasNormalMap) {
         bindings.push(
-            { name: "ccNormalTexture", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "ccNormalSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "ccNormalTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "ccNormalSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
 
     return {
-        id: suffix ? `clearcoat-${suffix}` : "clearcoat",
-        dependencies: deps.length > 0 ? deps : undefined,
+        _id: suffix ? `clearcoat-${suffix}` : "clearcoat",
+        _dependencies: deps.length > 0 ? deps : undefined,
 
-        uboFields: [
-            { name: "ccParams", type: "vec4<f32>" },
-            { name: "ccRefractionParams", type: "vec4<f32>" },
+        _uboFields: [
+            { _name: "ccParams", _type: "vec4<f32>" },
+            { _name: "ccRefractionParams", _type: "vec4<f32>" },
         ],
 
-        bindings,
+        _bindings: bindings,
 
-        helperFunctions: CC_HELPERS,
+        _helperFunctions: CC_HELPERS,
 
-        fragmentSlots: slots,
+        _fragmentSlots: slots,
     };
 }
 
@@ -281,16 +281,16 @@ export const clearcoatExt: PbrExt = {
         }
         return { f: PBR_HAS_CLEARCOAT, f2 };
     },
-    frag: (ctx) => createClearcoatFragment(ctx.features, ctx.features2, ctx.hasIbl, ctx.hasAnyNormal, ctx.hasSpecularAA),
+    frag: (ctx) => createClearcoatFragment(ctx._features, ctx._features2, ctx._hasIbl, ctx._hasAnyNormal, ctx._hasSpecularAA),
     writeUbo: writeClearcoatUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        const cc = (ctx.material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
+        const cc = (ctx._material as PbrMaterialProps).clearCoat as ClearCoatProps | undefined;
         if (!cc) {
             return b;
         }
         for (const [flag, key] of CC_TEX) {
             const tex = cc[key];
-            if ((ctx.features2 & flag) !== 0 && tex) {
+            if ((ctx._features2 & flag) !== 0 && tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });
             }

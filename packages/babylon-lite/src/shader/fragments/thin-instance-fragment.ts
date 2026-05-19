@@ -17,68 +17,68 @@ import type { ShaderFragment } from "../fragment-types.js";
 export function createThinInstanceFragment(hasInstanceColor: boolean): ShaderFragment {
     const attrs = [
         {
-            name: "world0",
-            type: "vec4<f32>",
-            gpuFormat: "float32x4" as GPUVertexFormat,
-            arrayStride: 64,
-            stepMode: "instance" as GPUVertexStepMode,
-            bufferGroup: "ti-matrix",
-            offset: 0,
+            _name: "world0",
+            _type: "vec4<f32>",
+            _gpuFormat: "float32x4" as GPUVertexFormat,
+            _arrayStride: 64,
+            _stepMode: "instance" as GPUVertexStepMode,
+            _bufferGroup: "ti-matrix",
+            _offset: 0,
         },
         {
-            name: "world1",
-            type: "vec4<f32>",
-            gpuFormat: "float32x4" as GPUVertexFormat,
-            arrayStride: 64,
-            stepMode: "instance" as GPUVertexStepMode,
-            bufferGroup: "ti-matrix",
-            offset: 16,
+            _name: "world1",
+            _type: "vec4<f32>",
+            _gpuFormat: "float32x4" as GPUVertexFormat,
+            _arrayStride: 64,
+            _stepMode: "instance" as GPUVertexStepMode,
+            _bufferGroup: "ti-matrix",
+            _offset: 16,
         },
         {
-            name: "world2",
-            type: "vec4<f32>",
-            gpuFormat: "float32x4" as GPUVertexFormat,
-            arrayStride: 64,
-            stepMode: "instance" as GPUVertexStepMode,
-            bufferGroup: "ti-matrix",
-            offset: 32,
+            _name: "world2",
+            _type: "vec4<f32>",
+            _gpuFormat: "float32x4" as GPUVertexFormat,
+            _arrayStride: 64,
+            _stepMode: "instance" as GPUVertexStepMode,
+            _bufferGroup: "ti-matrix",
+            _offset: 32,
         },
         {
-            name: "world3",
-            type: "vec4<f32>",
-            gpuFormat: "float32x4" as GPUVertexFormat,
-            arrayStride: 64,
-            stepMode: "instance" as GPUVertexStepMode,
-            bufferGroup: "ti-matrix",
-            offset: 48,
+            _name: "world3",
+            _type: "vec4<f32>",
+            _gpuFormat: "float32x4" as GPUVertexFormat,
+            _arrayStride: 64,
+            _stepMode: "instance" as GPUVertexStepMode,
+            _bufferGroup: "ti-matrix",
+            _offset: 48,
         },
     ];
 
     if (hasInstanceColor) {
         attrs.push({
-            name: "instanceColor",
-            type: "vec4<f32>",
-            gpuFormat: "float32x4" as GPUVertexFormat,
-            arrayStride: 16,
-            stepMode: "instance" as GPUVertexStepMode,
-            bufferGroup: "ti-color",
-            offset: 0,
+            _name: "instanceColor",
+            _type: "vec4<f32>",
+            _gpuFormat: "float32x4" as GPUVertexFormat,
+            _arrayStride: 16,
+            _stepMode: "instance" as GPUVertexStepMode,
+            _bufferGroup: "ti-color",
+            _offset: 0,
         });
     }
 
     return {
-        id: "thin-instance",
+        _id: "thin-instance",
 
-        vertexAttributes: attrs,
+        _vertexAttributes: attrs,
 
-        varyings: hasInstanceColor ? [{ name: "vInstanceColor", type: "vec4<f32>" }] : [],
+        _varyings: hasInstanceColor ? [{ _name: "vInstanceColor", _type: "vec4<f32>" }] : [],
 
-        vertexSlots: {
+        _vertexSlots: {
             VW: `let instanceWorld = mat4x4<f32>(world0, world1, world2, world3);\nfinalWorld = mesh.world * instanceWorld;`,
             VB: hasInstanceColor ? `out.vInstanceColor = instanceColor;` : "",
         },
 
-        fragmentSlots: hasInstanceColor
+        _fragmentSlots: hasInstanceColor
             ? {
                   AT: `baseColor *= input.vInstanceColor.rgb;\nalpha *= input.vInstanceColor.a;`,
               }

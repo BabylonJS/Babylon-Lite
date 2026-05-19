@@ -10,6 +10,7 @@
  */
 
 import { MAX_LIGHTS } from "../../light/types.js";
+import type { Varying } from "../../shader/fragment-types.js";
 
 const SHADOW_FACTORS_TYPE = `array<f32, ${MAX_LIGHTS}>`;
 const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
@@ -41,18 +42,14 @@ export interface ShadowEmit {
  *  Mutates `varyings` (pushes vPosFromLight_i + vDepthMetric_i per light) so
  *  buildVertexOut picks them up.
  */
-export function emitShadow(
-    shadowLights: readonly { lightIndex: number; shadowType: "esm" | "pcf" }[],
-    startBinding: number,
-    varyings: { name: string; type: string }[]
-): ShadowEmit {
+export function emitShadow(shadowLights: readonly { lightIndex: number; shadowType: "esm" | "pcf" }[], startBinding: number, varyings: Varying[]): ShadowEmit {
     const bindings: ShadowBinding[] = [];
     const wgslDecls: string[] = [];
     const bglEntries: GPUBindGroupLayoutEntry[] = [];
     for (const sl of shadowLights) {
         const suf = `_${sl.lightIndex}`;
-        varyings.push({ name: `vPosFromLight${suf}`, type: "vec4<f32>" });
-        varyings.push({ name: `vDepthMetric${suf}`, type: "f32" });
+        varyings.push({ _name: `vPosFromLight${suf}`, _type: "vec4<f32>" });
+        varyings.push({ _name: `vDepthMetric${suf}`, _type: "f32" });
     }
     const vertLines: string[] = [`let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`];
     const dispatchLines: string[] = [`var _sf = ${SHADOW_FACTORS_ONE};`];

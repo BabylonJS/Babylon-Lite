@@ -10,6 +10,7 @@
         "build:prod": "pnpm --filter babylon-lite build:prod",
         "build:lab-site": "tsx scripts/build-lab-site.ts",
         "build:bundle-scenes": "tsx scripts/build-bundle-scenes.ts",
+        "build:bundle-master-info": "tsx scripts/build-master-bundle-info.ts",
         "test": "pnpm build:bundle-scenes && pnpm test:parity",
         "test:watch": "vitest",
         "test:bundle-size": "npx playwright test tests/parity/bundle-size.spec.ts",

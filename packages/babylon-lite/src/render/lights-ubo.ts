@@ -18,7 +18,7 @@ import type { UboField } from "../shader/fragment-types.js";
 const _countU32 = new Uint32Array(1);
 const _countF32 = new Float32Array(_countU32.buffer);
 
-const MESH_LIGHT_INDEX_WORD_OFFSET = 20; // world matrix (16 u32) + lc (1 u32) + uniform padding (3 u32)
+const MSH_LIGHT_INDEX_WORD_OFFSET = 20; // world matrix (16 u32) + lc (1 u32) + uniform padding (3 u32)
 
 function meshLightIndexVec4Count(): number {
     return Math.ceil(MAX_LIGHTS / 4);
@@ -114,8 +114,8 @@ export function refreshSceneLightsUBO(engine: EngineContextInternal, scene: Scen
 
 /** @internal */
 export function appendMeshLightUboFields(fields: UboField[]): void {
-    fields.push({ name: "lc", type: "u32" });
-    fields.push({ name: "li", type: `array<vec4<u32>, ${meshLightIndexVec4Count()}>` });
+    fields.push({ _name: "lc", _type: "u32" });
+    fields.push({ _name: "li", _type: `array<vec4<u32>, ${meshLightIndexVec4Count()}>` });
 }
 
 /** @internal */
@@ -150,7 +150,7 @@ export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[]
         if (affectsMesh(light, mesh)) {
             single = pi;
             if (u32) {
-                u32[MESH_LIGHT_INDEX_WORD_OFFSET + count] = pi;
+                u32[MSH_LIGHT_INDEX_WORD_OFFSET + count] = pi;
             }
             count++;
         }
@@ -159,7 +159,7 @@ export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[]
     if (u32) {
         u32[16] = count;
         for (let i = count; i < MAX_LIGHTS; i++) {
-            u32[MESH_LIGHT_INDEX_WORD_OFFSET + i] = 0;
+            u32[MSH_LIGHT_INDEX_WORD_OFFSET + i] = 0;
         }
     }
     return count === 1 ? single + 1 : -count;

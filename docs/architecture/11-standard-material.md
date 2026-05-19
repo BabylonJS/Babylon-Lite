@@ -1,7 +1,7 @@
 # Module: Standard Material (Blinn-Phong)
 
 > Package path: `packages/babylon-lite/src/material/standard/`
-> Files: `standard-material.ts` (types/factory), `standard-template.ts` (shader template), `standard-pipeline.ts` (pipeline cache), `standard-renderable.ts` (renderable builder), `standard-single-rebuild.ts` (hot material swap)
+> Files: `standard-material.ts` (types/factory), `create-standard-material.ts` (factory), `standard-group-builder.ts` (dynamic imports), `standard-template.ts` (shader template), `standard-pipeline.ts` (pipeline cache), `standard-renderable.ts` (renderable builder and single-mesh rebuild closure), `standard-flags.ts` (feature flags and extension registry), `shadow-depth-view.ts` (pass-specific material view)
 
 ## Purpose
 
@@ -33,7 +33,7 @@ standard-material.ts (standardGroupBuilder):
   3. Passes fragment factories to buildStandardMeshRenderables()
 
 standard-renderable.ts (buildStandardMeshRenderables):
-  1. Groups meshes by feature bitmask
+  1. Resolves MaterialOrView to source material state + render feature bits
   2. Per group: builds fragment list from feature flags + fragment factories
   3. Calls composeStandardShader(features, fragments) → ComposedShader
   4. Calls getOrCreatePipeline() with composed shader
@@ -43,7 +43,7 @@ standard-renderable.ts (buildStandardMeshRenderables):
 
 `standard-material.ts` defines `standardGroupBuilder` (not exported), a `MeshGroupBuilder` function that dynamically imports `standard-renderable.js` and the needed fragment modules. This function is set as the `_buildGroup` field on every standard material created by `createStandardMaterial()`. At `startEngine()`, `scene.ts` groups meshes by builder identity so that all standard-material meshes are batched together for a single `buildStandardMeshRenderables()` call.
 
-`standardGroupBuilder` detects which features are needed across all meshes and conditionally imports only the required fragment modules, plus `thin-instance-gpu.ts` when thin instances are present. This ensures zero bundle-size impact for unused features. It also installs `_loadRebuildSingle = () => import("./standard-single-rebuild.js")` for hot material swapping.
+`standardGroupBuilder` detects which features are needed across all meshes and conditionally imports only the required fragment modules, plus `thin-instance-gpu.ts` when thin instances are present. This ensures zero bundle-size impact for unused features. It stores the `rebuildSingle` closure returned from `buildStandardMeshRenderables()` on `standardGroupBuilder._rebuildSingle` for material swaps, `rebuildMaterial()`, and per-pass material overrides.
 
 ## Dynamic Feature Flags
 
@@ -51,25 +51,28 @@ standard-renderable.ts (buildStandardMeshRenderables):
 | ------------------------ | --------- | ---------------------------- | ------------------------------------------- |
 | `HAS_DIFFUSE_TEXTURE`    | `1 << 0`  | `material.diffuseTexture`    | Diffuse texture sampling                    |
 | `HAS_EMISSIVE_TEXTURE`   | `1 << 1`  | `material.emissiveTexture`   | Emissive texture sampling                   |
-| `RECEIVE_SHADOWS`        | `1 << 2`  | `mesh.receiveShadows`        | ESM shadow map                              |
-| `HAS_BUMP_TEXTURE`       | `1 << 3`  | `material.bumpTexture`       | Cotangent-frame normal mapping              |
-| `HAS_SPECULAR_TEXTURE`   | `1 << 4`  | `material.specularTexture`   | Specular texture replaces specularColor     |
-| `HAS_AMBIENT_TEXTURE`    | `1 << 5`  | `material.ambientTexture`    | Ambient occlusion multiply                  |
-| `HAS_LIGHTMAP_TEXTURE`   | `1 << 6`  | `material.lightmapTexture`   | Additive lightmap                           |
-| `HAS_OPACITY_TEXTURE`    | `1 << 7`  | `material.opacityTexture`    | Alpha blending                              |
-| `LIGHTMAP_USES_UV2`      | `1 << 8`  | Lightmap on UV2              | UV2 attribute for lightmap                  |
-| `AMBIENT_USES_UV2`       | `1 << 9`  | Ambient on UV2               | UV2 attribute for ambient                   |
-| `DOUBLE_SIDED`           | `1 << 10` | `!material.backFaceCulling`  | `cullMode: 'none'`                          |
-| `DIFFUSE_USES_UV2`       | `1 << 11` | Diffuse on UV2               | UV2 attribute for diffuse                   |
-| `SPECULAR_USES_UV2`      | `1 << 12` | Specular on UV2              | UV2 attribute for specular                  |
-| `OPACITY_FROM_RGB`       | `1 << 13` | `material.opacityFromRGB`    | Opacity from RGB luminance                  |
-| `HAS_REFLECTION_TEXTURE` | `1 << 14` | `material.reflectionTexture` | Spherical/planar reflection                 |
-| `THIN_INSTANCES`         | `1 << 15` | `mesh.thinInstances`         | Instance matrix attributes + instanced draw |
-| `THIN_INSTANCE_COLOR`    | `1 << 16` | `mesh.thinInstances.colors`  | Per-instance color varying                  |
-| `DISABLE_LIGHTING`       | `1 << 17` | `material.disableLighting`   | Skip light loop, emissive-only output       |
-| `PCF_SHADOWS`            | `1 << 18` | PCF shadow generator         | PCF shadow sampling instead of ESM          |
+| `HAS_BUMP_TEXTURE`       | `1 << 2`  | `material.bumpTexture`       | Cotangent-frame normal mapping              |
+| `HAS_SPECULAR_TEXTURE`   | `1 << 3`  | `material.specularTexture`   | Specular texture replaces specularColor     |
+| `HAS_AMBIENT_TEXTURE`    | `1 << 4`  | `material.ambientTexture`    | Ambient occlusion multiply                  |
+| `HAS_LIGHTMAP_TEXTURE`   | `1 << 5`  | `material.lightmapTexture`   | Additive lightmap                           |
+| `HAS_OPACITY_TEXTURE`    | `1 << 6`  | `material.opacityTexture`    | Alpha/opacity texture                       |
+| `LIGHTMAP_USES_UV2`      | `1 << 7`  | Lightmap on UV2              | UV2 attribute for lightmap                  |
+| `AMBIENT_USES_UV2`       | `1 << 8`  | Ambient on UV2               | UV2 attribute for ambient                   |
+| `DOUBLE_SIDED`           | `1 << 9`  | `!material.backFaceCulling`  | `cullMode: 'none'`                          |
+| `DIFFUSE_USES_UV2`       | `1 << 10` | Diffuse on UV2               | UV2 attribute for diffuse                   |
+| `SPECULAR_USES_UV2`      | `1 << 11` | Specular on UV2              | UV2 attribute for specular                  |
+| `OPACITY_FROM_RGB`       | `1 << 12` | `material.opacityFromRGB`    | Opacity from RGB luminance                  |
+| `HAS_REFLECTION_TEXTURE` | `1 << 13` | `material.reflectionTexture` | Spherical/planar reflection                 |
+| `DISABLE_LIGHTING`       | `1 << 14` | `material.disableLighting`   | Skip light loop, emissive-only output       |
+| `PCF_SHADOWS`            | `1 << 15` | PCF shadow generator         | PCF shadow sampling instead of ESM          |
+| `MATERIAL_ALPHA_BLEND`   | `1 << 16` | `material.alpha < 1`         | Alpha blend pipeline state                  |
+| `HAS_CUBE_REFLECTION`    | `1 << 17` | `material.reflectionCubeTexture` | Cube reflection sampling                 |
+| `GENERATE_DEPTH_FOR_SHADOWS` | `1 << 18` | Shadow-depth material view | Depth encoded into color output             |
+| `HAS_DEPTH_EMISSIVE_TEXTURE` | `1 << 19` | Emissive texture has depth sample type | Depth texture emissive preview |
 | `NEEDS_UV`               | derived   | Any texture present          | UV vertex attribute                         |
 | `NEEDS_UV2`              | derived   | Any `*_USES_UV2` flag        | UV2 vertex attribute                        |
+
+Thin-instance and shadow-receiver state are mesh feature bits in `material/mesh-features.ts`, separate from Standard material render features.
 
 Pipelines are cached per `(features, format, msaaSamples, fragmentIds)` tuple.
 
@@ -81,7 +84,7 @@ Pipelines are cached per `(features, format, msaaSamples, fragmentIds)` tuple.
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 
 /** StandardMaterial properties — plain data. */
-export interface StandardMaterialProps {
+export interface StandardMaterialProps extends Material {
     diffuseColor: [number, number, number];
     alpha: number;
     specularColor: [number, number, number];
@@ -111,7 +114,6 @@ export interface StandardMaterialProps {
     uvScale: [number, number];
     backFaceCulling: boolean;
     disableLighting: boolean;
-    readonly _buildGroup: MeshGroupBuilder;
 }
 
 /** Fog configuration — plain data. */
@@ -128,6 +130,9 @@ export function createStandardMaterial(): StandardMaterialProps;
 
 /** Collect all non-null textures for acquire/release tracking. */
 export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[];
+
+/** Create a pass-specific shadow-depth material view over a Standard source material. */
+export function createStandardShadowDepthMaterialView(source: StandardMaterialProps): MaterialView;
 ```
 
 ### Pipeline (`standard-pipeline.ts`)
@@ -138,20 +143,19 @@ export const HAS_DIFFUSE_TEXTURE = 1 << 0;
 // ... (all flags as documented)
 export const PCF_SHADOWS = 1 << 18;
 
-export function computeFeatures(mat: StandardMaterialProps, receiveShadows: boolean): number;
-export function featuresToTemplateConfig(features: number): StandardTemplateConfig;
-export function composeStandardShader(features: number, fragments?: ShaderFragment[]): ComposedShader;
+export function _computeStandardMaterialFeatures(mat: StandardMaterialProps): number;
+export function featuresToTemplateConfig(features: number, meshFeatures?: number): StandardTemplateConfig;
+export function composeStandardShader(features: number, meshFeatures?: number, fragments?: ShaderFragment[]): ComposedShader;
 
-export function getOrCreatePipeline(
-    device: GPUDevice,
-    format: GPUTextureFormat,
-    msaaSamples: number,
+export function getOrCreateStandardBindings(
+    engine: EngineContextInternal,
     features: number,
-    composed: ComposedShader,
-    fragments?: ShaderFragment[]
-): PipelineVariant;
+    meshFeatures: number,
+    fragments?: ShaderFragment[],
+    shaderKey?: string
+): StandardShaderBindings;
 
-export function createDynamicMeshGPU(device: GPUDevice, variant: PipelineVariant, opts: DynamicMeshOpts): DynamicMeshGPU;
+export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline;
 
 export function clearStandardPipelineCache(): void;
 export function releaseStandardPipelineVariant(variant: PipelineVariant): void;
@@ -214,12 +218,13 @@ export interface StdFragmentFactories {
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult;
 ```
 
-### Single-Material Rebuild (`standard-single-rebuild.ts`)
+### Material Views and Rebuild
 
-```typescript
-/** Rebuild a single mesh renderable after material swap without rebuilding entire scene. */
-export function buildSingleStandardRenderable(scene: SceneContext, mesh: Mesh): Renderable;
-```
+Standard renderables accept `MaterialOrView`. A plain material computes/stores `_renderFeatures = { features: _computeStandardMaterialFeatures(mat) }`. A view uses `view._renderFeatures` exactly while reading all uniform/texture state from `view.source`.
+
+`createStandardShadowDepthMaterialView(source)` creates a view that ORs `GENERATE_DEPTH_FOR_SHADOWS` into the source material feature bits. This produces a Standard shader variant that writes depth into color, useful for shadow-depth RTT previews and pass-specific depth rendering.
+
+The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is stored on `standardGroupBuilder._rebuildSingle`. It is used by material swaps, `rebuildMaterial()`, and `RenderTask.addMesh(mesh, { material })` per-pass overrides.
 
 ### Default Material Values
 
@@ -423,27 +428,19 @@ Pipeline and composed shader caches are cleared on GPU device change.
 
 `buildStandardMeshRenderables(scene, meshes, factories)`:
 
-1. Groups meshes by feature bitmask (via `computeFeatures()`)
-2. For each group: builds fragment list from feature flags + `StdFragmentFactories` → `composeStandardShader(features, fragments)` → `getOrCreatePipeline()` → `createDynamicMeshGPU()`
-3. Creates one `Renderable` per group (order = 100, or 200 for transparent)
-4. Relies on `RenderTask` for the group-0 scene UBO and scene-owned lights UBO refresh
-5. Acquires textures for reference counting, registers cleanup disposables
+1. Resolves each mesh material or material view to source material state plus render features.
+2. Builds fragment lists from feature flags + `StdFragmentFactories`.
+3. Calls `composeStandardShader(features, meshFeatures, fragments)`.
+4. Creates/reuses sig-independent shader bindings and sig-specific pipelines.
+5. Creates one `Renderable` per mesh (order = `mesh.renderOrder ?? (isTransparent ? 200 : 100)`).
+6. Relies on `RenderTask` for the group-0 scene UBO and scene-owned lights UBO refresh.
+7. Acquires textures for reference counting, registers cleanup disposables.
 
 When thin instances are present, the draw function calls `tiSync(device, ti, pass, slot, hasInstanceColor)` to synchronize GPU buffers before each instanced draw, and uses `drawIndexed(indexCount, ti.count)` for instanced rendering.
 
-### Single-Material Rebuild (`standard-single-rebuild.ts`)
+### Single-Mesh Rebuild Closure
 
-`buildSingleStandardRenderable(scene, mesh)`:
-
-- Rebuilds a single mesh renderable after material swap without rebuilding the entire scene
-- Computes feature bitmask from the mesh's current material
-- Gets/creates pipeline variant and builds per-mesh GPU resources
-- Computes per-mesh light-selection indices and writes them to the mesh UBO
-- Builds per-light shadow UBOs if shadow generators exist
-- Relies on the active render-pass task for group-0 scene/lights binding
-- Acquires/releases textures for reference counting
-- Returns a `Renderable` that early-exits draw if mesh material changed again
-- Render order: `mesh.renderOrder ?? (isTransparent ? 200 : 100)`
+The `rebuildSingle(scene, mesh, materialOverride?)` closure returned from `buildStandardMeshRenderables()` rebuilds one mesh after a material swap or pass-specific override without rebuilding the entire scene. It accepts `MaterialOrView`, uses view render features with source material resources, computes material/mesh features and shader variant keys, creates/reuses shader bindings and pipelines, writes per-mesh light selections, builds optional shadow bind groups, and returns a `Renderable` that early-exits if the mesh material changed again unless it was built for an explicit override.
 
 ## Fragment Modules
 
@@ -640,8 +637,8 @@ registerScene(engine, scene)       → runs deferred builders and builds frame g
 - **`standard-material.ts`**: Imports `Texture2D` from texture-2d, `computeUboLayout` from ubo-layout, `createStandardTemplate` from standard-template.
 - **`standard-template.ts`**: Imports `ShaderTemplate`, `UboField`, `VertexAttribute`, `Varying`, `BindingDecl` from fragment-types, `WGSL_FOG` from wgsl-helpers.
 - **`standard-pipeline.ts`**: Imports `createStandardTemplate` from standard-template, `composeShader` from shader-composer, types from standard-material, shadow generator types, lights UBO helpers.
-- **`standard-renderable.ts`**: Imports pipeline functions from standard-pipeline, `ShaderFragment` from fragment-types, scene/engine/mesh/light types, renderable interface, resource pool helpers.
-- **`standard-single-rebuild.ts`**: Imports pipeline functions, material types, resource pool helpers.
+- **`standard-renderable.ts`**: Imports pipeline functions from standard-pipeline, `ShaderFragment` from fragment-types, scene/engine/mesh/light types, material-view types, renderable interface, resource pool helpers, and returns the single-mesh rebuild closure.
+- **`shadow-depth-view.ts`**: Imports `createMaterialView` and Standard feature flags to create depth-only material views without pulling the helper into ordinary Standard scenes.
 - **Fragment modules** (`fragments/`): Each imports only `ShaderFragment` (and optionally `BindingDecl`, `Varying`) from `fragment-types.js`.
 - **`thin-instance-gpu.ts`** (`src/mesh/`): Conditionally imported by `standardGroupBuilder` when thin instances are detected.
 - **Depended on by**: Application code (via `createStandardMaterial`), mesh factories, skybox-cubemap (shares scene UBO layout).
@@ -673,8 +670,8 @@ registerScene(engine, scene)       → runs deferred builders and builds frame g
 | `src/material/standard/standard-material.ts`                 | ~299 lines | Types (StandardMaterialProps, FogConfig), factory, collectStdBoundTextures, standardGroupBuilder with dynamic fragment imports                                                          |
 | `src/material/standard/standard-template.ts`                 | ~299 lines | `StandardTemplateConfig` + `createStandardTemplate()` — builds `ShaderTemplate` with Blinn-Phong lighting, fog, slot markers                                                            |
 | `src/material/standard/standard-pipeline.ts`                 | ~503 lines | Feature flags, `computeFeatures()`, `composeStandardShader()`, `getOrCreatePipeline()`, `createDynamicMeshGPU()`, `writeMaterialUBO()`, pipeline/shader caches, PCF shadow registration |
-| `src/material/standard/standard-renderable.ts`               | ~313 lines | `StdFragmentFactories` interface, `buildStandardMeshRenderables()` — groups meshes, composes shaders with fragments, creates Renderables                                                |
-| `src/material/standard/standard-single-rebuild.ts`           | ~140 lines | `buildSingleStandardRenderable()` — hot material swap for a single mesh                                                                                                                 |
+| `src/material/standard/standard-renderable.ts`               | ~313 lines | `StdFragmentFactories` interface, `buildStandardMeshRenderables()` — composes shaders with fragments, creates Renderables, returns single-mesh rebuild closure                          |
+| `src/material/standard/shadow-depth-view.ts`                 | ~16 lines  | `createStandardShadowDepthMaterialView()` — pass-specific depth material view helper                                                                                                    |
 | `src/material/standard/fragments/normal-map-fragment.ts`     | ~33 lines  | Cotangent-frame bump/normal mapping fragment (`AC` slot)                                                                                                                                |
 | `src/material/standard/fragments/std-emissive-fragment.ts`   | ~17 lines  | Emissive texture sampling fragment (`AT` slot)                                                                                                                                          |
 | `src/material/standard/fragments/std-specular-fragment.ts`   | ~18 lines  | Specular texture sampling fragment (`AT` slot, UV/UV2 aware)                                                                                                                            |

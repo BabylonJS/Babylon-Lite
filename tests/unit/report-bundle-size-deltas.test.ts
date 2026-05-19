@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = resolve(__dirname, "../..");
 const SCRIPT = resolve(ROOT, "scripts/report-bundle-size-deltas.ts");
+const TSX = resolve(ROOT, "node_modules/tsx/dist/cli.mjs");
 
 const tempDirs: string[] = [];
 
@@ -32,7 +33,7 @@ function runReporter(options: RunReporterOptions): { stdout: string; comment: st
     }
     writeFileSync(sceneConfigPath, JSON.stringify(options.scenes ?? []), "utf-8");
 
-    const stdout = execFileSync("npx", ["tsx", SCRIPT], {
+    const stdout = execFileSync(process.execPath, [TSX, SCRIPT], {
         cwd: ROOT,
         encoding: "utf-8",
         env: {

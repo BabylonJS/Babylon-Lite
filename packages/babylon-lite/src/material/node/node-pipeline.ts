@@ -100,14 +100,14 @@ function buildVertexIn(state: NodeBuildState): string {
     if (state.vertexAttributes.length === 0) {
         return `struct VertexIn {};`;
     }
-    const lines = state.vertexAttributes.map((a, i) => `    @location(${i}) ${a.name}: ${a.type},`);
+    const lines = state.vertexAttributes.map((a, i) => `    @location(${i}) ${a._name}: ${a._type},`);
     return `struct VertexIn {\n${lines.join("\n")}\n};`;
 }
 
 function buildVertexOut(state: NodeBuildState): string {
     const lines = [`    @builtin(position) position: vec4<f32>,`];
     state.varyings.forEach((v, i) => {
-        lines.push(`    @location(${i}) ${v.name}: ${v.type},`);
+        lines.push(`    @location(${i}) ${v._name}: ${v._type},`);
     });
     return `struct VertexOut {\n${lines.join("\n")}\n};`;
 }
@@ -127,9 +127,9 @@ function buildNodeUbo(state: NodeBuildState, binding: number): { struct: string;
         return null;
     }
     const layout = computeUboLayout(state.nodeUboFields);
-    const lines = state.nodeUboFields.map((f) => `    ${f.name}: ${f.type},`);
+    const lines = state.nodeUboFields.map((f) => `    ${f._name}: ${f._type},`);
     const struct = `struct NodeU {\n${lines.join("\n")}\n};\n@group(1) @binding(${binding}) var<uniform> nodeU: NodeU;`;
-    return { struct, size: layout.totalBytes, offsets: layout.offsets };
+    return { struct, size: layout._totalBytes, offsets: layout._offsets };
 }
 
 function indent(body: string): string {
@@ -390,9 +390,9 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 
     // Vertex buffers: one GPUVertexBufferLayout per declared attribute, each at location=i.
     const vertexBuffers: GPUVertexBufferLayout[] = state.vertexAttributes.map((a, i) => ({
-        arrayStride: a.arrayStride,
-        stepMode: a.stepMode ?? "vertex",
-        attributes: [{ format: a.gpuFormat, offset: a.offset ?? 0, shaderLocation: i }],
+        arrayStride: a._arrayStride,
+        stepMode: a._stepMode ?? "vertex",
+        attributes: [{ format: a._gpuFormat, offset: a._offset ?? 0, shaderLocation: i }],
     }));
 
     const shaderModule = device.createShaderModule({ label: "node-material", code: wgsl });

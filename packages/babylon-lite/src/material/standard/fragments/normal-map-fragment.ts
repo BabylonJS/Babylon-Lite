@@ -21,16 +21,16 @@ const STAGE_FRAGMENT = 0x2;
  */
 export function createNormalMapFragment(): ShaderFragment {
     return {
-        id: "normal-map",
+        _id: "normal-map",
 
-        bindings: [
-            { name: "bT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "bS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        _bindings: [
+            { _name: "bT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "bS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
 
-        helperFunctions: WGSL_PERTURB_NORMAL,
+        _helperFunctions: WGSL_PERTURB_NORMAL,
 
-        fragmentSlots: {
+        _fragmentSlots: {
             AC: `normalW = perturbNormal(input.vn, input.vp, input.vu, mat.bs);`,
         },
     };

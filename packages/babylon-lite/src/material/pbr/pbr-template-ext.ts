@@ -65,8 +65,8 @@ export function createPbrTemplateExt(flags: {
 
     // ── UV transform helpers ────────────────────────────────────
     const uvTransformUboFields = (name: string): UboField[] => [
-        { name: `${name}UVm`, type: "vec4<f32>" },
-        { name: `${name}UVt`, type: "vec4<f32>" },
+        { _name: `${name}UVm`, _type: "vec4<f32>" },
+        { _name: `${name}UVt`, _type: "vec4<f32>" },
     ];
     const uvVarName = (name: string) => (hasUvTransform ? `${name}UV` : "input.uv");
     const uvTransformDecl = (name: string) => (hasUvTransform ? `let ${name}UV = txfUV(input.uv, material.${name}UVm, material.${name}UVt.xy);\n` : "");
@@ -80,19 +80,19 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     // ── Extra vertex attributes ────────────────────────────────
     const extraVertexAttributes: VertexAttribute[] = [];
     if (hasUv2) {
-        extraVertexAttributes.push({ name: "uv2", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+        extraVertexAttributes.push({ _name: "uv2", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
     if (hasVertexColor) {
-        extraVertexAttributes.push({ name: "color", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 });
+        extraVertexAttributes.push({ _name: "color", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 });
     }
 
     // ── Extra varyings ──────────────────────────────────────────
     const extraVaryings: Varying[] = [];
     if (hasUv2) {
-        extraVaryings.push({ name: "uv2", type: "vec2<f32>" });
+        extraVaryings.push({ _name: "uv2", _type: "vec2<f32>" });
     }
     if (hasVertexColor) {
-        extraVaryings.push({ name: "vColor", type: "vec3<f32>" });
+        extraVaryings.push({ _name: "vColor", _type: "vec3<f32>" });
     }
 
     // ── Extra material UBO fields ────────────────────────────────
@@ -115,8 +115,8 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const extraBindings: BindingDecl[] = [];
     if (hasOcclusionUv2) {
         extraBindings.push(
-            { name: "occlusionTexture", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "occlusionSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "occlusionTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "occlusionSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
 

@@ -164,9 +164,9 @@ function bridgeVarying(state: NodeBuildState, varyingName: string, value: NodeEx
     if (from !== "vertex" || to !== "fragment") {
         throw new Error("NodeMaterial: only vertex->fragment varyings are supported");
     }
-    const already = state.varyings.find((v) => v.name === varyingName);
+    const already = state.varyings.find((v) => v._name === varyingName);
     if (!already) {
-        state.varyings.push({ name: varyingName, type: WGSL[value.type] });
+        state.varyings.push({ _name: varyingName, _type: WGSL[value.type] });
         state.vertex.body.push(`out.${varyingName} = ${value.expr};`);
     }
 }

@@ -1,18 +1,18 @@
 /**
  * Render-to-texture helper — eager allocation of a render target's GPU
- * textures so the color attachment can be exposed as a sampled texture
- * (e.g. wired as a material's diffuse texture) BEFORE the frame graph is
- * built.
+ * textures so the color attachment, or depth attachment for depth-only targets,
+ * can be exposed as a sampled texture BEFORE the frame graph is built.
  */
 
 import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
-import { getBilinearSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler, getNearestSampler } from "../resource/gpu-pool.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
 import { createRenderTarget, buildRenderTarget } from "../engine/render-target.js";
 import type { Texture2D } from "./texture-2d.js";
 
 /** Eagerly allocate a render target's GPU textures and return a sampled-texture
- *  view of the color attachment. Marks the RT so `buildRenderTarget` won't realloc.
+ *  view of the color attachment, or the depth attachment for depth-only targets.
+ *  Marks the RT so `buildRenderTarget` won't realloc.
  *
  *  The descriptor's size MUST be fixed (not `"canvas"`) because the canvas size
  *  may change before the frame graph builds, which would invalidate the eagerly-
@@ -26,7 +26,19 @@ export function createRenderTargetTexture(engine: EngineContext, descriptor: Ren
     buildRenderTarget(rt, eng);
     rt._eager = true;
     if (!rt._colorTexture || !rt._colorView) {
-        throw new Error("createRenderTargetTexture: render target has no color texture (resolveToSwapchain with sampleCount=1?).");
+        if (!rt._depthTexture) {
+            throw new Error("createRenderTargetTexture: render target has no color or depth texture (resolveToSwapchain with sampleCount=1?).");
+        }
+        const texture: Texture2D = {
+            texture: rt._depthTexture,
+            view: rt._depthTexture.createView({ aspect: "depth-only" }),
+            sampler: getNearestSampler(eng),
+            width: descriptor.size.width,
+            height: descriptor.size.height,
+            invertY: false,
+            _sampleType: "depth",
+        };
+        return { rt, texture };
     }
     const texture: Texture2D = {
         texture: rt._colorTexture,

@@ -56,25 +56,26 @@ function typeInfo(type: WgslScalarType): TypeInfo {
  * and the WGSL struct body string (fields only, no `struct Name {}` wrapper).
  */
 export function computeUboLayout(fields: readonly UboField[]): UboSpec {
-    const offsets = new Map<string, number>();
+    const _offsets = new Map<string, number>();
     const lines: string[] = [];
     let cursor = 0;
 
     for (const field of fields) {
-        const info = typeInfo(field.type);
+        const info = typeInfo(field._type);
 
         cursor = alignUp(cursor, info.align);
-        offsets.set(field.name, cursor);
-        lines.push(`${field.name}: ${field.type},`);
+        _offsets.set(field._name, cursor);
+        lines.push(`${field._name}: ${field._type},`);
         cursor += info.size;
     }
 
     // Round total size up to 16-byte boundary (required for uniform buffers)
-    const totalBytes = fields.length > 0 ? alignUp(cursor, 16) : 0;
+    const _totalBytes = fields.length > 0 ? alignUp(cursor, 16) : 0;
+    const _structBody = lines.join("\n");
 
     return {
-        totalBytes,
-        offsets,
-        structBody: lines.join("\n"),
+        _totalBytes,
+        _offsets,
+        _structBody,
     };
 }

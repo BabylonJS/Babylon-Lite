@@ -11,20 +11,16 @@ import type { MeshInternal } from "../../mesh/mesh.js";
 import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 import type { StandardMaterialProps } from "./standard-material.js";
+import { _computeStandardMaterialFeatures, _standardShaderVariantKey } from "./standard-material.js";
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import {
-    computeFeatures,
-    getOrCreateStandardBindings,
-    getOrCreateStandardPipeline,
-    createStandardMeshBindGroup,
-    clearStandardPipelineCache,
-    writeStdMaterialData,
-} from "./standard-pipeline.js";
-import { NEEDS_UV, NEEDS_UV2, RECEIVE_SHADOWS, THIN_INSTANCES, THIN_INSTANCE_COLOR, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
+import { getOrCreateStandardBindings, getOrCreateStandardPipeline, createStandardMeshBindGroup, clearStandardPipelineCache, writeStdMaterialData } from "./standard-pipeline.js";
+import { GENERATE_DEPTH_FOR_SHADOWS, NEEDS_UV, NEEDS_UV2, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import type { Material, MaterialRenderFeatures } from "../material.js";
+import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
  *  every Standard renderable since binding updates are single-threaded per frame. */
@@ -59,20 +55,17 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     const hasSomeShadows = shadowLights.length > 0;
 
     // All receiving meshes in this build share the same shadow generators,
-    // so keying the shadow BG by `bindings.shadowBGL` alone is correct.
+    // so keying the shadow BG by `bindings._shadowBGL` alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on standardGroupBuilder._rebuildSingle).
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: unknown): Renderable => {
-        const mat = (materialOverride ?? mesh.material) as StandardMaterialProps;
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+        const materialInput = (materialOverride ?? mesh.material) as StandardMaterialProps;
+        const mat = materialInput;
+        const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        let features = computeFeatures(mat, mesh.receiveShadows);
-        if (mesh.thinInstances) {
-            features |= THIN_INSTANCES;
-        }
-        if (mesh.thinInstances?.colors) {
-            features |= THIN_INSTANCE_COLOR;
-        }
+        const meshFeatures = _computeMeshFeatures(mesh, mesh.receiveShadows && hasSomeShadows);
+        const features = renderFeatures.features;
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
         for (const ext of _getStdExts().values()) {
@@ -83,19 +76,21 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 }
             }
         }
-        if (features & RECEIVE_SHADOWS && shadowFragment && hasSomeShadows) {
+        let shaderKey = "";
+        if (meshFeatures & MSH_RECEIVE_SHADOWS && shadowFragment && hasSomeShadows) {
             const slots = shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
+            shaderKey = _standardShaderVariantKey(slots);
             frags.push(shadowFragment(slots));
         }
-        if (features & THIN_INSTANCES && tiFragment) {
-            const hasColor = !!(features & THIN_INSTANCE_COLOR);
+        if (meshFeatures & MSH_HAS_THIN_INSTANCES && tiFragment) {
+            const hasColor = !!(meshFeatures & MSH_HAS_INSTANCE_COLOR);
             const tiFrag = tiFragment(hasColor);
             if (hasColor) {
                 // Standard applies instance color to final color (BC), not to baseColor (AT) like PBR.
-                const { fragmentSlots: _fragmentSlots, ...rest } = tiFrag;
+                const { _fragmentSlots: _fragmentSlots, ...rest } = tiFrag;
                 frags.push({
                     ...rest,
-                    fragmentSlots: {
+                    _fragmentSlots: {
                         BC: `color = vec4<f32>(color.rgb * input.vInstanceColor.rgb, color.a * input.vInstanceColor.a);`,
                     },
                 });
@@ -103,11 +98,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 frags.push(tiFrag);
             }
         }
-        const bindings = getOrCreateStandardBindings(engine, features, frags);
+        const bindings = getOrCreateStandardBindings(engine, features, meshFeatures, frags, shaderKey);
 
-        const meshShadowGens = mesh.receiveShadows ? shadowLights.map((sl) => sl.gen) : [];
+        const meshShadowGens = meshFeatures & MSH_RECEIVE_SHADOWS ? shadowLights.map((sl) => sl.gen) : [];
 
-        const meshUboData = new Float32Array(bindings.composed.meshUboSpec.totalBytes / 4);
+        const meshUboData = new Float32Array(bindings._composed._meshUboSpec._totalBytes / 4);
         meshUboData.set(mesh.worldMatrix, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
         const meshUBO = createUniformBuffer(engine, meshUboData);
@@ -119,8 +114,8 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
-        if (meshShadowGens.length > 0 && bindings.shadowBGL) {
-            let cached = shadowBGCache.get(bindings.shadowBGL);
+        if (meshShadowGens.length > 0 && bindings._shadowBGL) {
+            let cached = shadowBGCache.get(bindings._shadowBGL);
             if (!cached) {
                 const entries: GPUBindGroupEntry[] = [];
                 let b = 0;
@@ -129,19 +124,19 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                     entries.push({ binding: b++, resource: sg.blurredSampler });
                     entries.push({ binding: b++, resource: { buffer: sg.shadowUBO } });
                 }
-                cached = device.createBindGroup({ layout: bindings.shadowBGL, entries });
-                shadowBGCache.set(bindings.shadowBGL, cached);
+                cached = device.createBindGroup({ layout: bindings._shadowBGL, entries });
+                shadowBGCache.set(bindings._shadowBGL, cached);
             }
             shadowBindGroup = cached;
         }
 
         const needsUV = (features & NEEDS_UV) !== 0;
         const needsUV2 = (features & NEEDS_UV2) !== 0;
-        const hasShadow = (features & RECEIVE_SHADOWS) !== 0;
+        const hasShadow = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
         const hasOpacityTexture = (features & HAS_OPACITY_TEXTURE) !== 0;
-        const hasThinInstances = (features & THIN_INSTANCES) !== 0;
-        const hasInstanceColor = (features & THIN_INSTANCE_COLOR) !== 0;
-        const isTransparent = hasOpacityTexture || mat.alpha < 1;
+        const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
+        const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
+        const isTransparent = (features & GENERATE_DEPTH_FOR_SHADOWS) === 0 && (hasOpacityTexture || mat.alpha < 1);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {
@@ -165,9 +160,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 _lastWorldVersion = mesh.worldMatrixVersion;
                 _lastLightsCount = s.lights.length;
             }
-            const m = mat as any;
-            if (m._uboDirty) {
-                m._uboDirty = false;
+            const uboVersion = mat._uboVersion;
+            if (uboVersion !== _lastUboVersion) {
+                _lastUboVersion = uboVersion;
                 _stdMatScratch.fill(0);
                 writeStdMaterialData(_stdMatScratch, mat, textureLevel);
                 device.queue.writeBuffer(materialUBO, 0, _stdMatScratch.buffer, 0, 96);
@@ -177,7 +172,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
             // For per-pass material overrides, skip the mesh.material === mat guard
             // because the override material is intentionally not the mesh's current one.
-            if (!isOverride && mesh.material !== mat) {
+            if (!isOverride && mesh.material !== materialInput) {
                 return 0;
             }
             const g = (mesh as MeshInternal)._gpu;
@@ -222,6 +217,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 };
             },
         };
+        let _lastUboVersion = mat._uboVersion;
         return r;
     };
 

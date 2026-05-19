@@ -116,7 +116,7 @@ function bindSystem(renderable: BillboardRenderableInternal, engine: EngineConte
     const pipeline = getOrCreateBillboardPipeline(
         engine,
         renderable._pipelineCache,
-        target.colorFormat,
+        target.colorFormat!,
         sampleCount,
         renderable._system,
         target.depthStencilFormat,

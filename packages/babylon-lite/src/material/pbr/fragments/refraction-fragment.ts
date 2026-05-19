@@ -22,7 +22,7 @@
  * Maps BJS `SubSurfaceConfiguration.refraction`.
  */
 
-import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import type { ShaderFragment, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR2_HAS_REFRACTION, PBR2_HAS_VOLUME } from "../pbr-flag-bits.js";
@@ -74,17 +74,17 @@ color = finalIrradiance * refrOpacity
  * @param hasVolume Whether KHR_materials_volume data is present (Beer-Lambert absorption).
  */
 export function createRefractionFragment(hasVolume: boolean): ShaderFragment {
-    const uboFields: { name: string; type: "vec4<f32>" }[] = [{ name: "refractionParams", type: "vec4<f32>" as const }];
+    const uboFields: UboField[] = [{ _name: "refractionParams", _type: "vec4<f32>" as const }];
     if (hasVolume) {
-        uboFields.push({ name: "volumeParams", type: "vec4<f32>" as const });
+        uboFields.push({ _name: "volumeParams", _type: "vec4<f32>" as const });
     }
     return {
-        id: "refraction",
+        _id: "refraction",
         // Must run after IBL so finalIrradiance/finalRadianceScaled/finalSpecularScaled
         // are in scope. The IBL AI slot also produces `cubemapDim` + `maxLod` + `rotateY`.
-        dependencies: ["ibl"],
-        uboFields,
-        fragmentSlots: { AI: makeRefractionMod(hasVolume) },
+        _dependencies: ["ibl"],
+        _uboFields: uboFields,
+        _fragmentSlots: { AI: makeRefractionMod(hasVolume) },
     };
 }
 
@@ -137,10 +137,10 @@ export const refractionExt: PbrExt = {
         return { f: 0, f2 };
     },
     frag(ctx) {
-        if (!(ctx.features2 & PBR2_HAS_REFRACTION)) {
+        if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
             return null;
         }
-        return createRefractionFragment((ctx.features2 & PBR2_HAS_VOLUME) !== 0);
+        return createRefractionFragment((ctx._features2 & PBR2_HAS_VOLUME) !== 0);
     },
     writeUbo(data, mat, offsets) {
         if (offsets.has("refractionParams")) {

@@ -5,12 +5,12 @@ import { HAS_CUBE_REFLECTION } from "../standard-flags.js";
 
 export function createStdCubeReflectionFragment(): ShaderFragment {
     return {
-        id: "std-cube-reflection",
-        bindings: [
-            { name: "cRT", type: { kind: "texture", textureType: "texture_cube<f32>" }, visibility: 0x2 },
-            { name: "cRS", type: { kind: "sampler", samplerType: "sampler" }, visibility: 0x2 },
+        _id: "std-cube-reflection",
+        _bindings: [
+            { _name: "cRT", _type: { _kind: "texture", _textureType: "texture_cube<f32>" }, _visibility: 0x2 },
+            { _name: "cRS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: 0x2 },
         ],
-        fragmentSlots: {
+        _fragmentSlots: {
             AD: `{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
         },
     };

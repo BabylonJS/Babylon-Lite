@@ -1520,6 +1520,10 @@
                 background: #1f3a5f;
                 color: #58a6ff;
             }
+            .bf-toolbar-group button:disabled {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
             .bf-toolbar-check {
                 display: inline-flex;
                 align-items: center;
@@ -1626,6 +1630,10 @@
                 background: #1f3a5f;
                 color: #58a6ff;
             }
+            .bf-badge-missing {
+                background: #3a1a1a;
+                color: #f85149;
+            }
             .bf-modules {
                 list-style: none;
                 margin: 0;
@@ -1656,6 +1664,22 @@
             .bf-mod-bytes {
                 color: #8b949e;
                 white-space: nowrap;
+            }
+            .bf-size-diff {
+                display: inline-block;
+                min-width: 4.4rem;
+                margin-right: 0.45rem;
+                text-align: right;
+                font-weight: 700;
+            }
+            .bf-size-diff.increase {
+                color: #f85149;
+            }
+            .bf-size-diff.decrease {
+                color: #3fb950;
+            }
+            .bf-size-diff.neutral {
+                color: #8b949e;
             }
             .bf-mod-exports {
                 display: flex;
@@ -6050,6 +6074,8 @@
                 var state = {
                     info: null,
                     manifest: null,
+                    source: "local",
+                    sources: {},
                     runtimeSet: {},
                     hasRuntime: false,
                     filter: "",
@@ -6057,12 +6083,16 @@
                     sortBy: "size", // "size" | "path"
                     sortDir: "desc", // "asc" | "desc"
                     hideUnloaded: true,
+                    masterLookups: null,
                 };
 
                 function fmtBytes(n) {
                     if (n < 1024) return n + " B";
-                    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+                    if (n < 1024 * 1024) return (n / 1024).toFixed(2) + " KB";
                     return (n / (1024 * 1024)).toFixed(2) + " MB";
+                }
+                function fmtDeltaBytes(n) {
+                    return (n > 0 ? "+" : "-") + fmtBytes(Math.abs(n));
                 }
                 function modulePrefix(id) {
                     if (id.indexOf("packages/babylon-lite/") === 0) return "lite";
@@ -6091,6 +6121,7 @@
                     return false;
                 }
                 function renderChipsHtml(m) {
+                    if (m._overhead) return "";
                     var exports = normalizeExports(m.exports);
                     var isNonTs = /\.(wgsl|css|json|png|jpg|svg)(\?|$)/.test(m.id);
                     var isVirtual = m.id.charCodeAt(0) === 0;
@@ -6126,7 +6157,8 @@
                     }
                     return '<div class="bf-mod-exports-empty">no named exports (side-effect only)</div>';
                 }
-                function renderModuleLi(m) {
+                function renderModuleLi(m, masterBytesOverride) {
+                    var hasMasterOverride = arguments.length > 1;
                     return (
                         '<div class="bf-mod-row">' +
                         '<span class="bf-mod-path" title="' +
@@ -6135,6 +6167,7 @@
                         escapeHtml(m.id) +
                         "</span>" +
                         '<span class="bf-mod-bytes">' +
+                        renderLocalSizeDiff("module", m.id, m.bytes, hasMasterOverride ? masterBytesOverride : m._masterBytes) +
                         fmtBytes(m.bytes) +
                         "</span>" +
                         "</div>" +
@@ -6142,9 +6175,269 @@
                     );
                 }
 
+                function chunkSortKey(file) {
+                    return String(file).replace(/-[A-Za-z0-9_-]{8}(?=\.js$)/, "");
+                }
+                function baseChunkComparator() {
+                    var dir = state.sortDir === "asc" ? 1 : -1;
+                    if (state.sortBy === "path") {
+                        return function (a, b) {
+                            return a.file.localeCompare(b.file) * dir;
+                        };
+                    }
+                    return function (a, b) {
+                        return (a.bytes - b.bytes) * dir;
+                    };
+                }
+                function baseModuleComparator() {
+                    var dir = state.sortDir === "asc" ? 1 : -1;
+                    if (state.sortBy === "path") {
+                        return function (a, b) {
+                            return a.id.localeCompare(b.id) * dir;
+                        };
+                    }
+                    return function (a, b) {
+                        return (a.bytes - b.bytes) * dir;
+                    };
+                }
+                function visibleChunksForSource(source) {
+                    return (source.info.chunks || []).filter(function (c) {
+                        var loaded = !source.hasRuntime || source.runtimeSet[c.file];
+                        return !(state.hideUnloaded && source.hasRuntime && !loaded);
+                    });
+                }
+                function buildSet(items, keyFn) {
+                    var set = {};
+                    items.forEach(function (item) {
+                        set[keyFn(item)] = true;
+                    });
+                    return set;
+                }
+                function buildModuleList(chunks) {
+                    var modules = [];
+                    var seen = {};
+                    chunks.forEach(function (c) {
+                        (c.modules || []).forEach(function (m) {
+                            if (!seen[m.id]) {
+                                seen[m.id] = true;
+                                modules.push(m);
+                            }
+                        });
+                    });
+                    return modules;
+                }
+                function cloneMissingLocalModule(m) {
+                    var out = {};
+                    Object.keys(m).forEach(function (key) {
+                        out[key] = m[key];
+                    });
+                    out.bytes = 0;
+                    out._masterBytes = m.bytes;
+                    out._missingLocal = true;
+                    return out;
+                }
+                function cloneModuleWithMasterBytes(m, masterBytes) {
+                    var out = {};
+                    Object.keys(m).forEach(function (key) {
+                        out[key] = m[key];
+                    });
+                    out._masterBytes = masterBytes;
+                    return out;
+                }
+                function sumModuleBytes(modules) {
+                    return modules.reduce(function (sum, m) {
+                        return sum + (m.bytes || 0);
+                    }, 0);
+                }
+                function appendChunkOverhead(chunk, modules, masterChunk) {
+                    var localOverhead = Math.max(0, chunk.bytes - sumModuleBytes(chunk.modules || []));
+                    var masterOverhead = masterChunk
+                        ? Math.max(0, masterChunk.bytes - sumModuleBytes(masterChunk.modules || []))
+                        : chunk._masterBytes != null
+                          ? chunk._masterBytes -
+                            sumModuleBytes(
+                                (chunk.modules || []).map(function (m) {
+                                    return { bytes: m._masterBytes || 0 };
+                                })
+                            )
+                          : undefined;
+                    if (localOverhead === 0 && !masterOverhead) return modules;
+                    return modules.concat([{ id: "(chunk overhead)", bytes: localOverhead, exports: [], _masterBytes: masterOverhead, _overhead: true }]);
+                }
+                function cloneMissingLocalChunk(c) {
+                    var out = {};
+                    Object.keys(c).forEach(function (key) {
+                        out[key] = c[key];
+                    });
+                    out.bytes = 0;
+                    out._masterBytes = c.bytes;
+                    out._missingLocal = true;
+                    out.modules = (c.modules || []).map(cloneMissingLocalModule);
+                    return out;
+                }
+                function buildItemSet(items, keyFn) {
+                    var set = {};
+                    items.forEach(function (item) {
+                        set[keyFn(item)] = true;
+                    });
+                    return set;
+                }
+                function appendMissingMasterChunks(localChunks) {
+                    if (state.source !== "local" || !state.sources.master) return localChunks;
+                    var localSet = buildItemSet(localChunks, function (c) {
+                        return chunkSortKey(c.file);
+                    });
+                    var missing = visibleChunksForSource(state.sources.master)
+                        .filter(function (c) {
+                            return !localSet[chunkSortKey(c.file)];
+                        })
+                        .map(cloneMissingLocalChunk);
+                    return localChunks.concat(missing);
+                }
+                function mergeMissingMasterModules(chunk, modules) {
+                    if (state.source !== "local" || !state.sources.master || chunk._missingLocal) return modules;
+                    var masterChunks = visibleChunksForSource(state.sources.master);
+                    var masterChunk = null;
+                    for (var i = 0; i < masterChunks.length; i++) {
+                        if (chunkSortKey(masterChunks[i].file) === chunkSortKey(chunk.file)) {
+                            masterChunk = masterChunks[i];
+                            break;
+                        }
+                    }
+                    if (!masterChunk) return modules;
+                    var localModulesInChunk = buildItemSet(modules, function (m) {
+                        return m.id;
+                    });
+                    var missing = (masterChunk.modules || [])
+                        .filter(function (m) {
+                            return !localModulesInChunk[m.id];
+                        })
+                        .map(cloneMissingLocalModule);
+                    return modules.concat(missing);
+                }
+                function appendMissingMasterFlatItems(items) {
+                    if (state.source !== "local" || !state.sources.master) return items;
+                    var localModules = buildItemSet(
+                        items.map(function (it) {
+                            return it.m;
+                        }),
+                        function (m) {
+                            return m.id;
+                        }
+                    );
+                    visibleChunksForSource(state.sources.master).forEach(function (c) {
+                        (c.modules || []).forEach(function (m) {
+                            if (!localModules[m.id]) {
+                                items.push({ m: cloneMissingLocalModule(m), chunk: cloneMissingLocalChunk(c), loaded: false });
+                                localModules[m.id] = true;
+                            }
+                        });
+                    });
+                    return items;
+                }
+                function getMasterLookups() {
+                    if (state.source !== "local" || !state.sources.master) return null;
+                    if (state.masterLookups) return state.masterLookups;
+                    var chunkBytes = {};
+                    var moduleBytes = {};
+                    var chunks = state.sources.master.info.chunks || [];
+                    for (var i = 0; i < chunks.length; i++) {
+                        chunkBytes[chunkSortKey(chunks[i].file)] = chunks[i].bytes;
+                    }
+                    buildModuleList(chunks).forEach(function (m) {
+                        moduleBytes[m.id] = m.bytes;
+                    });
+                    state.masterLookups = { chunkBytes: chunkBytes, moduleBytes: moduleBytes };
+                    return state.masterLookups;
+                }
+                function findMasterChunkBytes(file) {
+                    var lookups = getMasterLookups();
+                    return lookups ? lookups.chunkBytes[chunkSortKey(file)] : null;
+                }
+                function findMasterModuleBytes(id) {
+                    var lookups = getMasterLookups();
+                    return lookups ? lookups.moduleBytes[id] : null;
+                }
+                function findMasterChunk(file) {
+                    if (state.source !== "local" || !state.sources.master) return null;
+                    var key = chunkSortKey(file);
+                    var chunks = state.sources.master.info.chunks || [];
+                    for (var i = 0; i < chunks.length; i++) {
+                        if (chunkSortKey(chunks[i].file) === key) return chunks[i];
+                    }
+                    return null;
+                }
+                function renderLocalSizeDiff(kind, key, localBytes, masterBytesOverride) {
+                    if (state.source !== "local" || !state.sources.master) return "";
+                    var masterBytes = arguments.length > 3 ? masterBytesOverride : kind === "chunk" ? findMasterChunkBytes(key) : findMasterModuleBytes(key);
+                    if (masterBytes == null) {
+                        return '<span class="bf-size-diff increase" title="New in local">' + fmtDeltaBytes(localBytes) + "</span>";
+                    }
+                    var delta = localBytes - masterBytes;
+                    if (delta === 0) return "";
+                    var cls = delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral";
+                    return '<span class="bf-size-diff ' + cls + '" title="Local vs master">' + fmtDeltaBytes(delta) + "</span>";
+                }
+                function buildPartitionedOrder(localItems, masterItems, keyFn, source) {
+                    var masterSet = buildSet(masterItems, keyFn);
+                    var processedMaster = {};
+                    var common = [];
+                    var localOnly = [];
+                    var masterOnly = [];
+                    localItems.forEach(function (item) {
+                        var key = keyFn(item);
+                        if (masterSet[key]) {
+                            common.push(key);
+                            processedMaster[key] = true;
+                        } else {
+                            localOnly.push(key);
+                        }
+                    });
+                    masterItems.forEach(function (item) {
+                        var key = keyFn(item);
+                        if (!processedMaster[key] && !masterSet["__processed__" + key]) {
+                            masterSet["__processed__" + key] = true;
+                            if (common.indexOf(key) === -1) {
+                                masterOnly.push(key);
+                            }
+                        }
+                    });
+                    var groups = source === "local" ? [common, localOnly, masterOnly] : [common, masterOnly];
+                    var ranks = {};
+                    groups.forEach(function (group, rank) {
+                        group.forEach(function (key) {
+                            ranks[key] = rank;
+                        });
+                    });
+                    return { ranks: ranks, fallback: groups.length };
+                }
+                function buildPartitionedOrderMaps() {
+                    var local = state.sources.local;
+                    var master = state.sources.master;
+                    if (!local || !master) return null;
+                    var localChunks = visibleChunksForSource(local);
+                    var masterChunks = visibleChunksForSource(master);
+                    var chunkOrder = buildPartitionedOrder(localChunks, masterChunks, function (c) { return chunkSortKey(c.file); }, state.source);
+                    var moduleOrder = buildPartitionedOrder(buildModuleList(localChunks), buildModuleList(masterChunks), function (m) { return m.id; }, state.source);
+                    return { chunkRanks: chunkOrder.ranks, moduleRanks: moduleOrder.ranks, chunkFallback: chunkOrder.fallback, moduleFallback: moduleOrder.fallback };
+                }
+                function partitionedRankFirst(cmp, rankMap, keyFn, fallback) {
+                    return function (a, b) {
+                        var ak = keyFn(a);
+                        var bk = keyFn(b);
+                        var ar = rankMap[ak];
+                        var br = rankMap[bk];
+                        if (ar == null) ar = fallback;
+                        if (br == null) br = fallback;
+                        if (ar !== br) return ar - br;
+                        return cmp(a, b);
+                    };
+                }
+
                 function renderBundleGrouped(chunks, filter) {
                     var html = "";
                     var anyShown = false;
+                    var partitionedOrder = buildPartitionedOrderMaps();
                     // Optionally filter out chunks that didn't load at runtime.
                     var visibleChunks = chunks.filter(function (c) {
                         var loaded = !state.hasRuntime || state.runtimeSet[c.file];
@@ -6152,33 +6445,52 @@
                     });
                     // Sort chunks by current sort key.
                     var cmpChunk = makeChunkComparator();
-                    visibleChunks = visibleChunks.slice().sort(cmpChunk);
+                    visibleChunks = appendMissingMasterChunks(visibleChunks).slice().sort(cmpChunk);
                     visibleChunks.forEach(function (c, idx) {
-                        var loaded = !state.hasRuntime || state.runtimeSet[c.file];
-                        var visibleMods = (c.modules || []).filter(function (m) {
+                        var loaded = !c._missingLocal && (!state.hasRuntime || state.runtimeSet[c.file]);
+                        var masterChunk = findMasterChunk(c.file);
+                        var masterModules = {};
+                        if (masterChunk) {
+                            (masterChunk.modules || []).forEach(function (m) {
+                                masterModules[m.id] = m.bytes;
+                            });
+                        }
+                        var visibleMods = (c.modules || [])
+                            .map(function (m) {
+                                return cloneModuleWithMasterBytes(m, masterModules[m.id]);
+                            })
+                            .filter(function (m) {
+                                return matchesFilter(m, filter);
+                            });
+                        visibleMods = mergeMissingMasterModules(c, visibleMods).filter(function (m) {
                             return matchesFilter(m, filter);
                         });
+                        if (!filter) {
+                            visibleMods = appendChunkOverhead(c, visibleMods, masterChunk);
+                        }
                         if (filter && visibleMods.length === 0) return;
                         // Sort modules within the chunk by current sort key.
-                        visibleMods = visibleMods.slice().sort(makeModuleComparator());
+                        visibleMods = visibleMods.slice().sort(makeModuleComparator(partitionedOrder));
                         anyShown = true;
                         var badges = "";
                         if (c.isEntry) badges += '<span class="bf-chunk-badge bf-badge-entry">entry</span> ';
+                        if (c._missingLocal) badges += '<span class="bf-chunk-badge bf-badge-missing">missing local</span> ';
                         if (state.hasRuntime) {
                             badges += loaded ? '<span class="bf-chunk-badge bf-badge-runtime">loaded</span> ' : '<span class="bf-chunk-badge bf-badge-stripped">not loaded</span> ';
                         }
                         var modsHtml = visibleMods.length
-                            ? visibleMods
-                                  .map(function (m) {
-                                      return "<li>" + renderModuleLi(m) + "</li>";
-                                  })
-                                  .join("")
+                              ? visibleMods
+                                   .map(function (m) {
+                                      return "<li" + (m._missingLocal ? ' class="missing-local"' : "") + ">" + renderModuleLi(m, m._masterBytes) + "</li>";
+                                   })
+                                   .join("")
                             : '<li class="bf-empty">(no module contributions recorded)</li>';
                         // Collapse chunks by default except the first visible one, unless filtering (then expand all).
                         var collapsed = !filter && idx > 0;
                         html +=
                             '<div class="bf-chunk' +
                             (loaded ? "" : " stripped") +
+                            (c._missingLocal ? " missing-local" : "") +
                             '">' +
                             '<div class="bf-chunk-head" onclick="this.nextElementSibling.classList.toggle(\'collapsed\')">' +
                             '<span class="bf-chunk-name">' +
@@ -6186,6 +6498,7 @@
                             "</span>" +
                             badges +
                             '<span class="bf-chunk-size">' +
+                            (c._missingLocal ? renderLocalSizeDiff("chunk", c.file, c.bytes, c._masterBytes) : renderLocalSizeDiff("chunk", c.file, c.bytes)) +
                             fmtBytes(c.bytes) +
                             " · " +
                             c.modules.length +
@@ -6205,26 +6518,14 @@
                 }
 
                 function makeChunkComparator() {
-                    var dir = state.sortDir === "asc" ? 1 : -1;
-                    if (state.sortBy === "path") {
-                        return function (a, b) {
-                            return a.file.localeCompare(b.file) * dir;
-                        };
-                    }
-                    return function (a, b) {
-                        return (a.bytes - b.bytes) * dir;
-                    };
+                    var cmp = baseChunkComparator();
+                    var partitionedOrder = buildPartitionedOrderMaps();
+                    return partitionedOrder ? partitionedRankFirst(cmp, partitionedOrder.chunkRanks, function (c) { return chunkSortKey(c.file); }, partitionedOrder.chunkFallback) : cmp;
                 }
-                function makeModuleComparator() {
-                    var dir = state.sortDir === "asc" ? 1 : -1;
-                    if (state.sortBy === "path") {
-                        return function (a, b) {
-                            return a.id.localeCompare(b.id) * dir;
-                        };
-                    }
-                    return function (a, b) {
-                        return (a.bytes - b.bytes) * dir;
-                    };
+                function makeModuleComparator(partitionedOrder) {
+                    var cmp = baseModuleComparator();
+                    partitionedOrder = partitionedOrder || buildPartitionedOrderMaps();
+                    return partitionedOrder ? partitionedRankFirst(cmp, partitionedOrder.moduleRanks, function (m) { return m.id; }, partitionedOrder.moduleFallback) : cmp;
                 }
 
                 function renderFlat(chunks, filter) {
@@ -6237,6 +6538,7 @@
                             items.push({ m: m, chunk: c, loaded: loaded });
                         });
                     });
+                    items = appendMissingMasterFlatItems(items);
                     var cmp = makeModuleComparator();
                     items.sort(function (a, b) {
                         return cmp(a.m, b.m);
@@ -6244,9 +6546,10 @@
                     if (items.length === 0) return '<div class="bf-empty">No modules match the current filters.</div>';
                     var html = '<ul class="bf-flat-list">';
                     items.forEach(function (it) {
+                        var liClass = (!it.loaded ? "stripped" : "") + (it.m._missingLocal ? " missing-local" : "");
                         html +=
                             "<li" +
-                            (it.loaded ? "" : ' class="stripped"') +
+                            (liClass ? ' class="' + liClass.trim() + '"' : "") +
                             ">" +
                             renderModuleLi(it.m) +
                             '<span class="bf-flat-chunk-ref">in ' +
@@ -6296,6 +6599,81 @@
                     document.getElementById("bf-overlay").classList.remove("active");
                 };
 
+                function loadJson(url) {
+                    return fetch(url + "?t=" + Date.now(), { cache: "no-store" })
+                        .then(function (r) {
+                            return r.ok ? r.json() : null;
+                        })
+                        .catch(function () {
+                            return null;
+                        });
+                }
+
+                function prepareBundleSourceData(label, info, manifest, scene) {
+                    if (!info) return null;
+                    var sceneManifest = manifest && manifest[scene] ? manifest[scene] : {};
+                    var runtimeSet = {};
+                    (sceneManifest.runtimeChunks || []).forEach(function (f) {
+                        runtimeSet[f] = true;
+                    });
+                    var hasRuntime = Object.keys(runtimeSet).length > 0;
+                    var chunks = info.chunks || [];
+                    chunks.sort(function (a, b) {
+                        var ar = !hasRuntime || runtimeSet[a.file] ? 1 : 0;
+                        var br = !hasRuntime || runtimeSet[b.file] ? 1 : 0;
+                        if (a.isEntry !== b.isEntry) return a.isEntry ? -1 : 1;
+                        if (ar !== br) return br - ar;
+                        return b.bytes - a.bytes;
+                    });
+
+                    var totalRuntimeBytes = 0,
+                        runtimeChunkCount = 0,
+                        strippedChunkCount = 0;
+                    chunks.forEach(function (c) {
+                        var loaded = !hasRuntime || runtimeSet[c.file];
+                        if (loaded) {
+                            totalRuntimeBytes += c.bytes;
+                            runtimeChunkCount++;
+                        } else {
+                            strippedChunkCount++;
+                        }
+                    });
+
+                    var sub = runtimeChunkCount + " chunk" + (runtimeChunkCount === 1 ? "" : "s") + " loaded at runtime · " + fmtBytes(totalRuntimeBytes) + " raw";
+                    if (strippedChunkCount) sub += " · " + strippedChunkCount + " chunk" + (strippedChunkCount === 1 ? "" : "s") + " built but not fetched";
+                    if (!hasRuntime) sub = "runtime info unavailable — all built chunks shown";
+                    return { label: label, info: info, manifest: manifest || {}, runtimeSet: runtimeSet, hasRuntime: hasRuntime, subtitle: sub };
+                }
+
+                function applyBundleSource(source) {
+                    var data = state.sources[source];
+                    if (!data) return;
+                    state.source = source;
+                    state.info = data.info;
+                    state.manifest = data.manifest;
+                    state.runtimeSet = data.runtimeSet;
+                    state.hasRuntime = data.hasRuntime;
+                    document.getElementById("bf-subtitle").textContent = data.label + " · " + data.subtitle;
+                    var sourceGroup = document.getElementById("bf-tg-source");
+                    if (sourceGroup) {
+                        Array.prototype.forEach.call(sourceGroup.querySelectorAll("button"), function (btn) {
+                            btn.classList.toggle("active", btn.getAttribute("data-value") === source);
+                        });
+                    }
+                    render();
+                }
+
+                function wireSourceButtons() {
+                    var sourceGroup = document.getElementById("bf-tg-source");
+                    if (!sourceGroup) return;
+                    Array.prototype.forEach.call(sourceGroup.querySelectorAll("button"), function (btn) {
+                        btn.addEventListener("click", function () {
+                            var source = btn.getAttribute("data-value");
+                            if (source) applyBundleSource(source);
+                        });
+                    });
+                }
+
                 window.showBundleFiles = function (scene) {
                     var cfg = (window.SCENE_CONFIG || []).filter(function (c) {
                         return "scene" + c.id === scene;
@@ -6307,80 +6685,42 @@
                     body.innerHTML = '<div class="bf-empty">Loading…</div>';
                     document.getElementById("bf-overlay").classList.add("active");
 
-                    Promise.all([
-                        fetch("/bundle/bundle-info/" + scene + ".json?t=" + Date.now())
-                            .then(function (r) {
-                                return r.ok ? r.json() : null;
-                            })
-                            .catch(function () {
-                                return null;
-                            }),
-                        fetch("/bundle/manifest.json?t=" + Date.now())
-                            .then(function (r) {
-                                return r.ok ? r.json() : null;
-                            })
-                            .catch(function () {
-                                return null;
-                            }),
-                    ]).then(function (results) {
+                    Promise.all([loadJson("/bundle/bundle-info/" + scene + ".json"), loadJson("/bundle/manifest.json"), loadJson("/bundle/master-bundle-info/" + scene + ".json"), loadJson("/bundle/master-manifest.json")]).then(function (results) {
                         var info = results[0];
                         var manifest = results[1] || {};
-                        if (!info) {
-                            body.innerHTML = '<div class="bf-error">No bundle info available. Run <code>pnpm build:bundle-scenes</code> to generate it.</div>';
+                        var masterInfo = results[2];
+                        var masterManifest = results[3] || {};
+                        var localData = prepareBundleSourceData("Local", info, manifest, scene);
+                        var masterData = prepareBundleSourceData("Master", masterInfo, masterManifest, scene);
+                        if (!localData && !masterData) {
+                            body.innerHTML =
+                                '<div class="bf-error">No bundle info available. Run <code>pnpm build:bundle-scenes</code> for local info and <code>pnpm build:bundle-master-info</code> for master info.</div>';
                             document.getElementById("bf-subtitle").textContent = "";
                             return;
                         }
-                        var sceneManifest = manifest[scene] || {};
-                        var runtimeSet = {};
-                        (sceneManifest.runtimeChunks || []).forEach(function (f) {
-                            runtimeSet[f] = true;
-                        });
-                        var hasRuntime = Object.keys(runtimeSet).length > 0;
-
-                        var chunks = info.chunks || [];
-                        // Sort: entry first, runtime-loaded next, stripped last; within group by size desc.
-                        chunks.sort(function (a, b) {
-                            var ar = !hasRuntime || runtimeSet[a.file] ? 1 : 0;
-                            var br = !hasRuntime || runtimeSet[b.file] ? 1 : 0;
-                            if (a.isEntry !== b.isEntry) return a.isEntry ? -1 : 1;
-                            if (ar !== br) return br - ar;
-                            return b.bytes - a.bytes;
-                        });
-
-                        var totalRuntimeBytes = 0,
-                            runtimeChunkCount = 0,
-                            strippedChunkCount = 0;
-                        chunks.forEach(function (c) {
-                            var loaded = !hasRuntime || runtimeSet[c.file];
-                            if (loaded) {
-                                totalRuntimeBytes += c.bytes;
-                                runtimeChunkCount++;
-                            } else {
-                                strippedChunkCount++;
-                            }
-                        });
-
-                        var sub = runtimeChunkCount + " chunk" + (runtimeChunkCount === 1 ? "" : "s") + " loaded at runtime · " + fmtBytes(totalRuntimeBytes) + " raw";
-                        if (strippedChunkCount) sub += " · " + strippedChunkCount + " chunk" + (strippedChunkCount === 1 ? "" : "s") + " built but not fetched";
-                        if (!hasRuntime) sub = "runtime info unavailable — all built chunks shown";
-                        document.getElementById("bf-subtitle").textContent = sub;
-
-                        state.info = info;
-                        state.manifest = manifest;
-                        state.runtimeSet = runtimeSet;
-                        state.hasRuntime = hasRuntime;
+                        state.sources = {};
+                        if (localData) state.sources.local = localData;
+                        if (masterData) state.sources.master = masterData;
+                        state.masterLookups = null;
+                        state.source = localData ? "local" : "master";
                         state.filter = "";
                         state.groupByBundle = true;
                         state.sortBy = "size";
                         state.sortDir = "desc";
                         state.hideUnloaded = true;
+                        var initialData = state.sources[state.source];
 
                         function btn(group, value, label, active) {
-                            return '<button data-value="' + value + '"' + (active ? ' class="active"' : "") + ">" + label + "</button>";
+                            var available = group !== "source" || !!state.sources[value];
+                            return '<button data-value="' + value + '"' + (active ? ' class="active"' : "") + (available ? "" : " disabled") + ">" + label + "</button>";
                         }
                         body.innerHTML =
                             '<div class="bf-toolbar">' +
                             '<input id="bf-filter" class="bf-filter" type="text" placeholder="Filter by file path or export name…" />' +
+                            '<div id="bf-tg-source" class="bf-toolbar-group" title="Bundle source">' +
+                            btn("source", "local", "Local", state.source === "local") +
+                            btn("source", "master", "Master", state.source === "master") +
+                            "</div>" +
                             '<div id="bf-tg-group" class="bf-toolbar-group" title="Grouping">' +
                             btn("group", "true", "Group by bundle", true) +
                             btn("group", "false", "Flat list", false) +
@@ -6393,13 +6733,14 @@
                             btn("sortdir", "desc", "↓ Desc", true) +
                             btn("sortdir", "asc", "↑ Asc", false) +
                             "</div>" +
-                            (hasRuntime
+                            (initialData && initialData.hasRuntime
                                 ? '<label class="bf-toolbar-check" title="Hide chunks that were not actually fetched at runtime">' +
                                   '<input type="checkbox" id="bf-hide-unloaded" checked /> Hide unloaded' +
                                   "</label>"
                                 : "") +
                             "</div>" +
                             '<div class="bf-note">Chunk sizes are post-minification bytes. Module sizes are the rendered contribution of each <code>.ts</code> / <code>.wgsl</code> file. Chips show the exported symbols that survived tree-shaking.</div>' +
+                            (masterData ? "" : '<div class="bf-note">Master file breakdown unavailable. Run <code>pnpm build:bundle-master-info</code> to generate <code>master-bundle-info</code>.</div>') +
                             '<div id="bf-list"></div>';
 
                         var filterEl = document.getElementById("bf-filter");
@@ -6407,6 +6748,7 @@
                             state.filter = filterEl.value;
                             render();
                         });
+                        wireSourceButtons();
                         wireToolbarButtons();
                         var hideEl = document.getElementById("bf-hide-unloaded");
                         if (hideEl)
@@ -6414,7 +6756,7 @@
                                 state.hideUnloaded = hideEl.checked;
                                 render();
                             });
-                        render();
+                        applyBundleSource(state.source);
                     });
                 };
                 document.addEventListener("keydown", function (e) {

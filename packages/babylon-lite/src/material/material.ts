@@ -1,22 +1,32 @@
 /** Base material interface — the polymorphic anchor shared by every concrete
  *  material kind (Standard, PBR, …).
  *
- *  Public surface is intentionally empty: concrete materials add their own
- *  user-facing properties (colors, textures, factors). The shared engine-side
- *  contract lives on {@link MaterialInternal} below — accessed by the renderer
- *  through a single cast at the dispatch site. */
-export interface Material {}
-
+ *  Concrete materials add their own user-facing properties (colors, textures,
+ *  factors), while the shared `_buildGroup` hook lets the renderer dispatch
+ *  materials through a common path. */
 import type { MeshGroupBuilder } from "../render/renderable.js";
 
-/** @internal Engine-side view of a Material.
- *
- *  Concrete material props (StandardMaterialPropsInternal, PbrMaterialPropsInternal)
- *  extend this so the renderer can:
- *   - dispatch group / single-mesh builds polymorphically via `_buildGroup`
- *   - skip redundant material-UBO uploads via `_uboDirty`. */
-export interface MaterialInternal extends Material {
+export interface Material {
     readonly _buildGroup: MeshGroupBuilder;
-    /** Set to true when a UBO-relevant property changes. Cleared after upload. */
-    _uboDirty?: boolean;
+    /** Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
+    _renderFeatures?: MaterialRenderFeatures;
+    /** Monotonic material UBO version. Renderables track their last seen value independently. */
+    _uboVersion: number;
+}
+
+/** Exact material render-feature override used by MaterialView.
+ *  Feature bits are interpreted by each concrete material family. */
+export interface MaterialRenderFeatures {
+    features: number;
+    features2?: number;
+}
+
+/** A lightweight render view over an editable source material.
+ *  The view is also a Material: it inherits material state from {@link source}
+ *  through the prototype chain and owns only render-feature bits. Keeping views
+ *  material-compatible lets ordinary render paths read properties normally, so
+ *  scenes that never create views do not retain view-specific unwrap branches. */
+export interface MaterialView extends Material {
+    readonly source: Material;
+    _renderFeatures: MaterialRenderFeatures;
 }

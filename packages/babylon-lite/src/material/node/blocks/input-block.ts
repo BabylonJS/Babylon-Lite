@@ -85,12 +85,12 @@ function emitAttribute(block: NodeBlock, stage: Stage, state: NodeBuildState): N
     }
     const wgslType = WGSL[type];
     // Dedup vertex attribute.
-    if (!state.vertexAttributes.find((a) => a.name === attrName)) {
+    if (!state.vertexAttributes.find((a) => a._name === attrName)) {
         state.vertexAttributes.push({
-            name: attrName,
-            type: wgslType,
-            gpuFormat: type === "vec2f" ? "float32x2" : type === "vec3f" ? "float32x3" : "float32x4",
-            arrayStride: (type === "vec2f" ? 2 : type === "vec3f" ? 3 : 4) * 4,
+            _name: attrName,
+            _type: wgslType,
+            _gpuFormat: type === "vec2f" ? "float32x2" : type === "vec3f" ? "float32x3" : "float32x4",
+            _arrayStride: (type === "vec2f" ? 2 : type === "vec3f" ? 3 : 4) * 4,
         });
     }
     if (stage === "vertex") {
@@ -98,8 +98,8 @@ function emitAttribute(block: NodeBlock, stage: Stage, state: NodeBuildState): N
     }
     // In fragment stage — bridge through a varying (idempotent).
     const vname = `v_attr_${attrName}`;
-    if (!state.varyings.find((v) => v.name === vname)) {
-        state.varyings.push({ name: vname, type: wgslType });
+    if (!state.varyings.find((v) => v._name === vname)) {
+        state.varyings.push({ _name: vname, _type: wgslType });
         state.vertex.body.push(`out.${vname} = in.${attrName};`);
     }
     return { expr: `in.${vname}`, type };
@@ -143,8 +143,8 @@ function emitUniform(block: NodeBlock, state: NodeBuildState): NodeExpr {
     // UBO field name — use block name (must be unique; parser enforces via namedInputs key).
     const fieldName = sanitize(block.name || `input${block.id}`);
     // Dedup.
-    if (!state.nodeUboFields.find((f) => f.name === fieldName)) {
-        state.nodeUboFields.push({ name: fieldName, type: WGSL[type] as any });
+    if (!state.nodeUboFields.find((f) => f._name === fieldName)) {
+        state.nodeUboFields.push({ _name: fieldName, _type: WGSL[type] as any });
         // If this is a literal value (no override yet), it will be written into the
         // UBO at material-build time; for shader generation we just reference the field.
         // We ignore the inline literal here — the UBO write path handles that.

@@ -35,5 +35,6 @@ export function createStandardMaterial(): StandardMaterialProps {
         backFaceCulling: true,
         disableLighting: false,
         _buildGroup: standardGroupBuilder,
+        _uboVersion: 0,
     } as StandardMaterialProps;
 }

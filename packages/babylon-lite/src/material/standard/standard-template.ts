@@ -89,50 +89,50 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     const { textures, needsUV, needsUV2, disableLighting } = config;
 
     // ── Base vertex attributes ──────────────────────────────────
-    const baseVertexAttributes: VertexAttribute[] = [
-        { name: "position", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
-        { name: "normal", type: "vec3<f32>", gpuFormat: "float32x3", arrayStride: 12 },
+    const _baseVertexAttributes: VertexAttribute[] = [
+        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
+        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
     ];
     if (needsUV) {
-        baseVertexAttributes.push({ name: "uv", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+        _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
     if (needsUV2) {
-        baseVertexAttributes.push({ name: "uv2", type: "vec2<f32>", gpuFormat: "float32x2", arrayStride: 8 });
+        _baseVertexAttributes.push({ _name: "uv2", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
 
     // ── Base varyings ───────────────────────────────────────────
-    const baseVaryings: Varying[] = [
-        { name: "vp", type: "vec3<f32>" },
-        { name: "vn", type: "vec3<f32>" },
-        { name: "vf", type: "vec3<f32>" },
+    const _baseVaryings: Varying[] = [
+        { _name: "vp", _type: "vec3<f32>" },
+        { _name: "vn", _type: "vec3<f32>" },
+        { _name: "vf", _type: "vec3<f32>" },
     ];
     if (needsUV) {
-        baseVaryings.push({ name: "vu", type: "vec2<f32>" });
+        _baseVaryings.push({ _name: "vu", _type: "vec2<f32>" });
     }
     if (needsUV2) {
-        baseVaryings.push({ name: "vv", type: "vec2<f32>" });
+        _baseVaryings.push({ _name: "vv", _type: "vec2<f32>" });
     }
     // shadow varyings (vPositionFromLight, vDepthMetric) are provided by std-shadow-fragment
 
     // ── Base UBO fields (mesh = world matrix + affected light indices) ──────────────
-    const baseMeshUboFields: UboField[] = [{ name: "world", type: "mat4x4<f32>" }];
-    appendMeshLightUboFields(baseMeshUboFields);
+    const _baseMeshUboFields: UboField[] = [{ _name: "world", _type: "mat4x4<f32>" }];
+    appendMeshLightUboFields(_baseMeshUboFields);
 
     // ── Base bindings (group 1, starting after mesh UBO at 0) ───
     // Order: material, diffuse*, shadow/UV*, emissive*, bump*, specular*, ambient*, lightmap*, opacity*, reflection*
     // The shadow/UV UBO is placed AFTER diffuse so its auto-assigned binding index
     // matches the conventional slot 5 when diffuse is present (bindings 3,4).
-    const baseBindings: BindingDecl[] = [{ name: "mat", type: { kind: "uniform-buffer" }, visibility: STAGE_FRAGMENT }];
+    const _baseBindings: BindingDecl[] = [{ _name: "mat", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_FRAGMENT }];
 
     if (textures.diffuse) {
-        baseBindings.push(
-            { name: "dT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "dS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+        _baseBindings.push(
+            { _name: "dT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "dS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
     // UV params UBO — only when UVs are actually emitted.
     if (needsUV) {
-        baseBindings.push({ name: "up", type: { kind: "uniform-buffer" }, visibility: STAGE_VERTEX });
+        _baseBindings.push({ _name: "up", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_VERTEX });
     }
     // bump bindings are provided by the normal-map fragment (not baseBindings)
     // emissive, specular, ambient, lightmap, opacity, reflection bindings
@@ -141,7 +141,7 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // Shadow map bindings (group 2) are provided by std-shadow-fragment
 
     // No separate vertex bindings — shadow/UV is in baseBindings above
-    const baseVertexBindings: BindingDecl[] = [];
+    const _baseVertexBindings: BindingDecl[] = [];
 
     // ── Vertex template ─────────────────────────────────────────
 
@@ -152,7 +152,7 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // Vertex UBO struct definitions (must be before binding declarations)
     const vertexUboStructs = needsUV ? `struct upUniforms { u: vec4<f32>, }` : "";
 
-    const vertexTemplate = `/*SU*/
+    const _vertexTemplate = `/*SU*/
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 ${vertexUboStructs}
@@ -242,7 +242,6 @@ var baseColor = _ds.rgb * mat.tl;`
     const diffuseColorCode = `let diffuseColor = mat.dc.rgb;`;
     const emissiveCode = `var emissiveContrib = mat.ec;`;
     const specularColorCode = !disableLighting ? `var specularColor = mat.sc.rgb;` : "";
-
     // Lighting block (only when lighting enabled)
     let lightingBlock: string;
     if (!disableLighting) {
@@ -270,7 +269,7 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
         lightingBlock = `var color = vec4<f32>(clamp(emissiveContrib * diffuseColor, vec3<f32>(0.0), vec3<f32>(1.0)) * baseColor, alpha);`;
     }
 
-    const fragmentTemplate = `/*SU*/
+    const _fragmentTemplate = `/*SU*/
 ${lightsStructs}
 ${materialStruct}
 /*MU*/
@@ -303,12 +302,12 @@ return color;
 }`;
 
     return {
-        vertexTemplate,
-        fragmentTemplate,
-        baseMeshUboFields,
-        baseVertexAttributes,
-        baseVaryings,
-        baseBindings,
-        baseVertexBindings,
+        _vertexTemplate,
+        _fragmentTemplate,
+        _baseMeshUboFields,
+        _baseVertexAttributes,
+        _baseVaryings,
+        _baseBindings,
+        _baseVertexBindings,
     };
 }

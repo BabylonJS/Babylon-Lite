@@ -77,7 +77,7 @@ export function buildSkyboxCubeMapGPU(engine: EngineContextInternal, worldMatrix
                         { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] },
                         { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" as GPUVertexFormat }] },
                     ],
-                    format: sig.colorFormat,
+                    format: sig.colorFormat!,
                     depthStencilFormat: sig.depthStencilFormat,
                     msaaSamples: sig.sampleCount,
                     cullMode: "none",

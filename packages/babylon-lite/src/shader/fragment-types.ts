@@ -18,64 +18,64 @@ export type WgslScalarType = "f32" | "u32" | "i32" | "vec2<f32>" | "vec3<f32>" |
 
 export interface VertexAttribute {
     /** WGSL variable name in the vertex input (e.g. "position", "world0") */
-    readonly name: string;
+    readonly _name: string;
     /** WGSL type (e.g. "vec3<f32>", "vec4<f32>") */
-    readonly type: string;
+    readonly _type: string;
     /** WebGPU vertex format (e.g. "float32x3", "float32x4") */
-    readonly gpuFormat: GPUVertexFormat;
+    readonly _gpuFormat: GPUVertexFormat;
     /** Byte stride of the vertex buffer this attribute lives in */
-    readonly arrayStride: number;
+    readonly _arrayStride: number;
     /** Step mode — default "vertex" */
-    readonly stepMode?: GPUVertexStepMode;
+    readonly _stepMode?: GPUVertexStepMode;
     /**
      * Attributes sharing the same bufferGroup are packed into one vertex buffer.
      * E.g. thin-instance world0-world3 share bufferGroup "ti-matrix".
      * Attributes without a bufferGroup get their own buffer.
      */
-    readonly bufferGroup?: string;
+    readonly _bufferGroup?: string;
     /** Byte offset within the buffer (for packed multi-attribute buffers). Default 0. */
-    readonly offset?: number;
+    readonly _offset?: number;
 }
 
 // ── Varyings ────────────────────────────────────────────────────
 
 export interface Varying {
     /** WGSL variable name (e.g. "worldPos", "vInstanceColor") */
-    readonly name: string;
+    readonly _name: string;
     /** WGSL type (e.g. "vec3<f32>") */
-    readonly type: string;
+    readonly _type: string;
 }
 
 // ── UBO fields ──────────────────────────────────────────────────
 
 export interface UboField {
     /** WGSL field name (e.g. "emissiveColor", "ccParams") */
-    readonly name: string;
+    readonly _name: string;
     /** WGSL type */
-    readonly type: WgslScalarType;
+    readonly _type: WgslScalarType;
 }
 
 // ── Bindings ────────────────────────────────────────────────────
 
 export type BindingKind =
-    | { readonly kind: "uniform-buffer" }
+    | { readonly _kind: "uniform-buffer" }
     | {
-          readonly kind: "texture";
-          readonly textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_2d<u32>";
-          readonly sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
+          readonly _kind: "texture";
+          readonly _textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_2d<u32>";
+          readonly _sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
       }
-    | { readonly kind: "sampler"; readonly samplerType: "sampler" | "sampler_comparison" }
-    | { readonly kind: "storage-texture"; readonly access: "read" | "write" | "read_write"; readonly format: string };
+    | { readonly _kind: "sampler"; readonly _samplerType: "sampler" | "sampler_non_filtering" | "sampler_comparison" }
+    | { readonly _kind: "storage-texture"; readonly _access: "read" | "write" | "read_write"; readonly _format: string };
 
 export interface BindingDecl {
     /** WGSL variable name (e.g. "normalTex", "brdfSampler_") */
-    readonly name: string;
+    readonly _name: string;
     /** Binding type descriptor */
-    readonly type: BindingKind;
+    readonly _type: BindingKind;
     /** Which bind group: "mesh" (group 1) or "shadow" (group 2). Default: "mesh" */
-    readonly group?: "mesh" | "shadow";
+    readonly _group?: "mesh" | "shadow";
     /** Shader stage visibility flags (e.g. GPUShaderStage.FRAGMENT) */
-    readonly visibility: GPUShaderStageFlags;
+    readonly _visibility: GPUShaderStageFlags;
 }
 
 // ── Fragment slots ──────────────────────────────────────────────
@@ -110,48 +110,48 @@ export type VertexSlot = "VR" | "VW" | "VB";
 
 export interface ShaderFragment {
     /** Unique ID for dedup and dependency resolution (e.g. "clearcoat", "skeleton") */
-    readonly id: string;
+    readonly _id: string;
 
     /** Fragment IDs that must be composed before this one */
-    readonly dependencies?: readonly string[];
+    readonly _dependencies?: readonly string[];
 
     // ── Vertex stage ──
 
     /** Extra vertex input attributes */
-    readonly vertexAttributes?: readonly VertexAttribute[];
+    readonly _vertexAttributes?: readonly VertexAttribute[];
 
     /** Extra vertex→fragment varyings */
-    readonly varyings?: readonly Varying[];
+    readonly _varyings?: readonly Varying[];
 
     /** Extra @group(1) bindings used in the vertex shader (skeleton bone tex, morph tex+uniforms) */
-    readonly vertexBindings?: readonly BindingDecl[];
+    readonly _vertexBindings?: readonly BindingDecl[];
 
     /** WGSL code injected at named vertex slots */
-    readonly vertexSlots?: Partial<Record<VertexSlot, string>>;
+    readonly _vertexSlots?: Partial<Record<VertexSlot, string>>;
 
     /** Extra pipeline vertex buffer layouts (skeleton joints/weights).
      *  Called with next available shader location. Returns layouts + next location. */
-    readonly pipelineVertexBuffers?: (nextLoc: number) => { buffers: GPUVertexBufferLayout[]; nextLoc: number };
+    readonly _pipelineVertexBuffers?: (nextLoc: number) => { _buffers: GPUVertexBufferLayout[]; _nextLoc: number };
 
     /** @builtin declarations for vertex function params (e.g. vertex_index for morph targets) */
-    readonly vertexBuiltins?: readonly { readonly name: string; readonly builtin: string; readonly type: string }[];
+    readonly _vertexBuiltins?: readonly { readonly _name: string; readonly _builtin: string; readonly _type: string }[];
 
     /** WGSL helper functions / struct definitions injected before @vertex fn main */
-    readonly vertexHelperFunctions?: string;
+    readonly _vertexHelperFunctions?: string;
 
     // ── Fragment stage ──
 
     /** UBO fields appended to MeshUniforms (mesh bind group) */
-    readonly uboFields?: readonly UboField[];
+    readonly _uboFields?: readonly UboField[];
 
     /** Extra bindings (textures, samplers) in the fragment shader */
-    readonly bindings?: readonly BindingDecl[];
+    readonly _bindings?: readonly BindingDecl[];
 
     /** WGSL helper functions injected before @fragment fn main */
-    readonly helperFunctions?: string;
+    readonly _helperFunctions?: string;
 
     /** Code injected at named fragment slots */
-    readonly fragmentSlots?: Partial<Record<FragmentSlot, string>>;
+    readonly _fragmentSlots?: Partial<Record<FragmentSlot, string>>;
 }
 
 // ── Shader template ─────────────────────────────────────────────
@@ -166,23 +166,23 @@ export interface ShaderFragment {
  */
 export interface ShaderTemplate {
     /** Base vertex shader WGSL with slot markers */
-    readonly vertexTemplate: string;
+    readonly _vertexTemplate: string;
     /** Base fragment shader WGSL with slot markers */
-    readonly fragmentTemplate: string;
+    readonly _fragmentTemplate: string;
     /** Base mesh UBO fields (e.g. world matrix for PBR, or mesh+lights+material for Standard) */
-    readonly baseMeshUboFields: readonly UboField[];
+    readonly _baseMeshUboFields: readonly UboField[];
     /** Base vertex attributes (e.g. position, normal) */
-    readonly baseVertexAttributes: readonly VertexAttribute[];
+    readonly _baseVertexAttributes: readonly VertexAttribute[];
     /** Base varyings (e.g. worldPos, worldNormal, uv) */
-    readonly baseVaryings: readonly Varying[];
+    readonly _baseVaryings: readonly Varying[];
     /** Base fragment bindings (e.g. baseColor texture for PBR, or diffuse/lights/material for Standard) */
-    readonly baseBindings?: readonly BindingDecl[];
+    readonly _baseBindings?: readonly BindingDecl[];
     /** Base vertex bindings (UBOs used in the vertex shader beyond mesh UBO) */
-    readonly baseVertexBindings?: readonly BindingDecl[];
+    readonly _baseVertexBindings?: readonly BindingDecl[];
     /** Base material UBO fields (e.g. reflectance, intensity). When provided,
      *  packed into a separate MaterialUniforms UBO at group 1 binding 1,
      *  and fragment uboFields also target the material UBO instead of mesh UBO. */
-    readonly baseMaterialUboFields?: readonly UboField[];
+    readonly _baseMaterialUboFields?: readonly UboField[];
 }
 
 // ── Composed output ─────────────────────────────────────────────
@@ -190,29 +190,29 @@ export interface ShaderTemplate {
 /** Computed byte layout for a UBO struct */
 export interface UboSpec {
     /** Total byte size (aligned to 16 bytes) */
-    readonly totalBytes: number;
+    readonly _totalBytes: number;
     /** Map from field name → byte offset */
-    readonly offsets: ReadonlyMap<string, number>;
+    readonly _offsets: ReadonlyMap<string, number>;
     /** Generated WGSL struct body (fields only, no `struct Name {}`  wrapper) */
-    readonly structBody: string;
+    readonly _structBody: string;
 }
 
 /** The output of composeShader() — everything needed to create a GPU pipeline */
 export interface ComposedShader {
     /** Final vertex WGSL source */
-    readonly vertexWGSL: string;
+    readonly _vertexWGSL: string;
     /** Final fragment WGSL source */
-    readonly fragmentWGSL: string;
+    readonly _fragmentWGSL: string;
     /** Mesh bind group layout descriptor (group 1) */
-    readonly meshBGLDescriptor: GPUBindGroupLayoutDescriptor;
+    readonly _meshBGLDescriptor: GPUBindGroupLayoutDescriptor;
     /** Shadow bind group layout descriptor (group 2), or null */
-    readonly shadowBGLDescriptor: GPUBindGroupLayoutDescriptor | null;
+    readonly _shadowBGLDescriptor: GPUBindGroupLayoutDescriptor | null;
     /** Vertex buffer layouts for pipeline descriptor */
-    readonly vertexBufferLayouts: GPUVertexBufferLayout[];
+    readonly _vertexBufferLayouts: GPUVertexBufferLayout[];
     /** Mesh UBO spec */
-    readonly meshUboSpec: UboSpec;
+    readonly _meshUboSpec: UboSpec;
     /** Material UBO spec (present when template provides baseMaterialUboFields) */
-    readonly materialUboSpec?: UboSpec;
+    readonly _materialUboSpec?: UboSpec;
     /** Sorted fragment IDs joined with "|" — used as part of pipeline cache key */
-    readonly fragmentKey: string;
+    readonly _fragmentKey: string;
 }
