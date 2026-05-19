@@ -7,13 +7,10 @@
  *
  *  Protocol
  *  --------
- *  Init (once):  { positions: Float32Array, vertexCount: number }
+ *  Init (once):  { p: Float32Array, n: number }
  *                — buffer is transferred and retained on the worker side.
  *                — positions are in mesh-LOCAL space (stride 3, xyz per splat).
- *  Sort  (N×):   { worldMatrix: Float32Array(16),
- *                  cameraForward: Float32Array(3),
- *                  cameraPosition: Float32Array(3),
- *                  depthMix: BigInt64Array }
+ *  Sort  (N×):   { m: Float32Array(16), f: Float32Array(3), c: Float32Array(3), d: BigInt64Array }
  *                — depthMix is round-tripped via transferable; layout is
  *                  high-32 bits = packed depth (then bit-inverted), low-32 bits = splat index.
  *                  After sort, low-32 bits give the back-to-front order.
@@ -38,28 +35,28 @@ let vertexCount = 0;
 
 self.onmessage = (e: MessageEvent) => {
     const data = e.data as {
-        positions?: Float32Array;
-        vertexCount?: number;
-        worldMatrix?: Float32Array;
-        cameraForward?: Float32Array;
-        cameraPosition?: Float32Array;
-        depthMix?: BigInt64Array;
+        p?: Float32Array;
+        n?: number;
+        m?: Float32Array;
+        f?: Float32Array;
+        c?: Float32Array;
+        d?: BigInt64Array;
     };
 
-    if (data.positions) {
-        positions = data.positions;
-        vertexCount = data.vertexCount ?? 0;
+    if (data.p) {
+        positions = data.p;
+        vertexCount = data.n ?? 0;
         return;
     }
 
-    if (!positions || !data.worldMatrix || !data.cameraForward || !data.cameraPosition || !data.depthMix) {
+    if (!positions || !data.m || !data.f || !data.c || !data.d) {
         return;
     }
 
-    const m = data.worldMatrix;
-    const cf = data.cameraForward;
-    const cp = data.cameraPosition;
-    const depthMix = data.depthMix;
+    const m = data.m;
+    const cf = data.f;
+    const cp = data.c;
+    const depthMix = data.d;
     const indices = new Uint32Array(depthMix.buffer);
     const floatMix = new Float32Array(depthMix.buffer);
 
@@ -83,5 +80,5 @@ self.onmessage = (e: MessageEvent) => {
 
     depthMix.sort();
 
-    (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ depthMix }, [depthMix.buffer]);
+    (self as unknown as { postMessage: (m: unknown, t?: Transferable[]) => void }).postMessage({ d: depthMix }, [depthMix.buffer]);
 };

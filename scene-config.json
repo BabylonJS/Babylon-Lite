@@ -987,5 +987,55 @@
         "description": "Xbot idle base animation blends with a full-weight additive sad pose.",
         "tags": ["pbr", "gltf", "anim"],
         "skipPerf": true
+    },
+    {
+        "id": 159,
+        "slug": "scene159-shader-material-basic",
+        "name": "Scene 159 - ShaderMaterial Basic",
+        "maxMad": 0.02,
+        "maxRawKB": 37,
+        "description": "WGSL-only Lite ShaderMaterial equivalent of the Babylon docs' simplest solid-color ShaderMaterial.",
+        "tags": ["shader", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 160,
+        "slug": "scene160-shader-material-texture",
+        "name": "Scene 160 - ShaderMaterial Texture",
+        "maxMad": 0.02,
+        "maxRawKB": 39,
+        "description": "WGSL ShaderMaterial samples a Texture2D through a declared sampler, matching the Babylon docs texture sampler pattern.",
+        "tags": ["shader", "texture", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 161,
+        "slug": "scene161-shader-material-uniform",
+        "name": "Scene 161 - ShaderMaterial Uniform",
+        "maxMad": 0.02,
+        "maxRawKB": 37,
+        "description": "WGSL ShaderMaterial updates typed custom uniforms through standalone setters.",
+        "tags": ["shader", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 162,
+        "slug": "scene162-shader-material-defines",
+        "name": "Scene 162 - ShaderMaterial Defines",
+        "maxMad": 0.02,
+        "maxRawKB": 37,
+        "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
+        "tags": ["shader", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 163,
+        "slug": "scene163-shader-material-alpha",
+        "name": "Scene 163 - ShaderMaterial Alpha",
+        "maxMad": 0.02,
+        "maxRawKB": 37,
+        "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
+        "tags": ["shader", "alpha", "procedural"],
+        "skipPerf": true
     }
 ]

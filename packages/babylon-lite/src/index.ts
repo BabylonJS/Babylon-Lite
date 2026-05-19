@@ -85,6 +85,7 @@ export { createStandardMaterial } from "./material/standard/create-standard-mate
 export { createStandardShadowDepthMaterialView } from "./material/standard/shadow-depth-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { createPbrShadowDepthMaterialView } from "./material/pbr/shadow-depth-view.js";
+export { createShaderMaterial, setShaderUniform, setShaderTexture, setShaderFloat, setShaderVector3, setShaderMatrix } from "./material/shader/shader-material.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
@@ -166,6 +167,21 @@ export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
 export type { Material, MaterialRenderFeatures, MaterialView } from "./material/material.js";
+export type {
+    ShaderMaterial,
+    ShaderMaterialOptions,
+    ShaderAttributeName,
+    ShaderUniformType,
+    ShaderSystemUniformName,
+    ShaderUniformOption,
+    ShaderUniformDecl,
+    ShaderUniformValue,
+    ShaderSamplerOption,
+    ShaderSamplerDecl,
+    ShaderDefineValue,
+    ShaderDefineMap,
+    ShaderDefine,
+} from "./material/shader/shader-material.js";
 export type {
     PbrMaterialProps,
     ClearCoatProps,
