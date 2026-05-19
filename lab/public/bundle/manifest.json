@@ -1667,8 +1667,8 @@
     ]
   },
   "scene150": {
-    "rawKB": 55.5,
-    "gzipKB": 20.8,
+    "rawKB": 52.8,
+    "gzipKB": 19.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene150-standard-renderable-Dj6w0BpM.js",
@@ -1679,8 +1679,8 @@
     "bjsGzipKB": 350.8
   },
   "scene151": {
-    "rawKB": 55.7,
-    "gzipKB": 20.9,
+    "rawKB": 53.1,
+    "gzipKB": 20,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene151-standard-renderable-DJbC05xl.js",
@@ -1691,8 +1691,8 @@
     "bjsGzipKB": 350.9
   },
   "scene152": {
-    "rawKB": 86.7,
-    "gzipKB": 33.5,
+    "rawKB": 86.6,
+    "gzipKB": 33.4,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene152-create-skeleton-BNt2jBzT.js",
@@ -1711,8 +1711,8 @@
     "bjsGzipKB": 552.4
   },
   "scene153": {
-    "rawKB": 11.7,
-    "gzipKB": 4.7,
+    "rawKB": 8.1,
+    "gzipKB": 3.4,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene153.js"
@@ -1721,8 +1721,8 @@
     "bjsGzipKB": 138.8
   },
   "scene154": {
-    "rawKB": 56,
-    "gzipKB": 20.9,
+    "rawKB": 53.3,
+    "gzipKB": 20,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene154-standard-renderable-CFQk7tIu.js",
@@ -1733,8 +1733,8 @@
     "bjsGzipKB": 350.9
   },
   "scene155": {
-    "rawKB": 58.4,
-    "gzipKB": 21.8,
+    "rawKB": 55.8,
+    "gzipKB": 20.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene155-standard-renderable-CTX-mAn4.js",
@@ -1745,8 +1745,8 @@
     "bjsGzipKB": 353.8
   },
   "scene156": {
-    "rawKB": 59.2,
-    "gzipKB": 22,
+    "rawKB": 56.6,
+    "gzipKB": 21.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene156-standard-renderable-ORZmxg3Q.js",
@@ -1757,8 +1757,8 @@
     "bjsGzipKB": 353.9
   },
   "scene157": {
-    "rawKB": 92.3,
-    "gzipKB": 35.1,
+    "rawKB": 91.4,
+    "gzipKB": 34.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene157-create-skeleton-DynzY1cG.js",
@@ -1776,8 +1776,8 @@
     "bjsGzipKB": 512.1
   },
   "scene158": {
-    "rawKB": 92.7,
-    "gzipKB": 35.3,
+    "rawKB": 91.9,
+    "gzipKB": 35.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene158-create-skeleton-DOsXOX5j.js",

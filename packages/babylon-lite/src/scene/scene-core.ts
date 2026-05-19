@@ -64,11 +64,6 @@ export interface SceneContext {
     fixedDeltaMs: number;
 }
 
-export interface AddToSceneOptions {
-    /** When false, AssetContainer.animationGroups remain caller-owned instead of scene-ticked. */
-    readonly registerAnimationGroups?: boolean;
-}
-
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
 export interface SceneContextInternal extends SceneContext, RenderingContext {
     /** All renderables in this scene. The active frame-graph tasks bucket them
@@ -266,29 +261,13 @@ export function addDeferredSceneRenderables(
     });
 }
 
-/**
- * Add an entity (mesh, light, camera, transform node, shadow generator, or asset container)
- * to the scene. Optional scene-hosted systems such as depth-hosted sprites expose their own
- * opt-in add functions so mesh-only scenes do not pay feature-specific routing bytes here.
- */
-function registerSceneAnimationGroups(ctx: SceneContextInternal, groups: readonly AnimationGroup[]): void {
-    const engine = ctx.engine as EngineContextInternal;
-    ctx._beforeRender.push((deltaMs: number) => {
-        for (const group of groups) {
-            if (!group._stopped && group._ctrl) {
-                group._ctrl.tick(deltaMs, engine);
-            }
-        }
-    });
-}
-
-export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer, options?: AddToSceneOptions): void {
+export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     const ctx = scene as SceneContextInternal;
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
         const result = entity as AssetContainer;
         for (const e of result.entities) {
-            addToScene(scene, e, options);
+            addToScene(scene, e);
         }
         if (result.clearColor) {
             ctx.clearColor = result.clearColor;
@@ -297,11 +276,16 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx.camera = result.camera;
         }
         if (result.animationGroups?.length) {
+            const engine = ctx.engine as EngineContextInternal;
             const groups = result.animationGroups;
             ctx.animationGroups.push(...groups);
-            if (options?.registerAnimationGroups !== false) {
-                registerSceneAnimationGroups(ctx, groups);
-            }
+            ctx._beforeRender.push((deltaMs: number) => {
+                for (const g of groups) {
+                    if (!g._stopped && g._ctrl) {
+                        g._ctrl.tick(deltaMs, engine);
+                    }
+                }
+            });
         }
         return;
     }
@@ -333,7 +317,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     if (kids?.length) {
         for (const child of kids) {
             (child as unknown as SceneNode).parent = entity as unknown as SceneNode;
-            addToScene(scene, child, options);
+            addToScene(scene, child);
         }
     }
 }

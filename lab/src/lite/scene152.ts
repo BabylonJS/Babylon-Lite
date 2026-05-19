@@ -31,7 +31,9 @@ async function main(): Promise<void> {
     scene.fixedDeltaMs = 16.0;
 
     const shark = await loadGltf(engine, SHARK_URL);
-    addToScene(scene, shark, { registerAnimationGroups: false });
+    for (const entity of shark.entities) {
+        addToScene(scene, entity);
+    }
     for (const group of shark.animationGroups ?? []) {
         if (group.name !== "swimming") {
             stopAnimation(group);

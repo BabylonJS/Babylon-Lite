@@ -1,9 +1,11 @@
-import { createAnimationGroups, playAnimation } from "./animation-group.js";
+import { playAnimation } from "./animation-group.js";
 import type { AnimationGroup } from "./animation-group.js";
 import { addAnimationGroup } from "./animation-manager-core.js";
 import type { AnimationManager } from "./animation-manager-core.js";
 import { INTERP_LINEAR, INTERP_STEP, PATH_POINTER } from "./types.js";
-import type { AnimationChannel, AnimationClip, AnimationSampler, GltfAnimationData } from "./types.js";
+import type { AnimationChannel, AnimationClip, AnimationSampler } from "./types.js";
+import { evaluateSampler } from "./evaluate.js";
+import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
 export {
     addAnimationGroup,
@@ -127,16 +129,6 @@ export function createPropertyAnimationGroup(
         duration: clip.duration,
         frameRate: clip.frameRate,
     };
-    const animData: GltfAnimationData = {
-        clips: [runtimeClip],
-        nodes: [],
-        skeletons: [],
-        morphBindings: [],
-    };
-    const group = createAnimationGroups(animData)[0];
-    if (!group?._ctrl) {
-        throw new Error("Failed to create property animation group");
-    }
 
     const fromTime = options?.fromTime ?? (options?.fromFrame !== undefined ? options.fromFrame / clip.frameRate : 0);
     const toTime = options?.toTime ?? (options?.toFrame !== undefined ? options.toFrame / clip.frameRate : clip.duration);
@@ -144,9 +136,7 @@ export function createPropertyAnimationGroup(
         throw new Error("Animation play range must have toTime greater than fromTime");
     }
 
-    group._ctrl.fromTime = fromTime;
-    group._ctrl.toTime = toTime;
-    group._ctrl.time = fromTime;
+    const group = createPointerAnimationGroup(runtimeClip, fromTime, toTime, options);
     group.loopAnimation = options?.loop ?? true;
     group.speedRatio = options?.speedRatio ?? 1;
     group._pm = [channels, samplers, fromTime, toTime, clip.duration];
@@ -154,6 +144,69 @@ export function createPropertyAnimationGroup(
     addAnimationGroup(manager, group);
     return group;
 }
+
+function createPointerAnimationGroup(clip: AnimationClip, fromTime: number, toTime: number, options?: CreatePropertyAnimationGroupOptions): AnimationGroup {
+    const ctrl: AnimationController = {
+        time: fromTime,
+        playing: false,
+        speedRatio: options?.speedRatio ?? 1,
+        loop: options?.loop ?? true,
+        tick(deltaMs: number): void {
+            if (ctrl.playing) {
+                ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
+            }
+            const duration = Math.max(0, toTime - fromTime);
+            if (duration <= 0) {
+                return;
+            }
+            if (ctrl.loop && ctrl.playing) {
+                ctrl.time = fromTime + ((ctrl.time - fromTime) % duration);
+                if (ctrl.time < fromTime) {
+                    ctrl.time += duration;
+                }
+            } else {
+                ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
+            }
+            for (const ch of clip.channels) {
+                if (ch.pointerArity && ch.pointerWriter) {
+                    evaluateSampler(clip.samplers[ch.samplerIdx]!, ctrl.time, ch.pointerArity, ch.pointerQuaternion === true, _pointerScratch, 0);
+                    ch.pointerWriter(_pointerScratch, 0);
+                }
+            }
+        },
+    };
+    return {
+        name: clip.name,
+        duration: clip.duration,
+        frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
+        get isPlaying(): boolean {
+            return ctrl.playing;
+        },
+        get currentFrame(): number {
+            return ctrl.time;
+        },
+        set currentFrame(v: number) {
+            ctrl.time = v;
+        },
+        get speedRatio(): number {
+            return ctrl.speedRatio;
+        },
+        set speedRatio(v: number) {
+            ctrl.speedRatio = v;
+        },
+        get loopAnimation(): boolean {
+            return ctrl.loop;
+        },
+        set loopAnimation(v: boolean) {
+            ctrl.loop = v;
+        },
+        weight: 1,
+        _ctrl: ctrl,
+        _stopped: false,
+    };
+}
+
+const _pointerScratch = new Float32Array(16);
 
 function createSampler(track: PropertyAnimationTrackOptions, frameRate: number): AnimationSampler {
     if (track.keys.length === 0) {

@@ -2,7 +2,7 @@
 // Zero per-frame allocation: all scratch buffers pre-allocated at init.
 
 import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
-import type { GltfAnimationData, AnimationClip } from "../animation/types.js";
+import type { AnimationClip, NodeRest, SkeletonBinding } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
 import { evaluateSampler } from "../animation/evaluate.js";
@@ -50,7 +50,7 @@ function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int
 
 export interface AnimationController {
     /** Advance animation by deltaMs and update bone textures. */
-    tick(deltaMs: number, engine?: EngineContext, force?: boolean): void;
+    tick(deltaMs: number, engine?: EngineContext): void;
     /** Current playback time in seconds. */
     time: number;
     /** True if playing. */
@@ -59,12 +59,6 @@ export interface AnimationController {
     speedRatio: number;
     /** Whether animation loops (default true). */
     loop: boolean;
-    /** Inclusive playback range start in seconds. */
-    fromTime: number;
-    /** Exclusive playback range end in seconds. Defaults to clip duration. */
-    toTime: number;
-    /** True when evaluating the clip needs GPU uploads through an engine. */
-    readonly requiresEngine: boolean;
     /** Debug: node world matrices (numNodes × 16 floats, column-major). */
     readonly _debugWorldMat?: Float32Array;
     /** Debug: node names. */
@@ -75,23 +69,12 @@ export interface AnimationController {
  * Create a skeleton animation controller from parsed glTF animation data.
  * Returns a tick function that advances the animation and uploads bone matrices.
  */
-export function createAnimationController(animData: GltfAnimationData): AnimationController {
-    const { clips, nodes, skeletons, morphBindings } = animData;
-    const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer)) {
-        return {
-            tick() {},
-            time: 0,
-            playing: false,
-            speedRatio: 1,
-            loop: true,
-            fromTime: 0,
-            toTime: 0,
-            requiresEngine: false,
-        };
-    }
-
-    const clip: AnimationClip = clips[0]!;
+export function createAnimationController(
+    clip: AnimationClip,
+    nodes: readonly NodeRest[],
+    skeletons: readonly SkeletonBinding[],
+    morphBindings: readonly MorphBinding[]
+): AnimationController {
     const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
 
@@ -120,52 +103,40 @@ export function createAnimationController(animData: GltfAnimationData): Animatio
     // Current registered writers need at most 4 (quaternion/color4). Keep 16 for headroom.
     const pointerScratch = new Float32Array(16);
 
-    let _hasTickedOnce = false;
+    let cachedEngine: EngineContext | undefined;
 
     const ctrl: AnimationController = {
         time: 0,
         playing: true,
         speedRatio: 1,
         loop: true,
-        fromTime: 0,
-        toTime: clip.duration,
-        requiresEngine,
         _debugWorldMat: worldMat,
 
-        tick(deltaMs: number, engine?: EngineContext, force = false): void {
+        tick(deltaMs: number, engine?: EngineContext): void {
             if (clip.duration <= 0) {
                 return;
             }
-            if (requiresEngine && !engine) {
+            if (engine) {
+                cachedEngine = engine;
+            }
+            const activeEngine = engine ?? cachedEngine;
+            if (requiresEngine && !activeEngine) {
                 throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
             }
-            const device = requiresEngine ? (engine as EngineContextInternal).device : null;
-
-            // Skip if animation time hasn't changed (paused/static scene)
-            if (!force && deltaMs === 0 && _hasTickedOnce) {
-                return;
-            }
-            _hasTickedOnce = true;
+            const device = requiresEngine ? (activeEngine as EngineContextInternal).device : null;
 
             if (ctrl.playing) {
                 ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
             }
 
-            const fromTime = Math.max(0, Math.min(ctrl.fromTime, clip.duration));
-            const toTime = ctrl.toTime > fromTime ? Math.min(ctrl.toTime, clip.duration) : clip.duration;
-            const duration = Math.max(0, toTime - fromTime);
-            if (duration <= 0) {
-                return;
-            }
-
             // Always wrap/clamp — ensures externally-set time (goToFrame) is valid
             if (ctrl.loop) {
-                ctrl.time = fromTime + ((ctrl.time - fromTime) % duration);
-                if (ctrl.time < fromTime) {
-                    ctrl.time += duration;
+                ctrl.time %= clip.duration;
+                if (ctrl.time < 0) {
+                    ctrl.time += clip.duration;
                 }
             } else {
-                ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
+                ctrl.time = Math.min(Math.max(ctrl.time, 0), clip.duration);
             }
             const t = ctrl.time;
 

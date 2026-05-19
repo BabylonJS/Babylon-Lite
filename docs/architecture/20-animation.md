@@ -293,7 +293,9 @@ Unified glTF + manual animation ownership:
 
 ```typescript
 const shark = await loadGltf(engine, "https://models.babylonjs.com/shark.glb");
-addToScene(scene, shark, { registerAnimationGroups: false });
+for (const entity of shark.entities) {
+    addToScene(scene, entity);
+}
 
 const manager = createAnimationManager({ engine });
 addAnimationGroups(manager, shark.animationGroups ?? []);
@@ -316,7 +318,9 @@ Weighted glTF skeleton blend:
 
 ```typescript
 const xbot = await loadGltf(engine, "https://playground.babylonjs.com/scenes/Xbot.glb");
-addToScene(scene, xbot, { registerAnimationGroups: false });
+for (const entity of xbot.entities) {
+    addToScene(scene, entity);
+}
 
 const manager = createAnimationManager({ engine });
 addAnimationGroups(manager, xbot.animationGroups ?? []);

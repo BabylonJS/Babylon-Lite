@@ -60,7 +60,7 @@ export function setAnimationAdditive(group: AnimationGroup, options?: AnimationA
     if (options?.referenceFrame !== undefined && options.referenceTime !== undefined) {
         throw new Error("Additive animation reference must use either referenceFrame or referenceTime, not both");
     }
-    const referenceTime = options?.referenceTime ?? (options?.referenceFrame ?? 0) / group.frameRate;
+    const referenceTime = options?.referenceTime ?? (options?.referenceFrame ?? 0) / (group.frameRate || 60);
     if (!Number.isFinite(referenceTime) || referenceTime < 0) {
         throw new Error(`Additive animation reference time must be a finite non-negative number, got ${referenceTime}`);
     }
@@ -306,22 +306,17 @@ function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, delt
         group.currentFrame += (deltaMs / 1000) * group.speedRatio;
     }
 
-    const ctrl = group._ctrl;
-    const fromTime = Math.max(0, Math.min(ctrl?.fromTime ?? 0, clip.duration));
-    const rawToTime = ctrl?.toTime ?? clip.duration;
-    const toTime = rawToTime > fromTime ? Math.min(rawToTime, clip.duration) : clip.duration;
-    const duration = Math.max(0, toTime - fromTime);
-    if (duration <= 0) {
-        return fromTime;
+    if (clip.duration <= 0) {
+        return 0;
     }
 
     if (group.loopAnimation && isPlaying) {
-        group.currentFrame = fromTime + ((group.currentFrame - fromTime) % duration);
-        if (group.currentFrame < fromTime) {
-            group.currentFrame += duration;
+        group.currentFrame %= clip.duration;
+        if (group.currentFrame < 0) {
+            group.currentFrame += clip.duration;
         }
     } else {
-        group.currentFrame = Math.min(Math.max(group.currentFrame, fromTime), toTime);
+        group.currentFrame = Math.min(Math.max(group.currentFrame, 0), clip.duration);
     }
     return group.currentFrame;
 }

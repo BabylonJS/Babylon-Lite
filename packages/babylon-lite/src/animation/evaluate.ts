@@ -94,21 +94,12 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
         }
         return;
     }
-    if (t >= input[keyCount - 1]!) {
-        // Clamp to last keyframe
-        const srcOff = interpolation === INTERP_CUBICSPLINE ? (keyCount - 1) * stride * 3 + stride : (keyCount - 1) * stride;
-        for (let c = 0; c < stride; c++) {
-            dst[dstOffset + c] = output[srcOff + c]!;
-        }
-        return;
-    }
-
     const idx = findKeyframe(input, t);
     const t0 = input[idx]!;
     const t1 = input[idx + 1]!;
 
     if (interpolation === INTERP_STEP) {
-        const srcOff = idx * stride;
+        const srcOff = (t >= t1 ? idx + 1 : idx) * stride;
         for (let c = 0; c < stride; c++) {
             dst[dstOffset + c] = output[srcOff + c]!;
         }
@@ -116,7 +107,7 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
     }
 
     const dt = t1 - t0;
-    const f = dt > 0 ? (t - t0) / dt : 0; // fractional time between keyframes
+    const f = t >= t1 ? 1 : dt > 0 ? (t - t0) / dt : 0; // fractional time between keyframes
 
     if (interpolation === INTERP_CUBICSPLINE) {
         // Hermite spline: p(t) = (2t³-3t²+1)p0 + (t³-2t²+t)m0 + (-2t³+3t²)p1 + (t³-t²)m1

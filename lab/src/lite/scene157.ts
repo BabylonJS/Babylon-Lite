@@ -41,7 +41,9 @@ async function main(): Promise<void> {
     addToScene(scene, createDirectionalLight([0, -0.5, -1], 0.8));
 
     const xbot = await loadGltf(engine, XBOT_URL);
-    addToScene(scene, xbot, { registerAnimationGroups: false });
+    for (const entity of xbot.entities) {
+        addToScene(scene, entity);
+    }
 
     const manager = createAnimationManager({ engine });
     const walk = xbot.animationGroups?.find((group) => group.name === "walk");
