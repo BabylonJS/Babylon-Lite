@@ -222,6 +222,8 @@ export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAt
 export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export { createSprite2DLayer, addSprite2DIndex, updateSprite2DIndex, removeSprite2DIndex, clearSprite2DLayer, setSprite2DFrameIndex } from "./sprite/sprite-2d.js";
+export type { Sprite2DHandle } from "./sprite/sprite-2d-handle.js";
+export { addSprite2D, updateSprite2D, removeSprite2D, setSprite2DHandleFrameIndex, getSprite2DHandleIndex, isSprite2DHandleAlive } from "./sprite/sprite-2d-handle.js";
 export { addDepthHostedSpriteLayer } from "./sprite/sprite-scene.js";
 // ─── World-space billboards ────────────────────────────────────────
 export type {
@@ -242,6 +244,15 @@ export {
     clearBillboardSprites,
     setBillboardSpriteFrameIndex,
 } from "./sprite/billboard-sprite.js";
+export type { BillboardSpriteHandle } from "./sprite/billboard-sprite-handle.js";
+export {
+    addBillboardSprite,
+    updateBillboardSprite,
+    removeBillboardSprite,
+    setBillboardSpriteHandleFrameIndex,
+    getBillboardSpriteHandleIndex,
+    isBillboardSpriteHandleAlive,
+} from "./sprite/billboard-sprite-handle.js";
 export { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "./sprite/billboard-scene.js";
 export type { SpriteRenderer, SpriteRendererOptions } from "./sprite/sprite-renderer.js";
 export {
