@@ -26,6 +26,10 @@ variables:
       value: "true"
     - name: HEADLESS
       value: "true"
+    # Curated performance-regression suite. Keep this to representative, high-signal scenes
+    # so BrowserStack perf validation stays actionable and finishes in a reasonable time.
+    - name: PERF_SCENES
+      value: "1,4,7,9,16,17,19,20,22,28,35,37,54,66,72,73,110,111,116,120"
 
 stages:
     - stage: CI
@@ -188,10 +192,20 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                - script: |
+                      PERF_BUNDLE_SCENES=$(node -e "const ids = process.env.PERF_SCENES.split(',').map((s) => s.trim()).filter(Boolean); console.log(ids.map((id) => 'scene' + id).join(','));")
+                      echo "Perf scene ids: $(PERF_SCENES)"
+                      echo "Perf bundle scenes: $PERF_BUNDLE_SCENES"
+                      echo "##vso[task.setvariable variable=PERF_BUNDLE_SCENES]$PERF_BUNDLE_SCENES"
+                  displayName: "Resolve perf scene subset"
+                  env:
+                      PERF_SCENES: "$(PERF_SCENES)"
+
                 # Build current bundle scenes (skip size measurement — not needed for perf)
                 - script: pnpm build:bundle-scenes
                   displayName: "Build current bundle scenes"
                   env:
+                      BUNDLE_SCENES: "$(PERF_BUNDLE_SCENES)"
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
@@ -205,7 +219,7 @@ stages:
 
                 - task: Cache@2
                   inputs:
-                      key: '"perf-baseline" | "$(BASELINE_SHA)"'
+                      key: '"perf-baseline" | "$(BASELINE_SHA)" | "$(PERF_SCENES)"'
                       path: $(System.DefaultWorkingDirectory)/lab/public/bundle-baseline
                       cacheHitVar: BASELINE_CACHE_HIT
                   displayName: "Cache baseline bundles"
@@ -214,6 +228,8 @@ stages:
                 - script: pnpm build:perf-baseline
                   displayName: "Build baseline bundle scenes"
                   condition: ne(variables.BASELINE_CACHE_HIT, 'true')
+                  env:
+                      BUNDLE_SCENES: "$(PERF_BUNDLE_SCENES)"
 
                 # Generate baseline HTML loader pages (needed even on cache hit)
                 - script: |
@@ -221,14 +237,18 @@ stages:
                       const fs = require('fs');
                       const path = require('path');
                       const scenes = JSON.parse(fs.readFileSync('scene-config.json','utf8'));
-                      for (const s of scenes) {
+                      const selected = new Set(process.env.PERF_SCENES.split(',').map((s) => Number(s.trim())).filter(Boolean));
+                      const perfScenes = scenes.filter((s) => selected.has(s.id));
+                      for (const s of perfScenes) {
                         const html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style></head><body><canvas id=\"renderCanvas\"></canvas><script src=\"/loader.js\"></script><script type=\"module\" src=\"/bundle-baseline/scene'+s.id+'.js\"></script></body></html>';
                         fs.writeFileSync(path.join('lab','bundle-baseline-scene'+s.id+'.html'), html);
                       }
-                      console.log('Generated ' + scenes.length + ' baseline HTML pages');
+                      console.log('Generated ' + perfScenes.length + ' baseline HTML pages');
                       "
                   displayName: "Generate baseline HTML pages"
                   condition: eq(variables.BASELINE_CACHE_HIT, 'true')
+                  env:
+                      PERF_SCENES: "$(PERF_SCENES)"
 
                 # Runs current vs baseline on same BrowserStack macOS Chrome instance
                 - script: pnpm test:perf-cloud
@@ -239,6 +259,7 @@ stages:
                       PERF_FRAMES: "$(PERF_FRAMES)"
                       PERF_RUNS: "$(PERF_RUNS)"
                       PERF_WARMUP: "$(PERF_WARMUP)"
+                      PERF_SCENES: "$(PERF_SCENES)"
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
 
