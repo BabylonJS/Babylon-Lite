@@ -15,27 +15,31 @@ export * from "./pbr-flag-bits.js";
 export type PbrExtPhase = "vertex" | "base-tex" | "ibl" | "fragment";
 
 /** @internal Fragment creation context threaded through `PbrExt.frag`. */
-export interface PbrFragCtx {
-    readonly features: number;
-    readonly features2: number;
-    readonly hasIbl: boolean;
-    readonly hasAnyNormal: boolean;
-    readonly hasSpecularAA: boolean;
+export interface _PbrFragCtx {
+    readonly _features: number;
+    readonly _features2: number;
+    /** Mesh feature bits, separate from material feature bits. */
+    readonly _meshFeatures: number;
+    readonly _hasIbl: boolean;
+    readonly _hasAnyNormal: boolean;
+    readonly _hasSpecularAA: boolean;
     /** Aniso bent-normal WGSL (IBL only). */
-    readonly anisoBentNormalCode?: string;
+    readonly _anisoBentNormalCode?: string;
     /** Pre-baked skybox WGSL (IBL only). */
-    readonly iblSkyboxCalc?: string;
+    readonly _iblSkyboxCalc?: string;
 }
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
-export interface PbrBindCtx {
-    readonly features: number;
-    readonly features2: number;
-    readonly material: unknown;
+export interface _PbrBindCtx {
+    readonly _features: number;
+    readonly _features2: number;
+    /** Mesh feature bits, separate from material feature bits. */
+    readonly _meshFeatures: number;
+    readonly _material: unknown;
     /** Populated for "vertex" phase (skeleton, morph). */
-    readonly mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null };
+    readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null };
     /** Populated for "ibl" phase. */
-    readonly env?: { brdfLutView: GPUTextureView; brdfSampler: GPUSampler; specularCubeView: GPUTextureView; cubeSampler: GPUSampler } | null;
+    readonly _env?: { brdfLutView: GPUTextureView; brdfSampler: GPUSampler; specularCubeView: GPUTextureView; cubeSampler: GPUSampler } | null;
 }
 
 /** @internal Unified PBR extension. All hooks optional.
@@ -48,11 +52,11 @@ export interface PbrExt {
     /** Contribute feature bits for a given material. Returns {f,f2} to OR in. */
     detect?(mat: unknown): { f: number; f2: number };
     /** Contribute a ShaderFragment (null if gated off for this variant). */
-    frag?(ctx: PbrFragCtx): ShaderFragment | null;
+    frag?(ctx: _PbrFragCtx): ShaderFragment | null;
     /** Write this ext's slice of the material UBO. */
     writeUbo?(data: Float32Array, mat: unknown, offsets: ReadonlyMap<string, number>): void;
     /** Push group-1 bind entries starting at binding `b`; return new b. */
-    bind?(ctx: PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number;
+    bind?(ctx: _PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number;
     /** Enumerate textures for acquire/release. */
     textures?(mat: unknown, out: Texture2D[]): void;
 }

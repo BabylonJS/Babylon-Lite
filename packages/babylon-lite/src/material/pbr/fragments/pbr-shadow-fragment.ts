@@ -19,9 +19,9 @@ export type PbrShadowLightSlot = ShadowLightSlot;
  */
 export function createPbrShadowFragment(shadowLights: PbrShadowLightSlot[] = [{ lightIndex: 0, shadowType: "esm" }]): ShaderFragment {
     const fragment = createShadowFragment("pbr-shadow", shadowLights);
-    const shadowCode = fragment.fragmentSlots?.AD;
+    const shadowCode = fragment._fragmentSlots?.AD;
     return {
         ...fragment,
-        fragmentSlots: shadowCode ? { AS: shadowCode } : undefined,
+        _fragmentSlots: shadowCode ? { AS: shadowCode } : undefined,
     };
 }

@@ -49,14 +49,14 @@ export function createReflectanceFragment(
     const bindings: BindingDecl[] = [];
     if (hasMetallicReflectanceMap) {
         bindings.push(
-            { name: "metallicReflectanceMap", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "metallicReflectanceMapSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "metallicReflectanceMap", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "metallicReflectanceMapSampler", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
     if (hasReflectanceMap) {
         bindings.push(
-            { name: "reflectanceMap", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "reflectanceMapSampler", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "reflectanceMap", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "reflectanceMapSampler", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
 
@@ -90,20 +90,20 @@ let colorF90 = vec3<f32>(mrFactors.a);
 let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surfaceReflectivityColor) * (1.0 - metallic);`;
 
     return {
-        id: "reflectance",
+        _id: "reflectance",
 
-        uboFields: [
-            { name: "occlusionStrength", type: "f32" },
-            { name: "metallicF0Factor", type: "f32" },
-            { name: "_mrPad0", type: "f32" },
-            { name: "_mrPad1", type: "f32" },
-            { name: "metallicReflectanceColor", type: "vec3<f32>" },
-            { name: "_mrPad2", type: "f32" },
+        _uboFields: [
+            { _name: "occlusionStrength", _type: "f32" },
+            { _name: "metallicF0Factor", _type: "f32" },
+            { _name: "_mrPad0", _type: "f32" },
+            { _name: "_mrPad1", _type: "f32" },
+            { _name: "metallicReflectanceColor", _type: "vec3<f32>" },
+            { _name: "_mrPad2", _type: "f32" },
         ],
 
-        bindings,
+        _bindings: bindings,
 
-        fragmentSlots: {
+        _fragmentSlots: {
             MF: f0Code,
             AT: hasOcclusionUv2
                 ? `let occlusion = mix(1.0, textureSample(occlusionTexture, occlusionSampler_, input.uv2).r, material.occlusionStrength);`
@@ -126,7 +126,6 @@ export const reflectanceExt: PbrExt = {
         if (m.reflectanceTexture) {
             f |= PBR_HAS_REFLECTANCE_MAP;
         }
-        // Factor-only mode: non-default specular factors without textures
         if (f === 0) {
             const hasNonDefaultF0 = m.metallicF0Factor != null && Math.abs(m.metallicF0Factor - 1) > 1e-6;
             const mrc = m.metallicReflectanceColor;
@@ -141,20 +140,20 @@ export const reflectanceExt: PbrExt = {
         return { f, f2 };
     },
     frag(ctx) {
-        const hasMR = (ctx.features & PBR_HAS_METALLIC_REFLECTANCE_MAP) !== 0;
-        const hasR = (ctx.features & PBR_HAS_REFLECTANCE_MAP) !== 0;
-        const hasFactors = (ctx.features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
+        const hasMR = (ctx._features & PBR_HAS_METALLIC_REFLECTANCE_MAP) !== 0;
+        const hasR = (ctx._features & PBR_HAS_REFLECTANCE_MAP) !== 0;
+        const hasFactors = (ctx._features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         if (!hasMR && !hasR && !hasFactors) {
             return null;
         }
-        return createReflectanceFragment(hasMR, hasR, (ctx.features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0, (ctx.features2 & PBR2_HAS_UV2) !== 0);
+        return createReflectanceFragment(hasMR, hasR, (ctx._features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0, (ctx._features2 & PBR2_HAS_UV2) !== 0);
     },
     writeUbo: writeReflectanceUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        if ((ctx.features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) === 0) {
+        if ((ctx._features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) === 0) {
             return b;
         }
-        const m = ctx.material as PbrMaterialProps;
+        const m = ctx._material as PbrMaterialProps;
         if (m.metallicReflectanceTexture) {
             entries.push({ binding: b++, resource: m.metallicReflectanceTexture.view });
             entries.push({ binding: b++, resource: m.metallicReflectanceTexture.sampler });

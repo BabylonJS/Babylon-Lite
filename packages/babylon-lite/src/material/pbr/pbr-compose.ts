@@ -12,93 +12,103 @@ import {
     PBR_HAS_ALPHA_BLEND,
     PBR2_HAS_UV_TRANSFORM,
     PBR2_HAS_REFLECTANCE_FACTORS,
-    PBR2_HAS_VERTEX_COLOR,
     PBR2_HAS_UV2,
     PBR_HAS_METALLIC_REFLECTANCE_MAP,
     PBR_HAS_REFLECTANCE_MAP,
     PBR_HAS_SPECULAR_AA,
     PBR_HAS_EMISSIVE_COLOR,
     PBR_HAS_GAMMA_ALBEDO,
-    PBR_HAS_RECEIVE_SHADOWS,
-    PBR_HAS_THIN_INSTANCES,
-    PBR_HAS_INSTANCE_COLOR,
-} from "./pbr-flag-bits.js";
-import {
     PBR_HAS_ANISOTROPY,
-    PBR_HAS_COTANGENT_NORMAL,
     PBR_HAS_DOUBLE_SIDED,
     PBR_HAS_EMISSIVE,
     PBR_HAS_ENV,
-    PBR_HAS_MORPH_TARGETS,
+    PBR_HAS_TONEMAP,
+    PBR_HAS_SPEC_GLOSS,
     PBR_HAS_OCCLUSION,
     PBR_HAS_SKYBOX,
-    PBR_HAS_SPEC_GLOSS,
-    PBR_HAS_TONEMAP,
 } from "./pbr-flag-bits.js";
-import { _getPbrExts, type PbrFragCtx } from "./pbr-flags.js";
+import { _getPbrExts, type _PbrFragCtx } from "./pbr-flags.js";
+import {
+    MSH_HAS_TANGENTS,
+    MSH_HAS_MORPH_TARGETS,
+    MSH_RECEIVE_SHADOWS,
+    MSH_HAS_THIN_INSTANCES,
+    MSH_HAS_INSTANCE_COLOR,
+    MSH_HAS_VERTEX_COLOR,
+    MSH_HAS_UV2,
+} from "../mesh-features.js";
 
-export interface PbrComposerDeps {
-    readonly singleLightWGSL: string;
-    readonly getSingleLightBlock: ((type: string) => string) | null;
-    readonly multiLightWGSL: string;
-    readonly multiLightLoop: string;
-    readonly acesHelpers: string;
-    readonly acesTonemapCall: string;
-    readonly createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null;
-    readonly anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null;
-    readonly iblSkyboxCalc: string;
-    readonly createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
-    readonly shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
-    readonly createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
+interface PbrComposerDeps {
+    readonly _singleLightWGSL: string;
+    readonly _getSingleLightBlock: ((type: string) => string) | null;
+    readonly _multiLightWGSL: string;
+    readonly _multiLightLoop: string;
+    readonly _acesHelpers: string;
+    readonly _acesTonemapCall: string;
+    readonly _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null;
+    readonly _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null;
+    readonly _iblSkyboxCalc: string;
+    readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
+    readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
+    readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
 }
 
 export type PbrLightMode = 0 | 1 | 2;
-export type PbrComposeFn = (features: number, features2?: number, lightMode?: PbrLightMode, singleLightType?: string) => ComposedShader;
+type PbrComposeFn = (
+    _features: number,
+    _features2?: number,
+    _meshFeatures?: number,
+    _sceneFeatures?: number,
+    _lightMode?: PbrLightMode,
+    _singleLightType?: string
+) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
 export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
     const cache = new Map<string, ComposedShader>();
     const {
-        singleLightWGSL,
-        getSingleLightBlock,
-        multiLightWGSL,
-        multiLightLoop,
-        acesHelpers,
-        acesTonemapCall,
-        createPbrTemplateExt,
-        anisoExt,
-        iblSkyboxCalc,
-        createPbrShadowFragment,
-        shadowLights,
-        createThinInstanceFragment,
+        _singleLightWGSL,
+        _getSingleLightBlock,
+        _multiLightWGSL,
+        _multiLightLoop,
+        _acesHelpers,
+        _acesTonemapCall,
+        _createPbrTemplateExt,
+        _anisoExt,
+        _iblSkyboxCalc,
+        _createPbrShadowFragment,
+        _shadowLights,
+        _createThinInstanceFragment,
     } = deps;
 
-    return function composePbr(features: number, features2: number = 0, lightMode: PbrLightMode = 0, singleLightType = ""): ComposedShader {
-        const ckey = `${features}:${features2}:${lightMode}:${singleLightType}`;
+    return function composePbr(features: number, features2: number = 0, meshFeatures = 0, sceneFeatures = 0, lightMode: PbrLightMode = 0, singleLightType = ""): ComposedShader {
+        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
         }
 
         const has = (bit: number) => (features & bit) !== 0;
-        const hasNormal = has(PBR_HAS_NORMAL_MAP);
-        const hasCotangent = has(PBR_HAS_COTANGENT_NORMAL);
+        const hasMesh = (bit: number) => (meshFeatures & bit) !== 0;
+        const hasScene = (bit: number) => (sceneFeatures & bit) !== 0;
+        const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MSH_HAS_TANGENTS);
+        const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
         const hasReflExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
-        const hasIbl = has(PBR_HAS_ENV);
-        const hasMorph = has(PBR_HAS_MORPH_TARGETS);
-        const hasShadow = has(PBR_HAS_RECEIVE_SHADOWS);
+        const hasIbl = hasScene(PBR_HAS_ENV);
+        const hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
+        const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const hasAniso = has(PBR_HAS_ANISOTROPY);
         const hasEmCol = has(PBR_HAS_EMISSIVE_COLOR);
         const hasEmTex = has(PBR_HAS_EMISSIVE);
-        const hasTI = has(PBR_HAS_THIN_INSTANCES);
+        const hasTI = hasMesh(MSH_HAS_THIN_INSTANCES);
 
         const hasUvTx = (features2 & PBR2_HAS_UV_TRANSFORM) !== 0;
-        const hasVC = (features2 & PBR2_HAS_VERTEX_COLOR) !== 0;
-        const hasU2 = (features2 & PBR2_HAS_UV2) !== 0;
+        const hasVC = hasMesh(MSH_HAS_VERTEX_COLOR);
+        const hasU2 = (features2 & PBR2_HAS_UV2) !== 0 && hasMesh(MSH_HAS_UV2);
         const needsExt = hasUvTx || hasVC || hasU2;
         const ext =
-            needsExt && createPbrTemplateExt
-                ? createPbrTemplateExt({
+            needsExt && _createPbrTemplateExt
+                ? _createPbrTemplateExt({
                       hasUvTransform: hasUvTx,
                       hasVertexColor: hasVC,
                       hasUv2: hasU2,
@@ -112,17 +122,17 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const template = createPbrTemplate({
             hasSingleLight: lightMode === 1,
             hasMultiLight: lightMode === 2,
-            singleLightWGSL,
-            singleLightBlock: lightMode === 1 && getSingleLightBlock ? getSingleLightBlock(singleLightType) : "",
-            multiLightWGSL,
-            multiLightLoop,
+            singleLightWGSL: _singleLightWGSL,
+            singleLightBlock: lightMode === 1 && _getSingleLightBlock ? _getSingleLightBlock(singleLightType) : "",
+            multiLightWGSL: _multiLightWGSL,
+            multiLightLoop: _multiLightLoop,
             normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",
             hasEmissiveTexture: hasEmTex,
             hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
             hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),
-            hasTonemap: has(PBR_HAS_TONEMAP),
-            acesHelpers,
-            acesTonemapCall,
+            hasTonemap: hasScene(PBR_HAS_TONEMAP),
+            acesHelpers: _acesHelpers,
+            acesTonemapCall: _acesTonemapCall,
             hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),
             hasSpecularAA: has(PBR_HAS_SPECULAR_AA),
             hasGammaAlbedo: has(PBR_HAS_GAMMA_ALBEDO),
@@ -132,22 +142,23 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             hasReflectanceExt: hasReflExt,
             hasIbl,
             hasAnisotropy: hasAniso,
-            anisoBrdfFunctions: hasAniso && anisoExt ? anisoExt.ANISO_BRDF_FUNCTIONS : "",
-            anisoTBBlock: hasAniso && anisoExt ? anisoExt.makeAnisotropyTBBlock(hasNormal) : "",
+            anisoBrdfFunctions: hasAniso && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
+            anisoTBBlock: hasAniso && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal) : "",
             ext,
         });
 
         const frags: ShaderFragment[] = [];
         const hasAnyNormal = hasNormal || hasCotangent;
         const hasSpecularAAbit = has(PBR_HAS_SPECULAR_AA);
-        const fragCtx: PbrFragCtx = {
-            features,
-            features2,
-            hasIbl,
-            hasAnyNormal,
-            hasSpecularAA: hasSpecularAAbit,
-            anisoBentNormalCode: hasAniso && anisoExt ? anisoExt.ANISO_BENT_NORMAL : "",
-            iblSkyboxCalc: has(PBR_HAS_SKYBOX) ? iblSkyboxCalc : "",
+        const fragCtx: _PbrFragCtx = {
+            _features: features,
+            _features2: features2,
+            _meshFeatures: meshFeatures,
+            _hasIbl: hasIbl,
+            _hasAnyNormal: hasAnyNormal,
+            _hasSpecularAA: hasSpecularAAbit,
+            _anisoBentNormalCode: hasAniso && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "",
+            _iblSkyboxCalc: has(PBR_HAS_SKYBOX) ? _iblSkyboxCalc : "",
         };
         // Registration order defines iteration order; callers register in composer-matching order.
         for (const regExt of _getPbrExts().values()) {
@@ -158,12 +169,12 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
                 }
             }
         }
-        if (hasShadow && createPbrShadowFragment) {
-            const slots = shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
-            frags.push(createPbrShadowFragment(slots));
+        if (hasShadow && _createPbrShadowFragment) {
+            const slots = _shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
+            frags.push(_createPbrShadowFragment(slots));
         }
-        if (hasTI && createThinInstanceFragment) {
-            frags.push(createThinInstanceFragment(has(PBR_HAS_INSTANCE_COLOR)));
+        if (hasTI && _createThinInstanceFragment) {
+            frags.push(_createThinInstanceFragment(hasMesh(MSH_HAS_INSTANCE_COLOR)));
         }
 
         const composed = composeShader(template, frags);

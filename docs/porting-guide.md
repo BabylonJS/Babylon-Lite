@@ -276,14 +276,14 @@ Babylon Lite supports animating material properties at runtime (e.g. changing co
 
 ### Manual (default — zero overhead)
 
-Mutate the property, then call `markMaterialDirty()`:
+Mutate the property, then call `markMaterialUboDirty()`:
 
 ```typescript
-import { markMaterialDirty } from "babylon-lite";
+import { markMaterialUboDirty } from "babylon-lite";
 
 onBeforeRender(scene, () => {
     material.alpha = Math.sin(time) * 0.5 + 0.5;
-    markMaterialDirty(material);
+    markMaterialUboDirty(material);
 });
 ```
 
@@ -299,7 +299,7 @@ import { enableMaterialTracking } from "babylon-lite";
 const mat = createPbrMaterial({ anisotropy: { isEnabled: true, intensity: 1.0 } });
 enableMaterialTracking(mat);
 
-// Now mutations auto-set the dirty flag — no markMaterialDirty() needed:
+// Now mutations auto-mark the material UBO dirty — no manual call needed:
 onBeforeRender(scene, () => {
     mat.anisotropy!.intensity = Math.cos(a) * 0.5 + 0.5;  // auto-dirty
     mat.emissiveColor![0] = 0.5;                            // auto-dirty (index write)
@@ -308,7 +308,7 @@ onBeforeRender(scene, () => {
 
 `enableMaterialTracking` is fully tree-shakable — scenes that don't import it pay zero bundle cost.
 
-| Feature | `markMaterialDirty` | `enableMaterialTracking` |
+| Feature | `markMaterialUboDirty` | `enableMaterialTracking` |
 |---|---|---|
 | Bundle cost | ~50 bytes | ~1.5 KB (only if imported) |
 | Per-frame cost | Zero (manual call) | Zero (setter fires only on change) |

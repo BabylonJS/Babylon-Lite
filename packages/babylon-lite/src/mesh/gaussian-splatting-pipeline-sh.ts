@@ -328,7 +328,7 @@ function getOrCreateShPipeline(engine: EngineContextInternal, sig: RenderTargetS
             entryPoint: "fs",
             targets: [
                 {
-                    format: sig.colorFormat,
+                    format: sig.colorFormat!,
                     blend: {
                         color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
                         alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },

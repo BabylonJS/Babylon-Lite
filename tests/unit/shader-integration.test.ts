@@ -58,64 +58,76 @@ describe("PBR template + fragments integration", () => {
     it("composes minimal PBR (no extensions)", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig });
         const result = composeShader(template, []);
-        expect(result.vertexWGSL).toContain("@vertex fn main");
-        expect(result.vertexWGSL).toContain("struct SceneUniforms");
-        expect(result.vertexWGSL).toContain("struct MeshUniforms");
-        expect(result.vertexWGSL).toContain("var finalWorld = mesh.world;");
-        expect(result.fragmentWGSL).toContain("@fragment fn main");
-        expect(result.fragmentWGSL).toContain("distributionGGX");
-        expect(result.fragmentWGSL).toContain("fresnelSchlick");
-        expect(result.meshUboSpec.totalBytes).toBe(144); // world matrix + per-mesh light-selection data
-        expect(result.materialUboSpec).toBeDefined();
+        expect(result._vertexWGSL).toContain("@vertex fn main");
+        expect(result._vertexWGSL).toContain("struct SceneUniforms");
+        expect(result._vertexWGSL).toContain("struct MeshUniforms");
+        expect(result._vertexWGSL).toContain("var finalWorld = mesh.world;");
+        expect(result._fragmentWGSL).toContain("@fragment fn main");
+        expect(result._fragmentWGSL).toContain("distributionGGX");
+        expect(result._fragmentWGSL).toContain("fresnelSchlick");
+        expect(result._meshUboSpec._totalBytes).toBe(144); // world matrix + per-mesh light-selection data
+        expect(result._materialUboSpec).toBeDefined();
     });
 
     it("composes PBR + emissive color", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent", hasTonemap: true, hasEmissiveColor: true });
         const result = composeShader(template, [createEmissiveColorFragment(false)]);
-        expect(result.fragmentWGSL).toContain("material.emissiveColor");
-        expect(result.materialUboSpec!.offsets.has("emissiveColor")).toBe(true);
+        expect(result._fragmentWGSL).toContain("material.emissiveColor");
+        expect(result._materialUboSpec!._offsets.has("emissiveColor")).toBe(true);
     });
 
     it("composes PBR + clearcoat", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent", hasEmissiveTexture: true, hasTonemap: true, hasClearcoat: true });
         const result = composeShader(template, [createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, false, false, false)!]);
-        expect(result.fragmentWGSL).toContain("visibility_Kelemen");
-        expect(result.fragmentWGSL).toContain("getR0RemappedForClearCoat");
-        expect(result.fragmentWGSL).toContain("material.ccParams");
-        expect(result.materialUboSpec!.offsets.has("ccParams")).toBe(true);
+        expect(result._fragmentWGSL).toContain("visibility_Kelemen");
+        expect(result._fragmentWGSL).toContain("getR0RemappedForClearCoat");
+        expect(result._fragmentWGSL).toContain("material.ccParams");
+        expect(result._materialUboSpec!._offsets.has("ccParams")).toBe(true);
     });
 
     it("composes PBR + sheen", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent", hasEmissiveTexture: true, hasTonemap: true, hasSheen: true });
         const result = composeShader(template, [createSheenFragment(false, false)]);
-        expect(result.fragmentWGSL).toContain("normalDistributionFunction_CharlieSheen");
-        expect(result.fragmentWGSL).toContain("visibility_Ashikhmin");
-        expect(result.fragmentWGSL).toContain("sheenColorFinal");
-        expect(result.materialUboSpec!.offsets.has("sheenParams")).toBe(true);
+        expect(result._fragmentWGSL).toContain("normalDistributionFunction_CharlieSheen");
+        expect(result._fragmentWGSL).toContain("visibility_Ashikhmin");
+        expect(result._fragmentWGSL).toContain("sheenColorFinal");
+        expect(result._materialUboSpec!._offsets.has("sheenParams")).toBe(true);
     });
 
     it("composes PBR + IBL (env)", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent", hasTonemap: true, hasSpecularAA: true, hasIbl: true });
         const result = composeShader(template, [createIblFragment(true)]);
-        expect(result.fragmentWGSL).toContain("environmentHorizonOcclusion");
-        expect(result.fragmentWGSL).toContain("iblTexture");
-        expect(result.fragmentWGSL).toContain("brdfLUT");
-        expect(result.fragmentWGSL).toContain("vSphericalL00");
+        expect(result._fragmentWGSL).toContain("environmentHorizonOcclusion");
+        expect(result._fragmentWGSL).toContain("iblTexture");
+        expect(result._fragmentWGSL).toContain("brdfLUT");
+        expect(result._fragmentWGSL).toContain("vSphericalL00");
         // 4 IBL bindings in group 1
-        expect(result.meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(5); // mesh UBO + base textures + 4 IBL
+        expect(result._meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(5); // mesh UBO + base textures + 4 IBL
         // Scene UBO should include canonical SH coefficients
-        expect(result.vertexWGSL).toContain("vSphericalL00");
+        expect(result._vertexWGSL).toContain("vSphericalL00");
     });
 
     it("composes PBR + skeleton (4-bone)", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent" });
         const result = composeShader(template, [createSkeletonFragment(false)]);
-        expect(result.vertexWGSL).toContain("readMatrixFromRawSampler");
-        expect(result.vertexWGSL).toContain("finalWorld = mesh.world * influence");
+        expect(result._vertexWGSL).toContain("readMatrixFromRawSampler");
+        expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
         // Skeleton vertex binding (bone texture)
-        expect(result.meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(2);
+        expect(result._meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(2);
         // Should have extra vertex buffer layouts for joints/weights
-        expect(result.vertexBufferLayouts.length).toBeGreaterThanOrEqual(5); // pos + normal + tangent + uv + joints + weights
+        expect(result._vertexBufferLayouts.length).toBeGreaterThanOrEqual(5); // pos + normal + tangent + uv + joints + weights
+    });
+
+    it("composes PBR + skeleton (8-bone) with complete vertex buffer layouts", () => {
+        const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent" });
+        const result = composeShader(template, [createSkeletonFragment(true)]);
+
+        expect(result._vertexWGSL).toContain("joints1");
+        expect(result._vertexWGSL).toContain("weights1");
+        expect(result._vertexWGSL).not.toContain("undefined");
+        expect(result._vertexBufferLayouts.every((layout) => layout.arrayStride !== undefined)).toBe(true);
+        expect(result._vertexBufferLayouts.some((layout) => layout.attributes.some((attribute) => attribute.shaderLocation === 6 && attribute.format === "uint32x4"))).toBe(true);
+        expect(result._vertexBufferLayouts.some((layout) => layout.attributes.some((attribute) => attribute.shaderLocation === 7 && attribute.format === "float32x4"))).toBe(true);
     });
 
     it("composes PBR + morph + skeleton", () => {
@@ -123,22 +135,22 @@ describe("PBR template + fragments integration", () => {
         const morph = createMorphFragment();
         const skeleton = createSkeletonFragment(false);
         const result = composeShader(template, [morph, skeleton]);
-        expect(result.vertexWGSL).toContain("morphedPos");
-        expect(result.vertexWGSL).toContain("morphedNorm");
-        expect(result.vertexWGSL).toContain("readMatrixFromRawSampler");
-        expect(result.fragmentKey).toBe("morph|skeleton");
+        expect(result._vertexWGSL).toContain("morphedPos");
+        expect(result._vertexWGSL).toContain("morphedNorm");
+        expect(result._vertexWGSL).toContain("readMatrixFromRawSampler");
+        expect(result._fragmentKey).toBe("morph|skeleton");
     });
 
     it("composes PBR + thin instance + instance color", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig });
         const result = composeShader(template, [createThinInstanceFragment(true)]);
-        expect(result.vertexWGSL).toContain("world0");
-        expect(result.vertexWGSL).toContain("world1");
-        expect(result.vertexWGSL).toContain("instanceWorld");
-        expect(result.vertexWGSL).toContain("vInstanceColor");
-        expect(result.fragmentWGSL).toContain("vInstanceColor");
+        expect(result._vertexWGSL).toContain("world0");
+        expect(result._vertexWGSL).toContain("world1");
+        expect(result._vertexWGSL).toContain("instanceWorld");
+        expect(result._vertexWGSL).toContain("vInstanceColor");
+        expect(result._fragmentWGSL).toContain("vInstanceColor");
         // Instance buffer layout
-        const tiLayout = result.vertexBufferLayouts.find((l) => l.stepMode === "instance" && l.arrayStride === 64);
+        const tiLayout = result._vertexBufferLayouts.find((l) => l.stepMode === "instance" && l.arrayStride === 64);
         expect(tiLayout).toBeDefined();
         expect(tiLayout!.attributes.length).toBe(4); // world0-3
     });
@@ -146,10 +158,10 @@ describe("PBR template + fragments integration", () => {
     it("composes PBR + shadow", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, normalMode: "tangent" });
         const result = composeShader(template, [createPbrShadowFragment()]);
-        expect(result.fragmentWGSL).toContain("computeShadowESM_0");
-        expect(result.fragmentWGSL).toContain("@group(2)");
-        expect(result.shadowBGLDescriptor).not.toBeNull();
-        expect(result.shadowBGLDescriptor!.entries.length).toBe(3);
+        expect(result._fragmentWGSL).toContain("computeShadowESM_0");
+        expect(result._fragmentWGSL).toContain("@group(2)");
+        expect(result._shadowBGLDescriptor).not.toBeNull();
+        expect(result._shadowBGLDescriptor!.entries.length).toBe(3);
     });
 
     it("composes full PBR (IBL + clearcoat + sheen + emissive + shadow)", () => {
@@ -173,18 +185,18 @@ describe("PBR template + fragments integration", () => {
         ];
         const result = composeShader(template, fragments);
         // All helpers present
-        expect(result.fragmentWGSL).toContain("visibility_Kelemen");
-        expect(result.fragmentWGSL).toContain("normalDistributionFunction_CharlieSheen");
-        expect(result.fragmentWGSL).toContain("environmentHorizonOcclusion");
-        expect(result.fragmentWGSL).toContain("computeShadowESM_0");
+        expect(result._fragmentWGSL).toContain("visibility_Kelemen");
+        expect(result._fragmentWGSL).toContain("normalDistributionFunction_CharlieSheen");
+        expect(result._fragmentWGSL).toContain("environmentHorizonOcclusion");
+        expect(result._fragmentWGSL).toContain("computeShadowESM_0");
         // UBO has all extension fields (in materialUboSpec, not meshUboSpec — split UBOs)
-        expect(result.materialUboSpec!.offsets.has("ccParams")).toBe(true);
-        expect(result.materialUboSpec!.offsets.has("sheenParams")).toBe(true);
-        expect(result.materialUboSpec!.offsets.has("emissiveColor")).toBe(true);
+        expect(result._materialUboSpec!._offsets.has("ccParams")).toBe(true);
+        expect(result._materialUboSpec!._offsets.has("sheenParams")).toBe(true);
+        expect(result._materialUboSpec!._offsets.has("emissiveColor")).toBe(true);
         // Fragment key is deterministic
-        expect(result.fragmentKey).toContain("clearcoat");
-        expect(result.fragmentKey).toContain("sheen");
-        expect(result.fragmentKey).toContain("ibl");
+        expect(result._fragmentKey).toContain("clearcoat");
+        expect(result._fragmentKey).toContain("sheen");
+        expect(result._fragmentKey).toContain("ibl");
     });
 });
 
@@ -199,10 +211,10 @@ describe("Standard template + fragments integration", () => {
             hasShadow: false,
         });
         const result = composeShader(template, []);
-        expect(result.vertexWGSL).toContain("@vertex fn main");
-        expect(result.vertexWGSL).toContain("var finalWorld = mesh.world;");
-        expect(result.fragmentWGSL).toContain("@fragment fn main");
-        expect(result.fragmentWGSL).toContain("calcFogFactor");
+        expect(result._vertexWGSL).toContain("@vertex fn main");
+        expect(result._vertexWGSL).toContain("var finalWorld = mesh.world;");
+        expect(result._fragmentWGSL).toContain("@fragment fn main");
+        expect(result._fragmentWGSL).toContain("calcFogFactor");
     });
 
     it("composes Standard + diffuse texture", () => {
@@ -213,10 +225,10 @@ describe("Standard template + fragments integration", () => {
             hasShadow: false,
         });
         const result = composeShader(template, []);
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(2) var dT: texture_2d<f32>");
-        expect(result.fragmentWGSL).toContain("@group(1) @binding(3) var dS: sampler");
-        expect(result.fragmentWGSL).toContain("textureSample(dT, dS, input.vu)");
-        expect(result.vertexWGSL).toContain("uv");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(2) var dT: texture_2d<f32>");
+        expect(result._fragmentWGSL).toContain("@group(1) @binding(3) var dS: sampler");
+        expect(result._fragmentWGSL).toContain("textureSample(dT, dS, input.vu)");
+        expect(result._vertexWGSL).toContain("uv");
     });
 
     it("composes Standard + thin instances", () => {
@@ -227,9 +239,9 @@ describe("Standard template + fragments integration", () => {
             hasShadow: false,
         });
         const result = composeShader(template, [createThinInstanceFragment(true)]);
-        expect(result.vertexWGSL).toContain("instanceWorld");
-        expect(result.vertexWGSL).toContain("vInstanceColor");
-        expect(result.fragmentWGSL).toContain("vInstanceColor");
+        expect(result._vertexWGSL).toContain("instanceWorld");
+        expect(result._vertexWGSL).toContain("vInstanceColor");
+        expect(result._fragmentWGSL).toContain("vInstanceColor");
     });
 
     it("composes Standard + bump + fog", () => {
@@ -240,7 +252,7 @@ describe("Standard template + fragments integration", () => {
             hasShadow: false,
         });
         const result = composeShader(template, [createNormalMapFragment()]);
-        expect(result.fragmentWGSL).toContain("perturbNormal");
-        expect(result.fragmentWGSL).toContain("calcFogFactor");
+        expect(result._fragmentWGSL).toContain("perturbNormal");
+        expect(result._fragmentWGSL).toContain("calcFogFactor");
     });
 });

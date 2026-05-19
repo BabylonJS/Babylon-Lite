@@ -410,7 +410,7 @@ function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: Rend
         fragment: {
             module: getShaderModule(wrapper),
             entryPoint: "effectFragment",
-            targets: [{ format: targetSignature.colorFormat, blend: wrapper.options.blend }],
+            targets: [{ format: targetSignature.colorFormat!, blend: wrapper.options.blend }],
         },
         primitive: { topology: "triangle-list" },
         multisample: { count: targetSignature.sampleCount },

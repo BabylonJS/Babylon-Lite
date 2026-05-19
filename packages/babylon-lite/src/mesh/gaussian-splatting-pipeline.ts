@@ -79,7 +79,7 @@ function getOrCreatePipeline(engine: EngineContextInternal, sig: RenderTargetSig
             entryPoint: "fs",
             targets: [
                 {
-                    format: sig.colorFormat,
+                    format: sig.colorFormat!,
                     blend: {
                         // BJS GS material uses ALPHA_COMBINE: src*srcAlpha + dst*(1-srcAlpha)
                         color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },

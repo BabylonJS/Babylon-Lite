@@ -8,7 +8,9 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { Material } from "../material/material.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Camera } from "../camera/camera.js";
 
 /** Dynamic per-pass data available before a binding draws. */
@@ -98,7 +100,7 @@ export interface MeshGroupBuildResult {
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
      *  reuse the same setup. The group builder stores it on itself as
      *  `_rebuildSingle` after the first run. */
-    rebuildSingle: (scene: any, mesh: any, materialOverride?: any) => Renderable;
+    rebuildSingle: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
 }
 
 /**
@@ -113,6 +115,6 @@ export interface MeshGroupBuildResult {
  * @param scene  - The scene context (for engine, camera, env textures, etc.)
  * @param meshes - All meshes that use this builder's material type.
  */
-export type MeshGroupBuilder = ((scene: any, meshes: any[]) => Promise<MeshGroupBuildResult>) & {
-    _rebuildSingle?: (scene: any, mesh: any, materialOverride?: any) => Renderable;
+export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise<MeshGroupBuildResult>) & {
+    _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
 };

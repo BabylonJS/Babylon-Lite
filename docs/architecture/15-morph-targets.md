@@ -42,8 +42,8 @@ interface MeshGPU {
 ### Feature Flag
 
 ```typescript
-// pbr-shader.ts
-export const PBR_HAS_MORPH_TARGETS = 1 << 5;
+// mesh-features.ts
+export const MSH_HAS_MORPH_TARGETS = 1 << 3;
 ```
 
 ---
@@ -99,7 +99,7 @@ Per-frame updates write only the first 16 bytes (weights). The `count`, `texWidt
 
 ## Pipeline Configuration
 
-### Feature Flag Effects (`PBR_HAS_MORPH_TARGETS = 1 << 5`)
+### Feature Flag Effects (`MSH_HAS_MORPH_TARGETS = 1 << 3`)
 
 When the flag is set:
 
@@ -204,7 +204,7 @@ For each PATH_WEIGHTS animation channel:
 | `morphTexture` (rgba32float tiled) | `MorphTargetManager._textureFloat` |
 | `morphWeightsBuffer` (32B UBO) | `MorphTargetManager._influences` uniform |
 | Vertex shader `textureLoad` loop | `morphTargets.vertex.fx` shader include |
-| `PBR_HAS_MORPH_TARGETS` flag | `#define MORPHTARGETS` in shader defines |
+| `MSH_HAS_MORPH_TARGETS` flag | `#define MORPHTARGETS` in shader defines |
 | PATH_WEIGHTS in `skeleton-updater.ts` | `Animation.AllowMatricesInterpolation` + `MorphTargetManager.getTarget().influence` |
 | Max 4 targets (vec4 weights) | Configurable via `MorphTargetManager.numTargets` |
 | Flat data + functions | Full class hierarchy (`MorphTarget`, `MorphTargetManager`) |
@@ -233,7 +233,7 @@ For each PATH_WEIGHTS animation channel:
 | UBO layout | Total 32 bytes: 16B weights + 4B count + 4B texWidth + 4B rowsPerBand + 4B pad |
 | Initial weights | `mesh.weights = [0.5, 0.3]` → UBO bytes 0–15 contain `[0.5, 0.3, 0, 0]` |
 | Immutable fields | Per-frame update writes only first 16 bytes, not count/texWidth/rowsPerBand |
-| Feature flag | `PBR_HAS_MORPH_TARGETS = 1 << 5 = 32` |
+| Feature flag | `MSH_HAS_MORPH_TARGETS = 1 << 3 = 8` |
 | Morph-only animation | Animation with PATH_WEIGHTS but no skeleton plays correctly |
 | Max targets | More than 4 targets in glTF → only first 4 used |
 

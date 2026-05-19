@@ -1,6 +1,9 @@
 /** Shared tracking primitives for observable material properties. */
 
-export function observableColor3(r: number, g: number, b: number, owner: { _uboDirty?: boolean }): [number, number, number] {
+import type { Material } from "../material.js";
+import { markMaterialUboDirty } from "../material-dirty.js";
+
+export function observableColor3(r: number, g: number, b: number, owner: Material): [number, number, number] {
     const arr = [r, g, b] as [number, number, number];
     for (let i = 0; i < 3; i++) {
         let val = arr[i]!;
@@ -11,7 +14,7 @@ export function observableColor3(r: number, g: number, b: number, owner: { _uboD
             set(v: number) {
                 if (val !== v) {
                     val = v;
-                    owner._uboDirty = true;
+                    markMaterialUboDirty(owner);
                 }
             },
             configurable: true,
@@ -21,7 +24,7 @@ export function observableColor3(r: number, g: number, b: number, owner: { _uboD
     return arr;
 }
 
-export function observableVec2(x: number, y: number, owner: { _uboDirty?: boolean }): [number, number] {
+export function observableVec2(x: number, y: number, owner: Material): [number, number] {
     const arr = [x, y] as [number, number];
     for (let i = 0; i < 2; i++) {
         let val = arr[i]!;
@@ -32,7 +35,7 @@ export function observableVec2(x: number, y: number, owner: { _uboDirty?: boolea
             set(v: number) {
                 if (val !== v) {
                     val = v;
-                    owner._uboDirty = true;
+                    markMaterialUboDirty(owner);
                 }
             },
             configurable: true,
@@ -51,7 +54,7 @@ export function trackScalar(obj: any, key: string): void {
         set(v: any) {
             if (val !== v) {
                 val = v;
-                obj._uboDirty = true;
+                markMaterialUboDirty(obj as Material);
             }
         },
         configurable: true,
@@ -59,7 +62,7 @@ export function trackScalar(obj: any, key: string): void {
     });
 }
 
-export function trackSubProps(parent: { _uboDirty?: boolean }, sub: any, keys: string[]): void {
+export function trackSubProps(parent: Material, sub: any, keys: string[]): void {
     for (const key of keys) {
         let val = sub[key];
         Object.defineProperty(sub, key, {
@@ -69,7 +72,7 @@ export function trackSubProps(parent: { _uboDirty?: boolean }, sub: any, keys: s
             set(v: any) {
                 if (val !== v) {
                     val = v;
-                    parent._uboDirty = true;
+                    markMaterialUboDirty(parent);
                 }
             },
             configurable: true,

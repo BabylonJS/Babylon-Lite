@@ -12,12 +12,12 @@ export function createStdOpacityFragment(fromRGB: boolean): ShaderFragment {
         ? `{ let opSample = textureSample(oT, oS, input.vu); alpha *= dot(opSample.rgb, vec3<f32>(0.3, 0.59, 0.11)) * mat.opLvl; }`
         : `alpha *= textureSample(oT, oS, input.vu).a * mat.opLvl;`;
     return {
-        id: "std-opacity",
-        bindings: [
-            { name: "oT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "oS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        _id: "std-opacity",
+        _bindings: [
+            { _name: "oT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "oS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
-        fragmentSlots: {
+        _fragmentSlots: {
             AT: opacityCalc,
         },
     };

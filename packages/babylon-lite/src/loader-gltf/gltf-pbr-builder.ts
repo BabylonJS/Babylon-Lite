@@ -74,7 +74,8 @@ export function assemblePbrProps(
         ...(mat.alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat.baseColorFactor[3] } : undefined),
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
-    } satisfies PbrMaterialPropsInternal;
+        _uboVersion: 0,
+    } as PbrMaterialPropsInternal;
 }
 
 /** Build the always-present default textures (base color + ORM) from a parsed glTF material.

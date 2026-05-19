@@ -18,13 +18,13 @@ import type { MeshGroupBuilder, MeshGroupBuildResult } from "../../render/render
 import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
 import { loadGraphEmitters, emitGraph } from "./node-emitter.js";
 import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
+import type { Material } from "../material.js";
 import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js";
 
 // ─── Public API types ───────────────────────────────────────────────
 
-export interface NodeMaterial {
+export interface NodeMaterial extends Material {
     readonly inputs: Record<string, NodeInputHandle>;
-    readonly _buildGroup: MeshGroupBuilder;
 }
 
 export interface NodeInputHandle {
@@ -220,7 +220,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         uniformValues.set(fieldName, { name: fieldName, type, offsetBytes: offset, values: arr });
     }
 
-    const attrNames = state.vertexAttributes.map((a) => a.name);
+    const attrNames = state.vertexAttributes.map((a) => a._name);
 
     // Per-texture handles (populated from options.textures, then exposed via inputs).
     const textureSlots = new Map<string, { current: Texture2D | null }>();
@@ -255,7 +255,9 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
 
     const material: NodeMaterialInternal = {
         inputs,
+        _renderFeatures: { features: 0 },
         _buildGroup,
+        _uboVersion: 0,
         _compile: compile,
         _state: state,
         _graph: graph,

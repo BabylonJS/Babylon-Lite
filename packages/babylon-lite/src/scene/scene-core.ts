@@ -293,7 +293,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
         const mesh = entity as unknown as Mesh;
         ctx.meshes.push(mesh);
         installMaterialSetter(ctx, mesh);
-        const build = mesh.material ? ((mesh.material as any)._buildGroup as MeshGroupBuilder | undefined) : undefined;
+        const build = mesh.material?._buildGroup;
         if (build) {
             let group = ctx._groups.get(build);
             if (!group) {

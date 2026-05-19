@@ -38,20 +38,20 @@ export function createShadowFragment(id: string, shadowLights: ShadowLightSlot[]
         const li = slot.lightIndex;
         const suffix = `_${li}`;
 
-        varyings.push({ name: `vPosFromLight${suffix}`, type: "vec4<f32>" }, { name: `vDepthMetric${suffix}`, type: "f32" });
+        varyings.push({ _name: `vPosFromLight${suffix}`, _type: "vec4<f32>" }, { _name: `vDepthMetric${suffix}`, _type: "f32" });
 
         if (slot.shadowType === "pcf") {
             bindings.push(
-                { name: `shadowTex${suffix}`, type: { kind: "texture", textureType: "texture_depth_2d", sampleType: "depth" }, group: "shadow", visibility: STAGE_FRAGMENT },
-                { name: `shadowComp${suffix}`, type: { kind: "sampler", samplerType: "sampler_comparison" }, group: "shadow", visibility: STAGE_FRAGMENT }
+                { _name: `shadowTex${suffix}`, _type: { _kind: "texture", _textureType: "texture_depth_2d", _sampleType: "depth" }, _group: "shadow", _visibility: STAGE_FRAGMENT },
+                { _name: `shadowComp${suffix}`, _type: { _kind: "sampler", _samplerType: "sampler_comparison" }, _group: "shadow", _visibility: STAGE_FRAGMENT }
             );
         } else {
             bindings.push(
-                { name: `shadowTex${suffix}`, type: { kind: "texture", textureType: "texture_2d<f32>" }, group: "shadow", visibility: STAGE_FRAGMENT },
-                { name: `shadowSamp${suffix}`, type: { kind: "sampler", samplerType: "sampler" }, group: "shadow", visibility: STAGE_FRAGMENT }
+                { _name: `shadowTex${suffix}`, _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _group: "shadow", _visibility: STAGE_FRAGMENT },
+                { _name: `shadowSamp${suffix}`, _type: { _kind: "sampler", _samplerType: "sampler" }, _group: "shadow", _visibility: STAGE_FRAGMENT }
             );
         }
-        bindings.push({ name: `shadowInfo${suffix}`, type: { kind: "uniform-buffer" }, group: "shadow", visibility: STAGE_FRAGMENT | STAGE_VERTEX });
+        bindings.push({ _name: `shadowInfo${suffix}`, _type: { _kind: "uniform-buffer" }, _group: "shadow", _visibility: STAGE_FRAGMENT | STAGE_VERTEX });
 
         vertexLines.push(
             `out.vPosFromLight${suffix} = shadowInfo${suffix}.lightMatrix * worldPos4;`,
@@ -129,15 +129,15 @@ return computeFallOff${suffix}(esm, clipSpace.xy, frustumEdgeFalloff);
     }
 
     return {
-        id,
-        varyings,
-        bindings,
-        helperFunctions: helperParts.join("\n"),
-        vertexHelperFunctions: vertexHelperParts.join("\n"),
-        vertexSlots: {
+        _id: id,
+        _varyings: varyings,
+        _bindings: bindings,
+        _helperFunctions: helperParts.join("\n"),
+        _vertexHelperFunctions: vertexHelperParts.join("\n"),
+        _vertexSlots: {
             VB: vertexLines.join("\n"),
         },
-        fragmentSlots: {
+        _fragmentSlots: {
             AD: fragmentLines.join("\n"),
         },
     };

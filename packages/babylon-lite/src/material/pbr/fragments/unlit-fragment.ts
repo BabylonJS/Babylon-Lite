@@ -18,13 +18,13 @@ import { PBR2_HAS_UNLIT } from "../pbr-flag-bits.js";
 export function createUnlitFragment(hasIbl: boolean): ShaderFragment {
     const assign = `color = baseColor * material.unlitColor;`;
     return {
-        id: "unlit",
-        dependencies: hasIbl ? ["ibl"] : undefined,
-        uboFields: [
-            { name: "unlitColor", type: "vec3<f32>" },
-            { name: "_unlitColorPad", type: "f32" },
+        _id: "unlit",
+        _dependencies: hasIbl ? ["ibl"] : undefined,
+        _uboFields: [
+            { _name: "unlitColor", _type: "vec3<f32>" },
+            { _name: "_unlitColorPad", _type: "f32" },
         ],
-        fragmentSlots: hasIbl ? { AI: assign } : { NI: assign },
+        _fragmentSlots: hasIbl ? { AI: assign } : { NI: assign },
     };
 }
 
@@ -47,10 +47,10 @@ export const unlitExt: PbrExt = {
         return (mat as PbrMaterialProps).unlit ? { f: 0, f2: PBR2_HAS_UNLIT } : { f: 0, f2: 0 };
     },
     frag(ctx) {
-        if (!(ctx.features2 & PBR2_HAS_UNLIT)) {
+        if (!(ctx._features2 & PBR2_HAS_UNLIT)) {
             return null;
         }
-        return createUnlitFragment(ctx.hasIbl);
+        return createUnlitFragment(ctx._hasIbl);
     },
     writeUbo: writeUnlitUBO as PbrExt["writeUbo"],
 };

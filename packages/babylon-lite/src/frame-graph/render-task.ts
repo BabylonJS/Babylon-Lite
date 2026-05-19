@@ -36,7 +36,7 @@ import type { Camera } from "../camera/camera.js";
 import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
-import type { Material, MaterialInternal } from "../material/material.js";
+import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
@@ -116,6 +116,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     const sc = scene as SceneContextInternal;
     const rt = config.rt;
     config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
+    config.clr ??= true;
     const swapchain = rt.descriptor.resolveToSwapchain === true;
     const sampleCount = rt.descriptor.sampleCount ?? 1;
     // Offscreen RTTs need a Y-flipped projection so the result texture samples
@@ -232,7 +233,7 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContextInternal): void 
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const buildGroup = (material as MaterialInternal)._buildGroup;
+        const buildGroup = material._buildGroup;
         const rebuild = buildGroup?._rebuildSingle;
         if (!rebuild) {
             throw new Error();
@@ -295,6 +296,7 @@ function buildBindings(task: RenderTask, eng: EngineContextInternal, targetSigna
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     task._colorAttachment.view = rt._colorView!;
+    task._renderPassDescriptor.colorAttachments = rt._colorView ? [task._colorAttachment] : [];
 
     const depthView = rt._depthView;
     let depthAttachment: GPURenderPassDepthStencilAttachment | null = null;
@@ -364,8 +366,10 @@ function executePass(
     prepareRenderTaskPass(task, eng, sc, flipY, targetSignature, context);
     const att = task._colorAttachment;
     const cfg = task._config;
-    att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
-    att.loadOp = cfg.clr !== false ? "clear" : "load";
+    if (cfg.rt._colorView || swapchain) {
+        att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
+        att.loadOp = cfg.clr ? "clear" : "load";
+    }
     if (swapchain) {
         const swapView = eng._swapchainView;
         if (sampleCount > 1) {
@@ -413,7 +417,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
         const desc = rt.descriptor;
         const be = eng.device.createRenderBundleEncoder({
-            colorFormats: [desc.colorFormat],
+            colorFormats: desc.colorFormat ? [desc.colorFormat] : [],
             depthStencilFormat: desc.depthStencilFormat,
             sampleCount: desc.sampleCount ?? 1,
         });

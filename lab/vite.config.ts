@@ -51,7 +51,7 @@ function serveReferenceImages(): Plugin {
                     }
                 }
                 if (url === "/lab-api/signature") {
-                    // Returns mtimes for bundle / perf manifests and per-scene parity images
+                    // Returns mtimes for current/master bundle and perf manifests plus per-scene parity images
                     // so the dashboard can auto-refresh only when data actually changes.
                     const sig: {
                         bundle: number | null;

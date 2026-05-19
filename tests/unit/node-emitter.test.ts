@@ -54,13 +54,13 @@ describe("NodeMaterial emitter core", () => {
         const result = emitGraph(graph, emitters, fragRoot.id, null);
 
         // UBO must contain the alpha uniform field.
-        expect(result.state.nodeUboFields.find((f) => f.name === "alpha")).toBeTruthy();
+        expect(result.state.nodeUboFields.find((f) => f._name === "alpha")).toBeTruthy();
 
         // Vertex attribute "uv" must be declared exactly once.
-        expect(result.state.vertexAttributes.filter((a) => a.name === "uv")).toHaveLength(1);
+        expect(result.state.vertexAttributes.filter((a) => a._name === "uv")).toHaveLength(1);
 
         // A varying must bridge uv from vertex to fragment.
-        expect(result.state.varyings.find((v) => v.name === "v_attr_uv")).toBeTruthy();
+        expect(result.state.varyings.find((v) => v._name === "v_attr_uv")).toBeTruthy();
 
         // Fragment body must reference the uniform + varying and assign the output.
         expect(result.fragmentWgsl).toContain("nodeU.alpha");
@@ -110,7 +110,7 @@ describe("NodeMaterial emitter core", () => {
         const fragRoot = findBlockByClassName(graph, "FragmentOutputBlock")!;
         const result = emitGraph(graph, emitters, fragRoot.id, null);
         // The `c` uniform field appears exactly once in the UBO fields list.
-        expect(result.state.nodeUboFields.filter((f) => f.name === "c")).toHaveLength(1);
+        expect(result.state.nodeUboFields.filter((f) => f._name === "c")).toHaveLength(1);
     });
 
     it("casts vec4 to vec3 via .xyz when needed", async () => {

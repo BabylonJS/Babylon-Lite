@@ -10,12 +10,12 @@ const STAGE_FRAGMENT = 0x2;
 export function createStdLightmapFragment(usesUV2: boolean): ShaderFragment {
     const uv = usesUV2 ? "input.vv" : "input.vu";
     return {
-        id: "std-lightmap",
-        bindings: [
-            { name: "lT", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "lS", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT },
+        _id: "std-lightmap",
+        _bindings: [
+            { _name: "lT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "lS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
-        fragmentSlots: {
+        _fragmentSlots: {
             BC: `color = vec4<f32>(color.rgb + textureSample(lT, lS, ${uv}).rgb * mat.lmLvl, color.a);`,
         },
     };

@@ -273,10 +273,10 @@ A render task can be explicitly populated with:
 
 ```typescript
 task.addMesh(mesh);
-task.addMesh(mesh, { material: overrideMaterial });
+task.addMesh(mesh, { material: overrideMaterialOrView });
 ```
 
-`addMesh()` resolves at `record()` time through the material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run.
+`addMesh()` accepts a source material or `MaterialView` and resolves at `record()` time through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example depth-only Standard/PBR variants used by shadow/depth RTTs.
 
 If a task has explicit renderables, it does **not** auto-mirror the scene.
 

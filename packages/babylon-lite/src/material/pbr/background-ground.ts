@@ -164,7 +164,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
                     entryPoint: "main",
                     targets: [
                         {
-                            format: sig.colorFormat,
+                            format: sig.colorFormat!,
                             blend: {
                                 color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                                 alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },

@@ -73,9 +73,9 @@ export const THIN_INSTANCES      = 1 << 15;  // matrix instancing
 export const THIN_INSTANCE_COLOR = 1 << 16;  // per-instance color buffer
 export const DISABLE_LIGHTING    = 1 << 17;  // skip light loop, output emissive × diffuse × baseColor
 
-// pbr-flags.ts
-export const PBR_HAS_THIN_INSTANCES = 1 << 18;
-export const PBR_HAS_INSTANCE_COLOR = 1 << 19;
+// mesh-features.ts
+export const MSH_HAS_THIN_INSTANCES = 1 << 4;
+export const MSH_HAS_INSTANCE_COLOR = 1 << 5;
 ```
 
 ### Material Property
@@ -437,7 +437,7 @@ if (meshes.some(m => !!m.thinInstances)) {
 The fragment contributes:
 - **Vertex attributes**: `world0..world3` (instance matrix rows) + optional `instanceColor`
 - **Vertex slot**: Composes `finalWorld = mesh.world * instanceWorld` — replaces the mesh world matrix in all subsequent transforms
-- **Fragment slot**: Multiplies base color/alpha by instance color (when `PBR_HAS_INSTANCE_COLOR` is set)
+- **Fragment slot**: Multiplies base color/alpha by instance color (when `MSH_HAS_INSTANCE_COLOR` is set)
 
 ### Draw Path
 
@@ -515,7 +515,7 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 | `src/material/standard/standard-pipeline.ts` | `THIN_INSTANCES`, `THIN_INSTANCE_COLOR`, `DISABLE_LIGHTING` flags + pipeline vertex buffer layouts |
 | `src/material/standard/standard-template.ts` | `instanceColor` varying + `disableLighting` fragment path + instance world matrix composition |
 | `src/material/standard/standard-renderable.ts` | `tiSync` callback integration + instanced `drawIndexed` |
-| `src/material/pbr/pbr-flags.ts` | `PBR_HAS_THIN_INSTANCES`, `PBR_HAS_INSTANCE_COLOR` feature flag constants |
+| `src/material/mesh-features.ts` | `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR` feature flag constants |
 | `src/material/pbr/pbr-renderable.ts` | PBR thin-instance detection, fragment loading, instanced draw |
 | `src/material/pbr/pbr-pipeline.ts` | PBR pipeline vertex buffer layouts for thin instances |
 | `src/shader/fragments/thin-instance-fragment.ts` | ShaderFragment for instance matrix/color — shared by PBR and Standard |

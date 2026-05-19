@@ -96,8 +96,8 @@ const STAGE_FRAGMENT = 0x2;
 export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boolean, useGltfThicknessChannel: boolean): ShaderFragment {
     const bindings = hasThicknessMap
         ? [
-              { name: "thicknessTexture_", type: { kind: "texture" as const, textureType: "texture_2d<f32>" as const }, visibility: STAGE_FRAGMENT },
-              { name: "thicknessSampler_", type: { kind: "sampler" as const, samplerType: "sampler" as const }, visibility: STAGE_FRAGMENT },
+              { _name: "thicknessTexture_", _type: { _kind: "texture" as const, _textureType: "texture_2d<f32>" as const }, _visibility: STAGE_FRAGMENT },
+              { _name: "thicknessSampler_", _type: { _kind: "sampler" as const, _samplerType: "sampler" as const }, _visibility: STAGE_FRAGMENT },
           ]
         : [];
 
@@ -118,16 +118,16 @@ export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boole
     }
 
     return {
-        id: "subsurface",
-        dependencies: deps.length > 0 ? deps : undefined,
-        bindings: bindings.length > 0 ? bindings : undefined,
-        uboFields: [
-            { name: "subsurfaceParams", type: "vec4<f32>" as const },
-            { name: "subsurfaceParams2", type: "vec4<f32>" as const },
-            { name: "subsurfaceParams3", type: "vec4<f32>" as const },
+        _id: "subsurface",
+        _dependencies: deps.length > 0 ? deps : undefined,
+        _bindings: bindings.length > 0 ? bindings : undefined,
+        _uboFields: [
+            { _name: "subsurfaceParams", _type: "vec4<f32>" as const },
+            { _name: "subsurfaceParams2", _type: "vec4<f32>" as const },
+            { _name: "subsurfaceParams3", _type: "vec4<f32>" as const },
         ],
-        helperFunctions: SS_HELPERS,
-        fragmentSlots: slots,
+        _helperFunctions: SS_HELPERS,
+        _fragmentSlots: slots,
     };
 }
 
@@ -175,10 +175,10 @@ export const subsurfaceExt: PbrExt = {
         return { f, f2 };
     },
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_SUBSURFACE)) {
+        if (!(ctx._features & PBR_HAS_SUBSURFACE)) {
             return null;
         }
-        return createSubsurfaceFragment((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0, ctx.hasIbl, (ctx.features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
+        return createSubsurfaceFragment((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0, ctx._hasIbl, (ctx._features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
     },
     writeUbo(data, mat, offsets) {
         const m = mat as PbrMaterialProps;
@@ -187,8 +187,8 @@ export const subsurfaceExt: PbrExt = {
         }
     },
     bind(ctx, entries, b) {
-        if ((ctx.features & PBR_HAS_THICKNESS_MAP) !== 0) {
-            const tex = (ctx.material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+        if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
+            const tex = (ctx._material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
             if (tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });

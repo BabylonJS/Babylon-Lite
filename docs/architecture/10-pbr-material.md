@@ -1,7 +1,7 @@
 # Module: PBR Material
 
 > Package path: `packages/babylon-lite/src/material/pbr/`
-> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder), `pbr-flags.ts` (feature flag constants), `pbr-single-rebuild.ts` (hot material swap), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
+> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder and single-mesh rebuild closure), `pbr-flags.ts` / `pbr-flag-bits.ts` (feature flag constants), `shadow-depth-view.ts` (pass-specific material view), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
 
 ## Purpose
 
@@ -33,7 +33,7 @@ PBR shaders are built using the `ShaderComposer` architecture defined in `src/sh
 
 ```
 pbr-renderable.ts:
-  1. Computes feature bitmask from mesh/material/scene state
+  1. Resolves MaterialOrView to source material state + render feature bits
   2. Dynamically imports only needed fragment modules
   3. Calls createPbrTemplate(config) → ShaderTemplate
   4. Calls composeShader(template, fragments) → ComposedShader
@@ -43,38 +43,41 @@ pbr-renderable.ts:
 
 ## Dynamic Feature Flags (`pbr-flags.ts`)
 
-| Flag                               | Constant  | Condition                     | Shader effect                                        |
-| ---------------------------------- | --------- | ----------------------------- | ---------------------------------------------------- |
-| `PBR_HAS_NORMAL_MAP`               | `1 << 0`  | Mesh has tangent buffer       | Tangent vertex attr + normal texture + TBN transform |
-| `PBR_HAS_EMISSIVE`                 | `1 << 1`  | Material has emissive texture | Emissive texture sampling                            |
-| `PBR_HAS_ENV`                      | `1 << 2`  | Environment loaded            | IBL (BRDF LUT + specular cubemap + SH irradiance)    |
-| `PBR_HAS_SKELETON`                 | `1 << 3`  | Mesh has skeleton             | Bone texture sampling + skinning matrix              |
-| `PBR_HAS_TONEMAP`                  | `1 << 4`  | Tone mapping enabled          | Exposure/contrast/gamma post-processing              |
-| `PBR_HAS_MORPH_TARGETS`            | `1 << 5`  | Mesh has morph targets        | Morph target texture + weight accumulation           |
-| `PBR_HAS_ALPHA_BLEND`              | `1 << 6`  | Material has alpha blend      | Alpha blend pipeline state                           |
-| `PBR_HAS_SPEC_GLOSS`               | `1 << 7`  | Specular-glossiness workflow  | SpecGloss texture instead of ORM                     |
-| `PBR_HAS_DOUBLE_SIDED`             | `1 << 8`  | Material is double-sided      | `cullMode: 'none'` + front-facing normal flip        |
-| `PBR_HAS_COTANGENT_NORMAL`         | `1 << 9`  | Normal map without tangents   | Cotangent-frame normal perturbation                  |
-| `PBR_HAS_METALLIC_REFLECTANCE_MAP` | `1 << 10` | Has metallic reflectance map  | Reflectance texture sampling                         |
-| `PBR_HAS_REFLECTANCE_MAP`          | `1 << 11` | Has reflectance map           | Reflectance map sampling                             |
-| `PBR_HAS_USE_ALPHA_ONLY_MR`        | `1 << 12` | Use alpha-only from MR map    | Alpha-only metallic reflectance                      |
-| `PBR_HAS_OCCLUSION`                | `1 << 13` | Has occlusion strength        | ORM occlusion with strength factor                   |
-| `PBR_HAS_SKELETON_8`               | `1 << 14` | 8-bone skinning               | 8-bone influence blending                            |
-| `PBR_HAS_SPECULAR_AA`              | `1 << 15` | Specular anti-aliasing        | Geometric AA roughness adjustment                    |
-| `PBR_HAS_THIN_INSTANCES`           | `1 << 16` | Mesh has thin instances       | Instance matrix attributes + instanced draw          |
-| `PBR_HAS_INSTANCE_COLOR`           | `1 << 17` | Per-instance color            | Instance color varying                               |
-| `PBR_HAS_CLEARCOAT`                | `1 << 18` | Clearcoat layer enabled       | Clearcoat BRDF + energy conservation                 |
-| `PBR_HAS_EMISSIVE_COLOR`           | `1 << 19` | Non-zero emissive uniform     | Emissive color uniform contribution                  |
-| `PBR_HAS_SHEEN`                    | `1 << 20` | Sheen layer enabled           | Sheen BRDF (Charlie NDF + Ashikhmin visibility)      |
-| `PBR_HAS_SHEEN_TEXTURE`            | `1 << 21` | Sheen has texture             | Sheen texture sampling                               |
-| `PBR_HAS_RECEIVE_SHADOWS`          | `1 << 22` | Mesh receives shadows         | Shadow map sampling + shadow factors                 |
-| `PBR_HAS_GAMMA_ALBEDO`             | `1 << 23` | Base color in gamma space     | Gamma-to-linear decode                               |
+| Flag | Constant | Condition | Shader effect |
+|---|---|---|---|
+| `PBR_HAS_NORMAL_MAP` | `1 << 0` | Mesh has tangent buffer | Tangent vertex attr + normal texture + TBN transform |
+| `PBR_HAS_EMISSIVE` | `1 << 1` | Material has emissive texture | Emissive texture sampling |
+| `PBR_HAS_ENV` | `1 << 2` | Environment loaded | IBL (BRDF LUT + specular cubemap + SH irradiance) |
+| `PBR_HAS_TONEMAP` | `1 << 4` | Tone mapping enabled | Exposure/contrast/gamma post-processing |
+| `PBR_HAS_ALPHA_BLEND` | `1 << 6` | Material has alpha blend | Alpha blend pipeline state |
+| `PBR_HAS_SPEC_GLOSS` | `1 << 7` | Specular-glossiness workflow | SpecGloss texture instead of ORM |
+| `PBR_HAS_DOUBLE_SIDED` | `1 << 8` | Material is double-sided | `cullMode: 'none'` + front-facing normal flip |
+| `PBR_HAS_COTANGENT_NORMAL` | `1 << 9` | Normal map without tangents | Cotangent-frame normal perturbation |
+| `PBR_HAS_METALLIC_REFLECTANCE_MAP` | `1 << 10` | Has metallic reflectance map | Reflectance texture sampling |
+| `PBR_HAS_REFLECTANCE_MAP` | `1 << 11` | Has reflectance map | Reflectance map sampling |
+| `PBR_HAS_USE_ALPHA_ONLY_MR` | `1 << 12` | Use alpha-only from MR map | Alpha-only metallic reflectance |
+| `PBR_HAS_OCCLUSION` | `1 << 15` | Has occlusion strength | ORM/separate occlusion with strength factor |
+| `PBR_HAS_SPECULAR_AA` | `1 << 17` | Specular anti-aliasing | Geometric AA roughness adjustment |
+| `PBR_HAS_CLEARCOAT` | `1 << 20` | Clearcoat layer enabled | Clearcoat BRDF + energy conservation |
+| `PBR_HAS_EMISSIVE_COLOR` | `1 << 21` | Non-zero emissive uniform | Emissive color uniform contribution |
+| `PBR_HAS_SHEEN` | `1 << 22` | Sheen layer enabled | Sheen BRDF (Charlie NDF + Ashikhmin visibility) |
+| `PBR_HAS_SHEEN_TEXTURE` | `1 << 23` | Sheen has texture | Sheen texture sampling |
+| `PBR_HAS_GAMMA_ALBEDO` | `1 << 25` | Base color in gamma space | Gamma-to-linear decode |
+| `PBR_HAS_ANISOTROPY` | `1 << 26` | Anisotropy enabled | Anisotropic specular BRDF |
+| `PBR_HAS_SUBSURFACE` | `1 << 27` | Subsurface enabled | Translucency / scattering / volume feature root |
+| `PBR_HAS_THICKNESS_MAP` | `1 << 28` | Thickness texture present | Thickness texture sampling |
+| `PBR_HAS_SKYBOX` | `1 << 29` | PBR skybox mode | Direct environment lookup |
+| `PBR_HAS_SHEEN_ALBEDO_SCALING` | `1 << 30` | Sheen albedo scaling enabled | Energy compensation for sheen |
+
+Mesh/pass feature bits live in `mesh-features.ts` (`MSH_HAS_SKELETON`, `MSH_HAS_MORPH_TARGETS`, `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR`, `MSH_HAS_VERTEX_COLOR`, `MSH_HAS_UV2`, `MSH_RECEIVE_SHADOWS`). Do not duplicate a mesh feature as `PBR_HAS_*` or `PBR2_HAS_*`; the mesh flag takes precedence.
+
+Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_GENERATE_DEPTH_FOR_SHADOWS` for depth-only material views.
 
 Light type bits are also shifted into the feature mask via `getLightTypeFeatureBits()` (hemispheric=1, directional=2, point=3).
 
 Base color + ORM textures are always present (core PBR workflow).
 
-Pipelines are cached per `(features, format, msaaSamples)` tuple. Key format: `pbr:${features}:${format}:${msaa}`.
+PBR caches are two-tiered: sig-independent shader bindings are cached per the inline key string `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`, then each binding caches sig-specific pipelines per `targetSignatureKey(sig)` (format, depth format, sample count, Y-flip).
 
 ## Public API Surface
 
@@ -102,32 +105,31 @@ export interface SheenProps {
 }
 
 /** User-facing PBR material properties. */
-export interface PbrMaterialProps {
-    baseColorTexture?: Texture2D;
-    normalTexture?: Texture2D;
-    /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
-    ormTexture?: Texture2D;
-    emissiveTexture?: Texture2D;
-    specGlossTexture?: Texture2D;
-    metallicReflectanceTexture?: Texture2D;
-    reflectanceTexture?: Texture2D;
-    emissiveColor?: [number, number, number];
-    doubleSided?: boolean;
-    alpha?: number;
-    alphaBlend?: boolean;
-    environmentIntensity?: number;
-    directIntensity?: number;
-    usePhysicalLightFalloff?: boolean;
-    reflectance?: number;
-    occlusionStrength?: number;
-    metallicF0Factor?: number;
-    metallicReflectanceColor?: [number, number, number];
-    useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
-    enableSpecularAA?: boolean;
-    gammaAlbedo?: boolean;
-    clearCoat?: ClearCoatProps;
-    sheen?: SheenProps;
-    readonly _buildGroup: MeshGroupBuilder;
+export interface PbrMaterialProps extends Material {
+  baseColorTexture?: Texture2D;
+  normalTexture?: Texture2D;
+  /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
+  ormTexture?: Texture2D;
+  emissiveTexture?: Texture2D;
+  specGlossTexture?: Texture2D;
+  metallicReflectanceTexture?: Texture2D;
+  reflectanceTexture?: Texture2D;
+  emissiveColor?: [number, number, number];
+  doubleSided?: boolean;
+  alpha?: number;
+  alphaBlend?: boolean;
+  environmentIntensity?: number;
+  directIntensity?: number;
+  usePhysicalLightFalloff?: boolean;
+  reflectance?: number;
+  occlusionStrength?: number;
+  metallicF0Factor?: number;
+  metallicReflectanceColor?: [number, number, number];
+  useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
+  enableSpecularAA?: boolean;
+  gammaAlbedo?: boolean;
+  clearCoat?: ClearCoatProps;
+  sheen?: SheenProps;
 }
 
 /** Create a PbrMaterialProps with optional overrides. */
@@ -138,6 +140,9 @@ export const pbrGroupBuilder: MeshGroupBuilder;
 
 /** Collect all non-null textures for acquire/release tracking. */
 export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[];
+
+/** Create a pass-specific shadow-depth material view over a PBR source material. */
+export function createPbrShadowDepthMaterialView(source: PbrMaterialProps): MaterialView;
 ```
 
 Usage:
@@ -156,6 +161,14 @@ const mat = createPbrMaterial({
 addToScene(scene, await loadGltf(engine, "model.glb"));
 ```
 
+### Material Views and Rebuild
+
+PBR renderables accept `MaterialOrView`. A plain material computes/stores `_renderFeatures = _computePbrMaterialFeatures(mat)`. A view uses `view._renderFeatures` exactly while reading all uniform/texture state from `view.source`.
+
+`createPbrShadowDepthMaterialView(source)` creates a view that clears `PBR_HAS_ALPHA_BLEND` and sets `PBR2_GENERATE_DEPTH_FOR_SHADOWS`. This produces a depth-only PBR pipeline suitable for shadow/depth RTTs while retaining the source material's geometry-relevant state and textures.
+
+The `rebuildSingle` closure returned from `buildPbrRenderables()` is stored on `pbrGroupBuilder._rebuildSingle`. It is used by material swaps, `rebuildMaterial()`, and `RenderTask.addMesh(mesh, { material })` per-pass overrides.
+
 ### Pipeline (`pbr-pipeline.ts`)
 
 ```typescript
@@ -165,12 +178,13 @@ export function computePbrFeatures(...): number;
 /** Get or create sig-independent PBR shader bindings. */
 export function getOrCreatePbrBindings(
   engine: EngineContextInternal, features: number, features2: number,
+  meshFeatures: number, sceneFeatures: number,
   composed: ComposedShader, shaderKey?: string,
-): PbrShaderBindings;
+): _PbrShaderBindings;
 
 /** Get or create a cached PBR pipeline for a render-target signature. */
 export function getOrCreatePbrPipeline(
-  engine: EngineContextInternal, sig: RenderTargetSignature, bindings: PbrShaderBindings,
+  engine: EngineContextInternal, sig: RenderTargetSignature, bindings: _PbrShaderBindings,
 ): GPURenderPipeline;
 
 /** Create per-mesh bind group (group 1) with textures matching the composed shader layout. */
@@ -229,15 +243,8 @@ export function buildPbrRenderables(
   scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined,
 ): Promise<MeshGroupBuildResult>;
 
-/** Exported for use by pbr-single-rebuild.ts. */
+/** Internal helper used by the captured single-mesh rebuild closure. */
 export function _createPbrMeshUBO(...): GPUBuffer;
-```
-
-### Single-Material Rebuild (`pbr-single-rebuild.ts`)
-
-```typescript
-/** Rebuild a single mesh renderable after material swap without rebuilding entire scene. */
-export function buildSinglePbrRenderable(scene: SceneContext, mesh: Mesh): Renderable;
 ```
 
 ## Fragment Modules
@@ -356,13 +363,13 @@ Base vertex buffers are defined by the template. Fragment modules add additional
 
 **Conditional (appended by template or fragments, location indices assigned by composer):**
 
-| Attribute                                   | Source                   | When                                |
-| ------------------------------------------- | ------------------------ | ----------------------------------- |
-| Tangent (`float32x4`)                       | Template                 | `PBR_HAS_NORMAL_MAP` (tangent mode) |
-| Joints (`uint16x4`) + Weights (`float32x4`) | `skeleton-fragment`      | `PBR_HAS_SKELETON`                  |
-| Joints1 + Weights1                          | `skeleton-fragment`      | `PBR_HAS_SKELETON_8`                |
-| Instance matrix (4× `float32x4`)            | `thin-instance-fragment` | `PBR_HAS_THIN_INSTANCES`            |
-| Instance color (`float32x4`)                | `thin-instance-fragment` | `PBR_HAS_INSTANCE_COLOR`            |
+| Attribute | Source | When |
+|---|---|---|
+| Tangent (`float32x4`) | Template | `PBR_HAS_NORMAL_MAP` (tangent mode) |
+| Joints (`uint16x4`) + Weights (`float32x4`) | `skeleton-fragment` | `MSH_HAS_SKELETON` |
+| Joints1 + Weights1 | `skeleton-fragment` | `MSH_HAS_SKELETON_8` |
+| Instance matrix (4× `float32x4`) | `thin-instance-fragment` | `MSH_HAS_THIN_INSTANCES` |
+| Instance color (`float32x4`) | `thin-instance-fragment` | `MSH_HAS_INSTANCE_COLOR` |
 
 ### Pipeline State
 
@@ -390,8 +397,8 @@ Base vertex buffers are defined by the template. Fragment modules add additional
 Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assigned sequentially by the composer based on which fragments are active. The order follows fragment topological sort:
 
 - Mesh UBO — always (binding 0)
-- Morph target texture + UBO — if `PBR_HAS_MORPH_TARGETS`
-- Bone sampler texture — if `PBR_HAS_SKELETON`
+- Morph target texture + UBO — if `MSH_HAS_MORPH_TARGETS`
+- Bone sampler texture — if `MSH_HAS_SKELETON`
 - Base color texture + sampler — always
 - Normal texture + sampler — if `PBR_HAS_NORMAL_MAP`
 - ORM texture + sampler — always (or specGloss texture)
@@ -400,7 +407,7 @@ Binding 0 is always the mesh UBO (VERTEX+FRAGMENT). Subsequent bindings are assi
 - Reflectance maps + samplers — if reflectance extension
 - Sheen texture + sampler — if `PBR_HAS_SHEEN_TEXTURE`
 
-**Group 2 — Shadow** (only when `PBR_HAS_RECEIVE_SHADOWS`):
+**Group 2 — Shadow** (only when `MSH_RECEIVE_SHADOWS`):
 
 Per-light shadow info UBOs, shadow textures, and shadow samplers.
 
@@ -408,7 +415,7 @@ Per-light shadow info UBOs, shadow textures, and shadow samplers.
 
 `pbr-material.ts` exports `pbrGroupBuilder`, a `MeshGroupBuilder` function that dynamically imports `pbr-renderable.js` at build time. This function is set as the `_buildGroup` field on every PBR material created by `createPbrMaterial()`. At `startEngine()`, `scene.ts` calls each mesh's `material._buildGroup`, grouping meshes by builder identity so that all PBR meshes are batched together for a single `buildPbrRenderables()` call.
 
-The builder also stashes `_buildGroup._rebuildSingle` for hot material swapping — `pbr-single-rebuild.ts` is lazily loaded to rebuild a single mesh renderable without tearing down the entire scene.
+The builder stores the returned `rebuildSingle` closure on `pbrGroupBuilder._rebuildSingle`. The closure is captured inside `pbr-renderable.ts`, reuses the initial per-scene caches, and rebuilds one mesh for material swaps, `rebuildMaterial()`, and per-pass `RenderTask.addMesh(mesh, { material })` overrides.
 
 ## Internal Architecture
 
@@ -455,7 +462,7 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 
 ### Composed Shader Caching
 
-`pbr-renderable.ts` maintains a `Map<number, ComposedShader>` keyed by feature bitmask. The `composePbr` function reference is stashed on the scene context for reuse by `pbr-single-rebuild.ts`.
+`pbr-renderable.ts` maintains composed shader caches keyed by material features, extended features, mesh features, scene features, light mode, and shader variant key. The same captured composer is used by the `rebuildSingle` closure returned from the initial build.
 
 ### Renderable Builder (`pbr-renderable.ts`)
 
@@ -471,18 +478,9 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 8. Returns `rebuildSingle` so material swaps and per-pass material overrides can rebuild one mesh without rebuilding the whole scene
 9. Sets up disposal to clear pipeline cache and samplers on scene teardown
 
-### Single-Material Rebuild (`pbr-single-rebuild.ts`)
+### Single-Mesh Rebuild Closure
 
-`buildSinglePbrRenderable(scene, mesh)`:
-
-- Rebuilds a single mesh renderable after material swap without rebuilding the entire scene
-- Reuses cached scene bind group and stored `composePbr` function from the initial build
-- Recomputes feature bits from the mesh's current material and scene state
-- Creates/reuses pipeline variant and mesh UBO
-- Builds material bind group and optional shadow bind group
-- Tracks shadow generator versions for lazy refresh
-- Acquires/releases textures for reference counting
-- Returns a `Renderable` that early-exits draw if mesh material changed again
+The `rebuildSingle(scene, mesh, materialOverride?)` closure returned from `buildPbrRenderables()` rebuilds one mesh after a material swap or pass-specific override without rebuilding the entire scene. It accepts `MaterialOrView`, uses view render features with source material resources, reuses captured per-scene fragment imports/composer caches/shadow caches/environment state, recomputes mesh features and light variants, creates/reuses shader bindings and pipelines, and returns a `Renderable` that early-exits if the mesh material changed again unless it was built for an explicit override.
 
 ## Shader Logic
 
@@ -491,21 +489,20 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 **Inputs**: position (`vec3`), normal (`vec3`), uv (`vec2`), optional tangent (`vec4`), optional joints/weights, optional instance matrix.
 
 **Processing**:
-
-1. `/*VR*/` — Morph target application (if `PBR_HAS_MORPH_TARGETS`): accumulates position/normal deltas from morph texture
-2. `/*VW*/` — Skinning (if `PBR_HAS_SKELETON`): `finalWorld = mesh.world * boneInfluence`; otherwise `finalWorld = mesh.world`
+1. `/*VR*/` — Morph target application (if `MSH_HAS_MORPH_TARGETS`): accumulates position/normal deltas from morph texture
+2. `/*VW*/` — Skinning (if `MSH_HAS_SKELETON`): `finalWorld = mesh.world * boneInfluence`; otherwise `finalWorld = mesh.world`
 3. `worldPos = finalWorld × vec4(position, 1.0)`
 4. `clipPos = scene.viewProjection × worldPos`
 5. `worldNormal = normalize((finalWorld × vec4(normalize(normal), 0)).xyz)`
 6. If tangent normal map — compute TBN **in local space first** (critical for reflection matrices):
-    ```
-    N_local = normalize(normal)
-    T_local = normalize(tangent.xyz)
-    B_local = cross(N_local, T_local) * tangent.w
-    worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
-    worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
-    ```
-7. `/*VB*/` — Shadow light-space transform (if `PBR_HAS_RECEIVE_SHADOWS`)
+   ```
+   N_local = normalize(normal)
+   T_local = normalize(tangent.xyz)
+   B_local = cross(N_local, T_local) * tangent.w
+   worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
+   worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
+   ```
+7. `/*VB*/` — Shadow light-space transform (if `MSH_RECEIVE_SHADOWS`)
 
 **Outputs**: `worldPos`, `worldNormal`, [`worldTangent`, `worldBitangent`], `uv`, optional shadow varyings.
 
@@ -568,26 +565,26 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite                                 | Babylon.js                                          |
-| -------------------------------------------- | --------------------------------------------------- |
-| `computePbrFeatures()`                       | Internal define flags in `PBRMaterial._getEffect()` |
-| `getOrCreatePbrPipeline()`                   | Pipeline cache in `PBRMaterial._getEffect()`        |
-| `createPbrTemplate()` + `composeShader()`    | GLSL shader generation from defines                 |
-| `ShaderFragment` composition                 | `#include` / `#define` preprocessor                 |
-| Scene UBO (group 0)                          | `Scene.sceneUbo`                                    |
-| Mesh UBO (group 1, binding 0)                | `Mesh._uniformBuffer`                               |
-| `PBR_HAS_NORMAL_MAP`                         | `#define BUMP`                                      |
-| `PBR_HAS_EMISSIVE`                           | `#define EMISSIVE`                                  |
-| `PBR_HAS_ENV`                                | `#define REFLECTION` + `#define SS_REFRACTION`      |
-| `PBR_HAS_CLEARCOAT`                          | `#define CLEARCOAT`                                 |
-| `PBR_HAS_SHEEN`                              | `#define SHEEN`                                     |
-| `PBR_HAS_SKELETON`                           | `#define BONES`                                     |
-| `PBR_HAS_MORPH_TARGETS`                      | `#define MORPHTARGETS`                              |
-| `PBR_HAS_RECEIVE_SHADOWS`                    | `#define SHADOW0`                                   |
-| `PBR_HAS_SPEC_GLOSS`                         | `#define SPECULARGLOSSINESS`                        |
-| `PBR_HAS_SPECULAR_AA`                        | `#define SPECULARAA`                                |
-| `pbr-single-rebuild.ts`                      | `Material._markAllSubMeshesAsAllDirty()`            |
-| `singlelight-wgsl.ts` / `multilight-wgsl.ts` | Direct-light setup/functions in `pbr.fragment.fx`   |
+| Babylon Lite | Babylon.js |
+|---|---|
+| `computePbrFeatures()` | Internal define flags in `PBRMaterial._getEffect()` |
+| `getOrCreatePbrPipeline()` | Pipeline cache in `PBRMaterial._getEffect()` |
+| `createPbrTemplate()` + `composeShader()` | GLSL shader generation from defines |
+| `ShaderFragment` composition | `#include` / `#define` preprocessor |
+| Scene UBO (group 0) | `Scene.sceneUbo` |
+| Mesh UBO (group 1, binding 0) | `Mesh._uniformBuffer` |
+| `PBR_HAS_NORMAL_MAP` | `#define BUMP` |
+| `PBR_HAS_EMISSIVE` | `#define EMISSIVE` |
+| `PBR_HAS_ENV` | `#define REFLECTION` + `#define SS_REFRACTION` |
+| `PBR_HAS_CLEARCOAT` | `#define CLEARCOAT` |
+| `PBR_HAS_SHEEN` | `#define SHEEN` |
+| `MSH_HAS_SKELETON` | `#define BONES` |
+| `MSH_HAS_MORPH_TARGETS` | `#define MORPHTARGETS` |
+| `MSH_RECEIVE_SHADOWS` | `#define SHADOW0` |
+| `PBR_HAS_SPEC_GLOSS` | `#define SPECULARGLOSSINESS` |
+| `PBR_HAS_SPECULAR_AA` | `#define SPECULARAA` |
+| `rebuildSingle` closure | `Material._markAllSubMeshesAsAllDirty()` |
+| `singlelight-wgsl.ts` / `multilight-wgsl.ts` | Direct-light setup/functions in `pbr.fragment.fx` |
 
 ## Dependencies
 
@@ -595,8 +592,8 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 - **`pbr-flags.ts`**: Pure PBR feature/ext constants and registry helpers. No light-extension dependency.
 - **`pbr-template.ts`**: Imports `ShaderTemplate`, `UboField`, `VertexAttribute`, `Varying`, `BindingDecl` from fragment-types.
 - **`pbr-pipeline.ts`**: Imports `PbrMaterialProps` from pbr-material, `ComposedShader` from shader-composer, feature flags from pbr-flags.
-- **`pbr-renderable.ts`**: Imports pipeline functions, template creator, shader composer, fragment factories (dynamic), engine/scene/mesh/light types, resource pool helpers.
-- **`pbr-single-rebuild.ts`**: Imports `_createPbrMeshUBO` from pbr-renderable, pipeline helpers, feature flags, resource pool.
+- **`pbr-renderable.ts`**: Imports pipeline functions, template creator, shader composer, fragment factories (dynamic), engine/scene/mesh/light types, material-view types, resource pool helpers, and returns the single-mesh rebuild closure.
+- **`shadow-depth-view.ts`**: Imports `createMaterialView` and PBR feature flags to create depth-only material views without pulling the helper into ordinary PBR scenes.
 - **`fragments/singlelight-wgsl.ts`**: No imports (pure WGSL string helpers).
 - **`fragments/multilight-wgsl.ts`**: Imports `MAX_LIGHTS` to size the generated WGSL arrays.
 - **Fragment modules**: Each imports only `ShaderFragment` (and optionally `BindingDecl`, `Varying`) from `fragment-types.js`.
@@ -625,22 +622,22 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 
 ## File Manifest
 
-| File                                                 | Size       | Purpose                                                                                                                                         |
-| ---------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/material/pbr/pbr-material.ts`                   | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
-| `src/material/pbr/pbr-flags.ts`                      | ~43 lines  | Feature flag bit constants + PBR extension registry helpers                                                                                     |
-| `src/material/pbr/pbr-template.ts`                   | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings                        |
-| `src/material/pbr/pbr-pipeline.ts`                   | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management                                       |
-| `src/material/pbr/pbr-renderable.ts`                 | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation                                    |
-| `src/material/pbr/pbr-single-rebuild.ts`             | ~214 lines | `buildSinglePbrRenderable()` — hot material swap for a single mesh                                                                              |
-| `src/material/pbr/fragments/singlelight-wgsl.ts`     | ~75 lines  | Lazy WGSL helpers for the non-looping one-light direct path                                                                                     |
-| `src/material/pbr/fragments/multilight-wgsl.ts`      | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()`                                                          |
-| `src/material/pbr/fragments/ibl-fragment.ts`         | ~86 lines  | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance)                                                                   |
-| `src/material/pbr/fragments/clearcoat-fragment.ts`   | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat)                                                                 |
-| `src/material/pbr/fragments/sheen-fragment.ts`       | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen)                                                                    |
-| `src/material/pbr/fragments/reflectance-fragment.ts` | ~79 lines  | Metallic reflectance extension fragment (F0 computation, reflectance maps)                                                                      |
-| `src/material/pbr/fragments/emissive-fragment.ts`    | ~29 lines  | Emissive color uniform fragment                                                                                                                 |
-| `src/material/pbr/fragments/morph-fragment.ts`       | ~48 lines  | Morph target vertex animation fragment                                                                                                          |
-| `src/material/pbr/fragments/skeleton-fragment.ts`    | ~71 lines  | Skeletal animation fragment (4-bone or 8-bone)                                                                                                  |
-| `src/material/pbr/fragments/pbr-shadow-fragment.ts`  | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light)                                                                                            |
-| `src/shader/shader-composer.ts`                      | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection                                                             |
+| File | Size | Purpose |
+|---|---|---|
+| `src/material/pbr/pbr-material.ts` | ~140 lines | `PbrMaterialProps`, `ClearCoatProps`, `SheenProps` interfaces + `createPbrMaterial()` factory + `pbrGroupBuilder` + `collectPbrBoundTextures()` |
+| `src/material/pbr/pbr-flags.ts` | ~43 lines | Feature flag bit constants + PBR extension registry helpers |
+| `src/material/pbr/pbr-template.ts` | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings |
+| `src/material/pbr/pbr-pipeline.ts` | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management |
+| `src/material/pbr/pbr-renderable.ts` | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure |
+| `src/material/pbr/shadow-depth-view.ts` | ~18 lines | `createPbrShadowDepthMaterialView()` — pass-specific depth-only material view helper |
+| `src/material/pbr/fragments/singlelight-wgsl.ts` | ~75 lines | Lazy WGSL helpers for the non-looping one-light direct path |
+| `src/material/pbr/fragments/multilight-wgsl.ts` | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()` |
+| `src/material/pbr/fragments/ibl-fragment.ts` | ~86 lines | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance) |
+| `src/material/pbr/fragments/clearcoat-fragment.ts` | ~122 lines | Clearcoat layer fragment (Kelemen visibility, F0 remap, direct + IBL clearcoat) |
+| `src/material/pbr/fragments/sheen-fragment.ts` | ~115 lines | Sheen layer fragment (Charlie NDF, Ashikhmin visibility, direct + IBL sheen) |
+| `src/material/pbr/fragments/reflectance-fragment.ts` | ~79 lines | Metallic reflectance extension fragment (F0 computation, reflectance maps) |
+| `src/material/pbr/fragments/emissive-fragment.ts` | ~29 lines | Emissive color uniform fragment |
+| `src/material/pbr/fragments/morph-fragment.ts` | ~48 lines | Morph target vertex animation fragment |
+| `src/material/pbr/fragments/skeleton-fragment.ts` | ~71 lines | Skeletal animation fragment (4-bone or 8-bone) |
+| `src/material/pbr/fragments/pbr-shadow-fragment.ts` | ~143 lines | PBR shadow receiving fragment (ESM + PCF, per-light) |
+| `src/shader/shader-composer.ts` | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection |

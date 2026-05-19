@@ -4,7 +4,7 @@
  *
  * Uses git worktree to checkout the baseline ref without disturbing the working tree.
  *
- * Env:  PERF_BASELINE_REF — override the git ref to use (default: latest tag or origin/master)
+ * Env:  PERF_BASELINE_REF — override the git ref to use (default: latest tag or upstream/master, then origin/master)
  *
  * Usage: tsx scripts/build-perf-baseline.ts
  */
@@ -47,8 +47,9 @@ function getBaselineRef(): string {
 
     console.log("No release tags found, falling back to default branch");
 
-    // Try common remote branch names
-    for (const ref of ["origin/master", "origin/main"]) {
+    // Try common remote branch names. In fork checkouts, `origin/master` can lag
+    // BabylonJS master, so prefer `upstream/*` when that remote exists.
+    for (const ref of ["upstream/master", "upstream/main", "origin/master", "origin/main"]) {
         try {
             run(`git rev-parse ${ref}`);
             console.log(`Using fallback ref: ${ref}`);
@@ -109,6 +110,10 @@ try {
     // lockfile might differ between versions — allow unfrozen
     run("pnpm install", { cwd: WORKTREE_DIR });
 }
+
+// Use the current bundle builder for baseline generation. This keeps perf
+// comparisons focused on runtime source changes, not historical bundler bugs.
+cpSync(resolve(ROOT, "scripts/bundle-scenes-core.ts"), resolve(WORKTREE_DIR, "scripts/bundle-scenes-core.ts"));
 
 console.log("\nBuilding bundle scenes from baseline (Lite only, skip measurement)...");
 run("pnpm build:bundle-scenes", {

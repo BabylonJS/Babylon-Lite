@@ -1,5 +1,10 @@
-/** Mark a material (PBR or Standard) as dirty — its UBO will be re-uploaded on the next frame.
- *  Call after mutating any material property (alpha, emissiveColor, anisotropy.intensity, etc.). */
-export function markMaterialDirty(material: { _uboDirty?: boolean }): void {
-    material._uboDirty = true;
+import type { Material } from "./material.js";
+import { getMaterialSource } from "./material-view.js";
+
+/** Mark a material source (or one of its views) as needing UBO re-upload.
+ *  The source owns a monotonic version so multiple renderables/views can observe
+ *  the same mutation independently without racing on a single cleared boolean. */
+export function markMaterialUboDirty(materialOrView: Material): void {
+    const source = getMaterialSource(materialOrView);
+    source._uboVersion++;
 }

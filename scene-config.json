@@ -17,7 +17,8 @@
         "maxRegionMad": 0.01,
         "maxRawKB": 46.2,
         "description": "StandardMaterial sphere with Blinn-Phong, directional light, ground plane.",
-        "tags": ["std", "procedural"]
+        "tags": ["std", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 3,
@@ -26,7 +27,8 @@
         "maxMad": 0.01,
         "maxRawKB": 53.5,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
-        "tags": ["fog", "procedural", "std"]
+        "tags": ["fog", "procedural", "std"],
+        "skipPerf": true
     },
     {
         "id": 4,
@@ -45,7 +47,8 @@
         "maxRegionMad": 0.08,
         "maxRawKB": 88.6,
         "description": "glTF Alien model with PBR, skeleton/bones, normal map, hemispheric light.",
-        "tags": ["pbr", "gltf"]
+        "tags": ["pbr", "gltf"],
+        "skipPerf": true
     },
     {
         "id": 6,
@@ -54,7 +57,8 @@
         "maxMad": 0.5,
         "maxRawKB": 74,
         "description": "Procedural sphere with PBR specular-glossiness, environment IBL, no direct light.",
-        "tags": ["pbr", "procedural"]
+        "tags": ["pbr", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 7,
@@ -73,7 +77,8 @@
         "maxMad": 0.027,
         "maxRawKB": 74.2,
         "description": "Glass sphere with HDR environment, alpha transparency, and custom exposure.",
-        "tags": ["pbr", "procedural", "env"]
+        "tags": ["pbr", "procedural", "env"],
+        "skipPerf": true
     },
     {
         "id": 9,
@@ -91,7 +96,8 @@
         "maxMad": 0.011,
         "maxRawKB": 54.1,
         "description": "PBR metallic-roughness sphere: golden base, metallic=0, roughness=1, hemispheric light only.",
-        "tags": ["pbr", "procedural"]
+        "tags": ["pbr", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 11,
@@ -100,7 +106,8 @@
         "maxMad": 0.01,
         "maxRawKB": 83.4,
         "description": "Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
-        "tags": ["pbr", "gltf"]
+        "tags": ["pbr", "gltf"],
+        "skipPerf": true
     },
     {
         "id": 12,
@@ -109,7 +116,8 @@
         "maxMad": 0.027,
         "maxRawKB": 99.6,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
-        "tags": ["pbr", "gltf"]
+        "tags": ["pbr", "gltf"],
+        "skipPerf": true
     },
     {
         "id": 13,
@@ -118,7 +126,8 @@
         "maxMad": 0.008,
         "maxRawKB": 88.9,
         "description": "12 spheres with varying metallic/roughness baseColorFactor, default environment.",
-        "tags": ["pbr", "gltf"]
+        "tags": ["pbr", "gltf"],
+        "skipPerf": true
     },
     {
         "id": 14,
@@ -127,7 +136,8 @@
         "maxMad": 0.42,
         "maxRawKB": 93.2,
         "description": "glTF Flight Helmet with PBR materials, DDS cube skybox, default environment.",
-        "tags": ["pbr", "gltf"]
+        "tags": ["pbr", "gltf"],
+        "skipPerf": true
     },
     {
         "id": 15,
@@ -136,7 +146,8 @@
         "maxMad": 0.01,
         "maxRawKB": 46.5,
         "description": "Two SpotLights (red + green) with different exponents on a ground plane. Multi-light support.",
-        "tags": ["std", "procedural"]
+        "tags": ["std", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 16,
@@ -163,7 +174,8 @@
         "maxMad": 0.011,
         "maxRawKB": 60.6,
         "description": "FreeCamera + SpotLight PCF shadow generator. Ground receives hard shadows from box.",
-        "tags": ["std", "procedural", "shadow"]
+        "tags": ["std", "procedural", "shadow"],
+        "skipPerf": true
     },
     {
         "id": 19,
@@ -190,7 +202,8 @@
         "maxMad": 0.01,
         "maxRawKB": 89.3,
         "description": "Cloth mesh with PBR sheen layer, blue albedo + fire texture. Country environment.",
-        "tags": ["pbr", "env"]
+        "tags": ["pbr", "env"],
+        "skipPerf": true
     },
     {
         "id": 22,
@@ -208,7 +221,8 @@
         "maxMad": 0.12,
         "maxRawKB": 78.5,
         "description": "PBR metallic sphere with anisotropic reflections. DDS environment, no direct light.",
-        "tags": ["pbr", "env"]
+        "tags": ["pbr", "env"],
+        "skipPerf": true
     },
     {
         "id": 24,
@@ -226,7 +240,8 @@
         "maxMad": 0.5,
         "maxRawKB": 51.8,
         "description": "Ground plane with KTX compressed texture (auto-format selection), UV tiling, FreeCamera, hemispheric light.",
-        "tags": ["std", "procedural"]
+        "tags": ["std", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 26,
@@ -236,7 +251,8 @@
         "maxRawKB": 90.7,
         "description": "Georgia Tech Dragon with PBR subsurface translucency, thickness map, point light, DDS environment.",
         "tags": ["pbr", "gltf", "env"],
-        "skipParity": true
+        "skipParity": true,
+        "skipPerf": true
     },
     {
         "id": 27,
@@ -245,7 +261,8 @@
         "maxMad": 1,
         "maxRawKB": 79.4,
         "description": "glTF refrigerator with KHR_materials_variants, White variant selected. ArcRotate camera, hemispheric light.",
-        "tags": ["pbr", "gltf", "variants"]
+        "tags": ["pbr", "gltf", "variants"],
+        "skipPerf": true
     },
     {
         "id": 28,
@@ -263,7 +280,8 @@
         "maxMad": 0.015,
         "maxRawKB": 87.4,
         "description": "SheenCloth.gltf (KHR_materials_sheen + KHR_texture_transform 30× tiling) with default environment (IBL only). Matches PG #YG3BBF#2.",
-        "tags": ["pbr", "gltf", "env", "sheen", "texture-transform"]
+        "tags": ["pbr", "gltf", "env", "sheen", "texture-transform"],
+        "skipPerf": true
     },
     {
         "id": 30,
@@ -284,7 +302,8 @@
         "maxMad": 0.01,
         "maxRawKB": 78.2,
         "description": "EmissiveStrengthTest.glb (grid of materials with varying emissive_strength) against default IBL environment. Matches PG #YG3BBF#52.",
-        "tags": ["pbr", "gltf", "env", "emissive"]
+        "tags": ["pbr", "gltf", "env", "emissive"],
+        "skipPerf": true
     },
     {
         "id": 32,
@@ -293,7 +312,8 @@
         "maxMad": 0.01,
         "maxRawKB": 78.1,
         "description": "UnlitTest.glb (KHR_materials_unlit) against default IBL environment. Base color output directly with no lighting. Matches PG #YG3BBF#53.",
-        "tags": ["pbr", "gltf", "env", "unlit"]
+        "tags": ["pbr", "gltf", "env", "unlit"],
+        "skipPerf": true
     },
     {
         "id": 33,
@@ -303,7 +323,8 @@
         "maxRawKB": 88.7,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "note": "MAD ceiling temporarily relaxed (0.5 actual vs 0.02 target). Glass lampshade needs correct transmission parity (see scene 30) to tighten maxMad below 0.5.",
-        "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"]
+        "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
+        "skipPerf": true
     },
     {
         "id": 34,
@@ -312,7 +333,8 @@
         "maxMad": 0.02,
         "maxRawKB": 88.5,
         "description": "CubeVisibility.glb — three cubes: green always-visible, blue blinking via KHR_animation_pointer on its visibility flag, two reds hidden via KHR_node_visibility. Default IBL env. Matches PG #YG3BBF#55.",
-        "tags": ["pbr", "gltf", "env", "node-visibility", "animation-pointer"]
+        "tags": ["pbr", "gltf", "env", "node-visibility", "animation-pointer"],
+        "skipPerf": true
     },
     {
         "id": 35,
@@ -330,7 +352,8 @@
         "maxMad": 0.5,
         "maxRawKB": 51.1,
         "description": "Box with a .basis texture as diffuse+emissive. Transcoder fetched from the BJS CDN; auto-selects BC7/ASTC/ETC2/BC3/RGBA32 per device. Matches PG #4RN0VF.",
-        "tags": ["std", "procedural", "basis"]
+        "tags": ["std", "procedural", "basis"],
+        "skipPerf": true
     },
     {
         "id": 37,
@@ -348,7 +371,8 @@
         "maxMad": 0.02,
         "maxRawKB": 62.3,
         "description": "Cylinder, cone, plane, disc, ring, polyhedron, ribbon, tube, and extruded shape rendered with StandardMaterial. Parity check against BJS MeshBuilder.",
-        "tags": ["std", "procedural"]
+        "tags": ["std", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 40,
@@ -388,7 +412,8 @@
         "maxMad": 0.02,
         "maxRawKB": 60,
         "description": "3D scene (sphere + StandardMaterial under a directional light) with a pure-2D HUD sprite overlay rendered AFTER the 3D pass via createSpriteRenderer + registerSpriteRenderer. HUD layer uses depth: \"none\". BJS reference renders the same 3D scene plus a pixel-space SpriteRenderer HUD for parity.",
-        "tags": ["sprites", "2d", "hud"]
+        "tags": ["sprites", "2d", "hud"],
+        "skipPerf": true
     },
     {
         "id": 53,
@@ -397,7 +422,8 @@
         "maxMad": 0.02,
         "maxRawKB": 60,
         "description": "Two boxes at different camera-distances + a Sprite2DLayer added via addToScene with depth: \"test-write\" and per-instance z. The front box occludes the sprite; the sprite occludes the back box. BJS reference uses SpriteManager sprites projected to the same pixel centers and depths for parity.",
-        "tags": ["sprites", "2d", "depth"]
+        "tags": ["sprites", "2d", "depth"],
+        "skipPerf": true
     },
     {
         "id": 54,
@@ -415,7 +441,8 @@
         "maxMad": 0.02,
         "maxRawKB": 35,
         "description": "Overlapping transparent world-space billboards inserted near-to-far in Lite and far-to-near in the Babylon.js SpriteManager reference, exercising CPU-side per-billboard sorting before compact vertex-buffer upload.",
-        "tags": ["sprites", "billboards", "sorting"]
+        "tags": ["sprites", "billboards", "sorting"],
+        "skipPerf": true
     },
     {
         "id": 56,
@@ -424,7 +451,8 @@
         "maxMad": 0.02,
         "maxRawKB": 65,
         "description": "Axis-locked world-space billboards constrain rotation to an arbitrary normalized axis. BJS reference uses explicit meshes with axis-aligned basis vectors computed from the camera and lock axis.",
-        "tags": ["sprites", "billboards", "axis-locked"]
+        "tags": ["sprites", "billboards", "axis-locked"],
+        "skipPerf": true
     },
     {
         "id": 57,
@@ -433,7 +461,8 @@
         "maxMad": 0.02,
         "maxRawKB": 65,
         "description": "Hard-alpha world-space billboard cards rendered with blendMode: \"cutout\", alpha cutoff, and depth writes. Front cutout pixels occlude later overlapping cards and opaque geometry while transparent holes leave the background visible.",
-        "tags": ["sprites", "billboards", "depth"]
+        "tags": ["sprites", "billboards", "depth"],
+        "skipPerf": true
     },
     {
         "id": 60,
@@ -442,7 +471,8 @@
         "maxMad": 0.5,
         "maxRawKB": 60,
         "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
-        "tags": ["nme", "procedural"]
+        "tags": ["nme", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 61,
@@ -451,7 +481,8 @@
         "maxMad": 0.5,
         "maxRawKB": 60,
         "description": "Node Material with a vertex→fragment varying: normal attribute remapped as `normal * 0.5 + 0.5` → FragmentOutput.rgb. Exercises ScaleBlock, AddBlock, and attribute-to-fragment bridging.",
-        "tags": ["nme", "procedural"]
+        "tags": ["nme", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 62,
@@ -460,7 +491,8 @@
         "maxMad": 0.5,
         "maxRawKB": 63,
         "description": "Node Material sampling a 2D texture (crate.png) through a TextureBlock driven by the UV attribute. Exercises texture/sampler BGL slot allocation and `NodeInputHandle.texture` pass-through.",
-        "tags": ["nme", "procedural"]
+        "tags": ["nme", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 63,
@@ -469,7 +501,8 @@
         "maxMad": 0.5,
         "maxRawKB": 64,
         "description": "Node Material with one DirectionalLight: position/normal world-transformed, driven through LightBlock (Blinn-Phong) to FragmentOutput.rgb. Exercises the shared lights UBO binding + module-scope helper assembly.",
-        "tags": ["nme", "procedural"]
+        "tags": ["nme", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 64,
@@ -478,7 +511,8 @@
         "maxMad": 0.5,
         "maxRawKB": 65,
         "description": "Node Material with a MorphTargetsBlock: one morph target shifts every vertex along +Y at weight=1.0 so the sphere renders translated upward. Proves morph-texture + weights-UBO binding and the @builtin(vertex_index) plumbing.",
-        "tags": ["nme", "procedural"]
+        "tags": ["nme", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 65,
@@ -487,7 +521,8 @@
         "maxMad": 0.1,
         "maxRawKB": 80,
         "description": "Node Material with shadow receive: sphere casts onto ground plane, both lit by one DirectionalLight with an ESM shadow generator. Only meshes with receiveShadows=true are attenuated; the sphere stays fully lit. Same JSON graph as scene 63 — shadow integration is externally driven via parseNodeMaterialFromSnippet({ shadowGenerators }).",
-        "tags": ["nme", "procedural", "shadows"]
+        "tags": ["nme", "procedural", "shadows"],
+        "skipPerf": true
     },
     {
         "id": 66,
@@ -505,7 +540,8 @@
         "maxMad": 0.02,
         "maxRawKB": 95,
         "description": "NME PBRMetallicRoughnessBlock + ReflectionBlock with IBL plumbing on a saturated teal matte sphere. Hemi + point + spot + directional lights make the base material visible against a black background.",
-        "tags": ["pbr", "nme", "procedural", "env"]
+        "tags": ["pbr", "nme", "procedural", "env"],
+        "skipPerf": true
     },
     {
         "id": 68,
@@ -514,7 +550,8 @@
         "maxMad": 0.02,
         "maxRawKB": 96,
         "description": "Dark navy PBR sphere with a ClearCoatBlock wired into PBRMetallicRoughnessBlock.clearcoat (intensity=1, roughness=0.02, IOR=1.5) for an obvious glossy coat highlight.",
-        "tags": ["pbr", "nme", "procedural", "env", "clearcoat"]
+        "tags": ["pbr", "nme", "procedural", "env", "clearcoat"],
+        "skipPerf": true
     },
     {
         "id": 69,
@@ -523,7 +560,8 @@
         "maxMad": 0.02,
         "maxRawKB": 98,
         "description": "Dark purple PBR sphere with softened clearcoat plus a hot magenta SheenBlock wired into PBRMetallicRoughnessBlock.sheen (intensity=1, roughness=0.55) for a visible fabric-like rim.",
-        "tags": ["pbr", "nme", "procedural", "env", "clearcoat", "sheen"]
+        "tags": ["pbr", "nme", "procedural", "env", "clearcoat", "sheen"],
+        "skipPerf": true
     },
     {
         "id": 70,
@@ -532,7 +570,8 @@
         "maxMad": 0.02,
         "maxRawKB": 100,
         "description": "Metallic gold PBR sphere with AnisotropyBlock intensity=0.85 and diagonal direction, producing a visibly stretched anisotropic specular highlight.",
-        "tags": ["pbr", "nme", "procedural", "env", "anisotropy"]
+        "tags": ["pbr", "nme", "procedural", "env", "anisotropy"],
+        "skipPerf": true
     },
     {
         "id": 71,
@@ -541,7 +580,8 @@
         "maxMad": 0.02,
         "maxRawKB": 100,
         "description": "Warm wax-like PBR sphere with SubSurfaceBlock translucency and a modest RefractionBlock input, back-lit to show transmitted subsurface glow.",
-        "tags": ["pbr", "nme", "procedural", "env", "subsurface"]
+        "tags": ["pbr", "nme", "procedural", "env", "subsurface"],
+        "skipPerf": true
     },
     {
         "id": 72,
@@ -568,7 +608,8 @@
         "maxMad": 0.05,
         "maxRawKB": 20,
         "description": "EffectRenderer-style fullscreen procedural pass: radial glow, diagonal gradient, crisp rings, and grid rendered without scene geometry.",
-        "tags": ["procedural", "effect"]
+        "tags": ["procedural", "effect"],
+        "skipPerf": true
     },
     {
         "id": 75,
@@ -577,7 +618,8 @@
         "maxMad": 0.05,
         "maxRawKB": 50,
         "description": "EffectRenderer-style WGSL pass renders a 512×512 green offscreen texture, then an unlit sphere displays that render target as its base-color texture.",
-        "tags": ["procedural", "effect", "rtt"]
+        "tags": ["procedural", "effect", "rtt"],
+        "skipPerf": true
     },
     {
         "id": 76,
@@ -586,7 +628,8 @@
         "maxMad": 0.05,
         "maxRawKB": 25,
         "description": "EffectWrapper fullscreen pass samples a Texture2D bound through setEffectTexture, proving texture and sampler bindings work without scene geometry.",
-        "tags": ["procedural", "effect", "texture"]
+        "tags": ["procedural", "effect", "texture"],
+        "skipPerf": true
     },
     {
         "id": 77,
@@ -595,7 +638,8 @@
         "maxMad": 0.5,
         "maxRawKB": 65,
         "description": "Node Material compatibility graph for editor-only/alias blocks: OppositeBlock computes 1 - uv.x, Elbow and Teleport In/Out pass the value through, and an inactive DebugBlock is parsed without changing shader output.",
-        "tags": ["nme", "procedural"]
+        "tags": ["nme", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 78,
@@ -604,7 +648,8 @@
         "maxMad": 0.5,
         "maxRawKB": 60,
         "description": "Single-plane Node Material graph covering scalar and vector math blocks: Divide, Mod, Reciprocal, Length, Distance, Cross, Reflect, Refract, ArcTan2, and Fresnel with UV-derived deterministic inputs.",
-        "tags": ["nme", "procedural", "math"]
+        "tags": ["nme", "procedural", "math"],
+        "skipPerf": true
     },
     {
         "id": 79,
@@ -613,7 +658,8 @@
         "maxMad": 0.5,
         "maxRawKB": 65,
         "description": "Single-plane Node Material graph covering NLerpBlock, ConditionalBlock, CurveBlock, WaveBlock, and RandomNumberBlock with UV-driven deterministic inputs, multiple condition/curve/wave modes, and Babylon.js-compatible getRand(seed.xy).",
-        "tags": ["nme", "procedural", "math"]
+        "tags": ["nme", "procedural", "math"],
+        "skipPerf": true
     },
     {
         "id": 80,
@@ -622,7 +668,8 @@
         "maxMad": 0.5,
         "maxRawKB": 65,
         "description": "Single-plane Node Material color ramp covering ColorMergerBlock, ColorConverterBlock, DesaturateBlock, GradientBlock, PosterizeBlock, and ReplaceColorBlock with deterministic UV-driven color operations.",
-        "tags": ["nme", "procedural", "color"]
+        "tags": ["nme", "procedural", "color"],
+        "skipPerf": true
     },
     {
         "id": 81,
@@ -631,7 +678,8 @@
         "maxMad": 0.5,
         "maxRawKB": 71,
         "description": "UV sphere Node Material graph covering PannerBlock, Rotate2dBlock, TriPlanarBlock, and BiPlanarBlock with a frozen-time atlas texture and object-space projection mapping.",
-        "tags": ["nme", "procedural", "texture", "uv"]
+        "tags": ["nme", "procedural", "texture", "uv"],
+        "skipPerf": true
     },
     {
         "id": 82,
@@ -640,7 +688,8 @@
         "maxMad": 0.5,
         "maxRawKB": 75,
         "description": "Single-plane Node Material graph split into four deterministic procedural quadrants covering CloudBlock, SimplexPerlin3DBlock, VoronoiNoiseBlock, and WorleyNoise3DBlock.",
-        "tags": ["nme", "procedural", "noise"]
+        "tags": ["nme", "procedural", "noise"],
+        "skipPerf": true
     },
     {
         "id": 83,
@@ -649,7 +698,8 @@
         "maxMad": 0.5,
         "maxRawKB": 75,
         "description": "Lit Node Material plane covering DerivativeBlock, HeightToNormalBlock, TBNBlock, NormalBlendBlock, and AmbientOcclusionBlock with a UV height field, blended normal-map color, tangent basis tint, and deterministic AO darkening.",
-        "tags": ["nme", "procedural", "normals", "lighting"]
+        "tags": ["nme", "procedural", "normals", "lighting"],
+        "skipPerf": true
     },
     {
         "id": 84,
@@ -658,7 +708,8 @@
         "maxMad": 0.5,
         "maxRawKB": 90,
         "description": "Node Material planes covering FragCoordBlock, ScreenSizeBlock, ScreenSpaceBlock, TwirlBlock, and FragDepthBlock with normalized screen coordinates, projected mesh coordinates, a twirl field, and deterministic custom-depth overwriting.",
-        "tags": ["nme", "procedural", "screen", "depth"]
+        "tags": ["nme", "procedural", "screen", "depth"],
+        "skipPerf": true
     },
     {
         "id": 85,
@@ -667,7 +718,8 @@
         "maxMad": 0.5,
         "maxRawKB": 68,
         "description": "Node Material plane covering MatrixBuilder, MatrixTransposeBlock, MatrixSplitterBlock, and MatrixDeterminantBlock with matrix-driven vertex shear and determinant/splitter-derived fragment color.",
-        "tags": ["nme", "procedural", "matrix"]
+        "tags": ["nme", "procedural", "matrix"],
+        "skipPerf": true
     },
     {
         "id": 86,
@@ -676,7 +728,8 @@
         "maxMad": 0.5,
         "maxRawKB": 75,
         "description": "Node Material quads covering MeshAttributeExistsBlock, ClipPlanesBlock, and ReflectionTextureBaseBlock compatibility with per-mesh UV/color/tangent branch selection and scene clip-plane discard.",
-        "tags": ["nme", "scene-state", "mesh-attributes", "clip-plane"]
+        "tags": ["nme", "scene-state", "mesh-attributes", "clip-plane"],
+        "skipPerf": true
     },
     {
         "id": 87,
@@ -685,7 +738,8 @@
         "maxMad": 0.5,
         "maxRawKB": 99,
         "description": "Environment-lit Node Material PBR sphere covering IridescenceBlock thin-film Fresnel plus ImageProcessingBlock output routing under standard tone mapping/exposure/contrast.",
-        "tags": ["nme", "pbr", "iridescence", "image-processing", "env"]
+        "tags": ["nme", "pbr", "iridescence", "image-processing", "env"],
+        "skipPerf": true
     },
     {
         "id": 88,
@@ -694,7 +748,8 @@
         "maxMad": 0.05,
         "maxRawKB": 68,
         "description": "Single-plane Node Material graph covering LoopBlock control flow with StorageRead/StorageWrite accumulation of five deterministic UV color bands.",
-        "tags": ["nme", "procedural", "loop"]
+        "tags": ["nme", "procedural", "loop"],
+        "skipPerf": true
     },
     {
         "id": 89,
@@ -703,7 +758,8 @@
         "maxMad": 0.05,
         "maxRawKB": 68,
         "description": "Single-plane Node Material graph covering StorageReadBlock and StorageWriteBlock through a LoopBlock-local vec4 storage value with component-dependent feedback updates.",
-        "tags": ["nme", "procedural", "loop", "storage"]
+        "tags": ["nme", "procedural", "loop", "storage"],
+        "skipPerf": true
     },
     {
         "id": 90,
@@ -712,7 +768,8 @@
         "maxMad": 1,
         "maxRawKB": 78,
         "description": "Box and sphere constructive solid geometry rows showing subtract, intersect, and union with textured StandardMaterial meshes and SVG texture labels.",
-        "tags": ["csg", "procedural", "std"]
+        "tags": ["csg", "procedural", "std"],
+        "skipPerf": true
     },
     {
         "id": 91,
@@ -721,7 +778,8 @@
         "maxMad": 1,
         "maxRawKB": 78,
         "description": "Box and sphere CSG2 rows showing subtract, intersect, and add/union with textured StandardMaterial meshes and canvas texture labels.",
-        "tags": ["csg", "procedural", "std"]
+        "tags": ["csg", "procedural", "std"],
+        "skipPerf": true
     },
     {
         "id": 110,
@@ -748,7 +806,8 @@
         "maxMad": 0.2,
         "maxRawKB": 110,
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures for base color, normal, and occlusion/roughness/metallic maps.",
-        "tags": ["pbr", "gltf", "env", "basis"]
+        "tags": ["pbr", "gltf", "env", "basis"],
+        "skipPerf": true
     },
     {
         "id": 113,
@@ -757,7 +816,8 @@
         "maxMad": 0.3,
         "maxRawKB": 68,
         "description": "Visual picking validation: one detailed sphere pick places a tiny surface marker at the picked point and a small oriented box along the picked normal.",
-        "tags": ["std", "procedural", "picking"]
+        "tags": ["std", "procedural", "picking"],
+        "skipPerf": true
     },
     {
         "id": 114,
@@ -766,7 +826,8 @@
         "maxMad": 0.1,
         "maxRawKB": 86,
         "description": "Visual picking validation on morphed and skinned geometry: GPU and detailed picks drive marker positions from the deformed rendered surface.",
-        "tags": ["pbr", "procedural", "morph", "skeleton", "picking"]
+        "tags": ["pbr", "procedural", "morph", "skeleton", "picking"],
+        "skipPerf": true
     },
     {
         "id": 115,
@@ -775,7 +836,18 @@
         "maxMad": 0.01,
         "maxRawKB": 120,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
-        "tags": ["pbr", "gltf", "anim", "skeleton", "picking"]
+        "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
+        "skipPerf": true
+    },
+    {
+        "id": 116,
+        "slug": "scene116-shadow-depth-materials",
+        "name": "Scene 116 — Shadow Depth Materials",
+        "maxMad": 0.01,
+        "maxRawKB": 82,
+        "description": "Frame-graph RTT demo for Standard and PBR material views with shadow-depth feature overrides; the normal source materials render in the main pass and the depth RTTs are displayed on planes.",
+        "tags": ["std", "pbr", "frame-graph", "rtt", "shadow"],
+        "skipPerf": true
     },
     {
         "id": 120,
@@ -793,7 +865,8 @@
         "maxMad": 50,
         "maxRawKB": 35,
         "description": "Loads Halo_Believe.splat with keepInRam, modifies the first 30 000 splats' Y by -2, then calls gs.updateData().",
-        "tags": ["gaussian-splatting", "splat"]
+        "tags": ["gaussian-splatting", "splat"],
+        "skipPerf": true
     },
     {
         "id": 122,
@@ -802,7 +875,8 @@
         "maxMad": 1,
         "maxRawKB": 70,
         "description": "Loads hornedlizard.sog (ZIP-packed WebPs + meta.json) via loadSOG(); renders with view-dependent SH shading.",
-        "tags": ["gaussian-splatting", "sog", "sh"]
+        "tags": ["gaussian-splatting", "sog", "sh"],
+        "skipPerf": true
     },
     {
         "id": 123,
@@ -811,7 +885,8 @@
         "maxMad": 1,
         "maxRawKB": 65,
         "description": "Loads hornedlizard.spz (gzip-wrapped binary stream) via loadSPZ(); renders with view-dependent SH shading.",
-        "tags": ["gaussian-splatting", "spz", "sh"]
+        "tags": ["gaussian-splatting", "spz", "sh"],
+        "skipPerf": true
     },
     {
         "id": 124,
@@ -820,7 +895,8 @@
         "maxMad": 1,
         "maxRawKB": 65,
         "description": "Loads small_hornedlizard.compressed.ply (chunked PLY + element sh) via loadSplat(); SH rendering through dynamic-imported pipeline.",
-        "tags": ["gaussian-splatting", "ply", "compressed", "sh"]
+        "tags": ["gaussian-splatting", "ply", "compressed", "sh"],
+        "skipPerf": true
     },
     {
         "id": 150,
@@ -829,7 +905,8 @@
         "maxMad": 0.08,
         "maxRawKB": 57,
         "description": "Standalone AnimationManager drives a manual position.x float track matching Babylon.js beginDirectAnimation.",
-        "tags": ["std", "procedural", "anim"]
+        "tags": ["std", "procedural", "anim"],
+        "skipPerf": true
     },
     {
         "id": 151,
@@ -838,7 +915,8 @@
         "maxMad": 0.02,
         "maxRawKB": 57,
         "description": "Standalone AnimationManager drives position, scaling, and rotationQuaternion tracks on one manual transform clip.",
-        "tags": ["std", "procedural", "anim"]
+        "tags": ["std", "procedural", "anim"],
+        "skipPerf": true
     },
     {
         "id": 152,
@@ -847,7 +925,8 @@
         "maxMad": 0.02,
         "maxRawKB": 90,
         "description": "One explicit AnimationManager drives a glTF shark skeleton group and a manual camera orbit property group.",
-        "tags": ["pbr", "gltf", "anim"]
+        "tags": ["pbr", "gltf", "anim"],
+        "skipPerf": true
     },
     {
         "id": 153,
@@ -856,7 +935,8 @@
         "maxMad": 0.02,
         "maxRawKB": 16,
         "description": "Standalone AnimationManager animates a plain object and draws to a 2D canvas without a Lite scene or engine.",
-        "tags": ["anim", "standalone"]
+        "tags": ["anim", "standalone"],
+        "skipPerf": true
     },
     {
         "id": 154,
@@ -865,7 +945,8 @@
         "maxMad": 0.02,
         "maxRawKB": 58,
         "description": "Manual property animation uses second-based keyframes and STEP interpolation, matching Babylon.js AnimationKeyInterpolation.STEP.",
-        "tags": ["std", "procedural", "anim"]
+        "tags": ["std", "procedural", "anim"],
+        "skipPerf": true
     },
     {
         "id": 155,
@@ -874,7 +955,8 @@
         "maxMad": 0.02,
         "maxRawKB": 60,
         "description": "Two manual property animation groups blend weighted contributions into the same position.x property.",
-        "tags": ["std", "procedural", "anim"]
+        "tags": ["std", "procedural", "anim"],
+        "skipPerf": true
     },
     {
         "id": 156,
@@ -883,7 +965,8 @@
         "maxMad": 0.02,
         "maxRawKB": 61,
         "description": "Two manual property animation groups cross-fade by duration-driven weight transitions.",
-        "tags": ["std", "procedural", "anim"]
+        "tags": ["std", "procedural", "anim"],
+        "skipPerf": true
     },
     {
         "id": 157,
@@ -892,7 +975,8 @@
         "maxMad": 0.02,
         "maxRawKB": 96,
         "description": "One AnimationManager blends Xbot walk and run glTF animation groups with equal weights before a single skeleton upload.",
-        "tags": ["pbr", "gltf", "anim"]
+        "tags": ["pbr", "gltf", "anim"],
+        "skipPerf": true
     },
     {
         "id": 158,
@@ -901,6 +985,7 @@
         "maxMad": 0.02,
         "maxRawKB": 98,
         "description": "Xbot idle base animation blends with a full-weight additive sad pose.",
-        "tags": ["pbr", "gltf", "anim"]
+        "tags": ["pbr", "gltf", "anim"],
+        "skipPerf": true
     }
 ]

@@ -44,46 +44,46 @@ influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[3])) *
  */
 export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
     return {
-        id: "skeleton",
+        _id: "skeleton",
 
-        vertexAttributes: [
-            { name: "joints", type: "vec4<u32>", gpuFormat: "uint32x4" as GPUVertexFormat, arrayStride: 16 },
-            { name: "weights", type: "vec4<f32>", gpuFormat: "float32x4" as GPUVertexFormat, arrayStride: 16 },
+        _vertexAttributes: [
+            { _name: "joints", _type: "vec4<u32>", _gpuFormat: "uint32x4" as GPUVertexFormat, _arrayStride: 16 },
+            { _name: "weights", _type: "vec4<f32>", _gpuFormat: "float32x4" as GPUVertexFormat, _arrayStride: 16 },
             ...(has8Bones
                 ? [
-                      { name: "joints1", type: "vec4<u32>", gpuFormat: "uint32x4" as GPUVertexFormat, arrayStride: 16 },
-                      { name: "weights1", type: "vec4<f32>", gpuFormat: "float32x4" as GPUVertexFormat, arrayStride: 16 },
+                      { _name: "joints1", _type: "vec4<u32>", _gpuFormat: "uint32x4" as GPUVertexFormat, _arrayStride: 16 },
+                      { _name: "weights1", _type: "vec4<f32>", _gpuFormat: "float32x4" as GPUVertexFormat, _arrayStride: 16 },
                   ]
                 : []),
         ] as VertexAttribute[],
 
-        vertexBindings: [
-            { name: "boneSampler", type: { kind: "texture", textureType: "texture_2d<f32>" as const, sampleType: "unfilterable-float" as const }, visibility: STAGE_VERTEX },
+        _vertexBindings: [
+            { _name: "boneSampler", _type: { _kind: "texture", _textureType: "texture_2d<f32>" as const, _sampleType: "unfilterable-float" as const }, _visibility: STAGE_VERTEX },
         ],
 
-        vertexHelperFunctions: SKELETON_HELPERS,
+        _vertexHelperFunctions: SKELETON_HELPERS,
 
-        vertexSlots: {
+        _vertexSlots: {
             VW: makeSkinningCode(has8Bones),
         },
     };
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_SKELETON, PBR_HAS_SKELETON_8 } from "../pbr-flag-bits.js";
+import { MSH_HAS_SKELETON, MSH_HAS_SKELETON_8 } from "../../mesh-features.js";
 
 export const skeletonExt: PbrExt = {
     id: "skeleton",
     phase: "vertex",
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_SKELETON)) {
+        if (!(ctx._meshFeatures & MSH_HAS_SKELETON)) {
             return null;
         }
-        return createSkeletonFragment((ctx.features & PBR_HAS_SKELETON_8) !== 0);
+        return createSkeletonFragment((ctx._meshFeatures & MSH_HAS_SKELETON_8) !== 0);
     },
     bind(ctx, entries, b) {
-        const mesh = ctx.mesh as { skeleton?: { boneTexture: GPUTexture } } | undefined;
-        if (!(ctx.features & PBR_HAS_SKELETON) || !mesh?.skeleton) {
+        const mesh = ctx._mesh as { skeleton?: { boneTexture: GPUTexture } } | undefined;
+        if (!(ctx._meshFeatures & MSH_HAS_SKELETON) || !mesh?.skeleton) {
             return b;
         }
         entries.push({ binding: b++, resource: mesh.skeleton.boneTexture.createView() });

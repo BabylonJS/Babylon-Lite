@@ -132,30 +132,30 @@ sheenRoughnessAdjusted *= sheenMapData.a;
     const bindings: BindingDecl[] = [];
     if (hasSheenTexture) {
         bindings.push(
-            { name: "sheenTexture_", type: { kind: "texture", textureType: "texture_2d<f32>" }, visibility: STAGE_FRAGMENT },
-            { name: "sheenSampler_", type: { kind: "sampler", samplerType: "sampler" }, visibility: STAGE_FRAGMENT }
+            { _name: "sheenTexture_", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "sheenSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
 
     const uboFields: UboField[] = [
-        { name: "sheenParams", type: "vec4<f32>" },
-        { name: "sheenParams2", type: "vec4<f32>" },
+        { _name: "sheenParams", _type: "vec4<f32>" },
+        { _name: "sheenParams2", _type: "vec4<f32>" },
     ];
     if (hasSheenUvTx) {
-        uboFields.push({ name: "sheenUVm", type: "vec4<f32>" }, { name: "sheenUVt", type: "vec4<f32>" });
+        uboFields.push({ _name: "sheenUVm", _type: "vec4<f32>" }, { _name: "sheenUVt", _type: "vec4<f32>" });
     }
 
     return {
-        id: "sheen",
-        dependencies: hasIbl ? ["ibl"] : undefined,
+        _id: "sheen",
+        _dependencies: hasIbl ? ["ibl"] : undefined,
 
-        uboFields,
+        _uboFields: uboFields,
 
-        bindings,
+        _bindings: bindings,
 
-        helperFunctions: SHEEN_HELPERS,
+        _helperFunctions: SHEEN_HELPERS,
 
-        fragmentSlots: slots,
+        _fragmentSlots: slots,
     };
 }
 
@@ -229,22 +229,22 @@ export const sheenExt: PbrExt = {
         return { f, f2 };
     },
     frag(ctx) {
-        if (!(ctx.features & PBR_HAS_SHEEN)) {
+        if (!(ctx._features & PBR_HAS_SHEEN)) {
             return null;
         }
         return createSheenFragment(
-            (ctx.features & PBR_HAS_SHEEN_TEXTURE) !== 0,
-            ctx.hasIbl,
-            (ctx.features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
-            (ctx.features2 & PBR2_HAS_SHEEN_UV_TX) !== 0
+            (ctx._features & PBR_HAS_SHEEN_TEXTURE) !== 0,
+            ctx._hasIbl,
+            (ctx._features & PBR_HAS_SHEEN_ALBEDO_SCALING) !== 0,
+            (ctx._features2 & PBR2_HAS_SHEEN_UV_TX) !== 0
         );
     },
     writeUbo: writeSheenUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {
-        if ((ctx.features & PBR_HAS_SHEEN_TEXTURE) === 0) {
+        if ((ctx._features & PBR_HAS_SHEEN_TEXTURE) === 0) {
             return b;
         }
-        const sh = (ctx.material as PbrMaterialProps).sheen as SheenProps | undefined;
+        const sh = (ctx._material as PbrMaterialProps).sheen as SheenProps | undefined;
         if (sh?.texture) {
             entries.push({ binding: b++, resource: sh.texture.view });
             entries.push({ binding: b++, resource: sh.texture.sampler });

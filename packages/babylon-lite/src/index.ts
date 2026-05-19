@@ -82,10 +82,14 @@ export { loadBasisTexture2D } from "./texture/basis-loader.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
+export { createStandardShadowDepthMaterialView } from "./material/standard/shadow-depth-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
+export { createPbrShadowDepthMaterialView } from "./material/pbr/shadow-depth-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
-export { markMaterialDirty } from "./material/material-dirty.js";
+export { createMaterialView } from "./material/material-view.js";
+export { markMaterialUboDirty } from "./material/material-dirty.js";
+export { rebuildMaterial } from "./material/material-rebuild.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -161,7 +165,7 @@ export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
-export type { Material } from "./material/material.js";
+export type { Material, MaterialRenderFeatures, MaterialView } from "./material/material.js";
 export type {
     PbrMaterialProps,
     ClearCoatProps,
