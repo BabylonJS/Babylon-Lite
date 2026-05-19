@@ -3,7 +3,7 @@ import { addToScene, createArcRotateCamera, createEngine, createSceneContext, cr
 const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;out.position=shaderSystem.worldViewProjection*vec4<f32>(input.position,1.0);return out;}`;
 const fragmentSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,};
-@fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{if(USE_BLUE){return vec4<f32>(0.10,0.28,1.00,1.0);}return vec4<f32>(1.00,0.10,0.10,1.0);}`;
+@fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{if(USE_BLUE){return vec4<f32>(25.0/255.0,0.28,1.00,1.0);}return vec4<f32>(1.00,25.0/255.0,25.0/255.0,1.0);}`;
 
 async function main(): Promise<void> {
     const initStart = performance.now();
