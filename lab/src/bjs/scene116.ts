@@ -44,6 +44,35 @@ function createDepthPreviewTexture(scene: Scene, rtt: RenderTargetTexture, name:
     });
 }
 
+function waitForRenderedFrames(scene: Scene, targets: readonly RenderTargetTexture[], frameCount: number): Promise<void> {
+    const waitForScene = new Promise<void>((resolve) => {
+        let remaining = frameCount;
+        const observer = scene.onAfterRenderObservable.add(() => {
+            remaining--;
+            if (remaining <= 0) {
+                scene.onAfterRenderObservable.remove(observer);
+                resolve();
+            }
+        });
+    });
+    const waitForTargets = targets.map(
+        (target) =>
+            new Promise<void>((resolve) => {
+                let remaining = frameCount;
+                const observer = target.onAfterRenderObservable.add(() => {
+                    remaining--;
+                    if (remaining <= 0) {
+                        target.onAfterRenderObservable.remove(observer);
+                        resolve();
+                    }
+                });
+            })
+    );
+    return Promise.all([waitForScene, ...waitForTargets]).then(() => undefined);
+}
+
+const READY_RENDERED_FRAMES = 18;
+
 (async function () {
     const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -138,9 +167,8 @@ function createDepthPreviewTexture(scene: Scene, rtt: RenderTargetTexture, name:
     });
 
     await scene.whenReadyAsync();
-    canvas.dataset.initMs = String(performance.now() - initStart);
-    window.setTimeout(() => {
-        canvas.dataset.ready = "true";
-    }, 250);
     engine.runRenderLoop(() => scene.render());
+    await waitForRenderedFrames(scene, [standardRTT, pbrRTT], READY_RENDERED_FRAMES);
+    canvas.dataset.initMs = String(performance.now() - initStart);
+    canvas.dataset.ready = "true";
 })().catch(console.error);

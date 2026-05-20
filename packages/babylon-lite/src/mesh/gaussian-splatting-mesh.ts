@@ -225,7 +225,7 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
         // hand the worker a fresh transferable. If a sort is currently in
         // flight, the message queues behind it and the worker swaps to the
         // new positions when it lands.
-        mesh._worker.postMessage({ positions: newGeom.positions, vertexCount: newGeom.vertexCount }, [newGeom.positions.buffer]);
+        mesh._worker.postMessage({ p: newGeom.positions, n: newGeom.vertexCount }, [newGeom.positions.buffer]);
         // Force a re-sort on the next eligible frame by zeroing the snapshot
         // state — any real camera/world state will differ by more than the
         // gating threshold. (`_canPostToWorker` is left untouched — it's owned
@@ -242,12 +242,12 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
 
     // Ship the positions buffer to the worker once. After this `geom.positions`
     // is detached on this side — that's fine, we never need it again.
-    worker.postMessage({ positions: geom.positions, vertexCount: geom.vertexCount }, [geom.positions.buffer]);
+    worker.postMessage({ p: geom.positions, n: geom.vertexCount }, [geom.positions.buffer]);
 
     worker.onmessage = (e: MessageEvent) => {
-        const data = e.data as { depthMix: BigInt64Array };
-        mesh._depthMix = data.depthMix;
-        const indices = new Uint32Array(data.depthMix.buffer);
+        const data = e.data as { d: BigInt64Array };
+        mesh._depthMix = data.d;
+        const indices = new Uint32Array(data.d.buffer);
         const cpu = mesh._gs.splatIndexCpu;
         for (let j = 0; j < mesh.vertexCount; j++) {
             cpu[j] = indices[2 * j]!;

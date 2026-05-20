@@ -22,6 +22,7 @@ import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle
  * For `?raw` WGSL imports: miniray minification (no identifier mangling — miniray's mangler
  * produces invalid WGSL on some shaders).
  * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
+ * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
  */
 function wgslMinifyPlugin(): Plugin {
     return {
@@ -37,7 +38,8 @@ function wgslMinifyPlugin(): Plugin {
             const raw = JSON.parse(`"${match[1]}"`);
             const result = minifyWgslMiniray(raw, { mangle: false });
             const minified = typeof result === "string" ? result : result.code;
-            return { code: `export default ${JSON.stringify(minified)}`, map: null };
+            const compact = id.includes("gaussian-splatting.wgsl") ? mangleGaussianSplattingWgsl(minified) : minified;
+            return { code: `export default ${JSON.stringify(compact)}`, map: null };
         },
         renderChunk(code: string, chunk) {
             const minified = minifyTemplateWgsl(code);
@@ -45,6 +47,54 @@ function wgslMinifyPlugin(): Plugin {
             return { code: isPbrChunk ? mangleInlineWgsl(minified) : minified, map: null };
         },
     };
+}
+
+function replaceWgslIdentifiers(code: string, replacements: readonly (readonly [string, string])[]): string {
+    let out = code;
+    for (const [from, to] of replacements) {
+        out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
+    }
+    return out;
+}
+
+function mangleGaussianSplattingWgsl(code: string): string {
+    return replaceWgslIdentifiers(code, [
+        ["world", "w"],
+        ["view", "v"],
+        ["projection", "p"],
+        ["viewport", "vp"],
+        ["focal", "f"],
+        ["dataSize", "ds"],
+        ["alpha", "a"],
+        ["_pad", "_p"],
+        ["vColor", "vc"],
+        ["vPos", "vq"],
+        ["dataUv", "du"],
+        ["splatIndex", "si"],
+        ["corner", "co"],
+        ["center", "ce"],
+        ["color", "cl"],
+        ["covA", "ca"],
+        ["covB", "cb"],
+        ["worldPos", "wp"],
+        ["modelView", "mv"],
+        ["camspace", "cs"],
+        ["pos2d", "p2"],
+        ["bounds", "bd"],
+        ["Vrk", "vr"],
+        ["invZ2", "iz2"],
+        ["invZ", "iz"],
+        ["cov2d", "c2"],
+        ["kernelSize", "ks"],
+        ["radius", "ra"],
+        ["epsilon", "ep"],
+        ["lambda1", "l1"],
+        ["lambda2", "l2"],
+        ["diag", "dg"],
+        ["majorAxis", "ma"],
+        ["minorAxis", "mi"],
+        ["vCenter", "vc2"],
+    ]);
 }
 
 function mangleInlineWgsl(code: string): string {
@@ -125,10 +175,7 @@ function mangleInlineWgsl(code: string): string {
         ["NmePbrMrResult", "PMR"],
         ["NME_PBR_PI", "PI"],
     ];
-    let out = code;
-    for (const [from, to] of replacements) {
-        out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
-    }
+    const out = replaceWgslIdentifiers(code, replacements);
     return out
         .replace(/\b0\.0\b/g, "0.")
         .replace(/\b1\.0\b/g, "1.")
@@ -371,11 +418,7 @@ function mangleWgslIdentifiers(code: string): string {
         ["iPos", "ipos"],
         ["iRot", "ir"],
     ];
-    let out = code;
-    for (const [from, to] of replacements) {
-        out = out.replace(new RegExp(`\\b${from}\\b`, "g"), to);
-    }
-    return out;
+    return replaceWgslIdentifiers(code, replacements);
 }
 
 /**
@@ -406,6 +449,8 @@ function terserPropertyManglePlugin(): Plugin {
                 }
 
                 const result = await terserMinify(chunk.code, {
+                    ecma: 2022,
+                    module: true,
                     compress: {
                         passes: 2,
                         unsafe: true,
@@ -471,6 +516,7 @@ const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
 const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
+const LITE_BUNDLE_TARGET = "esnext";
 
 interface BundleManifestEntry {
     rawKB: number;
@@ -899,6 +945,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
         build: {
             outDir: sceneOutDir,
             emptyOutDir: true,
+            target: LITE_BUNDLE_TARGET,
             minify: "esbuild",
             sourcemap: "hidden",
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
@@ -998,6 +1045,7 @@ export async function buildBundleScenes(): Promise<void> {
             build: {
                 outDir: sceneOutDir,
                 emptyOutDir: true,
+                ...(!isBjs && { target: LITE_BUNDLE_TARGET }),
                 minify: "esbuild",
                 sourcemap: "hidden",
                 modulePreload: { polyfill: false, resolveDependencies: () => [] },

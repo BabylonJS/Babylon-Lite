@@ -221,10 +221,10 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
         mesh._canPostToWorker = false;
         mesh._worker.postMessage(
             {
-                worldMatrix: new Float32Array(world),
-                cameraForward: new Float32Array([cf0, cf1, cf2]),
-                cameraPosition: new Float32Array([camPos.x, camPos.y, camPos.z]),
-                depthMix: mesh._depthMix,
+                m: new Float32Array(world),
+                f: new Float32Array([cf0, cf1, cf2]),
+                c: new Float32Array([camPos.x, camPos.y, camPos.z]),
+                d: mesh._depthMix,
             },
             [mesh._depthMix.buffer]
         );
