@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import * as path from "path";
-import { attachCompareArtifacts, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(164);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene164-device-lost-recovery");
@@ -9,6 +9,9 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 164 skipped via skipParity in scene-config.json");
 
 test("Scene 164 — device-lost recovery restores Alien rendering", async ({ page }, testInfo) => {
+    const browser = page.context().browser()!;
+    await captureGolden(browser, { sceneId: 164, seekTime: 2, force: true, timeout: 60_000, settleMs: 500 });
+
     await page.goto("/scene164.html?seekTime=2");
 
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.deviceLost === "true", { timeout: 30_000 });

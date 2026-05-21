@@ -9,14 +9,21 @@ import "@babylonjs/loaders/glTF";
 
 interface WebGpuEngineDeviceAccess {
     _device: GPUDevice;
-    onContextLostObservable?: { add(callback: () => void): void };
-    onContextRestoredObservable?: { add(callback: () => void): void };
 }
 
-(async function () {
-    const __initStart = performance.now();
-    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
+function seekAndFreeze(scene: Scene, seekTime: number): void {
+    scene.animationGroups.forEach((g) => {
+        const range = g.to - g.from;
+        if (range > 0) {
+            const seekFrame = g.from + (((Number.isNaN(seekTime) ? 2 : seekTime) * 60 - g.from) % range);
+            g.goToFrame(seekFrame);
+        }
+    });
+    scene.animatables.forEach((a) => a.pause());
+}
+
+async function buildRuntime(canvas: HTMLCanvasElement, recovered: boolean, seekTime: number): Promise<WebGPUEngine> {
+    const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true, doNotHandleContextLost: true });
     await engine.initAsync();
 
     const scene = new Scene(engine);
@@ -34,38 +41,17 @@ interface WebGpuEngineDeviceAccess {
     };
     scene.useConstantAnimationDeltaTime = true;
 
-    const params = new URLSearchParams(window.location.search);
-    const seekTimeParam = parseFloat(params.get("seekTime") || "2");
-    const eng = engine as unknown as WebGpuEngineDeviceAccess;
-
-    eng.onContextLostObservable?.add(() => {
-        canvas.dataset.deviceLost = "true";
-    });
-    eng.onContextRestoredObservable?.add(() => {
-        canvas.dataset.deviceRecovered = "true";
-    });
-    void eng._device.lost.then(() => {
-        canvas.dataset.deviceLost = "true";
-    });
-
     let frameCount = 0;
     let recoveredFrames = 0;
     let frozen = false;
     scene.onBeforeRenderObservable.add(() => {
         frameCount++;
         canvas.dataset.frameCount = String(frameCount);
-        if (canvas.dataset.deviceRecovered === "true" && !frozen) {
+        if (recovered && canvas.dataset.deviceRecovered === "true" && !frozen) {
             recoveredFrames++;
             canvas.dataset.postRecoveryFrames = String(recoveredFrames);
             if (recoveredFrames >= 10) {
-                scene.animationGroups.forEach((g) => {
-                    const range = g.to - g.from;
-                    if (range > 0) {
-                        const seekFrame = g.from + (((isNaN(seekTimeParam) ? 2 : seekTimeParam) * 60 - g.from) % range);
-                        g.goToFrame(seekFrame);
-                    }
-                });
-                scene.animatables.forEach((a) => a.pause());
+                seekAndFreeze(scene, seekTime);
                 frozen = true;
                 canvas.dataset.animationFrozen = "true";
                 canvas.dataset.ready = "true";
@@ -81,6 +67,31 @@ interface WebGpuEngineDeviceAccess {
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
     canvas.dataset.loaded = "true";
     canvas.dataset.ready = "true";
-    eng._device.destroy();
+    if (recovered) {
+        canvas.dataset.deviceRecovered = "true";
+    }
+    return engine;
+}
+
+(async function () {
+    const __initStart = performance.now();
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const params = new URLSearchParams(window.location.search);
+    const seekTimeParam = parseFloat(params.get("seekTime") || "2");
+
+    const initialEngine = await buildRuntime(canvas, false, seekTimeParam);
+    const initialDevice = (initialEngine as unknown as WebGpuEngineDeviceAccess)._device;
+    void initialDevice.lost
+        .then(async () => {
+            canvas.dataset.deviceLost = "true";
+            initialEngine.stopRenderLoop();
+            await buildRuntime(canvas, true, seekTimeParam);
+            canvas.dataset.initMs = String(performance.now() - __initStart);
+        })
+        .catch((error: unknown) => {
+            canvas.dataset.recoveryFailed = error instanceof Error ? error.message : String(error);
+            console.error(error);
+        });
+    initialDevice.destroy();
     canvas.dataset.initMs = String(performance.now() - __initStart);
 })().catch(console.error);
