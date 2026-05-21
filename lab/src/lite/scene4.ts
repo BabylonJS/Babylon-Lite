@@ -49,7 +49,13 @@ async function main(): Promise<void> {
 
     // Shadow generator — torus casts shadows (directional light, ESM blur)
     light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {
+        mapSize: 1024,
+        depthScale: 50,
+        bias: 0.00005,
         blurKernel: 64,
+        blurScale: 2,
+        darkness: 0,
+        frustumEdgeFalloff: 0,
         orthoMinZ: cam.nearPlane,
         orthoMaxZ: cam.farPlane,
     });
@@ -61,6 +67,7 @@ async function main(): Promise<void> {
     addToScene(scene, spot);
 
     spot.shadowGenerator = createPcfSpotlightShadowGenerator(engine, spot, {
+        mapSize: 512,
         near: cam.nearPlane,
         far: cam.farPlane,
     });
@@ -98,22 +105,22 @@ async function main(): Promise<void> {
         }
     });
     const btnStyle =
-        "position:absolute;bottom:12px;z-index:10;";
+        "position:absolute;bottom:12px;padding:8px 16px;font:14px sans-serif;cursor:pointer;z-index:10;background:#333;color:#fff;border:1px solid #666;border-radius:4px;";
     const btnRotate = document.createElement("button");
-    btnRotate.textContent = "Torus OFF";
-    btnRotate.setAttribute("style", btnStyle + "left:42%;");
+    btnRotate.textContent = "Rotate Torus: OFF";
+    btnRotate.setAttribute("style", btnStyle + "left:calc(50% - 120px);");
     btnRotate.addEventListener("click", () => {
         rotatingTorus = !rotatingTorus;
-        btnRotate.textContent = `Torus ${rotatingTorus ? "ON" : "OFF"}`;
+        btnRotate.textContent = `Rotate Torus: ${rotatingTorus ? "ON" : "OFF"}`;
     });
     document.body.appendChild(btnRotate);
 
     const btnOrbit = document.createElement("button");
-    btnOrbit.textContent = "Spot OFF";
-    btnOrbit.setAttribute("style", btnStyle + "left:52%;");
+    btnOrbit.textContent = "Orbit Spot: OFF";
+    btnOrbit.setAttribute("style", btnStyle + "left:calc(50% + 20px);");
     btnOrbit.addEventListener("click", () => {
         orbitingSpot = !orbitingSpot;
-        btnOrbit.textContent = `Spot ${orbitingSpot ? "ON" : "OFF"}`;
+        btnOrbit.textContent = `Orbit Spot: ${orbitingSpot ? "ON" : "OFF"}`;
     });
     document.body.appendChild(btnOrbit);
 
