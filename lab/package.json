@@ -17,8 +17,10 @@
     "@babylonjs/loaders": "^9.5.0",
     "@recast-navigation/core": "0.43.0",
     "@recast-navigation/generators": "0.43.0",
+    "@recast-navigation/wasm": "0.43.0",
     "@webgpu/types": "^0.1.52",
     "babylonjs-gltf2interface": "^9.5.0",
+    "manifold-3d": "3.4.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   }
