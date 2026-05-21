@@ -17,7 +17,7 @@
  *   5. fg.dispose()                         → free everything
  */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { SceneContextInternal } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
@@ -25,9 +25,6 @@ import type { Task } from "./task.js";
 export interface FrameGraph {
     /** Ordered list of tasks. Executed in array order each frame. */
     _tasks: Task[];
-    /** Engine and scene captured at creation. */
-    _engine: EngineContextInternal;
-    _scene: SceneContextInternal;
 
     /** Set during `build()` while a single task's `record()` is running.
      *  Used by `addRenderPass` to associate a
@@ -46,12 +43,9 @@ export interface FrameGraph {
 }
 
 /** Create an empty frame graph bound to the given engine and scene. */
-export function createFrameGraph(engine: EngineContext, scene: SceneContextInternal): FrameGraph {
-    const eng = engine as EngineContextInternal;
+export function createFrameGraph(_engine: EngineContext, _scene: SceneContextInternal): FrameGraph {
     const fg: FrameGraph = {
         _tasks: [],
-        _engine: eng,
-        _scene: scene,
         _currentProcessedTask: null,
 
         build(): void {
