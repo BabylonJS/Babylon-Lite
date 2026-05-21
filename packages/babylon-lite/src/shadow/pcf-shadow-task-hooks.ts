@@ -27,11 +27,6 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _casterMeshes: readonly Mesh[];
 }
 
-interface PreloadItem {
-    readonly _shadowGenerator: ShadowGenerator;
-    readonly _casterMeshes: readonly Mesh[];
-}
-
 type StandardNoColorFactory = typeof import("../material/standard/no-color-view.js").createStandardNoColorMaterialView;
 type PbrNoColorFactory = typeof import("../material/pbr/no-color-view.js").createPbrNoColorMaterialView;
 type NodeNoColorFactory = typeof import("../material/node/no-color-view.js").createNodeNoColorMaterialView;
@@ -40,18 +35,16 @@ let createStandardNoColorMaterialView: StandardNoColorFactory;
 let createPbrNoColorMaterialView: PbrNoColorFactory;
 let createNodeNoColorMaterialView: NodeNoColorFactory;
 
-export async function preloadPcfShadowTaskState(items: readonly PreloadItem[]): Promise<void> {
+export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): Promise<void> {
     const loads: Promise<void>[] = [];
     let needsStandard = false;
     let needsPbr = false;
     let needsNode = false;
-    for (const item of items) {
-        for (const mesh of item._casterMeshes) {
-            const family = mesh.material?._buildGroup._materialFamily;
-            needsStandard ||= family === "standard";
-            needsPbr ||= family === "pbr";
-            needsNode ||= family === "node";
-        }
+    for (const mesh of casterMeshes) {
+        const family = mesh.material?._buildGroup._materialFamily;
+        needsStandard ||= family === "standard";
+        needsPbr ||= family === "pbr";
+        needsNode ||= family === "node";
     }
     if (needsStandard && !createStandardNoColorMaterialView) {
         loads.push(

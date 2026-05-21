@@ -25,7 +25,7 @@ import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap
 // ─── Internal helpers ───────────────────────────────────────────────
 
 /** @internal Compute the PCF directional light view/projection matrix for ShadowTask. */
-export function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: readonly Mesh[], orthoMinZ: number, orthoMaxZ: number): PcfLightMatrix {
+function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: readonly Mesh[], orthoMinZ: number, orthoMaxZ: number): PcfLightMatrix {
     const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z);
     let lMinX = Infinity,
         lMaxX = -Infinity,
@@ -138,7 +138,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
         _version: 0,
     };
     sg._preloadShadowTask = async (casterMeshes) => {
-        await preloadPcfShadowTaskState([{ _shadowGenerator: sg, _casterMeshes: casterMeshes }]);
+        await preloadPcfShadowTaskState(casterMeshes);
     };
     sg._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         const state = ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, sg._shadowTaskState ?? null);

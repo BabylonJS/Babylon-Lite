@@ -108,7 +108,7 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
         _version: 0,
     };
     sg._preloadShadowTask = async (casterMeshes) => {
-        await preloadPcfShadowTaskState([{ _shadowGenerator: sg, _casterMeshes: casterMeshes }]);
+        await preloadPcfShadowTaskState(casterMeshes);
     };
     sg._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         const state = ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, sg._shadowTaskState ?? null);

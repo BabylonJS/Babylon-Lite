@@ -89,7 +89,7 @@ function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTask
     getEsmShadowTaskResourceMap().set(sg, resources);
 }
 
-export function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
+function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
     return esmShadowTaskResources?.get(sg) ?? null;
 }
 
@@ -129,7 +129,7 @@ async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise
 }
 
 /** @internal Compute the ESM directional light view/projection matrix for ShadowTask. */
-export function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: readonly Mesh[], orthoMinZ: number, orthoMaxZ: number): EsmLightMatrix {
+function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: readonly Mesh[], orthoMinZ: number, orthoMaxZ: number): EsmLightMatrix {
     const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z);
     let lMinX = Infinity;
     let lMaxX = -Infinity;
@@ -251,27 +251,7 @@ function wgslFloat(value: number): string {
 function createShadowBlurFragmentWGSL(blurKernel: number): string {
     const { offsets, weights } = createKernelBlurSamples(blurKernel);
     const count = offsets.length;
-    return `// Generated to match Babylon.js ThinBlurPostProcess for blurKernel=${blurKernel}
-struct BlurParams {
-  delta: vec2<f32>,
-  _pad: vec2<f32>,
-};
-@group(0) @binding(0) var<uniform> params: BlurParams;
-@group(0) @binding(1) var srcTex: texture_2d<f32>;
-@group(0) @binding(2) var srcSampler: sampler;
-
-const OFFSETS = array<f32, ${count}>(${offsets.map(wgslFloat).join(", ")});
-const WEIGHTS = array<f32, ${count}>(${weights.map(wgslFloat).join(", ")});
-
-@fragment
-fn main(@location(0) sampleCenter: vec2<f32>) -> @location(0) vec4<f32> {
-  var blend = vec4<f32>(0.0);
-  for (var i = 0u; i < ${count}u; i = i + 1u) {
-    blend += textureSample(srcTex, srcSampler, sampleCenter + params.delta * OFFSETS[i]) * WEIGHTS[i];
-  }
-  return blend;
-}
-`;
+    return `struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
 }
 
 function ensureEsmShadowTaskState(

@@ -295,7 +295,7 @@ function _computeDirectionalLightMatrix(
    ```
 9. Multiply: `viewProj = proj * view` (standard 4×4 multiply)
 
-ESM exports its task-facing directional matrix helper as internal `_computeDirectionalLightMatrix()` from `shadow/esm-directional-shadow-generator.ts`. PCF exports the same orthographic helper as internal `_computeDirectionalLightMatrix()` from `shadow/pcf-directional-shadow-generator.ts` so directional shadow generator math remains with the relevant directional resource setup without becoming public API.
+ESM owns its task-facing directional matrix helper as internal `_computeDirectionalLightMatrix()` in `shadow/esm-directional-shadow-generator.ts`. PCF owns the same orthographic helper as internal `_computeDirectionalLightMatrix()` in `shadow/pcf-directional-shadow-generator.ts` so directional shadow generator math remains with the relevant directional resource setup without becoming public API.
 
 #### Spot PCF: `_computeSpotLightMatrix` (perspective)
 
@@ -593,7 +593,7 @@ ESM generators expose their depth/blur resources to `ShadowTask`. Caster meshes 
 2. Create 4 GPU textures: ESM target, depth buffer, blur-H target, blur-V target
 3. Create blur pipeline, blur UBOs, and blur bind groups
 4. Create shared receiver shadow UBO
-5. Store ESM-only task resources via `setEsmShadowTaskResources()`
+5. Store ESM-only task resources via the internal resource map
 6. Return `ShadowGenerator` with `_shadowType: 'esm'`
 
 Scene setup separately registers caster meshes as `ShadowTask` inputs via `setShadowTaskCasterMeshes()`.
