@@ -100,6 +100,7 @@ export function createSpriteFrameAnimation(
     return animation;
 }
 
+/** Add an animation to a manager, transferring ownership if it already belongs to another manager. */
 export function addSpriteAnimation(manager: SpriteAnimationManager, animation: SpriteFrameAnimation): void {
     if (animation._owner === manager) {
         return;
@@ -144,6 +145,7 @@ export function clearSpriteAnimations(manager: SpriteAnimationManager): void {
     manager.animations.length = 0;
 }
 
+/** Replay an animation; omit options to keep callbacks/removal, pass options to overwrite them, or `{}` to clear them. */
 export function playSpriteFrameAnimation(
     animation: SpriteFrameAnimation,
     from = animation.from,
