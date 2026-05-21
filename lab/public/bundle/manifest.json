@@ -1920,10 +1920,12 @@
     "bjsGzipKB": 294
   },
   "scene170": {
-    "rawKB": 30.1,
-    "gzipKB": 11.4,
+    "rawKB": 46.8,
+    "gzipKB": 18.3,
     "ignoredRawKB": 0,
     "runtimeChunks": [
+      "scene170-standard-renderable-CKjSAPfl.js",
+      "scene170-wgsl-helpers-WTsokIfK.js",
       "scene170.js"
     ],
     "bjsRawKB": 1330.9,

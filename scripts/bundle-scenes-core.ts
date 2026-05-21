@@ -1179,7 +1179,20 @@ export async function buildBundleScenes(): Promise<void> {
     } catch {
         /* manifold-3d not installed — skip vendor copy */
     }
-    // ── 2. Measure real runtime sizes via headless browser ───────────────
+    try {
+        const _require = createRequire(resolve(labDir, "package.json"));
+        const recastDir = resolve(vendorDir, "recast-navigation");
+        mkdirSync(recastDir, { recursive: true });
+        const coreSrc = _require.resolve("@recast-navigation/core");
+        writeFileSync(resolve(recastDir, "core.js"), readFileSync(resolve(dirname(coreSrc), "index.mjs")));
+        const gensSrc = _require.resolve("@recast-navigation/generators");
+        writeFileSync(resolve(recastDir, "generators.js"), readFileSync(resolve(dirname(gensSrc), "index.mjs")));
+        const wasmPkg = dirname(dirname(_require.resolve("@recast-navigation/wasm")));
+        writeFileSync(resolve(recastDir, "wasm-compat.js"), readFileSync(resolve(wasmPkg, "dist/recast-navigation.wasm-compat.js")));
+        writeFileSync(resolve(recastDir, "wasm.js"), readFileSync(resolve(wasmPkg, "dist/recast-navigation.wasm.js")));
+    } catch {
+        /* @recast-navigation not installed — skip vendor copy */
+    }
     if (process.env.SKIP_MEASURE) {
         console.log("Skipping live size measurement (SKIP_MEASURE is set)");
         console.log(`✓ Bundle scenes built to ${outDir} (total ${elapsed(t0)})`);

@@ -88,11 +88,10 @@ async function _ensureRecast(locateFile?: (url: string) => string): Promise<{ co
                 const core = await import("@recast-navigation/core");
                 const gens = await import("@recast-navigation/generators");
                 if (locateFile) {
-                    const impl = async () => {
-                        const wasmFactory = (await import("@recast-navigation/wasm/wasm")).default;
-                        return wasmFactory({ locateFile });
-                    };
-                    await core.init(impl);
+                    const wasmFactory = (await import("@recast-navigation/wasm/wasm")).default;
+                    // core.init types impl as typeof Recast but calls it as impl() at runtime;
+                    // bind pre-fills locateFile and cast to satisfy the declaration.
+                    await core.init(wasmFactory.bind(null, { locateFile }) as typeof wasmFactory);
                 } else {
                     await core.init();
                 }

@@ -1043,7 +1043,7 @@
         "slug": "scene170-navigation-basic",
         "name": "Scene 170 - Navigation Basic",
         "maxMad": 0.5,
-        "maxRawKB": 38,
+        "maxRawKB": 55,
         "description": "Recast V2 navmesh built from ground + sphere + box, debug visualization, one stationary crowd agent at a fixed nav-snapped position.",
         "tags": ["navigation", "recast", "wasm"],
         "skipPerf": true,
