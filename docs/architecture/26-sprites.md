@@ -655,9 +655,26 @@ export function setSprite2DFrameIndex(layer: Sprite2DLayer, index: number, frame
 ```
 
 The Handle API (`addSprite2D` / `removeSprite2D`, returning a
-`Sprite2DHandle` with observable fields, stable id, and parenting) is roadmap.
-It should live in a separately importable module so Index-only scenes do not
-pull handle code (see [Handles](#handles-identity-and-parenting-roadmap)).
+`Sprite2DHandle` with a stable id) lives in the separately importable
+`sprite-2d-handle.ts` module so Index-only scenes do not pull handle code,
+maps, or typed arrays (see [Handles](#handles-identity-and-parenting)).
+Observable fields and parenting remain additive follow-up modules.
+
+```typescript
+// src/sprite/sprite-2d-handle.ts — optional, tree-shakable Handle API.
+export interface Sprite2DHandle {
+  readonly _entityType: "sprite-2d-handle";
+  readonly layer: Sprite2DLayer;
+  readonly id: number;
+}
+
+export function addSprite2D(layer: Sprite2DLayer, props: Sprite2DProps): Sprite2DHandle;
+export function updateSprite2D(handle: Sprite2DHandle, patch: Partial<Sprite2DProps>): void;
+export function removeSprite2D(handle: Sprite2DHandle): void;
+export function setSprite2DFrame(handle: Sprite2DHandle, frame: number): void;
+export function getSprite2DHandleIndex(handle: Sprite2DHandle): number;
+export function isSprite2DHandleAlive(handle: Sprite2DHandle): boolean;
+```
 
 ### Roadmap — `AnchorSource` opt-in 3D bridge for `Sprite2DLayer`
 
@@ -730,9 +747,10 @@ the low-level index API, explicit scene opt-in helpers, and CPU-side
 transparent sorting for the current compact vertex-buffer upload. It also
 ships the production cutout path: alpha-tested, depth-writing billboard
 systems selected via `blendMode: "cutout"`.
-Handle objects, clip playback, parenting, picking,
+Clip playback, observable handle fields, parenting, picking,
 storage-buffer sort indirection, and additive/multiply blend modes are
-additive follow-up modules. That split
+additive follow-up modules. Stable handle identity itself lives in
+`billboard-sprite-handle.ts`. That split
 keeps the first billboard path small and keeps pure-2D sprite bundles from
 importing scene rendering code.
 
@@ -801,6 +819,20 @@ export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index:
 export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index: number): void;
 export function clearBillboardSprites(system: BillboardSpriteSystem): void;
 export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: number): void;
+
+// src/sprite/billboard-sprite-handle.ts — optional, tree-shakable Handle API.
+export interface BillboardSpriteHandle {
+  readonly _entityType: "billboard-sprite-handle";
+  readonly system: BillboardSpriteSystem;
+  readonly id: number;
+}
+
+export function addBillboardSprite(system: BillboardSpriteSystem, init: BillboardSpriteInit): BillboardSpriteHandle;
+export function updateBillboardSprite(handle: BillboardSpriteHandle, patch: Partial<BillboardSpriteInit>): void;
+export function removeBillboardSprite(handle: BillboardSpriteHandle): void;
+export function setBillboardSpriteFrame(handle: BillboardSpriteHandle, frame: number): void;
+export function getBillboardSpriteHandleIndex(handle: BillboardSpriteHandle): number;
+export function isBillboardSpriteHandleAlive(handle: BillboardSpriteHandle): boolean;
 
 // src/sprite/billboard-scene.ts
 export function addFacingBillboardSystem(scene: SceneContext, system: FacingBillboardSpriteSystem): void;
@@ -1677,11 +1709,10 @@ without having called `unregisterSpriteRenderer` first — it does both.
 
 ---
 
-## Handles, Identity, and Parenting (Roadmap)
+## Handles, Identity, and Parenting
 
-The current billboard implementation exposes the Index API only. The handle
-API described below is the planned extension point; it is not part of the
-current public root exports.
+Stable handle identity is implemented as an optional layer over the Index API.
+Parenting and observable field objects remain roadmap extensions.
 
 Sprites in Babylon Lite use a **two-tier API** that mirrors the
 Index/Handle split common in data-oriented engines (and parallels Lite's
@@ -1692,39 +1723,46 @@ ThinInstance vs. Mesh split for 3D geometry).
 | Tier           | Functions                                                                                                                                                           | Returns                                    | Use for                                                                                                                                                |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Index API**  | `addSprite2DIndex`, `updateSprite2DIndex`, `removeSprite2DIndex`, `clearSprite2DLayer`, `setSprite2DFrameIndex` (and `addBillboardSpriteIndex` etc. for billboards) | `number` (slot index)                      | Tile maps, scenery, particles, large fixed-layout HUDs. Maximum throughput, zero per-sprite GC. Indices are _not_ stable — `removeXIndex` swap-removes |
-| **Handle API** | Roadmap: `addSprite2D`, `removeSprite2D`, `addBillboardSprite`, `removeBillboardSprite` and matching update helpers                                                 | `Sprite2DHandle` / `BillboardSpriteHandle` | Player characters, enemies, UI elements that move or are parented. Observable fields, stable id, optional parenting                                    |
+| **Handle API** | `addSprite2D`, `removeSprite2D`, `addBillboardSprite`, `removeBillboardSprite` and matching update helpers                                                         | `Sprite2DHandle` / `BillboardSpriteHandle` | Player characters, enemies, UI elements that move or will later be parented. Stable id, remove-safe update helpers                                      |
 
 Mario analogy: `Index` is a scenario tile (set once, never updated, can
 spawn 10 000 of them); `Handle` is Mario himself (moves every frame,
 parented to a moving platform, owns animation state).
 
-The future handle modules will live in separate files so that scenes that only
-use the Index API never load handle code (see **Tree-shaking** below).
+The handle modules live in separate files so that scenes that only use the
+Index API never load handle code (see **Tree-shaking** below).
+Holding a handle intentionally keeps its owning layer/system reachable for GC
+for as long as the handle itself remains reachable.
 
-### Stable IDs (`_idToIndex` / `_indexToId`)
+### Stable IDs (`idToIndex` / `indexToId`)
 
 Each handle owns a `readonly id: number` (u32, monotonically allocated
-from `layer._nextHandleId`). The layer owns two parallel structures,
+from the family handle state). The layer/system owns two parallel structures,
 lazily allocated on first handle creation:
 
-- `_idToIndex: Map<number, number> | null` — maps `handle.id` → current slot index.
-- `_indexToId: Uint32Array | null` — parallel to storage capacity; maps slot index → `handle.id` (0 = no handle for that slot, since ids start at 1).
+- `idToIndex: Map<number, number>` — maps `handle.id` → current slot index.
+- `indexToId: Uint32Array` — parallel to storage capacity; maps slot index → `handle.id` (0 = no handle for that slot, since ids start at 1).
 
 When `removeXIndex` swap-removes the last slot into the freed slot, it
-patches both maps so the moved-into slot's id resolves to its new index.
-When `removeSprite2D(handle)` is called, the handle module first calls
-`_removeSprite2DHandleId(layer, slot)` to drop the dying handle's id
-from the map, _then_ invokes `removeSprite2DIndex` (so the swap-remove
-that follows correctly re-binds the moved-in slot's id without colliding
-with the dying handle's id).
+calls a lazily-installed generic hook that patches both maps so the moved-into
+slot's id resolves to its new index.
+When `removeSprite2D(handle)` or `removeBillboardSprite(handle)` is called,
+the handle module resolves the handle's current slot through `idToIndex` and
+then invokes the existing index removal helper. The same hook invalidates the
+removed handle id and re-binds any moved-in handle id.
 
 **Cost:** 4 B/slot in `_indexToId` + one Map lookup per handle mutation.
-Index API users skip the Map entirely — they keep raw indices and pay
-nothing for handle infrastructure. Both `_idToIndex` and `_indexToId`
-start as `null` and stay that way for layers that only use the Index
-API; bundle stays smaller.
+Index API users skip the Map and `Uint32Array` entirely — they keep raw
+indices and pay no handle-state allocations. The base state object has only an
+optional hook slot, and the hook object is installed by the handle module on the
+first `add*` handle call. If the handle module is not imported, bundling drops
+it entirely.
 
-### Handle field tables
+### Roadmap observable handle field tables
+
+The current handle API is stable identity plus standalone update/remove
+helpers. Observable fields are planned as a later layer over the same ids and
+maps.
 
 **`Sprite2DHandle`** (Sprite2D family):
 
@@ -1823,14 +1861,13 @@ handle code:
   `billboard-sprite.ts`) — no handle modules, no walker modules. Future handle
   support should continue to use function-pointer hooks so Index-only scenes
   pay zero handle-walker cost.
-- **Handle modules** statically import their corresponding walker
-  module and assign it to `layer._parentedHandlesWalker` on the first
-  `handle.parent = …` call. This means walker code is loaded only when
-  an app actually uses parenting — apps that use handles but never
-  parent never load walker code.
+- **Handle modules** statically import only the family index module. Future
+  parenting support must stay in separate walker modules assigned through
+  function-pointer hooks on first `handle.parent = …`, so apps that use handles
+  but never parent still do not load walker code.
 - **Apps that only use the Index API** (e.g. a tile-map scene) never
-  import any handle module, so `_idToIndex` / `_indexToId` /
-  `_parentedHandles` / `_parentedHandlesWalker` all stay `null`. The
+  import any handle module, so `idToIndex` / `indexToId` /
+  `_parentedHandles` / `_parentedHandlesWalker` are never allocated. The
   handle module's bytes are tree-shaken out of the bundle entirely.
 
 ### Future physics integration
@@ -1990,7 +2027,10 @@ packages/babylon-lite/src/
     sprite-pipeline.ts                           # Sprite2D WGSL, pipeline cache, dirty upload helpers
     sprite-renderer.ts                           # createSpriteRenderer / registerSpriteRenderer / unregisterSpriteRenderer / disposeSpriteRenderer + (sampleCount, hasDepth) pipeline cache
 
+    sprite-2d-handle.ts                          # Optional stable-id Sprite2D Handle API; lazy maps/hooks, no render code
+
     billboard-sprite.ts                          # BillboardSpriteSystem factories + Index API + 64-byte float-color instance storage
+    billboard-sprite-handle.ts                   # Optional stable-id Billboard Handle API; lazy maps/hooks, no render code
     billboard-scene.ts                           # addFacingBillboardSystem / addAxisLockedBillboardSystem; dynamically imports the renderable builder
     billboard-renderable.ts                      # Scene Renderable wrapper, transparent CPU sort, world-center maintenance, GPU resource lifetime
     billboard-pipeline.ts                        # Billboard WGSL composer, pipeline cache, UBO and instance upload helpers

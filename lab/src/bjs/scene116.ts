@@ -71,7 +71,7 @@ function waitForRenderedFrames(scene: Scene, targets: readonly RenderTargetTextu
     return Promise.all([waitForScene, ...waitForTargets]).then(() => undefined);
 }
 
-const READY_RENDERED_FRAMES = 18;
+const READY_RENDERED_FRAMES = 50;
 
 (async function () {
     const initStart = performance.now();

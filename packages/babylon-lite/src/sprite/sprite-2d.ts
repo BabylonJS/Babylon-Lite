@@ -5,8 +5,8 @@
  * scene renderable added through `addDepthHostedSpriteLayer`
  * (`depth: "test" | "test-write"`).
  *
- * The current surface exposes the Index API. Animation, clip playback, and
- * the Handle API land in later PRs.
+ * The Index API stays the storage foundation. The optional Handle API lives in
+ * `sprite-2d-handle.ts` and lazily installs hooks only when handles are used.
  */
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
@@ -98,6 +98,14 @@ export interface Sprite2DLayer {
     _dirtyMin: number;
     /** @internal Max dirty index exclusive. */
     _dirtyMax: number;
+    /** @internal Optional hooks installed by the opt-in handle module. */
+    _handleHooks?: Sprite2DIndexHandleHooks;
+}
+
+/** @internal Lazy hooks used by the opt-in Handle API to track swap-removes. */
+export interface Sprite2DIndexHandleHooks {
+    readonly removeIndex: (index: number, last: number) => void;
+    readonly clear: () => void;
 }
 
 /** Per-sprite init record passed to `addSprite2DIndex` / `updateSprite2DIndex`. */
@@ -399,6 +407,7 @@ export function removeSprite2DIndex(layer: Sprite2DLayer, index: number): void {
         throw new Error(`removeSprite2DIndex: index ${index} out of range [0, ${layer.count})`);
     }
     const last = layer.count - 1;
+    layer._handleHooks?.removeIndex(index, last);
     if (index !== last) {
         layer._instanceData.copyWithin(index * layer._instanceFloatsPerSprite, last * layer._instanceFloatsPerSprite, (last + 1) * layer._instanceFloatsPerSprite);
         // Carry the swapped sprite's saved-size shadow with it (`[w, h]` per sprite).
@@ -416,6 +425,7 @@ export function clearSprite2DLayer(layer: Sprite2DLayer): void {
     const count = layer.count;
     layer._dirtyMin = 0;
     layer._dirtyMax = 0;
+    layer._handleHooks?.clear();
     if (count === 0) {
         return;
     }

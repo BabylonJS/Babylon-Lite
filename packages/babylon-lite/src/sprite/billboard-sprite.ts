@@ -1,9 +1,8 @@
 /**
  * Billboard sprites: world-space quads backed by a SpriteAtlas.
  *
- * This module is pure state + standalone index API only. Scene integration lives in
- * `billboard-scene.ts` so 2D sprite paths and mesh-only scenes do not import the
- * billboard renderable/pipeline graph unless they explicitly opt in.
+ * This module is pure state + standalone index API. The optional Handle API
+ * lives in `billboard-sprite-handle.ts` and installs swap-remove hooks lazily.
  */
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
@@ -55,6 +54,14 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _dirtyMin: number;
     /** @internal Dirty max index exclusive. */
     _dirtyMax: number;
+    /** @internal Optional hooks installed by the opt-in handle module. */
+    _handleHooks?: BillboardIndexHandleHooks;
+}
+
+/** @internal Lazy hooks used by the opt-in Handle API to track swap-removes. */
+export interface BillboardIndexHandleHooks {
+    readonly removeIndex: (index: number, last: number) => void;
+    readonly clear: () => void;
 }
 
 export type FacingBillboardSpriteSystem = BillboardSpriteSystem<"facing">;
@@ -314,6 +321,7 @@ export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index:
         throw new Error(`removeBillboardSpriteIndex: index ${index} out of range [0, ${system.count})`);
     }
     const last = system.count - 1;
+    system._handleHooks?.removeIndex(index, last);
     if (index !== last) {
         system._instanceData.copyWithin(
             index * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE,
@@ -336,6 +344,7 @@ export function clearBillboardSprites(system: BillboardSpriteSystem): void {
     const count = system.count;
     system._dirtyMin = 0;
     system._dirtyMax = 0;
+    system._handleHooks?.clear();
     if (count === 0) {
         return;
     }
