@@ -230,7 +230,7 @@ const READY_RENDERED_FRAMES = 50;
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     await waitForRenderedFrames(scene, [standardRTT, pbrRTT], READY_RENDERED_FRAMES);
-    await waitForDepthPreviews(canvas, scene, 30_000);
+    await waitForDepthPreviews(canvas, scene, 8000);
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);
