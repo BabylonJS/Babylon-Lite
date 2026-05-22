@@ -105,14 +105,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
     const { ubo: _shadowUBO } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
     const _config: ShadowGenerator["_config"] = {
         mapSize,
-        depthScale: 1.0 / mapSize,
         bias,
-        blurKernel: 1,
-        blurScale: 1,
-        darkness,
-        frustumEdgeFalloff: 0,
-        orthoMinZ,
-        orthoMaxZ,
         forceRefreshEveryFrame,
     };
 
@@ -137,9 +130,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
         _config,
         _version: 0,
     };
-    sg._preloadShadowTask = async (casterMeshes) => {
-        await preloadPcfShadowTaskState(casterMeshes);
-    };
+    sg._preloadShadowTask = preloadPcfShadowTaskState;
     sg._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         const state = ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, sg._shadowTaskState ?? null);
         sg._shadowTaskState = state;

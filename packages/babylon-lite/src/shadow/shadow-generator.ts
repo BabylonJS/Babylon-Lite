@@ -1,13 +1,8 @@
 interface ShadowGeneratorRuntimeConfig {
     mapSize: number;
-    depthScale: number;
     bias: number;
-    blurKernel: number;
-    blurScale: number;
-    darkness: number;
-    frustumEdgeFalloff: number;
-    orthoMinZ: number;
-    orthoMaxZ: number;
+    orthoMinZ?: number;
+    orthoMaxZ?: number;
     forceRefreshEveryFrame: boolean;
 }
 

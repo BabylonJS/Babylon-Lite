@@ -315,7 +315,7 @@ function renderEsmShadowMap(engine: EngineContextInternal, sg: ShadowGenerator, 
         return 0;
     }
 
-    const matrix = _computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config.orthoMinZ, sg._config.orthoMaxZ);
+    const matrix = _computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config.orthoMinZ!, sg._config.orthoMaxZ!);
     if (shadowMatrixChanged(sg._lightMatrix, matrix._viewProj)) {
         sg._lightMatrix.set(matrix._viewProj);
         sg._version++;
@@ -410,12 +410,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
 
     const _config: ShadowGenerator["_config"] = {
         mapSize,
-        depthScale,
         bias,
-        blurKernel,
-        blurScale,
-        darkness,
-        frustumEdgeFalloff,
         orthoMinZ,
         orthoMaxZ,
         forceRefreshEveryFrame,
@@ -486,12 +481,11 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     const _shadowsInfo = new Float32Array([darkness, 0, depthScale, frustumEdgeFalloff]);
     const _depthValues = new Float32Array([0, 1]);
     const { ubo: _shadowUBO, data: shadowUboData } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
-    const _shadowType = "esm" as const;
     const _depthTexture = blurTexV;
     const _depthSampler = blurSampler;
 
     const sg: ShadowGenerator = {
-        _shadowType,
+        _shadowType: "esm",
         _light,
         _depthTexture,
         _depthSampler,

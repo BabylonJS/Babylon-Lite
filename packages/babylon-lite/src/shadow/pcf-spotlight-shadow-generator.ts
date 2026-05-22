@@ -80,22 +80,14 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
 
     // Shared shadow UBO for all receiver meshes (96 bytes)
     const { ubo: _shadowUBO } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
-    const _shadowType = "pcf" as const;
     const _config: ShadowGenerator["_config"] = {
         mapSize,
-        depthScale: 1.0 / mapSize,
         bias,
-        blurKernel: 1,
-        blurScale: 1,
-        darkness,
-        frustumEdgeFalloff: 0,
-        orthoMinZ: near,
-        orthoMaxZ: far,
-        forceRefreshEveryFrame: cfg.forceRefreshEveryFrame === true,
+        forceRefreshEveryFrame: cfg.forceRefreshEveryFrame ?? false,
     };
 
     const sg: ShadowGenerator = {
-        _shadowType,
+        _shadowType: "pcf",
         _light,
         _depthTexture,
         _depthSampler,
@@ -107,9 +99,7 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
         _config,
         _version: 0,
     };
-    sg._preloadShadowTask = async (casterMeshes) => {
-        await preloadPcfShadowTaskState(casterMeshes);
-    };
+    sg._preloadShadowTask = preloadPcfShadowTaskState;
     sg._ensureShadowTaskState = (engine, scene, casterMeshes) => {
         const state = ensurePcfShadowTaskState(engine, scene, sg, casterMeshes, sg._shadowTaskState ?? null);
         sg._shadowTaskState = state;

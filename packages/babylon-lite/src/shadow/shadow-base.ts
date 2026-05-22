@@ -126,11 +126,11 @@ export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
 }
 
 /** Create the light-owned camera facade used by shadow render tasks. */
-export function createShadowCamera(sg: Pick<ShadowGenerator, "_light" | "_config">): Camera {
+export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera {
     return {
-        fov: sg._light.lightType === "spot" ? ((sg._light as { angle?: number }).angle ?? 1) : 1,
-        nearPlane: sg._config.orthoMinZ,
-        farPlane: sg._config.orthoMaxZ,
+        fov: 1,
+        nearPlane: 1,
+        farPlane: 1,
         children: [],
         get worldMatrix() {
             return sg._light.worldMatrix;

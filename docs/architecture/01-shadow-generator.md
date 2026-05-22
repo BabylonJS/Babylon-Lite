@@ -69,7 +69,7 @@ export interface ShadowGenerator {
   _depthValues: Float32Array;            // Directional PCF/ESM: [0, 1]; spot PCF: [0, far]
   _shadowParamsUBO: GPUBuffer;           // Shared shadow parameters UBO
   _shadowUBO: GPUBuffer;                 // Receiver-side shadow info UBO
-  _config: ShadowGeneratorRuntimeConfig; // required normalized runtime config, internal to shadow-generator.ts
+  _config: ShadowGeneratorRuntimeConfig; // minimal normalized fields read by shadow task hooks
   /** Monotonically increasing version — bumped each time _lightMatrix changes.
    *  Consumers compare against a stashed version to skip redundant UBO uploads. */
   _version: number;
