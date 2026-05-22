@@ -275,15 +275,15 @@ await loadEnvironment(scene, 'environmentSpecular.env');
 
 | Babylon.js | Babylon Lite |
 |---|---|
-| `new BABYLON.ShadowGenerator(1024, light)` with directional ESM | `createEsmDirectionalShadowGenerator(engine, light, config)` |
+| `new BABYLON.ShadowGenerator(1024, light)` | `createShadowGenerator(engine.device, light, casterBounds, casters, config)` |
 | `shadowGen.useBlurExponentialShadowMap = true` | *(always ESM blur — it's the only mode)* |
-| `shadowGen.addShadowCaster(mesh)` | `setShadowTaskCasterMeshes(shadowGen, [mesh])` |
+| `shadowGen.addShadowCaster(mesh)` | Pass caster mesh data in the `casters` array |
 | `mesh.receiveShadows = true` | `mesh.receiveShadows = true` *(same)* |
 
 **Key differences**:
-- Shadow support requires `registerSceneWithShadowSupport(engine, scene)`.
-- Caster meshes are assigned through `setShadowTaskCasterMeshes()`.
-- ESM directional and PCF spotlight shadows use explicit factory names.
+- Shadow generator requires explicit caster bounds (AABB) and caster mesh GPU data.
+- There is only one shadow mode: blurred exponential shadow maps.
+- Shadow generator is added to scene via `addToScene(scene, shadowGen)`.
 
 ```typescript
 // Babylon.js
@@ -294,9 +294,15 @@ shadowGen.addShadowCaster(torus);
 ground.receiveShadows = true;
 
 // Babylon Lite
-const shadowGen = createEsmDirectionalShadowGenerator(engine, light, { mapSize: 1024, bias: 0.00005, blurScale: 2 });
-light.shadowGenerator = shadowGen;
-setShadowTaskCasterMeshes(shadowGen, [torus]);
+const shadowGen = createShadowGenerator(engine.device, light, casterBounds, [
+  {
+    positionBuffer: torus._gpu.positionBuffer,
+    indexBuffer: torus._gpu.indexBuffer,
+    indexCount: torus._gpu.indexCount,
+    worldMatrix: new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, ...torus.position, 1]),
+  },
+], { mapSize: 1024, bias: 0.00005, blurScale: 2 });
+addToScene(scene, shadowGen);
 ground.receiveShadows = true;
 ```
 
