@@ -164,7 +164,9 @@ async function main(): Promise<void> {
         SubSurface_thickness_texture: white,
     };
     const textures = { ...fallback, ...loaded };
-    const material = await parseNodeMaterialFromSnippet(engine, "", { json, textures, shadowGenerators: [sg], blockLoader: loadScene72BlockEmitter });
+    // BJS parses this NME graph without wiring receiver shadow factors into the PBR block output.
+    // Keep the shadow generator setup above to mirror the scene, but do not pass it into the Lite NME compiler here.
+    const material = await parseNodeMaterialFromSnippet(engine, "", { json, textures, blockLoader: loadScene72BlockEmitter });
     (sphere as { material?: unknown }).material = material;
     (ground as { material?: unknown }).material = material;
 
