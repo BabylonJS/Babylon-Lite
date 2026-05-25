@@ -207,8 +207,8 @@ describe("Standard template + fragments integration", () => {
             _needsUV2: false,
         });
         const result = composeShader(template, []);
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(2) var dT: texture_2d<f32>");
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(3) var dS: sampler");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(2) var dT:texture_2d<f32>");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(3) var dS:sampler");
         expect(result._fragmentWGSL).toContain("textureSample(dT, dS, input.vu)");
         expect(result._vertexWGSL).toContain("uv");
     });
