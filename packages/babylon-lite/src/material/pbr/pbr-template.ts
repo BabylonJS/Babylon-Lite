@@ -195,7 +195,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     ];
 
     // ── Base bindings (always-present textures) ─────────────────
-    const _baseBindings: BindingDecl[] = [...tex2d("baseColorTexture", "baseColorSampler")];
+    const _baseBindings: BindingDecl[] = tex2d("baseColorTexture", "baseColorSampler");
     if (hasAnyNormal) {
         _baseBindings.push(...tex2d("normalTexture", "normalSampler_"));
     }

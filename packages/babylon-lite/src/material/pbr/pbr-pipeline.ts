@@ -182,17 +182,7 @@ export function createPbrMeshBindGroup(
 
     const sortedExts = _getPbrExtsSorted();
 
-    const extByFragId = new Map<string, PbrExt>();
     const fragIds = composed._fragmentKey ? composed._fragmentKey.split("|").filter((s) => s.length > 0) : [];
-    for (const fid of fragIds) {
-        let match = sortedExts.find((e) => e.id === fid);
-        if (!match) {
-            match = sortedExts.find((e) => fid.startsWith(e.id + "-"));
-        }
-        if (match) {
-            extByFragId.set(fid, match);
-        }
-    }
 
     entries.push({ binding: b++, resource: { buffer: meshUBO } });
     entries.push({ binding: b++, resource: { buffer: materialUBO } });
@@ -221,13 +211,13 @@ export function createPbrMeshBindGroup(
             resource: { buffer: (material as PbrMaterialProps & { readonly _esmShadowParamsUBO: GPUBuffer })._esmShadowParamsUBO },
         });
     }
-    const seenExts = new Set<PbrExt>();
+    const seenExts: PbrExt[] = [];
     for (const fid of fragIds) {
-        const ext = extByFragId.get(fid);
-        if (!ext || ext.phase === "vertex" || !ext.bind || seenExts.has(ext)) {
+        const ext = sortedExts.find((e) => e.id === fid || fid.startsWith(e.id + "-"));
+        if (!ext || ext.phase === "vertex" || !ext.bind || seenExts.includes(ext)) {
             continue;
         }
-        seenExts.add(ext);
+        seenExts.push(ext);
         b = ext.bind(ctx, entries, b);
     }
 
