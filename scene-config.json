@@ -1096,5 +1096,60 @@
         "tags": ["navigation", "recast", "wasm"],
         "skipPerf": true,
         "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 171,
+        "slug": "scene171-navigation-crowd-path",
+        "name": "Scene 171 - Navigation Crowd Path",
+        "maxMad": 6,
+        "maxRawKB": 100,
+        "description": "Single crowd agent on the nav_test.glb mesh follows a computed path (port of playground #DPDNVH#2).",
+        "tags": ["navigation", "recast", "wasm", "path"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 172,
+        "slug": "scene172-navigation-obstacles",
+        "name": "Scene 172 - Navigation Obstacles",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Tile-cache navmesh on a 10x10 ground with one cylinder + one box obstacle. Single agent computes a path around obstacles (port of playground #DPDNVH#3).",
+        "tags": ["navigation", "recast", "wasm", "obstacles"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 173,
+        "slug": "scene173-navigation-dynamic-obstacles",
+        "name": "Scene 173 - Navigation Dynamic Obstacles",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Tile-cache navmesh with a box obstacle that is toggled off 1 second after ready frame (port of playground #DPDNVH#4).",
+        "tags": ["navigation", "recast", "wasm", "obstacles"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 174,
+        "slug": "scene174-navigation-offmesh",
+        "name": "Scene 174 - Navigation Off-Mesh Connections",
+        "maxMad": 2.5,
+        "maxRawKB": 100,
+        "description": "Solo navmesh on nav_test.glb with three off-mesh connections; path computed across the scene exercises elevated platforms (port of playground #DPDNVH#5).",
+        "tags": ["navigation", "recast", "wasm", "offmesh"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 175,
+        "slug": "scene175-navigation-raycast",
+        "name": "Scene 175 - Navigation Raycast",
+        "maxMad": 2.5,
+        "maxRawKB": 100,
+        "description": "Navmesh raycast between two far-separated points on nav_test.glb. Spheres mark start/end/hit, a yellow tube traces the ray (port of playground #DPDNVH#7).",
+        "tags": ["navigation", "recast", "wasm", "raycast"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
     }
 ]

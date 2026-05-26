@@ -1990,8 +1990,8 @@
     ]
   },
   "scene170": {
-    "rawKB": 46.6,
-    "gzipKB": 18.3,
+    "rawKB": 48,
+    "gzipKB": 18.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene170-standard-renderable-DW3tOoGg.js",
@@ -2074,5 +2074,80 @@
       "scene141-wgsl-helpers-WTsokIfK.js",
       "scene141.js"
     ]
+  },
+  "scene171": {
+    "rawKB": 90.3,
+    "gzipKB": 36.1,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene171-generate-mipmaps-Uy5fTPh7.js",
+      "scene171-gltf-glb-parser-BdYiApo0.js",
+      "scene171-mesh-features-GJGfSdO-.js",
+      "scene171-pbr-renderable-ChkzDCS2.js",
+      "scene171-singlelight-hemispheric-wgsl-fdOH0N74.js",
+      "scene171-standard-renderable-IbMB3nTQ.js",
+      "scene171-wgsl-helpers-WTsokIfK.js",
+      "scene171.js"
+    ],
+    "bjsRawKB": 3800,
+    "bjsGzipKB": 961.4
+  },
+  "scene172": {
+    "rawKB": 55.9,
+    "gzipKB": 21.7,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene172-standard-renderable-2wdrrPtt.js",
+      "scene172-wgsl-helpers-WTsokIfK.js",
+      "scene172.js"
+    ],
+    "bjsRawKB": 2235.1,
+    "bjsGzipKB": 576.8
+  },
+  "scene173": {
+    "rawKB": 57.6,
+    "gzipKB": 22.3,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene173-standard-renderable-DWgH_7Se.js",
+      "scene173-wgsl-helpers-WTsokIfK.js",
+      "scene173.js"
+    ],
+    "bjsRawKB": 2235.3,
+    "bjsGzipKB": 576.9
+  },
+  "scene174": {
+    "rawKB": 91,
+    "gzipKB": 36.4,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene174-generate-mipmaps-B38bkebo.js",
+      "scene174-gltf-glb-parser-BdYiApo0.js",
+      "scene174-mesh-features-GJGfSdO-.js",
+      "scene174-pbr-renderable-C076fdUg.js",
+      "scene174-singlelight-hemispheric-wgsl--TtdjZvs.js",
+      "scene174-standard-renderable-JqpehYYv.js",
+      "scene174-wgsl-helpers-WTsokIfK.js",
+      "scene174.js"
+    ],
+    "bjsRawKB": 3065.1,
+    "bjsGzipKB": 785.8
+  },
+  "scene175": {
+    "rawKB": 89.3,
+    "gzipKB": 35.7,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene175-generate-mipmaps-CspFjsVd.js",
+      "scene175-gltf-glb-parser-BdYiApo0.js",
+      "scene175-mesh-features-GJGfSdO-.js",
+      "scene175-pbr-renderable-DLOGRHCW.js",
+      "scene175-singlelight-hemispheric-wgsl-mcWzrVrn.js",
+      "scene175-standard-renderable-xmyh8iyX.js",
+      "scene175-wgsl-helpers-WTsokIfK.js",
+      "scene175.js"
+    ],
+    "bjsRawKB": 3064.1,
+    "bjsGzipKB": 785.3
   }
 }

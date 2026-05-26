@@ -331,5 +331,14 @@ export {
     getAgentVelocity,
     agentGoto,
     updateNavCrowd,
+    findRandomPointAroundCircle,
+    findRandomPoint,
+    setNavigationRandomSeed,
+    getNavigationRandomSeed,
+    raycast,
+    addBoxObstacle,
+    addCylinderObstacle,
+    removeObstacle,
+    updateNavMeshObstacles,
 } from "./navigation/navigation.js";
-export type { NavigationPlugin, NavCrowd, NavMeshParameters, AgentParameters } from "./navigation/navigation.js";
+export type { NavigationPlugin, NavCrowd, NavMeshParameters, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";
