@@ -170,7 +170,7 @@ export interface AnimationGroup {
     readonly name: string;
     readonly duration: number;             // seconds
     readonly frameRate: number;            // used by goToFrame()
-    readonly isPlaying: boolean;
+    isPlaying: boolean;
     currentFrame: number;                  // current time in seconds (not frames!)
     speedRatio: number;                    // default 1
     loopAnimation: boolean;               // default true
@@ -198,6 +198,7 @@ export function updateAnimationManager(manager: AnimationManager, deltaMs: numbe
 export function startAnimationManager(manager: AnimationManager): void;
 export function stopAnimationManager(manager: AnimationManager): void;
 export function setAnimationWeight(group: AnimationGroup, weight: number): void;
+export function enablePropertyAnimationBlending(manager: AnimationManager): void;
 export function fadeAnimationWeight(manager: AnimationManager, group: AnimationGroup, options: FadeAnimationWeightOptions): void;
 export function crossFadeAnimationGroups(manager: AnimationManager, fromGroup: AnimationGroup, toGroup: AnimationGroup, options: CrossFadeAnimationGroupsOptions): void;
 export function enableAnimationBlending(manager: AnimationManager): void;
@@ -256,7 +257,7 @@ A module-level `[0,0,0,1]` array is reused for quaternion slerp output to avoid 
 
 - `AnimationGroup.currentFrame` stores time in **seconds** (not frame numbers, despite the name — matches BJS convention)
 - `goToFrame(frame)` converts frame number to seconds with the group's `frameRate`, immediately evaluates the pose when possible, then pauses
-- `tickAnimation(group, deltaMs, engine?)` advances `ctrl.time += (deltaMs / 1000) * speedRatio`
+- `tickAnimation(group, deltaMs, engine?)` advances `group.currentFrame += (deltaMs / 1000) * speedRatio` and syncs the internal controller only for evaluation/upload
 - Duration is in seconds (max sampler input timestamp)
 - Looping wraps via modulo within the active range: `time = from + ((time - from) % (to - from))`
 - glTF groups default to 60fps; property groups inherit the `PropertyAnimationClip.frameRate`
@@ -334,6 +335,7 @@ Weighted manual animation and deterministic cross-fade:
 const walk = createPropertyAnimationGroup(manager, box, walkClip);
 const run = createPropertyAnimationGroup(manager, box, runClip);
 
+enablePropertyAnimationBlending(manager);
 setAnimationWeight(walk, 1);
 setAnimationWeight(run, 0);
 crossFadeAnimationGroups(manager, walk, run, { durationMs: 300 });
@@ -379,7 +381,7 @@ enableAnimationBlending(manager);
 
 `createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. All groups auto-play by default (matching BJS behavior).
 
-Manual property clips follow the same runtime path. `createPropertyAnimationClip()` stores reusable unresolved property tracks. `createPropertyAnimationGroup()` resolves each track against the target once, converts the clip to a pointer-only `AnimationClip`, and wraps it in an `AnimationGroup`. The hot path remains `evaluateSampler()` + `AnimationController.tick()`.
+Manual property clips share sampler evaluation with glTF animation, but they do not masquerade as glTF `AnimationChannel`s. `createPropertyAnimationClip()` stores reusable unresolved property tracks. `createPropertyAnimationGroup()` resolves each track against the target once, builds compact property runtime tracks (`sampler`, `stride`, `quaternion`, `writer`, `mixTarget`, `mixProperty`), and wraps them in an `AnimationGroup`. The hot path remains `evaluateSampler()` plus direct property writers.
 
 ### Property Binding
 
@@ -389,11 +391,11 @@ Manual property bindings are resolved once when the group is created:
 - vector/quaternion paths (`position`, `scaling`, `rotationQuaternion`) call `.set(...)` when the target object exposes a setter method;
 - invalid paths throw immediately during `createPropertyAnimationGroup()` so typos never fail silently.
 
-Bindings are target-specific; `PropertyAnimationClip` is reusable, while the generated pointer-only `AnimationClip` is owned by the returned `AnimationGroup`.
+Bindings are target-specific; `PropertyAnimationClip` is reusable, while the generated property runtime tracks are owned by the returned `AnimationGroup`.
 
 ### Manual Weight Mixing
 
-Manual property weights are optional and live outside the default direct evaluator. Calling `setAnimationWeight()` installs a manager-side mixer for manual pointer tracks that share the same target and property path. The mixer advances group time once, samples each contributing clip with `evaluateSampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
+Manual property weights are optional and live outside the default direct evaluator. Calling `enablePropertyAnimationBlending(manager)` installs a manager-side mixer for manual property tracks that share the same target and property path. `setAnimationWeight()` only changes the group weight, so glTF-only scenes do not load the manual property mixer. The mixer advances group time once, samples each contributing clip with `evaluateSampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
 
 Weights intentionally use Babylon-style weighted sums for this first layer: `final = sum(group.weight * sampledValue)` for the groups targeting the same property. The mixer does not normalize totals and does not blend toward rest pose. `crossFadeAnimationGroups()` builds on the same weights by scheduling deterministic duration-based fade jobs inside the manager.
 
@@ -430,10 +432,10 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
                       upload bone matrices + morph weights
 ```
 
-- **STOPPED**: `ctrl.playing = false`, `ctrl.time = 0`, `stopped = true`. `tickAnimation()` returns immediately.
-- **PLAYING**: `ctrl.playing = true`. Each `tickAnimation()` advances time, evaluates samplers, uploads GPU data.
-- **PAUSED**: `ctrl.playing = false`. `tickAnimation()` still evaluates (ensures pose is current) but doesn't advance time.
-- **goToFrame(f)**: Sets `ctrl.time = f / group.frameRate`, evaluates the pose immediately for pointer-only clips (or engine-backed clips when an engine is provided), then pauses.
+- **STOPPED**: `group.isPlaying = false`, `group.currentFrame = 0`, `group._stopped = true`. `tickAnimation()` returns immediately.
+- **PLAYING**: `group.isPlaying = true`. Each `tickAnimation()` advances time, evaluates samplers, uploads GPU data.
+- **PAUSED**: `group.isPlaying = false`. `tickAnimation()` still evaluates (ensures pose is current) but doesn't advance time.
+- **goToFrame(f)**: Sets `group.currentFrame = f / group.frameRate`, evaluates the pose immediately for manual property clips (or engine-backed clips when an engine is provided), then pauses.
 
 ## Babylon.js Equivalence Map
 
@@ -451,6 +453,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `AnimationGroup.loopAnimation` | `group.loopAnimation` |
 | `AnimationGroup.weight` / `setWeightForAllAnimatables()` | `setAnimationWeight(group, weight)`; call `enableAnimationBlending(manager)` for weighted glTF skeleton clips |
 | `AnimationGroup.MakeAnimationAdditive(group, frame)` | `setAnimationAdditive(group, { referenceFrame: frame })` |
+| manual property weighted blending | `enablePropertyAnimationBlending(manager)` + `setAnimationWeight(group, weight)` |
 | manual weight ramp / blending speed | `fadeAnimationWeight(manager, group, { to, durationMs })` |
 | manual cross-fade | `crossFadeAnimationGroups(manager, from, to, { durationMs })` |
 | `scene.animationGroups` | `scene.animationGroups` |
@@ -482,7 +485,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 9. **Morph weight upload**: Verify correct weights written to GPU buffer for PATH_WEIGHTS channels
 10. **Manual scalar animation**: Verify `position.x` keyframes reproduce Babylon frame-rate timing
 11. **Manual vector animation**: Verify `position` calls `.set(x, y, z)` and marks world matrices dirty
-12. **Standalone manager**: Verify `updateAnimationManager()` works without a scene or engine for pointer-only clips
+12. **Standalone manager**: Verify `updateAnimationManager()` works without a scene or engine for manual property clips
 13. **Bad path failure**: Verify invalid property paths throw during binding
 14. **Manual weighted blend**: Verify two groups targeting one scalar write a single weighted result independent of group order
 15. **Manual cross-fade**: Verify manager fade jobs update group weights by elapsed duration
@@ -498,6 +501,6 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `animation-group.ts` | User-facing AnimationGroup factory; wraps AnimationController per clip |
 | `animation-manager.ts` | Generic animation task scheduler; no 2D, 3D, glTF, or property-animation runtime imports |
 | `animation-group-task.ts` | AnimationGroup-to-AnimationTask adapter, owner tracking, and `getAnimationGroups()` lookup |
-| `property-animation.ts` | Manual property animation clip builder and cached property bindings |
+| `property-animation.ts` | Manual property animation clip builder and property path binding |
 | `weighted-pointer-mixer.ts` | Optional manual property weight mixer plus fade/cross-fade scheduling |
 | `weighted-gltf-mixer.ts` | Optional glTF skeleton weighted/additive mixer with single skeleton upload per blended target |

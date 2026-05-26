@@ -126,9 +126,10 @@ export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-sh
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
-export { crossFadeAnimationGroups, fadeAnimationWeight, setAnimationWeight } from "./animation/animation-weight.js";
+export { setAnimationWeight } from "./animation/animation-weight.js";
+export { crossFadeAnimationGroups, enablePropertyAnimationBlending, fadeAnimationWeight } from "./animation/weighted-pointer-mixer.js";
 export { enableAnimationBlending, setAnimationAdditive } from "./animation/weighted-gltf-mixer.js";
-export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/animation-weight.js";
+export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/weighted-pointer-mixer.js";
 export type { AnimationAdditiveOptions } from "./animation/weighted-gltf-mixer.js";
 export {
     addAnimationTask,

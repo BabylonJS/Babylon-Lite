@@ -1,9 +1,9 @@
 import { playAnimation } from "./animation-group.js";
-import type { AnimationGroup } from "./animation-group.js";
+import type { AnimationGroup, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { addAnimationGroup } from "./animation-group-task.js";
 import type { AnimationManager } from "./animation-manager.js";
-import { INTERP_LINEAR, INTERP_STEP, PATH_POINTER } from "./types.js";
-import type { AnimationChannel, AnimationClip, AnimationSampler } from "./types.js";
+import { INTERP_LINEAR, INTERP_STEP } from "./types.js";
+import type { AnimationSampler } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
@@ -56,19 +56,14 @@ export interface CreatePropertyAnimationGroupOptions {
 
 type PropertyWriter = (output: Float32Array, offset: number) => void;
 
-type PropertyBinding = readonly [object, PropertyWriter, number];
+interface ResolvedPropertyBinding {
+    readonly mixTarget: object;
+    readonly mixProperty: string;
+    readonly writer: PropertyWriter;
+}
 
 interface PathSettable {
     set: (...values: number[]) => void;
-}
-
-let propertyBindings: WeakMap<object, Map<string, PropertyBinding>> | undefined;
-
-function getPropertyBindings(): WeakMap<object, Map<string, PropertyBinding>> {
-    if (!propertyBindings) {
-        propertyBindings = new WeakMap();
-    }
-    return propertyBindings;
 }
 
 export function createPropertyAnimationClip(name: string, tracks: readonly PropertyAnimationTrackOptions[], options?: PropertyAnimationClipOptions): PropertyAnimationClip {
@@ -100,30 +95,19 @@ export function createPropertyAnimationGroup(
     clip: PropertyAnimationClip,
     options?: CreatePropertyAnimationGroupOptions
 ): AnimationGroup {
-    const samplers: AnimationSampler[] = [];
-    const channels: AnimationChannel[] = [];
+    const runtimeTracks: AnimationPropertyRuntimeTrack[] = [];
     for (let i = 0; i < clip.tracks.length; i++) {
         const track = clip.tracks[i]!;
         const binding = resolvePropertyBinding(target, track.path, track.stride);
-        samplers.push(track.sampler);
-        channels.push({
-            samplerIdx: i,
-            nodeIdx: -1,
-            path: PATH_POINTER,
-            pointerArity: track.stride,
-            pointerQuaternion: track.quaternion,
-            pointerWriter: binding[1],
-            _mk: binding[0],
+        runtimeTracks.push({
+            sampler: track.sampler,
+            stride: track.stride,
+            quaternion: track.quaternion,
+            writer: binding.writer,
+            mixTarget: binding.mixTarget,
+            mixProperty: binding.mixProperty,
         });
     }
-
-    const runtimeClip: AnimationClip = {
-        name: clip.name,
-        channels,
-        samplers,
-        duration: clip.duration,
-        frameRate: clip.frameRate,
-    };
 
     const fromTime = options?.fromTime ?? (options?.fromFrame !== undefined ? options.fromFrame / clip.frameRate : 0);
     const toTime = options?.toTime ?? (options?.toFrame !== undefined ? options.toFrame / clip.frameRate : clip.duration);
@@ -131,16 +115,24 @@ export function createPropertyAnimationGroup(
         throw new Error("Animation play range must have toTime greater than fromTime");
     }
 
-    const group = createPointerAnimationGroup(runtimeClip, fromTime, toTime, options);
+    const group = createPointerAnimationGroup(clip.name, clip.duration, clip.frameRate, runtimeTracks, fromTime, toTime, options);
     group.loopAnimation = options?.loop ?? true;
     group.speedRatio = options?.speedRatio ?? 1;
-    group._pm = [channels, samplers, fromTime, toTime, clip.duration];
+    group._pm = [runtimeTracks, fromTime, toTime, clip.duration];
     playAnimation(group);
     addAnimationGroup(manager, group);
     return group;
 }
 
-function createPointerAnimationGroup(clip: AnimationClip, fromTime: number, toTime: number, options?: CreatePropertyAnimationGroupOptions): AnimationGroup {
+function createPointerAnimationGroup(
+    name: string,
+    duration: number,
+    frameRate: number,
+    tracks: readonly AnimationPropertyRuntimeTrack[],
+    fromTime: number,
+    toTime: number,
+    options?: CreatePropertyAnimationGroupOptions
+): AnimationGroup {
     const ctrl: AnimationController = {
         time: fromTime,
         playing: false,
@@ -162,39 +154,20 @@ function createPointerAnimationGroup(clip: AnimationClip, fromTime: number, toTi
             } else {
                 ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
             }
-            for (const ch of clip.channels) {
-                if (ch.pointerArity && ch.pointerWriter) {
-                    evaluateSampler(clip.samplers[ch.samplerIdx]!, ctrl.time, ch.pointerArity, ch.pointerQuaternion === true, _pointerScratch, 0);
-                    ch.pointerWriter(_pointerScratch, 0);
-                }
+            for (const track of tracks) {
+                evaluateSampler(track.sampler, ctrl.time, track.stride, track.quaternion, _pointerScratch, 0);
+                track.writer(_pointerScratch, 0);
             }
         },
     };
     return {
-        name: clip.name,
-        duration: clip.duration,
-        frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
-        get isPlaying(): boolean {
-            return ctrl.playing;
-        },
-        get currentFrame(): number {
-            return ctrl.time;
-        },
-        set currentFrame(v: number) {
-            ctrl.time = v;
-        },
-        get speedRatio(): number {
-            return ctrl.speedRatio;
-        },
-        set speedRatio(v: number) {
-            ctrl.speedRatio = v;
-        },
-        get loopAnimation(): boolean {
-            return ctrl.loop;
-        },
-        set loopAnimation(v: boolean) {
-            ctrl.loop = v;
-        },
+        name,
+        duration,
+        frameRate: frameRate || DEFAULT_FRAME_RATE,
+        isPlaying: false,
+        currentFrame: fromTime,
+        speedRatio: options?.speedRatio ?? 1,
+        loopAnimation: options?.loop ?? true,
         weight: 1,
         _ctrl: ctrl,
         _stopped: false,
@@ -270,21 +243,7 @@ function writeKeyValue(path: string, value: AnimationKeyframeValue, stride: numb
     }
 }
 
-function resolvePropertyBinding(target: object, path: string, stride: number): PropertyBinding {
-    const bindingsByTarget = getPropertyBindings();
-    let bindings = bindingsByTarget.get(target);
-    if (!bindings) {
-        bindings = new Map<string, PropertyBinding>();
-        bindingsByTarget.set(target, bindings);
-    }
-    const cached = bindings.get(path);
-    if (cached) {
-        if (cached[2] !== stride) {
-            throw new Error("Stride mismatch");
-        }
-        return cached;
-    }
-
+function resolvePropertyBinding(target: object, path: string, stride: number): ResolvedPropertyBinding {
     const parts = path.split(".");
     if (parts.length === 0 || parts.some((p) => p.length === 0)) {
         throw new Error(`Invalid animation property path "${path}"`);
@@ -306,25 +265,7 @@ function resolvePropertyBinding(target: object, path: string, stride: number): P
         throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
     }
 
-    let writer: PropertyWriter;
-    if (stride === 1) {
-        writer = (output, offset) => {
-            record[property] = output[offset]!;
-        };
-    } else {
-        const targetValue = record[property];
-        const settable = isSettable(targetValue) ? targetValue : null;
-        if (settable) {
-            writer = createSetWriter(settable, stride, path);
-        } else {
-            const valueRecord = asRecord(targetValue, path);
-            writer = createComponentWriter(valueRecord, stride, path);
-        }
-    }
-
-    const binding: PropertyBinding = [{}, writer, stride];
-    bindings.set(path, binding);
-    return binding;
+    return { mixTarget: record, mixProperty: property, writer: createPropertyWriter(record, property, stride, path) };
 }
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
@@ -338,32 +279,38 @@ function isSettable(value: unknown): value is PathSettable {
     return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { set?: unknown }).set === "function";
 }
 
-function createSetWriter(target: PathSettable, stride: number, path: string): PropertyWriter {
-    switch (stride) {
-        case 2:
-            return (output, offset) => target.set(output[offset]!, output[offset + 1]!);
-        case 3:
-            return (output, offset) => target.set(output[offset]!, output[offset + 1]!, output[offset + 2]!);
-        case 4:
-            return (output, offset) => target.set(output[offset]!, output[offset + 1]!, output[offset + 2]!, output[offset + 3]!);
-        default:
-            throw new Error(`Animation property path "${path}" has unsupported vector size ${stride}`);
+function createPropertyWriter(target: Record<string, unknown>, property: string, stride: number, path: string): PropertyWriter {
+    if (stride === 1) {
+        return (output, offset) => {
+            target[property] = output[offset]!;
+        };
     }
-}
-
-function createComponentWriter(target: Record<string, unknown>, stride: number, path: string): PropertyWriter {
     if (stride > 4) {
         throw new Error(`Animation property path "${path}" has unsupported vector size ${stride}`);
     }
-    const components = ["x", "y", "z", "w"];
+
+    const targetValue = target[property];
+    if (isSettable(targetValue)) {
+        switch (stride) {
+            case 2:
+                return (output, offset) => targetValue.set(output[offset]!, output[offset + 1]!);
+            case 3:
+                return (output, offset) => targetValue.set(output[offset]!, output[offset + 1]!, output[offset + 2]!);
+            case 4:
+                return (output, offset) => targetValue.set(output[offset]!, output[offset + 1]!, output[offset + 2]!, output[offset + 3]!);
+        }
+    }
+
+    const valueRecord = asRecord(targetValue, path);
+    const components = "xyzw";
     for (let i = 0; i < stride; i++) {
-        if (!(components[i]! in target)) {
+        if (!(components[i]! in valueRecord)) {
             throw new Error(`Animation property path "${path}" could not resolve component "${components[i]!}"`);
         }
     }
     return (output, offset) => {
         for (let i = 0; i < stride; i++) {
-            target[components[i]!] = output[offset + i]!;
+            valueRecord[components[i]!] = output[offset + i]!;
         }
     };
 }

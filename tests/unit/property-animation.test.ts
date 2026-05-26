@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createAnimationManager, startAnimationManager, stopAnimationManager, updateAnimationManager } from "../../packages/babylon-lite/src/animation/animation-manager";
 import { goToFrame } from "../../packages/babylon-lite/src/animation/animation-group";
-import { crossFadeAnimationGroups, setAnimationWeight } from "../../packages/babylon-lite/src/animation/animation-weight";
+import { setAnimationWeight } from "../../packages/babylon-lite/src/animation/animation-weight";
+import { crossFadeAnimationGroups, enablePropertyAnimationBlending } from "../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../packages/babylon-lite/src/animation/property-animation";
 
 describe("Property animation", () => {
@@ -69,6 +70,27 @@ describe("Property animation", () => {
         expect(target.position.x).toBeCloseTo(1);
         expect(target.position.y).toBeCloseTo(2);
         expect(target.position.z).toBeCloseTo(3);
+    });
+
+    it("writes vector tracks through component bindings", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0, y: 0, z: 0 } };
+        const clip = createPropertyAnimationClip("move", [
+            {
+                path: "position",
+                keys: [
+                    { time: 0, value: [0, 0, 0] },
+                    { time: 1, value: [3, 6, 9] },
+                ],
+            },
+        ]);
+
+        createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        updateAnimationManager(manager, 500);
+
+        expect(target.position.x).toBeCloseTo(1.5);
+        expect(target.position.y).toBeCloseTo(3);
+        expect(target.position.z).toBeCloseTo(4.5);
     });
 
     it("supports STEP interpolation with second-based keyframes", () => {
@@ -139,6 +161,7 @@ describe("Property animation", () => {
             const second = order === "positive-first" ? negative : positive;
             const firstGroup = createPropertyAnimationGroup(manager, target, first, { loop: false });
             const secondGroup = createPropertyAnimationGroup(manager, target, second, { loop: false });
+            enablePropertyAnimationBlending(manager);
             setAnimationWeight(firstGroup, order === "positive-first" ? 0.25 : 0.75);
             setAnimationWeight(secondGroup, order === "positive-first" ? 0.75 : 0.25);
 
@@ -191,6 +214,7 @@ describe("Property animation", () => {
         ]);
         const positiveGroup = createPropertyAnimationGroup(manager, target, positive, { loop: false });
         const negativeGroup = createPropertyAnimationGroup(manager, target, negative, { loop: false });
+        enablePropertyAnimationBlending(manager);
         setAnimationWeight(positiveGroup, 1);
         setAnimationWeight(negativeGroup, 0);
 
