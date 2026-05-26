@@ -63,12 +63,7 @@ export function createLinearDepthMaterial(options: LinearDepthMaterialOptions = 
         vertexSource: VERTEX,
         fragmentSource: FRAGMENT,
         attributes: ["position"],
-        uniforms: [
-            "world",
-            "view",
-            "projection",
-            { name: "nearFar", type: "vec2<f32>", defaultValue: [near, far] },
-        ],
+        uniforms: ["world", "view", "projection", { name: "nearFar", type: "vec2<f32>", defaultValue: [near, far] }],
         backFaceCulling: true,
         depthWrite: true,
         depthCompare: "less-equal",

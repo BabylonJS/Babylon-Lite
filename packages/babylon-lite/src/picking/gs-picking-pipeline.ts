@@ -365,8 +365,20 @@ export function computeGsPickMatrix(out: Float32Array, px: number, py: number, w
     const ndcX = (2 * (px + 0.5)) / w - 1;
     const ndcY = 1 - (2 * (py + 0.5)) / h;
     // column-major mat4
-    out[0] = w; out[1] = 0; out[2] = 0; out[3] = 0;
-    out[4] = 0; out[5] = h; out[6] = 0; out[7] = 0;
-    out[8] = 0; out[9] = 0; out[10] = 1; out[11] = 0;
-    out[12] = -ndcX * w; out[13] = -ndcY * h; out[14] = 0; out[15] = 1;
+    out[0] = w;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = h;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 1;
+    out[11] = 0;
+    out[12] = -ndcX * w;
+    out[13] = -ndcY * h;
+    out[14] = 0;
+    out[15] = 1;
 }
