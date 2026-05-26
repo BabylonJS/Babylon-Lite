@@ -104,9 +104,11 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
     const _depthValues = new Float32Array([0, 1]);
     const { ubo: _shadowUBO } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
     const _config: ShadowGenerator["_config"] = {
-        mapSize,
-        bias,
-        forceRefreshEveryFrame,
+        _mapSize: mapSize,
+        _bias: bias,
+        _forceRefreshEveryFrame: forceRefreshEveryFrame,
+        _orthoMinZ: orthoMinZ,
+        _orthoMaxZ: orthoMaxZ,
     };
 
     const sg: ShadowGenerator = {

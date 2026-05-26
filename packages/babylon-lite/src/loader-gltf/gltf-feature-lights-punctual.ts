@@ -22,12 +22,12 @@ interface GltfLightDef {
 const feature: GltfFeature = {
     id: "KHR_lights_punctual",
     async applyAsset(_meshes, _root, ctx) {
-        const defs: GltfLightDef[] | undefined = ctx.json.extensions?.KHR_lights_punctual?.lights;
+        const defs: GltfLightDef[] | undefined = ctx._json.extensions?.KHR_lights_punctual?.lights;
         if (!defs?.length) {
             return {};
         }
         const lights: LightBase[] = [];
-        const nodes = ctx.json.nodes ?? [];
+        const nodes = ctx._json.nodes ?? [];
         // Count lights first so we can raise MAX_LIGHTS before any pipeline is
         // compiled (loadGltf runs before addToScene which triggers pipeline
         // creation). Lite's MAX_LIGHTS is scene-wide, so cover every punctual
@@ -50,7 +50,7 @@ const feature: GltfFeature = {
             if (!def) {
                 continue;
             }
-            const world = computeNodeWorldMatrix(ctx.json, nodeIdx, ctx.parentMap, ctx.worldMatrixCache);
+            const world = computeNodeWorldMatrix(ctx._json, nodeIdx, ctx._parentMap, ctx._worldMatrixCache);
             const px = world[12]!;
             const py = world[13]!;
             const pz = world[14]!;

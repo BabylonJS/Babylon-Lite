@@ -144,7 +144,7 @@ export async function decodeDracoPrimitive(compressed: Uint8Array, attributeMap:
     module.destroy(mesh);
     module.destroy(decoder);
 
-    return { attributes, indices, vertexCount: numPoints, indexCount };
+    return { _attributes: attributes, _indices: indices, _vertexCount: numPoints, _indexCount: indexCount };
 }
 
 /**

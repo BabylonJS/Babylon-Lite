@@ -28,8 +28,8 @@ function applyVisibility(json: any, nodeMap: readonly (SceneNode | undefined)[])
 const ext: GltfFeature = {
     id: "KHR_node_visibility",
     async applyAsset(_meshes, _root, ctx) {
-        if (ctx.nodeMap) {
-            applyVisibility(ctx.json, ctx.nodeMap);
+        if (ctx._nodeMap) {
+            applyVisibility(ctx._json, ctx._nodeMap);
         }
         return {};
     },

@@ -55,7 +55,7 @@ function buildInstanceMatrices(translation: Float32Array | null, rotation: Float
 const ext: GltfFeature = {
     id: "EXT_mesh_gpu_instancing",
     async applyAsset(_meshes, _root, ctx) {
-        const { json, binChunk, nodeMap } = ctx;
+        const { _json: json, _binChunk: binChunk, _nodeMap: nodeMap } = ctx;
         if (!nodeMap) {
             return {};
         }
@@ -84,8 +84,8 @@ const ext: GltfFeature = {
                     continue;
                 }
                 if (count === 0) {
-                    count = acc.count;
-                } else if (acc.count !== count) {
+                    count = acc._count;
+                } else if (acc._count !== count) {
                     throw new Error(`EXT_mesh_gpu_instancing: accessor count mismatch on node ${nodeIdx}`);
                 }
             }
@@ -94,12 +94,12 @@ const ext: GltfFeature = {
             }
 
             const matrices = buildInstanceMatrices(
-                tAcc ? (tAcc.data as Float32Array) : null,
-                rAcc ? (rAcc.data as Float32Array) : null,
-                sAcc ? (sAcc.data as Float32Array) : null,
+                tAcc ? (tAcc._data as Float32Array) : null,
+                rAcc ? (rAcc._data as Float32Array) : null,
+                sAcc ? (sAcc._data as Float32Array) : null,
                 count
             );
-            const nodeWorld = ctx.worldMatrixCache.get(nodeIdx);
+            const nodeWorld = ctx._worldMatrixCache.get(nodeIdx);
             for (const mesh of meshesForNode) {
                 setThinInstances(mesh, matrices, count);
                 expandMeshAabbForInstances(mesh as MeshInternal, matrices, count, nodeWorld);

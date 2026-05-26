@@ -81,9 +81,9 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
     // Shared shadow UBO for all receiver meshes (96 bytes)
     const { ubo: _shadowUBO } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
     const _config: ShadowGenerator["_config"] = {
-        mapSize,
-        bias,
-        forceRefreshEveryFrame: cfg.forceRefreshEveryFrame ?? false,
+        _mapSize: mapSize,
+        _bias: bias,
+        _forceRefreshEveryFrame: cfg.forceRefreshEveryFrame ?? false,
     };
 
     const sg: ShadowGenerator = {

@@ -235,12 +235,12 @@ const ext: GltfFeature = {
                 const idx =
                     primitive.indices === undefined
                         ? new Uint32Array(0)
-                        : new Uint32Array(resolveAccessor(gltf, binChunk, primitive.indices).data as Uint16Array | Uint32Array | Uint8Array);
+                        : new Uint32Array(resolveAccessor(gltf, binChunk, primitive.indices)._data as Uint16Array | Uint32Array | Uint8Array);
                 decoded.set(primitive, {
-                    attributes,
-                    indices: idx,
-                    vertexCount: posAcc.count,
-                    indexCount: idx.length,
+                    _attributes: attributes,
+                    _indices: idx,
+                    _vertexCount: posAcc.count,
+                    _indexCount: idx.length,
                 });
             }
         }

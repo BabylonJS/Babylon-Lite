@@ -20,20 +20,20 @@ import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts,
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
-    positions: Float32Array;
-    normals: Float32Array;
-    tangents: Float32Array | null;
-    uvs: Float32Array;
-    uv2s: Float32Array | null;
-    colors: Float32Array | null;
-    indices: Uint16Array | Uint32Array;
-    vertexCount: number;
-    indexCount: number;
-    worldMatrix: Mat4;
-    material: GltfMaterialData;
+    _positions: Float32Array;
+    _normals: Float32Array;
+    _tangents: Float32Array | null;
+    _uvs: Float32Array;
+    _uv2s: Float32Array | null;
+    _colors: Float32Array | null;
+    _indices: Uint16Array | Uint32Array;
+    _vertexCount: number;
+    _indexCount: number;
+    _worldMatrix: Mat4;
+    _material: GltfMaterialData;
     /** glTF node index this mesh came from (for hierarchy reconstruction
      *  and for features that need to resolve skin/morph data lazily). */
-    nodeIndex: number;
+    _nodeIndex: number;
     /** Raw primitive definition — features (skeleton, morph, …) read their
      *  own attributes/targets from here without bloating core extraction. */
     _primitive: any;
@@ -81,14 +81,14 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache, decodedPrimitives);
 
     const ctx: GltfLoadCtx = {
-        engine: engine as EngineContextInternal,
-        json,
-        binChunk,
-        baseUrl,
-        parentMap,
-        worldMatrixCache,
-        matExts,
-        wrapTex,
+        _engine: engine as EngineContextInternal,
+        _json: json,
+        _binChunk: binChunk,
+        _baseUrl: baseUrl,
+        _parentMap: parentMap,
+        _worldMatrixCache: worldMatrixCache,
+        _matExts: matExts,
+        _wrapTex: wrapTex,
     };
 
     const meshes = await uploadMeshes(meshDatas, features, ctx);
@@ -96,7 +96,7 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // Build TransformNode hierarchy from glTF nodes. Returns both the synthetic root
     // and a glTF-node-index → SceneNode map (used by node-visibility + animation-pointer).
     const { root, nodeMap } = buildNodeHierarchy(json, meshes, meshDatas);
-    ctx.nodeMap = nodeMap;
+    ctx._nodeMap = nodeMap;
 
     // Run every feature's per-asset hook (animations, variants, …) and merge
     // the returned AssetContainer fragments. `entities` is appended (never
@@ -227,7 +227,7 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
     // Map nodeIndex → uploaded Mesh[]
     const nodeToMeshes = new Map<number, Mesh[]>();
     for (let i = 0; i < meshDatas.length; i++) {
-        const ni = meshDatas[i]!.nodeIndex;
+        const ni = meshDatas[i]!._nodeIndex;
         let arr = nodeToMeshes.get(ni);
         if (!arr) {
             arr = [];
@@ -291,7 +291,7 @@ async function extractAllMeshes(
     };
 
     // First pass: do all sync work, fire all material fetches concurrently
-    const partials: Array<Omit<GltfMeshData, "material">> = [];
+    const partials: Array<Omit<GltfMeshData, "_material">> = [];
     const matPromises: Promise<GltfMaterialData>[] = [];
 
     for (let nodeIdx = 0; nodeIdx < json.nodes.length; nodeIdx++) {
@@ -306,11 +306,11 @@ async function extractAllMeshes(
         for (const primitive of mesh.primitives) {
             const attrs = primitive.attributes;
             const decoded = decodedPrimitives.get(primitive);
-            const resolveAttr = (name: string): { data: ArrayBufferView; count: number; componentCount: number } | null => {
-                if (decoded && decoded.attributes.has(name)) {
-                    const data = decoded.attributes.get(name)!;
-                    const componentCount = data.length / decoded.vertexCount;
-                    return { data, count: decoded.vertexCount, componentCount };
+            const resolveAttr = (name: string): { _data: ArrayBufferView; _count: number; _componentCount: number } | null => {
+                if (decoded && decoded._attributes.has(name)) {
+                    const data = decoded._attributes.get(name)!;
+                    const componentCount = data.length / decoded._vertexCount;
+                    return { _data: data, _count: decoded._vertexCount, _componentCount: componentCount };
                 }
                 const idx = attrs[name];
                 return idx !== undefined ? resolveAccessor(json, binChunk, idx) : null;
@@ -322,35 +322,35 @@ async function extractAllMeshes(
             const tanData = resolveAttr("TANGENT");
             const colorData = resolveAttr("COLOR_0");
             const idxData = decoded
-                ? { data: decoded.indices, count: decoded.indexCount, componentCount: 1 }
+                ? { _data: decoded._indices, _count: decoded._indexCount, _componentCount: 1 }
                 : primitive.indices !== undefined
                   ? resolveAccessor(json, binChunk, primitive.indices)
                   : null;
 
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
-                ? idxData.data instanceof Uint32Array
-                    ? new Uint32Array(idxData.data as Uint32Array)
-                    : idxData.data instanceof Uint8Array
-                      ? Uint16Array.from(idxData.data as Uint8Array)
-                      : new Uint16Array(idxData.data.buffer, idxData.data.byteOffset, idxData.count)
+                ? idxData._data instanceof Uint32Array
+                    ? new Uint32Array(idxData._data as Uint32Array)
+                    : idxData._data instanceof Uint8Array
+                      ? Uint16Array.from(idxData._data as Uint8Array)
+                      : new Uint16Array(idxData._data.buffer, idxData._data.byteOffset, idxData._count)
                 : new Uint16Array(0);
 
             // Fire material fetch without awaiting — all materials load in parallel
             matPromises.push(getMat(primitive.material));
 
             partials.push({
-                positions: posData.data as Float32Array,
-                normals: normData.data as Float32Array,
-                tangents: tanData ? (tanData.data as Float32Array) : null,
-                uvs: uvData ? (uvData.data as Float32Array) : new Float32Array(posData.count * 2),
-                uv2s: uv2Data ? (uv2Data.data as Float32Array) : null,
-                colors: colorData ? (colorData.data as Float32Array) : null,
-                indices,
-                vertexCount: posData.count,
-                indexCount: idxData?.count ?? 0,
-                worldMatrix,
-                nodeIndex: nodeIdx,
+                _positions: posData._data as Float32Array,
+                _normals: normData._data as Float32Array,
+                _tangents: tanData ? (tanData._data as Float32Array) : null,
+                _uvs: uvData ? (uvData._data as Float32Array) : new Float32Array(posData._count * 2),
+                _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
+                _colors: colorData ? (colorData._data as Float32Array) : null,
+                _indices: indices,
+                _vertexCount: posData._count,
+                _indexCount: idxData?._count ?? 0,
+                _worldMatrix: worldMatrix,
+                _nodeIndex: nodeIdx,
                 _primitive: primitive,
                 _decoded: decoded,
             });
@@ -359,7 +359,7 @@ async function extractAllMeshes(
 
     // Resolve all material fetches in parallel
     const materials = await Promise.all(matPromises);
-    return partials.map((p, i) => ({ ...p, material: materials[i]! }));
+    return partials.map((p, i) => ({ ...p, _material: materials[i]! }));
 }
 
 // --- GPU Upload ---
@@ -374,7 +374,7 @@ async function ensureMipmapModule(): Promise<void> {
 }
 
 async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], ctx: GltfLoadCtx): Promise<Mesh[]> {
-    const { engine, json, binChunk, baseUrl, matExts, wrapTex } = ctx;
+    const { _engine: engine, _json: json, _binChunk: binChunk, _baseUrl: baseUrl, _matExts: matExts, _wrapTex: wrapTex } = ctx;
     const sampler = getOrCreateSampler(engine, {
         magFilter: "linear",
         minFilter: "linear",
@@ -463,20 +463,20 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
 
     const meshes = await Promise.all(
         meshDatas.map(async (m, i): Promise<Mesh> => {
-            const material = await buildPbrFromGltfMat(m.material);
+            const material = await buildPbrFromGltfMat(m._material);
 
-            const [boundMin, boundMax] = computeAabb(m.positions, m.worldMatrix);
+            const [boundMin, boundMax] = computeAabb(m._positions, m._worldMatrix);
 
             const gpu: MeshGPU = {
-                positionBuffer: createMappedBuffer(engine, m.positions, GPUBufferUsage.VERTEX),
-                normalBuffer: createMappedBuffer(engine, m.normals, GPUBufferUsage.VERTEX),
-                tangentBuffer: m.tangents ? createMappedBuffer(engine, m.tangents, GPUBufferUsage.VERTEX) : null,
-                uvBuffer: createMappedBuffer(engine, m.uvs, GPUBufferUsage.VERTEX),
-                uv2Buffer: m.uv2s ? createMappedBuffer(engine, m.uv2s, GPUBufferUsage.VERTEX) : null,
-                colorBuffer: m.colors ? createMappedBuffer(engine, m.colors, GPUBufferUsage.VERTEX) : null,
-                indexBuffer: createMappedBuffer(engine, m.indices, GPUBufferUsage.INDEX),
-                indexCount: m.indexCount,
-                indexFormat: (m.indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
+                positionBuffer: createMappedBuffer(engine, m._positions, GPUBufferUsage.VERTEX),
+                normalBuffer: createMappedBuffer(engine, m._normals, GPUBufferUsage.VERTEX),
+                tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, GPUBufferUsage.VERTEX) : null,
+                uvBuffer: createMappedBuffer(engine, m._uvs, GPUBufferUsage.VERTEX),
+                uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, GPUBufferUsage.VERTEX) : null,
+                colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, GPUBufferUsage.VERTEX) : null,
+                indexBuffer: createMappedBuffer(engine, m._indices, GPUBufferUsage.INDEX),
+                indexCount: m._indexCount,
+                indexFormat: (m._indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
             };
 
             const mesh = {
@@ -493,11 +493,11 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             initMeshTransform(mesh);
 
             // Retain CPU geometry for detailed picking
-            mesh._cpuPositions = m.positions;
-            mesh._cpuNormals = m.normals;
-            mesh._cpuUvs = m.uvs;
-            mesh._cpuIndices = m.indices instanceof Uint32Array ? m.indices : new Uint32Array(m.indices);
-            engine._dlr?.m(mesh, m.uv2s, m.tangents, m.colors, m.indices, gpu.indexFormat);
+            mesh._cpuPositions = m._positions;
+            mesh._cpuNormals = m._normals;
+            mesh._cpuUvs = m._uvs;
+            mesh._cpuIndices = m._indices instanceof Uint32Array ? m._indices : new Uint32Array(m._indices);
+            engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
 
             // Run all per-mesh feature hooks (skeleton, morph, …) in parallel.
             // Each hook mutates `mesh` directly (e.g. attaches mesh.skeleton).

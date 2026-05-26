@@ -126,7 +126,7 @@ export function renderPcfShadowMap(
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
     const lightVersion = sg._light.worldMatrixVersion;
-    if (!sg._config.forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion) {
+    if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion) {
         return 0;
     }
 
@@ -148,7 +148,7 @@ export function renderPcfShadowMap(
 function updateShadowCamera(state: PcfTaskState, sg: ShadowGenerator, matrix: PcfLightMatrix): void {
     state._cameraVersion++;
     state._camera.fov = sg._light.lightType === "spot" ? (sg._light as SpotLight).angle : 1;
-    updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, biasViewProjection(matrix._viewProj, sg._config.bias));
+    updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, biasViewProjection(matrix._viewProj, sg._config._bias));
 }
 
 function biasViewProjection(viewProj: Float32Array, bias: number): Float32Array {

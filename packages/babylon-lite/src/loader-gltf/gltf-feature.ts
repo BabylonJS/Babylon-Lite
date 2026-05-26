@@ -25,31 +25,31 @@ import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
-    engine: EngineContextInternal;
-    json: any;
-    binChunk: DataView;
-    baseUrl: string;
-    parentMap: Map<number, number>;
-    worldMatrixCache: Map<number, Mat4>;
+    _engine: EngineContextInternal;
+    _json: any;
+    _binChunk: DataView;
+    _baseUrl: string;
+    _parentMap: Map<number, number>;
+    _worldMatrixCache: Map<number, Mat4>;
     /** All material-layer features active for this load (so e.g. variants can re-use them). */
-    matExts: GltfFeature[];
+    _matExts: GltfFeature[];
     /** Composed texture-wrap function aggregating every active feature's
      *  `wrapTexture` hook. Identity when no feature contributes one. */
-    wrapTex: TextureWrapFn;
+    _wrapTex: TextureWrapFn;
     /** glTF-node-index → SceneNode, populated by buildNodeHierarchy. Consumers:
      *  KHR_node_visibility (load-time), KHR_animation_pointer (runtime pointer writers).
      *  `undefined` for a given index means the node was unreachable from any scene root. */
-    nodeMap?: (TransformNode | undefined)[];
+    _nodeMap?: (TransformNode | undefined)[];
 }
 
 /** Pre-decoded primitive data keyed by the primitive object. Features like
  *  KHR_draco_mesh_compression populate this in their `preMesh` hook so that
  *  the core mesh-extraction loop stays feature-agnostic. */
 export interface DecodedPrimitive {
-    attributes: Map<string, Float32Array | Uint32Array | Int32Array>;
-    indices: Uint32Array;
-    vertexCount: number;
-    indexCount: number;
+    _attributes: Map<string, Float32Array | Uint32Array | Int32Array>;
+    _indices: Uint32Array;
+    _vertexCount: number;
+    _indexCount: number;
 }
 
 /** A glTF feature module. Each module implements one or more of the four hooks. */

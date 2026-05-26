@@ -12,20 +12,20 @@ const feature: GltfFeature = {
         if (!targets || targets.length === 0) {
             return;
         }
-        const { json, binChunk } = ctx;
+        const { _json: json, _binChunk: binChunk } = ctx;
         const morphTargets: { positions: Float32Array; normals: Float32Array | null }[] = [];
         for (const target of targets) {
             const posAcc = target.POSITION !== undefined ? resolveAccessor(json, binChunk, target.POSITION) : null;
             const normAcc = target.NORMAL !== undefined ? resolveAccessor(json, binChunk, target.NORMAL) : null;
             morphTargets.push({
-                positions: posAcc ? (posAcc.data as Float32Array) : new Float32Array(meshData.vertexCount * 3),
-                normals: normAcc ? (normAcc.data as Float32Array) : null,
+                positions: posAcc ? (posAcc._data as Float32Array) : new Float32Array(meshData._vertexCount * 3),
+                normals: normAcc ? (normAcc._data as Float32Array) : null,
             });
         }
-        const parentMesh = json.meshes[json.nodes[meshData.nodeIndex].mesh];
+        const parentMesh = json.meshes[json.nodes[meshData._nodeIndex].mesh];
         const morphWeights = parentMesh.weights ?? new Array(targets.length).fill(0);
         const { createMorphTargets } = await import("../morph/create-morph-targets.js");
-        mesh.morphTargets = createMorphTargets(ctx.engine, morphTargets, meshData.vertexCount, morphWeights);
+        mesh.morphTargets = createMorphTargets(ctx._engine, morphTargets, meshData._vertexCount, morphWeights);
     },
 };
 export default feature;

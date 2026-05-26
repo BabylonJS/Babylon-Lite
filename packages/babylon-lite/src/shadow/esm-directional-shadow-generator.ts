@@ -311,11 +311,11 @@ function renderEsmShadowMap(engine: EngineContextInternal, sg: ShadowGenerator, 
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
     const lightVersion = sg._light.worldMatrixVersion;
-    if (!sg._config.forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion) {
+    if (!sg._config._forceRefreshEveryFrame && casterVersion === state._lastCasterVersion && lightVersion === state._lastLightVersion) {
         return 0;
     }
 
-    const matrix = _computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config.orthoMinZ!, sg._config.orthoMaxZ!);
+    const matrix = _computeDirectionalLightMatrix(sg._light as DirectionalLight, casterMeshes, sg._config._orthoMinZ!, sg._config._orthoMaxZ!);
     if (shadowMatrixChanged(sg._lightMatrix, matrix._viewProj)) {
         sg._lightMatrix.set(matrix._viewProj);
         sg._version++;
@@ -409,11 +409,11 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     const blurSize = mapSize / blurScale;
 
     const _config: ShadowGenerator["_config"] = {
-        mapSize,
-        bias,
-        orthoMinZ,
-        orthoMaxZ,
-        forceRefreshEveryFrame,
+        _mapSize: mapSize,
+        _bias: bias,
+        _orthoMinZ: orthoMinZ,
+        _orthoMaxZ: orthoMaxZ,
+        _forceRefreshEveryFrame: forceRefreshEveryFrame,
     };
 
     const _shadowParamsUBO = createShadowParamsUBO(eng, bias, depthScale);

@@ -60,7 +60,7 @@ function resolveIBMs(json: any, binChunk: DataView, skin: any): Float32Array {
     const jointCount = skin.joints.length;
     if (skin.inverseBindMatrices !== undefined) {
         const ibmData = resolveAccessor(json, binChunk, skin.inverseBindMatrices);
-        return new Float32Array(ibmData.data.buffer, ibmData.data.byteOffset, jointCount * 16);
+        return new Float32Array(ibmData._data.buffer, ibmData._data.byteOffset, jointCount * 16);
     }
     const out = new Float32Array(jointCount * 16);
     for (let i = 0; i < jointCount; i++) {
@@ -147,8 +147,8 @@ export function parseAnimationData(
             const inNorm = json.accessors[s.input]?.normalized === true;
             const outNorm = json.accessors[s.output]?.normalized === true;
             samplers.push({
-                input: toSamplerFloat32(inputAcc.data, inputAcc.count, inNorm),
-                output: toSamplerFloat32(outputAcc.data, outputAcc.count * outputAcc.componentCount, outNorm),
+                input: toSamplerFloat32(inputAcc._data, inputAcc._count, inNorm),
+                output: toSamplerFloat32(outputAcc._data, outputAcc._count * outputAcc._componentCount, outNorm),
                 interpolation: INTERP_MAP[s.interpolation ?? "LINEAR"] ?? INTERP_LINEAR,
             });
         }

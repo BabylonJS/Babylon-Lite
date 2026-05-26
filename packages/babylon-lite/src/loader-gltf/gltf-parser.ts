@@ -27,7 +27,13 @@ const TYPE_SIZES: Record<string, number> = {
 
 // --- Accessor Resolution ---
 
-export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: number): { data: ArrayBufferView; count: number; componentCount: number } {
+export interface AccessorView {
+    _data: ArrayBufferView;
+    _count: number;
+    _componentCount: number;
+}
+
+export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: number): AccessorView {
     const accessor = json.accessors[accessorIdx];
     const bufferView = json.bufferViews[accessor.bufferView];
     const componentCount = TYPE_SIZES[accessor.type] ?? 1;
@@ -39,13 +45,13 @@ export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: numb
 
     switch (accessor.componentType) {
         case FLOAT:
-            return { data: new Float32Array(ab, baseOffset, count * componentCount), count, componentCount };
+            return { _data: new Float32Array(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
         case UNSIGNED_SHORT:
-            return { data: new Uint16Array(ab, baseOffset, count * componentCount), count, componentCount };
+            return { _data: new Uint16Array(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
         case UNSIGNED_INT:
-            return { data: new Uint32Array(ab, baseOffset, count * componentCount), count, componentCount };
+            return { _data: new Uint32Array(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
         case UNSIGNED_BYTE:
-            return { data: new Uint8Array(ab, baseOffset, count * componentCount), count, componentCount };
+            return { _data: new Uint8Array(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
         default:
             throw new Error(`Unsupported component type: ${accessor.componentType}`);
     }

@@ -84,7 +84,7 @@ export function createShadowParamsUBO(engine: EngineContextInternal, bias: numbe
 
 /** Create the eager shadow-map render target used by frame-graph shadow tasks. */
 export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUTexture | null = null, depthTexture: GPUTexture = sg._depthTexture): RenderTarget {
-    const mapSize = sg._config.mapSize;
+    const mapSize = sg._config._mapSize;
     return {
         _descriptor: {
             size: { width: mapSize, height: mapSize },

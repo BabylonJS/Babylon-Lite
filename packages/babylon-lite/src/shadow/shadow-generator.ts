@@ -1,9 +1,9 @@
 interface ShadowGeneratorRuntimeConfig {
-    mapSize: number;
-    bias: number;
-    orthoMinZ?: number;
-    orthoMaxZ?: number;
-    forceRefreshEveryFrame: boolean;
+    _mapSize: number;
+    _bias: number;
+    _orthoMinZ?: number;
+    _orthoMaxZ?: number;
+    _forceRefreshEveryFrame: boolean;
 }
 
 export interface ShadowTaskInternalState {
