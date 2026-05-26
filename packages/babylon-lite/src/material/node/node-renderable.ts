@@ -227,12 +227,15 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 const cx = pkt._mesh.position?.x ?? wm[12]!;
                 const cy = pkt._mesh.position?.y ?? wm[13]!;
                 const cz = pkt._mesh.position?.z ?? wm[14]!;
+                const sortCenter: [number, number, number] = [cx, cy, cz];
                 const update = (): void => {
                     updatePacketUBO(pkt);
                     updateNodeUBO();
                     // Update world center for sorting.
                     const m = pkt._mesh.worldMatrix as unknown as ArrayLike<number>;
-                    rTrans._worldCenter = [m[12]!, m[13]!, m[14]!];
+                    sortCenter[0] = m[12]!;
+                    sortCenter[1] = m[13]!;
+                    sortCenter[2] = m[14]!;
                 };
                 const draw = (pass: NodeRenderPass): number => {
                     drawPacket(pass, pkt);
@@ -242,7 +245,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                     order: 200,
                     isTransparent: true,
                     mesh: pkt._mesh,
-                    _worldCenter: [cx, cy, cz],
+                    _worldCenter: sortCenter,
                     bind() {
                         return { renderable: rTrans, pipeline: compile._pipeline, update, draw };
                     },

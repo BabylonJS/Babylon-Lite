@@ -155,9 +155,12 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
+        const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
         const update = (): void => {
-            r._worldCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!];
             if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+                sortCenter[0] = mesh.worldMatrix[12]!;
+                sortCenter[1] = mesh.worldMatrix[13]!;
+                sortCenter[2] = mesh.worldMatrix[14]!;
                 meshUboData.set(mesh.worldMatrix, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
@@ -221,6 +224,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 };
             },
         };
+        r._worldCenter = sortCenter;
         let _lastUboVersion = mat._uboVersion;
         return r;
     };
