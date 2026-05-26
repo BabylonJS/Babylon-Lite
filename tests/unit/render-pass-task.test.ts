@@ -203,6 +203,20 @@ describe("RenderPassTask transparent sorting", () => {
         expect(drawOrder).toEqual(["far-in-view", "near-but-wide"]);
     });
 
+    it("uses radial distance as a transparent camera-depth tie-breaker", async () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContextInternal;
+        scene.camera = makeCamera();
+        const drawOrder: string[] = [];
+
+        scene._renderables.push(makeTransparentRenderable("near-tie", [0, 0, 0], [0, 0, 10], drawOrder), makeTransparentRenderable("far-tie", [0, 0, 0], [0, 1, 10], drawOrder));
+
+        await registerScene(engine, scene);
+        scene._record();
+
+        expect(drawOrder).toEqual(["far-tie", "near-tie"]);
+    });
+
     it("direct-draws dynamic depth-write renderables without marking them transmissive", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;

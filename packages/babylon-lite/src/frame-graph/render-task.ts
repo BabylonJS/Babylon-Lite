@@ -39,7 +39,7 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js"
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
+import { getCameraPosition, getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
@@ -258,9 +258,18 @@ function sortTransparentBindings(task: RenderTask, camera: Camera | null | undef
         return;
     }
     const v = getViewMatrix(camera);
+    const c = getCameraPosition(camera);
     for (const b of arr) {
         const wc = b.renderable._worldCenter;
-        b._sortDistance = wc ? wc[0]! * v[2]! + wc[1]! * v[6]! + wc[2]! * v[10]! + v[14]! : 0;
+        if (wc) {
+            const z = wc[0]! * v[2]! + wc[1]! * v[6]! + wc[2]! * v[10]! + v[14]!;
+            const x = wc[0]! - c.x;
+            const y = wc[1]! - c.y;
+            const dz = wc[2]! - c.z;
+            b._sortDistance = z + (x * x + y * y + dz * dz) * 1e-6;
+        } else {
+            b._sortDistance = 0;
+        }
     }
     arr.sort((a, b) => b._sortDistance! - a._sortDistance! || a.renderable.order - b.renderable.order);
 }
