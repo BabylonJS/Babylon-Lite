@@ -43,7 +43,10 @@ fn main(input: FragmentInput) -> @location(0) vec4<f32> {
   finalAlpha *= fadeFactor * fadeFactor;
 
   // Image processing (preserves alpha)
-  var color = applyImageProcessing(vec4<f32>(finalColor, finalAlpha));
+  var color = vec4<f32>(finalColor, finalAlpha);
+  if (scene.vImageInfos.w >= 0.0) {
+    color = applyImageProcessing(color);
+  }
 
   // PREMULTIPLYALPHA — BJS shd_16 line 373
   color = vec4<f32>(color.rgb * color.a, color.a);

@@ -83,7 +83,7 @@ export function createRenderPass(name: string, task: Task): RenderPass {
             if (!rt) {
                 throw new Error(`RenderPass "${pass.name}": render target not set`);
             }
-            const swapchain = rt.descriptor.resolveToSwapchain === true;
+            const swapchain = rt._descriptor.resolveToSwapchain === true;
             const colorView = rt._colorView;
             let colorAttachment: GPURenderPassColorAttachment | null = null;
             if (colorView || swapchain) {
@@ -95,7 +95,7 @@ export function createRenderPass(name: string, task: Task): RenderPass {
                 };
             }
             const depthRt = pass._renderTargetDepth ?? rt;
-            const depthFormat = depthRt.descriptor.depthStencilFormat;
+            const depthFormat = depthRt._descriptor.depthStencilFormat;
             const depthView = depthRt._depthView;
             const hasStencil = depthFormat ? depthFormat === "depth24plus-stencil8" || depthFormat === "depth32float-stencil8" || depthFormat === "stencil8" : false;
             let depthAttachment: GPURenderPassDepthStencilAttachment | null = null;
@@ -116,7 +116,7 @@ export function createRenderPass(name: string, task: Task): RenderPass {
                 depthStencilAttachment: depthAttachment ?? undefined,
             };
             pass._swapchain = swapchain;
-            pass._sampleCount = rt.descriptor.sampleCount ?? 1;
+            pass._sampleCount = rt._descriptor.sampleCount ?? 1;
         },
         _execute(): number {
             const rt = pass._renderTarget;

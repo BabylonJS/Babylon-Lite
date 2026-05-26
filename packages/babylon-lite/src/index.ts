@@ -13,6 +13,7 @@ export {
     addToScene,
     disposeScene,
     registerScene,
+    registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
 
@@ -28,6 +29,10 @@ export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
+export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
+export { createShadowTask } from "./frame-graph/shadow-task.js";
+export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
 export { createRenderTargetTexture } from "./texture/rtt.js";
@@ -83,11 +88,12 @@ export { loadBasisTexture2D } from "./texture/basis-loader.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
-export { createStandardShadowDepthMaterialView } from "./material/standard/shadow-depth-view.js";
+export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
-export { createPbrShadowDepthMaterialView } from "./material/pbr/shadow-depth-view.js";
 export { createShaderMaterial, setShaderUniform, setShaderTexture, setShaderFloat, setShaderVector3, setShaderMatrix } from "./material/shader/shader-material.js";
+export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
@@ -119,9 +125,10 @@ export type { GsShaderFragment, GsFragmentSlot } from "./mesh/GaussianSplatting/
 export { createProceduralGaussianSplattingMesh } from "./mesh/GaussianSplatting/create-gaussian-splatting-mesh.js";
 
 // ─── Shadows ─────────────────────────────────────────────────────────
-export { createShadowGenerator } from "./shadow/shadow-generator.js";
-export { createPcfShadowGenerator } from "./shadow/pcf-shadow-generator.js";
+export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
+export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
+export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
@@ -203,8 +210,10 @@ export type { PointLight } from "./light/point-light.js";
 export type { DirectionalLight } from "./light/directional-light.js";
 export type { SpotLight } from "./light/spot-light.js";
 export type { Texture2D, Texture2DOptions } from "./texture/texture-2d.js";
-export type { ShadowGenerator, ShadowGeneratorConfig } from "./shadow/shadow-generator.js";
-export type { PcfShadowGeneratorConfig } from "./shadow/pcf-shadow-generator.js";
+export type { ShadowGenerator } from "./shadow/shadow-generator.js";
+export type { EsmDirectionalShadowGeneratorConfig } from "./shadow/esm-directional-shadow-generator.js";
+export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-shadow-generator.js";
+export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";
@@ -351,5 +360,14 @@ export {
     getAgentVelocity,
     agentGoto,
     updateNavCrowd,
+    findRandomPointAroundCircle,
+    findRandomPoint,
+    setNavigationRandomSeed,
+    getNavigationRandomSeed,
+    raycast,
+    addBoxObstacle,
+    addCylinderObstacle,
+    removeObstacle,
+    updateNavMeshObstacles,
 } from "./navigation/navigation.js";
-export type { NavigationPlugin, NavCrowd, NavMeshParameters, AgentParameters } from "./navigation/navigation.js";
+export type { NavigationPlugin, NavCrowd, NavMeshParameters, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";

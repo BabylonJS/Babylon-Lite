@@ -25,17 +25,17 @@ export function createStdEmissiveFragment(depthTexture: boolean): ShaderFragment
 }
 
 export const stdEmissiveExt: StdExt = {
-    id: "std-emissive",
-    phase: "mesh",
-    feature: HAS_EMISSIVE_TEXTURE,
-    frag: (features) => createStdEmissiveFragment((features & HAS_DEPTH_EMISSIVE_TEXTURE) !== 0),
-    bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
+    _id: "std-emissive",
+    _phase: "mesh",
+    _feature: HAS_EMISSIVE_TEXTURE,
+    _frag: (features) => createStdEmissiveFragment((features & HAS_DEPTH_EMISSIVE_TEXTURE) !== 0),
+    _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
         const tex = mat.emissiveTexture!;
         entries.push({ binding: b++, resource: tex.view });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.emissiveTexture) {
             out.push(mat.emissiveTexture);
         }

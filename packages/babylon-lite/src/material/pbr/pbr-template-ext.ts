@@ -53,24 +53,24 @@ export interface PbrTemplateExt {
  * Each flag corresponds to a detected feature in the scene.
  */
 export function createPbrTemplateExt(flags: {
-    hasUvTransform: boolean;
-    hasVertexColor: boolean;
-    hasUv2: boolean;
-    hasOcclusionUv2: boolean;
-    hasAnyNormal: boolean;
-    hasEmissiveTexture: boolean;
-    hasSpecGloss: boolean;
+    _hasUvTransform: boolean;
+    _hasVertexColor: boolean;
+    _hasUv2: boolean;
+    _hasOcclusionUv2: boolean;
+    _hasAnyNormal: boolean;
+    _hasEmissiveTexture: boolean;
+    _hasSpecGloss: boolean;
 }): PbrTemplateExt {
-    const { hasUvTransform, hasVertexColor, hasUv2, hasOcclusionUv2, hasAnyNormal, hasEmissiveTexture, hasSpecGloss } = flags;
+    const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasOcclusionUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
 
     // ── UV transform helpers ────────────────────────────────────
     const uvTransformUboFields = (name: string): UboField[] => [
         { _name: `${name}UVm`, _type: "vec4<f32>" },
         { _name: `${name}UVt`, _type: "vec4<f32>" },
     ];
-    const uvVarName = (name: string) => (hasUvTransform ? `${name}UV` : "input.uv");
-    const uvTransformDecl = (name: string) => (hasUvTransform ? `let ${name}UV = txfUV(input.uv, material.${name}UVm, material.${name}UVt.xy);\n` : "");
-    const UV_TRANSFORM_HELPER_WGSL = hasUvTransform
+    const uvVarName = (name: string) => (_hasUvTransform ? `${name}UV` : "input.uv");
+    const uvTransformDecl = (name: string) => (_hasUvTransform ? `let ${name}UV = txfUV(input.uv, material.${name}UVm, material.${name}UVt.xy);\n` : "");
+    const UV_TRANSFORM_HELPER_WGSL = _hasUvTransform
         ? `fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
 return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
 }
@@ -79,41 +79,41 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
 
     // ── Extra vertex attributes ────────────────────────────────
     const extraVertexAttributes: VertexAttribute[] = [];
-    if (hasUv2) {
+    if (_hasUv2) {
         extraVertexAttributes.push({ _name: "uv2", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
-    if (hasVertexColor) {
+    if (_hasVertexColor) {
         extraVertexAttributes.push({ _name: "color", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 });
     }
 
     // ── Extra varyings ──────────────────────────────────────────
     const extraVaryings: Varying[] = [];
-    if (hasUv2) {
+    if (_hasUv2) {
         extraVaryings.push({ _name: "uv2", _type: "vec2<f32>" });
     }
-    if (hasVertexColor) {
+    if (_hasVertexColor) {
         extraVaryings.push({ _name: "vColor", _type: "vec3<f32>" });
     }
 
     // ── Extra material UBO fields ────────────────────────────────
     const extraMaterialUboFields: UboField[] = [];
-    if (hasUvTransform) {
+    if (_hasUvTransform) {
         extraMaterialUboFields.push(...uvTransformUboFields("baseColor"));
-        if (hasAnyNormal) {
+        if (_hasAnyNormal) {
             extraMaterialUboFields.push(...uvTransformUboFields("normal"));
         }
         extraMaterialUboFields.push(...uvTransformUboFields("orm"));
-        if (hasEmissiveTexture) {
+        if (_hasEmissiveTexture) {
             extraMaterialUboFields.push(...uvTransformUboFields("emissive"));
         }
-        if (hasSpecGloss) {
+        if (_hasSpecGloss) {
             extraMaterialUboFields.push(...uvTransformUboFields("specGloss"));
         }
     }
 
     // ── Extra bindings ──────────────────────────────────────────
     const extraBindings: BindingDecl[] = [];
-    if (hasOcclusionUv2) {
+    if (_hasOcclusionUv2) {
         extraBindings.push(
             { _name: "occlusionTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
             { _name: "occlusionSampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
@@ -122,10 +122,10 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
 
     // ── Vertex body extra ───────────────────────────────────────
     let vertexBodyExtra = "";
-    if (hasUv2) {
+    if (_hasUv2) {
         vertexBodyExtra += "out.uv2 = uv2;\n";
     }
-    if (hasVertexColor) {
+    if (_hasVertexColor) {
         vertexBodyExtra += "out.vColor = color;\n";
     }
 
@@ -133,12 +133,12 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const fragmentHelpers = UV_TRANSFORM_HELPER_WGSL;
 
     // ── Fragment prelude ────────────────────────────────────────
-    const fragmentPrelude = hasUvTransform
+    const fragmentPrelude = _hasUvTransform
         ? uvTransformDecl("baseColor") +
-          (hasAnyNormal ? uvTransformDecl("normal") : "") +
+          (_hasAnyNormal ? uvTransformDecl("normal") : "") +
           uvTransformDecl("orm") +
-          (hasEmissiveTexture ? uvTransformDecl("emissive") : "") +
-          (hasSpecGloss ? uvTransformDecl("specGloss") : "")
+          (_hasEmissiveTexture ? uvTransformDecl("emissive") : "") +
+          (_hasSpecGloss ? uvTransformDecl("specGloss") : "")
         : "";
 
     // ── UV expressions ──────────────────────────────────────────
@@ -149,7 +149,7 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const uvForSpecGloss = uvVarName("specGloss");
 
     // ── Base color modifier ─────────────────────────────────────
-    const baseColorMod = hasVertexColor ? "\nbaseColor *= input.vColor;" : "";
+    const baseColorMod = _hasVertexColor ? "\nbaseColor *= input.vColor;" : "";
 
     // ── Normal scale modifier ───────────────────────────────────
     // When ext is active, emit the scaledNormal line (replaces default normalMapRaw).
@@ -157,9 +157,9 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const normalScaleMod = "let scaledNormal = vec3<f32>(normalMapRaw.xy * material.normalScale, normalMapRaw.z);\n";
 
     // ── Occlusion override ──────────────────────────────────────
-    // When hasReflectanceExt=false AND hasOcclusionUv2=true, override occlusion sampling.
+    // When hasReflectanceExt=false AND _hasOcclusionUv2=true, override occlusion sampling.
     // When hasReflectanceExt=true, the reflectance fragment handles occlusion.
-    const occlusionOverride = hasOcclusionUv2 ? "let occlusion = textureSample(occlusionTexture, occlusionSampler_, input.uv2).r;" : null;
+    const occlusionOverride = _hasOcclusionUv2 ? "let occlusion = textureSample(occlusionTexture, occlusionSampler_, input.uv2).r;" : null;
 
     return {
         extraVertexAttributes,

@@ -18,6 +18,14 @@
         },
         "./loader-env/load-dds-env": {
             "import": "./src/loader-env/load-dds-env.ts"
+        },
+        "./engine/device-lost-recovery": {
+            "import": "./src/engine/device-lost-recovery.ts",
+            "types": "./src/engine/device-lost-recovery.ts"
+        },
+        "./engine/device-lost-recovery-testing": {
+            "import": "./src/engine/device-lost-recovery-testing.ts",
+            "types": "./src/engine/device-lost-recovery-testing.ts"
         }
     },
     "files": [

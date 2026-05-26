@@ -461,7 +461,7 @@ spot.angle = Math.PI / 4;
 3. **`ObservableVec3`** — Direction/position use observable vectors with dirty callbacks, replacing Babylon's Vector3 + manual dirty tracking.
 4. **Shared lights UBO** — Standard and PBR pack up to `MAX_LIGHTS` scene lights into one UBO; Babylon.js uses material-scoped light defines/uniforms and defaults to 4 simultaneous lights per material.
 5. **Tree-shakable PBR light code** — PBR imports the one-light or multi-light WGSL helper only when needed; Babylon.js includes broad light shader support.
-6. **No shadow caster list on lights** — Shadow casters are managed by `ShadowGenerator`, not by the light. Lights reference their shadow generator via `shadowGenerator` property.
+6. **No shadow caster list on lights or generators** — Shadow casters are scene/frame-graph `ShadowTask` inputs registered for a generator. Lights only reference their shadow generator via `shadowGenerator` property.
 
 ---
 

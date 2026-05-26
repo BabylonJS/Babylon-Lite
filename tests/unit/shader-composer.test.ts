@@ -252,8 +252,8 @@ describe("composeShader", () => {
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result._vertexWGSL).toContain("@location(2) world0: vec4<f32>");
-        expect(result._vertexWGSL).toContain("@location(3) world1: vec4<f32>");
+        expect(result._vertexWGSL).toContain("@location(2) world0:vec4<f32>");
+        expect(result._vertexWGSL).toContain("@location(3) world1:vec4<f32>");
 
         // Should have 3 vertex buffer layouts: position, normal (ungrouped) + ti group
         expect(result._vertexBufferLayouts.length).toBe(3);
@@ -269,8 +269,8 @@ describe("composeShader", () => {
             _varyings: [{ _name: "vInstanceColor", _type: "vec4<f32>" }],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result._vertexWGSL).toContain("vInstanceColor: vec4<f32>");
-        expect(result._fragmentWGSL).toContain("vInstanceColor: vec4<f32>");
+        expect(result._vertexWGSL).toContain("vInstanceColor:vec4<f32>");
+        expect(result._fragmentWGSL).toContain("vInstanceColor:vec4<f32>");
     });
 
     it("auto-assigns binding indices for fragment bindings", () => {
@@ -283,8 +283,8 @@ describe("composeShader", () => {
         };
         const result = composeShader(makeTemplate(), [frag]);
         // mesh UBO at binding 0, then fragment bindings start at 1
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(1) var brdfLUT: texture_2d<f32>");
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(2) var brdfSampler_: sampler");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(1) var brdfLUT:texture_2d<f32>");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(2) var brdfSampler_:sampler");
     });
 
     it("puts shadow bindings in group 2", () => {
@@ -296,26 +296,26 @@ describe("composeShader", () => {
             ],
         };
         const result = composeShader(makeTemplate(), [frag]);
-        expect(result._fragmentWGSL).toContain("@group(2) @binding(0) var shadowTex: texture_depth_2d");
-        expect(result._fragmentWGSL).toContain("@group(2) @binding(1) var shadowSamp: sampler_comparison");
+        expect(result._fragmentWGSL).toContain("@group(2)@binding(0) var shadowTex:texture_depth_2d");
+        expect(result._fragmentWGSL).toContain("@group(2)@binding(1) var shadowSamp:sampler_comparison");
         expect(result._shadowBGLDescriptor).not.toBeNull();
         expect(result._shadowBGLDescriptor!.entries.length).toBe(2);
     });
 
     it("throws on duplicate fragment IDs", () => {
         const frag: ShaderFragment = { _id: "dupe" };
-        expect(() => composeShader(makeTemplate(), [frag, frag])).toThrow("Duplicate fragment id");
+        expect(() => composeShader(makeTemplate(), [frag, frag])).toThrow();
     });
 
     it("throws on missing dependency", () => {
         const frag: ShaderFragment = { _id: "child", _dependencies: ["nonexistent"] };
-        expect(() => composeShader(makeTemplate(), [frag])).toThrow('depends on unknown fragment "nonexistent"');
+        expect(() => composeShader(makeTemplate(), [frag])).toThrow();
     });
 
     it("throws on circular dependency", () => {
         const a: ShaderFragment = { _id: "a", _dependencies: ["b"] };
         const b: ShaderFragment = { _id: "b", _dependencies: ["a"] };
-        expect(() => composeShader(makeTemplate(), [a, b])).toThrow("Cycle detected");
+        expect(() => composeShader(makeTemplate(), [a, b])).toThrow();
     });
 
     it("respects dependency order for slot injection", () => {
@@ -377,8 +377,8 @@ describe("composeShader", () => {
         };
         const result = composeShader(template, [frag]);
         // binding 0 = mesh UBO, 1 = baseColorTex, 2 = baseColorSamp, 3 = envTex
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(1) var baseColorTex");
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(2) var baseColorSamp");
-        expect(result._fragmentWGSL).toContain("@group(1) @binding(3) var envTex");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(1) var baseColorTex");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(2) var baseColorSamp");
+        expect(result._fragmentWGSL).toContain("@group(1)@binding(3) var envTex");
     });
 });

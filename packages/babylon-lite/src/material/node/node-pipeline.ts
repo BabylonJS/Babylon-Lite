@@ -44,34 +44,29 @@ const SENTINEL_SCREEN_SIZE = "_NME_SCREEN_SIZE_";
 // ─── Compile result ─────────────────────────────────────────────────
 
 export interface NodeCompileResult {
-    readonly wgsl: string;
-    readonly pipeline: GPURenderPipeline;
-    readonly meshBGL: GPUBindGroupLayout;
-    readonly nodeUboSize: number;
-    readonly nodeUboOffsets: ReadonlyMap<string, number>;
+    readonly _wgsl: string;
+    readonly _pipeline: GPURenderPipeline;
+    readonly _meshBGL: GPUBindGroupLayout;
+    readonly _nodeUboSize: number;
+    readonly _nodeUboOffsets: ReadonlyMap<string, number>;
     /** The resolved bind-group slot (within group 1) for the node UBO. `null` if no uniforms. */
-    readonly nodeUboBinding: number | null;
+    readonly _nodeUboBinding: number | null;
     /** Per-texture binding slots assigned by the pipeline builder. */
-    readonly textureBindings: ReadonlyArray<{ readonly name: string; readonly texBinding: number; readonly sampBinding: number }>;
+    readonly _textureBindings: ReadonlyArray<{ readonly _name: string; readonly _texBinding: number; readonly _sampBinding: number }>;
     /** Slots for the morph-target texture + weights UBO, or `null` when no MorphTargetsBlock is present. */
-    readonly morphBindings: { readonly textureBinding: number; readonly uboBinding: number } | null;
+    readonly _morphBindings: { readonly _textureBinding: number; readonly _uboBinding: number } | null;
     /** Slot assignments for env IBL bindings within group 1, when state.usesEnv is true. */
-    readonly envBindings: {
-        readonly iblTexture: number;
-        readonly iblSampler: number;
-        readonly brdfLUT: number;
-        readonly brdfSampler: number;
+    readonly _envBindings: {
+        readonly _iblTexture: number;
+        readonly _iblSampler: number;
+        readonly _brdfLUT: number;
+        readonly _brdfSampler: number;
     } | null;
     /** Per shadow-casting light: slot assignments in group 1 for the shadow texture, sampler, and shadowInfo UBO. Empty when the material uses no shadows. */
-    readonly shadowBindings: ReadonlyArray<{
-        readonly lightIndex: number;
-        readonly texBinding: number;
-        readonly sampBinding: number;
-        readonly uboBinding: number;
-        readonly shadowType: "esm" | "pcf";
-    }>;
-    readonly usesClipPlanes: boolean;
-    readonly usesMeshAttributeFlags: boolean;
+    readonly _shadowBindings: readonly import("./node-shadow.js").ShadowBinding[];
+    readonly _usesClipPlanes: boolean;
+    readonly _usesMeshAttributeFlags: boolean;
+    readonly _esmShadowParamsBinding: number | null;
 }
 
 // ─── Pipeline cache ─────────────────────────────────────────────────
@@ -112,16 +107,6 @@ function buildVertexOut(state: NodeBuildState): string {
     return `struct VertexOut {\n${lines.join("\n")}\n};`;
 }
 
-function buildFragmentOut(state: NodeBuildState): string | null {
-    if (!state.usesFragDepth) {
-        return null;
-    }
-    return `struct FragmentOut {
-    @location(0) color: vec4<f32>,
-    @builtin(frag_depth) fragDepth: f32,
-};`;
-}
-
 function buildNodeUbo(state: NodeBuildState, binding: number): { struct: string; size: number; offsets: ReadonlyMap<string, number> } | null {
     if (state.nodeUboFields.length === 0) {
         return null;
@@ -142,27 +127,32 @@ function indent(body: string): string {
 // ─── Pipeline creation ──────────────────────────────────────────────
 
 export interface CompileOpts {
-    readonly engine: EngineContextInternal;
-    readonly format: GPUTextureFormat;
-    readonly msaaSamples: number;
-    readonly backFaceCulling?: boolean;
+    readonly _engine: EngineContextInternal;
+    readonly _format: GPUTextureFormat;
+    readonly _depthStencilFormat?: GPUTextureFormat;
+    readonly _msaaSamples: number;
+    readonly _backFaceCulling?: boolean;
+    readonly _noColorOutput?: boolean;
+    readonly _esmShadowOutput?: boolean;
+    /** ESM shadow depth output code. Supplied by the ESM material view so normal Node bundles don't retain it. */
+    readonly _esmShadowDepthCode?: string;
     /** BJS alpha mode (0=DISABLE, 2=COMBINE). Determines blend state. */
-    readonly alphaMode?: number;
+    readonly _alphaMode?: number;
     /** When `state.usesEnv` is true, this factory produces the env IBL
      *  bindings + WGSL. Loaded via `await import("./node-env.js")` from
      *  node-material.ts only when `state.usesEnv` was set during emitGraph,
      *  so non-env scenes never bundle the env helpers. */
-    readonly envEmitter?: typeof import("./node-env.js").emitEnv;
+    readonly _envEmitter?: typeof import("./node-env.js").emitEnv;
     /** When `state.shadowLights` is non-empty, this factory produces shadow
      *  bindings + WGSL. Loaded via `await import("./node-shadow.js")` from
      *  `node-material.ts` only when `shadowGenerators` was supplied, so
      *  non-shadow scenes never bundle the PCF/ESM helpers. */
-    readonly shadowEmitter?: typeof import("./node-shadow.js").emitShadow;
+    readonly _shadowEmitter?: typeof import("./node-shadow.js").emitShadow;
 }
 
 export function compileNodePipeline(state: NodeBuildState, vertexBody: string, fragmentBody: string, opts: CompileOpts): NodeCompileResult {
-    const { engine, format, msaaSamples } = opts;
-    const device = engine.device;
+    const { _engine, _format, _msaaSamples } = opts;
+    const device = _engine.device;
 
     // Binding layout for group 1:
     //   slot 0         = mesh UBO (world matrix)
@@ -170,42 +160,40 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     //   slot N, N+1    = texture + sampler (paired) for each entry in state.textures
     //   scene group 0 binding 1 = shared lights UBO (if state.usesLightsUbo)
     let nextBinding = 1;
-    const nodeUboBinding = state.nodeUboFields.length > 0 ? nextBinding++ : null;
-    const nodeUbo = nodeUboBinding !== null ? buildNodeUbo(state, nodeUboBinding) : null;
-    const nodeUboSize = nodeUbo?.size ?? 0;
-    const nodeUboOffsets: ReadonlyMap<string, number> = nodeUbo?.offsets ?? new Map<string, number>();
+    const _nodeUboBinding = state.nodeUboFields.length > 0 ? nextBinding++ : null;
+    const nodeUbo = _nodeUboBinding !== null ? buildNodeUbo(state, _nodeUboBinding) : null;
+    const _nodeUboSize = nodeUbo?.size ?? 0;
+    const _nodeUboOffsets: ReadonlyMap<string, number> = nodeUbo?.offsets ?? new Map<string, number>();
 
-    const textureBindings: { name: string; texBinding: number; sampBinding: number }[] = [];
+    const _textureBindings: { _name: string; _texBinding: number; _sampBinding: number }[] = [];
     const textureWgslDecls: string[] = [];
     for (const tex of state.textures) {
-        const texBinding = nextBinding++;
-        const sampBinding = nextBinding++;
-        textureBindings.push({ name: tex.name, texBinding, sampBinding });
+        const _name = tex.name;
+        const _texBinding = nextBinding++;
+        const _sampBinding = nextBinding++;
+        _textureBindings.push({ _name, _texBinding, _sampBinding });
         const wgslTexType = tex.kind === "textureCube" ? "texture_cube<f32>" : "texture_2d<f32>";
-        textureWgslDecls.push(`@group(1) @binding(${texBinding}) var nodeTex_${tex.name}: ${wgslTexType};`);
-        textureWgslDecls.push(`@group(1) @binding(${sampBinding}) var nodeSamp_${tex.name}: sampler;`);
+        textureWgslDecls.push(`@group(1) @binding(${_texBinding}) var nodeTex_${_name}: ${wgslTexType};`);
+        textureWgslDecls.push(`@group(1) @binding(${_sampBinding}) var nodeSamp_${_name}: sampler;`);
     }
 
-    const lightsWgslDecls: string[] = [];
-    if (state.usesLightsUbo) {
-        lightsWgslDecls.push(
-            `struct LightEntry { vLightData: vec4<f32>, vLightDiffuse: vec4<f32>, vLightSpecular: vec4<f32>, vLightDirection: vec4<f32> };`,
-            `struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<LightEntry, ${MAX_LIGHTS}> };`,
-            `@group(0) @binding(1) var<uniform> nmeLights: lightsUniforms;`
-        );
-    }
+    const lightsWgslDecls = state.usesLightsUbo
+        ? `struct LightEntry { vLightData: vec4<f32>, vLightDiffuse: vec4<f32>, vLightSpecular: vec4<f32>, vLightDirection: vec4<f32> };
+struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<LightEntry, ${MAX_LIGHTS}> };
+@group(0) @binding(1) var<uniform> nmeLights: lightsUniforms;`
+        : "";
 
     // Morph-target bindings (vertex-only). Two slots: texture atlas + weights UBO.
-    let morphBindings: { textureBinding: number; uboBinding: number } | null = null;
+    let _morphBindings: { _textureBinding: number; _uboBinding: number } | null = null;
     const morphWgslDecls: string[] = [];
     if (state.usesMorphTargets) {
-        const textureBinding = nextBinding++;
-        const uboBinding = nextBinding++;
-        morphBindings = { textureBinding, uboBinding };
+        const _textureBinding = nextBinding++;
+        const _uboBinding = nextBinding++;
+        _morphBindings = { _textureBinding, _uboBinding };
         morphWgslDecls.push(
-            `@group(1) @binding(${textureBinding}) var morphTargets: texture_2d<f32>;`,
+            `@group(1) @binding(${_textureBinding}) var morphTargets: texture_2d<f32>;`,
             `struct morphUniforms { weights: vec4<f32>, count: u32, texWidth: u32, rowsPerBand: u32, _p0: u32 };`,
-            `@group(1) @binding(${uboBinding}) var<uniform> morph: morphUniforms;`,
+            `@group(1) @binding(${_uboBinding}) var<uniform> morph: morphUniforms;`,
             // Helpers are emitted inline (module-scope) so they can reference `morph` + `morphTargets`.
             `fn nme_morph_coord(vi: u32) -> vec2<i32> { let col = i32(vi % morph.texWidth); let row = i32(vi / morph.texWidth); return vec2<i32>(col, row); }`,
             `fn nme_morphPosition(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
@@ -234,13 +222,13 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     // supplied envEmitter (lazy-imported by node-material.ts). All env-specific
     // WGSL strings + BGL entries live in node-env.ts so non-env scenes never
     // bundle them.
-    let envBindings: { iblTexture: number; iblSampler: number; brdfLUT: number; brdfSampler: number } | null = null;
-    const envWgslDecls: string[] = [];
+    let _envBindings: { _iblTexture: number; _iblSampler: number; _brdfLUT: number; _brdfSampler: number } | null = null;
+    let envWgslDecls = "";
     let envBglEntries: readonly GPUBindGroupLayoutEntry[] = [];
-    if (state.usesEnv && opts.envEmitter) {
-        const env = opts.envEmitter(nextBinding);
-        envBindings = env.bindings;
-        envWgslDecls.push(env.wgslDecls);
+    if (state.usesEnv && opts._envEmitter) {
+        const env = opts._envEmitter(nextBinding);
+        _envBindings = env.bindings;
+        envWgslDecls = env.wgslDecls;
         envBglEntries = env.bglEntries;
         nextBinding += env.bindingCount;
     }
@@ -249,14 +237,23 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     // dynamically-imported `node-shadow.ts` module so scenes without shadows
     // never bundle the PCF/ESM helper code. `shadowEmitter` is supplied only
     // when `shadowGenerators` was passed to `parseNodeMaterialFromSnippet`.
-    const shadowEmit = state.shadowLights.length > 0 && opts.shadowEmitter ? opts.shadowEmitter(state.shadowLights, nextBinding, state.varyings) : null;
+    const noColorOutput = opts._noColorOutput === true;
+    const esmShadowOutput = opts._esmShadowOutput === true;
+    const shadowOutput = noColorOutput || esmShadowOutput;
+    const shadowEmit = !shadowOutput && state.shadowLights.length > 0 && opts._shadowEmitter ? opts._shadowEmitter(state.shadowLights, nextBinding, state.varyings) : null;
     if (shadowEmit) {
-        nextBinding += shadowEmit.bindingCount;
+        nextBinding += shadowEmit._bindingCount;
     }
-    const shadowBindings = shadowEmit?.bindings ?? [];
-    const shadowWgslDecls = shadowEmit ? [shadowEmit.wgslDecls] : [];
-    const shadowVertexInject = shadowEmit?.vertexInject ?? "";
-    const shadowFragmentHelper = shadowEmit?.fragmentHelper ?? "";
+    const _shadowBindings = shadowEmit?._bindings ?? [];
+    const shadowWgslDecls = shadowEmit?._wgslDecls ?? "";
+    const shadowVertexInject = shadowEmit?._vertexInject ?? "";
+    const esmShadowDepthCode = opts._esmShadowDepthCode ?? "";
+    const _esmShadowParamsBinding = esmShadowOutput ? nextBinding++ : null;
+    const shadowFragmentHelper =
+        shadowEmit?._fragmentHelper ??
+        (shadowOutput && state.shadowLights.length > 0
+            ? `fn nme_computeShadowFactors(input: VertexOut) -> array<f32, ${MAX_LIGHTS}> {\n    return array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});\n}`
+            : "");
 
     // Module-scope helpers (function defs, struct defs) — dedupe across both
     // stages by key. Fail on same-key/different-source to avoid silent loss.
@@ -274,7 +271,13 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     // Compose WGSL (node UBO struct inserted conditionally between mesh + VertexIn).
     const vertexIn = buildVertexIn(state);
     const vertexOut = buildVertexOut(state);
-    const fragmentOut = buildFragmentOut(state);
+    const fragmentOut =
+        !noColorOutput && state.usesFragDepth
+            ? `struct FragmentOut {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) fragDepth: f32,
+};`
+            : "";
     const wgslParts: string[] = ["// Auto-generated by NodeMaterial — DO NOT EDIT", SCENE_UBO_WGSL, buildMeshStruct()];
     if (nodeUbo) {
         wgslParts.push(nodeUbo.struct);
@@ -282,22 +285,27 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     if (textureWgslDecls.length > 0) {
         wgslParts.push(textureWgslDecls.join("\n"));
     }
-    if (lightsWgslDecls.length > 0) {
-        wgslParts.push(lightsWgslDecls.join("\n"));
+    if (lightsWgslDecls) {
+        wgslParts.push(lightsWgslDecls);
     }
     if (morphWgslDecls.length > 0) {
         wgslParts.push(morphWgslDecls.join("\n"));
     }
-    if (envWgslDecls.length > 0) {
-        wgslParts.push(envWgslDecls.join("\n"));
+    if (envWgslDecls) {
+        wgslParts.push(envWgslDecls);
     }
     wgslParts.push(vertexIn);
     wgslParts.push(vertexOut);
     if (fragmentOut) {
         wgslParts.push(fragmentOut);
     }
-    if (shadowWgslDecls.length > 0) {
-        wgslParts.push(shadowWgslDecls.join("\n"));
+    if (shadowWgslDecls) {
+        wgslParts.push(shadowWgslDecls);
+    }
+    if (_esmShadowParamsBinding !== null) {
+        wgslParts.push(
+            `struct NmeShadowParams { biasAndScale: vec4<f32>, depthValues: vec4<f32> };\n@group(1) @binding(${_esmShadowParamsBinding}) var<uniform> nmeShadowParams: NmeShadowParams;`
+        );
     }
     if (shadowFragmentHelper.length > 0) {
         wgslParts.push(shadowFragmentHelper);
@@ -312,42 +320,42 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
             `    var out: VertexOut;\n` +
             `    var ${SENTINEL_VTX_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);\n` +
             `${indent(vertexBody)}\n` +
-            (shadowVertexInject.length > 0 ? `    ${shadowVertexInject}\n` : ``) +
+            (!shadowOutput && shadowVertexInject.length > 0 ? `    ${shadowVertexInject}\n` : ``) +
             `    out.position = ${SENTINEL_VTX_OUTPUT};\n` +
             `    return out;\n` +
             `}`
     );
-    if (state.usesFragDepth) {
-        wgslParts.push(
-            `@fragment\nfn fs_main(in: VertexOut, @builtin(front_facing) ${SENTINEL_FRONT_FACING}: bool) -> FragmentOut {\n` +
-                `    var ${SENTINEL_FRAG_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);\n` +
-                `    var ${SENTINEL_FRAG_DEPTH}: f32 = in.position.z;\n` +
-                `${indent(fragmentBody)}\n` +
-                `    return FragmentOut(${SENTINEL_FRAG_OUTPUT}, ${SENTINEL_FRAG_DEPTH});\n` +
-                `}`
-        );
-    } else {
-        wgslParts.push(
-            `@fragment\nfn fs_main(in: VertexOut, @builtin(front_facing) ${SENTINEL_FRONT_FACING}: bool) -> @location(0) vec4<f32> {\n` +
-                `    var ${SENTINEL_FRAG_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);\n` +
-                `${indent(fragmentBody)}\n` +
-                `    return ${SENTINEL_FRAG_OUTPUT};\n` +
-                `}`
-        );
-    }
+    const fsReturnType = noColorOutput ? "" : state.usesFragDepth && !esmShadowOutput ? " -> FragmentOut" : " -> @location(0) vec4<f32>";
+    const fragDepthDecl = noColorOutput || esmShadowOutput || state.usesFragDepth ? `    var ${SENTINEL_FRAG_DEPTH}: f32 = in.position.z;\n` : "";
+    const fsReturn = noColorOutput
+        ? ""
+        : esmShadowOutput
+          ? `${indent(esmShadowDepthCode)}\n`
+          : state.usesFragDepth
+            ? `    return FragmentOut(${SENTINEL_FRAG_OUTPUT}, ${SENTINEL_FRAG_DEPTH});\n`
+            : `    return ${SENTINEL_FRAG_OUTPUT};\n`;
+    wgslParts.push(
+        `@fragment\nfn fs_main(in: VertexOut, @builtin(front_facing) ${SENTINEL_FRONT_FACING}: bool)${fsReturnType} {\n` +
+            `    var ${SENTINEL_FRAG_OUTPUT}: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);\n` +
+            fragDepthDecl +
+            `${indent(fragmentBody)}\n` +
+            fsReturn +
+            `}`
+    );
     const rawWgsl = wgslParts.join("\n\n");
     // Substitute scene-uniform sentinels emitted by blocks (FogBlock, LightBlock,
     // ReflectionTextureBlock). These all resolve to scene-UBO fields.
-    const wgsl = rawWgsl
+    const _wgsl = rawWgsl
         .replaceAll("_NME_CAMERA_POS_", "scene.vEyePosition.xyz")
         .replaceAll("_NME_FOG_PARAMS_", "scene.vFogInfos")
         .replaceAll("sceneU.", "scene.")
         .replaceAll(SENTINEL_FRAG_COORD, "in.position")
         .replaceAll(SENTINEL_SCREEN_SIZE, "vec2<f32>(scene.vFogColor.w, scene._envPad0)");
 
-    const alphaMode = opts.alphaMode ?? 0;
-    const cacheKey = `${wgsl}|${format}|${msaaSamples}|${opts.backFaceCulling !== false ? "bfc" : "nobfc"}|a${alphaMode}`;
-    const cache = getCache(engine);
+    const alphaMode = opts._alphaMode ?? 0;
+    const depthFormat = opts._depthStencilFormat ?? "depth24plus-stencil8";
+    const cacheKey = `${_wgsl}|${_format}|${depthFormat}|${_msaaSamples}|${opts._backFaceCulling !== false ? 1 : 0}|${alphaMode}|${noColorOutput ? 1 : esmShadowOutput ? 2 : 0}`;
+    const cache = getCache(_engine);
     const existing = cache.get(cacheKey);
     if (existing) {
         return existing;
@@ -357,78 +365,94 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     const blend = alphaModeToBlend(alphaMode);
     const depthWriteEnabled = blend === undefined;
 
-    const sceneBGL = getSceneBindGroupLayout(engine);
+    const sceneBGL = getSceneBindGroupLayout(_engine);
 
     // group 1 BGL
     const meshBglEntries: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }];
-    if (nodeUboBinding !== null) {
-        meshBglEntries.push({ binding: nodeUboBinding, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } });
+    if (_nodeUboBinding !== null) {
+        meshBglEntries.push({ binding: _nodeUboBinding, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } });
     }
-    for (const tb of textureBindings) {
-        meshBglEntries.push({ binding: tb.texBinding, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } });
-        meshBglEntries.push({ binding: tb.sampBinding, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } });
+    for (const tb of _textureBindings) {
+        meshBglEntries.push({ binding: tb._texBinding, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } });
+        meshBglEntries.push({ binding: tb._sampBinding, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } });
     }
-    if (morphBindings !== null) {
+    if (_morphBindings !== null) {
         meshBglEntries.push({
-            binding: morphBindings.textureBinding,
+            binding: _morphBindings._textureBinding,
             visibility: GPUShaderStage.VERTEX,
             texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
         });
         meshBglEntries.push({
-            binding: morphBindings.uboBinding,
+            binding: _morphBindings._uboBinding,
             visibility: GPUShaderStage.VERTEX,
             buffer: { type: "uniform", minBindingSize: 32 },
         });
     }
-    if (envBindings) {
+    if (_envBindings) {
         meshBglEntries.push(...envBglEntries);
     }
     if (shadowEmit) {
-        meshBglEntries.push(...shadowEmit.bglEntries);
+        meshBglEntries.push(...shadowEmit._bglEntries);
     }
-    const meshBGL = device.createBindGroupLayout({ label: "node-mesh", entries: meshBglEntries });
+    if (_esmShadowParamsBinding !== null) {
+        meshBglEntries.push({ binding: _esmShadowParamsBinding, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } });
+    }
+    const _meshBGL = device.createBindGroupLayout({ label: "node-mesh", entries: meshBglEntries });
 
     // Vertex buffers: one GPUVertexBufferLayout per declared attribute, each at location=i.
-    const vertexBuffers: GPUVertexBufferLayout[] = state.vertexAttributes.map((a, i) => ({
+    const _vertexBuffers: GPUVertexBufferLayout[] = state.vertexAttributes.map((a, i) => ({
         arrayStride: a._arrayStride,
         stepMode: a._stepMode ?? "vertex",
         attributes: [{ format: a._gpuFormat, offset: a._offset ?? 0, shaderLocation: i }],
     }));
 
-    const shaderModule = device.createShaderModule({ label: "node-material", code: wgsl });
+    const shaderModule = device.createShaderModule({ label: "node-material", code: _wgsl });
 
-    const fragTarget: GPUColorTargetState = blend ? { format, blend } : { format };
-    const pipeline = device.createRenderPipeline({
-        ...createDefaultPipelineDescriptor({
-            label: "node-material",
-            engine,
-            bgls: [sceneBGL, meshBGL],
-            vertModule: shaderModule,
-            fragModule: shaderModule,
-            vertexBuffers,
-            format,
-            msaaSamples,
-            cullMode: opts.backFaceCulling !== false ? "back" : "none",
-            blend,
-            depthWriteEnabled,
-        }),
-        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: vertexBuffers },
-        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [fragTarget] },
-    });
+    const _pipeline = device.createRenderPipeline(
+        noColorOutput
+            ? {
+                  label: "node-material-depth",
+                  layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
+                  vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
+                  fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
+                  depthStencil: { format: depthFormat, depthCompare: "less-equal", depthWriteEnabled: true },
+                  multisample: { count: _msaaSamples },
+                  primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
+              }
+            : {
+                  ...createDefaultPipelineDescriptor({
+                      _label: "node-material",
+                      _engine,
+                      _bgls: [sceneBGL, _meshBGL],
+                      _vertModule: shaderModule,
+                      _fragModule: shaderModule,
+                      _vertexBuffers,
+                      _format,
+                      _depthStencilFormat: opts._depthStencilFormat,
+                      _msaaSamples,
+                      _cullMode: opts._backFaceCulling !== false ? "back" : "none",
+                      _blend: esmShadowOutput ? undefined : blend,
+                      _depthWriteEnabled: esmShadowOutput || depthWriteEnabled,
+                  }),
+                  vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
+                  fragment: { module: shaderModule, entryPoint: "fs_main", targets: [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }] },
+              }
+    );
 
     const result: NodeCompileResult = {
-        wgsl,
-        pipeline,
-        meshBGL,
-        nodeUboSize,
-        nodeUboOffsets,
-        nodeUboBinding,
-        textureBindings,
-        morphBindings,
-        envBindings,
-        shadowBindings,
-        usesClipPlanes: state.usesClipPlanes,
-        usesMeshAttributeFlags: state.usesMeshAttributeExists,
+        _wgsl,
+        _pipeline,
+        _meshBGL,
+        _nodeUboSize,
+        _nodeUboOffsets,
+        _nodeUboBinding,
+        _textureBindings,
+        _morphBindings,
+        _envBindings,
+        _shadowBindings,
+        _usesClipPlanes: state.usesClipPlanes,
+        _usesMeshAttributeFlags: state.usesMeshAttributeExists,
+        _esmShadowParamsBinding,
     };
     cache.set(cacheKey, result);
     return result;

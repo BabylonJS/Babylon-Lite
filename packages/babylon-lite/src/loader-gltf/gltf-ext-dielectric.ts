@@ -50,10 +50,10 @@ const ext: GltfFeature = {
         }
 
         const [specTex, specColTex, thickTex, transTex] = await Promise.all([
-            ctx.texture(eSp?.specularTexture, false),
-            ctx.texture(eSp?.specularColorTexture, true),
-            ctx.texture(eVol?.thicknessTexture, false),
-            ctx.texture(eTx?.transmissionTexture, false),
+            ctx._texture(eSp?.specularTexture, false),
+            ctx._texture(eSp?.specularColorTexture, true),
+            ctx._texture(eVol?.thicknessTexture, false),
+            ctx._texture(eTx?.transmissionTexture, false),
         ]);
 
         const out: Partial<PbrMaterialProps> = {};
@@ -122,6 +122,7 @@ const ext: GltfFeature = {
         if (eTx) {
             const intensity: number = typeof eTx.transmissionFactor === "number" ? eTx.transmissionFactor : 0;
             if (intensity > 0 || transTex) {
+                out.transmissive = true;
                 const refraction: RefractionProps = {
                     ...(subsurface.refraction ?? {}),
                     intensity,

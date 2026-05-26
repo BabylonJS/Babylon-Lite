@@ -39,58 +39,64 @@ return F0+(F90-F0)*(t2*t2*t);
 
 export interface PbrTemplateConfig {
     /** When true, generates a non-looping single-light direct block + lights UBO binding. */
-    readonly hasSingleLight?: boolean;
+    readonly _hasSingleLight?: boolean;
     /** When true, generates a multi-light loop + lights UBO binding.
      *  Used for multiple lights or shadow receivers. */
-    readonly hasMultiLight?: boolean;
+    readonly _hasMultiLight?: boolean;
     /** Pre-built WGSL for the single-light UBO structs. */
-    readonly singleLightWGSL?: string;
+    readonly _singleLightWGSL?: string;
     /** Pre-built WGSL for the single-light direct lighting block. */
-    readonly singleLightBlock?: string;
+    readonly _singleLightBlock?: string;
     /** Pre-built WGSL for multi-light (structs + computePbrLight). Passed from
      *  dynamically imported fragments/multilight-wgsl.ts to keep it out of non-shadow bundles. */
-    readonly multiLightWGSL?: string;
+    readonly _multiLightWGSL?: string;
     /** Pre-built WGSL for the multi-light direct lighting loop body. */
-    readonly multiLightLoop?: string;
+    readonly _multiLightLoop?: string;
     /** Normal map mode (default: "none") */
-    readonly normalMode?: "tangent" | "cotangent" | "none";
+    readonly _normalMode?: "tangent" | "cotangent" | "none";
     /** Has emissive texture */
-    readonly hasEmissiveTexture?: boolean;
+    readonly _hasEmissiveTexture?: boolean;
     /** Has specular-glossiness workflow */
-    readonly hasSpecGloss?: boolean;
+    readonly _hasSpecGloss?: boolean;
     /** Has double-sided rendering */
-    readonly hasDoubleSided?: boolean;
+    readonly _hasDoubleSided?: boolean;
     /** Has tonemap */
-    readonly hasTonemap?: boolean;
+    readonly _hasTonemap?: boolean;
     /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
-    readonly acesHelpers?: string;
+    readonly _acesHelpers?: string;
     /** ACES WGSL: tonemap call block replacing the default exponential one. */
-    readonly acesTonemapCall?: string;
+    readonly _acesTonemapCall?: string;
     /** Has alpha blending */
-    readonly hasAlphaBlend?: boolean;
+    readonly _hasAlphaBlend?: boolean;
     /** Has specular AA */
-    readonly hasSpecularAA?: boolean;
+    readonly _hasSpecularAA?: boolean;
     /** Has gamma albedo (sRGB base color decode) */
-    readonly hasGammaAlbedo?: boolean;
+    readonly _hasGammaAlbedo?: boolean;
     /** Has morph targets (changes position/normal variable names in vertex shader) */
-    readonly hasMorph?: boolean;
+    readonly _hasMorph?: boolean;
     /** Has occlusion in ORM texture (simple path, no reflectance ext) */
-    readonly hasOcclusion?: boolean;
+    readonly _hasOcclusion?: boolean;
     /** Has emissive color UBO field (fragment handles emissive computation) */
-    readonly hasEmissiveColor?: boolean;
+    readonly _hasEmissiveColor?: boolean;
     /** When true, the reflectance fragment handles F0 + occlusion computation */
-    readonly hasReflectanceExt?: boolean;
+    readonly _hasReflectanceExt?: boolean;
     /** When true, include IBL SH coefficients in scene UBO */
-    readonly hasIbl?: boolean;
+    readonly _hasIbl?: boolean;
     /** Has anisotropy layer */
-    readonly hasAnisotropy?: boolean;
+    readonly _hasAnisotropy?: boolean;
     /** Anisotropy WGSL: BRDF helper functions (dynamically imported). */
-    readonly anisoBrdfFunctions?: string;
+    readonly _anisoBrdfFunctions?: string;
     /** Anisotropy WGSL: T/B computation block (dynamically imported). */
-    readonly anisoTBBlock?: string;
+    readonly _anisoTBBlock?: string;
     /** Optional extension config for advanced features (UV transforms, UV2, vertex colors).
      *  When undefined, base template defaults to master-like behavior (no feature strings). */
-    readonly ext?: PbrTemplateExt;
+    readonly _ext?: PbrTemplateExt;
+    /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
+    readonly _noColorOutput?: boolean;
+    /** Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
+    readonly _esmShadowOutput?: boolean;
+    /** ESM shadow depth output code. Supplied by the ESM material view so normal PBR bundles don't retain it. */
+    readonly _esmShadowDepthCode?: string;
 }
 
 /**
@@ -99,34 +105,37 @@ export interface PbrTemplateConfig {
  */
 export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     const {
-        hasSingleLight = false,
-        hasMultiLight = false,
-        singleLightWGSL = "",
-        singleLightBlock = "",
-        multiLightWGSL = "",
-        multiLightLoop = "",
-        normalMode = "none",
-        hasEmissiveTexture = false,
-        hasSpecGloss = false,
-        hasDoubleSided = false,
-        hasTonemap = false,
-        acesHelpers = "",
-        acesTonemapCall = "",
-        hasAlphaBlend = false,
-        hasSpecularAA = false,
-        hasGammaAlbedo = false,
-        hasMorph = false,
-        hasOcclusion = false,
-        hasEmissiveColor = false,
-        hasReflectanceExt = false,
-        hasIbl = false,
-        hasAnisotropy = false,
-        anisoBrdfFunctions = "",
-        anisoTBBlock = "",
-        ext,
+        _hasSingleLight = false,
+        _hasMultiLight = false,
+        _singleLightWGSL = "",
+        _singleLightBlock = "",
+        _multiLightWGSL = "",
+        _multiLightLoop = "",
+        _normalMode = "none",
+        _hasEmissiveTexture = false,
+        _hasSpecGloss = false,
+        _hasDoubleSided = false,
+        _hasTonemap = false,
+        _acesHelpers = "",
+        _acesTonemapCall = "",
+        _hasAlphaBlend = false,
+        _hasSpecularAA = false,
+        _hasGammaAlbedo = false,
+        _hasMorph = false,
+        _hasOcclusion = false,
+        _hasEmissiveColor = false,
+        _hasReflectanceExt = false,
+        _hasIbl = false,
+        _hasAnisotropy = false,
+        _anisoBrdfFunctions = "",
+        _anisoTBBlock = "",
+        _ext,
+        _noColorOutput = false,
+        _esmShadowOutput = false,
+        _esmShadowDepthCode = "",
     } = config;
-    const hasNormal = normalMode === "tangent";
-    const hasCotangentNormal = normalMode === "cotangent";
+    const hasNormal = _normalMode === "tangent";
+    const hasCotangentNormal = _normalMode === "cotangent";
     const hasAnyNormal = hasNormal || hasCotangentNormal;
 
     // ── Base vertex attributes ──────────────────────────────────
@@ -138,8 +147,8 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _baseVertexAttributes.push({ _name: "tangent", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 });
     }
     _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
-    if (ext) {
-        _baseVertexAttributes.push(...ext.extraVertexAttributes);
+    if (_ext) {
+        _baseVertexAttributes.push(..._ext.extraVertexAttributes);
     }
 
     // ── Base varyings ───────────────────────────────────────────
@@ -151,8 +160,8 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _baseVaryings.push({ _name: "worldTangent", _type: "vec3<f32>" }, { _name: "worldBitangent", _type: "vec3<f32>" });
     }
     _baseVaryings.push({ _name: "uv", _type: "vec2<f32>" });
-    if (ext) {
-        _baseVaryings.push(...ext.extraVaryings);
+    if (_ext) {
+        _baseVaryings.push(..._ext.extraVaryings);
     }
 
     // ── Base mesh UBO fields (world matrix + affected light indices — UV transforms are
@@ -174,9 +183,9 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         // Anisotropy UBO field stays on the base template because anisotropy is
         // template-only (no ShaderFragment) — the anisotropyExt just writes its
         // slice through the unified ext.writeUbo hook.
-        ...(hasAnisotropy ? [{ _name: "anisotropyParams", _type: "vec4<f32>" as const }] : []),
+        ...(_hasAnisotropy ? [{ _name: "anisotropyParams", _type: "vec4<f32>" as const }] : []),
         // ── Extension fields (per-texture UV transforms, etc.) ─
-        ...(ext ? ext.extraMaterialUboFields : []),
+        ...(_ext ? _ext.extraMaterialUboFields : []),
     ];
 
     // ── Helper: texture + sampler binding pair ────────────────────
@@ -186,26 +195,29 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
     ];
 
     // ── Base bindings (always-present textures) ─────────────────
-    const _baseBindings: BindingDecl[] = [...tex2d("baseColorTexture", "baseColorSampler")];
+    const _baseBindings: BindingDecl[] = tex2d("baseColorTexture", "baseColorSampler");
     if (hasAnyNormal) {
         _baseBindings.push(...tex2d("normalTexture", "normalSampler_"));
     }
     _baseBindings.push(...tex2d("ormTexture", "ormSampler"));
-    if (ext) {
-        _baseBindings.push(...ext.extraBindings);
+    if (_ext) {
+        _baseBindings.push(..._ext.extraBindings);
     }
-    if (hasEmissiveTexture) {
+    if (_hasEmissiveTexture) {
         _baseBindings.push(...tex2d("emissiveTexture", "emissiveSampler"));
     }
-    if (hasSpecGloss) {
+    if (_hasSpecGloss) {
         _baseBindings.push(...tex2d("specGlossTexture", "specGlossSampler"));
+    }
+    if (_esmShadowOutput) {
+        _baseBindings.push({ _name: "shadowParams", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_FRAGMENT });
     }
     // ── Vertex template ─────────────────────────────────────────
     // When morph targets are active, the morph fragment's VR
     // defines morphedPos/morphedNorm. The base template uses those instead
     // of the raw vertex attributes.
-    const posVar = hasMorph ? "morphedPos" : "position";
-    const normVar = hasMorph ? "morphedNorm" : "normal";
+    const posVar = _hasMorph ? "morphedPos" : "position";
+    const normVar = _hasMorph ? "morphedNorm" : "normal";
 
     // The vertex template uses morphedPos/morphedNorm when morph fragment is present,
     // falling back to position/normal. The morph fragment's VR defines these vars.
@@ -236,17 +248,17 @@ out.clipPos = scene.viewProjection * worldPos4;
 out.worldNormal = (finalWorld * vec4<f32>(normalize(${normVar}), 0.0)).xyz;
 ${tangentBlock}
 out.uv = uv;
-${ext ? ext.vertexBodyExtra : ""}/*VB*/
+    ${_ext ? _ext.vertexBodyExtra : ""}/*VB*/
 return out;
 }`;
 
     // ── Fragment template ────────────────────────────────────────
 
     // Normal handling block
-    const normalUV = ext?.uvForNormal ?? "input.uv";
-    const normalScaleMod = ext?.normalScaleMod ?? "";
-    const normalRef = ext?.normalScaleMod ? "scaledNormal" : "normalMapRaw";
-    const normalRefCt = ext?.normalScaleMod ? "scaledNormalCT" : "normalMapSample";
+    const normalUV = _ext?.uvForNormal ?? "input.uv";
+    const normalScaleMod = _ext?.normalScaleMod ?? "";
+    const normalRef = _ext?.normalScaleMod ? "scaledNormal" : "normalMapRaw";
+    const normalRefCt = _ext?.normalScaleMod ? "scaledNormalCT" : "normalMapSample";
     let normalBlock: string;
     if (hasNormal) {
         normalBlock = `let normalMapRaw=textureSample(normalTexture,normalSampler_,${normalUV}).rgb*2.0-1.0;
@@ -275,19 +287,19 @@ var N=N_geom;`;
     }
 
     // Anisotropy: tangent/bitangent frame (passed in from dynamic import, empty if not used)
-    const anisotropyTBBlock = hasAnisotropy ? anisoTBBlock : "";
+    const anisotropyTBBlock = _hasAnisotropy ? _anisoTBBlock : "";
 
     // Base color decoding
-    const vertexColorMod = ext?.baseColorMod ?? "";
-    const baseColorDecode = hasGammaAlbedo
+    const vertexColorMod = _ext?.baseColorMod ?? "";
+    const baseColorDecode = _hasGammaAlbedo
         ? `var baseColor=pow(baseColorSample.rgb,vec3<f32>(2.2));
 var alpha=baseColorSample.a;${vertexColorMod}`
         : `var baseColor=baseColorSample.rgb;
 var alpha=baseColorSample.a;${vertexColorMod}`;
 
     // Roughness / metallic
-    const specGlossUV = ext?.uvForSpecGloss ?? "input.uv";
-    const roughnessMetallic = hasSpecGloss
+    const specGlossUV = _ext?.uvForSpecGloss ?? "input.uv";
+    const roughnessMetallic = _hasSpecGloss
         ? `let specGloss=textureSample(specGlossTexture,specGlossSampler,${specGlossUV});
 let roughness=clamp(1.0-specGloss.a,0.0,1.0);
 let metallic=0.0;`
@@ -295,19 +307,19 @@ let metallic=0.0;`
 let metallic=orm.b*material.metallicFactor;`;
 
     // Emissive default (overridden by emissive-color fragment's AT slot)
-    const emissiveUV = ext?.uvForEmissive ?? "input.uv";
-    const emissiveDefault = hasEmissiveColor
+    const emissiveUV = _ext?.uvForEmissive ?? "input.uv";
+    const emissiveDefault = _hasEmissiveColor
         ? ``
-        : hasEmissiveTexture
+        : _hasEmissiveTexture
           ? `let emissive=textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`
           : `let emissive=vec3<f32>(0.0);`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
-    const occlusionDefault = hasReflectanceExt ? `` : ext?.occlusionOverride ? ext.occlusionOverride : hasOcclusion ? `let occlusion=orm.r;` : `let occlusion=1.0;`;
+    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? `let occlusion=orm.r;` : `let occlusion=1.0;`;
     // F0 computation (overridden by reflectance fragment's MF slot)
-    const f0Default = hasReflectanceExt
+    const f0Default = _hasReflectanceExt
         ? ``
-        : hasSpecGloss
+        : _hasSpecGloss
           ? `var colorF0=specGloss.rgb;
 let colorF90=vec3<f32>(1.0);
 let maxSpecular=max(colorF0.r,max(colorF0.g,colorF0.b));
@@ -323,7 +335,7 @@ let surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
     // Emitted unconditionally as var so sheen/other fragments can reference them
     // without needing a define; zero on the no-curvature path makes them a no-op.
     const specularAABlock =
-        hasSpecularAA || hasAnyNormal
+        _hasSpecularAA || hasAnyNormal
             ? `var AA_factor_x=0.0;
 var AA_factor_y=0.0;
 {let nDfdx_AA=dpdx(N);
@@ -337,52 +349,55 @@ var AA_factor_y=0.0;`;
 
     // Direct lighting block — use the compact non-looping shader for one non-shadow light,
     // and the generic multi-light loop for multiple lights or shadow receivers.
-    const directLightBlock: string = hasMultiLight
-        ? multiLightLoop
-        : hasSingleLight
-          ? singleLightBlock
+    const directLightBlock: string = _hasMultiLight
+        ? _multiLightLoop
+        : _hasSingleLight
+          ? _singleLightBlock
           : `var directDiffuse=vec3<f32>(0.0);
 var directSpecular=vec3<f32>(0.0);
 /*BL*/`;
 
     // Tonemap: BJS TONEMAPPING_STANDARD (exponential) by default; caller-supplied
     // ACES WGSL (from pbr-aces-wgsl.ts) is used when provided.
-    const useAces = hasTonemap && acesTonemapCall !== "";
-    const acesBlock = useAces ? acesHelpers : "";
-    const tonemapBlock = hasTonemap
+    const useAces = _hasTonemap && _acesTonemapCall !== "";
+    const acesBlock = useAces ? _acesHelpers : "";
+    const tonemapBlock = _hasTonemap
         ? useAces
-            ? acesTonemapCall
+            ? _acesTonemapCall
             : `color*=scene.vImageInfos.x;
 color=1.0-exp2(-1.590579*color);`
         : `color*=scene.vImageInfos.x;`;
 
     // Alpha output
-    const alphaBlock = hasAlphaBlend
-        ? `var finalAlpha=alpha*material.materialAlpha;
+    const alphaBlock = _noColorOutput
+        ? ""
+        : _hasAlphaBlend
+          ? `var finalAlpha=alpha*material.materialAlpha;
 var luminanceOverAlpha=0.0;
 /*BA*/
-luminanceOverAlpha+=dot(${hasIbl ? "finalSpecularScaled" : "directSpecular"},vec3<f32>(0.2126,0.7152,0.0722));
+luminanceOverAlpha+=dot(${_hasIbl ? "finalSpecularScaled" : "directSpecular"},vec3<f32>(0.2126,0.7152,0.0722));
 finalAlpha=saturate(finalAlpha+luminanceOverAlpha*luminanceOverAlpha);
 return vec4<f32>(color,finalAlpha);`
-        : `return vec4<f32>(color,alpha*material.materialAlpha);`;
+          : `return vec4<f32>(color,alpha*material.materialAlpha);`;
 
-    const doubleSidedEntry = hasDoubleSided
-        ? `@fragment fn main(input: FragmentInput, @builtin(front_facing) frontFacing: bool) -> @location(0) vec4<f32> {`
-        : `@fragment fn main(input: FragmentInput) -> @location(0) vec4<f32> {`;
-    const doubleSidedFlip = hasDoubleSided ? `if (!frontFacing) { N = -N; }` : "";
+    const doubleSidedEntry = _hasDoubleSided
+        ? `@fragment fn main(input: FragmentInput, @builtin(front_facing) frontFacing: bool)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`
+        : `@fragment fn main(input: FragmentInput)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`;
+    const doubleSidedFlip = _hasDoubleSided ? `if (!frontFacing) { N = -N; }` : "";
 
-    const lightDecls = hasMultiLight ? multiLightWGSL : hasSingleLight ? singleLightWGSL : "";
-    const lightBindingDecl = hasSingleLight || hasMultiLight ? `@group(0) @binding(1) var<uniform> lights: lightsUniforms;` : "";
-    const meshLightIndexHelper = hasSingleLight || hasMultiLight ? meshLightIndexWGSL("mesh") : "";
+    const lightDecls = _hasMultiLight ? _multiLightWGSL : _hasSingleLight ? _singleLightWGSL : "";
+    const lightBindingDecl = _hasSingleLight || _hasMultiLight ? `@group(0) @binding(1) var<uniform> lights: lightsUniforms;` : "";
+    const meshLightIndexHelper = _hasSingleLight || _hasMultiLight ? meshLightIndexWGSL("mesh") : "";
 
-    const anisoBrdfBlock = hasAnisotropy ? anisoBrdfFunctions : "";
+    const anisoBrdfBlock = _hasAnisotropy ? _anisoBrdfFunctions : "";
 
-    const fragmentHelpers = ext?.fragmentHelpers ?? "";
-    const fragmentPrelude = ext?.fragmentPrelude ?? "";
-    const baseColorUV = ext?.uvForBaseColor ?? "input.uv";
-    const ormUV = ext?.uvForOrm ?? "input.uv";
+    const fragmentHelpers = _ext?.fragmentHelpers ?? "";
+    const fragmentPrelude = _ext?.fragmentPrelude ?? "";
+    const baseColorUV = _ext?.uvForBaseColor ?? "input.uv";
+    const ormUV = _ext?.uvForOrm ?? "input.uv";
 
     const _fragmentTemplate = `/*SU*/
+${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, depthValues: vec4<f32>, }" : ""}
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
 /*HF*/
@@ -404,6 +419,7 @@ ${occlusionDefault}
 ${roughnessMetallic}
 ${emissiveDefault}
 /*AT*/
+${_noColorOutput ? "return;" : _esmShadowOutput ? _esmShadowDepthCode : ""}
 ${normalBlock}
 ${doubleSidedFlip}
 ${anisotropyTBBlock}

@@ -37,7 +37,14 @@ export interface Texture2D {
     invertY?: boolean;
     /** @internal Depth textures require texture_depth_2d shader bindings. */
     _sampleType?: "float" | "depth";
+    /** @internal Retained source for opt-in device-lost recovery. */
+    _recoverySource?: Texture2DRecoverySource;
 }
+
+export type Texture2DRecoverySource =
+    | { kind: "url"; url: string; opts: Texture2DOptions }
+    | { kind: "solid"; rgba: readonly [number, number, number, number] }
+    | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array; samplerDesc: GPUSamplerDescriptor };
 
 /** Create a fresh Texture2D wrapper that shares GPU resources with `base`
  *  but carries its own UV transform. Use this when the same underlying image
@@ -159,6 +166,7 @@ async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opt
     });
 
     const tex2d: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    engine._dlr?.u(tex2d, url, opts);
     acquireTexture(tex2d);
     return tex2d;
 }

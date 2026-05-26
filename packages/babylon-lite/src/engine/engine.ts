@@ -1,3 +1,6 @@
+import type { MeshInternal } from "../mesh/mesh.js";
+import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
 
@@ -44,11 +47,26 @@ export interface RenderingContext {
     _resize?(): void;
 }
 
+interface DeviceLostRecoveryCapture {
+    u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
+    s(tex: Texture2D, r: number, g: number, b: number, a: number): void;
+    b(tex: Texture2D, bitmap: ImageBitmap | null, srgb: boolean, mipMaps: boolean, fallback?: Uint8Array): void;
+    m(
+        mesh: MeshInternal,
+        uv2s: Float32Array | null | undefined,
+        tangents: Float32Array | null | undefined,
+        colors: Float32Array | null | undefined,
+        gpuIndices: Uint16Array | Uint32Array,
+        indexFormat: GPUIndexFormat
+    ): void;
+}
+
 /** @internal Engine with GPU internals exposed. Not re-exported from index.ts. */
 export interface EngineContextInternal extends EngineContext {
-    readonly device: GPUDevice;
+    device: GPUDevice;
     readonly context: GPUCanvasContext;
     readonly alphaMode: GPUCanvasAlphaMode;
+    _dlr?: DeviceLostRecoveryCapture;
     _animFrameId: number;
     _renderFn: ((now: number) => void) | null;
     /** Registered rendering contexts in render order (first clears; subsequent overlay). */

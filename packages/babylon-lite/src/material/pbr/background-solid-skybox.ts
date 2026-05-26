@@ -81,8 +81,8 @@ function createSkyboxMaterial(): SkyboxMaterial {
     }
 
     return {
-        getPipeline(engine, sig) {
-            const device = engine.device;
+        getPipeline(_engine, sig) {
+            const device = _engine.device;
             if (_skyCachedDevice !== device) {
                 _skyPipelines.clear();
                 _skyLayout = null;
@@ -93,22 +93,22 @@ function createSkyboxMaterial(): SkyboxMaterial {
             if (cached) {
                 return cached;
             }
-            const vertModule = device.createShaderModule({ code: SCENE_UBO_WGSL + skyboxVertSrc, label: "skybox-vert" });
-            const fragModule = device.createShaderModule({ code: WGSL_DITHER + skyboxFragSrc, label: "skybox-frag" });
+            const _vertModule = device.createShaderModule({ code: SCENE_UBO_WGSL + skyboxVertSrc, label: "skybox-vert" });
+            const _fragModule = device.createShaderModule({ code: WGSL_DITHER + skyboxFragSrc, label: "skybox-frag" });
 
             const pipeline = device.createRenderPipeline(
                 createDefaultPipelineDescriptor({
-                    label: "skybox-pipeline",
-                    engine,
-                    bgls: [getSceneBindGroupLayout(engine), getLayout(engine)],
-                    vertModule,
-                    fragModule,
-                    vertexBuffers: SKYBOX_POS_BUFFER,
-                    format: sig.colorFormat!,
-                    depthStencilFormat: sig.depthStencilFormat,
-                    msaaSamples: sig.sampleCount,
-                    depthWriteEnabled: false,
-                    flipY: sig.flipY,
+                    _label: "skybox-pipeline",
+                    _engine,
+                    _bgls: [getSceneBindGroupLayout(_engine), getLayout(_engine)],
+                    _vertModule,
+                    _fragModule,
+                    _vertexBuffers: SKYBOX_POS_BUFFER,
+                    _format: sig.colorFormat!,
+                    _depthStencilFormat: sig.depthStencilFormat,
+                    _msaaSamples: sig.sampleCount,
+                    _depthWriteEnabled: false,
+                    _flipY: sig.flipY,
                 })
             );
             _skyPipelines.set(key, pipeline);

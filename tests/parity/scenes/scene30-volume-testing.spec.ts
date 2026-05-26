@@ -2,10 +2,8 @@
  * Scene 30 — KHR_materials_volume_testing Parity Test
  *
  * Khronos volume/transmission testing glb against the default IBL environment.
- * Matches Babylon playground #YG3BBF#16. V1 uses env-only refraction (samples
- * IBL specular cube at Snell-refracted direction + Beer-Lambert absorption
- * from KHR_materials_volume attenuation). Full opaque-scene RTT refraction is
- * a follow-up; MAD ceiling accommodates the V1 env-only approximation.
+ * Matches Babylon playground #YG3BBF#16 using frame-graph scene-texture
+ * transmission for KHR_materials_transmission.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

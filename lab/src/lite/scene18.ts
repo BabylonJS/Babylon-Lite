@@ -1,7 +1,7 @@
 // Scene 18: Spotlight Hard Shadows (PCF) — FreeCamera + SpotLight + PCF Shadow Generator
 // Demonstrates new FreeCamera type and PCF shadow mapping for spot lights.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createFreeCamera, createSpotLight, createGround, createBox, createStandardMaterial, createPcfShadowGenerator, loadTexture2D, attachFreeControl, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createFreeCamera, createSpotLight, createGround, createBox, createStandardMaterial, createPcfSpotlightShadowGenerator, setShadowTaskCasterMeshes, loadTexture2D, attachFreeControl, registerSceneWithShadowSupport } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -40,13 +40,14 @@ async function main(): Promise<void> {
     addToScene(scene, light);
 
     // PCF Shadow Generator — box casts shadow onto ground
-    light.shadowGenerator = createPcfShadowGenerator(engine, light, [box], {
+    light.shadowGenerator = createPcfSpotlightShadowGenerator(engine, light, {
         mapSize: 512,
         near: cam.nearPlane,
         far: cam.farPlane,
     });
+    setShadowTaskCasterMeshes(light.shadowGenerator, [box]);
 
-    await registerScene(engine, scene);
+    await registerSceneWithShadowSupport(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

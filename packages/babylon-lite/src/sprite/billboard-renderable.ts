@@ -73,7 +73,6 @@ export function buildBillboardRenderable(engine: EngineContextInternal, system: 
     const renderable: BillboardRenderableInternal = {
         order: system.order,
         isTransparent,
-        isTransmissive: false,
         _direct: !isTransparent,
         _engine: engine,
         _system: system,

@@ -11,6 +11,7 @@
  */
 
 import type { EngineContextInternal } from "./engine.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 
 /** Signature of a render target's attachment set — enough to key a GPURenderPipeline. */
 export interface RenderTargetSignature {
@@ -20,6 +21,8 @@ export interface RenderTargetSignature {
     /** When true, the projection matrix's Y is flipped (offscreen RTT — see writePassSceneUBO).
      *  Pipelines must invert frontFace to keep back-face culling correct. */
     readonly flipY?: boolean;
+    /** Internal per-task refraction texture shared by transmissive material bindings. */
+    readonly _transmissionTexture?: Texture2D | null;
 }
 
 /** Description of a render target — what to create, not the GPU objects themselves. */
@@ -36,6 +39,8 @@ export interface RenderTargetDescriptor {
      *  time. With sampleCount === 1 the RT owns no color texture (the swap view is the
      *  color attachment directly). */
     resolveToSwapchain?: boolean;
+    /** Override projection Y-flip. Defaults to true for offscreen targets and false for swapchain targets. */
+    flipY?: boolean;
 }
 
 /** Stringified signature used to key pipelines against a render target's attachment set. */
@@ -45,7 +50,7 @@ export function targetSignatureKey(desc: RenderTargetSignature): string {
 
 /** Allocated GPU state for a render target. */
 export interface RenderTarget {
-    readonly descriptor: RenderTargetDescriptor;
+    readonly _descriptor: RenderTargetDescriptor;
     _colorTexture: GPUTexture | null;
     _colorView: GPUTextureView | null;
     _depthTexture: GPUTexture | null;
@@ -61,7 +66,7 @@ export interface RenderTarget {
 /** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
 export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
     return {
-        descriptor,
+        _descriptor: descriptor,
         _colorTexture: null,
         _colorView: null,
         _depthTexture: null,
@@ -82,7 +87,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
     }
     disposeRenderTarget(rt);
 
-    const desc = rt.descriptor;
+    const desc = rt._descriptor;
     const { width, height } = resolveSize(desc, engine);
     rt._width = width;
     rt._height = height;
@@ -96,7 +101,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
             size: { width, height },
             format: desc.colorFormat!,
             sampleCount: desc.sampleCount,
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
         });
         rt._colorView = rt._colorTexture.createView();
     }

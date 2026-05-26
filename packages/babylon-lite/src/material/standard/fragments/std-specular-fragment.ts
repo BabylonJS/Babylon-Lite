@@ -22,17 +22,17 @@ export function createStdSpecularFragment(usesUV2: boolean): ShaderFragment {
 }
 
 export const stdSpecularExt: StdExt = {
-    id: "std-specular",
-    phase: "mesh",
-    feature: HAS_SPECULAR_TEXTURE,
-    frag: (features) => createStdSpecularFragment((features & SPECULAR_USES_UV2) !== 0),
-    bind(mat, entries, b) {
+    _id: "std-specular",
+    _phase: "mesh",
+    _feature: HAS_SPECULAR_TEXTURE,
+    _frag: (features) => createStdSpecularFragment((features & SPECULAR_USES_UV2) !== 0),
+    _bind(mat, entries, b) {
         const tex = mat.specularTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.specularTexture) {
             out.push(mat.specularTexture);
         }

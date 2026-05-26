@@ -7,7 +7,7 @@
 
 import type { HdrImage } from "./hdr-parser.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import { getBilinearSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler } from "../resource/samplers.js";
 import { createUniformBuffer, createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?raw";
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";

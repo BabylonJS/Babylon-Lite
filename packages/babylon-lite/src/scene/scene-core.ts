@@ -67,8 +67,7 @@ export interface SceneContext {
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
 export interface SceneContextInternal extends SceneContext, RenderingContext {
     /** All renderables in this scene. The active frame-graph tasks bucket them
-     *  (opaque / direct / transparent) at bind time based on `isTransparent`
-     *  and `_direct`; `isTransmissive` is used by refraction setup. */
+     *  (opaque / direct / transparent) at bind time based on `isTransparent`, `_direct`, and `_transmissive`. */
     _renderables: Renderable[];
     /** Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
@@ -171,11 +170,6 @@ export function createSceneContext(engine: EngineContext): SceneContext {
             }
             if (ctx._materialSwapQueue.length > 0) {
                 ctx._processSwaps?.(ctx);
-            }
-            for (const light of ctx.lights) {
-                if (light.shadowGenerator) {
-                    draws += light.shadowGenerator.renderShadowMap(encoder);
-                }
             }
             for (const pp of ctx._prePasses) {
                 draws += pp.execute(encoder, eng);
@@ -378,6 +372,27 @@ export async function registerScene(engine: EngineContext, scene: SceneContext):
     }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
+    await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
+    ctx._frameGraph.build();
+    if ((engine as EngineContextInternal)._renderingContexts.length > 0) {
+        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(engine as EngineContextInternal, ctx);
+    }
+    registerRenderingContext(engine, ctx);
+}
+
+/**
+ * Register a scene with the engine and install the scene-owned shadow frame-graph task.
+ * Use only for scenes that generate shadow maps.
+ */
+export async function registerSceneWithShadowSupport(engine: EngineContext, scene: SceneContext): Promise<void> {
+    const ctx = scene as SceneContextInternal;
+    if (isRenderingContextRegistered(engine, ctx)) {
+        return;
+    }
+    await buildScene(scene);
+    ctx._renderables.sort(byOrder);
+    await ensureShadowTask(engine as EngineContextInternal, ctx);
+    await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
     if ((engine as EngineContextInternal)._renderingContexts.length > 0) {
         (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(engine as EngineContextInternal, ctx);
@@ -386,6 +401,11 @@ export async function registerScene(engine: EngineContext, scene: SceneContext):
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
+
+async function ensureShadowTask(engine: EngineContextInternal, scene: SceneContextInternal): Promise<void> {
+    const { createShadowTask } = await import("../frame-graph/shadow-task.js");
+    scene._frameGraph._tasks.unshift(createShadowTask(engine, scene));
+}
 
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources. */
 export function unregisterScene(engine: EngineContext, scene: SceneContext): void {

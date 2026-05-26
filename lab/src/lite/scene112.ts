@@ -1,8 +1,20 @@
 // Scene 112: Flight Helmet KTX2 — glTF KHR_texture_basisu validation.
 
-import { addToScene, attachControl, createDefaultCamera, createEngine, createHemisphericLight, createSceneContext, loadEnvironment, loadGltf, registerScene, startEngine } from "babylon-lite";
+import {
+    addToScene,
+    attachControl,
+    createDefaultCamera,
+    createEngine,
+    createHemisphericLight,
+    createSceneContext,
+    getFrameGraph,
+    loadEnvironment,
+    loadGltf,
+    registerScene,
+    startEngine,
+    type RenderTask,
+} from "babylon-lite";
 import { addDdsEnvironmentBackground } from "../../../packages/babylon-lite/src/material/pbr/background-dds-environment.js";
-import { enablePbrOpaqueRefraction, usePbrOpaqueRefraction } from "../../../packages/babylon-lite/src/material/pbr/pbr-refraction-setup.js";
 
 const MODEL_URL = "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/FlightHelmetKTX/FlightHelmet.gltf";
 
@@ -12,10 +24,9 @@ async function main(): Promise<void> {
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    enablePbrOpaqueRefraction(scene, engine);
+    (getFrameGraph(scene)._tasks[0] as RenderTask)._config.transmission = { copyCount: 1 };
 
     const helmet = await loadGltf(engine, MODEL_URL);
-    usePbrOpaqueRefraction(helmet);
     addToScene(scene, helmet);
     const groundTextureUrl = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
     const skyboxUrl = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";

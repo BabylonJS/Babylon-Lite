@@ -37,17 +37,17 @@ export function createNormalMapFragment(): ShaderFragment {
 }
 
 export const bumpStdExt: StdExt = {
-    id: "normal-map",
-    phase: "mesh",
-    feature: HAS_BUMP_TEXTURE,
-    frag: createNormalMapFragment,
-    bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
+    _id: "normal-map",
+    _phase: "mesh",
+    _feature: HAS_BUMP_TEXTURE,
+    _frag: createNormalMapFragment,
+    _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number {
         const tex = mat.bumpTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.bumpTexture) {
             out.push(mat.bumpTexture);
         }

@@ -106,7 +106,7 @@ babylon-lite/
 │   │   │   │   ├── pbr-flags.ts         # PBR feature flag bitmask
 │   │   │   │   ├── pbr-pipeline.ts      # Pipeline cache + feature flags
 │   │   │   │   ├── pbr-renderable.ts    # buildPbrRenderables() + single-mesh rebuild closure
-│   │   │   │   ├── shadow-depth-view.ts # PBR shadow/depth MaterialView helper
+│   │   │   │   ├── no-color-view.ts # PBR no-color MaterialView helper
 │   │   │   │   ├── fragments/singlelight-wgsl.ts # Non-looping one-light WGSL
 │   │   │   │   ├── fragments/multilight-wgsl.ts  # Generic multi-light WGSL
 │   │   │   │   ├── background-material.ts    # Skybox + Ground material factories
@@ -129,7 +129,7 @@ babylon-lite/
 │   │   │       ├── standard-template.ts    # Standard shader template (WGSL generation)
 │   │   │       ├── standard-pipeline.ts    # Pipeline cache + feature flags
 │   │   │       ├── standard-renderable.ts  # buildStandardMeshRenderables() + single-mesh rebuild closure
-│   │   │       ├── shadow-depth-view.ts    # Standard shadow/depth MaterialView helper
+│   │   │       ├── no-color-view.ts # Standard no-color MaterialView helper
 │   │   │       ├── skybox-cubemap.ts       # CubeMap skybox for StandardMaterial scenes
 │   │   │       └── fragments/             # Standard ShaderFragment modules
 │   │   │           ├── normal-map-fragment.ts
@@ -187,9 +187,10 @@ babylon-lite/
 │   │   │   └── gpu-pool.ts         # GPU buffer/texture pooling
 │   │   ├── shadow/
 │   │   │   ├── shadow-base.ts       # Shared shadow logic
-│   │   │   ├── shadow-generator.ts  # ESM shadow generator
-│   │   │   ├── pcf-shadow-generator.ts # PCF shadow generator
-│   │   │   └── shadow-renderable.ts # Shadow → PrePassRenderable
+│   │   │   ├── shadow-generator.ts  # ShadowGenerator contract
+│   │   │   ├── esm-directional-shadow-generator.ts # Directional ESM shadow generator
+│   │   │   ├── pcf-spotlight-shadow-generator.ts # Spot PCF shadow generator
+│   │   │   └── pcf-directional-shadow-generator.ts # Directional PCF shadow generator
 │   │   ├── frame-graph/
 │   │   │   ├── task.ts              # Frame-graph task interface
 │   │   │   ├── frame-graph.ts       # Ordered task list
@@ -201,8 +202,7 @@ babylon-lite/
 │   │   │   ├── cube-texture.ts    # 6-face cube texture loader
 │   │   │   ├── rtt.ts             # Eager render-target texture helper
 │   │   │   ├── ktx2-loader.ts      # KTX2/BasisU upload for KHR_texture_basisu
-│   │   │   ├── rtt-mip.ts          # Mipmapped render-target texture helper
-│   │   │   ├── record-mipmaps.ts   # Encoder-local mipmap recording
+│   │   │   ├── mip-count.ts        # Biased mip-count helper
 │   │   │   └── generate-mipmaps.ts # GPU mipmap generation
 │   │   ├── loader-gltf/
 │   │   │   ├── load-gltf.ts       # GLB parser, GPU upload
@@ -335,9 +335,12 @@ createGroundFromHeightMap(engine: Engine, url: string, options: GroundOptions): 
 createStandardMaterial(): StandardMaterialProps
 createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMaterialProps
 
-// Shadows — note: takes engine + casterMeshes[], not scene
-createShadowGenerator(engine: Engine, light: DirectionalLight, casterMeshes: Mesh[], config?: ShadowGeneratorConfig): ShadowGenerator
-createPcfShadowGenerator(engine: Engine, light: SpotLight, casterMeshes: Mesh[], config?: PcfShadowGeneratorConfig): ShadowGenerator
+// Shadows — generators own GPU resources; caster lists are ShadowTask inputs
+registerSceneWithShadowSupport(engine: Engine, scene: SceneContext): Promise<void>
+createEsmDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, config?: EsmDirectionalShadowGeneratorConfig): ShadowGenerator
+createPcfSpotlightShadowGenerator(engine: Engine, light: SpotLight, config?: PcfSpotlightShadowGeneratorConfig): ShadowGenerator
+createPcfDirectionalShadowGenerator(engine: Engine, light: DirectionalLight, config?: PcfDirectionalShadowGeneratorConfig): ShadowGenerator
+setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void
 
 // Animation
 createAnimationController(skeleton, scene): AnimationController
@@ -619,11 +622,11 @@ interface Texture2DOptions {
 
 // ─── Shadows ─────────────────────────────────────────────────────────
 interface ShadowGenerator {
-    shadowType: "esm" | "pcf";
-    light: LightBase;
-    config: Required<ShadowGeneratorConfig>;
+    _shadowType: "esm" | "pcf";
+    _light: LightBase;
+    _config: ShadowGeneratorRuntimeConfig;
 }
-interface ShadowGeneratorConfig {
+interface EsmDirectionalShadowGeneratorConfig {
     mapSize?: number; // Shadow map size (default 1024)
     depthScale?: number; // ESM depth exponent scale (default 50)
     bias?: number; // Shadow bias (default 0.00005)
@@ -632,14 +635,25 @@ interface ShadowGeneratorConfig {
     frustumEdgeFalloff?: number;
     orthoMinZ?: number; // Ortho projection near Z (default 1)
     orthoMaxZ?: number; // Ortho projection far Z (default 10000)
+    forceRefreshEveryFrame?: boolean;
 }
-interface PcfShadowGeneratorConfig {
+interface PcfSpotlightShadowGeneratorConfig {
     mapSize?: number; // Shadow map size (default 512)
     bias?: number;
     darkness?: number;
     normalBias?: number;
     near?: number; // Near plane for shadow projection
     far?: number; // Far plane for shadow projection
+    forceRefreshEveryFrame?: boolean;
+}
+interface PcfDirectionalShadowGeneratorConfig {
+    mapSize?: number; // Shadow map size (default 1024)
+    bias?: number;
+    darkness?: number;
+    normalBias?: number;
+    orthoMinZ?: number; // Ortho projection near Z (default 1)
+    orthoMaxZ?: number; // Ortho projection far Z (default 10000)
+    forceRefreshEveryFrame?: boolean;
 }
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -744,9 +758,13 @@ interface PickingInfo {
 interface DrawUpdateContext {
     targetWidth: number;
     targetHeight: number;
+    _camera?: Camera | null;
 }
 interface Renderable {
     order: number;
+    isTransparent: boolean;
+    _transmissive?: boolean;
+    _direct?: boolean;
     bind(engine: Engine, target: RenderTargetSignature): DrawBinding;
 }
 interface DrawBinding {
@@ -971,9 +989,13 @@ contribution = hemiColor * intensity
 interface DrawUpdateContext {
     targetWidth: number;
     targetHeight: number;
+    _camera?: Camera | null;
 }
 interface Renderable {
     order: number;
+    isTransparent: boolean;
+    _transmissive?: boolean;
+    _direct?: boolean;
     bind(engine, target): DrawBinding;
 }
 interface MaterialView {
@@ -993,7 +1015,7 @@ interface SceneUniformUpdater {
 }
 ```
 
-**Draw order**: skybox/background (0) → opaque bundle (100) → direct non-transparent draws (dynamic depth-write batches and true transmissive surfaces) → transparent (200, distance-sorted).
+**Draw order**: skybox/background (0) → opaque bundle (100) → non-transparent direct draws (dynamic depth-write batches) → transparent + transmissive (camera-space-depth sorted).
 
 **Deferred building**: Entities register builders on `scene._deferredBuilders`. `registerScene()` calls `buildScene()` to drain them before the scene is registered, then builds the scene frame graph.
 
@@ -1384,7 +1406,7 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/material/pbr/pbr-flags.ts` | PBR feature flag bitmask | — |
 | `src/material/pbr/pbr-pipeline.ts` | PBR pipeline cache | 170 |
 | `src/material/pbr/pbr-renderable.ts` | PBR renderable builder + single-mesh rebuild closure | 140 |
-| `src/material/pbr/shadow-depth-view.ts` | PBR shadow/depth material view helper | — |
+| `src/material/pbr/no-color-view.ts` | PBR no-color material view helper | — |
 | `src/material/pbr/fragments/singlelight-wgsl.ts` | Non-looping single-light PBR WGSL | — |
 | `src/material/pbr/fragments/multilight-wgsl.ts` | Generic multi-light PBR WGSL | — |
 | `src/material/pbr/background-material.ts` | Skybox + Ground material factories | 217 |
@@ -1397,7 +1419,7 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/material/standard/standard-template.ts` | Standard shader template (WGSL gen) | 230 |
 | `src/material/standard/standard-pipeline.ts` | Standard pipeline cache | 280 |
 | `src/material/standard/standard-renderable.ts` | Standard renderable builder + single-mesh rebuild closure | 115 |
-| `src/material/standard/shadow-depth-view.ts` | Standard shadow/depth material view helper | — |
+| `src/material/standard/no-color-view.ts` | Standard no-color material view helper | — |
 | `src/material/standard/skybox-cubemap.ts` | CubeMap skybox pipeline | 104 |
 | `src/material/standard/fragments/` | Standard ShaderFragment modules | — |
 | `src/shader/shader-composer.ts` | ShaderFragment composer engine | — |
@@ -1429,9 +1451,10 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/picking/ray.ts` | Ray intersection math | — |
 | `src/resource/gpu-pool.ts` | GPU buffer/texture pooling | — |
 | `src/shadow/shadow-base.ts` | Shared shadow logic | — |
-| `src/shadow/shadow-generator.ts` | ESM shadow generator | 150 |
-| `src/shadow/pcf-shadow-generator.ts` | PCF shadow generator | — |
-| `src/shadow/shadow-renderable.ts` | Shadow PrePassRenderable | 80 |
+| `src/shadow/shadow-generator.ts` | ShadowGenerator contract | — |
+| `src/shadow/esm-directional-shadow-generator.ts` | Directional ESM shadow generator | 150 |
+| `src/shadow/pcf-spotlight-shadow-generator.ts` | Spot PCF shadow generator | — |
+| `src/shadow/pcf-directional-shadow-generator.ts` | Directional PCF shadow generator | — |
 | `src/frame-graph/task.ts` | Frame-graph task interface | — |
 | `src/frame-graph/frame-graph.ts` | Ordered frame-graph task list | — |
 | `src/frame-graph/frame-graph-actions.ts` | Task insertion helpers | — |
@@ -1441,9 +1464,8 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/texture/cube-texture.ts` | 6-face cube texture loader | 141 |
 | `src/texture/rtt.ts` | Render-target texture helper | — |
 | `src/texture/ktx2-loader.ts` | KTX2/BasisU upload for `KHR_texture_basisu` | — |
-| `src/texture/rtt-mip.ts` | Mipmapped render-target texture helper | — |
-| `src/texture/record-mipmaps.ts` | Encoder-local mipmap recording | — |
-| `src/texture/generate-mipmaps.ts` | GPU mipmap generation | — |
+| `src/texture/mip-count.ts` | Biased mip-count helper | — |
+| `src/texture/generate-mipmaps.ts` | GPU mipmap generation and encoder-local mipmap recording | — |
 | `src/loader-gltf/load-gltf.ts` | GLB parser + GPU upload | 390 |
 | `src/loader-gltf/gltf-parser.ts` | glTF JSON parsing helpers | — |
 | `src/loader-gltf/gltf-material.ts` | glTF material → PbrMaterialProps | — |

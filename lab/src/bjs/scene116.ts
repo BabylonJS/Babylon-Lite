@@ -71,6 +71,67 @@ function waitForRenderedFrames(scene: Scene, targets: readonly RenderTargetTextu
     return Promise.all([waitForScene, ...waitForTargets]).then(() => undefined);
 }
 
+async function canvasHasDepthPreviews(canvas: HTMLCanvasElement): Promise<boolean> {
+    const bitmap = await createImageBitmap(canvas);
+    try {
+        const w = canvas.width;
+        const h = canvas.height;
+        const scratch = new OffscreenCanvas(w, h);
+        const ctx = scratch.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+            throw new Error("Scene 116: failed to create 2D canvas context.");
+        }
+        ctx.drawImage(bitmap, 0, 0);
+
+        const hasDarkDepthShape = (x0: number, y0: number, x1: number, y1: number): boolean => {
+            const data = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+            let darkDepthPixels = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i]! < 180 && data[i + 1]! < 80 && data[i + 2]! < 40) {
+                    darkDepthPixels++;
+                }
+            }
+            return darkDepthPixels > 100;
+        };
+
+        return (
+            hasDarkDepthShape(Math.floor(w * 0.28), Math.floor(h * 0.52), Math.floor(w * 0.43), Math.floor(h * 0.82)) &&
+            hasDarkDepthShape(Math.floor(w * 0.58), Math.floor(h * 0.52), Math.floor(w * 0.77), Math.floor(h * 0.82))
+        );
+    } finally {
+        bitmap.close();
+    }
+}
+
+function waitForDepthPreviews(canvas: HTMLCanvasElement, scene: Scene, timeoutMs: number): Promise<void> {
+    const deadline = performance.now() + timeoutMs;
+    return new Promise<void>((resolve, reject) => {
+        let pending = false;
+        const observer = scene.onAfterRenderObservable.add(() => {
+            if (pending) {
+                return;
+            }
+            pending = true;
+            void canvasHasDepthPreviews(canvas)
+                .then((ready) => {
+                    if (ready) {
+                        scene.onAfterRenderObservable.remove(observer);
+                        resolve();
+                    } else if (performance.now() > deadline) {
+                        scene.onAfterRenderObservable.remove(observer);
+                        reject(new Error("Scene 116: timed out waiting for populated depth previews."));
+                    } else {
+                        pending = false;
+                    }
+                })
+                .catch((err: unknown) => {
+                    scene.onAfterRenderObservable.remove(observer);
+                    reject(err);
+                });
+        });
+    });
+}
+
 const READY_RENDERED_FRAMES = 50;
 
 (async function () {
@@ -169,6 +230,7 @@ const READY_RENDERED_FRAMES = 50;
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     await waitForRenderedFrames(scene, [standardRTT, pbrRTT], READY_RENDERED_FRAMES);
+    await waitForDepthPreviews(canvas, scene, 8000);
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

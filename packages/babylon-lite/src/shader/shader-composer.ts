@@ -14,7 +14,7 @@ function topoSort(fragments: readonly ShaderFragment[]): ShaderFragment[] {
     const byId = new Map<string, ShaderFragment>();
     for (const f of fragments) {
         if (byId.has(f._id)) {
-            throw new Error(`Duplicate fragment id: "${f._id}"`);
+            throw Error();
         }
         byId.set(f._id, f);
     }
@@ -26,7 +26,7 @@ function topoSort(fragments: readonly ShaderFragment[]): ShaderFragment[] {
         }
         for (const d of f._dependencies ?? []) {
             if (!byId.has(d)) {
-                throw new Error(`Fragment "${f._id}" depends on unknown fragment "${d}"`);
+                throw Error();
             }
             inDeg.set(f._id, (inDeg.get(f._id) ?? 0) + 1);
             let arr = deps.get(d);
@@ -62,7 +62,7 @@ function topoSort(fragments: readonly ShaderFragment[]): ShaderFragment[] {
         }
     }
     if (out.length !== fragments.length) {
-        throw new Error("Cycle detected in fragment dependencies");
+        throw Error();
     }
     return out;
 }
@@ -111,13 +111,13 @@ function bglEntry(binding: number, decl: BindingDecl): GPUBindGroupLayoutEntry {
 function declWGSL(g: number, b: number, d: BindingDecl): string {
     switch (d._type._kind) {
         case "uniform-buffer":
-            return `@group(${g}) @binding(${b}) var<uniform> ${d._name}: ${d._name}Uniforms;`;
+            return `@group(${g})@binding(${b}) var<uniform> ${d._name}:${d._name}Uniforms;`;
         case "texture":
-            return `@group(${g}) @binding(${b}) var ${d._name}: ${d._type._textureType};`;
+            return `@group(${g})@binding(${b}) var ${d._name}:${d._type._textureType};`;
         case "sampler":
-            return `@group(${g}) @binding(${b}) var ${d._name}: ${d._type._samplerType === "sampler_non_filtering" ? "sampler" : d._type._samplerType};`;
+            return `@group(${g})@binding(${b}) var ${d._name}:${d._type._samplerType === "sampler_non_filtering" ? "sampler" : d._type._samplerType};`;
         case "storage-texture":
-            return `@group(${g}) @binding(${b}) var ${d._name}: texture_storage_2d<${d._type._format}, ${d._type._access}>;`;
+            return `@group(${g})@binding(${b}) var ${d._name}:texture_storage_2d<${d._type._format},${d._type._access}>;`;
     }
 }
 
@@ -158,7 +158,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
             vHelpers.push(f._vertexHelperFunctions);
         }
         for (const b of f._vertexBuiltins ?? []) {
-            vBuiltins.push(`@builtin(${b._builtin}) ${b._name}: ${b._type},`);
+            vBuiltins.push(`@builtin(${b._builtin}) ${b._name}:${b._type},`);
         }
     }
 
@@ -170,7 +170,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     const firstOfGroup = new Map<string, VertexAttribute>();
     for (let i = 0; i < allAttrs.length; i++) {
         const a = allAttrs[i]!;
-        inputLines.push(`@location(${i}) ${a._name}: ${a._type},`);
+        inputLines.push(`@location(${i}) ${a._name}:${a._type},`);
         if (a._bufferGroup) {
             if (!groups.has(a._bufferGroup)) {
                 groups.set(a._bufferGroup, []);
@@ -204,7 +204,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
 
     // Varyings
     const allVary = dedup(template._baseVaryings, fragVaryings);
-    const varyBody = `@builtin(position) clipPos: vec4<f32>,\n` + allVary.map((v, i) => `@location(${i}) ${v._name}: ${v._type},`).join("\n");
+    const varyBody = `@builtin(position) clipPos:vec4f,\n` + allVary.map((v, i) => `@location(${i}) ${v._name}:${v._type},`).join("\n");
 
     // UBO layouts
     const hasMaterialUbo = !!(template._baseMaterialUboFields && template._baseMaterialUboFields.length > 0);
@@ -267,16 +267,14 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
 
     const _fragmentKey = sorted.map((f) => f._id).join("|");
     const vParams = (vBuiltins.length ? vBuiltins.join("\n") + "\n" : "") + inputLines.join("\n");
-    const meshStruct = `struct MeshUniforms {\n${_meshUboSpec._structBody}\n}`;
-    const materialStruct = _materialUboSpec
-        ? `\nstruct MaterialUniforms {\n${_materialUboSpec._structBody}\n}\n@group(1) @binding(1) var<uniform> material: MaterialUniforms;`
-        : "";
+    const meshStruct = `struct MeshUniforms{\n${_meshUboSpec._structBody}\n}`;
+    const materialStruct = _materialUboSpec ? `\nstruct MaterialUniforms{\n${_materialUboSpec._structBody}\n}\n@group(1)@binding(1) var<uniform> material:MaterialUniforms;` : "";
 
     let _vertexWGSL = template._vertexTemplate;
     _vertexWGSL = _vertexWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
     _vertexWGSL = _vertexWGSL.replace("/*MU*/", meshStruct);
-    _vertexWGSL = _vertexWGSL.replace("/*VI*/", `struct VertexInput {\n${inputLines.join("\n")}\n}`);
-    _vertexWGSL = _vertexWGSL.replace("/*VO*/", `struct VertexOutput {\n${varyBody}\n}`);
+    _vertexWGSL = _vertexWGSL.replace("/*VI*/", `struct VertexInput{\n${inputLines.join("\n")}\n}`);
+    _vertexWGSL = _vertexWGSL.replace("/*VO*/", `struct VertexOutput{\n${varyBody}\n}`);
     _vertexWGSL = _vertexWGSL.replace("/*VD*/", vDecls.join("\n"));
     _vertexWGSL = _vertexWGSL.replace("/*VP*/", vParams);
     _vertexWGSL = _vertexWGSL.replace("/*VH*/", vHelpers.join("\n"));
@@ -286,7 +284,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     let _fragmentWGSL = template._fragmentTemplate;
     _fragmentWGSL = _fragmentWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
     _fragmentWGSL = _fragmentWGSL.replace("/*MU*/", meshStruct + materialStruct);
-    _fragmentWGSL = _fragmentWGSL.replace("/*FI*/", `struct FragmentInput {\n${varyBody}\n}`);
+    _fragmentWGSL = _fragmentWGSL.replace("/*FI*/", `struct FragmentInput{\n${varyBody}\n}`);
     _fragmentWGSL = _fragmentWGSL.replace("/*HF*/", helpers.join("\n"));
     _fragmentWGSL = _fragmentWGSL.replace("/*FB*/", fDecls.join("\n"));
     _fragmentWGSL = injectSlots(_fragmentWGSL, sorted, "_fragmentSlots");

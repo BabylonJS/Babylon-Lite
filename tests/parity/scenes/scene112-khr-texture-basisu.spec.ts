@@ -2,7 +2,7 @@
  * Scene 112 — KHR_texture_basisu Flight Helmet Parity Test
  *
  * Loads the FlightHelmetKTX glTF asset from BabylonJS/Assets and validates
- * glTF KHR_texture_basisu KTX2 texture-source support against Babylon.js.
+ * KHR_texture_basisu plus frame-graph transmission against Babylon.js.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

@@ -24,17 +24,17 @@ export function createStdOpacityFragment(fromRGB: boolean): ShaderFragment {
 }
 
 export const stdOpacityExt: StdExt = {
-    id: "std-opacity",
-    phase: "mesh",
-    feature: HAS_OPACITY_TEXTURE,
-    frag: (features) => createStdOpacityFragment((features & OPACITY_FROM_RGB) !== 0),
-    bind(mat, entries, b) {
+    _id: "std-opacity",
+    _phase: "mesh",
+    _feature: HAS_OPACITY_TEXTURE,
+    _frag: (features) => createStdOpacityFragment((features & OPACITY_FROM_RGB) !== 0),
+    _bind(mat, entries, b) {
         const tex = mat.opacityTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.opacityTexture) {
             out.push(mat.opacityTexture);
         }

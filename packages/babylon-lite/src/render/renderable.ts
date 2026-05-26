@@ -45,7 +45,7 @@ export interface DrawBinding {
      *  version-guarded to avoid redundant writes. Render task transparent sorting
      *  runs after these updates, so renderables may refresh `_worldCenter` here. */
     update?(context: DrawUpdateContext): void;
-    /** Scratch: squared distance from camera for transparent sorting (per-pass). */
+    /** Scratch: camera-space depth for transparent sorting (per-pass). */
     _sortDistance?: number;
 }
 
@@ -56,14 +56,13 @@ export interface Renderable {
     readonly order: number;
     /** Whether this renderable is transparent (auto-derived from material). */
     readonly isTransparent: boolean;
-    /** Whether this renderable is a true transmissive/refractive surface. These surfaces are
-     *  excluded from the opaque-scene RTT; PBR transmissive renderables also set `_direct`. */
-    readonly isTransmissive?: boolean;
+    /** True transmissive/refractive surface. Excluded from opaque-scene RTT; also direct-drawn. */
+    readonly _transmissive?: boolean;
     /** Whether this non-transparent renderable must direct-draw after cached opaque bundles. */
     readonly _direct?: boolean;
     /** Reference to the source mesh (for distance sort + material-change detection). */
     readonly mesh?: Mesh;
-    /** Scratch: squared distance from camera for transparent sorting. */
+    /** Scratch: camera-space depth for transparent sorting. */
     _sortDistance?: number;
     /** World-space center for distance sort computation. */
     _worldCenter?: [number, number, number];
@@ -117,4 +116,5 @@ export interface MeshGroupBuildResult {
  */
 export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise<MeshGroupBuildResult>) & {
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
+    _materialFamily?: "standard" | "pbr" | "node";
 };

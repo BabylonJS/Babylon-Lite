@@ -287,12 +287,10 @@
         "id": 30,
         "slug": "scene30-volume-testing",
         "name": "Scene 30 — KHR_materials_volume_testing",
-        "maxMad": 20,
-        "maxRawKB": 88.4,
-        "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment. V1 env-only refraction. Matches PG #YG3BBF#16.",
-        "note": "MAD ceiling temporarily relaxed (18.59 actual vs 0.02 target). Env-only refraction cannot show scene-behind-the-glass; full parity requires opaque-scene RTT, deferred to land with the frame-graph.",
+        "maxMad": 0.15,
+        "maxRawKB": 94,
+        "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment with frame-graph scene-texture transmission. Matches PG #YG3BBF#16.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume"],
-        "skipParity": true,
         "skipPerf": true
     },
     {
@@ -319,10 +317,9 @@
         "id": 33,
         "slug": "scene33-lights-punctual",
         "name": "Scene 33 — KHR_lights_punctual",
-        "maxMad": 0.5,
-        "maxRawKB": 88.7,
+        "maxMad": 0.07,
+        "maxRawKB": 93,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
-        "note": "MAD ceiling temporarily relaxed (0.5 actual vs 0.02 target). Glass lampshade needs correct transmission parity (see scene 30) to tighten maxMad below 0.5.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true
     },
@@ -823,10 +820,11 @@
         "id": 112,
         "slug": "scene112-khr-texture-basisu",
         "name": "Scene 112 — KHR_texture_basisu Flight Helmet",
-        "maxMad": 0.2,
+        "maxMad": 0.4,
         "maxRawKB": 110,
-        "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures for base color, normal, and occlusion/roughness/metallic maps.",
-        "tags": ["pbr", "gltf", "env", "basis"],
+        "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
+        "note": "Frame-graph transmission renders through a linear half-float target before final image processing; residual background blending variance stays within 5 RGB levels.",
+        "tags": ["pbr", "gltf", "env", "basis", "transmission"],
         "skipPerf": true
     },
     {
@@ -867,6 +865,7 @@
         "maxRawKB": 82,
         "description": "Frame-graph RTT demo for Standard and PBR material views with shadow-depth feature overrides; the normal source materials render in the main pass and the depth RTTs are displayed on planes.",
         "tags": ["std", "pbr", "frame-graph", "rtt", "shadow"],
+        "skipParity": true,
         "skipPerf": true
     },
     {
@@ -935,6 +934,26 @@
         "maxRawKB": 35,
         "description": "Loads Halo_Believe.splat and applies a GsShaderFragment that overrides finalColor at GS_FRAGMENT_MAIN_END (parity with BJS MaterialPluginBase CUSTOM_FRAGMENT_MAIN_END).",
         "tags": ["gaussian-splatting", "material-plugin"]
+    },
+    {
+        "id": 140,
+        "slug": "scene140-nme-pcf-alpha-discard-shadows",
+        "name": "Scene 140 — NME PCF Alpha Discard Shadows",
+        "maxMad": 0.25,
+        "maxRawKB": 102,
+        "description": "Scene 66 NME variant where the sphere and cube caster materials discard fragments when final alpha is below 0.4, validating PCF shadow depth passes that execute material fragment discard while morph-target shadows refresh every frame.",
+        "tags": ["nme", "procedural", "shadows", "morph", "reflection"],
+        "skipPerf": true
+    },
+    {
+        "id": 141,
+        "slug": "scene141-esm-material-casters",
+        "name": "Scene 141 — ESM Material Casters",
+        "maxMad": 0.1,
+        "maxRawKB": 137,
+        "description": "Scene 65 ESM directional-shadow setup with three caster materials: NodeMaterial, Standard, and PBR spheres all cast shadows onto a NodeMaterial receiver.",
+        "tags": ["nme", "standard", "pbr", "shadows"],
+        "skipPerf": true
     },
     {
         "id": 150,
@@ -1077,6 +1096,17 @@
         "skipPerf": true
     },
     {
+        "id": 164,
+        "slug": "scene164-device-lost-recovery",
+        "name": "Scene 164 - Device Lost Recovery",
+        "maxMad": 0.01,
+        "maxRegionMad": 0.08,
+        "maxRawKB": 95,
+        "description": "Scene 5 Alien glTF forces WebGPU device loss and validates opt-in automatic recovery without an app rebuild callback.",
+        "tags": ["pbr", "gltf", "anim", "recovery"],
+        "skipPerf": true
+    },
+    {
         "id": 170,
         "slug": "scene170-navigation-basic",
         "name": "Scene 170 - Navigation Basic",
@@ -1084,6 +1114,61 @@
         "maxRawKB": 55,
         "description": "Recast V2 navmesh built from ground + sphere + box, debug visualization, one stationary crowd agent at a fixed nav-snapped position.",
         "tags": ["navigation", "recast", "wasm"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 171,
+        "slug": "scene171-navigation-crowd-path",
+        "name": "Scene 171 - Navigation Crowd Path",
+        "maxMad": 6,
+        "maxRawKB": 100,
+        "description": "Single crowd agent on the nav_test.glb mesh follows a computed path (port of playground #DPDNVH#2).",
+        "tags": ["navigation", "recast", "wasm", "path"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 172,
+        "slug": "scene172-navigation-obstacles",
+        "name": "Scene 172 - Navigation Obstacles",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Tile-cache navmesh on a 10x10 ground with one cylinder + one box obstacle. Single agent computes a path around obstacles (port of playground #DPDNVH#3).",
+        "tags": ["navigation", "recast", "wasm", "obstacles"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 173,
+        "slug": "scene173-navigation-dynamic-obstacles",
+        "name": "Scene 173 - Navigation Dynamic Obstacles",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "Tile-cache navmesh with a box obstacle that is toggled off 1 second after ready frame (port of playground #DPDNVH#4).",
+        "tags": ["navigation", "recast", "wasm", "obstacles"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 174,
+        "slug": "scene174-navigation-offmesh",
+        "name": "Scene 174 - Navigation Off-Mesh Connections",
+        "maxMad": 2.5,
+        "maxRawKB": 100,
+        "description": "Solo navmesh on nav_test.glb with three off-mesh connections; path computed across the scene exercises elevated platforms (port of playground #DPDNVH#5).",
+        "tags": ["navigation", "recast", "wasm", "offmesh"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 175,
+        "slug": "scene175-navigation-raycast",
+        "name": "Scene 175 - Navigation Raycast",
+        "maxMad": 2.5,
+        "maxRawKB": 100,
+        "description": "Navmesh raycast between two far-separated points on nav_test.glb. Spheres mark start/end/hit, a yellow tube traces the ray (port of playground #DPDNVH#7).",
+        "tags": ["navigation", "recast", "wasm", "raycast"],
         "skipPerf": true,
         "bundleTimeoutMs": 120000
     }

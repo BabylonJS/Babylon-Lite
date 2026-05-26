@@ -15,7 +15,7 @@ import { _computeStandardMaterialFeatures, _standardShaderVariantKey } from "./s
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { getOrCreateStandardBindings, getOrCreateStandardPipeline, createStandardMeshBindGroup, clearStandardPipelineCache, writeStdMaterialData } from "./standard-pipeline.js";
-import { GENERATE_DEPTH_FOR_SHADOWS, NEEDS_UV, NEEDS_UV2, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
+import { ESM_SHADOW_OUTPUT, NO_COLOR_OUTPUT, NEEDS_UV, NEEDS_UV2, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
@@ -49,7 +49,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     for (let i = 0; i < scene.lights.length; i++) {
         const sg = scene.lights[i]!.shadowGenerator;
         if (sg) {
-            shadowLights.push({ lightIndex: i, shadowType: sg.shadowType, gen: sg });
+            shadowLights.push({ lightIndex: i, shadowType: sg._shadowType, gen: sg });
         }
     }
     const hasSomeShadows = shadowLights.length > 0;
@@ -64,13 +64,15 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const mat = materialInput;
         const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const meshFeatures = _computeMeshFeatures(mesh, mesh.receiveShadows && hasSomeShadows);
         const features = renderFeatures.features;
+        const shadowOutput = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) !== 0;
+        const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
+        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
         for (const ext of _getStdExts().values()) {
-            if (features & ext.feature) {
-                const f = ext.frag(features);
+            if (features & ext._feature) {
+                const f = ext._frag(features);
                 if (f) {
                     frags.push(f);
                 }
@@ -98,9 +100,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 frags.push(tiFrag);
             }
         }
-        const bindings = getOrCreateStandardBindings(engine, features, meshFeatures, frags, shaderKey);
+        const esmShadowDepthCode = (features & ESM_SHADOW_OUTPUT) !== 0 ? (mat as StandardMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
+        const bindings = getOrCreateStandardBindings(engine, features, meshFeatures, frags, shaderKey, esmShadowDepthCode);
 
-        const meshShadowGens = meshFeatures & MSH_RECEIVE_SHADOWS ? shadowLights.map((sl) => sl.gen) : [];
+        const meshShadowGens = receiveShadows ? shadowLights.map((sl) => sl.gen) : [];
 
         const meshUboData = new Float32Array(bindings._composed._meshUboSpec._totalBytes / 4);
         meshUboData.set(mesh.worldMatrix, 0);
@@ -120,9 +123,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 const entries: GPUBindGroupEntry[] = [];
                 let b = 0;
                 for (const sg of meshShadowGens) {
-                    entries.push({ binding: b++, resource: sg.blurredTexture.createView() });
-                    entries.push({ binding: b++, resource: sg.blurredSampler });
-                    entries.push({ binding: b++, resource: { buffer: sg.shadowUBO } });
+                    entries.push({ binding: b++, resource: sg._depthTexture.createView() });
+                    entries.push({ binding: b++, resource: sg._depthSampler });
+                    entries.push({ binding: b++, resource: { buffer: sg._shadowUBO } });
                 }
                 cached = device.createBindGroup({ layout: bindings._shadowBGL, entries });
                 shadowBGCache.set(bindings._shadowBGL, cached);
@@ -136,7 +139,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const hasOpacityTexture = (features & HAS_OPACITY_TEXTURE) !== 0;
         const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
         const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
-        const isTransparent = (features & GENERATE_DEPTH_FOR_SHADOWS) === 0 && (hasOpacityTexture || mat.alpha < 1);
+        const isTransparent = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) === 0 && (hasOpacityTexture || mat.alpha < 1);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {
@@ -152,8 +155,12 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
+        const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
         const update = (): void => {
             if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+                sortCenter[0] = mesh.worldMatrix[12]!;
+                sortCenter[1] = mesh.worldMatrix[13]!;
+                sortCenter[2] = mesh.worldMatrix[14]!;
                 meshUboData.set(mesh.worldMatrix, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
@@ -217,6 +224,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 };
             },
         };
+        r._worldCenter = sortCenter;
         let _lastUboVersion = mat._uboVersion;
         return r;
     };

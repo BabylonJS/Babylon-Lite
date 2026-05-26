@@ -11,6 +11,7 @@ import {
     _getPbrExts,
     PBR2_HAS_UV_TRANSFORM,
     PBR2_HAS_UV2,
+    PBR_HAS_ALPHA_TEST,
     PBR_HAS_ALPHA_BLEND,
     PBR_HAS_ANISOTROPY,
     PBR_HAS_DOUBLE_SIDED,
@@ -35,6 +36,8 @@ export const pbrGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     return result;
 };
 
+pbrGroupBuilder._materialFamily = "pbr";
+
 export interface PbrMaterialProps extends Material {
     baseColorTexture?: Texture2D;
     normalTexture?: Texture2D;
@@ -54,6 +57,8 @@ export interface PbrMaterialProps extends Material {
     alpha?: number;
     /** Enable alpha blending (glTF alphaMode "BLEND"). Enables radianceOverAlpha + specularOverAlpha. */
     alphaBlend?: boolean;
+    /** Alpha test cutoff (glTF alphaMode "MASK"). Fragments with base alpha * material alpha below this value are discarded. */
+    alphaCutOff?: number;
     /** Scale factor for environment/IBL contribution. Default 1.0. */
     environmentIntensity?: number;
     /** Scale factor for direct light contribution. Default 1.0. */
@@ -106,6 +111,9 @@ export interface PbrMaterialProps extends Material {
     /** Subsurface configuration. Presence of nested sub-features (translucency, scattering)
      *  enables them — no isEnabled booleans needed. Tree-shakable — only bundled when used. */
     subsurface?: SubSurfaceProps;
+    /** True transmissive surface: render task provides a scene-color refraction texture
+     *  just before this material draws. Set by KHR_materials_transmission. */
+    transmissive?: boolean;
     /** When true, the material samples the environment cubemap using the view direction
      *  (camera→fragment) instead of the reflected view direction. Used for PBR skybox boxes
      *  where the mesh surrounds the camera and should display the environment directly.
@@ -135,7 +143,8 @@ export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: 
         (mat.emissiveTexture ? PBR_HAS_EMISSIVE : 0) |
         (mat.emissiveColor ? PBR_HAS_EMISSIVE_COLOR : 0) |
         (mat.normalTexture ? PBR_HAS_NORMAL_MAP : 0) |
-        (mat.alphaBlend === true || mat.alpha! < 1 ? PBR_HAS_ALPHA_BLEND : 0) |
+        ((mat.alphaCutOff ?? 0) > 0 ? PBR_HAS_ALPHA_TEST : 0) |
+        (mat.alphaBlend === true || ((mat.alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
         (mat.specGlossTexture ? PBR_HAS_SPEC_GLOSS : 0) |
         (mat.doubleSided ? PBR_HAS_DOUBLE_SIDED : 0);
     if ((mat.occlusionStrength ?? 1.0) > 0) {
@@ -262,7 +271,7 @@ export interface ThicknessProps {
 }
 
 /** Refraction sub-feature (KHR_materials_transmission + _volume + _ior).
- *  Presence enables transmission. Requires an opaque-scene RTT at render time. */
+ *  Presence enables frame-graph scene-texture transmission. */
 export interface RefractionProps {
     /** Transmission factor (0=off, 1=fully transmissive). Default 0.
      *  Maps to KHR_materials_transmission.transmissionFactor. */
@@ -297,7 +306,7 @@ export interface SubSurfaceProps {
     tint?: TintProps;
     /** Refraction: physical light transmission through the surface
      *  (KHR_materials_transmission + _volume + _ior). Presence enables it.
-     *  Requires the engine to produce an opaque-scene render target. */
+     *  Requires the frame graph to produce a transmission refraction texture. */
     refraction?: RefractionProps;
 }
 

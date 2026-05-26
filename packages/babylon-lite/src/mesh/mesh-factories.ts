@@ -63,6 +63,7 @@ export function createMeshFromData(
     mesh._cpuNormals = normals;
     mesh._cpuUvs = uvs;
     mesh._cpuIndices = indices;
+    (engine as EngineContextInternal)._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
 
     return mesh as Mesh;
 }

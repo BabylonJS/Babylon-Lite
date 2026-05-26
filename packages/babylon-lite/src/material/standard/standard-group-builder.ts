@@ -65,3 +65,5 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     standardGroupBuilder._rebuildSingle = result.rebuildSingle;
     return result;
 };
+
+standardGroupBuilder._materialFamily = "standard";

@@ -1,7 +1,7 @@
 # Module: PBR Material
 
 > Package path: `packages/babylon-lite/src/material/pbr/`
-> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder and single-mesh rebuild closure), `pbr-flags.ts` / `pbr-flag-bits.ts` (feature flag constants), `shadow-depth-view.ts` (pass-specific material view), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
+> Files: `pbr-material.ts` (props + factory), `pbr-template.ts` (shader template), `pbr-pipeline.ts` (pipeline cache), `pbr-renderable.ts` (renderable builder and single-mesh rebuild closure), `pbr-flags.ts` / `pbr-flag-bits.ts` (feature flag constants), `no-color-view.ts` (pass-specific material view), `fragments/singlelight-wgsl.ts` (one-light WGSL), `fragments/multilight-wgsl.ts` (multi-light WGSL)
 
 ## Purpose
 
@@ -71,7 +71,7 @@ pbr-renderable.ts:
 
 Mesh/pass feature bits live in `mesh-features.ts` (`MSH_HAS_SKELETON`, `MSH_HAS_MORPH_TARGETS`, `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR`, `MSH_HAS_VERTEX_COLOR`, `MSH_HAS_UV2`, `MSH_RECEIVE_SHADOWS`). Do not duplicate a mesh feature as `PBR_HAS_*` or `PBR2_HAS_*`; the mesh flag takes precedence.
 
-Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_GENERATE_DEPTH_FOR_SHADOWS` for depth-only material views.
+Extended `features2` bits carry overflow and pass-specific features, including clearcoat texture bits, transmission/volume, unlit, UV transform, occlusion-on-UV2 material intent (`PBR2_HAS_UV2` gated by `MSH_HAS_UV2`), linear image processing for refraction, and `PBR2_NO_COLOR_OUTPUT` for no-color material views.
 
 Light type bits are also shifted into the feature mask via `getLightTypeFeatureBits()` (hemispheric=1, directional=2, point=3).
 
@@ -93,6 +93,11 @@ export interface ClearCoatProps {
     intensity?: number;
     roughness?: number;
     indexOfRefraction?: number;
+    texture?: Texture2D;
+    roughnessTexture?: Texture2D;
+    bumpTexture?: Texture2D;
+    bumpTextureScale?: number;
+    useF0Remap?: boolean;
 }
 
 /** Sheen layer properties. */
@@ -102,12 +107,58 @@ export interface SheenProps {
     roughness?: number;
     intensity?: number;
     texture?: Texture2D;
+    albedoScaling?: boolean;
+}
+
+export interface AnisotropyProps {
+    isEnabled: boolean;
+    intensity?: number;
+    direction?: [number, number];
+}
+
+export interface TranslucencyProps {
+    intensity?: number;
+    color?: [number, number, number];
+    diffusionDistance?: [number, number, number];
+}
+
+export interface ScatteringProps {
+    diffusionDistance?: [number, number, number];
+    metersPerUnit?: number;
+}
+
+export interface ThicknessProps {
+    texture?: Texture2D;
+    useGlTFChannel?: boolean;
+    min?: number;
+    max?: number;
+}
+
+export interface RefractionProps {
+    intensity?: number;
+    texture?: Texture2D;
+    indexOfRefraction?: number;
+    useThicknessAsDepth?: boolean;
+}
+
+export interface TintProps {
+    color?: [number, number, number];
+    atDistance?: number;
+}
+
+export interface SubSurfaceProps {
+    translucency?: TranslucencyProps;
+    scattering?: ScatteringProps;
+    thickness?: ThicknessProps;
+    tint?: TintProps;
+    refraction?: RefractionProps;
 }
 
 /** User-facing PBR material properties. */
 export interface PbrMaterialProps extends Material {
   baseColorTexture?: Texture2D;
   normalTexture?: Texture2D;
+  normalTextureScale?: number;
   /** Occlusion-Roughness-Metallic packed: R=occ, G=rough, B=metal. */
   ormTexture?: Texture2D;
   emissiveTexture?: Texture2D;
@@ -118,11 +169,16 @@ export interface PbrMaterialProps extends Material {
   doubleSided?: boolean;
   alpha?: number;
   alphaBlend?: boolean;
+  alphaCutOff?: number;
   environmentIntensity?: number;
   directIntensity?: number;
   usePhysicalLightFalloff?: boolean;
   reflectance?: number;
+  metallicFactor?: number;
+  roughnessFactor?: number;
   occlusionStrength?: number;
+  occlusionTexCoord?: number;
+  occlusionTexture?: Texture2D;
   metallicF0Factor?: number;
   metallicReflectanceColor?: [number, number, number];
   useOnlyMetallicFromMetallicReflectanceTexture?: boolean;
@@ -130,6 +186,12 @@ export interface PbrMaterialProps extends Material {
   gammaAlbedo?: boolean;
   clearCoat?: ClearCoatProps;
   sheen?: SheenProps;
+  anisotropy?: AnisotropyProps;
+  subsurface?: SubSurfaceProps;
+  transmissive?: boolean;
+  skyboxMode?: boolean;
+  unlit?: boolean;
+  unlitColor?: [number, number, number];
 }
 
 /** Create a PbrMaterialProps with optional overrides. */
@@ -141,8 +203,8 @@ export const pbrGroupBuilder: MeshGroupBuilder;
 /** Collect all non-null textures for acquire/release tracking. */
 export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[];
 
-/** Create a pass-specific shadow-depth material view over a PBR source material. */
-export function createPbrShadowDepthMaterialView(source: PbrMaterialProps): MaterialView;
+/** Create a pass-specific no-color material view over a PBR source material. */
+export function createPbrNoColorMaterialView(source: PbrMaterialProps): MaterialView;
 ```
 
 Usage:
@@ -165,7 +227,7 @@ addToScene(scene, await loadGltf(engine, "model.glb"));
 
 PBR renderables accept `MaterialOrView`. A plain material computes/stores `_renderFeatures = _computePbrMaterialFeatures(mat)`. A view uses `view._renderFeatures` exactly while reading all uniform/texture state from `view.source`.
 
-`createPbrShadowDepthMaterialView(source)` creates a view that clears `PBR_HAS_ALPHA_BLEND` and sets `PBR2_GENERATE_DEPTH_FOR_SHADOWS`. This produces a depth-only PBR pipeline suitable for shadow/depth RTTs while retaining the source material's geometry-relevant state and textures.
+`createPbrNoColorMaterialView(source)` creates a view that clears `PBR_HAS_ALPHA_BLEND` and sets `PBR2_NO_COLOR_OUTPUT`. This produces a no-color PBR pipeline suitable for passes that should execute the fragment stage without writing color, while retaining the source material's geometry-relevant state and textures.
 
 The `rebuildSingle` closure returned from `buildPbrRenderables()` is stored on `pbrGroupBuilder._rebuildSingle`. It is used by material swaps, `rebuildMaterial()`, and `RenderTask.addMesh(mesh, { material })` per-pass overrides.
 
@@ -204,31 +266,35 @@ export function clearPbrPipelineCache(): void;
 /** Full configuration for PBR template generation. */
 export interface PbrTemplateConfig {
     // Light configuration
-    hasSingleLight?: boolean;
-    hasMultiLight?: boolean;
-    singleLightWGSL?: string;
-    singleLightBlock?: string;
-    multiLightWGSL?: string;
-    multiLightLoop?: string;
+    _hasSingleLight?: boolean;
+    _hasMultiLight?: boolean;
+    _singleLightWGSL?: string;
+    _singleLightBlock?: string;
+    _multiLightWGSL?: string;
+    _multiLightLoop?: string;
     // Feature booleans
-    normalMode?: "tangent" | "cotangent" | "none";
-    hasEmissiveTexture?: boolean;
-    hasSpecGloss?: boolean;
-    hasDoubleSided?: boolean;
-    hasTonemap?: boolean;
-    acesHelpers?: string;
-    acesTonemapCall?: string;
-    hasAlphaBlend?: boolean;
-    hasSpecularAA?: boolean;
-    hasGammaAlbedo?: boolean;
-    hasMorph?: boolean;
-    hasOcclusion?: boolean;
-    hasEmissiveColor?: boolean;
-    hasReflectanceExt?: boolean;
-    hasAnisotropy?: boolean;
-    anisoBrdfFunctions?: string;
-    anisoTBBlock?: string;
-    ext?: PbrTemplateExt;
+    _normalMode?: "tangent" | "cotangent" | "none";
+    _hasEmissiveTexture?: boolean;
+    _hasSpecGloss?: boolean;
+    _hasDoubleSided?: boolean;
+    _hasTonemap?: boolean;
+    _acesHelpers?: string;
+    _acesTonemapCall?: string;
+    _hasAlphaBlend?: boolean;
+    _hasSpecularAA?: boolean;
+    _hasGammaAlbedo?: boolean;
+    _hasMorph?: boolean;
+    _hasOcclusion?: boolean;
+    _hasEmissiveColor?: boolean;
+    _hasReflectanceExt?: boolean;
+    _hasIbl?: boolean;
+    _hasAnisotropy?: boolean;
+    _anisoBrdfFunctions?: string;
+    _anisoTBBlock?: string;
+    _ext?: PbrTemplateExt;
+    _noColorOutput?: boolean;
+    _esmShadowOutput?: boolean;
+    _esmShadowDepthCode?: string;
 }
 
 /** Create a ShaderTemplate from PBR configuration. */
@@ -423,7 +489,7 @@ The builder stores the returned `rebuildSingle` closure on `pbrGroupBuilder._reb
 
 PBR uses the canonical `SceneUniforms` shared with Standard/material-independent passes. The struct is fixed-size (`SCENE_UBO_BYTES = 352`) and is declared in `packages/babylon-lite/shaders/scene-uniforms.wgsl`. It contains view/projection matrices, camera position, environment rotation, SH irradiance, image-processing fields, and fog fields.
 
-Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the scene-owned `LightsUniforms` UBO at group 0 binding 1 when `hasSingleLight` or `hasMultiLight` is enabled.
+Light data is **not** stored in `SceneUniforms`. PBR direct lighting reads the scene-owned `LightsUniforms` UBO at group 0 binding 1 when `_hasSingleLight` or `_hasMultiLight` is enabled.
 
 ### Mesh Uniform Buffer Layout (Group 1, Binding 0)
 
@@ -458,7 +524,7 @@ The exact layout is computed by `computeUboLayout()` from the merged UBO field l
 - **Fragment template** — texture sampling, BRDF functions (always included: GGX NDF, Smith-GGX geometry, Schlick Fresnel), optional specular AA, optional gamma decode, slot markers for material setup (`/*MF*/`, `/*SV*/`, `/*BL*/`), direct lighting (`/*AD*/`), IBL (`/*AI*/` or `/*NI*/`), post-effects (`/*AT*/`, `/*BC*/`, `/*BA*/`)
 - **Base UBO fields** for the mesh light-selection data and **base bindings** for the always-present textures; direct lighting uses the fixed group-0 lights UBO
 
-Supports both metallic-roughness and specular-glossiness workflows via `hasSpecGloss`.
+Supports both metallic-roughness and specular-glossiness workflows via `_hasSpecGloss`.
 
 ### Composed Shader Caching
 
@@ -474,7 +540,7 @@ Supports both metallic-roughness and specular-glossiness workflows via `hasSpecG
 4. Builds per-mesh mesh/material UBOs and bind groups; the mesh UBO stores `lc` and packed `li` scene-light indices
 5. For each mesh: `computePbrFeatures()` → compose shader → `getOrCreatePbrPipeline()` → create mesh UBO → `createPbrMeshBindGroup()`
 6. Returns one `Renderable` per mesh; each renderable binds target-specific `DrawBinding`s for frame-graph passes
-7. Uses opaque order = 100, transparent order = 200, and sets `_direct` on transmissive materials while keeping `isTransmissive` reserved for refraction surfaces
+7. Uses opaque order = 100 and transparent/transmissive order = 150; scene-texture refraction surfaces set `_transmissive` and bind against `RenderTargetSignature._transmissionTexture` during `record()`
 8. Returns `rebuildSingle` so material swaps and per-pass material overrides can rebuild one mesh without rebuilding the whole scene
 9. Sets up disposal to clear pipeline cache and samplers on scene teardown
 
@@ -542,8 +608,8 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 - Clearcoat direct BRDF (clearcoat-fragment `AD`)
 - Sheen direct term (sheen-fragment `AD`)
 - Shadow factor application (pbr-shadow-fragment `AD`)
-- Single-light direct block when `hasSingleLight` is enabled
-- Multi-light loop when `hasMultiLight` is enabled
+- Single-light direct block when `_hasSingleLight` is enabled
+- Multi-light loop when `_hasMultiLight` is enabled
 
 #### 6. Environment Lighting — `/*AI*/` or `/*NI*/` Slot
 
@@ -593,7 +659,7 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 - **`pbr-template.ts`**: Imports `ShaderTemplate`, `UboField`, `VertexAttribute`, `Varying`, `BindingDecl` from fragment-types.
 - **`pbr-pipeline.ts`**: Imports `PbrMaterialProps` from pbr-material, `ComposedShader` from shader-composer, feature flags from pbr-flags.
 - **`pbr-renderable.ts`**: Imports pipeline functions, template creator, shader composer, fragment factories (dynamic), engine/scene/mesh/light types, material-view types, resource pool helpers, and returns the single-mesh rebuild closure.
-- **`shadow-depth-view.ts`**: Imports `createMaterialView` and PBR feature flags to create depth-only material views without pulling the helper into ordinary PBR scenes.
+- **`no-color-view.ts`**: Imports `createMaterialView` and PBR feature flags to create no-color material views without pulling the helper into ordinary PBR scenes.
 - **`fragments/singlelight-wgsl.ts`**: No imports (pure WGSL string helpers).
 - **`fragments/multilight-wgsl.ts`**: Imports `MAX_LIGHTS` to size the generated WGSL arrays.
 - **Fragment modules**: Each imports only `ShaderFragment` (and optionally `BindingDecl`, `Varying`) from `fragment-types.js`.
@@ -629,7 +695,7 @@ BRDF evaluation (GGX NDF + Smith-GGX geometry + Schlick Fresnel) for the primary
 | `src/material/pbr/pbr-template.ts` | ~465 lines | `PbrTemplateConfig` + `createPbrTemplate()` — builds `ShaderTemplate` with BRDF helpers, slot markers, base UBO/bindings |
 | `src/material/pbr/pbr-pipeline.ts` | ~284 lines | `computePbrFeatures()`, `getOrCreatePbrPipeline()`, `createPbrMeshBindGroup()`, pipeline cache management |
 | `src/material/pbr/pbr-renderable.ts` | ~723 lines | `buildPbrRenderables()` — dynamic fragment import, shader composition, lights UBO setup, renderable creation, single-mesh rebuild closure |
-| `src/material/pbr/shadow-depth-view.ts` | ~18 lines | `createPbrShadowDepthMaterialView()` — pass-specific depth-only material view helper |
+| `src/material/pbr/no-color-view.ts` | ~18 lines | `createPbrNoColorMaterialView()` — pass-specific no-color material view helper |
 | `src/material/pbr/fragments/singlelight-wgsl.ts` | ~75 lines | Lazy WGSL helpers for the non-looping one-light direct path |
 | `src/material/pbr/fragments/multilight-wgsl.ts` | ~120 lines | Lazy WGSL helpers: `MULTI_LIGHT_STRUCTS()`, `COMPUTE_PBR_LIGHT`, `getMultiLightLoop()` |
 | `src/material/pbr/fragments/ibl-fragment.ts` | ~86 lines | IBL environment lighting fragment (BRDF LUT, specular cubemap, SH irradiance) |

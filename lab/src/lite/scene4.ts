@@ -1,6 +1,6 @@
 // Scene 4: Shadows — matches Babylon #IIZ9UU
 
-import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSpotLight, createTorus, createSphere, createGroundFromHeightMap, createShadowGenerator, createPcfShadowGenerator, createStandardMaterial, loadTexture2D, attachControl, registerScene } from "babylon-lite";
+import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, createSpotLight, createTorus, createSphere, createGroundFromHeightMap, createEsmDirectionalShadowGenerator, createPcfSpotlightShadowGenerator, setShadowTaskCasterMeshes, createStandardMaterial, loadTexture2D, attachControl, registerSceneWithShadowSupport } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     addToScene(scene, ground);
 
     // Shadow generator — torus casts shadows (directional light, ESM blur)
-    light.shadowGenerator = createShadowGenerator(engine, light, [torus], {
+    light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {
         mapSize: 1024,
         depthScale: 50,
         bias: 0.00005,
@@ -59,17 +59,19 @@ async function main(): Promise<void> {
         orthoMinZ: cam.nearPlane,
         orthoMaxZ: cam.farPlane,
     });
+    setShadowTaskCasterMeshes(light.shadowGenerator, [torus]);
 
     // Second light: SpotLight with PCF shadows (tests multi-light shadow support)
     const spot = createSpotLight([48.8, 50, 6.8], [-18.8, -20, -6.8], 1.5, 12);
     spot.intensity = 0.8;
     addToScene(scene, spot);
 
-    spot.shadowGenerator = createPcfShadowGenerator(engine, spot, [torus], {
+    spot.shadowGenerator = createPcfSpotlightShadowGenerator(engine, spot, {
         mapSize: 512,
         near: cam.nearPlane,
         far: cam.farPlane,
     });
+    setShadowTaskCasterMeshes(spot.shadowGenerator, [torus]);
 
     // Emissive sphere to visualize spotlight position
     const spotSphere = createSphere(engine, { diameter: 2 });
@@ -122,7 +124,7 @@ async function main(): Promise<void> {
     });
     document.body.appendChild(btnOrbit);
 
-    await registerScene(engine, scene);
+    await registerSceneWithShadowSupport(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

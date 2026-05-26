@@ -87,3 +87,40 @@ export async function getScene66Nme(): Promise<{ json: Record<string, unknown>; 
     const json = restoreInputNameAliases(await decodeGzipBase64Json<Record<string, unknown>>(SCENE66_NME_GZIP_BASE64));
     return { json, textures: getScene66TextureInfos(json) };
 }
+
+export function createScene66FinalAlphaDiscardJson(json: Record<string, unknown>, cutoff = 0.4): Record<string, unknown> {
+    const clone = JSON.parse(JSON.stringify(json)) as Record<string, unknown>;
+    const blocks = clone.blocks;
+    if (!Array.isArray(blocks)) {
+        throw new Error("Scene 66 NME JSON is missing blocks");
+    }
+
+    const blockById = new Map<number, Record<string, unknown>>();
+    for (const block of blocks as Array<Record<string, unknown>>) {
+        const id = block.id;
+        if (typeof id === "number") {
+            blockById.set(id, block);
+        }
+    }
+
+    const discard = blockById.get(142);
+    const alphaCutoff = blockById.get(147);
+    if (!discard || !alphaCutoff || !Array.isArray(discard.inputs)) {
+        throw new Error("Scene 66 NME JSON does not match the expected alpha discard graph");
+    }
+
+    for (const input of discard.inputs as Array<Record<string, unknown>>) {
+        if (input.name === "value") {
+            input.targetBlockId = 109;
+            input.targetConnectionName = "output";
+            input.inputName = "value";
+        } else if (input.name === "cutoff") {
+            input.targetBlockId = 147;
+            input.targetConnectionName = "output";
+            input.inputName = "cutoff";
+        }
+    }
+    alphaCutoff.value = cutoff;
+
+    return clone;
+}

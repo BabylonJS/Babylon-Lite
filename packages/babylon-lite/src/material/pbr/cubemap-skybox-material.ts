@@ -44,8 +44,8 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
     }
 
     return {
-        getPipeline(engine, sig) {
-            const device = engine.device;
+        getPipeline(_engine, sig) {
+            const device = _engine.device;
             if (_cmCachedDevice !== device) {
                 _cmPipelines.clear();
                 _cmLayouts.clear();
@@ -56,22 +56,22 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
             if (cached) {
                 return cached;
             }
-            const vertModule = device.createShaderModule({ code: vertCode, label: `${label}-vert` });
-            const fragModule = device.createShaderModule({ code: fragCode, label: `${label}-frag` });
+            const _vertModule = device.createShaderModule({ code: vertCode, label: `${label}-vert` });
+            const _fragModule = device.createShaderModule({ code: fragCode, label: `${label}-frag` });
 
             const pipeline = device.createRenderPipeline(
                 createDefaultPipelineDescriptor({
-                    label: `${label}-pipeline`,
-                    engine,
-                    bgls: [getSceneBindGroupLayout(engine), getLayout(engine)],
-                    vertModule,
-                    fragModule,
-                    vertexBuffers: SKYBOX_POS_BUFFER,
-                    format: sig.colorFormat!,
-                    depthStencilFormat: sig.depthStencilFormat,
-                    msaaSamples: sig.sampleCount,
-                    depthWriteEnabled: false,
-                    flipY: sig.flipY,
+                    _label: `${label}-pipeline`,
+                    _engine,
+                    _bgls: [getSceneBindGroupLayout(_engine), getLayout(_engine)],
+                    _vertModule,
+                    _fragModule,
+                    _vertexBuffers: SKYBOX_POS_BUFFER,
+                    _format: sig.colorFormat!,
+                    _depthStencilFormat: sig.depthStencilFormat,
+                    _msaaSamples: sig.sampleCount,
+                    _depthWriteEnabled: false,
+                    _flipY: sig.flipY,
                 })
             );
             _cmPipelines.set(key, pipeline);

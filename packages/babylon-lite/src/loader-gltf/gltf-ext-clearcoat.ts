@@ -9,9 +9,9 @@ const ext: GltfFeature = {
             return null;
         }
         const [tex, rough, normal] = await Promise.all([
-            ctx.texture(c.clearcoatTexture, false),
-            ctx.texture(c.clearcoatRoughnessTexture, false),
-            ctx.texture(c.clearcoatNormalTexture, false),
+            ctx._texture(c.clearcoatTexture, false),
+            ctx._texture(c.clearcoatRoughnessTexture, false),
+            ctx._texture(c.clearcoatNormalTexture, false),
         ]);
         return {
             clearCoat: {

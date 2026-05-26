@@ -12,6 +12,8 @@ const sceneConfig = getSceneConfig(116);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene116-shadow-depth-materials");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
+test.skip(!!sceneConfig.skipParity, "Scene 116 skipped via skipParity in scene-config.json");
+
 test("Scene 116 - Shadow Depth Materials matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 116, timeout: 60_000, settleMs: 1_000 });

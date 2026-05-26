@@ -301,7 +301,7 @@ describe("addFacingBillboardSystem", () => {
 
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(true);
-        expect(scene._renderables[0]!.isTransmissive).toBe(false);
+        expect(scene._renderables[0]!._transmissive).toBeFalsy();
         expect(scene._renderables[0]!._direct).toBe(false);
         expect(scene._renderables[0]!.order).toBe(230);
     });
@@ -316,7 +316,7 @@ describe("addFacingBillboardSystem", () => {
 
         expect(scene._renderables.length).toBe(1);
         expect(scene._renderables[0]!.isTransparent).toBe(false);
-        expect(scene._renderables[0]!.isTransmissive).toBe(false);
+        expect(scene._renderables[0]!._transmissive).toBeFalsy();
         expect(scene._renderables[0]!._direct).toBe(true);
         expect(scene._renderables[0]!.order).toBe(120);
     });

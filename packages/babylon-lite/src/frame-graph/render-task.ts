@@ -61,6 +61,9 @@ export interface RenderTaskConfig {
     cam?: Camera | null;
     /** Use canvas dimensions, not render-target dimensions, for this pass's scene UBO aspect. */
     cs?: boolean;
+    /** Scene-texture transmission settings. `copyCount: 0` copies before every transmissive draw.
+     *  `generateMipmaps: false` allocates only mip 0 for the refraction texture and skips mip generation. */
+    transmission?: { copyCount?: number; generateMipmaps?: boolean };
 }
 
 export interface RenderTask extends Task {
@@ -92,6 +95,8 @@ export interface RenderTask extends Task {
     _lightsUBO: GPUBuffer;
     _suData: Float32Array;
     _su: unknown[];
+    _executeWithTransmission?(sampleCount: number): number;
+    _targetSignature: RenderTargetSignature;
 
     /** Add a mesh to this task's explicit render list with an optional per-pass material override.
      *  Resolved at `record()` time via `material._buildGroup._rebuildSingle`,
@@ -117,16 +122,15 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     const rt = config.rt;
     config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     config.clr ??= true;
-    const swapchain = rt.descriptor.resolveToSwapchain === true;
-    const sampleCount = rt.descriptor.sampleCount ?? 1;
-    // Offscreen RTTs need a Y-flipped projection so the result texture samples
-    // upright when sourced by a downstream pass. Swapchain passes never flip.
-    const flipY = !swapchain;
-    const targetSignature: RenderTargetSignature = {
-        colorFormat: rt.descriptor.colorFormat,
-        depthStencilFormat: rt.descriptor.depthStencilFormat,
-        sampleCount,
-        flipY,
+    const desc = rt._descriptor;
+    // Offscreen RTTs usually need a Y-flipped projection so the result texture
+    // samples upright when sourced by a downstream pass. Depth-only shadow maps
+    // can override this to preserve shadow-sampler UV conventions.
+    const targetSignature = {
+        colorFormat: desc.colorFormat,
+        depthStencilFormat: desc.depthStencilFormat,
+        sampleCount: desc.sampleCount ?? 1,
+        flipY: desc.flipY ?? desc.resolveToSwapchain !== true,
     };
 
     const sceneBGL = getSceneBindGroupLayout(eng);
@@ -162,6 +166,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _lightsUBO: lightsUBO,
         _suData: new Float32Array(SCENE_UBO_BYTES / 4),
         _su: [],
+        _targetSignature: targetSignature,
         _pendingMeshes: [],
         addMesh(mesh, opts) {
             const material = opts?.material ?? mesh.material;
@@ -187,7 +192,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             buildRenderPassDescriptor(task, rt);
         },
         execute(): number {
-            return executePass(task, eng, sc, swapchain, sampleCount, flipY, targetSignature, updateContext);
+            return executePass(task, eng, targetSignature, updateContext);
         },
         dispose(): void {
             task._passes.length = 0;
@@ -249,23 +254,13 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContextInternal): void 
 /** Per-frame back-to-front sort for transparent bindings using the active camera. */
 function sortTransparentBindings(task: RenderTask, camera: Camera | null | undefined): void {
     const arr = task._transparentBindings;
-    if (arr.length <= 1) {
+    if (arr.length <= 1 || !camera) {
         return;
     }
-    if (!camera) {
-        return;
-    }
-    const w = camera.worldMatrix;
-    const cx = w[12]!;
-    const cy = w[13]!;
-    const cz = w[14]!;
+    const v = getViewMatrix(camera);
     for (const b of arr) {
-        b._sortDistance = 0;
         const wc = b.renderable._worldCenter;
-        if (wc) {
-            const [wx, wy, wz] = wc;
-            b._sortDistance = (wx - cx) ** 2 + (wy - cy) ** 2 + (wz - cz) ** 2;
-        }
+        b._sortDistance = wc ? wc[0]! * v[2]! + wc[1]! * v[6]! + wc[2]! * v[10]! + v[14]! : 0;
     }
     arr.sort((a, b) => b._sortDistance! - a._sortDistance! || a.renderable.order - b.renderable.order);
 }
@@ -280,7 +275,7 @@ function buildBindings(task: RenderTask, eng: EngineContextInternal, targetSigna
     transparent.length = 0;
     for (const r of task._renderables) {
         const binding = r.bind(eng, targetSignature);
-        if (r.isTransparent) {
+        if (r.isTransparent || r._transmissive) {
             transparent.push(binding);
         } else if (r._direct) {
             direct.push(binding);
@@ -307,7 +302,7 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
             depthLoadOp: "clear",
             depthStoreOp: "store",
         };
-        if (rt.descriptor.depthStencilFormat?.includes("stencil")) {
+        if (rt._descriptor.depthStencilFormat?.includes("stencil")) {
             depthAttachment.stencilClearValue = 0;
             depthAttachment.stencilLoadOp = "clear";
             depthAttachment.stencilStoreOp = "store";
@@ -317,14 +312,8 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     task._renderPassDescriptor.depthStencilAttachment = depthAttachment ?? undefined;
 }
 
-function prepareRenderTaskPass(
-    task: RenderTask,
-    eng: EngineContextInternal,
-    sc: SceneContextInternal,
-    flipY: boolean,
-    targetSignature: RenderTargetSignature,
-    context: DrawUpdateContext
-): void {
+function prepareRenderTaskPass(task: RenderTask, eng: EngineContextInternal, targetSignature: RenderTargetSignature, context: DrawUpdateContext): void {
+    const sc = task.scene;
     // Auto-resync when the source scene mutates.
     if (task._autoFromScene && task._lastVersion !== sc._renderableVersion) {
         task._renderables.length = 0;
@@ -338,7 +327,7 @@ function prepareRenderTaskPass(
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
-    writePassSceneUBO(task, eng, sc, camera, flipY);
+    writePassSceneUBO(task, eng, sc, camera, targetSignature.flipY === true);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
@@ -353,19 +342,13 @@ function prepareRenderTaskPass(
     sortTransparentBindings(task, camera);
 }
 
-function executePass(
-    task: RenderTask,
-    eng: EngineContextInternal,
-    sc: SceneContextInternal,
-    swapchain: boolean,
-    sampleCount: number,
-    flipY: boolean,
-    targetSignature: RenderTargetSignature,
-    context: DrawUpdateContext
-): number {
-    prepareRenderTaskPass(task, eng, sc, flipY, targetSignature, context);
+function executePass(task: RenderTask, eng: EngineContextInternal, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
+    const sc = task.scene;
+    const sampleCount = targetSignature.sampleCount;
+    prepareRenderTaskPass(task, eng, targetSignature, context);
     const att = task._colorAttachment;
     const cfg = task._config;
+    const swapchain = cfg.rt._descriptor.resolveToSwapchain === true;
     if (cfg.rt._colorView || swapchain) {
         att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
         att.loadOp = cfg.clr ? "clear" : "load";
@@ -377,6 +360,9 @@ function executePass(
         } else {
             att.view = swapView;
         }
+    }
+    if (task._executeWithTransmission) {
+        return task._executeWithTransmission(sampleCount);
     }
     const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
     const draws = executePassBody(task, pass);
@@ -392,11 +378,11 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     const cfg = task._config;
     const rt = cfg.rt;
     const scene = task.scene;
-    const camera = cfg.cam ?? scene.camera;
-    const sceneBG = task._sceneBG;
     const opaqueBindings = task._opaqueBindings;
     const opaqueBundles = task._opaqueBundles;
+    const sceneBG = task._sceneBG;
 
+    const camera = cfg.cam ?? scene.camera;
     const v = camera?.viewport;
     if (v) {
         const rw = rt._width;
@@ -415,7 +401,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     // or visibility version (_vis). The bundle records group(0) at its start so it can
     // be replayed standalone (executeBundles inherits no inherited state).
     if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
-        const desc = rt.descriptor;
+        const desc = rt._descriptor;
         const be = eng.device.createRenderBundleEncoder({
             colorFormats: desc.colorFormat ? [desc.colorFormat] : [],
             depthStencilFormat: desc.depthStencilFormat,

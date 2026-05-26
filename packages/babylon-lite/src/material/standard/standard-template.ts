@@ -53,50 +53,35 @@ return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb * a);
 `;
 
 export interface StandardTemplateConfig {
-    /** Which optional textures are present */
-    readonly textures: {
-        readonly diffuse?: boolean;
-        readonly emissive?: boolean;
-        readonly bump?: boolean;
-        readonly specular?: boolean;
-        readonly ambient?: boolean;
-        readonly lightmap?: boolean;
-        readonly opacity?: boolean;
-        readonly reflection?: boolean;
-    };
+    readonly _diffuse?: boolean;
     /** UV coordinate channels used */
-    readonly needsUV: boolean;
-    readonly needsUV2: boolean;
-    /** UV2 usage per texture */
-    readonly lightmapUsesUV2?: boolean;
-    readonly ambientUsesUV2?: boolean;
-    readonly diffuseUsesUV2?: boolean;
-    readonly specularUsesUV2?: boolean;
-    /** Shadow mode */
-    readonly hasShadow: boolean;
-    readonly hasPcfShadow?: boolean;
-    /** Opacity from RGB rather than alpha */
-    readonly opacityFromRGB?: boolean;
+    readonly _needsUV: boolean;
+    readonly _needsUV2: boolean;
+    readonly _diffuseUsesUV2?: boolean;
     /** Disable lighting (unlit material) */
-    readonly disableLighting?: boolean;
+    readonly _disableLighting?: boolean;
+    /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
+    readonly _noColorOutput?: boolean;
+    /** Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
+    readonly _esmShadowOutput?: boolean;
 }
 
 /**
  * Create a Standard material ShaderTemplate from configuration.
  * The template contains slot markers that the composer fills.
  */
-export function createStandardTemplate(config: StandardTemplateConfig): ShaderTemplate {
-    const { textures, needsUV, needsUV2, disableLighting } = config;
+export function createStandardTemplate(config: StandardTemplateConfig, esmShadowDepthCode = ""): ShaderTemplate {
+    const { _diffuse, _needsUV, _needsUV2, _diffuseUsesUV2, _disableLighting, _noColorOutput, _esmShadowOutput } = config;
 
     // ── Base vertex attributes ──────────────────────────────────
     const _baseVertexAttributes: VertexAttribute[] = [
         { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
         { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
     ];
-    if (needsUV) {
+    if (_needsUV) {
         _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
-    if (needsUV2) {
+    if (_needsUV2) {
         _baseVertexAttributes.push({ _name: "uv2", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     }
 
@@ -106,10 +91,10 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
         { _name: "vn", _type: "vec3<f32>" },
         { _name: "vf", _type: "vec3<f32>" },
     ];
-    if (needsUV) {
+    if (_needsUV) {
         _baseVaryings.push({ _name: "vu", _type: "vec2<f32>" });
     }
-    if (needsUV2) {
+    if (_needsUV2) {
         _baseVaryings.push({ _name: "vv", _type: "vec2<f32>" });
     }
     // shadow varyings (vPositionFromLight, vDepthMetric) are provided by std-shadow-fragment
@@ -124,15 +109,18 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
     // matches the conventional slot 5 when diffuse is present (bindings 3,4).
     const _baseBindings: BindingDecl[] = [{ _name: "mat", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_FRAGMENT }];
 
-    if (textures.diffuse) {
+    if (_diffuse) {
         _baseBindings.push(
             { _name: "dT", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
             { _name: "dS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT }
         );
     }
     // UV params UBO — only when UVs are actually emitted.
-    if (needsUV) {
+    if (_needsUV) {
         _baseBindings.push({ _name: "up", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_VERTEX });
+    }
+    if (_esmShadowOutput) {
+        _baseBindings.push({ _name: "shadowParams", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_FRAGMENT });
     }
     // bump bindings are provided by the normal-map fragment (not baseBindings)
     // emissive, specular, ambient, lightmap, opacity, reflection bindings
@@ -140,17 +128,14 @@ export function createStandardTemplate(config: StandardTemplateConfig): ShaderTe
 
     // Shadow map bindings (group 2) are provided by std-shadow-fragment
 
-    // No separate vertex bindings — shadow/UV is in baseBindings above
-    const _baseVertexBindings: BindingDecl[] = [];
-
     // ── Vertex template ─────────────────────────────────────────
 
-    const uvPassthrough = needsUV ? `out.vu = uv * up.u.xy + up.u.zw;` : "";
+    const uvPassthrough = _needsUV ? `out.vu = uv * up.u.xy + up.u.zw;` : "";
 
-    const uv2Passthrough = needsUV2 ? `out.vv = uv2;` : "";
+    const uv2Passthrough = _needsUV2 ? `out.vv = uv2;` : "";
 
     // Vertex UBO struct definitions (must be before binding declarations)
-    const vertexUboStructs = needsUV ? `struct upUniforms { u: vec4<f32>, }` : "";
+    const vertexUboStructs = _needsUV ? `struct upUniforms { u: vec4<f32>, }` : "";
 
     const _vertexTemplate = `/*SU*/
 /*MU*/
@@ -205,35 +190,25 @@ _1: f32,
 };
 `;
 
-    const helpers = [WGSL_FOG];
-    if (!disableLighting) {
-        helpers.push(LIGHTING_FN);
-    }
+    const helpers = _disableLighting ? WGSL_FOG : WGSL_FOG + LIGHTING_FN;
     // reflection, shadow, bump helpers are provided by their respective fragments
 
     // Main fragment body — mirrors old composeFragmentShader exactly
-    const uvSelect = (useUV2: boolean | undefined) => (useUV2 ? "input.vv" : "input.vu");
-
-    const doubleSidedEntry = `@fragment fn main(input: FragmentInput) -> @location(0) vec4<f32> {`;
+    const doubleSidedEntry = `@fragment fn main(input: FragmentInput)${_noColorOutput ? "" : " -> @location(0) vec4<f32>"} {`;
 
     // View direction
-    const viewDirCode = !disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
+    const viewDirCode = !_disableLighting ? `let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
 
     // Normal computation — fragment can override via AC slot
-    let normalCode: string;
-    if (!disableLighting) {
-        normalCode = `var normalW = normalize(input.vn);`;
-    } else {
-        normalCode = "";
-    }
+    const normalCode = _disableLighting ? "" : `var normalW = normalize(input.vn);`;
 
     // Opacity — default from material alpha, fragment can modify via AT
     const opacityCode = `var alpha = mat.dc.a;`;
 
     // Base color + alpha test. Texture alpha used for discard only (not blended into output alpha),
     // matching BJS ALPHATEST without ALPHAFROMDIFFUSE.
-    const baseColorCode = textures.diffuse
-        ? `let _ds = textureSample(dT, dS, ${uvSelect(config.diffuseUsesUV2)});
+    const baseColorCode = _diffuse
+        ? `let _ds = textureSample(dT, dS, ${_diffuseUsesUV2 ? "input.vv" : "input.vu"});
 if (_ds.a < mat.aCut) { discard; }
 var baseColor = _ds.rgb * mat.tl;`
         : `var baseColor = vec3<f32>(1.0, 1.0, 1.0);`;
@@ -241,10 +216,10 @@ var baseColor = _ds.rgb * mat.tl;`
     // Diffuse color + emissive + specular — defaults, fragments can override via AT
     const diffuseColorCode = `let diffuseColor = mat.dc.rgb;`;
     const emissiveCode = `var emissiveContrib = mat.ec;`;
-    const specularColorCode = !disableLighting ? `var specularColor = mat.sc.rgb;` : "";
+    const specularColorCode = !_disableLighting ? `var specularColor = mat.sc.rgb;` : "";
     // Lighting block (only when lighting enabled)
     let lightingBlock: string;
-    if (!disableLighting) {
+    if (!_disableLighting) {
         // Shadow — default to 1.0, fragment overrides via AD slot
         // shadowFactors array is populated by std-shadow-fragment (one per light index)
         lightingBlock = `var glossiness = mat.sc.a;
@@ -272,10 +247,11 @@ var color = vec4<f32>(finalDiffuse * baseAmbientColor + finalSpecular + reflecti
     const _fragmentTemplate = `/*SU*/
 ${lightsStructs}
 ${materialStruct}
+${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, depthValues: vec4<f32>, }" : ""}
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
-${!disableLighting ? meshLightIndexWGSL("mesh") : ""}
-${helpers.join("\n")}
+${!_disableLighting ? meshLightIndexWGSL("mesh") : ""}
+${helpers}
 /*HF*/
 /*FB*/
 /*FI*/
@@ -290,6 +266,7 @@ ${diffuseColorCode}
 ${emissiveCode}
 ${specularColorCode}
 /*AT*/
+${_noColorOutput ? "return;" : _esmShadowOutput ? esmShadowDepthCode : ""}
 ${lightingBlock}
 /*BC*/
 color = vec4<f32>(max(color.rgb, vec3<f32>(0.0)), color.a);
@@ -298,7 +275,7 @@ let fog = calcFogFactor(input.vf);
 color = vec4<f32>(mix(scene.vFogColor.rgb, color.rgb, fog), color.a);
 }
 /*BA*/
-return color;
+${_noColorOutput ? "" : "return color;"}
 }`;
 
     return {
@@ -308,6 +285,5 @@ return color;
         _baseVertexAttributes,
         _baseVaryings,
         _baseBindings,
-        _baseVertexBindings,
     };
 }

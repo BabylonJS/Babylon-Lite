@@ -17,11 +17,11 @@ export function createStdCubeReflectionFragment(): ShaderFragment {
 }
 
 export const stdCubeReflectionExt: StdExt = {
-    id: "std-cube-reflection",
-    phase: "mesh",
-    feature: HAS_CUBE_REFLECTION,
-    frag: createStdCubeReflectionFragment,
-    bind(mat, entries, b) {
+    _id: "std-cube-reflection",
+    _phase: "mesh",
+    _feature: HAS_CUBE_REFLECTION,
+    _frag: createStdCubeReflectionFragment,
+    _bind(mat, entries, b) {
         const cube = mat.reflectionCubeTexture!;
         entries.push({ binding: b++, resource: cube.view });
         entries.push({ binding: b++, resource: cube.sampler });

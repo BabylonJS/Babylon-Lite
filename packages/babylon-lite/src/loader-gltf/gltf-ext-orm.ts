@@ -29,13 +29,13 @@ async function compositeOrm(mr: ImageBitmap, occ: ImageBitmap): Promise<ImageBit
 const ext: GltfFeature = {
     id: "_orm-composite",
     async applyMaterial(mat, ctx) {
-        const mr = mat.metallicRoughnessImage;
-        const occ = mat.occlusionImage;
+        const mr = mat._metallicRoughnessImage;
+        const occ = mat._occlusionImage;
         if (!mr || !occ || mr === occ) {
             return null;
         }
         const bmp = await compositeOrm(mr, occ);
-        return { ormTexture: ctx.uploadImage(bmp, false) };
+        return { ormTexture: ctx._uploadImage(bmp, false) };
     },
 };
 export default ext;

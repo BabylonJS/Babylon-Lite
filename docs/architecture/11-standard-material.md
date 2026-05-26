@@ -1,7 +1,7 @@
 # Module: Standard Material (Blinn-Phong)
 
 > Package path: `packages/babylon-lite/src/material/standard/`
-> Files: `standard-material.ts` (types/factory), `create-standard-material.ts` (factory), `standard-group-builder.ts` (dynamic imports), `standard-template.ts` (shader template), `standard-pipeline.ts` (pipeline cache), `standard-renderable.ts` (renderable builder and single-mesh rebuild closure), `standard-flags.ts` (feature flags and extension registry), `shadow-depth-view.ts` (pass-specific material view)
+> Files: `standard-material.ts` (types/factory), `create-standard-material.ts` (factory), `standard-group-builder.ts` (dynamic imports), `standard-template.ts` (shader template), `standard-pipeline.ts` (pipeline cache), `standard-renderable.ts` (renderable builder and single-mesh rebuild closure), `standard-flags.ts` (feature flags and extension registry), `no-color-view.ts` (pass-specific material view)
 
 ## Purpose
 
@@ -64,10 +64,9 @@ standard-renderable.ts (buildStandardMeshRenderables):
 | `OPACITY_FROM_RGB`       | `1 << 12` | `material.opacityFromRGB`    | Opacity from RGB luminance                  |
 | `HAS_REFLECTION_TEXTURE` | `1 << 13` | `material.reflectionTexture` | Spherical/planar reflection                 |
 | `DISABLE_LIGHTING`       | `1 << 14` | `material.disableLighting`   | Skip light loop, emissive-only output       |
-| `PCF_SHADOWS`            | `1 << 15` | PCF shadow generator         | PCF shadow sampling instead of ESM          |
 | `MATERIAL_ALPHA_BLEND`   | `1 << 16` | `material.alpha < 1`         | Alpha blend pipeline state                  |
 | `HAS_CUBE_REFLECTION`    | `1 << 17` | `material.reflectionCubeTexture` | Cube reflection sampling                 |
-| `GENERATE_DEPTH_FOR_SHADOWS` | `1 << 18` | Shadow-depth material view | Depth encoded into color output             |
+| `NO_COLOR_OUTPUT` | `1 << 18` | No-color material view | Fragment stage runs discard/alpha-test logic and writes no color |
 | `HAS_DEPTH_EMISSIVE_TEXTURE` | `1 << 19` | Emissive texture has depth sample type | Depth texture emissive preview |
 | `NEEDS_UV`               | derived   | Any texture present          | UV vertex attribute                         |
 | `NEEDS_UV2`              | derived   | Any `*_USES_UV2` flag        | UV2 vertex attribute                        |
@@ -131,8 +130,8 @@ export function createStandardMaterial(): StandardMaterialProps;
 /** Collect all non-null textures for acquire/release tracking. */
 export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[];
 
-/** Create a pass-specific shadow-depth material view over a Standard source material. */
-export function createStandardShadowDepthMaterialView(source: StandardMaterialProps): MaterialView;
+/** Create a pass-specific no-color material view over a Standard source material. */
+export function createStandardNoColorMaterialView(source: StandardMaterialProps): MaterialView;
 ```
 
 ### Pipeline (`standard-pipeline.ts`)
@@ -141,12 +140,8 @@ export function createStandardShadowDepthMaterialView(source: StandardMaterialPr
 // Feature flags (see Dynamic Feature Flags table above for full list)
 export const HAS_DIFFUSE_TEXTURE = 1 << 0;
 // ... (all flags as documented)
-export const PCF_SHADOWS = 1 << 18;
 
 export function _computeStandardMaterialFeatures(mat: StandardMaterialProps): number;
-export function featuresToTemplateConfig(features: number, meshFeatures?: number): StandardTemplateConfig;
-export function composeStandardShader(features: number, meshFeatures?: number, fragments?: ShaderFragment[]): ComposedShader;
-
 export function getOrCreateStandardBindings(
     engine: EngineContextInternal,
     features: number,
@@ -160,9 +155,6 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
 export function clearStandardPipelineCache(): void;
 export function releaseStandardPipelineVariant(variant: PipelineVariant): void;
 
-export function registerPcfShadowShader(ext: ShadowShaderExt): void;
-export function getPcfShadowExt(): ShadowShaderExt | null;
-
 // Re-exports from lights-ubo
 export { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO };
 ```
@@ -172,30 +164,17 @@ export { LIGHTS_UBO_SIZE, getLightsUboSize, writeLightsUBO, refreshLightsUBO };
 ```typescript
 /** Configuration for standard shader template generation. */
 export interface StandardTemplateConfig {
-    textures: {
-        diffuse?: boolean;
-        emissive?: boolean;
-        bump?: boolean;
-        specular?: boolean;
-        ambient?: boolean;
-        lightmap?: boolean;
-        opacity?: boolean;
-        reflection?: boolean;
-    };
-    needsUV: boolean;
-    needsUV2: boolean;
-    lightmapUsesUV2?: boolean;
-    ambientUsesUV2?: boolean;
-    diffuseUsesUV2?: boolean;
-    specularUsesUV2?: boolean;
-    hasShadow: boolean;
-    hasPcfShadow?: boolean;
-    opacityFromRGB?: boolean;
-    disableLighting?: boolean;
+    _diffuse?: boolean;
+    _needsUV: boolean;
+    _needsUV2: boolean;
+    _diffuseUsesUV2?: boolean;
+    _disableLighting?: boolean;
+    _noColorOutput?: boolean;
+    _esmShadowOutput?: boolean;
 }
 
 /** Create a ShaderTemplate from standard material configuration. */
-export function createStandardTemplate(config: StandardTemplateConfig): ShaderTemplate;
+export function createStandardTemplate(config: StandardTemplateConfig, esmShadowDepthCode?: string): ShaderTemplate;
 ```
 
 ### Renderable (`standard-renderable.ts`)
@@ -222,7 +201,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
 Standard renderables accept `MaterialOrView`. A plain material computes/stores `_renderFeatures = { features: _computeStandardMaterialFeatures(mat) }`. A view uses `view._renderFeatures` exactly while reading all uniform/texture state from `view.source`.
 
-`createStandardShadowDepthMaterialView(source)` creates a view that ORs `GENERATE_DEPTH_FOR_SHADOWS` into the source material feature bits. This produces a Standard shader variant that writes depth into color, useful for shadow-depth RTT previews and pass-specific depth rendering.
+`createStandardNoColorMaterialView(source)` creates a view that ORs `NO_COLOR_OUTPUT` into the source material feature bits. This produces a Standard shader variant that runs discard/alpha-test code and writes no color, useful for passes that should execute the fragment stage without writing color.
 
 The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is stored on `standardGroupBuilder._rebuildSingle`. It is used by material swaps, `rebuildMaterial()`, and `RenderTask.addMesh(mesh, { material })` per-pass overrides.
 
@@ -389,7 +368,7 @@ The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is st
 
 ### Shader Template (`standard-template.ts`)
 
-`createStandardTemplate(config)` builds a `ShaderTemplate` with slot markers for fragment injection. The template provides:
+`createStandardTemplate(config, esmShadowDepthCode?)` builds a `ShaderTemplate` with slot markers for fragment injection. The template provides:
 
 **Always-present WGSL blocks (embedded in template):**
 
@@ -621,7 +600,6 @@ registerScene(engine, scene)       → runs deferred builders and builds frame g
 | `HAS_REFLECTION_TEXTURE`                       | `#define REFLECTION`                                           |
 | `THIN_INSTANCES` / `THIN_INSTANCE_COLOR`       | `mesh.thinInstanceSetBuffer(...)`                              |
 | `material.disableLighting`                     | `material.disableLighting`                                     |
-| `PCF_SHADOWS`                                  | `#define SHADOWPCF0`                                           |
 | `computeFeatures()`                            | Internal define computation in `StandardMaterial._getEffect()` |
 | `getOrCreatePipeline()`                        | Pipeline cache in StandardMaterial                             |
 | `createStandardTemplate()` + `composeShader()` | GLSL shader generation from defines                            |
@@ -638,7 +616,7 @@ registerScene(engine, scene)       → runs deferred builders and builds frame g
 - **`standard-template.ts`**: Imports `ShaderTemplate`, `UboField`, `VertexAttribute`, `Varying`, `BindingDecl` from fragment-types, `WGSL_FOG` from wgsl-helpers.
 - **`standard-pipeline.ts`**: Imports `createStandardTemplate` from standard-template, `composeShader` from shader-composer, types from standard-material, shadow generator types, lights UBO helpers.
 - **`standard-renderable.ts`**: Imports pipeline functions from standard-pipeline, `ShaderFragment` from fragment-types, scene/engine/mesh/light types, material-view types, renderable interface, resource pool helpers, and returns the single-mesh rebuild closure.
-- **`shadow-depth-view.ts`**: Imports `createMaterialView` and Standard feature flags to create depth-only material views without pulling the helper into ordinary Standard scenes.
+- **`no-color-view.ts`**: Imports `createMaterialView` and Standard feature flags to create no-color material views without pulling the helper into ordinary Standard scenes.
 - **Fragment modules** (`fragments/`): Each imports only `ShaderFragment` (and optionally `BindingDecl`, `Varying`) from `fragment-types.js`.
 - **`thin-instance-gpu.ts`** (`src/mesh/`): Conditionally imported by `standardGroupBuilder` when thin instances are detected.
 - **Depended on by**: Application code (via `createStandardMaterial`), mesh factories, skybox-cubemap (shares scene UBO layout).
@@ -671,7 +649,7 @@ registerScene(engine, scene)       → runs deferred builders and builds frame g
 | `src/material/standard/standard-template.ts`                 | ~299 lines | `StandardTemplateConfig` + `createStandardTemplate()` — builds `ShaderTemplate` with Blinn-Phong lighting, fog, slot markers                                                            |
 | `src/material/standard/standard-pipeline.ts`                 | ~503 lines | Feature flags, `computeFeatures()`, `composeStandardShader()`, `getOrCreatePipeline()`, `createDynamicMeshGPU()`, `writeMaterialUBO()`, pipeline/shader caches, PCF shadow registration |
 | `src/material/standard/standard-renderable.ts`               | ~313 lines | `StdFragmentFactories` interface, `buildStandardMeshRenderables()` — composes shaders with fragments, creates Renderables, returns single-mesh rebuild closure                          |
-| `src/material/standard/shadow-depth-view.ts`                 | ~16 lines  | `createStandardShadowDepthMaterialView()` — pass-specific depth material view helper                                                                                                    |
+| `src/material/standard/no-color-view.ts`                      | ~16 lines  | `createStandardNoColorMaterialView()` — pass-specific no-color material view helper                                                                                                      |
 | `src/material/standard/fragments/normal-map-fragment.ts`     | ~33 lines  | Cotangent-frame bump/normal mapping fragment (`AC` slot)                                                                                                                                |
 | `src/material/standard/fragments/std-emissive-fragment.ts`   | ~17 lines  | Emissive texture sampling fragment (`AT` slot)                                                                                                                                          |
 | `src/material/standard/fragments/std-specular-fragment.ts`   | ~18 lines  | Specular texture sampling fragment (`AT` slot, UV/UV2 aware)                                                                                                                            |

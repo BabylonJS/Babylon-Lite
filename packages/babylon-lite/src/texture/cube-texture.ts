@@ -1,5 +1,5 @@
 /** CubeTexture — loads 6 face images into a GPU cube texture with mipmaps. */
-import { getTrilinearSampler } from "../resource/gpu-pool.js";
+import { getTrilinearSampler } from "../resource/samplers.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { EngineContextInternal } from "../engine/engine.js";

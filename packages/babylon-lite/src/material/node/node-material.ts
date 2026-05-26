@@ -62,6 +62,8 @@ export interface NodeMaterialInternal extends NodeMaterial {
     readonly _compile: NodeCompileResult;
     readonly _state: NodeBuildState;
     readonly _graph: NodeGraph;
+    readonly _vertexBody: string;
+    readonly _fragmentBody: string;
     /** Ordered list of vertex attribute names that the pipeline's vertex buffers expect. */
     readonly _vertexAttrNames: readonly string[];
     readonly _shadowGenerators: readonly import("../../shadow/shadow-generator.js").ShadowGenerator[];
@@ -78,10 +80,10 @@ export interface NodeMaterialInternal extends NodeMaterial {
 }
 
 interface UniformSlot {
-    readonly name: string;
-    readonly type: NodeValueType;
-    readonly offsetBytes: number;
-    readonly values: Float32Array;
+    readonly _name: string;
+    readonly _type: NodeValueType;
+    readonly _offsetBytes: number;
+    readonly _values: Float32Array;
 }
 
 // ─── Parse entry point ──────────────────────────────────────────────
@@ -112,7 +114,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         const defaultIdx = options.shadowGenerators.map((_, i) => i);
         const indices = options.shadowLightIndices ?? defaultIdx;
         for (let i = 0; i < options.shadowGenerators.length; i++) {
-            shadowLightsPre.push({ lightIndex: indices[i]!, shadowType: options.shadowGenerators[i]!.shadowType });
+            shadowLightsPre.push({ lightIndex: indices[i]!, shadowType: options.shadowGenerators[i]!._shadowType });
         }
     }
 
@@ -126,29 +128,29 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     // graph emitted state.usesEnv. Scenes without ReflectionBlock+PBR-MR never
     // bundle this module.
     let envHelpers: typeof import("./node-env.js") | null = null;
-    let envEmitter: typeof import("./node-env.js").emitEnv | undefined;
+    let _envEmitter: typeof import("./node-env.js").emitEnv | undefined;
     if (state.usesEnv) {
         envHelpers = await import("./node-env.js");
-        envEmitter = envHelpers.emitEnv;
+        _envEmitter = envHelpers.emitEnv;
     }
 
     // Dynamic import: the PCF/ESM WGSL helpers live in node-shadow.ts and
     // are only loaded when the caller supplied shadowGenerators. Scenes
     // without shadows never bundle this module.
-    let shadowEmitter: typeof import("./node-shadow.js").emitShadow | undefined;
+    let _shadowEmitter: typeof import("./node-shadow.js").emitShadow | undefined;
     if (options.shadowGenerators && options.shadowGenerators.length > 0) {
-        shadowEmitter = (await import("./node-shadow.js")).emitShadow;
+        _shadowEmitter = (await import("./node-shadow.js")).emitShadow;
     }
 
-    const engineInternal = engine as EngineContextInternal;
+    const _engine = engine as EngineContextInternal;
     const compile = compileNodePipeline(state, vertexWgsl, fragmentWgsl, {
-        engine: engineInternal,
-        format: engineInternal.format,
-        msaaSamples: engineInternal.msaaSamples,
-        backFaceCulling: graph.backFaceCulling,
-        alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
-        envEmitter,
-        shadowEmitter,
+        _engine,
+        _format: _engine.format,
+        _msaaSamples: _engine.msaaSamples,
+        _backFaceCulling: graph.backFaceCulling,
+        _alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
+        _envEmitter,
+        _shadowEmitter,
     });
 
     // Build the `inputs` map: one NodeInputHandle per named uniform.
@@ -156,23 +158,23 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     const uniformValues = new Map<string, UniformSlot>();
     for (const [name, blockId] of graph.namedInputs) {
         const block = graph.blocks.get(blockId)!;
-        const fieldName = sanitize(block.name || `input${block.id}`);
-        const offset = compile.nodeUboOffsets.get(fieldName);
-        if (offset === undefined) {
+        const _name = sanitize(block.name || `input${block.id}`);
+        const _offsetBytes = compile._nodeUboOffsets.get(_name);
+        if (_offsetBytes === undefined) {
             continue;
         }
-        const type = bjsTypeToNodeType((block.serialized["type"] as number | undefined) ?? 0x10);
-        if (type === "mat4f") {
+        const _type = bjsTypeToNodeType((block.serialized["type"] as number | undefined) ?? 0x10);
+        if (_type === "mat4f") {
             continue;
         }
-        const len = floatCount(type);
-        const defaultValues = extractDefault(block.serialized["value"], type);
-        const arr = new Float32Array(len);
-        arr.set(defaultValues);
-        const slot: UniformSlot = { name: fieldName, type, offsetBytes: offset, values: arr };
-        uniformValues.set(fieldName, slot);
+        const len = floatCount(_type);
+        const defaultValues = extractDefault(block.serialized["value"], _type);
+        const _values = new Float32Array(len);
+        _values.set(defaultValues);
+        const slot: UniformSlot = { _name, _type, _offsetBytes, _values };
+        uniformValues.set(_name, slot);
 
-        const handleType = handleTypeOf(type);
+        const handleType = handleTypeOf(_type);
         // capture material so the setter can mark it dirty.
         const setDirty = () => {
             material._uboDirty = true;
@@ -180,13 +182,13 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         const handle: NodeInputHandle = {
             type: handleType,
             get value(): number | number[] {
-                return handleType === "f32" ? slot.values[0]! : Array.from(slot.values);
+                return handleType === "f32" ? slot._values[0]! : Array.from(slot._values);
             },
             set value(v: number | number[]) {
                 if (typeof v === "number") {
-                    slot.values[0] = v;
+                    slot._values[0] = v;
                 } else {
-                    slot.values.set(v);
+                    slot._values.set(v);
                 }
                 setDirty();
             },
@@ -201,32 +203,32 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         if (block.className !== "InputBlock") {
             continue;
         }
-        const fieldName = sanitize(block.name || `input${block.id}`);
-        if (uniformValues.has(fieldName)) {
+        const _name = sanitize(block.name || `input${block.id}`);
+        if (uniformValues.has(_name)) {
             continue;
         } // already handled above
-        const offset = compile.nodeUboOffsets.get(fieldName);
-        if (offset === undefined) {
+        const _offsetBytes = compile._nodeUboOffsets.get(_name);
+        if (_offsetBytes === undefined) {
             continue;
         }
-        const type = bjsTypeToNodeType((block.serialized["type"] as number | undefined) ?? 0x10);
-        if (type === "mat4f") {
+        const _type = bjsTypeToNodeType((block.serialized["type"] as number | undefined) ?? 0x10);
+        if (_type === "mat4f") {
             continue;
         }
-        const len = floatCount(type);
-        const defaultValues = extractDefault(block.serialized["value"], type);
-        const arr = new Float32Array(len);
-        arr.set(defaultValues);
-        uniformValues.set(fieldName, { name: fieldName, type, offsetBytes: offset, values: arr });
+        const len = floatCount(_type);
+        const defaultValues = extractDefault(block.serialized["value"], _type);
+        const _values = new Float32Array(len);
+        _values.set(defaultValues);
+        uniformValues.set(_name, { _name, _type, _offsetBytes, _values });
     }
 
     const attrNames = state.vertexAttributes.map((a) => a._name);
 
     // Per-texture handles (populated from options.textures, then exposed via inputs).
     const textureSlots = new Map<string, { current: Texture2D | null }>();
-    for (const tb of compile.textureBindings) {
-        const slot = { current: options.textures?.[tb.name] ?? null };
-        textureSlots.set(tb.name, slot);
+    for (const tb of compile._textureBindings) {
+        const slot = { current: options.textures?.[tb._name] ?? null };
+        textureSlots.set(tb._name, slot);
         const handle: NodeInputHandle = {
             type: "texture2d",
             get texture(): Texture2D | null {
@@ -236,22 +238,16 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
                 slot.current = v;
             },
         } as NodeInputHandle;
-        inputs[tb.name] = handle;
+        inputs[tb._name] = handle;
     }
 
     const _buildGroup: MeshGroupBuilder = async (scene, meshes): Promise<MeshGroupBuildResult> => {
         const { buildNodeMeshRenderables } = await import("./node-renderable.js");
         const result = buildNodeMeshRenderables(scene, meshes);
-        // NME doesn't support per-mesh material rebuilds (no per-pass override / material swap
-        // currently; the NME node graph baked into the pipeline is fixed at build time).
-        // Provide a no-op rebuildSingle that throws so callers can detect unsupported usage.
-        return {
-            ...result,
-            rebuildSingle: () => {
-                throw new Error("NodeMaterial does not currently support per-mesh material rebuild (per-pass override / material swap).");
-            },
-        };
+        _buildGroup._rebuildSingle = result.rebuildSingle;
+        return result;
     };
+    _buildGroup._materialFamily = "node";
 
     const material: NodeMaterialInternal = {
         inputs,
@@ -261,6 +257,8 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _compile: compile,
         _state: state,
         _graph: graph,
+        _vertexBody: vertexWgsl,
+        _fragmentBody: fragmentWgsl,
         _vertexAttrNames: attrNames,
         _shadowGenerators: options.shadowGenerators ?? [],
         _needsAlphaBlending: graph.needsAlphaBlending,
@@ -395,14 +393,14 @@ function extractDefault(raw: unknown, type: NodeValueType): number[] {
 // ─── UBO writer ─────────────────────────────────────────────────────
 
 export function writeNodeUBO(engine: EngineContextInternal, buffer: GPUBuffer, material: NodeMaterialInternal): void {
-    const size = material._compile.nodeUboSize;
+    const size = material._compile._nodeUboSize;
     if (size === 0) {
         return;
     }
     const scratch = new Float32Array(size / 4);
     for (const slot of material._uniformValues.values()) {
-        const dstIdx = slot.offsetBytes >> 2;
-        scratch.set(slot.values, dstIdx);
+        const dstIdx = slot._offsetBytes >> 2;
+        scratch.set(slot._values, dstIdx);
     }
     engine.device.queue.writeBuffer(buffer, 0, scratch);
 }

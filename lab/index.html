@@ -1479,6 +1479,49 @@
                 font-size: 0.75rem;
                 margin-bottom: 0.6rem;
             }
+            .bf-master-compare {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 0.5rem;
+                margin-bottom: 0.65rem;
+                padding: 0.6rem;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                background: #161b22;
+            }
+            .bf-master-compare-title {
+                grid-column: 1 / -1;
+                color: #8b949e;
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+            }
+            .bf-master-compare-metric {
+                color: #8b949e;
+                font-size: 0.75rem;
+            }
+            .bf-master-compare-metric strong {
+                display: block;
+                margin-top: 0.15rem;
+                color: #e6edf3;
+                font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                font-size: 0.86rem;
+            }
+            .bf-master-compare-delta {
+                display: inline-block;
+                margin-left: 0.35rem;
+                font-weight: 700;
+            }
+            .bf-master-compare-delta.increase {
+                color: #f85149;
+            }
+            .bf-master-compare-delta.decrease {
+                color: #3fb950;
+            }
+            .bf-master-compare-delta.neutral {
+                color: #8b949e;
+            }
             .bf-toolbar {
                 position: sticky;
                 top: 0;
@@ -2857,7 +2900,7 @@
                             <td>KHR_materials_transmission</td>
                             <td>⚡</td>
                             <td>✅</td>
-                            <td>V1 env-only refraction (Scene 30); full opaque-scene RTT refraction pending frame-graph</td>
+                            <td>Frame-graph scene-texture transmission (Scenes 30/33/112)</td>
                         </tr>
                         <tr>
                             <td>KHR_materials_ior</td>
@@ -4609,6 +4652,27 @@
                 };
             }
 
+            function normalizeBundleChunkFile(file) {
+                return String(file).replace(/-[A-Za-z0-9_-]{8}(?=\.js$)/, "");
+            }
+
+            function getBundleRuntimeBytes(info, sizes) {
+                if (!info || !info.chunks) return null;
+                var runtimeSet = {};
+                (sizes && sizes.runtimeChunks ? sizes.runtimeChunks : []).forEach(function (file) {
+                    runtimeSet[file] = true;
+                    runtimeSet[normalizeBundleChunkFile(file)] = true;
+                });
+                var hasRuntime = Object.keys(runtimeSet).length > 0;
+                var total = 0;
+                info.chunks.forEach(function (chunk) {
+                    if (!hasRuntime || runtimeSet[chunk.file] || runtimeSet[normalizeBundleChunkFile(chunk.file)]) {
+                        total += chunk.bytes || 0;
+                    }
+                });
+                return total;
+            }
+
             function renderBundleMasterDelta(sizes, masterSizes) {
                 var delta = getBundleDelta(sizes, masterSizes);
                 if (!delta) return "";
@@ -4629,6 +4693,34 @@
                     Math.abs(delta.roundedDelta).toFixed(1) +
                     " KB vs master</span>"
                 );
+            }
+
+            function renderBundleMasterByteDelta(currentBytes, masterBytes) {
+                if (currentBytes == null || masterBytes == null) return "";
+                var delta = currentBytes - masterBytes;
+                var fmtCardBytes = function (n) {
+                    if (n < 1024) return n + " B";
+                    return (n / 1024).toFixed(2) + " KB";
+                };
+                var fmtCardDeltaBytes = function (n) {
+                    return (n > 0 ? "+" : "-") + fmtCardBytes(Math.abs(n));
+                };
+                if (delta === 0) {
+                    return '<span class="size-delta size-delta-neutral" title="Master baseline: ' + fmtCardBytes(masterBytes) + ' min">0 B vs master</span>';
+                }
+                var cls = delta > 0 ? "size-delta-regress" : "size-delta-improve";
+                return '<span class="size-delta ' + cls + '" title="Master baseline: ' + fmtCardBytes(masterBytes) + ' min">' + fmtCardDeltaBytes(delta) + " vs master</span>";
+            }
+
+            function updateBundleCardFileDelta(scene, card, sceneCard, sizes, masterSizes) {
+                Promise.all([fetchOptionalJson("/bundle/bundle-info/" + scene + ".json"), fetchOptionalJson("/bundle/master-bundle-info/" + scene + ".json")]).then(function (results) {
+                    var currentBytes = getBundleRuntimeBytes(results[0], sizes);
+                    var masterBytes = getBundleRuntimeBytes(results[1], masterSizes);
+                    if (currentBytes == null || masterBytes == null) return;
+                    var deltaEl = card.querySelector(".size-delta");
+                    if (deltaEl) deltaEl.outerHTML = renderBundleMasterByteDelta(currentBytes, masterBytes);
+                    sceneCard.dataset.bundleDeltaKb = ((currentBytes - masterBytes) / 1024).toFixed(1);
+                });
             }
 
             function formatBundleDeltaValue(delta) {
@@ -4956,6 +5048,7 @@
                             if (masterSizes && masterSizes.rawKB != null) {
                                 sceneCard.dataset.masterRawKb = masterSizes.rawKB;
                                 sceneCard.dataset.bundleDeltaKb = (sizes.rawKB - masterSizes.rawKB).toFixed(1);
+                                updateBundleCardFileDelta(scene, card, sceneCard, sizes, masterSizes);
                             } else {
                                 delete sceneCard.dataset.masterRawKb;
                                 delete sceneCard.dataset.bundleDeltaKb;
@@ -6091,8 +6184,18 @@
                     if (n < 1024 * 1024) return (n / 1024).toFixed(2) + " KB";
                     return (n / (1024 * 1024)).toFixed(2) + " MB";
                 }
+                function fmtKB(n) {
+                    return Number(n).toFixed(1) + " KB";
+                }
                 function fmtDeltaBytes(n) {
                     return (n > 0 ? "+" : "-") + fmtBytes(Math.abs(n));
+                }
+                function fmtDeltaKB(n) {
+                    return (n > 0 ? "+" : "-") + Math.abs(n).toFixed(1) + " KB";
+                }
+                function numericSize(value) {
+                    var n = parseFloat(value);
+                    return isFinite(n) ? n : null;
                 }
                 function modulePrefix(id) {
                     if (id.indexOf("packages/babylon-lite/") === 0) return "lite";
@@ -6178,6 +6281,9 @@
                 function chunkSortKey(file) {
                     return String(file).replace(/-[A-Za-z0-9_-]{8}(?=\.js$)/, "");
                 }
+                function isRuntimeChunk(runtimeSet, file) {
+                    return runtimeSet[file] || runtimeSet[chunkSortKey(file)];
+                }
                 function baseChunkComparator() {
                     var dir = state.sortDir === "asc" ? 1 : -1;
                     if (state.sortBy === "path") {
@@ -6202,7 +6308,7 @@
                 }
                 function visibleChunksForSource(source) {
                     return (source.info.chunks || []).filter(function (c) {
-                        var loaded = !source.hasRuntime || source.runtimeSet[c.file];
+                        var loaded = !source.hasRuntime || isRuntimeChunk(source.runtimeSet, c.file);
                         return !(state.hideUnloaded && source.hasRuntime && !loaded);
                     });
                 }
@@ -6440,14 +6546,14 @@
                     var partitionedOrder = buildPartitionedOrderMaps();
                     // Optionally filter out chunks that didn't load at runtime.
                     var visibleChunks = chunks.filter(function (c) {
-                        var loaded = !state.hasRuntime || state.runtimeSet[c.file];
+                        var loaded = !state.hasRuntime || isRuntimeChunk(state.runtimeSet, c.file);
                         return !(state.hideUnloaded && state.hasRuntime && !loaded);
                     });
                     // Sort chunks by current sort key.
                     var cmpChunk = makeChunkComparator();
                     visibleChunks = appendMissingMasterChunks(visibleChunks).slice().sort(cmpChunk);
                     visibleChunks.forEach(function (c, idx) {
-                        var loaded = !c._missingLocal && (!state.hasRuntime || state.runtimeSet[c.file]);
+                        var loaded = !c._missingLocal && (!state.hasRuntime || isRuntimeChunk(state.runtimeSet, c.file));
                         var masterChunk = findMasterChunk(c.file);
                         var masterModules = {};
                         if (masterChunk) {
@@ -6531,7 +6637,7 @@
                 function renderFlat(chunks, filter) {
                     var items = [];
                     chunks.forEach(function (c) {
-                        var loaded = !state.hasRuntime || state.runtimeSet[c.file];
+                        var loaded = !state.hasRuntime || isRuntimeChunk(state.runtimeSet, c.file);
                         if (state.hideUnloaded && state.hasRuntime && !loaded) return;
                         (c.modules || []).forEach(function (m) {
                             if (!matchesFilter(m, filter)) return;
@@ -6615,12 +6721,13 @@
                     var runtimeSet = {};
                     (sceneManifest.runtimeChunks || []).forEach(function (f) {
                         runtimeSet[f] = true;
+                        runtimeSet[chunkSortKey(f)] = true;
                     });
                     var hasRuntime = Object.keys(runtimeSet).length > 0;
                     var chunks = info.chunks || [];
                     chunks.sort(function (a, b) {
-                        var ar = !hasRuntime || runtimeSet[a.file] ? 1 : 0;
-                        var br = !hasRuntime || runtimeSet[b.file] ? 1 : 0;
+                        var ar = !hasRuntime || isRuntimeChunk(runtimeSet, a.file) ? 1 : 0;
+                        var br = !hasRuntime || isRuntimeChunk(runtimeSet, b.file) ? 1 : 0;
                         if (a.isEntry !== b.isEntry) return a.isEntry ? -1 : 1;
                         if (ar !== br) return br - ar;
                         return b.bytes - a.bytes;
@@ -6630,7 +6737,7 @@
                         runtimeChunkCount = 0,
                         strippedChunkCount = 0;
                     chunks.forEach(function (c) {
-                        var loaded = !hasRuntime || runtimeSet[c.file];
+                        var loaded = !hasRuntime || isRuntimeChunk(runtimeSet, c.file);
                         if (loaded) {
                             totalRuntimeBytes += c.bytes;
                             runtimeChunkCount++;
@@ -6642,7 +6749,73 @@
                     var sub = runtimeChunkCount + " chunk" + (runtimeChunkCount === 1 ? "" : "s") + " loaded at runtime · " + fmtBytes(totalRuntimeBytes) + " raw";
                     if (strippedChunkCount) sub += " · " + strippedChunkCount + " chunk" + (strippedChunkCount === 1 ? "" : "s") + " built but not fetched";
                     if (!hasRuntime) sub = "runtime info unavailable — all built chunks shown";
-                    return { label: label, info: info, manifest: manifest || {}, runtimeSet: runtimeSet, hasRuntime: hasRuntime, subtitle: sub };
+                    return { label: label, info: info, manifest: manifest || {}, runtimeSet: runtimeSet, hasRuntime: hasRuntime, runtimeBytes: totalRuntimeBytes, subtitle: sub };
+                }
+
+                function renderSceneSizeMetric(label, key, localSizes, masterSizes) {
+                    var local = numericSize(localSizes && localSizes[key]);
+                    var master = numericSize(masterSizes && masterSizes[key]);
+                    if (local == null) return "";
+                    if (master == null) {
+                        return '<div class="bf-master-compare-metric">' + label + '<strong>' + fmtKB(local) + '<span class="bf-master-compare-delta neutral">new vs master</span></strong></div>';
+                    }
+                    var delta = Math.round((local - master) * 10) / 10;
+                    var cls = delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral";
+                    var deltaText = delta === 0 ? "0.0 KB" : fmtDeltaKB(delta);
+                    return (
+                        '<div class="bf-master-compare-metric">' +
+                        label +
+                        '<strong>' +
+                        fmtKB(local) +
+                        '<span class="bf-master-compare-delta ' +
+                        cls +
+                        '" title="Master: ' +
+                        fmtKB(master) +
+                        '">' +
+                        deltaText +
+                        " vs master</span></strong></div>"
+                    );
+                }
+
+                function renderSceneByteMetric(label, localBytes, masterBytes) {
+                    if (localBytes == null) return "";
+                    if (masterBytes == null) {
+                        return '<div class="bf-master-compare-metric">' + label + '<strong>' + fmtBytes(localBytes) + '<span class="bf-master-compare-delta neutral">new vs master</span></strong></div>';
+                    }
+                    var delta = localBytes - masterBytes;
+                    var cls = delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral";
+                    var deltaText = delta === 0 ? "0 B" : fmtDeltaBytes(delta);
+                    return (
+                        '<div class="bf-master-compare-metric">' +
+                        label +
+                        '<strong>' +
+                        fmtBytes(localBytes) +
+                        '<span class="bf-master-compare-delta ' +
+                        cls +
+                        '" title="Master: ' +
+                        fmtBytes(masterBytes) +
+                        '">' +
+                        deltaText +
+                        " vs master</span></strong></div>"
+                    );
+                }
+
+                function renderSceneMasterComparison(scene, manifest, masterManifest, localData, masterData) {
+                    var localSizes = manifest && manifest[scene];
+                    var masterSizes = masterManifest && masterManifest[scene];
+                    if (!localSizes) {
+                        return '<div class="bf-note">Local bundle size unavailable in <code>manifest.json</code>.</div>';
+                    }
+                    if (!masterManifest) {
+                        return '<div class="bf-note">No master bundle baseline loaded; scene-level delta unavailable.</div>';
+                    }
+                    var metrics =
+                        localData && masterData
+                            ? renderSceneByteMetric("Raw minified", localData.runtimeBytes, masterData.runtimeBytes)
+                            : renderSceneSizeMetric("Raw minified", "rawKB", localSizes, masterSizes);
+                    metrics += renderSceneSizeMetric("Gzip", "gzipKB", localSizes, masterSizes);
+                    if (!metrics) return "";
+                    return '<div class="bf-master-compare"><div class="bf-master-compare-title">Current vs master bundle</div>' + metrics + "</div>";
                 }
 
                 function applyBundleSource(source) {
@@ -6689,7 +6862,7 @@
                         var info = results[0];
                         var manifest = results[1] || {};
                         var masterInfo = results[2];
-                        var masterManifest = results[3] || {};
+                        var masterManifest = results[3];
                         var localData = prepareBundleSourceData("Local", info, manifest, scene);
                         var masterData = prepareBundleSourceData("Master", masterInfo, masterManifest, scene);
                         if (!localData && !masterData) {
@@ -6739,6 +6912,7 @@
                                   "</label>"
                                 : "") +
                             "</div>" +
+                            renderSceneMasterComparison(scene, manifest, masterManifest, localData, masterData) +
                             '<div class="bf-note">Chunk sizes are post-minification bytes. Module sizes are the rendered contribution of each <code>.ts</code> / <code>.wgsl</code> file. Chips show the exported symbols that survived tree-shaking.</div>' +
                             (masterData ? "" : '<div class="bf-note">Master file breakdown unavailable. Run <code>pnpm build:bundle-master-info</code> to generate <code>master-bundle-info</code>.</div>') +
                             '<div id="bf-list"></div>';

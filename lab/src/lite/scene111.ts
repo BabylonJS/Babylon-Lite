@@ -12,16 +12,17 @@ import {
     createHemisphericLight,
     createPbrMaterial,
     createPcfDirectionalShadowGenerator,
-    createPcfShadowGenerator,
+    createPcfSpotlightShadowGenerator,
     createPointLight,
     createSceneContext,
-    createShadowGenerator,
+    createEsmDirectionalShadowGenerator,
     createSolidTexture2D,
     createSphere,
     createSpotLight,
     createStandardMaterial,
     parseNodeMaterialFromSnippet,
-    registerScene,
+    registerSceneWithShadowSupport,
+    setShadowTaskCasterMeshes,
     startEngine,
 } from "babylon-lite";
 import type { LightBase } from "babylon-lite";
@@ -185,7 +186,7 @@ async function main(): Promise<void> {
         addToScene(scene, light);
     }
 
-    light3.shadowGenerator = createShadowGenerator(engine, light3, [stdSphere, pbrSphere], {
+    light3.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light3, {
         mapSize: 512,
         depthScale: 40,
         bias: 0.00008,
@@ -195,18 +196,21 @@ async function main(): Promise<void> {
         orthoMinZ: camera.nearPlane,
         orthoMaxZ: camera.farPlane,
     });
-    light8.shadowGenerator = createPcfShadowGenerator(engine, light8, [pbrSphere, nmeSphere], {
+    setShadowTaskCasterMeshes(light3.shadowGenerator, [stdSphere, pbrSphere]);
+    light8.shadowGenerator = createPcfSpotlightShadowGenerator(engine, light8, {
         mapSize: 512,
         near: camera.nearPlane,
         far: camera.farPlane,
         darkness: 0.1,
     });
-    light13.shadowGenerator = createPcfDirectionalShadowGenerator(engine, light13, [stdSphere, nmeSphere], {
+    setShadowTaskCasterMeshes(light8.shadowGenerator, [pbrSphere, nmeSphere]);
+    light13.shadowGenerator = createPcfDirectionalShadowGenerator(engine, light13, {
         mapSize: 512,
         orthoMinZ: camera.nearPlane,
         orthoMaxZ: camera.farPlane,
         darkness: 0.12,
     });
+    setShadowTaskCasterMeshes(light13.shadowGenerator, [stdSphere, nmeSphere]);
 
     nmeSphere.material = await parseNodeMaterialFromSnippet(engine, "", {
         json: SCENE65_NME_JSON,
@@ -221,7 +225,7 @@ async function main(): Promise<void> {
     addToScene(scene, pbrSphere);
     addToScene(scene, nmeSphere);
 
-    await registerScene(engine, scene);
+    await registerSceneWithShadowSupport(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

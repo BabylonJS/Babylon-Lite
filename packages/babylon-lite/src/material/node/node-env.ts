@@ -19,10 +19,10 @@ import type { SceneContext } from "../../scene/scene.js";
 
 export interface EnvEmit {
     readonly bindings: {
-        readonly iblTexture: number;
-        readonly iblSampler: number;
-        readonly brdfLUT: number;
-        readonly brdfSampler: number;
+        readonly _iblTexture: number;
+        readonly _iblSampler: number;
+        readonly _brdfLUT: number;
+        readonly _brdfSampler: number;
     };
     readonly wgslDecls: string;
     readonly bglEntries: readonly GPUBindGroupLayoutEntry[];
@@ -50,7 +50,7 @@ export function emitEnv(startBinding: number): EnvEmit {
         { binding: brdfSampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
     ];
     return {
-        bindings: { iblTexture: iblTexBinding, iblSampler: iblSampBinding, brdfLUT: brdfTexBinding, brdfSampler: brdfSampBinding },
+        bindings: { _iblTexture: iblTexBinding, _iblSampler: iblSampBinding, _brdfLUT: brdfTexBinding, _brdfSampler: brdfSampBinding },
         wgslDecls,
         bglEntries,
         bindingCount: 4,
@@ -60,15 +60,15 @@ export function emitEnv(startBinding: number): EnvEmit {
 /** Append env IBL texture/sampler entries to a bind-group entries array. */
 export function pushEnvBindGroupEntries(
     scene: SceneContext,
-    envBindings: { iblTexture: number; iblSampler: number; brdfLUT: number; brdfSampler: number },
+    envBindings: { _iblTexture: number; _iblSampler: number; _brdfLUT: number; _brdfSampler: number },
     entries: GPUBindGroupEntry[]
 ): void {
     const env = (scene as unknown as { _envTextures?: import("../../loader-env/load-env.js").EnvironmentTextures })._envTextures;
     if (!env) {
         throw new Error("NodeMaterial: PBR/Reflection block requires scene environment but scene._envTextures is unset. Call loadEnvironment() before registerScene().");
     }
-    entries.push({ binding: envBindings.iblTexture, resource: env.specularCubeView });
-    entries.push({ binding: envBindings.iblSampler, resource: env.cubeSampler });
-    entries.push({ binding: envBindings.brdfLUT, resource: env.brdfLutView });
-    entries.push({ binding: envBindings.brdfSampler, resource: env.brdfSampler });
+    entries.push({ binding: envBindings._iblTexture, resource: env.specularCubeView });
+    entries.push({ binding: envBindings._iblSampler, resource: env.cubeSampler });
+    entries.push({ binding: envBindings._brdfLUT, resource: env.brdfLutView });
+    entries.push({ binding: envBindings._brdfSampler, resource: env.brdfSampler });
 }

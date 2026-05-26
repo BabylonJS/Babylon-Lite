@@ -14,35 +14,35 @@ import { getTextureImageIndex, resolveImage } from "./gltf-parser.js";
 /** Per-load context handed to each material extension's `applyMaterial()`. */
 export interface GltfMatExtCtx {
     /** Internal engine access for dynamic-only texture extensions that must upload directly. */
-    engine: EngineContextInternal;
+    _engine: EngineContextInternal;
     /** Fetch + upload a texture from a glTF textureInfo object.
      *  Returns undefined if texInfo is null/undefined. */
-    texture(texInfo: unknown, sRGB: boolean): Promise<Texture2D | undefined>;
+    _texture(texInfo: unknown, sRGB: boolean): Promise<Texture2D | undefined>;
     /** Upload an arbitrary ImageBitmap (e.g. composited bitmap from an ext). */
-    uploadImage(bitmap: ImageBitmap, sRGB: boolean): Texture2D;
+    _uploadImage(bitmap: ImageBitmap, sRGB: boolean): Texture2D;
 }
 
 /** Parsed core PBR material data. */
 export interface GltfMaterialData {
-    baseColorFactor: [number, number, number, number];
-    metallicFactor: number;
-    roughnessFactor: number;
-    emissiveFactor: [number, number, number];
-    baseColorImage: ImageBitmap | null;
-    metallicRoughnessImage: ImageBitmap | null;
-    normalImage: ImageBitmap | null;
+    _baseColorFactor: [number, number, number, number];
+    _metallicFactor: number;
+    _roughnessFactor: number;
+    _emissiveFactor: [number, number, number];
+    _baseColorImage: ImageBitmap | null;
+    _metallicRoughnessImage: ImageBitmap | null;
+    _normalImage: ImageBitmap | null;
     /** glTF normalTexture.scale (default 1.0). */
-    normalScale: number;
+    _normalScale: number;
     /** glTF occlusionTexture.texCoord (default 0). */
-    occlusionTexCoord: number;
-    occlusionImage: ImageBitmap | null;
-    emissiveImage: ImageBitmap | null;
+    _occlusionTexCoord: number;
+    _occlusionImage: ImageBitmap | null;
+    _emissiveImage: ImageBitmap | null;
     /** Whether material is double-sided. */
-    doubleSided: boolean;
+    _doubleSided: boolean;
     /** glTF alphaMode: "OPAQUE" (default), "BLEND", or "MASK". */
-    alphaMode: string;
+    _alphaMode: string;
     /** glTF alphaCutoff for MASK mode (default 0.5). */
-    alphaCutoff: number;
+    _alphaCutoff: number;
     /** Raw glTF material definition. Always set so ext modules can read raw
      *  extension data + KHR_texture_transform from texture infos. */
     _rawMatDef?: any;
@@ -63,20 +63,20 @@ export async function assembleMaterial(
     const mat = json.materials?.[materialIdx];
     if (!mat) {
         return {
-            baseColorFactor: [1, 1, 1, 1],
-            metallicFactor: 1,
-            roughnessFactor: 1,
-            emissiveFactor: [0, 0, 0],
-            baseColorImage: null,
-            metallicRoughnessImage: null,
-            normalImage: null,
-            normalScale: 1,
-            occlusionTexCoord: 0,
-            occlusionImage: null,
-            emissiveImage: null,
-            doubleSided: false,
-            alphaMode: "OPAQUE",
-            alphaCutoff: 0.5,
+            _baseColorFactor: [1, 1, 1, 1],
+            _metallicFactor: 1,
+            _roughnessFactor: 1,
+            _emissiveFactor: [0, 0, 0],
+            _baseColorImage: null,
+            _metallicRoughnessImage: null,
+            _normalImage: null,
+            _normalScale: 1,
+            _occlusionTexCoord: 0,
+            _occlusionImage: null,
+            _emissiveImage: null,
+            _doubleSided: false,
+            _alphaMode: "OPAQUE",
+            _alphaCutoff: 0.5,
         };
     }
 
@@ -92,20 +92,20 @@ export async function assembleMaterial(
     ]);
 
     return {
-        baseColorFactor: pbr.baseColorFactor ?? [1, 1, 1, 1],
-        metallicFactor: pbr.metallicFactor ?? 1,
-        roughnessFactor: pbr.roughnessFactor ?? 1,
-        emissiveFactor: mat.emissiveFactor ?? [0, 0, 0],
-        baseColorImage: baseColorImg,
-        metallicRoughnessImage: mrImg,
-        normalImage: normalImg,
-        normalScale: typeof mat.normalTexture?.scale === "number" ? mat.normalTexture.scale : 1,
-        occlusionTexCoord: typeof mat.occlusionTexture?.texCoord === "number" ? mat.occlusionTexture.texCoord : 0,
-        occlusionImage: occlusionImg,
-        emissiveImage: emissiveImg,
-        doubleSided: !!mat.doubleSided,
-        alphaMode: mat.alphaMode ?? "OPAQUE",
-        alphaCutoff: mat.alphaCutoff ?? 0.5,
+        _baseColorFactor: pbr.baseColorFactor ?? [1, 1, 1, 1],
+        _metallicFactor: pbr.metallicFactor ?? 1,
+        _roughnessFactor: pbr.roughnessFactor ?? 1,
+        _emissiveFactor: mat.emissiveFactor ?? [0, 0, 0],
+        _baseColorImage: baseColorImg,
+        _metallicRoughnessImage: mrImg,
+        _normalImage: normalImg,
+        _normalScale: typeof mat.normalTexture?.scale === "number" ? mat.normalTexture.scale : 1,
+        _occlusionTexCoord: typeof mat.occlusionTexture?.texCoord === "number" ? mat.occlusionTexture.texCoord : 0,
+        _occlusionImage: occlusionImg,
+        _emissiveImage: emissiveImg,
+        _doubleSided: !!mat.doubleSided,
+        _alphaMode: mat.alphaMode ?? "OPAQUE",
+        _alphaCutoff: mat.alphaCutoff ?? 0.5,
         _rawMatDef: mat,
     };
 }

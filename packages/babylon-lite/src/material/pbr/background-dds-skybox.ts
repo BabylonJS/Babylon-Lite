@@ -67,7 +67,7 @@ export async function buildDdsSkyboxRenderable(
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
     const { cubeView, sampler } = await loadDdsCube(engine, skyboxTextureUrl ?? DEFAULT_SKY_URL);
 
-    const fragCode = (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + ddsSkyboxFragSrc;
+    const fragCode = SCENE_UBO_WGSL + (enableNoise ? WGSL_DITHER : WGSL_NO_DITHER) + ddsSkyboxFragSrc;
     const mat = createCubemapSkyboxMaterial(enableNoise ? "skybox-dds" : "skybox-dds0", SCENE_UBO_WGSL + ddsSkyboxVertSrc, fragCode);
     const ubo = createDdsMeshUBO(engine, skyboxWorld, primaryColor, scene.imageProcessing.exposure, scene.imageProcessing.contrast);
     const bindGroup = mat.createBindGroup(engine, ubo, cubeView, sampler);

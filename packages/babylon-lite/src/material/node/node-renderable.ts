@@ -10,9 +10,12 @@ import type { EngineContextInternal } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh, MeshInternal } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
-import type { Renderable } from "../../render/renderable.js";
+import type { MeshGroupBuildResult, Renderable } from "../../render/renderable.js";
+import type { Material } from "../material.js";
 import type { NodeMaterialInternal } from "./node-material.js";
 import { writeNodeUBO } from "./node-material.js";
+import { compileNodePipeline } from "./node-pipeline.js";
+import { NODE_ESM_SHADOW_OUTPUT, NODE_NO_COLOR_OUTPUT } from "./node-flags.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 
@@ -46,10 +49,10 @@ function getEmptyMorph(engine: EngineContextInternal): { texture: GPUTexture; we
 }
 
 interface NodePacket {
-    readonly mesh: Mesh;
-    readonly meshUBO: GPUBuffer;
-    readonly meshBG: GPUBindGroup;
-    readonly meshScratch: Float32Array;
+    readonly _mesh: Mesh;
+    readonly _meshUBO: GPUBuffer;
+    readonly _meshBG: GPUBindGroup;
+    readonly _meshScratch: Float32Array;
     _lastWorldVersion: number;
     _lastReceivesShadow: number;
     _lastLightsCount: number;
@@ -58,7 +61,7 @@ interface NodePacket {
 type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 /** Build NME renderables for a set of meshes that share a NodeMaterial. */
-export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): { renderables: Renderable[] } {
+export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], materialOverride?: Material): MeshGroupBuildResult {
     const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
 
@@ -68,7 +71,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
     // shares that one material instance.
     const byMaterial = new Map<NodeMaterialInternal, Mesh[]>();
     for (const m of meshes) {
-        const mat = m.material as NodeMaterialInternal;
+        const mat = (materialOverride ?? m.material) as NodeMaterialInternal;
         let list = byMaterial.get(mat);
         if (!list) {
             list = [];
@@ -80,73 +83,95 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
     const renderables: Renderable[] = [];
 
     for (const [material, matMeshes] of byMaterial) {
-        const compile = material._compile;
-        const meshBGL = compile.meshBGL;
+        const featureFlags = material._renderFeatures?.features ?? 0;
+        const noColorOutput = (featureFlags & NODE_NO_COLOR_OUTPUT) !== 0;
+        const esmShadowOutput = (featureFlags & NODE_ESM_SHADOW_OUTPUT) !== 0;
+        const shadowOutput = noColorOutput || esmShadowOutput;
+        const compile = shadowOutput
+            ? compileNodePipeline(material._state, material._vertexBody, material._fragmentBody, {
+                  _engine: engine,
+                  _format: esmShadowOutput ? "rgba16float" : engine.format,
+                  _depthStencilFormat: "depth32float",
+                  _msaaSamples: 1,
+                  _backFaceCulling: material._graph.backFaceCulling,
+                  _noColorOutput: noColorOutput,
+                  _esmShadowOutput: esmShadowOutput,
+                  _esmShadowDepthCode: esmShadowOutput ? (material as NodeMaterialInternal & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : undefined,
+                  _alphaMode: esmShadowOutput ? 0 : undefined,
+              })
+            : material._compile;
+        const meshBGL = compile._meshBGL;
 
         // Node UBO is per-material (same across all meshes using it).
         let nodeUBO: GPUBuffer | null = null;
-        if (compile.nodeUboBinding !== null && compile.nodeUboSize > 0) {
-            nodeUBO = device.createBuffer({ label: "node-ubo", size: compile.nodeUboSize, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        if (compile._nodeUboBinding !== null && compile._nodeUboSize > 0) {
+            nodeUBO = device.createBuffer({ label: "node-ubo", size: compile._nodeUboSize, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
             writeNodeUBO(engine, nodeUBO, material);
             material._nodeUBO = nodeUBO;
         }
 
         const packets: NodePacket[] = [];
-        for (const mesh of matMeshes) {
+        for (const _mesh of matMeshes) {
             // Mesh UBO layout: world (64B) + receivesShadow (vec4, 16B) + lightCount/indices.
             const meshUboBytes = 96 + 16 * Math.ceil(MAX_LIGHTS / 4);
-            const meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-            const meshScratch = new Float32Array(((meshUboBytes + 15) & ~15) / 4);
-            meshScratch.set(mesh.worldMatrix as unknown as Float32Array, 0);
-            const recv = mesh.receiveShadows ? 1 : 0;
-            meshScratch[16] = recv;
-            if (compile.usesMeshAttributeFlags) {
-                writeAttributeFlags(mesh, meshScratch);
+            const _meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            const _meshScratch = new Float32Array(((meshUboBytes + 15) & ~15) / 4);
+            _meshScratch.set(_mesh.worldMatrix as unknown as Float32Array, 0);
+            const recv = _mesh.receiveShadows ? 1 : 0;
+            _meshScratch[16] = recv;
+            if (compile._usesMeshAttributeFlags) {
+                writeAttributeFlags(_mesh, _meshScratch);
             }
-            writeMeshLightSelection(mesh, scene.lights, meshScratch.subarray(4));
-            device.queue.writeBuffer(meshUBO, 0, meshScratch);
+            writeMeshLightSelection(_mesh, scene.lights, _meshScratch.subarray(4));
+            device.queue.writeBuffer(_meshUBO, 0, _meshScratch);
 
-            const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: { buffer: meshUBO } }];
+            const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: { buffer: _meshUBO } }];
             if (nodeUBO) {
-                entries.push({ binding: compile.nodeUboBinding!, resource: { buffer: nodeUBO } });
+                entries.push({ binding: compile._nodeUboBinding!, resource: { buffer: nodeUBO } });
             }
-            for (const tb of compile.textureBindings) {
-                const slot = material._textureSlots.get(tb.name);
+            for (const tb of compile._textureBindings) {
+                const slot = material._textureSlots.get(tb._name);
                 const tex = slot?.current;
                 if (!tex) {
                     throw new Error(
-                        `NodeMaterial: texture binding "${tb.name}" not set. Provide it via options.textures or material.inputs["${tb.name}"].texture before the first render.`
+                        `NodeMaterial: texture binding "${tb._name}" not set. Provide it via options.textures or material.inputs["${tb._name}"].texture before the first render.`
                     );
                 }
-                entries.push({ binding: tb.texBinding, resource: tex.view });
-                entries.push({ binding: tb.sampBinding, resource: tex.sampler });
+                entries.push({ binding: tb._texBinding, resource: tex.view });
+                entries.push({ binding: tb._sampBinding, resource: tex.sampler });
             }
-            if (compile.morphBindings !== null) {
-                const mt = (mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } | null }).morphTargets ?? getEmptyMorph(engine);
-                entries.push({ binding: compile.morphBindings.textureBinding, resource: mt.texture.createView() });
-                entries.push({ binding: compile.morphBindings.uboBinding, resource: { buffer: mt.weightsBuffer } });
+            if (compile._morphBindings !== null) {
+                const mt = (_mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } | null }).morphTargets ?? getEmptyMorph(engine);
+                entries.push({ binding: compile._morphBindings._textureBinding, resource: mt.texture.createView() });
+                entries.push({ binding: compile._morphBindings._uboBinding, resource: { buffer: mt.weightsBuffer } });
             }
-            if (compile.envBindings) {
-                material._envHelpers!.pushEnvBindGroupEntries(scene, compile.envBindings, entries);
+            if (compile._envBindings) {
+                material._envHelpers!.pushEnvBindGroupEntries(scene, compile._envBindings, entries);
             }
-            for (let si = 0; si < compile.shadowBindings.length; si++) {
-                const sb = compile.shadowBindings[si]!;
+            for (let si = 0; si < compile._shadowBindings.length; si++) {
+                const sb = compile._shadowBindings[si]!;
                 const sg = material._shadowGenerators[si];
                 if (!sg) {
                     throw new Error(`NodeMaterial: material requires shadow generator #${si} but none was supplied to parseNodeMaterialFromSnippet({ shadowGenerators }).`);
                 }
-                entries.push({ binding: sb.texBinding, resource: sg.blurredTexture.createView() });
-                entries.push({ binding: sb.sampBinding, resource: sg.blurredSampler });
-                entries.push({ binding: sb.uboBinding, resource: { buffer: sg.shadowUBO } });
+                entries.push({ binding: sb._texBinding, resource: sg._depthTexture.createView() });
+                entries.push({ binding: sb._sampBinding, resource: sg._depthSampler });
+                entries.push({ binding: sb._uboBinding, resource: { buffer: sg._shadowUBO } });
             }
-            const meshBG = device.createBindGroup({ label: "node-mesh-bg", layout: meshBGL, entries });
+            if (compile._esmShadowParamsBinding !== null) {
+                entries.push({
+                    binding: compile._esmShadowParamsBinding,
+                    resource: { buffer: (material as NodeMaterialInternal & { readonly _esmShadowParamsUBO: GPUBuffer })._esmShadowParamsUBO },
+                });
+            }
+            const _meshBG = device.createBindGroup({ label: "node-mesh-bg", layout: meshBGL, entries });
 
             packets.push({
-                mesh,
-                meshUBO,
-                meshBG,
-                meshScratch,
-                _lastWorldVersion: mesh.worldMatrixVersion,
+                _mesh,
+                _meshUBO,
+                _meshBG,
+                _meshScratch,
+                _lastWorldVersion: _mesh.worldMatrixVersion,
                 _lastReceivesShadow: recv,
                 _lastLightsCount: scene.lights.length,
             });
@@ -156,19 +181,19 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
         const attrNames = material._vertexAttrNames;
 
         const updatePacketUBO = (pkt: NodePacket): void => {
-            const recv = pkt.mesh.receiveShadows ? 1 : 0;
-            const worldChanged = pkt.mesh.worldMatrixVersion !== pkt._lastWorldVersion;
+            const recv = pkt._mesh.receiveShadows ? 1 : 0;
+            const worldChanged = pkt._mesh.worldMatrixVersion !== pkt._lastWorldVersion;
             const recvChanged = recv !== pkt._lastReceivesShadow;
             const lightsChanged = scene.lights.length !== pkt._lastLightsCount;
             if (worldChanged || recvChanged || lightsChanged) {
-                pkt.meshScratch.set(pkt.mesh.worldMatrix as unknown as Float32Array, 0);
-                pkt.meshScratch[16] = recv;
-                if (compile.usesMeshAttributeFlags) {
-                    writeAttributeFlags(pkt.mesh, pkt.meshScratch);
+                pkt._meshScratch.set(pkt._mesh.worldMatrix as unknown as Float32Array, 0);
+                pkt._meshScratch[16] = recv;
+                if (compile._usesMeshAttributeFlags) {
+                    writeAttributeFlags(pkt._mesh, pkt._meshScratch);
                 }
-                writeMeshLightSelection(pkt.mesh, scene.lights, pkt.meshScratch.subarray(4));
-                device.queue.writeBuffer(pkt.meshUBO, 0, pkt.meshScratch as Float32Array<ArrayBuffer>);
-                pkt._lastWorldVersion = pkt.mesh.worldMatrixVersion;
+                writeMeshLightSelection(pkt._mesh, scene.lights, pkt._meshScratch.subarray(4));
+                device.queue.writeBuffer(pkt._meshUBO, 0, pkt._meshScratch as Float32Array<ArrayBuffer>);
+                pkt._lastWorldVersion = pkt._mesh.worldMatrixVersion;
                 pkt._lastReceivesShadow = recv;
                 pkt._lastLightsCount = scene.lights.length;
             }
@@ -182,32 +207,35 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
         };
 
         const drawPacket = (pass: NodeRenderPass, pkt: NodePacket): void => {
-            const g = (pkt.mesh as MeshInternal)._gpu;
+            const g = (pkt._mesh as MeshInternal)._gpu;
             for (let i = 0; i < attrNames.length; i++) {
                 const buf = getAttrBuffer(engine, g, attrNames[i]!);
                 pass.setVertexBuffer(i, buf);
             }
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
-            pass.setBindGroup(1, pkt.meshBG);
+            pass.setBindGroup(1, pkt._meshBG);
             pass.drawIndexed(g.indexCount);
         };
 
-        const isTransparent = material._needsAlphaBlending;
+        const isTransparent = !noColorOutput && !esmShadowOutput && material._needsAlphaBlending;
 
         if (isTransparent) {
             // Transparent materials: one renderable per mesh so each gets an
             // independent _worldCenter for back-to-front distance sorting.
             for (const pkt of packets) {
-                const wm = pkt.mesh.worldMatrix as unknown as ArrayLike<number>;
-                const cx = pkt.mesh.position?.x ?? wm[12]!;
-                const cy = pkt.mesh.position?.y ?? wm[13]!;
-                const cz = pkt.mesh.position?.z ?? wm[14]!;
+                const wm = pkt._mesh.worldMatrix as unknown as ArrayLike<number>;
+                const cx = pkt._mesh.position?.x ?? wm[12]!;
+                const cy = pkt._mesh.position?.y ?? wm[13]!;
+                const cz = pkt._mesh.position?.z ?? wm[14]!;
+                const sortCenter: [number, number, number] = [cx, cy, cz];
                 const update = (): void => {
                     updatePacketUBO(pkt);
                     updateNodeUBO();
                     // Update world center for sorting.
-                    const m = pkt.mesh.worldMatrix as unknown as ArrayLike<number>;
-                    rTrans._worldCenter = [m[12]!, m[13]!, m[14]!];
+                    const m = pkt._mesh.worldMatrix as unknown as ArrayLike<number>;
+                    sortCenter[0] = m[12]!;
+                    sortCenter[1] = m[13]!;
+                    sortCenter[2] = m[14]!;
                 };
                 const draw = (pass: NodeRenderPass): number => {
                     drawPacket(pass, pkt);
@@ -216,10 +244,10 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 const rTrans: Renderable = {
                     order: 200,
                     isTransparent: true,
-                    mesh: pkt.mesh,
-                    _worldCenter: [cx, cy, cz],
+                    mesh: pkt._mesh,
+                    _worldCenter: sortCenter,
                     bind() {
-                        return { renderable: rTrans, pipeline: compile.pipeline, update, draw };
+                        return { renderable: rTrans, pipeline: compile._pipeline, update, draw };
                     },
                 };
                 renderables.push(rTrans);
@@ -244,14 +272,18 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[]): {
                 order: 100,
                 isTransparent: false,
                 bind() {
-                    return { renderable: rOpaque, pipeline: compile.pipeline, update, draw };
+                    return { renderable: rOpaque, pipeline: compile._pipeline, update, draw };
                 },
             };
             renderables.push(rOpaque);
         }
     }
 
-    return { renderables };
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, override?: Material): Renderable => {
+        return buildNodeMeshRenderables(s, [mesh], override).renderables[0]!;
+    };
+
+    return { renderables, rebuildSingle };
 }
 
 // Per-gpu-object cached zero buffers for attributes that a NodeMaterial's

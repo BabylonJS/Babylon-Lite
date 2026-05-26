@@ -9,7 +9,7 @@ export function collectStdBoundTextures(mat: StandardMaterialProps): Texture2D[]
         t.push(mat.diffuseTexture);
     }
     for (const ext of _getStdExts().values()) {
-        ext.textures?.(mat, t);
+        ext._textures?.(mat, t);
     }
     return t;
 }

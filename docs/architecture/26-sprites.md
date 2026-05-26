@@ -27,7 +27,7 @@
 > static `sprite-renderable` import is limited to that opt-in graph. The
 > builder inserts a generic `Renderable` into the scene, and the frame graph
 > then buckets it alongside meshes by `isTransparent` / `_direct`; PBR
-> refraction setup separately uses `isTransmissive` to exclude true refractive
+> refraction setup separately uses `_transmissive` to exclude true refractive
 > surfaces from the opaque-scene RTT.
 >
 > This document contains the full specification needed to implement the
@@ -886,7 +886,7 @@ transparent-bucket sorting so `_worldCenter` reflects any same-frame
 billboard mutations before draw order is chosen. Cutout systems have no blend state,
 discard fragments whose sampled texture alpha is below `alphaCutoff`, write
 depth, and route through the non-transparent direct-draw bucket with `_direct`
-rather than `isTransmissive`.
+rather than `_transmissive`.
 
 Yaw-locked billboards (world-Y axis constraint) are created via
 `createAxisLockedBillboardSystem(atlas, [0, 1, 0], opts)`.

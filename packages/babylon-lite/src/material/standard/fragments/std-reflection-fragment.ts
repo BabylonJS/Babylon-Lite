@@ -44,17 +44,17 @@ import type { StdExt } from "../standard-flags.js";
 import { HAS_REFLECTION_TEXTURE } from "../standard-flags.js";
 
 export const stdReflectionExt: StdExt = {
-    id: "std-reflection",
-    phase: "mesh",
-    feature: HAS_REFLECTION_TEXTURE,
-    frag: createStdReflectionFragment,
-    bind(mat, entries, b) {
+    _id: "std-reflection",
+    _phase: "mesh",
+    _feature: HAS_REFLECTION_TEXTURE,
+    _frag: createStdReflectionFragment,
+    _bind(mat, entries, b) {
         const tex = mat.reflectionTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.reflectionTexture) {
             out.push(mat.reflectionTexture);
         }

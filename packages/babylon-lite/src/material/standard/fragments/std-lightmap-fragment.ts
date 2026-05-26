@@ -22,17 +22,17 @@ export function createStdLightmapFragment(usesUV2: boolean): ShaderFragment {
 }
 
 export const stdLightmapExt: StdExt = {
-    id: "std-lightmap",
-    phase: "mesh",
-    feature: HAS_LIGHTMAP_TEXTURE,
-    frag: (features) => createStdLightmapFragment((features & LIGHTMAP_USES_UV2) !== 0),
-    bind(mat, entries, b) {
+    _id: "std-lightmap",
+    _phase: "mesh",
+    _feature: HAS_LIGHTMAP_TEXTURE,
+    _frag: (features) => createStdLightmapFragment((features & LIGHTMAP_USES_UV2) !== 0),
+    _bind(mat, entries, b) {
         const tex = mat.lightmapTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.lightmapTexture) {
             out.push(mat.lightmapTexture);
         }

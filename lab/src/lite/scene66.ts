@@ -17,9 +17,10 @@ import {
     createMorphTargets,
     attachControl,
     onBeforeRender,
-    registerScene,
+    registerSceneWithShadowSupport,
     loadTexture2D,
     parseNodeMaterialFromSnippet,
+    setShadowTaskCasterMeshes,
 } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
 import { SCENE66_MORPH_PERIOD_MS, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
@@ -60,11 +61,12 @@ async function main(): Promise<void> {
 
     // PCF directional shadow (sphere + box are casters). orthoMinZ/orthoMaxZ
     // match BJS's shadowMinZ=-10, shadowMaxZ=10 on the light.
-    const sg = createPcfDirectionalShadowGenerator(engine, light, [sphere, box], {
+    const sg = createPcfDirectionalShadowGenerator(engine, light, {
         mapSize: 1024,
         orthoMinZ: -10,
         orthoMaxZ: 10,
     });
+    setShadowTaskCasterMeshes(sg, [sphere, box]);
     light.shadowGenerator = sg;
 
     // Load local NME JSON + local texture assets.
@@ -111,7 +113,7 @@ async function main(): Promise<void> {
         });
     }
 
-    await registerScene(engine, scene);
+    await registerSceneWithShadowSupport(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

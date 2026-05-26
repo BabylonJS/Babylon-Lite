@@ -16,26 +16,26 @@ const SHADOW_FACTORS_TYPE = `array<f32, ${MAX_LIGHTS}>`;
 const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 export interface ShadowBinding {
-    readonly lightIndex: number;
-    readonly texBinding: number;
-    readonly sampBinding: number;
-    readonly uboBinding: number;
-    readonly shadowType: "esm" | "pcf";
+    readonly _lightIndex: number;
+    readonly _texBinding: number;
+    readonly _sampBinding: number;
+    readonly _uboBinding: number;
+    readonly _shadowType: "esm" | "pcf";
 }
 
 export interface ShadowEmit {
     /** One per shadow-casting light (3 binding slots each). */
-    readonly bindings: readonly ShadowBinding[];
+    readonly _bindings: readonly ShadowBinding[];
     /** Module-scope WGSL: struct + binding decls + compute fns. */
-    readonly wgslDecls: string;
+    readonly _wgslDecls: string;
     /** `nme_computeShadowFactors(input) -> array<f32, MAX_LIGHTS>` called from light blocks. */
-    readonly fragmentHelper: string;
+    readonly _fragmentHelper: string;
     /** Injected into vs_main body: populates vPosFromLight_i + vDepthMetric_i varyings. */
-    readonly vertexInject: string;
+    readonly _vertexInject: string;
     /** GPU BGL entries for group 1 (append to meshBglEntries). */
-    readonly bglEntries: readonly GPUBindGroupLayoutEntry[];
+    readonly _bglEntries: readonly GPUBindGroupLayoutEntry[];
     /** Total bindings consumed (= shadowLights.length * 3). */
-    readonly bindingCount: number;
+    readonly _bindingCount: number;
 }
 
 /** Emit shadow WGSL + bindings for a NodeMaterial.
@@ -43,35 +43,41 @@ export interface ShadowEmit {
  *  buildVertexOut picks them up.
  */
 export function emitShadow(shadowLights: readonly { lightIndex: number; shadowType: "esm" | "pcf" }[], startBinding: number, varyings: Varying[]): ShadowEmit {
-    const bindings: ShadowBinding[] = [];
+    const _bindings: ShadowBinding[] = [];
     const wgslDecls: string[] = [];
-    const bglEntries: GPUBindGroupLayoutEntry[] = [];
+    const _bglEntries: GPUBindGroupLayoutEntry[] = [];
     for (const sl of shadowLights) {
         const suf = `_${sl.lightIndex}`;
-        varyings.push({ _name: `vPosFromLight${suf}`, _type: "vec4<f32>" });
-        varyings.push({ _name: `vDepthMetric${suf}`, _type: "f32" });
+        if (!varyings.some((v) => v._name === `vPosFromLight${suf}`)) {
+            varyings.push({ _name: `vPosFromLight${suf}`, _type: "vec4<f32>" });
+        }
+        if (!varyings.some((v) => v._name === `vDepthMetric${suf}`)) {
+            varyings.push({ _name: `vDepthMetric${suf}`, _type: "f32" });
+        }
     }
     const vertLines: string[] = [`let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`];
     const dispatchLines: string[] = [`var _sf = ${SHADOW_FACTORS_ONE};`];
     let nextBinding = startBinding;
     for (const sl of shadowLights) {
         const suf = `_${sl.lightIndex}`;
-        const texBinding = nextBinding++;
-        const sampBinding = nextBinding++;
-        const uboBinding = nextBinding++;
-        bindings.push({ lightIndex: sl.lightIndex, texBinding, sampBinding, uboBinding, shadowType: sl.shadowType });
+        const _lightIndex = sl.lightIndex;
+        const _texBinding = nextBinding++;
+        const _sampBinding = nextBinding++;
+        const _uboBinding = nextBinding++;
+        const _shadowType = sl.shadowType;
+        _bindings.push({ _lightIndex, _texBinding, _sampBinding, _uboBinding, _shadowType });
         wgslDecls.push(
             `struct shadowInfo${suf}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`,
-            `@group(1) @binding(${uboBinding}) var<uniform> shadowInfo${suf}: shadowInfo${suf}Uniforms;`
+            `@group(1) @binding(${_uboBinding}) var<uniform> shadowInfo${suf}: shadowInfo${suf}Uniforms;`
         );
         if (sl.shadowType === "pcf") {
             wgslDecls.push(
-                `@group(1) @binding(${texBinding}) var shadowTex${suf}: texture_depth_2d;`,
-                `@group(1) @binding(${sampBinding}) var shadowComp${suf}: sampler_comparison;`,
+                `@group(1) @binding(${_texBinding}) var shadowTex${suf}: texture_depth_2d;`,
+                `@group(1) @binding(${_sampBinding}) var shadowComp${suf}: sampler_comparison;`,
                 `fn computeShadowPCF${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
     let clipSpace = posFromLight.xyz / posFromLight.w;
     let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+    if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
     let depthRef = clamp(clipSpace.z, 0.0, 1.0);
     var tc = uv * mapSz + 0.5;
     let st = fract(tc);
@@ -98,14 +104,14 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
             dispatchLines.push(
                 `_sf[${sl.lightIndex}] = computeShadowPCF${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.y, shadowInfo${suf}.shadowsInfo.z);`
             );
-            bglEntries.push(
-                { binding: texBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth", viewDimension: "2d" } },
-                { binding: sampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } }
+            _bglEntries.push(
+                { binding: _texBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth", viewDimension: "2d" } },
+                { binding: _sampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } }
             );
         } else {
             wgslDecls.push(
-                `@group(1) @binding(${texBinding}) var shadowTex${suf}: texture_2d<f32>;`,
-                `@group(1) @binding(${sampBinding}) var shadowSamp${suf}: sampler;`,
+                `@group(1) @binding(${_texBinding}) var shadowTex${suf}: texture_2d<f32>;`,
+                `@group(1) @binding(${_sampBinding}) var shadowSamp${suf}: sampler;`,
                 `fn computeFallOff${suf}(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
     let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
     return mix(value, 1.0, mask);
@@ -113,7 +119,7 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
 fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
     let clipSpace = posFromLight.xyz / posFromLight.w;
     let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+    if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
     let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
     let shadowMapSample = textureSampleLevel(shadowTex${suf}, shadowSamp${suf}, uv, 0.0).x;
     let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
@@ -123,17 +129,17 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
             dispatchLines.push(
                 `_sf[${sl.lightIndex}] = computeShadowESM${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.z, shadowInfo${suf}.shadowsInfo.w);`
             );
-            bglEntries.push(
-                { binding: texBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
-                { binding: sampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
+            _bglEntries.push(
+                { binding: _texBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
+                { binding: _sampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
             );
         }
         vertLines.push(
             `out.vPosFromLight${suf} = shadowInfo${suf}.lightMatrix * _shadowWp4;`,
             `out.vDepthMetric${suf} = (out.vPosFromLight${suf}.z + shadowInfo${suf}.depthValues.x) / shadowInfo${suf}.depthValues.y;`
         );
-        bglEntries.push({
-            binding: uboBinding,
+        _bglEntries.push({
+            binding: _uboBinding,
             visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
             buffer: { type: "uniform", minBindingSize: 96 },
         });
@@ -141,11 +147,11 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
     dispatchLines.push(`for (var _i = 0u; _i < ${MAX_LIGHTS}u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); }`);
     dispatchLines.push(`return _sf;`);
     return {
-        bindings,
-        wgslDecls: wgslDecls.join("\n"),
-        fragmentHelper: `fn nme_computeShadowFactors(input: VertexOut) -> ${SHADOW_FACTORS_TYPE} {\n    ${dispatchLines.join("\n    ")}\n}`,
-        vertexInject: vertLines.join("\n    "),
-        bglEntries,
-        bindingCount: shadowLights.length * 3,
+        _bindings,
+        _wgslDecls: wgslDecls.join("\n"),
+        _fragmentHelper: `fn nme_computeShadowFactors(input: VertexOut) -> ${SHADOW_FACTORS_TYPE} {\n    ${dispatchLines.join("\n    ")}\n}`,
+        _vertexInject: vertLines.join("\n    "),
+        _bglEntries,
+        _bindingCount: shadowLights.length * 3,
     };
 }

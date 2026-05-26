@@ -2,25 +2,6 @@ import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 
-// ─── Pluggable Shadow Shader Extensions (tree-shakable) ────────────
-// PCF shadow code is registered at runtime by createPcfShadowGenerator(),
-// so it's only bundled when PCF is actually used.
-export interface ShadowShaderExt {
-    declarations: string;
-    fn: string;
-    call: string;
-}
-
-let _pcfShadowExt: ShadowShaderExt | null = null;
-
-export function registerPcfShadowShader(ext: ShadowShaderExt): void {
-    _pcfShadowExt = ext;
-}
-
-export function getPcfShadowExt(): ShadowShaderExt | null {
-    return _pcfShadowExt;
-}
-
 // ─── Feature Flags ──────────────────────────────────────────────────
 
 export const HAS_DIFFUSE_TEXTURE = 1 << 0;
@@ -38,30 +19,11 @@ export const SPECULAR_USES_UV2 = 1 << 11;
 export const OPACITY_FROM_RGB = 1 << 12;
 export const HAS_REFLECTION_TEXTURE = 1 << 13;
 export const DISABLE_LIGHTING = 1 << 14;
-export const PCF_SHADOWS = 1 << 15;
 export const MATERIAL_ALPHA_BLEND = 1 << 16;
 export const HAS_CUBE_REFLECTION = 1 << 17;
-export const GENERATE_DEPTH_FOR_SHADOWS = 1 << 18;
+export const NO_COLOR_OUTPUT = 1 << 18;
 export const HAS_DEPTH_EMISSIVE_TEXTURE = 1 << 19;
-
-// ─── Pluggable Shadow Pipeline Extensions (tree-shakable) ──────────
-// PCF bind group layout config is registered at runtime by createPcfShadowGenerator().
-export interface ShadowBglConfig {
-    textureSampleType: GPUTextureSampleType;
-    samplerType: GPUSamplerBindingType;
-}
-
-let _pcfBglConfig: ShadowBglConfig | null = null;
-
-/** Called by PCF shadow generator to register its BGL config. */
-export function registerPcfShadowBgl(config: ShadowBglConfig): void {
-    _pcfBglConfig = config;
-}
-
-/** Get the registered PCF shadow BGL config (if any). */
-export function getPcfShadowBglConfig(): ShadowBglConfig | null {
-    return _pcfBglConfig;
-}
+export const ESM_SHADOW_OUTPUT = 1 << 20;
 
 // ─── Standard Material Extension Registry ───────────────────────────
 
@@ -71,15 +33,15 @@ export type StdExtPhase = "mesh";
 /** Unified extension for Standard material. Each fragment module exports one.
  *  Fragments register via `_registerStdExt(ext)` at dynamic-import sites. */
 export interface StdExt {
-    readonly id: string;
-    readonly phase: StdExtPhase;
+    readonly _id: string;
+    readonly _phase: StdExtPhase;
     /** Feature bit this ext gates on. */
-    readonly feature: number;
-    frag(features: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
+    readonly _feature: number;
+    _frag(features: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
     /** Push group-1 bind entries starting at binding `b`; return new b. */
-    bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number;
+    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number;
     /** Enumerate textures for acquire/release. */
-    textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
+    _textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
 }
 
 export interface ShadowLightSlotLite {
@@ -94,7 +56,7 @@ let _stdExts: Map<string, StdExt> | null = null;
 let _stdExtsSorted: readonly StdExt[] | null = null;
 
 export function _registerStdExt(ext: StdExt): void {
-    (_stdExts ??= new Map()).set(ext.id, ext);
+    (_stdExts ??= new Map()).set(ext._id, ext);
     _stdExtsSorted = null;
 }
 
@@ -105,7 +67,7 @@ export function _getStdExts(): ReadonlyMap<string, StdExt> {
 export function _getStdExtsSorted(): readonly StdExt[] {
     if (!_stdExtsSorted) {
         const map = _stdExts;
-        _stdExtsSorted = map ? Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id)) : [];
+        _stdExtsSorted = map ? Array.from(map.values()).sort((a, b) => a._id.localeCompare(b._id)) : [];
     }
     return _stdExtsSorted;
 }

@@ -60,28 +60,28 @@ export function buildSkyboxCubeMapGPU(engine: EngineContextInternal, worldMatrix
     const fragModule = device.createShaderModule({ code: SCENE_UBO_WGSL + WGSL_FOG + skyFragSrc, label: "skybox-cm-frag" });
 
     const gpu: SkyboxCubeMapGPU = {
-        getPipeline(eng, sig) {
+        getPipeline(_engine, sig) {
             const key = targetSignatureKey(sig);
             const cached = gpu.pipelines.get(key);
             if (cached) {
                 return cached;
             }
-            const pipeline = eng.device.createRenderPipeline(
+            const pipeline = _engine.device.createRenderPipeline(
                 createDefaultPipelineDescriptor({
-                    label: "skybox-cubemap-pipeline",
-                    engine: eng,
-                    bgls: [getSceneBindGroupLayout(eng), gpu.meshBindGroupLayout],
-                    vertModule: gpu.vertModule,
-                    fragModule: gpu.fragModule,
-                    vertexBuffers: [
+                    _label: "skybox-cubemap-pipeline",
+                    _engine,
+                    _bgls: [getSceneBindGroupLayout(_engine), gpu.meshBindGroupLayout],
+                    _vertModule: gpu.vertModule,
+                    _fragModule: gpu.fragModule,
+                    _vertexBuffers: [
                         { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] },
                         { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" as GPUVertexFormat }] },
                     ],
-                    format: sig.colorFormat!,
-                    depthStencilFormat: sig.depthStencilFormat,
-                    msaaSamples: sig.sampleCount,
-                    cullMode: "none",
-                    flipY: sig.flipY,
+                    _format: sig.colorFormat!,
+                    _depthStencilFormat: sig.depthStencilFormat,
+                    _msaaSamples: sig.sampleCount,
+                    _cullMode: "none",
+                    _flipY: sig.flipY,
                 })
             );
             gpu.pipelines.set(key, pipeline);

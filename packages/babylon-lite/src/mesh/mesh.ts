@@ -62,11 +62,16 @@ export interface Mesh extends SceneNode {
 /** @internal Mesh with internal GPU fields — for engine/renderable code only. Not re-exported from index.ts. */
 export interface MeshInternal extends Mesh {
     _materialDirty: boolean;
-    readonly _gpu: MeshGPU;
+    _gpu: MeshGPU;
     _cpuPositions?: Float32Array;
     _cpuNormals?: Float32Array;
     _cpuUvs?: Float32Array;
+    _cpuUv2s?: Float32Array | null;
+    _cpuTangents?: Float32Array | null;
+    _cpuColors?: Float32Array | null;
     _cpuIndices?: Uint32Array;
+    _cpuGpuIndices?: Uint16Array | Uint32Array;
+    _cpuIndexFormat?: GPUIndexFormat;
 }
 
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.

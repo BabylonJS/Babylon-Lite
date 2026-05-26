@@ -12,8 +12,9 @@ import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { ComposedShader } from "../../shader/fragment-types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
+import type { Texture2D } from "../../texture/texture-2d.js";
 import type { _PbrBindCtx, PbrExt } from "./pbr-flags.js";
-import { _getPbrExtsSorted, PBR2_GENERATE_DEPTH_FOR_SHADOWS, PBR2_HAS_UV2 } from "./pbr-flags.js";
+import { _getPbrExtsSorted, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBLE_SIDED, PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
 import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
@@ -97,19 +98,20 @@ export function getOrCreatePbrPipeline(engine: EngineContextInternal, sig: Rende
     }
 
     const device = engine.device;
-    const { _features: features, _composed: composed } = bindings;
-    const hasAlpha = (features & PBR_HAS_ALPHA_BLEND) !== 0;
+    const { _features: features, _features2: features2, _composed: composed } = bindings;
+    const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
+    const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
     const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
 
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
     const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
-    const depthOnly = (bindings._features2 & PBR2_GENERATE_DEPTH_FOR_SHADOWS) !== 0;
-    const fragModule = depthOnly || !sig.colorFormat || composed._fragmentWGSL == null ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const noColorOutput = (features2 & PBR2_NO_COLOR_OUTPUT) !== 0;
+    const fragModule = !sig.colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
 
-    const fragTarget: GPUColorTargetState = { format: sig.colorFormat!, writeMask: GPUColorWrite.ALL };
-    if (hasAlpha) {
+    const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig.colorFormat!, writeMask: GPUColorWrite.ALL };
+    if (hasAlpha && fragTarget) {
         fragTarget.blend = {
             color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
             alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
@@ -119,9 +121,15 @@ export function getOrCreatePbrPipeline(engine: EngineContextInternal, sig: Rende
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
-        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: [fragTarget] } } : {}),
+        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: fragTarget ? [fragTarget] : [] } } : {}),
         ...(sig.depthStencilFormat
-            ? { depthStencil: { format: sig.depthStencilFormat, depthCompare: "less-equal" as GPUCompareFunction, depthWriteEnabled: depthOnly || !hasAlpha } }
+            ? {
+                  depthStencil: {
+                      format: sig.depthStencilFormat,
+                      depthCompare: "less-equal" as GPUCompareFunction,
+                      depthWriteEnabled: noColorOutput || esmShadowOutput || !hasAlpha,
+                  },
+              }
             : {}),
         multisample: { count: sig.sampleCount },
         primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: sig.flipY ? "cw" : "ccw" },
@@ -140,7 +148,8 @@ export function createPbrMeshBindGroup(
     materialUBO: GPUBuffer,
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
-    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null
+    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null,
+    refractionTexture?: Texture2D | null
 ): GPUBindGroup {
     const device = engine.device;
     const features = bindings._features;
@@ -151,6 +160,7 @@ export function createPbrMeshBindGroup(
     const hasAnyNormal = hasNormal || hasCotangentNormal;
     const hasEmissive = (features & PBR_HAS_EMISSIVE) !== 0;
     const hasSpecGloss = (features & PBR_HAS_SPEC_GLOSS) !== 0;
+    const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
 
     const entries: GPUBindGroupEntry[] = [];
     let b = 0;
@@ -160,27 +170,19 @@ export function createPbrMeshBindGroup(
     };
 
     const ctx: _PbrBindCtx = {
+        _engine: engine,
         _features: features,
         _features2: features2,
         _meshFeatures: meshFeatures,
         _material: material,
         _mesh: meshCtx ?? undefined,
         _env: env,
+        _refractionTexture: refractionTexture,
     };
 
     const sortedExts = _getPbrExtsSorted();
 
-    const extByFragId = new Map<string, PbrExt>();
     const fragIds = composed._fragmentKey ? composed._fragmentKey.split("|").filter((s) => s.length > 0) : [];
-    for (const fid of fragIds) {
-        let match = sortedExts.find((e) => e.id === fid);
-        if (!match) {
-            match = sortedExts.find((e) => fid.startsWith(e.id + "-"));
-        }
-        if (match) {
-            extByFragId.set(fid, match);
-        }
-    }
 
     entries.push({ binding: b++, resource: { buffer: meshUBO } });
     entries.push({ binding: b++, resource: { buffer: materialUBO } });
@@ -203,13 +205,19 @@ export function createPbrMeshBindGroup(
     if (hasSpecGloss) {
         addTex(material.specGlossTexture!);
     }
-    const seenExts = new Set<PbrExt>();
+    if (esmShadowOutput) {
+        entries.push({
+            binding: b++,
+            resource: { buffer: (material as PbrMaterialProps & { readonly _esmShadowParamsUBO: GPUBuffer })._esmShadowParamsUBO },
+        });
+    }
+    const seenExts: PbrExt[] = [];
     for (const fid of fragIds) {
-        const ext = extByFragId.get(fid);
-        if (!ext || ext.phase === "vertex" || !ext.bind || seenExts.has(ext)) {
+        const ext = sortedExts.find((e) => e.id === fid || fid.startsWith(e.id + "-"));
+        if (!ext || ext.phase === "vertex" || !ext.bind || seenExts.includes(ext)) {
             continue;
         }
-        seenExts.add(ext);
+        seenExts.push(ext);
         b = ext.bind(ctx, entries, b);
     }
 

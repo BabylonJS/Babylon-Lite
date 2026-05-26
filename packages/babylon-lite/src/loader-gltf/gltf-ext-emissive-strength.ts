@@ -17,7 +17,7 @@ const ext: GltfFeature = {
             return null;
         }
         const s = e.emissiveStrength ?? 1.0;
-        const f = mat.emissiveFactor;
+        const f = mat._emissiveFactor;
         return {
             emissiveColor: [f[0] * s, f[1] * s, f[2] * s],
         };

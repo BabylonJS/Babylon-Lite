@@ -25,11 +25,12 @@ import {
     _getPbrExts,
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_ALPHA_BLEND,
-    PBR2_GENERATE_DEPTH_FOR_SHADOWS,
+    PBR2_NO_COLOR_OUTPUT,
     PBR2_HAS_REFRACTION,
     PBR2_HAS_UV2,
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
+    PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
@@ -58,7 +59,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (let i = 0; i < scene.lights.length; i++) {
         const sg = scene.lights[i]!.shadowGenerator;
         if (sg) {
-            shadowLights.push({ lightIndex: i, shadowType: sg.shadowType, gen: sg });
+            shadowLights.push({ lightIndex: i, shadowType: sg._shadowType, gen: sg });
         }
     }
     const hasSomeShadows = shadowLights.length > 0;
@@ -90,7 +91,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSheen = false;
     let hasAnyAnisotropy = false;
     let hasAnySubsurface = false;
-    let hasRefraction = false;
+    let hasAlphaTest = false;
+    let hasTransmissionRefraction = false;
     let needsEmissiveColor = false;
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
@@ -103,13 +105,15 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
         const mi = m as MeshInternal;
+        const refractionIntensity = mat.subsurface?.refraction?.intensity ?? 0;
         hasSkybox ||= !!mat.skyboxMode;
         hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
         hasClearcoat ||= !!mat.clearCoat?.isEnabled;
         hasSheen ||= !!mat.sheen?.isEnabled;
         hasAnyAnisotropy ||= !!mat.anisotropy?.isEnabled;
         hasAnySubsurface ||= !!mat.subsurface?.translucency;
-        hasRefraction ||= (mat.subsurface?.refraction?.intensity ?? 0) > 0;
+        hasAlphaTest ||= mat.alphaCutOff! > 0;
+        hasTransmissionRefraction ||= refractionIntensity > 0 && !!mat.transmissive;
         needsEmissiveColor ||= !!mat.emissiveColor;
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
@@ -155,11 +159,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _multiLightWGSL = wgslMod.MULTI_LIGHT_STRUCTS() + wgslMod.COMPUTE_PBR_LIGHT;
         _multiLightLoop = wgslMod.getMultiLightLoop();
     }
-    if (hasAnyAffectedLight) {
-        if (hasSomeShadows) {
-            const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
-            _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
-        }
+    if (hasAnyAffectedLight && hasSomeShadows) {
+        const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
+        _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
     }
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
@@ -168,6 +170,10 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // in scene1's pbr-renderable chunk. Registration runs sequentially in source
     // order, which is the iteration order consumed by `_getPbrExts().values()` on
     // the hot paths (composePbr, writeMaterialData, collectPbrBoundTextures).
+    if (hasAlphaTest) {
+        const mod = await import("./fragments/alpha-test-fragment.js");
+        _registerPbrExt(mod.alphaTestExt);
+    }
     if (hasMetallicReflectance) {
         const mod = await import("./fragments/reflectance-fragment.js");
         _registerPbrExt(mod.reflectanceExt);
@@ -184,9 +190,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const mod = await import("./fragments/subsurface-fragment.js");
         _registerPbrExt(mod.subsurfaceExt);
     }
-    if (hasRefraction) {
-        const mod = await import("./fragments/refraction-fragment.js");
-        _registerPbrExt(mod.refractionExt);
+    if (hasTransmissionRefraction) {
+        const mod = await import("./pbr-refraction.js");
+        await mod.registerPbrRefraction(scene as SceneContextInternal, engine, _registerPbrExt);
     }
     if (needsEmissiveColor) {
         const mod = await import("./fragments/emissive-fragment.js");
@@ -221,8 +227,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // Lazy-load pbr-template-ext when any advanced features are present.
     // Scene1 has none of these, so it won't pay the ~1.5KB cost.
     let _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null = null;
-    const hasAnyExt = hasAnyUvTransform || hasAnyVertexColor || hasAnyUv2;
-    if (hasAnyExt) {
+    if (hasAnyUvTransform || hasAnyVertexColor || hasAnyUv2) {
         const extMod = await import("./pbr-template-ext.js");
         _createPbrTemplateExt = extMod.createPbrTemplateExt;
     }
@@ -282,13 +287,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
         const lr = writeMeshLightSelection(mesh, s.lights);
         const lightCount = lr > 0 ? 1 : -lr;
-        const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !(mesh.receiveShadows && hasSomeShadows) ? 1 : 2;
-        const singleLightType = lightMode === 1 ? getPackedSingleLightType(s.lights, lr - 1) : "";
-        const meshFeatures = _computeMeshFeatures(mesh, mesh.receiveShadows && hasSomeShadows);
         const features = renderFeatures.features;
         const features2 = renderFeatures.features2 ?? 0;
+        const shadowOutput = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
+        const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
+        const lightMode: PbrLightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
+        const singleLightType = lightMode === 1 ? getPackedSingleLightType(s.lights, lr - 1) : "";
+        const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+        const esmShadowDepthCode = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0 ? (mat as PbrMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
 
-        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType);
+        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode);
         const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}`);
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
@@ -303,11 +311,12 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
 
-        const materialBindGroup = createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
+        const needsTaskRefraction = !!mat.transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
+        const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
-        const meshShadowLights = mesh.receiveShadows && hasSomeShadows ? shadowLights : [];
+        const meshShadowLights = receiveShadows ? shadowLights : [];
         if (meshShadowLights.length > 0 && bindings._shadowBGL) {
             let cached = shadowBGCache.get(bindings._shadowBGL);
             if (!cached) {
@@ -315,9 +324,9 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 let b = 0;
                 for (const sl of meshShadowLights) {
                     const sg = sl.gen;
-                    entries.push({ binding: b++, resource: sg.blurredTexture.createView() });
-                    entries.push({ binding: b++, resource: sg.blurredSampler });
-                    entries.push({ binding: b++, resource: { buffer: sg.shadowUBO } });
+                    entries.push({ binding: b++, resource: sg._depthTexture.createView() });
+                    entries.push({ binding: b++, resource: sg._depthSampler });
+                    entries.push({ binding: b++, resource: { buffer: sg._shadowUBO } });
                 }
                 cached = device.createBindGroup({ layout: bindings._shadowBGL, entries });
                 shadowBGCache.set(bindings._shadowBGL, cached);
@@ -341,9 +350,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             },
         ]);
 
-        const isTransparent = (features2 & PBR2_GENERATE_DEPTH_FOR_SHADOWS) === 0 && (features & PBR_HAS_ALPHA_BLEND) !== 0;
-        const isTransmissive = !isTransparent && (features2 & PBR2_HAS_REFRACTION) !== 0;
-        const order = mesh.renderOrder ?? (isTransparent ? 150 : isTransmissive ? 140 : 100);
+        const isTransparent = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) === 0 && (features & PBR_HAS_ALPHA_BLEND) !== 0;
+        const order = mesh.renderOrder ?? (isTransparent || needsTaskRefraction ? 150 : 100);
 
         const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0;
         const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0;
@@ -351,10 +359,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const hasTI = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
         const hasTIColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
 
-        let _lastWorldVersion = mesh.worldMatrixVersion;
+        let _lastWorldVersion = -1;
         let _lastLightsCount = s.lights.length;
+        const sortCenter = isTransparent || needsTaskRefraction ? ([mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number]) : null;
         const update = (): void => {
             if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+                if (sortCenter) {
+                    sortCenter[0] = mesh.worldMatrix[12]!;
+                    sortCenter[1] = mesh.worldMatrix[13]!;
+                    sortCenter[2] = mesh.worldMatrix[14]!;
+                }
                 meshUboData.set(mesh.worldMatrix, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
@@ -376,7 +390,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             }
         };
 
-        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
+        const drawWith = (pass: GPURenderPassEncoder | GPURenderBundleEncoder, materialBindGroup: GPUBindGroup): number => {
             if (!isOverride && mesh.material !== materialInput) {
                 return 0;
             }
@@ -420,22 +434,29 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             }
             return 1;
         };
+        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => drawWith(pass, materialBindGroupStatic!);
 
         const r: Renderable = {
             order,
             isTransparent,
-            isTransmissive,
-            _direct: isTransmissive,
+            _transmissive: needsTaskRefraction,
             mesh,
             bind(eng, sig) {
+                const pipeline = getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings);
+                const materialBindGroup = needsTaskRefraction
+                    ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
+                    : materialBindGroupStatic!;
                 return {
                     renderable: r,
-                    pipeline: getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings),
+                    pipeline,
                     update,
-                    draw,
+                    draw: needsTaskRefraction ? (pass) => drawWith(pass, materialBindGroup) : draw,
                 };
             },
         };
+        if (sortCenter) {
+            r._worldCenter = sortCenter;
+        }
         let _lastUboVersion = mat._uboVersion;
         return r;
     };
@@ -496,7 +517,6 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
         data[off + 2] = material.normalTextureScale ?? 1.0;
         data[off + 3] = material.usePhysicalLightFalloff === false ? 0 : 1;
     }
-
     for (const ext of _getPbrExts().values()) {
         if (ext.writeUbo) {
             ext.writeUbo(data, material, spec._offsets);

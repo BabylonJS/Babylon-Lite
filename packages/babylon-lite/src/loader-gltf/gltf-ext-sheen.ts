@@ -12,7 +12,7 @@ const ext: GltfFeature = {
         if (!s) {
             return null;
         }
-        const tex = await ctx.texture(s.sheenColorTexture, true);
+        const tex = await ctx._texture(s.sheenColorTexture, true);
         return {
             sheen: {
                 isEnabled: true,

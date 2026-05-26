@@ -6,7 +6,7 @@ import type { Mat4 } from "../../math/types.js";
 import type { EngineContextInternal } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
-import { getBilinearSampler } from "../../resource/gpu-pool.js";
+import { getBilinearSampler } from "../../resource/samplers.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { targetSignatureKey } from "../../engine/render-target.js";

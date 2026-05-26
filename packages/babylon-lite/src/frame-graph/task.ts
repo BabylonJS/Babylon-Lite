@@ -40,6 +40,9 @@ export interface Task {
     /** Called once when the frame graph is built. Must complete synchronously. */
     record(): void;
 
+    /** Optional asynchronous preparation run before synchronous frame-graph build. */
+    _preload?(): Promise<void>;
+
     /** Optional fast path for built-in tasks that execute without recorded Pass objects. */
     execute?(): number;
 

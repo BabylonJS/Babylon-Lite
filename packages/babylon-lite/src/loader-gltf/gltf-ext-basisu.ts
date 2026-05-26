@@ -137,7 +137,7 @@ async function uploadBasisuTexture(data: BasisuMaterialData, ctx: GltfMatExtCtx,
         if (source === null) {
             return undefined;
         }
-        tex = await uploadKtx2Texture2D(ctx.engine, await resolveImageBuffer(data, source), sRGB);
+        tex = await uploadKtx2Texture2D(ctx._engine, await resolveImageBuffer(data, source), sRGB);
         data.textures.set(key, tex);
     }
     return tex;
@@ -180,7 +180,7 @@ async function uploadOrmTexture(data: BasisuMaterialData, ctx: GltfMatExtCtx): P
         if (!mr || !occ) {
             return undefined;
         }
-        tex = ctx.uploadImage(await compositeOrm(mr, occ), false);
+        tex = ctx._uploadImage(await compositeOrm(mr, occ), false);
         data.textures.set(key, tex);
     }
     return tex;
@@ -235,12 +235,12 @@ const ext: GltfFeature = {
                 const idx =
                     primitive.indices === undefined
                         ? new Uint32Array(0)
-                        : new Uint32Array(resolveAccessor(gltf, binChunk, primitive.indices).data as Uint16Array | Uint32Array | Uint8Array);
+                        : new Uint32Array(resolveAccessor(gltf, binChunk, primitive.indices)._data as Uint16Array | Uint32Array | Uint8Array);
                 decoded.set(primitive, {
-                    attributes,
-                    indices: idx,
-                    vertexCount: posAcc.count,
-                    indexCount: idx.length,
+                    _attributes: attributes,
+                    _indices: idx,
+                    _vertexCount: posAcc.count,
+                    _indexCount: idx.length,
                 });
             }
         }
@@ -262,7 +262,7 @@ const ext: GltfFeature = {
             ...(ormTexture
                 ? {
                       ormTexture,
-                      ...(data.metallicRoughnessTexture ? { metallicFactor: mat.metallicFactor, roughnessFactor: mat.roughnessFactor } : undefined),
+                      ...(data.metallicRoughnessTexture ? { metallicFactor: mat._metallicFactor, roughnessFactor: mat._roughnessFactor } : undefined),
                       ...(data.occlusionTexture ? { occlusionStrength: 1.0, occlusionTexCoord: data.occlusionTexture.texCoord ?? 0 } : undefined),
                   }
                 : undefined),

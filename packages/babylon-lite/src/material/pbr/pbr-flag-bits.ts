@@ -1,6 +1,7 @@
 export const PBR_HAS_NORMAL_MAP = 1 << 0;
 export const PBR_HAS_EMISSIVE = 1 << 1;
 export const PBR_HAS_ENV = 1 << 2;
+export const PBR_HAS_ALPHA_TEST = 1 << 3;
 export const PBR_HAS_TONEMAP = 1 << 4;
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;
@@ -53,5 +54,7 @@ export const PBR2_HAS_UV2 = 1 << 11;
 export const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
 /** Material participates in the opaque-scene refraction prepass and must be authored in linear space. */
 export const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
-/** Render depth encoded as color for shadow-map generation/debug passes. */
-export const PBR2_GENERATE_DEPTH_FOR_SHADOWS = 1 << 15;
+/** Material view runs the fragment shader but declares no color output. */
+export const PBR2_NO_COLOR_OUTPUT = 1 << 15;
+/** Material view runs discard/clip logic and writes exponential shadow-map color. */
+export const PBR2_ESM_SHADOW_OUTPUT = 1 << 16;

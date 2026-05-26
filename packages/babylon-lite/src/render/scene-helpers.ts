@@ -60,34 +60,34 @@ export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: Wo
 // ── Pipeline descriptor builder ──────────────────────────────────
 
 export interface PipelineDescriptorOpts {
-    label: string;
-    engine: EngineContextInternal;
-    bgls: GPUBindGroupLayout[];
-    vertModule: GPUShaderModule;
-    fragModule: GPUShaderModule;
-    vertexBuffers: GPUVertexBufferLayout[];
-    format: GPUTextureFormat;
+    _label: string;
+    _engine: EngineContextInternal;
+    _bgls: GPUBindGroupLayout[];
+    _vertModule: GPUShaderModule;
+    _fragModule: GPUShaderModule;
+    _vertexBuffers: GPUVertexBufferLayout[];
+    _format: GPUTextureFormat;
     /** Depth-stencil format. Default: `"depth24plus-stencil8"` (matches the engine's default RT). */
-    depthStencilFormat?: GPUTextureFormat;
-    msaaSamples: number;
-    depthWriteEnabled?: boolean;
-    cullMode?: GPUCullMode;
-    blend?: GPUBlendState;
+    _depthStencilFormat?: GPUTextureFormat;
+    _msaaSamples: number;
+    _depthWriteEnabled?: boolean;
+    _cullMode?: GPUCullMode;
+    _blend?: GPUBlendState;
     /** When true, build with `frontFace: "cw"` (offscreen RTT with Y-flipped projection). */
-    flipY?: boolean;
+    _flipY?: boolean;
 }
 
 /** Build a render pipeline descriptor with the engine's default state:
  *  depth24plus-stencil8, less-equal, triangle-list, ccw front face (cw if flipY). */
 export function createDefaultPipelineDescriptor(opts: PipelineDescriptorOpts): GPURenderPipelineDescriptor {
-    const target: GPUColorTargetState = opts.blend ? { format: opts.format, blend: opts.blend } : { format: opts.format };
+    const target: GPUColorTargetState = opts._blend ? { format: opts._format, blend: opts._blend } : { format: opts._format };
     return {
-        label: opts.label,
-        layout: opts.engine.device.createPipelineLayout({ bindGroupLayouts: opts.bgls }),
-        vertex: { module: opts.vertModule, entryPoint: "main", buffers: opts.vertexBuffers },
-        fragment: { module: opts.fragModule, entryPoint: "main", targets: [target] },
-        depthStencil: { format: opts.depthStencilFormat ?? "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: opts.depthWriteEnabled ?? true },
-        multisample: { count: opts.msaaSamples },
-        primitive: { topology: "triangle-list", cullMode: opts.cullMode ?? "back", frontFace: opts.flipY ? "cw" : "ccw" },
+        label: opts._label,
+        layout: opts._engine.device.createPipelineLayout({ bindGroupLayouts: opts._bgls }),
+        vertex: { module: opts._vertModule, entryPoint: "main", buffers: opts._vertexBuffers },
+        fragment: { module: opts._fragModule, entryPoint: "main", targets: [target] },
+        depthStencil: { format: opts._depthStencilFormat ?? "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: opts._depthWriteEnabled ?? true },
+        multisample: { count: opts._msaaSamples },
+        primitive: { topology: "triangle-list", cullMode: opts._cullMode ?? "back", frontFace: opts._flipY ? "cw" : "ccw" },
     };
 }

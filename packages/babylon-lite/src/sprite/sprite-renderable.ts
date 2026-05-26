@@ -109,7 +109,6 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
         // the direct-draw phase after cached opaque meshes and before transparent draws.
         order: isTransparent ? 200 : 100,
         isTransparent,
-        isTransmissive: false,
         _direct: isDirect,
         _engine: engine,
         _layer: layer,

@@ -68,15 +68,10 @@ async function main(): Promise<void> {
     });
 
     const debugGeo = createDebugNavMeshGeometry(nav);
-    const debugNormals = new Float32Array(debugGeo.positions.length);
-    for (let i = 1; i < debugNormals.length; i += 3) {
-        debugNormals[i] = 1;
-    }
-    const navDebug = createMeshFromData(engine as never, "navDebug", debugGeo.positions, debugNormals, debugGeo.indices);
+    const navDebug = createMeshFromData(engine as never, "navDebug", debugGeo.positions, debugGeo.normals, debugGeo.indices);
     const navDebugMat = createStandardMaterial();
     navDebugMat.diffuseColor = [0.1, 0.2, 1];
     navDebugMat.alpha = 0.2;
-    navDebugMat.backFaceCulling = false;
     navDebug.material = navDebugMat;
     navDebug.position.set(0, 0.01, 0);
     addToScene(scene, navDebug);

@@ -3,12 +3,17 @@ import type { RenderTask } from "../frame-graph/render-task.js";
 import type { SceneContextInternal } from "./scene-core.js";
 
 function getDefaultSwapchainTask(scene: SceneContextInternal): RenderTask | null {
-    const task = scene._frameGraph._tasks[0] as Partial<RenderTask> | undefined;
-    if (!task?._config || !task._colorAttachment) {
-        return null;
+    for (const task of scene._frameGraph._tasks) {
+        const ptask = task as Partial<RenderTask> | undefined;
+        if (!ptask?._config || !ptask._colorAttachment) {
+            continue;
+        }
+        const renderTask = task as RenderTask;
+        if (renderTask._config.rt._descriptor.resolveToSwapchain === true) {
+            return renderTask;
+        }
     }
-    const renderTask = task as RenderTask;
-    return renderTask._config.rt.descriptor.resolveToSwapchain === true ? renderTask : null;
+    return null;
 }
 
 /** @internal Configure a later scene to preserve pixels already rendered into the same swapchain. */

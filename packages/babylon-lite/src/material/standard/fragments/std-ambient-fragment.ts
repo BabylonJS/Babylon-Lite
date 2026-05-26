@@ -22,17 +22,17 @@ export function createStdAmbientFragment(usesUV2: boolean): ShaderFragment {
 }
 
 export const stdAmbientExt: StdExt = {
-    id: "std-ambient",
-    phase: "mesh",
-    feature: HAS_AMBIENT_TEXTURE,
-    frag: (features) => createStdAmbientFragment((features & AMBIENT_USES_UV2) !== 0),
-    bind(mat, entries, b) {
+    _id: "std-ambient",
+    _phase: "mesh",
+    _feature: HAS_AMBIENT_TEXTURE,
+    _frag: (features) => createStdAmbientFragment((features & AMBIENT_USES_UV2) !== 0),
+    _bind(mat, entries, b) {
         const tex = mat.ambientTexture!;
         entries.push({ binding: b++, resource: tex.texture.createView() });
         entries.push({ binding: b++, resource: tex.sampler });
         return b;
     },
-    textures(mat: StandardMaterialProps, out: Texture2D[]): void {
+    _textures(mat: StandardMaterialProps, out: Texture2D[]): void {
         if (mat.ambientTexture) {
             out.push(mat.ambientTexture);
         }

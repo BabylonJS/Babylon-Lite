@@ -12,10 +12,11 @@ import {
     createSphere,
     createGround,
     createDirectionalLight,
-    createShadowGenerator,
+    createEsmDirectionalShadowGenerator,
     attachControl,
-    registerScene,
+    registerSceneWithShadowSupport,
     parseNodeMaterialFromSnippet,
+    setShadowTaskCasterMeshes,
 } from "babylon-lite";
 import { SCENE65_NME_JSON } from "../shared/scene65-nme.js";
 
@@ -41,7 +42,7 @@ async function main(): Promise<void> {
     const ground = createGround(engine, { width: 10, height: 10, subdivisions: 2 });
     ground.receiveShadows = true;
 
-    light.shadowGenerator = createShadowGenerator(engine, light, [sphere], {
+    light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {
         mapSize: 1024,
         depthScale: 50,
         bias: 0.00005,
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
         orthoMinZ: scene.camera.nearPlane,
         orthoMaxZ: scene.camera.farPlane,
     });
+    setShadowTaskCasterMeshes(light.shadowGenerator, [sphere]);
 
     const material = await parseNodeMaterialFromSnippet(engine, "", {
         json: SCENE65_NME_JSON,
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
     addToScene(scene, sphere);
     addToScene(scene, ground);
 
-    await registerScene(engine, scene);
+    await registerSceneWithShadowSupport(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

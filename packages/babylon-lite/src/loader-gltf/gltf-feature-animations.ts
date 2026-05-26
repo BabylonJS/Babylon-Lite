@@ -8,7 +8,7 @@ const feature: GltfFeature = {
     id: "_animations",
     async applyAsset(meshes, _root, ctx) {
         const [{ parseAnimationData }, { createAnimationGroups }] = await Promise.all([import("./gltf-animation.js"), import("../animation/animation-group.js")]);
-        const animData = parseAnimationData(ctx.json, ctx.binChunk, meshes, ctx.parentMap, ctx.worldMatrixCache, ctx.nodeMap);
+        const animData = parseAnimationData(ctx._json, ctx._binChunk, meshes, ctx._parentMap, ctx._worldMatrixCache, ctx._nodeMap);
         if (!animData) {
             return {};
         }

@@ -44,7 +44,15 @@ export function uploadTex(
     } else {
         device.queue.writeTexture({ texture: tex }, (fallback ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
     }
-    return { texture: tex, view: tex.createView(), sampler, width: w, height: h };
+    const result: Texture2D = {
+        texture: tex,
+        view: tex.createView(),
+        sampler,
+        width: w,
+        height: h,
+    };
+    engine._dlr?.b(result, bitmap, srgb, !!bitmap, fallback);
+    return result;
 }
 
 /** Assemble a PbrMaterialPropsInternal from parsed glTF material data + already-uploaded
@@ -58,20 +66,21 @@ export function assemblePbrProps(
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
 ): PbrMaterialPropsInternal {
-    const ef = mat.emissiveFactor;
+    const ef = mat._emissiveFactor;
     const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
     return {
         baseColorTexture,
         normalTexture,
         ormTexture,
         emissiveTexture,
-        doubleSided: mat.doubleSided,
-        occlusionStrength: mat.occlusionImage ? 1.0 : 0,
-        ...(mat.normalScale !== 1 ? { normalTextureScale: mat.normalScale } : undefined),
-        ...(mat.metallicRoughnessImage ? { metallicFactor: mat.metallicFactor, roughnessFactor: mat.roughnessFactor } : undefined),
+        doubleSided: mat._doubleSided,
+        occlusionStrength: mat._occlusionImage ? 1.0 : 0,
+        ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
+        ...(mat._metallicRoughnessImage ? { metallicFactor: mat._metallicFactor, roughnessFactor: mat._roughnessFactor } : undefined),
         ...(!defaultFactor ? { emissiveColor: [ef[0], ef[1], ef[2]] as [number, number, number] } : undefined),
         enableSpecularAA: true,
-        ...(mat.alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat.baseColorFactor[3] } : undefined),
+        ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
+        ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : undefined),
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
@@ -88,10 +97,10 @@ export function buildDefaultPbrTextures(
     generateMipmaps: GenerateMipmapsFn,
     getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
 ): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
-    const baseColorTexture = mat.baseColorImage
-        ? getCachedTex(mat.baseColorImage, true)
+    const baseColorTexture = mat._baseColorImage
+        ? getCachedTex(mat._baseColorImage, true)
         : (() => {
-              const f = mat.baseColorFactor;
+              const f = mat._baseColorFactor;
               return uploadTex(
                   engine,
                   null,
@@ -101,18 +110,18 @@ export function buildDefaultPbrTextures(
                   new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
               );
           })();
-    const normalTexture = mat.normalImage ? getCachedTex(mat.normalImage, false) : undefined;
-    const emissiveTexture = mat.emissiveImage ? getCachedTex(mat.emissiveImage, true) : undefined;
+    const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false) : undefined;
+    const emissiveTexture = mat._emissiveImage ? getCachedTex(mat._emissiveImage, true) : undefined;
 
-    const single = mat.metallicRoughnessImage ?? mat.occlusionImage;
+    const single = mat._metallicRoughnessImage ?? mat._occlusionImage;
     let ormTexture: Texture2D;
-    if (single && (!mat.metallicRoughnessImage || !mat.occlusionImage || mat.metallicRoughnessImage === mat.occlusionImage)) {
+    if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         ormTexture = getCachedTex(single, false);
     } else if (!single) {
         const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat.roughnessFactor), clamp(mat.metallicFactor), 255]));
+        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
     } else {
-        ormTexture = getCachedTex(mat.metallicRoughnessImage!, false);
+        ormTexture = getCachedTex(mat._metallicRoughnessImage!, false);
     }
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture };
 }

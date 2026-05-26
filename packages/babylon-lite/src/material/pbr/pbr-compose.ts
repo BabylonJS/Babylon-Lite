@@ -26,6 +26,8 @@ import {
     PBR_HAS_SPEC_GLOSS,
     PBR_HAS_OCCLUSION,
     PBR_HAS_SKYBOX,
+    PBR2_ESM_SHADOW_OUTPUT,
+    PBR2_NO_COLOR_OUTPUT,
 } from "./pbr-flag-bits.js";
 import { _getPbrExts, type _PbrFragCtx } from "./pbr-flags.js";
 import {
@@ -60,7 +62,8 @@ type PbrComposeFn = (
     _meshFeatures?: number,
     _sceneFeatures?: number,
     _lightMode?: PbrLightMode,
-    _singleLightType?: string
+    _singleLightType?: string,
+    _esmShadowDepthCode?: string
 ) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
@@ -81,7 +84,15 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _createThinInstanceFragment,
     } = deps;
 
-    return function composePbr(features: number, features2: number = 0, meshFeatures = 0, sceneFeatures = 0, lightMode: PbrLightMode = 0, singleLightType = ""): ComposedShader {
+    return function composePbr(
+        features: number,
+        features2: number = 0,
+        meshFeatures = 0,
+        sceneFeatures = 0,
+        lightMode: PbrLightMode = 0,
+        singleLightType = "",
+        _esmShadowDepthCode = ""
+    ): ComposedShader {
         const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}`;
         const cached = cache.get(ckey);
         if (cached) {
@@ -93,71 +104,74 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const hasScene = (bit: number) => (sceneFeatures & bit) !== 0;
         const hasNormal = has(PBR_HAS_NORMAL_MAP) && hasMesh(MSH_HAS_TANGENTS);
         const hasCotangent = has(PBR_HAS_NORMAL_MAP) && !hasMesh(MSH_HAS_TANGENTS);
-        const hasReflExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
-        const hasIbl = hasScene(PBR_HAS_ENV);
-        const hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
+        const _hasAnyNormal = hasNormal || hasCotangent;
+        const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
+        const _hasIbl = hasScene(PBR_HAS_ENV);
+        const _hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
         const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
-        const hasAniso = has(PBR_HAS_ANISOTROPY);
-        const hasEmCol = has(PBR_HAS_EMISSIVE_COLOR);
-        const hasEmTex = has(PBR_HAS_EMISSIVE);
+        const _hasAnisotropy = has(PBR_HAS_ANISOTROPY);
+        const _hasEmissiveColor = has(PBR_HAS_EMISSIVE_COLOR);
+        const _hasEmissiveTexture = has(PBR_HAS_EMISSIVE);
         const hasTI = hasMesh(MSH_HAS_THIN_INSTANCES);
 
-        const hasUvTx = (features2 & PBR2_HAS_UV_TRANSFORM) !== 0;
-        const hasVC = hasMesh(MSH_HAS_VERTEX_COLOR);
-        const hasU2 = (features2 & PBR2_HAS_UV2) !== 0 && hasMesh(MSH_HAS_UV2);
-        const needsExt = hasUvTx || hasVC || hasU2;
-        const ext =
+        const _hasUvTransform = (features2 & PBR2_HAS_UV_TRANSFORM) !== 0;
+        const _hasVertexColor = hasMesh(MSH_HAS_VERTEX_COLOR);
+        const _hasUv2 = (features2 & PBR2_HAS_UV2) !== 0 && hasMesh(MSH_HAS_UV2);
+        const needsExt = _hasUvTransform || _hasVertexColor || _hasUv2;
+        const _hasSpecularAA = has(PBR_HAS_SPECULAR_AA);
+        const _ext =
             needsExt && _createPbrTemplateExt
                 ? _createPbrTemplateExt({
-                      hasUvTransform: hasUvTx,
-                      hasVertexColor: hasVC,
-                      hasUv2: hasU2,
-                      hasOcclusionUv2: hasU2,
-                      hasAnyNormal: hasNormal || hasCotangent,
-                      hasEmissiveTexture: hasEmTex,
-                      hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
+                      _hasUvTransform,
+                      _hasVertexColor,
+                      _hasUv2,
+                      _hasOcclusionUv2: _hasUv2,
+                      _hasAnyNormal,
+                      _hasEmissiveTexture,
+                      _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
                   })
                 : undefined;
 
         const template = createPbrTemplate({
-            hasSingleLight: lightMode === 1,
-            hasMultiLight: lightMode === 2,
-            singleLightWGSL: _singleLightWGSL,
-            singleLightBlock: lightMode === 1 && _getSingleLightBlock ? _getSingleLightBlock(singleLightType) : "",
-            multiLightWGSL: _multiLightWGSL,
-            multiLightLoop: _multiLightLoop,
-            normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",
-            hasEmissiveTexture: hasEmTex,
-            hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
-            hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),
-            hasTonemap: hasScene(PBR_HAS_TONEMAP),
-            acesHelpers: _acesHelpers,
-            acesTonemapCall: _acesTonemapCall,
-            hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),
-            hasSpecularAA: has(PBR_HAS_SPECULAR_AA),
-            hasGammaAlbedo: has(PBR_HAS_GAMMA_ALBEDO),
-            hasMorph,
-            hasOcclusion: has(PBR_HAS_OCCLUSION) && !hasReflExt,
-            hasEmissiveColor: hasEmCol,
-            hasReflectanceExt: hasReflExt,
-            hasIbl,
-            hasAnisotropy: hasAniso,
-            anisoBrdfFunctions: hasAniso && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
-            anisoTBBlock: hasAniso && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal) : "",
-            ext,
+            _hasSingleLight: lightMode === 1,
+            _hasMultiLight: lightMode === 2,
+            _singleLightWGSL,
+            _singleLightBlock: lightMode === 1 && _getSingleLightBlock ? _getSingleLightBlock(singleLightType) : "",
+            _multiLightWGSL,
+            _multiLightLoop,
+            _normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",
+            _hasEmissiveTexture,
+            _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
+            _hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),
+            _hasTonemap: hasScene(PBR_HAS_TONEMAP),
+            _acesHelpers: _acesHelpers,
+            _acesTonemapCall: _acesTonemapCall,
+            _hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),
+            _hasSpecularAA,
+            _hasGammaAlbedo: has(PBR_HAS_GAMMA_ALBEDO),
+            _hasMorph,
+            _hasOcclusion: has(PBR_HAS_OCCLUSION) && !_hasReflectanceExt,
+            _hasEmissiveColor,
+            _hasReflectanceExt,
+            _hasIbl,
+            _hasAnisotropy,
+            _anisoBrdfFunctions: _hasAnisotropy && _anisoExt ? _anisoExt.ANISO_BRDF_FUNCTIONS : "",
+            _anisoTBBlock: _hasAnisotropy && _anisoExt ? _anisoExt.makeAnisotropyTBBlock(hasNormal) : "",
+            _ext,
+            _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
+            _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
+            _esmShadowDepthCode,
         });
 
         const frags: ShaderFragment[] = [];
-        const hasAnyNormal = hasNormal || hasCotangent;
-        const hasSpecularAAbit = has(PBR_HAS_SPECULAR_AA);
         const fragCtx: _PbrFragCtx = {
             _features: features,
             _features2: features2,
             _meshFeatures: meshFeatures,
-            _hasIbl: hasIbl,
-            _hasAnyNormal: hasAnyNormal,
-            _hasSpecularAA: hasSpecularAAbit,
-            _anisoBentNormalCode: hasAniso && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "",
+            _hasIbl: _hasIbl,
+            _hasAnyNormal,
+            _hasSpecularAA,
+            _anisoBentNormalCode: _hasAnisotropy && _anisoExt ? _anisoExt.ANISO_BENT_NORMAL : "",
             _iblSkyboxCalc: has(PBR_HAS_SKYBOX) ? _iblSkyboxCalc : "",
         };
         // Registration order defines iteration order; callers register in composer-matching order.

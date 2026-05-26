@@ -1,11 +1,9 @@
 // Scene 30 — KHR_materials_volume_testing — matches Babylon #YG3BBF#16
 // Loads the Khronos volume/transmission testing glb and displays it against the
-// default IBL environment (environmentSpecular.env). PR 2 wires the env-only
-// refraction path: Snell refraction samples the IBL specular cube + Beer-Lambert
-// absorption from KHR_materials_volume attenuation. Opaque-scene RTT refraction
-// is follow-up work.
+// default IBL environment (environmentSpecular.env) with frame-graph
+// scene-texture transmission enabled.
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl, registerScene, getFrameGraph, type RenderTask } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -13,6 +11,7 @@ async function main(): Promise<void> {
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
+    (getFrameGraph(scene)._tasks[0] as RenderTask)._config.transmission = { copyCount: 1 };
 
     // Exact camera values captured from the playground scene.
     const cam = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1.1856086997830126, { x: -0.2914360649171073, y: 0.4, z: 0.3975263311541397 });

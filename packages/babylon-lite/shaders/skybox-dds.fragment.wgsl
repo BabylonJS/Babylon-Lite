@@ -29,21 +29,23 @@ fn main(input: FragmentInput) -> @location(0) vec4<f32> {
   // BJS BackgroundMaterial: colorBase = reflectionColor.rgb * primaryColor.rgb
   color *= mesh.primaryColor;
 
-  // Exposure
-  color *= mesh.exposureLinear;
-  // Reinhard tonemap (matches BJS toneMappingType 0)
-  color = 1.0 - exp2(-1.590579 * color);
-  // Gamma
-  color = pow(color, vec3<f32>(1.0 / 2.2));
-  color = saturate(color);
+  if (scene.vImageInfos.w >= 0.0) {
+    // Exposure
+    color *= mesh.exposureLinear;
+    // Reinhard tonemap (matches BJS toneMappingType 0)
+    color = 1.0 - exp2(-1.590579 * color);
+    // Gamma
+    color = pow(color, vec3<f32>(1.0 / 2.2));
+    color = saturate(color);
 
-  // Contrast
-  let highContrast = color * color * (3.0 - 2.0 * color);
-  color = mix(color, highContrast, mesh.contrast - 1.0);
+    // Contrast
+    let highContrast = color * color * (3.0 - 2.0 * color);
+    color = mix(color, highContrast, mesh.contrast - 1.0);
 
-  // Dithering (enableNoise=true, variance=0.5)
-  color = color + vec3<f32>(dither(input.positionW.xy, 0.5));
-  color = max(color, vec3<f32>(0.0));
+    // Dithering (enableNoise=true, variance=0.5)
+    color = color + vec3<f32>(dither(input.positionW.xy, 0.5));
+    color = max(color, vec3<f32>(0.0));
+  }
 
   return vec4<f32>(color, 1.0);
 }

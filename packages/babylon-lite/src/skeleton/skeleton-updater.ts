@@ -180,7 +180,7 @@ export function createAnimationController(
                                           const mb = bindings[bindingIndex]!;
                                           mb.weights.set(morphUploadF32);
                                           // Write only the weights vec4 (first 16 bytes); count/texWidth/rowsPerBand are immutable
-                                          device!.queue.writeBuffer(mb.weightsBuffer, 0, morphUploadF32.buffer, 0, 16);
+                                          device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 0, morphUploadF32.buffer, 0, 16);
                                       }
                                   }
                                   break;
@@ -238,7 +238,12 @@ export function createAnimationController(
 
                           // Upload to GPU
                           const texWidth = skel.boneCount * 4;
-                          device!.queue.writeTexture({ texture: skel.boneTexture }, boneData.buffer, { bytesPerRow: texWidth * 16 }, { width: texWidth, height: 1 });
+                          device!.queue.writeTexture(
+                              { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
+                              boneData.buffer,
+                              { bytesPerRow: texWidth * 16 },
+                              { width: texWidth, height: 1 }
+                          );
                       }
                   },
     };

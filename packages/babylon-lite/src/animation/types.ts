@@ -81,6 +81,7 @@ export interface SkeletonBinding {
     readonly boneTexture: GPUTexture;
     readonly boneCount: number;
     readonly boneMatrices: Float32Array;
+    readonly runtimeSkeleton?: SkeletonData;
 }
 
 /** Connects a morph-target mesh to its GPU weight buffer for per-frame updates. */
@@ -93,6 +94,7 @@ export interface MorphBinding {
     readonly weights: Float32Array;
     /** Number of morph targets (max 4 supported). */
     readonly targetCount: number;
+    readonly runtimeMorphTargets?: MorphTargetData;
 }
 
 /** Everything the animation system needs, parsed from a glTF file. */

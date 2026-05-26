@@ -17,8 +17,9 @@ import {
     createSpotLight,
     createDirectionalLight,
     createPcfDirectionalShadowGenerator,
+    setShadowTaskCasterMeshes,
     attachControl,
-    registerScene,
+    registerSceneWithShadowSupport,
     parseNodeMaterialFromSnippet,
     loadEnvironment,
     createSolidTexture2D,
@@ -131,12 +132,14 @@ async function main(): Promise<void> {
     addToScene(scene, dir);
 
     const sphere = createSphere(engine, { segments: 32, diameter: 2 });
+    sphere.position.set(0, 0, -0.00001);
     const ground = createGround(engine, { width: 6, height: 6 });
     ground.position.set(0, -1, 0);
     ground.receiveShadows = true;
     (ground as Mesh & { layerMask?: number }).layerMask = 1;
 
-    const sg = createPcfDirectionalShadowGenerator(engine, dir, [sphere], { mapSize: 1024, orthoMinZ: -2, orthoMaxZ: 15 });
+    const sg = createPcfDirectionalShadowGenerator(engine, dir, { mapSize: 1024, orthoMinZ: -2, orthoMaxZ: 15 });
+    setShadowTaskCasterMeshes(sg, [sphere]);
     dir.shadowGenerator = sg;
 
     const json = await getScene72Nme();
@@ -162,14 +165,16 @@ async function main(): Promise<void> {
         SubSurface_thickness_texture: white,
     };
     const textures = { ...fallback, ...loaded };
-    const material = await parseNodeMaterialFromSnippet(engine, "", { json, textures, shadowGenerators: [sg], blockLoader: loadScene72BlockEmitter });
+    // BJS parses this NME graph without wiring receiver shadow factors into the PBR block output.
+    // Keep the shadow generator setup above to mirror the scene, but do not pass it into the Lite NME compiler here.
+    const material = await parseNodeMaterialFromSnippet(engine, "", { json, textures, blockLoader: loadScene72BlockEmitter });
     (sphere as { material?: unknown }).material = material;
     (ground as { material?: unknown }).material = material;
 
     addToScene(scene, sphere);
     addToScene(scene, ground);
 
-    await registerScene(engine, scene);
+    await registerSceneWithShadowSupport(engine, scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

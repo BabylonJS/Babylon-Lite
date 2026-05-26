@@ -1,16 +1,16 @@
-// Scene 116 - Standard + PBR shadow-depth material generation.
+// Scene 116 - Standard + PBR no-color material generation.
 //
 // The main pass renders a Standard torus and a PBR sphere normally. Two
 // frame-graph depth-only passes render those same meshes through material views
-// whose render-feature override enables shadow-depth output; the depth textures
+// whose render-feature override removes fragment color output; the depth textures
 // are displayed on unlit planes in the main pass.
 
 import {
     addTaskAtStart,
     addToScene,
     attachControl,
-    createPbrShadowDepthMaterialView,
-    createStandardShadowDepthMaterialView,
+    createPbrNoColorMaterialView,
+    createStandardNoColorMaterialView,
     createArcRotateCamera,
     createEngine,
     createFreeCamera,
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     standardMaterial.specularPower = 96;
     standardMesh.material = standardMaterial;
     addToScene(scene, standardMesh);
-    const standardDepthView = createStandardShadowDepthMaterialView(standardMaterial);
+    const standardDepthView = createStandardNoColorMaterialView(standardMaterial);
     markMaterialUboDirty(standardMaterial);
 
     const baseColorTexture = createSolidTexture2D(engine, 1.0, 0.72, 0.22);
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     });
     pbrMesh.material = pbrMaterial;
     addToScene(scene, pbrMesh);
-    const pbrDepthView = createPbrShadowDepthMaterialView(pbrMaterial);
+    const pbrDepthView = createPbrNoColorMaterialView(pbrMaterial);
     markMaterialUboDirty(pbrMaterial);
 
     const standardDepthDisplay = createPlane(engine, { width: 2.2, height: 2.2 });

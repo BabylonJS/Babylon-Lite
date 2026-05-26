@@ -16,11 +16,12 @@ export function addTask(target: FrameGraph | SceneContext, task: Task): void {
     _appendTask(resolveFg(target), task);
 }
 
-/** Insert a task at the START of execute order. Accepts a FrameGraph or a SceneContext. */
+/** Insert a task at the START of user execute order. Built-in system tasks that must
+ *  precede all user work, such as the shadow adapter, keep their leading slot. */
 export function addTaskAtStart(target: FrameGraph | SceneContext, task: Task): void {
     const fg = resolveFg(target);
-    fg._tasks.unshift(task);
-    fg._ready = false;
+    const firstUserTask = fg._tasks[0]?.name === "shadow" ? 1 : 0;
+    fg._tasks.splice(firstUserTask, 0, task);
 }
 
 /** Insert a task BEFORE another task in execute order. Accepts a FrameGraph or a SceneContext. */
@@ -32,7 +33,6 @@ export function addTaskBefore(target: FrameGraph | SceneContext, task: Task, bef
     } else {
         fg._tasks.splice(i, 0, task);
     }
-    fg._ready = false;
 }
 
 /** Create a `RenderPass`, wire it to the task currently recording, and return

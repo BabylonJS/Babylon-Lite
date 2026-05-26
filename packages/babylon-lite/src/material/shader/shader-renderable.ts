@@ -131,14 +131,18 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
 }
 
 function createTransparentRenderable(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, isOverride: boolean): Renderable {
+    const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
+    const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     const update = (context: DrawUpdateContext): void => {
         if (!isOverride && packet.mesh.material !== material) {
             return;
         }
         updateCustomUbo(scene.engine as EngineContextInternal, material);
         updatePacket(scene, material, packet, context);
-        const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
-        r._worldCenter = [wm[12]!, wm[13]!, wm[14]!];
+        const m = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
+        sortCenter[0] = m[12]!;
+        sortCenter[1] = m[13]!;
+        sortCenter[2] = m[14]!;
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContextInternal): number => {
         if (!isOverride && packet.mesh.material !== material) {
@@ -147,12 +151,11 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         drawPacket(pass, engine, material, packet);
         return 1;
     };
-    const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const r: Renderable = {
         order: packet.mesh.renderOrder ?? 200,
         isTransparent: true,
         mesh: packet.mesh,
-        _worldCenter: [wm[12]!, wm[13]!, wm[14]!],
+        _worldCenter: sortCenter,
         bind(eng, sig) {
             const e = eng as EngineContextInternal;
             const bindings = getOrCreateShaderPipelineBindings(e, material);

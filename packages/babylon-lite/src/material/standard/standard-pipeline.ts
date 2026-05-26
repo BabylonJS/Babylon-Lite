@@ -21,26 +21,16 @@ import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
 import {
-    AMBIENT_USES_UV2,
     DIFFUSE_USES_UV2,
     DISABLE_LIGHTING,
     DOUBLE_SIDED,
-    HAS_AMBIENT_TEXTURE,
-    HAS_BUMP_TEXTURE,
     HAS_DIFFUSE_TEXTURE,
-    HAS_EMISSIVE_TEXTURE,
-    HAS_LIGHTMAP_TEXTURE,
     HAS_OPACITY_TEXTURE,
-    HAS_REFLECTION_TEXTURE,
-    HAS_SPECULAR_TEXTURE,
-    LIGHTMAP_USES_UV2,
     MATERIAL_ALPHA_BLEND,
-    GENERATE_DEPTH_FOR_SHADOWS,
     NEEDS_UV,
     NEEDS_UV2,
-    OPACITY_FROM_RGB,
-    PCF_SHADOWS,
-    SPECULAR_USES_UV2,
+    NO_COLOR_OUTPUT,
+    ESM_SHADOW_OUTPUT,
     _getStdExtsSorted,
 } from "./standard-flags.js";
 import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
@@ -50,39 +40,22 @@ import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 // This produces identical WGSL to the old string-builder path but via
 // the generic composer, enabling fragment-based extensions in Phase 2.
 
-/** Convert feature bitmask to a StandardTemplateConfig for the composer. */
-export function featuresToTemplateConfig(features: number, meshFeatures = 0) {
-    const has = (bit: number) => (features & bit) !== 0;
-    const hasMesh = (bit: number) => (meshFeatures & bit) !== 0;
-    return {
-        textures: {
-            diffuse: has(HAS_DIFFUSE_TEXTURE),
-            emissive: has(HAS_EMISSIVE_TEXTURE),
-            bump: has(HAS_BUMP_TEXTURE),
-            specular: has(HAS_SPECULAR_TEXTURE),
-            ambient: has(HAS_AMBIENT_TEXTURE),
-            lightmap: has(HAS_LIGHTMAP_TEXTURE),
-            opacity: has(HAS_OPACITY_TEXTURE),
-            reflection: has(HAS_REFLECTION_TEXTURE),
-        },
-        needsUV: has(NEEDS_UV),
-        needsUV2: has(NEEDS_UV2),
-        lightmapUsesUV2: has(LIGHTMAP_USES_UV2),
-        ambientUsesUV2: has(AMBIENT_USES_UV2),
-        diffuseUsesUV2: has(DIFFUSE_USES_UV2),
-        specularUsesUV2: has(SPECULAR_USES_UV2),
-        hasShadow: hasMesh(MSH_RECEIVE_SHADOWS),
-        hasPcfShadow: has(PCF_SHADOWS),
-        opacityFromRGB: has(OPACITY_FROM_RGB),
-        disableLighting: has(DISABLE_LIGHTING),
-    };
-}
-
 /** Compose Standard shader via the generic ShaderComposer.
  *  @param fragments Optional extra fragments (e.g. thin-instance). */
-export function composeStandardShader(features: number, meshFeatures = 0, fragments: ShaderFragment[] = []): ComposedShader {
-    const config = featuresToTemplateConfig(features, meshFeatures);
-    const template = createStandardTemplate(config);
+function composeStandardShader(features: number, _meshFeatures = 0, fragments: ShaderFragment[] = [], esmShadowDepthCode = ""): ComposedShader {
+    const has = (bit: number) => (features & bit) !== 0;
+    const template = createStandardTemplate(
+        {
+            _diffuse: has(HAS_DIFFUSE_TEXTURE),
+            _needsUV: has(NEEDS_UV),
+            _needsUV2: has(NEEDS_UV2),
+            _diffuseUsesUV2: has(DIFFUSE_USES_UV2),
+            _disableLighting: has(DISABLE_LIGHTING),
+            _noColorOutput: has(NO_COLOR_OUTPUT),
+            _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
+        },
+        esmShadowDepthCode
+    );
     return composeShader(template, fragments);
 }
 
@@ -140,7 +113,8 @@ export function getOrCreateStandardBindings(
     features: number,
     meshFeatures: number,
     fragments: ShaderFragment[] = [],
-    shaderKey = ""
+    shaderKey = "",
+    esmShadowDepthCode = ""
 ): StandardShaderBindings {
     ensureDevice(engine);
     const key = _standardFeatureKey(features, meshFeatures, shaderKey);
@@ -152,7 +126,7 @@ export function getOrCreateStandardBindings(
     const cc = getComposedCache();
     let composed = cc.get(key);
     if (!composed) {
-        composed = composeStandardShader(features, meshFeatures, fragments);
+        composed = composeStandardShader(features, meshFeatures, fragments, esmShadowDepthCode);
         cc.set(key, composed);
     }
 
@@ -192,26 +166,35 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
 
     const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
-    const depthOnly = (features & GENERATE_DEPTH_FOR_SHADOWS) !== 0;
-    const fragModule = depthOnly || !sig.colorFormat || composed._fragmentWGSL == null ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const noColorOutput = (features & NO_COLOR_OUTPUT) !== 0;
+    const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
+    const fragModule = !sig.colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
 
-    const needsBlend = (features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0;
-    const colorTarget: GPUColorTargetState = needsBlend
-        ? {
-              format: sig.colorFormat!,
-              blend: {
-                  color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
-                  alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
-              },
-          }
-        : { format: sig.colorFormat! };
+    const needsBlend = !esmShadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0);
+    const colorTarget: GPUColorTargetState | null = noColorOutput
+        ? null
+        : needsBlend
+          ? {
+                format: sig.colorFormat!,
+                blend: {
+                    color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+                    alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+                },
+            }
+          : { format: sig.colorFormat! };
 
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
-        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: [colorTarget] } } : {}),
+        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: colorTarget ? [colorTarget] : [] } } : {}),
         ...(sig.depthStencilFormat
-            ? { depthStencil: { format: sig.depthStencilFormat, depthCompare: "less-equal" as GPUCompareFunction, depthWriteEnabled: depthOnly || !needsBlend } }
+            ? {
+                  depthStencil: {
+                      format: sig.depthStencilFormat,
+                      depthCompare: "less-equal" as GPUCompareFunction,
+                      depthWriteEnabled: noColorOutput || esmShadowOutput || !needsBlend,
+                  },
+              }
             : {}),
         multisample: { count: sig.sampleCount },
         primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: sig.flipY ? "cw" : "ccw" },
@@ -240,6 +223,7 @@ export function createStandardMeshBindGroup(
     const features = bindings._features;
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
+    const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
 
     // Sequential numbering matches composer output.
     let nextBinding = 0;
@@ -272,12 +256,19 @@ export function createStandardMeshBindGroup(
         entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
     }
 
+    if (esmShadowOutput) {
+        entries.push({
+            binding: nextBinding++,
+            resource: { buffer: (material as StandardMaterialProps & { readonly _esmShadowParamsUBO: GPUBuffer })._esmShadowParamsUBO },
+        });
+    }
+
     // Fragment-contributed bindings — iterate ext registry in alphabetical id order
     // to match composer's fragment sort order.
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
-        if (features & ext.feature && ext.bind) {
-            nextBinding = ext.bind(material, entries, nextBinding);
+        if (features & ext._feature && ext._bind) {
+            nextBinding = ext._bind(material, entries, nextBinding);
         }
     }
 

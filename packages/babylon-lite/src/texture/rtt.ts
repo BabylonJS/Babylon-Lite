@@ -5,7 +5,7 @@
  */
 
 import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
-import { getBilinearSampler, getNearestSampler } from "../resource/gpu-pool.js";
+import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
 import { createRenderTarget, buildRenderTarget } from "../engine/render-target.js";
 import type { Texture2D } from "./texture-2d.js";

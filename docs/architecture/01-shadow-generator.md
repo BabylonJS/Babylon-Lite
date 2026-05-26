@@ -7,9 +7,9 @@ Implements two shadow mapping techniques for different light types:
 
 1. **Exponential Shadow Mapping (ESM)** with two-pass Gaussian blur for **directional lights** — produces a blurred shadow texture that the main material pass samples. Pipeline per-frame: (1) render shadow casters from the light's perspective into an ESM depth texture, (2) horizontal Gaussian blur, (3) vertical Gaussian blur.
 
-2. **Percentage Closer Filtering (PCF)** for **spot lights** — renders casters into a depth-only texture; the main-pass fragment shader samples with a hardware comparison sampler (5×5 bilinear PCF). No blur passes needed — saves 2 draw calls and 2 GPU textures vs ESM.
+2. **Percentage Closer Filtering (PCF)** for **spot and directional lights** — renders casters into a depth-only texture; the main-pass fragment shader samples with a hardware comparison sampler (5×5 bilinear PCF). No blur passes needed — saves 2 draw calls and 2 GPU textures vs ESM.
 
-Both generators share caster infrastructure from `shadow-base.ts` and return the same `ShadowGenerator` interface, so the downstream render pipeline is shadow-technique-agnostic.
+Both generators return the same `ShadowGenerator` interface, so the downstream render pipeline is shadow-technique-agnostic. Caster meshes are registered as scene-owned `ShadowTask` inputs, not stored on `ShadowGenerator`. Shadow maps are scheduled by the scene's frame graph: shadow scenes opt into the internal `ShadowTask` by calling `registerSceneWithShadowSupport()`, so ordinary `registerScene()` bundles do not retain shadow scheduling code. PCF and ESM casters use per-source-material Standard/PBR/Node shadow material views, preserving material/mesh vertex features.
 
 ### Babylon.js Configuration Equivalence
 
@@ -28,46 +28,58 @@ Both generators share caster infrastructure from `shadow-base.ts` and return the
 ### Shared Base (`shadow-base.ts`)
 
 ```typescript
-export interface ShadowCaster {
-  positionBuffer: GPUBuffer;
-  indexBuffer: GPUBuffer;
-  indexCount: number;
-  worldMatrix: Float32Array;   // 16-element column-major 4×4
-  meshUBO: GPUBuffer;
-  bindGroup: GPUBindGroup;
-  _mesh: Mesh;
-  _lastWorldVersion: number;
-}
-
-/** Build caster list from meshes, creating per-caster UBOs and bind groups. */
-export function buildCasters(
-  device: GPUDevice,
-  meshes: Mesh[],
-  meshBGL: GPUBindGroupLayout,
-  extraEntries?: GPUBindGroupEntry[],
-): ShadowCaster[];
-
-/** Sync caster world matrices that have changed since last frame. */
-export function syncCasterMatrices(device: GPUDevice, casters: ShadowCaster[]): void;
-
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
- *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
+ *  Layout: [_lightMatrix(16), _depthValues.x, _depthValues.y, 0, 0, _shadowsInfo(4)] */
 export function writeShadowUboFields(
   out: Float32Array,
-  sg: { lightMatrix: Float32Array; depthValues: Float32Array; shadowsInfo: Float32Array },
+  sg: { _lightMatrix: Float32Array; _depthValues: Float32Array; _shadowsInfo: Float32Array },
 ): void;
 
-/** Compare two Float32Array(16) matrices. Returns true if any element differs. */
-export function shadowMatrixChanged(a: Float32Array, b: Float32Array): boolean;
-
-/** Draw all casters into the current render pass. */
-export function drawCasters(pass: GPURenderPassEncoder, casters: ShadowCaster[]): void;
+export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): Float32Array;
+export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array;
+export function createShadowParamsUBO(engine: EngineContextInternal, bias: number, depthScale: number): GPUBuffer;
+export function createSharedShadowUBO(engine: EngineContextInternal, _lightMatrix: Float32Array, _depthValues: Float32Array, _shadowsInfo: Float32Array): { ubo: GPUBuffer; data: Float32Array };
 ```
+
+### ShadowTask Inputs (`frame-graph/shadow-inputs.ts`)
+
+```typescript
+export interface ShadowTaskInputs {
+  readonly casterMeshes: readonly Mesh[];
+}
+
+export function setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readonly Mesh[]): void;
+```
+
+Caster meshes are task inputs. Scene setup creates the filter-specific `ShadowGenerator`, assigns it to the light, calls `setShadowTaskCasterMeshes()` to provide the caster list, then calls `registerSceneWithShadowSupport()` instead of `registerScene()` to install the scene-owned shadow task.
 
 ### Common ShadowGenerator Interface (`shadow-generator.ts`)
 
 ```typescript
-export interface ShadowGeneratorConfig {
+export interface ShadowGenerator {
+  /** Shadow technique: 'esm' (exponential) or 'pcf' (percentage closer filtering). */
+  _shadowType: 'esm' | 'pcf';
+  /** The light that owns this shadow generator. */
+  _light: LightBase;
+  _depthTexture: GPUTexture;             // Receiver-facing map: ESM final blurred rgba16float, PCF depth32float
+  _depthSampler: GPUSampler;             // Receiver-facing sampler: ESM linear sampler, PCF comparison sampler
+  _lightMatrix: Float32Array;            // 16-element light view-projection
+  _shadowsInfo: Float32Array;            // ESM: [darkness, 0, depthScale, frustumEdgeFalloff]
+                                         // PCF: [darkness, mapSize, 1/mapSize, 0]
+  _depthValues: Float32Array;            // Directional PCF/ESM: [0, 1]; spot PCF: [0, far]
+  _shadowParamsUBO: GPUBuffer;           // Shared shadow parameters UBO
+  _shadowUBO: GPUBuffer;                 // Receiver-side shadow info UBO
+  _config: ShadowGeneratorRuntimeConfig; // minimal normalized fields read by shadow task hooks
+  /** Monotonically increasing version — bumped each time _lightMatrix changes.
+   *  Consumers compare against a stashed version to skip redundant UBO uploads. */
+  _version: number;
+}
+```
+
+### ESM Factory Function (`esm-directional-shadow-generator.ts`)
+
+```typescript
+export interface EsmDirectionalShadowGeneratorConfig {
   mapSize?: number;           // Default: 1024
   depthScale?: number;        // Default: 50
   bias?: number;              // Default: 0.00005
@@ -76,59 +88,53 @@ export interface ShadowGeneratorConfig {
   frustumEdgeFalloff?: number;// Default: 0
   orthoMinZ?: number;         // Default: 1  — ortho projection near Z
   orthoMaxZ?: number;         // Default: 10000 — ortho projection far Z
+  forceRefreshEveryFrame?: boolean; // Default: false — regenerate every frame for GPU-driven/deforming casters
 }
 
-export type ShadowCasterMesh = ShadowCaster;   // Re-export from shadow-base
-
-export interface ShadowGenerator {
-  /** Shadow technique: 'esm' (exponential) or 'pcf' (percentage closer filtering). */
-  shadowType: 'esm' | 'pcf';
-  /** The light that owns this shadow generator. */
-  light: LightBase;
-  blurredTexture: GPUTexture;            // ESM: blurred output (rgba16float); PCF: depth texture (depth32float)
-  blurredSampler: GPUSampler;            // ESM: linear clamp; PCF: comparison sampler
-  renderShadowMap: (encoder: GPUCommandEncoder) => number;  // Returns draw count
-  lightMatrix: Float32Array;             // 16-element light view-projection
-  shadowsInfo: Float32Array;             // ESM: [darkness, 0, depthScale, frustumEdgeFalloff]
-                                         // PCF: [darkness, mapSize, 1/mapSize, 0]
-  depthValues: Float32Array;             // [0, 1] for WebGPU
-  depthMeshBGL: GPUBindGroupLayout;      // Bind group layout for per-mesh shadow depth
-  shadowParamsUBO: GPUBuffer;            // Shared shadow parameters UBO
-  config: Required<ShadowGeneratorConfig>;
-  /** Monotonically increasing version — bumped each time lightMatrix changes.
-   *  Consumers compare against a stashed version to skip redundant UBO uploads. */
-  _version: number;
-}
-```
-
-### ESM Factory Function (`shadow-generator.ts`)
-
-```typescript
-export function createShadowGenerator(
+export function createEsmDirectionalShadowGenerator(
   engine: Engine,
   light: DirectionalLight,
-  casterMeshes: Mesh[],
-  cfg?: ShadowGeneratorConfig,
+  cfg?: EsmDirectionalShadowGeneratorConfig,
 ): ShadowGenerator;
 ```
 
-### PCF Factory Function (`pcf-shadow-generator.ts`)
+### PCF Spot Factory Function (`pcf-spotlight-shadow-generator.ts`)
 
 ```typescript
-export interface PcfShadowGeneratorConfig {
+export interface PcfSpotlightShadowGeneratorConfig {
   mapSize?: number;      // Default: 512
   bias?: number;         // Default: 0.00005
   darkness?: number;     // Default: 0
   normalBias?: number;   // Default: 0
   near?: number;         // Default: 1 (camera near)
   far?: number;          // Default: light.range or 10000
+  forceRefreshEveryFrame?: boolean; // Default: false — regenerate every frame for GPU-driven/deforming casters
 }
 
-export function createPcfShadowGenerator(
+export function createPcfSpotlightShadowGenerator(
   engine: Engine,
   light: SpotLight,
-  casterMeshes: Mesh[],
-  cfg?: PcfShadowGeneratorConfig,
+  cfg?: PcfSpotlightShadowGeneratorConfig,
+): ShadowGenerator;
+```
+
+### PCF Directional Factory Function (`pcf-directional-shadow-generator.ts`)
+
+```typescript
+export interface PcfDirectionalShadowGeneratorConfig {
+  mapSize?: number;      // Default: 1024
+  bias?: number;         // Default: 0.00005
+  darkness?: number;     // Default: 0
+  normalBias?: number;   // Default: 0
+  orthoMinZ?: number;    // Default: 1
+  orthoMaxZ?: number;    // Default: 10000
+  forceRefreshEveryFrame?: boolean; // Default: false — regenerate every frame for GPU-driven/deforming casters
+}
+
+export function createPcfDirectionalShadowGenerator(
+  engine: Engine,
+  light: DirectionalLight,
+  cfg?: PcfDirectionalShadowGeneratorConfig,
 ): ShadowGenerator;
 ```
 
@@ -136,28 +142,21 @@ export function createPcfShadowGenerator(
 
 ```typescript
 import type { DirectionalLight } from '../light/directional-light.js';
-import type { Mesh } from '../mesh/mesh.js';
 import type { Engine, EngineInternal } from '../engine/engine.js';
 import { getOrCreateSampler } from '../resource/gpu-pool.js';
-import { buildCasters, syncCasterMatrices, drawCasters, shadowMatrixChanged } from './shadow-base.js';
-import depthVertSrc  from '../../shaders/shadow-depth.vertex.wgsl?raw';
-import depthFragSrc  from '../../shaders/shadow-depth.fragment.wgsl?raw';
+import { createSharedShadowUBO, createShadowParamsUBO } from './shadow-base.js';
 import blurVertSrc   from '../../shaders/shadow-blur.vertex.wgsl?raw';
 import blurFragSrc   from '../../shaders/shadow-blur.fragment.wgsl?raw';
-// Shadow depth shaders inline a minimal light-view SceneUniforms declaration.
 ```
 
 ### Imports (PCF generator)
 
 ```typescript
 import type { SpotLight } from '../light/spot-light.js';
-import type { Mesh } from '../mesh/mesh.js';
 import type { Engine, EngineInternal } from '../engine/engine.js';
 import type { ShadowGenerator } from './shadow-generator.js';
-import { buildCasters, syncCasterMatrices, drawCasters, shadowMatrixChanged } from './shadow-base.js';
-import depthVertSrc from '../../shaders/shadow-pcf-depth.vertex.wgsl?raw';
-import { registerPcfShadowShader, registerPcfShadowBgl } from '../material/standard/standard-pipeline.js';
-// Shadow depth shaders inline a minimal light-view SceneUniforms declaration.
+import { createSharedShadowUBO, createShadowParamsUBO } from './shadow-base.js';
+import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap } from './pcf-shadow-task-hooks.js';
 ```
 
 ---
@@ -166,13 +165,12 @@ import { registerPcfShadowShader, registerPcfShadowBgl } from '../material/stand
 
 ### Shadow Base Shared Infrastructure (`shadow-base.ts`)
 
-All shadow generators share a common caster management layer:
+Shadow generators share math and UBO packing helpers only. Caster ownership lives in `ShadowTaskInputs`:
 
-- **`buildCasters()`** — iterates `Mesh[]`, reads each mesh's internal GPU state (`_gpu.positionBuffer`, `_gpu.indexBuffer`, `_gpu.indexCount`), creates a 64-byte world-matrix UBO per caster, and builds per-caster bind groups. Accepts optional `extraEntries` for technique-specific bindings (ESM adds the shadow params UBO at binding 1; PCF does not).
-- **`syncCasterMatrices()`** — per-frame check: compares `mesh.worldMatrixVersion` against a stashed `_lastWorldVersion` and re-uploads only dirty world matrices.
-- **`drawCasters()`** — issues indexed draw calls: for each caster, sets vertex buffer 0, index buffer (uint32), bind group 1, and calls `drawIndexed`.
+- **`setShadowTaskCasterMeshes()`** — registers the caster mesh list for a generator in lazy task-owned input state.
 - **`writeShadowUboFields()`** — packs a `ShadowGenerator`'s light matrix (16 floats), depth values (2 floats + 2 padding), and shadowsInfo (4 floats) into a 24-float array for downstream UBO upload.
-- **`shadowMatrixChanged()`** — element-wise Float32Array(16) comparison; returns `true` if any element differs.
+- **`buildLightViewMatrix()` / `multiply4x4()`** — shared light-space matrix math for ESM and PCF task paths.
+- **`createShadowParamsUBO()` / `createSharedShadowUBO()`** — shared GPU buffer setup for generator-owned receiver resources.
 
 ### ESM Generator — GPU Textures
 
@@ -246,9 +244,6 @@ Same as ESM: light view-projection matrix.
 | 24              | [6]           | *(unused)*                                   |
 | 28              | [7]           | *(unused)*                                   |
 
-#### Per-Caster Mesh UBO — 64 bytes
-Same as ESM: world matrix only. PCF does not bind the shadow params UBO to per-caster groups.
-
 ### shadowsInfo Layout Differences
 
 | Field Index | ESM                     | PCF                |
@@ -260,10 +255,10 @@ Same as ESM: world matrix only. PCF does not bind the shadow params UBO to per-c
 
 ### Light View-Projection Matrix Computation
 
-#### ESM: `computeDirectionalLightMatrix` (orthographic)
+#### Directional shadows: matrix computation (orthographic)
 
 ```typescript
-function computeDirectionalLightMatrix(
+function _computeDirectionalLightMatrix(
   light: DirectionalLight,
   casterMeshes: Mesh[],
   orthoMinZ: number,
@@ -300,10 +295,12 @@ function computeDirectionalLightMatrix(
    ```
 9. Multiply: `viewProj = proj * view` (standard 4×4 multiply)
 
-#### PCF: `computeSpotLightMatrix` (perspective)
+ESM owns its task-facing directional matrix helper as internal `_computeDirectionalLightMatrix()` in `shadow/esm-directional-shadow-generator.ts`. PCF owns the same orthographic helper as internal `_computeDirectionalLightMatrix()` in `shadow/pcf-directional-shadow-generator.ts` so directional shadow generator math remains with the relevant directional resource setup without becoming public API.
+
+#### Spot PCF: `_computeSpotLightMatrix` (perspective)
 
 ```typescript
-function computeSpotLightMatrix(
+function _computeSpotLightMatrix(
   light: SpotLight,
   near: number,
   far: number,
@@ -327,6 +324,8 @@ function computeSpotLightMatrix(
    P[14] = -(far * near) / (far - near)
    ```
 6. Multiply: `viewProj = proj * view`
+
+The spot matrix helper is exported as internal `_computeSpotLightMatrix()` from `shadow/pcf-spotlight-shadow-generator.ts`.
 
 ---
 
@@ -379,48 +378,31 @@ Group 1 — `shadow-depth-mesh`:
 - `minFilter: 'linear'`, `magFilter: 'linear'`
 - `addressModeU: 'clamp-to-edge'`, `addressModeV: 'clamp-to-edge'`
 
-**Output sampler (returned as `blurredSampler`):**
-- Same configuration as blur sampler
+The final vertical blur target is stored as `ShadowGenerator._depthTexture`; receivers bind `sg._depthTexture` and `sg._depthSampler` directly, the same as PCF.
 
 ### PCF Shadow Depth Pipeline
 
-**Vertex buffers:**
-
-| Slot | Stride | Attribute | Location | Format      |
-|------|--------|-----------|----------|-------------|
-| 0    | 12B    | position  | 0        | float32x3   |
-
-**Bind group layouts:**
-
-Group 0 — `pcf-depth-scene`:
-| Binding | Visibility | Type    | Content                         |
-|---------|------------|---------|---------------------------------|
-| 0       | VERTEX     | uniform | Light view-projection + `pcfBias` (80 bytes) |
-
-Group 1 — `pcf-depth-mesh`:
-| Binding | Visibility | Type    | Content                         |
-|---------|------------|---------|---------------------------------|
-| 0       | VERTEX     | uniform | World matrix (64 bytes)         |
+PCF depth rendering uses the regular material renderable path with a pass-specific no-color shadow material view. The active material family (Standard, PBR, or Node) supplies vertex buffers, mesh bind groups, and the pipeline; the view only changes render feature bits to select a variant whose fragment stage writes no color.
 
 **Pipeline state:**
-- Primitive: `triangle-list`, cull: `back`, front: `ccw`
+- Primitive/culling/vertex layout: inherited from the Standard/PBR material pipeline
 - Depth/stencil: `depth32float`, write: `true`, compare: `less-equal`
-- Bias handling: PCF uses Babylon-style clip-space linear bias in the depth vertex shader (`clipPos.z += scene.pcfBias.x * clipPos.w`). The shadow-pass scene UBO stores `bias * 0.5` for WebGPU half-Z depth. PCF does **not** use WebGPU pipeline `depthBias` / `depthBiasSlopeScale`.
+- Bias handling: `ShadowTask` bakes Babylon-style clip-space linear bias (`bias * 0.5` for WebGPU half-Z depth) into the shadow pass view-projection matrix. PCF does **not** use WebGPU pipeline `depthBias` / `depthBiasSlopeScale`.
 - **No color targets** (depth-only pass)
-- **No fragment shader** (vertex-only pipeline)
+- **Fragment stage retained when needed** with a void entry point so material `discard` / alpha-test logic updates the depth attachment without writing color
 - No multisample
 
 ### PCF Main-Pass Integration
 
-The PCF generator dynamically registers shader snippets and bind group layout via `registerPcfShadowShader()` and `registerPcfShadowBgl()` into the standard material pipeline. This is lazy/one-shot — guarded by `_pcfRegistered` flag.
+Standard, PBR, and Node shadow receiver fragments emit PCF sampling code and bind-group layout directly from the scene's shadow-light list. There is no generator-side PCF shader registration path; the generator only exposes receiver-facing texture/sampler/UBO resources.
 
-**Registered bind group (group 2) for main pass:**
+**Receiver bind group entries for main pass:**
 | Binding | Type               | Content                          |
 |---------|--------------------|----------------------------------|
 | 0       | `texture_depth_2d` | Shadow depth texture             |
 | 1       | `sampler_comparison`| Comparison sampler (compare: `less`, linear filtering) |
 
-**Registered shader fragments (injected into standard fragment shader):**
+**Receiver shader fragments:**
 
 - **Declarations:** `@group(2) @binding(0) var shadowTex: texture_depth_2d; @group(2) @binding(1) var shadowCompSampler: sampler_comparison;`
 - **Function:** `computeShadowWithPCF(posFromLight, depthMetric, darkness, mapSize, invMapSize) → f32`
@@ -430,14 +412,14 @@ The PCF generator dynamically registers shader snippets and bind group layout vi
 
 ## Shader Logic
 
-### Shadow Depth Vertex Shader — ESM (`shadow-depth.vertex.wgsl`)
+### ESM Material Shadow View Vertex Path
 
 ```wgsl
 struct SceneUniforms { viewProjection: mat4x4<f32> };            // @group(0) @binding(0)
 struct MeshUniforms  { world: mat4x4<f32> };                     // @group(1) @binding(0)
 struct ShadowParams  {
   biasAndScale: vec4<f32>,  // x=bias, y=unused, z=depthScale, w=unused
-  depthValues: vec4<f32>,   // x=near(0), y=far(1)
+  depthValues: vec4<f32>,   // Directional x=0,y=1; spot PCF receiver x=0,y=far
 };                                                                // @group(1) @binding(1)
 
 struct VertexOutput {
@@ -457,9 +439,11 @@ struct VertexOutput {
 vDepthMetricSM = (clipPos.z + 0) / 1 + 0.00005
                = clipPos.z + bias
 ```
-(For WebGPU directional light: `depthValues = (0, 1)`)
+For WebGPU directional lights, `depthValues = (0, 1)`. For spot PCF receiver sampling, `depthValues = (0, far)`, matching Babylon.js `SpotLight.getDepthMinZ()/getDepthMaxZ()` in WebGPU half-Z mode.
 
-### Shadow Depth Fragment Shader — ESM (`shadow-depth.fragment.wgsl`)
+### ESM Material Shadow View Fragment Output
+
+The caster material's normal fragment logic runs first, including alpha test, `DiscardBlock`, and clip-plane discard. The ESM shadow view then replaces the final color output with the fixed ESM encoding:
 
 ```wgsl
 @fragment fn main(@location(0) vDepthMetricSM: f32) -> @location(0) vec4<f32> {
@@ -474,23 +458,9 @@ output.r = clamp(exp(-min(87.0, 50.0 * depth)), 0, 1)
 ```
 The `min(87.0, ...)` prevents float overflow in `exp()`. The result is stored in the red channel. Closer fragments (depth ≈ 0) produce values near 1.0; farther fragments produce values near 0.0.
 
-### Shadow Depth Vertex Shader — PCF (`shadow-pcf-depth.vertex.wgsl`)
+### Shadow Depth Vertex Shader — PCF
 
-```wgsl
-struct SceneUniforms {
-  viewProjection: mat4x4<f32>,
-  pcfBias: vec4<f32>,
-};                                                     // @group(0) @binding(0)
-struct MeshUniforms  { world: mat4x4<f32> };           // @group(1) @binding(0)
-
-@vertex fn main(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
-  clipPos = scene.viewProjection * mesh.world * vec4(position, 1.0);
-  clipPos.z += scene.pcfBias.x * clipPos.w;
-  return clipPos;
-}
-```
-
-No fragment shader — depth-only pass. Hardware writes `builtin(position).z` to the depth buffer. Bias is applied in clip space through `scene.pcfBias`; PCF does not use WebGPU pipeline depth-bias state.
+PCF no longer owns a custom position-only depth vertex shader. `ShadowTask` renders casters through Standard/PBR/Node no-color shadow material views, so the normal material vertex path handles mesh features such as morph targets, skeletons, thin instances, UV-dependent alpha tests, and future material vertex extensions. No-color shadow variants emit a void fragment stage when discard logic is required; no color attachment or dummy texture is bound. Bias is baked into the task scene UBO's light-space view-projection matrix; PCF does not use WebGPU pipeline depth-bias state.
 
 ### PCF Sampling Function (injected into main pass fragment shader)
 
@@ -611,48 +581,40 @@ Implements a 33-tap Gaussian blur matching Babylon's `kernelBlur` post-process w
 
 ## State Machine / Lifecycle
 
+### Frame-Graph Scheduling
+
+`registerSceneWithShadowSupport(engine, scene)` installs an internal frame-graph `ShadowTask` before the default swapchain scene render task. Shadow textures are owned by each `ShadowGenerator`; shadow rendering is owned by `ShadowTask`. On every frame, `ShadowTask.execute()` reads `engine._currentEncoder`, loops `scene.lights`, and renders each light's shadow generator. The returned draw counts are summed by `FrameGraph.execute()` together with the scene render task.
+
+ESM generators expose their depth/blur resources to `ShadowTask`. Caster meshes are registered as `ShadowTask` inputs. During `record()`, PCF creates a depth-only `RenderTask` over the generator's depth texture; ESM creates an ESM color+depth `RenderTask` over its task resources. Both paths create one shadow material view per unique caster material.
+
 ### ESM Initialization (once)
 
-1. Compute light view-projection matrix from `DirectionalLight` + caster mesh world AABBs
-2. Create `depthMeshBGL` with 2 bindings (world matrix + shadow params)
-3. Create shadow params UBO (bias, depthScale, depthValues)
-4. Build casters via `buildCasters()` with shadow params as extra bind group entry
-5. Create 4 GPU textures: ESM target, depth buffer, blur-H target, blur-V target
-6. Create depth scene UBO and write light viewProj matrix
-7. Create depth pipeline (vertex + fragment) with 2 bind group layouts
-8. Create blur pipeline (vertex + fragment) with 1 bind group layout
-9. Create blur UBOs for H/V passes with appropriate delta vectors
-10. Create all bind groups
-11. Return `ShadowGenerator` with `shadowType: 'esm'`
+1. Create shadow params UBO (bias, depthScale, depthValues)
+2. Create 4 GPU textures: ESM target, depth buffer, blur-H target, blur-V target
+3. Create blur pipeline, blur UBOs, and blur bind groups
+4. Create shared receiver shadow UBO
+5. Store ESM-only task resources via the internal resource map
+6. Return `ShadowGenerator` with `_shadowType: 'esm'`
 
-### PCF Initialization (once)
+Scene setup separately registers caster meshes as `ShadowTask` inputs via `setShadowTaskCasterMeshes()`.
 
-1. Call `ensurePcfRegistered()` — one-shot registration of PCF shader snippets and bind group layout into the standard material pipeline
-2. Compute spot light perspective view-projection matrix
-3. Create `depthMeshBGL` with 1 binding (world matrix only — no shadow params)
-4. Build casters via `buildCasters()` (no extra entries)
-5. Create single depth-only texture (`depth32float`, RENDER_ATTACHMENT + TEXTURE_BINDING)
-6. Create depth scene UBO and write light viewProj matrix
-7. Create depth-only pipeline (vertex shader only, no fragment shader, no color targets)
-8. Create comparison sampler (`compare: 'less'`, linear filtering)
-9. Create shadow params UBO (bias, texel size, depthValues)
-10. Return `ShadowGenerator` with `shadowType: 'pcf'`
+### PCF Initialization
 
-### Per-Frame Rendering — ESM (`renderShadowMap(encoder)`)
+1. Create single depth-only texture (`depth32float`, RENDER_ATTACHMENT + TEXTURE_BINDING)
+2. Create comparison sampler (`compare: 'less'`, linear filtering)
+3. Create shadow params UBO (bias, texel size, depthValues)
+4. Register caster meshes as `ShadowTask` inputs; the task wraps the generator's depth texture in a depth-only render target
+5. Return `ShadowGenerator` with `shadowType: 'pcf'`
+
+### Per-Frame Rendering — ESM (`ShadowTask`)
 
 ```
-Recompute light matrix → compare with shadowMatrixChanged() → update if dirty
-syncCasterMatrices()
+Recompute light matrix → update shared receiver shadow UBO if dirty
 
 Pass 1: Shadow Depth
   ├─ Clear esmTexture to (0,0,0,0), depthBuf to 1.0
-  ├─ Set depthPipeline
-  ├─ Set group(0) = depthSceneBG (light viewProj)
-  └─ For each caster (via drawCasters):
-       ├─ Set vertex buffer 0 = positionBuffer
-       ├─ Set index buffer (uint32)
-       ├─ Set group(1) = casterBindGroup
-       └─ drawIndexed(indexCount)
+  ├─ Build/record a material-view RenderTask from ShadowTask caster inputs
+  └─ Draw each caster through the material renderable path
 
 Pass 2: Blur Horizontal
   ├─ Clear blurTexH to (0,0,0,0)
@@ -669,67 +631,57 @@ Pass 3: Blur Vertical
 Returns: casters.length + 2  (depth draws + 2 blur passes)
 ```
 
-### Per-Frame Rendering — PCF (`renderShadowMap(encoder)`)
+### Per-Frame Rendering — PCF (`ShadowTask`)
 
 ```
-Recompute spot light matrix → compare with shadowMatrixChanged() → update if dirty
-syncCasterMatrices()
+ShadowTask.record()
+  ├─ Create one Standard/PBR/Node no-color shadow MaterialView per unique caster material
+  ├─ Create a depth-only RenderTask targeting the generator's depth texture
+  └─ Add each caster mesh to the task with its no-color shadow material view
+
+ShadowTask.execute()
+  ├─ Recompute spot or directional light matrix if the light/caster state is dirty
+  ├─ Update the shared receiver shadow UBO
+  └─ Execute the depth-only RenderTask
 
 Pass 1: Shadow Depth (single pass, depth-only)
   ├─ colorAttachments: []  (no color output)
   ├─ Clear depthTexture to 1.0
-  ├─ Set depthPipeline
-  ├─ Set group(0) = depthSceneBG (light viewProj)
-  └─ For each caster (via drawCasters):
-       ├─ Set vertex buffer 0 = positionBuffer
-       ├─ Set index buffer (uint32)
-       ├─ Set group(1) = casterBindGroup
-       └─ drawIndexed(indexCount)
+  ├─ Set group(0) = task scene UBO (biased light viewProjection)
+  └─ Draw each caster through the material renderable path
 
 Returns: casters.length  (depth draws only — no blur passes)
 ```
-
----
-
-## Shadow Renderable (`shadow-renderable.ts`)
-
-Currently a placeholder module:
-```typescript
-/** Shadow pre-pass renderable — placeholder for future shadow pass integration. */
-```
-
-Reserved for future integration of shadow maps into the general render pipeline's renderable system. Not yet implemented.
-
----
 
 ## Babylon.js Equivalence Map
 
 | Babylon Lite                                        | Babylon.js                                                            |
 |-----------------------------------------------------|-----------------------------------------------------------------------|
-| `createShadowGenerator()`                          | `new ShadowGenerator(mapSize, light)` with ESM config                |
-| `createPcfShadowGenerator()`                       | `new ShadowGenerator(mapSize, light)` with PCF config                |
-| `ShadowGenerator.shadowType === 'esm'`             | `ShadowGenerator.useBlurExponentialShadowMap = true`                 |
-| `ShadowGenerator.shadowType === 'pcf'`             | `ShadowGenerator.usePercentageCloserFiltering = true`                |
-| `ShadowGeneratorConfig.mapSize`                    | `ShadowGenerator.mapSize`                                            |
-| `ShadowGeneratorConfig.depthScale`                 | `ShadowGenerator.depthScale`                                         |
-| `ShadowGeneratorConfig.bias`                       | `ShadowGenerator.bias`                                               |
-| `ShadowGeneratorConfig.blurScale`                  | `ShadowGenerator.blurScale`                                          |
-| `ShadowGeneratorConfig.darkness`                   | `ShadowGenerator.darkness`                                           |
-| `ShadowGeneratorConfig.frustumEdgeFalloff`         | `ShadowGenerator.frustumEdgeFalloff`                                 |
-| `PcfShadowGeneratorConfig.normalBias`              | `ShadowGenerator.normalBias`                                         |
+| `createEsmDirectionalShadowGenerator()`            | `new ShadowGenerator(mapSize, light)` with directional ESM config    |
+| `createPcfSpotlightShadowGenerator()`              | `new ShadowGenerator(mapSize, light)` with spotlight PCF config      |
+| `createPcfDirectionalShadowGenerator()`            | `new ShadowGenerator(mapSize, light)` with directional PCF config    |
+| `ShadowGenerator._shadowType === 'esm'`            | `ShadowGenerator.useBlurExponentialShadowMap = true`                 |
+| `ShadowGenerator._shadowType === 'pcf'`            | `ShadowGenerator.usePercentageCloserFiltering = true`                |
+| `EsmDirectionalShadowGeneratorConfig.mapSize`       | `ShadowGenerator.mapSize`                                            |
+| `EsmDirectionalShadowGeneratorConfig.depthScale`    | `ShadowGenerator.depthScale`                                         |
+| `EsmDirectionalShadowGeneratorConfig.bias`          | `ShadowGenerator.bias`                                               |
+| `EsmDirectionalShadowGeneratorConfig.blurScale`     | `ShadowGenerator.blurScale`                                          |
+| `EsmDirectionalShadowGeneratorConfig.darkness`      | `ShadowGenerator.darkness`                                           |
+| `EsmDirectionalShadowGeneratorConfig.frustumEdgeFalloff` | `ShadowGenerator.frustumEdgeFalloff`                           |
+| `EsmDirectionalShadowGeneratorConfig.forceRefreshEveryFrame` | Force shadow-map rendering for dynamic/deforming casters      |
+| `PcfSpotlightShadowGeneratorConfig.normalBias` / `PcfDirectionalShadowGeneratorConfig.normalBias` | `ShadowGenerator.normalBias` |
 | ESM encoding (`exp(-depthScale*d)`)                | `ShadowGenerator.useBlurExponentialShadowMap = true`                 |
 | 33-tap Gaussian blur (kernel=64)                   | `ShadowGenerator.useKernelBlur = true; .blurKernel = 64`            |
 | PCF 5×5 bilinear (9 optimised taps)               | `ShadowGenerator.filteringQuality = SM_PCF`                         |
-| `computeDirectionalLightMatrix()`                  | `DirectionalLight._setDefaultAutoExtendShadowProjectionMatrix()`     |
-| `computeSpotLightMatrix()`                         | `SpotLight._setDefaultShadowProjectionMatrix()`                      |
+| `_computeDirectionalLightMatrix()`                 | `DirectionalLight._setDefaultAutoExtendShadowProjectionMatrix()`     |
+| `_computeSpotLightMatrix()`                        | `SpotLight._setDefaultShadowProjectionMatrix()`                      |
 | `shadowOrthoScale = 0.1` (expand)                  | `DirectionalLight.shadowOrthoScale = 0.1`                           |
-| `depthValues = [0, 1]`                             | `DirectionalLight.getDepthMinZ()=0`, `getDepthMaxZ()=1` (WebGPU)    |
-| `buildCasters()`                                    | `ShadowGenerator.addShadowCaster(mesh)` (internal)                  |
-| `syncCasterMatrices()`                              | `ShadowGenerator._renderForShadowMap()` world matrix sync (internal)|
-| `drawCasters()`                                     | `ShadowGenerator._renderSubMeshForShadowMap()` (internal)           |
-| `renderShadowMap(encoder)`                         | `ShadowGenerator._renderForShadowMap()` (internal)                  |
-| `blurredTexture`                                    | `ShadowGenerator.getShadowMap()` (after blur passes)                |
-| `lightMatrix`                                       | `ShadowGenerator.getTransformMatrix()`                              |
+| Directional `depthValues = [0, 1]`                 | `DirectionalLight.getDepthMinZ()=0`, `getDepthMaxZ()=1` (WebGPU half-Z) |
+| Spot PCF `depthValues = [0, far]`                  | `SpotLight.getDepthMinZ()=0`, `getDepthMaxZ()=far` (WebGPU half-Z)  |
+| `setShadowTaskCasterMeshes()`                      | `ShadowGenerator.addShadowCaster(mesh)` render-list input equivalent|
+| `ShadowTask.execute()`                             | Scene/frame orchestration before receiver rendering                 |
+| ESM `ShadowGenerator._depthTexture`                 | `ShadowGenerator.getShadowMap()` (after blur passes)                |
+| `_lightMatrix`                                      | `ShadowGenerator.getTransformMatrix()`                              |
 | `writeShadowUboFields()`                           | Internal UBO packing in Babylon's shadow system                      |
 | `ShadowGenerator._version`                         | No direct equivalent — Lite uses version for dirty tracking          |
 
@@ -740,30 +692,37 @@ Reserved for future integration of shadow maps into the general render pipeline'
 ### shadow-base.ts
 - `../mesh/mesh.js` — `Mesh`, `MeshInternal` interfaces
 
-### shadow-generator.ts (ESM)
+### esm-directional-shadow-generator.ts (ESM)
 - `../light/directional-light.js` — `DirectionalLight` interface
-- `../mesh/mesh.js` — `Mesh` interface
 - `../engine/engine.js` — `Engine`, `EngineInternal`
-- `../resource/gpu-pool.js` — `getOrCreateSampler`
-- Inline `SHADOW_LIGHT_VIEW_WGSL` — minimal `SceneUniforms { viewProjection }` for light-space depth rendering
-- `./shadow-base.js` — `buildCasters`, `syncCasterMatrices`, `drawCasters`, `shadowMatrixChanged`
-- `../../shaders/shadow-depth.vertex.wgsl` — depth vertex shader (raw import)
-- `../../shaders/shadow-depth.fragment.wgsl` — depth fragment shader (raw import)
+- `./shadow-base.js` — shared shadow params and receiver UBO helpers
 - `../../shaders/shadow-blur.vertex.wgsl` — blur vertex shader (raw import)
-- `../../shaders/shadow-blur.fragment.wgsl` — blur fragment shader (raw import)
 
-### pcf-shadow-generator.ts (PCF)
+### pcf-spotlight-shadow-generator.ts (PCF)
 - `../light/spot-light.js` — `SpotLight` interface
-- `../mesh/mesh.js` — `Mesh` interface
 - `../engine/engine.js` — `Engine`, `EngineInternal`
-- `../material/standard/standard-flags.js` — `registerPcfShadowShader`, `registerPcfShadowBgl`
-- Inline `SHADOW_LIGHT_VIEW_WGSL` — minimal `SceneUniforms { viewProjection, pcfBias }` for light-space depth rendering
-- `./shadow-base.js` — `buildCasters`, `syncCasterMatrices`, `drawCasters`, `shadowMatrixChanged`
+- `./shadow-base.js` — shared light matrix, matrix multiply, shadow UBO/params helpers
 - `./shadow-generator.js` — `ShadowGenerator` type
-- `../../shaders/shadow-pcf-depth.vertex.wgsl` — PCF depth vertex shader (raw import)
+- `./pcf-shadow-task-hooks.js` — shared PCF task preload/state/render helpers
 
-### shadow-renderable.ts
-- None (placeholder)
+### pcf-directional-shadow-generator.ts (Directional PCF)
+- `../light/directional-light.js` — `DirectionalLight` interface
+- `../mesh/mesh.js` — `Mesh` interface for caster AABB fitting
+- `../engine/engine.js` — `Engine`, `EngineInternal`
+- `./shadow-base.js` — shared light matrix, matrix multiply, shadow UBO/params helpers
+- `./shadow-generator.js` — `ShadowGenerator` type
+- `./pcf-shadow-task-hooks.js` — shared PCF task preload/state/render helpers and PCF task state types
+
+### pcf-shadow-task-hooks.ts
+- `../frame-graph/render-task.js` — internal material-view render task used for PCF depth passes
+- `./shadow-base.js` — shared caster-version, camera, render-target, and receiver UBO helpers
+- `./shadow-generator.js` — `ShadowGenerator` and task-state contracts
+
+### frame-graph/shadow-task.ts
+- `../engine/engine.js` — `EngineContext`, `EngineContextInternal`
+- `../scene/scene-core.js` — `SceneContext`, `SceneContextInternal`
+- `./task.js` — `Task`
+- `./shadow-inputs.js` — task-owned caster mesh input accessors
 
 ---
 
@@ -772,18 +731,17 @@ Reserved for future integration of shadow maps into the general render pipeline'
 1. **ESM light matrix computation** — Given a directional light at direction `(-1, -3, 2)` with caster meshes, verify the computed view-projection matrix produces correct NDC coordinates for known world points.
 2. **ESM encoding** — For depth value 0.5 and depthScale 50: `exp(-min(87, 50 * 0.5)) = exp(-25) ≈ 1.389e-11 ≈ 0` (clamped). For depth 0.01: `exp(-0.5) ≈ 0.6065`.
 3. **Blur weight normalization** — Sum of all 33 weights (26 bilinear + 7 dependent) should equal ≈ 1.0.
-4. **ESM render pass count** — `renderShadowMap` should encode exactly 3 render passes; return value = `casters.length + 2`.
-5. **PCF render pass count** — `renderShadowMap` should encode exactly 1 render pass (depth-only); return value = `casters.length`.
+4. **ESM render pass count** — `ShadowTask` should encode exactly 3 ESM render passes; return value = `casters.length + 2`.
+5. **PCF render pass count** — `ShadowTask` should execute exactly 1 depth-only render task per dirty PCF shadow map; return value = `casters.length`.
 6. **Texture dimensions** — ESM with `mapSize=1024, blurScale=2`: ESM is 1024², blur textures are 512². PCF with `mapSize=512`: depth texture is 512².
 7. **UBO sizes** — Scene: 64B, shadow params: 32B, mesh: 64B, blur: 16B.
-8. **ESM default config** — Verify: `mapSize=1024, depthScale=50, bias=0.00005, blurScale=2, darkness=0, frustumEdgeFalloff=0, orthoMinZ=1, orthoMaxZ=10000`.
-9. **PCF default config** — Verify: `mapSize=512, bias=0.00005, darkness=0, normalBias=0, near=1, far=10000 or light.range`.
+8. **ESM default config** — Verify: `mapSize=1024, depthScale=50, bias=0.00005, blurScale=2, darkness=0, frustumEdgeFalloff=0, orthoMinZ=1, orthoMaxZ=10000, forceRefreshEveryFrame=false`.
+9. **PCF default config** — Verify: `mapSize=512, bias=0.00005, darkness=0, normalBias=0, near=1, far=10000 or light.range, forceRefreshEveryFrame=false`.
 10. **PCF spot light matrix** — Verify perspective projection uses `light.angle` as FOV, 1:1 aspect, correct near/far.
 11. **PCF shadowsInfo packing** — `[darkness, mapSize, 1/mapSize, 0]`.
-12. **Caster sync** — After mutating a mesh's worldMatrixVersion, `syncCasterMatrices` re-uploads only dirty casters.
-13. **shadowMatrixChanged** — Returns false for identical arrays, true for any single differing element.
-14. **writeShadowUboFields** — Output Float32Array(24) matches expected layout: [lightMatrix×16, depthValues.x, depthValues.y, 0, 0, shadowsInfo×4].
-15. **PCF registration guard** — `ensurePcfRegistered()` only calls `registerPcfShadowShader` and `registerPcfShadowBgl` once.
+12. **Caster dirty tracking** — After mutating a mesh's worldMatrixVersion, `ShadowTask` detects the task-owned caster input versions and re-executes the material-view render task.
+12b. **Forced refresh** — With `forceRefreshEveryFrame=true`, `ShadowTask` re-executes the PCF material-view render task even if light and caster world matrix versions are unchanged, covering morph targets and other GPU-driven deformations.
+13. **writeShadowUboFields** — Output Float32Array(24) matches expected layout: [lightMatrix×16, depthValues.x, depthValues.y, 0, 0, shadowsInfo×4].
 
 ---
 
@@ -791,12 +749,13 @@ Reserved for future integration of shadow maps into the general render pipeline'
 
 | File | Role |
 |------|------|
-| `src/shadow/shadow-base.ts` | Shared caster infrastructure: `ShadowCaster` type, `buildCasters()`, `syncCasterMatrices()`, `drawCasters()`, `writeShadowUboFields()`, `shadowMatrixChanged()` |
-| `src/shadow/shadow-generator.ts` | ESM shadow generator — factory function, directional light matrix (orthographic), 3-pass pipeline (depth + 2× blur) |
-| `src/shadow/pcf-shadow-generator.ts` | PCF shadow generator — factory function, spot light matrix (perspective), 1-pass depth-only pipeline, inlined PCF shader snippets |
-| `src/shadow/shadow-renderable.ts` | Placeholder for future shadow pass renderable integration |
-| `shaders/shadow-depth.vertex.wgsl` | ESM vertex shader: transforms caster vertices to light clip space, outputs ESM depth metric |
-| `shaders/shadow-depth.fragment.wgsl` | ESM fragment shader: ESM encoding `exp(-depthScale * depth)` |
-| `shaders/shadow-pcf-depth.vertex.wgsl` | PCF vertex shader: transforms caster vertices to light clip space (no fragment output) |
+| `src/shadow/shadow-base.ts` | Shared shadow math, params UBO, receiver UBO, and `writeShadowUboFields()` helpers |
+| `src/shadow/shadow-generator.ts` | Shared `ShadowGenerator` contract |
+| `src/shadow/esm-directional-shadow-generator.ts` | Directional ESM generator — shadow params UBO, ESM/depth/blur textures, blur pipeline, receiver UBO, task resource accessors, and directional AABB-fit matrix helper |
+| `src/shadow/pcf-spotlight-shadow-generator.ts` | Spot PCF shadow generator — factory function, spot light matrix helper, depth texture/comparison sampler ownership, and spot receiver depth values |
+| `src/shadow/pcf-directional-shadow-generator.ts` | Directional PCF shadow generator — factory function, directional AABB-fit matrix helper, depth texture/comparison sampler ownership, and directional receiver depth values |
+| `src/frame-graph/shadow-inputs.ts` | Public caster-mesh input registration for shadow tasks |
+| `src/frame-graph/shadow-task.ts` | Internal frame-graph task that schedules shadows before receiver rendering and renders PCF/ESM casters via Standard/PBR/Node shadow material views |
+| `src/shadow/pcf-shadow-task-hooks.ts` | Shared PCF preload/state/render hooks used by spot and directional PCF generators |
 | `shaders/shadow-blur.vertex.wgsl` | Blur vertex shader: fullscreen triangle generation + UV computation |
-| `shaders/shadow-blur.fragment.wgsl` | Blur fragment shader: 33-tap Gaussian blur (26 bilinear + 7 dependent taps) |
+The spot matrix helper lives in `shadow/pcf-spotlight-shadow-generator.ts`.

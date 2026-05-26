@@ -4,8 +4,7 @@
 > - `packages/babylon-lite/src/texture/ktx-loader.ts` — KTX1 compressed texture loading
 > - `packages/babylon-lite/src/texture/ktx2-loader.ts` — KTX2/BasisU upload for glTF `KHR_texture_basisu`
 > - `packages/babylon-lite/src/texture/compressed-formats.ts` — GL→WebGPU format mapping
-> - `packages/babylon-lite/src/texture/record-mipmaps.ts` — Encoder-local mip generation for render-target textures
-> - `packages/babylon-lite/src/texture/rtt-mip.ts` — Mipmapped render-target texture helper
+> - `packages/babylon-lite/src/texture/mip-count.ts` — Biased mip-count helper for transmission refraction
 
 ## Purpose
 
@@ -382,6 +381,5 @@ loadGltf(engine, url)
 | `src/texture/ktx2-loader.ts` | Internal KTX2/BasisU decoder bridge and Texture2D upload for glTF `KHR_texture_basisu` |
 | `src/texture/compressed-formats.ts` | GL `glInternalFormat` → `{ gpuFormat, feature, blockW, blockH, blockBytes }` lookup table (lazy-init) |
 | `src/texture/solid-texture.ts` | Procedural 1×1 solid color texture |
-| `src/texture/generate-mipmaps.ts` | GPU mipmap generation via render passes |
-| `src/texture/record-mipmaps.ts` | Encoder-local mip generation used by scene-scoped opaque refraction RTT |
-| `src/texture/rtt-mip.ts` | Mipmapped render-target texture helper used by scene-scoped opaque refraction RTT |
+| `src/texture/generate-mipmaps.ts` | GPU mipmap generation via render passes, including encoder-local recording |
+| `src/texture/mip-count.ts` | Shared biased mip-count helper used by frame-graph transmission |

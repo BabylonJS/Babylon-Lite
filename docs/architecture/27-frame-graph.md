@@ -11,8 +11,10 @@ The first implementation is intentionally small:
 
 - a `FrameGraph` is an ordered task list, not a dependency DAG
 - `RenderTask` is the default scene-render task type; `EffectRenderTask` is also a frame-graph task for fullscreen RTT effects
+- `ShadowTask` is an internal adapter task, installed only by `registerSceneWithShadowSupport()`, that schedules shadow generators through `Task.execute()` before the default scene render
 - the `Task` interface is intentionally open so later work can add other task types
 - a task records one or more `Pass` instances during `record()`; only `RenderPass` exists today
+- a task may optionally implement `execute()` for legacy or non-recorded GPU work while that work is migrated into recorded passes
 - render targets are explicit objects, not virtual graph resources yet
 - the default scene render is itself a `RenderTask`
 
@@ -33,6 +35,8 @@ export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
+export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
@@ -44,7 +48,6 @@ export { createRenderTargetTexture } from "./texture/rtt.js";
 ```typescript
 export interface FrameGraph {
     _tasks: Task[];
-    _ready: boolean;
     _engine: EngineContextInternal;
     _scene: SceneContextInternal;
     _currentProcessedTask: Task | null;
@@ -54,7 +57,7 @@ export interface FrameGraph {
 }
 ```
 
-`createSceneContext(engine)` creates a frame graph immediately and appends one default swapchain `RenderTask` named `"scene"`. User code normally accesses it through `getFrameGraph(scene)` or passes the scene directly to `addTask*()`.
+`createSceneContext(engine)` creates a frame graph immediately and appends one default swapchain `RenderTask` named `"scene"`. `registerSceneWithShadowSupport()` inserts the internal shadow adapter task named `"shadow"` at the front, while ordinary `registerScene()` stays shadow-free so non-shadow scenes do not retain the shadow task module. User code normally accesses the graph through `getFrameGraph(scene)` or passes the scene directly to `addTask*()`.
 
 `build()` runs in two phases (mirroring the implicit shape of BJS' `frameGraph.buildAsync`):
 
@@ -72,6 +75,7 @@ export interface Task {
     readonly scene: SceneContextInternal;
     _passes: Pass[];
     record(): void;
+    execute?(): number;
     dispose(): void;
 }
 ```
@@ -81,11 +85,14 @@ Task lifecycle:
 | Method      | Called by                      | Purpose                                                                                                                                                                                                |
 | ----------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `record()`  | `FrameGraph.build()` (phase 1) | Allocate/rebuild GPU resources, register `Pass` instances onto `_passes` (typically via `addRenderPass(fg, name)` and friends), and finalize anything that needs the final canvas / target size. Sync. |
+| `execute()` | `FrameGraph.execute()`         | Optional task-level execution hook. If present, the frame graph calls it instead of draining `_passes`. Used only for adapter tasks while legacy GPU work is moved under frame-graph scheduling.        |
 | `dispose()` | `FrameGraph.dispose()`         | Release task-owned GPU resources. Should call `_dispose()` on each owned pass.                                                                                                                         |
 
 `RenderTask` is the primary scene-render implementation of `Task`, and `EffectRenderTask` uses the same task/pass contract for fullscreen RTT effects. The interface exists so future frame-graph work can add other ordered task types without changing `FrameGraph` itself, for example compute tasks, copy/resolve tasks, object-list tasks, or resource-transition/helper tasks.
 
 The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. Today every `RenderTask` records exactly one `RenderPass`; the surface is shaped to support multi-pass tasks (e.g. shadow cascades) later without changing the `Task` interface again.
+
+`Task.execute()` is a migration escape hatch, not the final shape for new rendering work. `FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
 
 ## `Pass` and `RenderPass`
 
@@ -160,7 +167,7 @@ Tasks execute in array order. There is no automatic dependency analysis; caller 
 
 ```typescript
 addTask(sceneOrGraph, task); // append at end
-addTaskAtStart(sceneOrGraph, task); // insert at start
+addTaskAtStart(sceneOrGraph, task); // insert at start of user work, after built-in system tasks such as ShadowTask
 addTaskBefore(sceneOrGraph, task, beforeTask);
 ```
 
@@ -169,8 +176,28 @@ Rules:
 - Offscreen producer tasks must run before consumers that sample their output.
 - Overlay tasks should use `clr: false` and run after the task they overlay.
 - `addTaskBefore()` appends if the `beforeTask` is not found.
-- Adding or inserting a task marks the graph not ready; call `await getFrameGraph(scene).build()` before the next frame if tasks are modified outside the startup/resize path.
+- If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
 - If a task uses `addMesh()` before `registerScene()`, defer the explicit `build()` call until after `registerScene()` so deferred material builders have run.
+
+### Internal Shadow Adapter Task
+
+`registerSceneWithShadowSupport(engine, scene)` installs an internal `ShadowTask` before the default `"scene"` render task:
+
+```typescript
+await registerSceneWithShadowSupport(engine, scene);
+createRenderTask({ name: "scene", rt: swapRT, clrColor: scene.clearColor }, engine, scene);
+```
+
+The task owns the caster-mesh inputs registered for each shadow generator. It records no direct passes of its own. During `record()`, it creates/records internal shadow render tasks so caster meshes are rendered through material-owned pipelines:
+
+```typescript
+record(): void {
+    task._passes.length = 0;
+    // PCF/ESM shadow generators record internal caster RenderTasks here.
+}
+```
+
+Per frame, `execute()` iterates the scene's lights, renders each light's shadow generator from task-owned caster inputs, and returns the summed draw count. ESM adds blur passes after its internal material-view caster task; PCF executes the internal depth-only material-view task recorded earlier.
 
 ## Render Targets
 
@@ -236,6 +263,7 @@ export interface RenderTaskConfig {
     clr?: boolean;
     cam?: Camera | null;
     cs?: boolean;
+    transmission?: { copyCount?: number; generateMipmaps?: boolean };
 }
 ```
 
@@ -247,6 +275,44 @@ export interface RenderTaskConfig {
 | `clr`      | Defaults to clear. Set `false` to use color/depth `loadOp: "load"` for overlays or multi-scene composition.                                                                                                     |
 | `cam`      | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                           |
 | `cs`       | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect. |
+| `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
+
+### Image Processing Task
+
+```typescript
+export type ImageProcessingSource = Texture2D | RenderTarget | (() => Texture2D | RenderTarget | null | undefined);
+
+export interface ImageProcessingTaskConfig {
+    name?: string;
+    source: ImageProcessingSource;
+}
+
+export function createImageProcessingTask(config: ImageProcessingTaskConfig, engine: EngineContext, scene: SceneContext): Task;
+```
+
+`createImageProcessingTask()` is a reusable fullscreen post-process task. During `record()` it resolves `config.source` to a `Texture2D` or `RenderTarget`, reads the source `GPUTexture.sampleCount` (falling back to `1`), builds the matching bind-group layout, and creates a fullscreen triangle pipeline targeting the swapchain format. During `execute()` it writes `scene.imageProcessing.exposure`, `scene.imageProcessing.contrast`, and `scene.imageProcessing.toneMappingEnabled` into a 16-byte uniform buffer, clears the swapchain to `scene.clearColor`, samples the source, applies exposure / tone map / gamma / contrast, and draws one triangle to the current swapchain view.
+
+The shader has two source variants:
+
+- single-sample: `texture_2d<f32>` with `textureLoad(source, pixel, 0)`
+- multisample: `texture_multisampled_2d<f32>` with `textureNumSamples(source)`; each sample is independently image-processed and the processed colors are averaged
+
+The task owns only its pipeline, bind group, and uniform buffer. It does not own the source texture. On graph rebuild, `record()` disposes the prior uniform buffer and rebuilds from the latest source returned by the getter.
+
+Transmission uses this task as its final swapchain pass. `enableSceneTransmission(scene, engine)` retargets render tasks to linear `rgba16float` offscreen output, then appends one `"transmission-image-processing"` task after the last render task if one is not already present. MSAA scenes feed the image-processing task directly from the MSAA color texture, so there is no extra final resolve texture or `*-transmission-scene` target.
+
+Transmission refraction textures allocate only the mip levels reachable by the refraction shader's fixed `-4.0` LOD bias. For the current 1024x1024 refraction textures, this means 7 levels (`0..6`) instead of the full 11-level chain, and mip generation records only those allocated levels. Tasks that set `transmission.generateMipmaps = false` allocate only mip 0 and skip this generation step.
+
+### Scene-Texture Transmission
+
+`enableSceneTransmission(scene, engine)` wraps each `RenderTask` instead of adding material-specific behavior to the renderer:
+
+1. Before the task records, it retargets swapchain output to a linear offscreen `rgba16float` render target using `engine.msaaSamples`, creates one shared 1024x1024 transmission texture for that task, and stores it on `task._targetSignature._transmissionTexture`.
+2. The original `RenderTask.record()` then binds renderables against that target signature. PBR transmissive renderables create their material bind groups at this point, capturing the shared transmission texture; there is no per-draw transmission bind-group mutation.
+3. After `record()` has built the render target, transmission stores `rt._colorTexture` as the source. If the source is MSAA or has a different size than the transmission texture, it creates the fullscreen blit pipeline and bind group once for this graph build; otherwise execute can use `copyTextureToTexture()` directly.
+4. During execute, the render task starts one pass for the opaque bundle and direct bucket, then iterates the single camera-sorted transparent list. Before a `_transmissive` binding, while `copyCount` allows, the pass is ended, the current offscreen color is copied/blitted into the shared transmission texture, optional mips are generated, and the task resumes with `loadOp: "load"`. Remaining transparent and transmissive bindings continue through the same loop.
+
+This keeps the refraction texture and all bind groups stable between graph rebuilds. `copyCount: 0` refreshes before every transmissive draw; finite values stop refreshing after the cap and draw the rest of the sorted transparent/transmissive list against the last snapshot.
 
 ### Default Scene Pass
 
@@ -276,7 +342,7 @@ task.addMesh(mesh);
 task.addMesh(mesh, { material: overrideMaterialOrView });
 ```
 
-`addMesh()` accepts a source material or `MaterialView` and resolves at `record()` time through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example depth-only Standard/PBR variants used by shadow/depth RTTs.
+`addMesh()` accepts a source material or `MaterialView` and resolves at `record()` time through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
 
 If a task has explicit renderables, it does **not** auto-mirror the scene.
 
@@ -306,9 +372,9 @@ Bindings are partitioned into:
 | ----------- | ---------------------------- | -------------------------------------------------------- |
 | Opaque      | `!isTransparent && !_direct` | Cached `GPURenderBundle`                                 |
 | Direct      | `_direct`                    | Direct draw after opaque                                 |
-| Transparent | `isTransparent`              | Direct draw after direct, sorted back-to-front per frame |
+| Transparent | `isTransparent || _transmissive` | Direct draw after direct, camera-space-depth sorted back-to-front per frame |
 
-Opaque and direct buckets currently sort by `renderable.order`. Transparent is sorted by squared distance from the active pass camera and must not be pipeline-sorted.
+Opaque and direct buckets currently sort by `renderable.order`. Transparent is sorted by camera-space depth from the active pass camera and must not be pipeline-sorted.
 
 `DrawBinding.pipeline` is mandatory. The per-pass-encoder body owns `setPipeline()` and deduplicates consecutive bindings with the same pipeline before calling the binding's `draw()` closure.
 
@@ -422,6 +488,7 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | Task record/build phase         | `Task.record()` via `FrameGraph.build()` (phase 1)         |
 | Pass post-record initialization | `Pass._initialize()` via `FrameGraph.build()` (phase 2)    |
 | Per-frame execute phase         | `_executeTask()` → iterates `_passes` calling `_execute()` |
+| Legacy/non-recorded task work   | Optional `Task.execute()`                                  |
 | Render target texture           | `createRenderTargetTexture()`                              |
 | Pass-specific camera/scene UBO  | `RenderTaskConfig.cam` + task-owned `_sceneUBO`            |
 
@@ -435,6 +502,8 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | `src/frame-graph/frame-graph.ts`         | Ordered task list and two-phase build/execute/dispose lifecycle                              |
 | `src/frame-graph/frame-graph-actions.ts` | Public task-insertion + `addRenderPass` actions                                              |
 | `src/frame-graph/render-task.ts`         | Render task, per-pass scene UBO, target binding, draw buckets, per-pass-encoder body         |
+| `src/frame-graph/image-processing-task.ts` | Reusable fullscreen image-processing task for swapchain output                              |
+| `src/frame-graph/shadow-task.ts`         | Internal adapter task that schedules existing shadow generators through `Task.execute()`      |
 | `src/engine/render-target.ts`            | Render target descriptors, allocation, disposal, target signatures                           |
 | `src/texture/rtt.ts`                     | Eager render-target texture helper                                                           |
 | `src/render/renderable.ts`               | `Renderable`, `DrawBinding`, and `DrawUpdateContext` contracts consumed by render-pass tasks |

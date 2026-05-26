@@ -173,9 +173,9 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
     const effect = config.effect as EffectWrapperInternal;
     const rt = config.target;
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
-    const sampleCount = rt.descriptor.sampleCount ?? 1;
+    const sampleCount = rt._descriptor.sampleCount ?? 1;
     const targetSignature: RenderTargetSignature = {
-        colorFormat: rt.descriptor.colorFormat,
+        colorFormat: rt._descriptor.colorFormat,
         sampleCount,
     };
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
@@ -262,8 +262,8 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
     });
 
     const targetSignature: RenderTargetSignature = {
-        colorFormat: rt.descriptor.colorFormat,
-        sampleCount: rt.descriptor.sampleCount ?? 1,
+        colorFormat: rt._descriptor.colorFormat,
+        sampleCount: rt._descriptor.sampleCount ?? 1,
     };
 
     const colorAttachment: GPURenderPassColorAttachment = {
@@ -369,8 +369,8 @@ function createBindingSlots(wrapper: EffectWrapperInternal): void {
 function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, eng: EngineContextInternal, clear: boolean, clearColor: GPUColorDict): void {
     att.clearValue = clearColor;
     att.loadOp = clear ? "clear" : "load";
-    if (rt.descriptor.resolveToSwapchain === true) {
-        if ((rt.descriptor.sampleCount ?? 1) > 1) {
+    if (rt._descriptor.resolveToSwapchain === true) {
+        if ((rt._descriptor.sampleCount ?? 1) > 1) {
             att.view = rt._colorView!;
             att.resolveTarget = eng._swapchainView;
         } else {
@@ -384,7 +384,7 @@ function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: Render
 }
 
 function ensureRtCanvasSize(rt: RenderTarget, eng: EngineContextInternal): void {
-    if (rt.descriptor.size !== "canvas") {
+    if (rt._descriptor.size !== "canvas") {
         return;
     }
     if (rt._width === eng.canvas.width && rt._height === eng.canvas.height) {

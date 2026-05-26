@@ -9,12 +9,12 @@ const ext: GltfFeature = {
         if (!mat._rawMatDef?.extensions?.KHR_materials_unlit) {
             return null;
         }
-        const f = mat.baseColorFactor;
+        const f = mat._baseColorFactor;
         // When a real baseColorTexture is present, its GPU sample contributes
         // the linear texel and `unlitColor` tints by `baseColorFactor`.  When
         // there is no texture, the 1×1 fallback already bakes the factor into
         // its byte value, so leave `unlitColor` at its default [1,1,1].
-        const tint: [number, number, number] | undefined = mat.baseColorImage ? [f[0], f[1], f[2]] : undefined;
+        const tint: [number, number, number] | undefined = mat._baseColorImage ? [f[0], f[1], f[2]] : undefined;
         return tint ? { unlit: true, unlitColor: tint } : { unlit: true };
     },
 };

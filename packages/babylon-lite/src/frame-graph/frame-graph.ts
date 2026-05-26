@@ -17,7 +17,7 @@
  *   5. fg.dispose()                         → free everything
  */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { SceneContextInternal } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
@@ -25,11 +25,6 @@ import type { Task } from "./task.js";
 export interface FrameGraph {
     /** Ordered list of tasks. Executed in array order each frame. */
     _tasks: Task[];
-    /** True after `build()` succeeds. */
-    _ready: boolean;
-    /** Engine and scene captured at creation. */
-    _engine: EngineContextInternal;
-    _scene: SceneContextInternal;
 
     /** Set during `build()` while a single task's `record()` is running.
      *  Used by `addRenderPass` to associate a
@@ -40,8 +35,7 @@ export interface FrameGraph {
     /** Build (or rebuild) every task in execute order. */
     build(): void;
 
-    /** Execute every task's recorded passes. Returns total draw calls.
-     *  No-op (returns 0) if the graph hasn't been built yet. */
+    /** Execute every task's recorded passes. Returns total draw calls. */
     execute(): number;
 
     /** Free all GPU resources owned by the frame graph. */
@@ -49,13 +43,9 @@ export interface FrameGraph {
 }
 
 /** Create an empty frame graph bound to the given engine and scene. */
-export function createFrameGraph(engine: EngineContext, scene: SceneContextInternal): FrameGraph {
-    const eng = engine as EngineContextInternal;
+export function createFrameGraph(_engine: EngineContext, _scene: SceneContextInternal): FrameGraph {
     const fg: FrameGraph = {
         _tasks: [],
-        _ready: false,
-        _engine: eng,
-        _scene: scene,
         _currentProcessedTask: null,
 
         build(): void {
@@ -77,13 +67,9 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
                     passes[j]!._initialize();
                 }
             }
-            fg._ready = true;
         },
 
         execute(): number {
-            if (!fg._ready) {
-                return 0;
-            }
             let drawCalls = 0;
             for (const task of fg._tasks) {
                 if (task.execute) {
@@ -102,7 +88,6 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
                 task.dispose();
             }
             fg._tasks.length = 0;
-            fg._ready = false;
             fg._currentProcessedTask = null;
         },
     };
@@ -112,5 +97,4 @@ export function createFrameGraph(engine: EngineContext, scene: SceneContextInter
 /** Add a task at the END of execute order. */
 export function _appendTask(fg: FrameGraph, task: Task): void {
     fg._tasks.push(task);
-    fg._ready = false;
 }
