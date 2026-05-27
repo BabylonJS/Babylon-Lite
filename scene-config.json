@@ -847,7 +847,7 @@
         "tags": ["std", "pbr", "frame-graph", "rtt", "shadow"],
         "skipParityOnCI": true,
         "skipPerf": true,
-        "skipNotes": "Scene 116 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: the shadow-depth RTT observables can complete and the page can mark ready while the preview planes still occasionally sample an empty depth texture, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs. We tried hardening the BJS ready gate to wait for visible depth-preview content, but CI still reproduced the intermittent empty-reference issue. Since this scene currently has no committed stable golden and live recapture is nondeterministic, skipParityOnCI avoids blocking PRs on reference-capture timing noise. The scene remains in the lab/bundle config and can be re-enabled once we have a stable committed golden or a more reliable BJS reference readiness signal."
+        "skipNotes": "Scene 116 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: the shadow-depth RTT observables can complete and the page can mark ready while the preview planes still occasionally sample an empty depth texture, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs and force-recaptures the golden on each test run. The scene remains in the lab/bundle config and can be re-enabled once the BJS reference readiness signal is reliable on CI."
     },
     {
         "id": 120,

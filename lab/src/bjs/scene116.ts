@@ -139,6 +139,7 @@ const READY_RENDERED_FRAMES = 50;
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
+    engine.useReverseDepthBuffer = true;
 
     const scene = new Scene(engine);
     scene.clearColor = new Color4(0.2, 0.2, 0.3, 1);

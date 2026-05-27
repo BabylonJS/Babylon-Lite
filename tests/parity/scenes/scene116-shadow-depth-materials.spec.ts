@@ -16,7 +16,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 116 skipped via skipParity in scene-c
 
 test("Scene 116 - Shadow Depth Materials matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 116, timeout: 60_000, settleMs: 1_000 });
+    await captureGolden(browser, { sceneId: 116, force: true, timeout: 60_000, settleMs: 1_000 });
 
     await page.goto("/scene116.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
