@@ -158,7 +158,7 @@ get worldMatrix():
 
 ## Scene Integration
 
-### `scene.add(TransformNode)`
+### `addToScene(scene, TransformNode)`
 
 ```typescript
 if (isTransformNode(entity)) {
@@ -199,7 +199,7 @@ Animation/skin parsing is lazy-loaded via `gltf-animation.ts` for bundle size op
 | `light/directional-light.ts` | Modified | ObservableVec3 position/direction |
 | `light/spot-light.ts` | Modified | ObservableVec3 position/direction |
 | `light/hemispheric.ts` | Modified | ObservableVec3 direction |
-| `scene/scene.ts` | Modified | add() sets parent links via collectMeshes |
+| `scene/scene-core.ts` | Modified | addToScene() sets parent links via collectMeshes |
 | `loader-gltf/load-gltf.ts` | Modified | Uses createTransformNode, lazy animation |
 | `index.ts` | Modified | Exports IWorldMatrixProvider, IParentable, ObservableQuat |
 

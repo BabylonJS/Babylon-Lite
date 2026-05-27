@@ -1,4 +1,4 @@
-# Module: Loaders (glTF + .env + HDR + .babylon + Skybox)
+# Module: Loaders (glTF + .env + HDR + .babylon + Skybox + Splats)
 > Package paths:
 > - `packages/babylon-lite/src/loader-gltf/load-gltf.ts` — GLB 2.0 loader
 > - `packages/babylon-lite/src/loader-gltf/gltf-ext-basisu.ts` — glTF `KHR_texture_basisu` feature module
@@ -12,10 +12,11 @@
 > - `packages/babylon-lite/src/loader-babylon/load-babylon.ts` — .babylon scene format loader
 > - `packages/babylon-lite/src/loader-skybox/load-skybox.ts` — Cube texture skybox loader
 > - `packages/babylon-lite/src/loader-skybox/skybox-renderable.ts` — Skybox renderable builder
+> - `packages/babylon-lite/src/loader-splat/` — Gaussian splat loaders (`.ply`, `.splat`, `.sog`, `.spz`)
 
 ## Purpose
 
-The Loaders module provides six asset loading pipelines plus dynamic glTF feature modules:
+The Loaders module provides asset loading pipelines plus dynamic glTF feature modules:
 
 1. **glTF Loader** — Parses `.glb` / `.gltf` 2.0 files, dynamically imports feature modules based on `extensionsUsed` and material/primitive content, extracts mesh geometry (positions, normals, tangents, UVs, indices), resolves the node hierarchy to compute world matrices with RH→LH conversion, extracts PBR metallic-roughness material data (textures + factors), uploads everything to GPU buffers and textures with mipmaps. Optional features such as `KHR_texture_basisu` live in separate dynamic modules so assets that do not use them pay zero runtime bytes.
 
@@ -29,25 +30,33 @@ The Loaders module provides six asset loading pipelines plus dynamic glTF featur
 
 6. **Skybox Loader** — Loads 6-face cube texture skyboxes for StandardMaterial scenes. Registers a deferred builder that creates the pipeline at engine start time.
 
+7. **Gaussian Splat Loaders** — Load `.ply`, `.splat`, `.sog`, and `.spz` splat assets into `GaussianSplattingMesh` instances. SOG handles ZIP-packed WebP payloads; SPZ handles gzip-wrapped binary streams. Transform baking helpers and material shader fragments are exposed separately so non-splat scenes pay zero runtime cost.
+
 ## Public API Surface
 
-### `loader-results.ts`
+### `asset-container.ts`
 
 ```typescript
 /** Unified result returned by both loadGltf() and loadBabylon(). */
-export interface LoaderResult {
+export interface AssetContainer {
   /**
    * Scene entities with world transforms (meshes, transform nodes, lights).
    * - glTF: single-element [root TransformNode]; meshes live in its hierarchy.
-   * - .babylon: flat array of every Mesh + LightBase in the file.
+   * - .babylon: root SceneNodes + LightBase objects in the file.
    */
-  entities: Array<Mesh | TransformNode | LightBase>;
+  entities: Array<SceneNode | LightBase>;
 
-  /** Animation groups from the file. scene.add() auto-ticks them each frame. */
+  /** Animation groups from the file. addToScene() auto-ticks them each frame. */
   animationGroups?: AnimationGroup[];
 
-  /** Scene clear color from the file. scene.add() applies it to ctx.clearColor. */
+  /** Scene clear color from the file. addToScene() applies it to ctx.clearColor. */
   clearColor?: GPUColorDict;
+
+  /** Camera parsed from the file. addToScene() sets it as scene.camera when present. */
+  camera?: Camera;
+
+  /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
+  materialVariants?: MaterialVariantData;
 }
 ```
 
@@ -80,11 +89,11 @@ export interface GltfMaterialData {
   emissiveImage: ImageBitmap | null;
 }
 
-/** Load a .glb file, parse it, upload to GPU. Returns a LoaderResult. */
-export async function loadGltf(engine: Engine, url: string): Promise<LoaderResult>;
+/** Load a .glb file, parse it, upload to GPU. Returns an AssetContainer. */
+export async function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer>;
 ```
 
-> **Note**: `loadGltf` takes an `Engine` (not `SceneContext`) and returns a `LoaderResult`. The result's `entities` array contains a **single** `TransformNode` (the glTF scene root). All meshes hang off that root's hierarchy. Pass the result to `scene.add()` — it will traverse the hierarchy, register animation ticks, and integrate everything into the scene. To access the root node directly: `const root = result.entities[0] as TransformNode`. Meshes are the standard `Mesh` type with GPU data in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`.
+> **Note**: `loadGltf` takes an `Engine` (not `SceneContext`) and returns an `AssetContainer`. The result's `entities` array contains root scene entities; glTF meshes usually hang off a root `TransformNode` hierarchy. Pass the result to `addToScene(scene, result)` — it will traverse the hierarchy, register animation ticks, and integrate everything into the scene. Meshes are the standard `Mesh` type with GPU data in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`.
 
 ### `load-env.ts`
 
@@ -154,13 +163,13 @@ Mesh[] + root TransformNode
   ↓
 createAnimationGroups(json, ...)       // extract glTF animations → AnimationGroup[]
   ↓
-LoaderResult { entities: [root], animationGroups }
-  → returned to caller; scene.add() dispatches entities + registers animation ticks
+AssetContainer { entities: [root], animationGroups }
+  → returned to caller; addToScene() dispatches entities + registers animation ticks
 ```
 
 **Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. The hot-path cache uses a numeric key (`bitmapId * 2 + +srgb`) so plain-image glTF assets do not pay string-key overhead. Feature modules can maintain their own caches for extension-owned image sources.
 
-**Animation support**: `loadGltf` extracts glTF animations, creates `AnimationGroup[]` via `createAnimationGroups()`, and returns them in `LoaderResult.animationGroups`. `scene.add()` registers `_beforeRender` callbacks for playback.
+**Animation support**: `loadGltf` extracts glTF animations, creates `AnimationGroup[]` via `createAnimationGroups()`, and returns them in `AssetContainer.animationGroups`. `addToScene()` registers playback with the scene-owned animation manager.
 
 **PBR materials**: Each `PbrMaterialProps` created during upload includes `_buildGroup: pbrGroupBuilder`, imported from `pbr-material.ts`.
 
@@ -490,7 +499,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 ## Dependencies
 
-- **`load-gltf.ts` imports**: `Engine` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `LoaderResult` from `../loader-results.js`; dynamic glTF feature imports including `gltf-ext-basisu.ts`.
+- **`load-gltf.ts` imports**: `EngineContext` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `AssetContainer` from `../asset-container.js`; dynamic glTF feature imports including `gltf-ext-basisu.ts`.
 - **`gltf-ext-basisu.ts` imports**: `decodeKtx2ImageBitmapFromBuffer`, `uploadKtx2Texture2D` from `../texture/ktx2-loader.js`; `resolveAccessor` from `./gltf-parser.js`; PBR and Texture2D types.
 - **`load-env.ts` imports**: `SceneContext` from `../scene/scene.js`.
 - **`load-dds-env.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `EnvironmentTextures` from `./load-env.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `./env-helpers.js`; dynamic import of `./rgbd-decode.js`.
@@ -499,7 +508,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 - **`load-hdr.ts` imports**: `EnvironmentTextures` from `../loader-env/load-env.js`; `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `../loader-env/env-helpers.js`; `parseRGBE`, `computeSHFromEquirect` from `./hdr-parser.js`; `equirectToCubemapGPU`, `prefilterCubemapGPU`, `generateBrdfLut` from `./hdr-ibl-pipeline.js`; dynamic imports: `../material/pbr/background-hdr-skybox.js`, `../material/pbr/background-renderable.js`.
 - **`hdr-parser.ts` imports**: None (standalone CPU code).
 - **`hdr-ibl-pipeline.ts` imports**: `HdrImage` from `./hdr-parser.js`; `getOrCreateSampler` from `../resource/gpu-pool.js`.
-- **`load-babylon.ts` imports**: `Engine`, `EngineInternal` from `../engine/engine.js`; `createStandardMaterial`, `StandardMaterialProps` from `../material/standard/standard-material.js`; `uploadMeshToGPU`, `initMeshTransform`, `MeshInternal` from `../mesh/mesh.js`; `createPointLight` from `../light/point-light.js`; `loadTexture2D` from `../texture/texture-2d.js`; `LoaderResult` from `../loader-results.js`.
+- **`load-babylon.ts` imports**: `EngineContext`, `EngineInternal` from `../engine/engine.js`; `createStandardMaterial`, `StandardMaterialProps` from `../material/standard/standard-material.js`; `uploadMeshToGPU`, `initMeshTransform`, `MeshInternal` from `../mesh/mesh.js`; `createPointLight` from `../light/point-light.js`; `loadTexture2D` from `../texture/texture-2d.js`; `AssetContainer` from `../asset-container.js`.
 - **`load-skybox.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `loadCubeTexture` from `../texture/cube-texture.js`; `createBoxData` from `../mesh/create-box.js`; dynamic import: `./skybox-renderable.js`.
 - **`skybox-renderable.ts` imports**: `SceneContext` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `SkyboxData` from `./load-skybox.js`; `Renderable` from `../render/renderable.js`; `buildSkyboxCubeMapGPU` from `../material/standard/skybox-cubemap.js`.
 - **Depended on by**: `pbr-renderable.ts` (consumes `Mesh`), `index.ts` (type exports), scene setup files.

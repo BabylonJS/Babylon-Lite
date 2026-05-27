@@ -56,6 +56,7 @@ function runViteBuild(basePath: string): void {
         cwd: ROOT,
         stdio: "inherit",
         env: process.env,
+        shell: process.platform === "win32",
     });
     if (result.status !== 0) {
         process.exit(result.status ?? 1);

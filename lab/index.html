@@ -1972,7 +1972,7 @@
                         <div class="arch-mod arch-mod-mat">
                             <div class="arch-mod-name">Materials</div>
                             <div class="arch-mod-sub">
-                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · background/ground
+                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · NodeMaterial · ShaderMaterial · background/ground
                             </div>
                         </div>
                         <div class="arch-mod arch-mod-mesh">
@@ -1984,13 +1984,13 @@
                         <div class="arch-mod arch-mod-loader">
                             <div class="arch-mod-name">Loaders</div>
                             <div class="arch-mod-sub">
-                                glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KTX2 · Draco · KHR_materials_variants · _clearcoat · _sheen · _anisotropy · _ior ·
-                                _specular · _volume · _transmission · _texture_transform · _texture_basisu
+                                glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KTX2 · Draco · Gaussian splats (.ply/.splat/.sog/.spz) · KHR_materials_variants ·
+                                _clearcoat · _sheen · _anisotropy · _ior · _specular · _volume · _transmission · _texture_transform · _texture_basisu
                             </div>
                         </div>
                         <div class="arch-mod arch-mod-anim">
                             <div class="arch-mod-name">Animation</div>
-                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights</div>
+                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights · blending · cross-fade · additive clips</div>
                         </div>
                     </div>
                     <div class="arch-modules">
@@ -2031,6 +2031,10 @@
                         <div class="arch-mod arch-mod-core">
                             <div class="arch-mod-name">Resource Pool</div>
                             <div class="arch-mod-sub">GPU buffer/texture pooling · automatic cleanup · device lifecycle</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Navigation</div>
+                            <div class="arch-mod-sub">Recast V2 navmesh · crowd agents · obstacles · off-mesh links · raycast</div>
                         </div>
                     </div>
                 </div>
@@ -2079,11 +2083,13 @@
                 <button class="feat-filter-btn active" data-filter="all" onclick="filterFeatures('all')">All</button>
                 <button class="feat-filter-btn" data-filter="implemented" onclick="filterFeatures('implemented')">✅ Implemented</button>
                 <button class="feat-filter-btn" data-filter="missing" onclick="filterFeatures('missing')">— Missing</button>
+                <button class="feat-filter-btn" data-filter="wont-support" onclick="filterFeatures('wont-support')">🚫 Won't support</button>
             </div>
             <div style="margin-bottom: 0.75rem; font-size: 0.7rem; color: #8b949e; display: flex; gap: 1.2rem; flex-wrap: wrap">
                 <span>✅ Supported</span>
                 <span>⚡ Partial</span>
                 <span>— Not available</span>
+                <span>🚫 Won't support</span>
                 <span style="color: #3fb950">● Green row = Lite advantage</span>
             </div>
             <div class="feature-table-wrap">
@@ -2109,15 +2115,15 @@
                         </tr>
                         <tr>
                             <td>WebGL 2.0</td>
-                            <td>—</td>
+                            <td>🚫</td>
                             <td>✅</td>
                             <td>Not planned — WebGPU only by design</td>
                         </tr>
                         <tr>
                             <td>WebGL 1.0</td>
-                            <td>—</td>
+                            <td>🚫</td>
                             <td>✅</td>
-                            <td>Not planned</td>
+                            <td>Not planned — WebGPU only by design</td>
                         </tr>
                         <tr>
                             <td>4× MSAA</td>
@@ -2312,9 +2318,9 @@
                         </tr>
                         <tr>
                             <td>Shader Material</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>✅</td>
+                            <td>WGSL-only ShaderMaterial with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163)</td>
                         </tr>
                         <tr>
                             <td>Material Plugins</td>
@@ -2548,16 +2554,16 @@
                             <td>Path3D parallel-transport frames, closePath/closeArray, cap modes</td>
                         </tr>
                         <tr>
-                            <td>CSG (Boolean Ops)</td>
+                            <td>CSG / CSG2 (Boolean Ops)</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Scenes 90/91 — mesh-based subtract, intersect, and union/add operations</td>
+                            <td>Scenes 90/91 — legacy mesh CSG plus Manifold-backed CSG2 subtract, intersect, and union/add operations</td>
                         </tr>
                         <tr>
                             <td>Instanced Meshes</td>
-                            <td>—</td>
+                            <td>🚫</td>
                             <td>✅</td>
-                            <td>Use thin instances instead</td>
+                            <td>Won't support BJS InstancedMesh API; use thin instances instead</td>
                         </tr>
 
                         <!-- Skeleton & Animation -->
@@ -2620,9 +2626,9 @@
                         </tr>
                         <tr>
                             <td>Animation Blending</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>✅</td>
+                            <td>Weighted blend, cross-fade, and additive animation groups (Scenes 155-158)</td>
                         </tr>
                         <tr>
                             <td>Animation Events</td>
@@ -2632,9 +2638,9 @@
                         </tr>
                         <tr>
                             <td>Animation Weights</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>✅</td>
+                            <td>AnimationGroup weight control through AnimationManager</td>
                         </tr>
 
                         <!-- Environment & IBL -->
@@ -2746,7 +2752,7 @@
                             <td>PCF Shadows</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>Scene 18</td>
+                            <td>Spot + directional PCF (Scenes 18, 111)</td>
                         </tr>
                         <tr>
                             <td>Cascaded Shadow Maps</td>
@@ -2765,6 +2771,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Scene 18 (PCF)</td>
+                        </tr>
+                        <tr>
+                            <td>Material-Aware Shadow Depth</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Shadow material views and alpha-discard casters for Standard, PBR, and NodeMaterial (Scenes 116, 140, 141)</td>
                         </tr>
                         <tr>
                             <td>Contact Hardening Shadows</td>
@@ -3256,7 +3268,13 @@
                             <td>Sprites / SpriteManager</td>
                             <td>⚡</td>
                             <td>✅</td>
-                            <td>2D sprite renderer/layers (Scenes 50-51); not the full BJS SpriteManager API</td>
+                            <td>2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards (Scenes 50-57); not the full BJS SpriteManager API</td>
+                        </tr>
+                        <tr>
+                            <td>Gaussian Splatting</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>.ply / .splat / .sog / .spz loaders, transform baking, and material plugin fragments (Scenes 120-126)</td>
                         </tr>
                         <tr>
                             <td>Octree / Frustum Culling</td>
@@ -3274,7 +3292,7 @@
                             <td>Ray Casting / Picking</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>GPU ID pass + CPU ray/triangle, thin-instance aware</td>
+                            <td>GPU ID pass + CPU ray/triangle details, normal/UV helpers, thin-instance and deformed mesh coverage (Scenes 113-115)</td>
                         </tr>
                         <tr>
                             <td>WebXR / VR / AR</td>
@@ -3338,9 +3356,15 @@
                         </tr>
                         <tr>
                             <td>Navigation Mesh</td>
-                            <td>—</td>
+                            <td>⚡</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)</td>
+                        </tr>
+                        <tr>
+                            <td>Device Lost Recovery</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
                         </tr>
                         <tr>
                             <td>Scene Optimizer</td>
@@ -5841,10 +5865,13 @@
                     if (!liteCell) return;
                     var val = liteCell.textContent.trim();
                     var hasLite = val === "\u2705" || val === "\u26a1";
+                    var wontSupport = val === "\ud83d\udeab";
                     if (mode === "implemented") {
                         row.classList.toggle("feat-hidden", !hasLite);
                     } else if (mode === "missing") {
-                        row.classList.toggle("feat-hidden", hasLite);
+                        row.classList.toggle("feat-hidden", hasLite || wontSupport);
+                    } else if (mode === "wont-support") {
+                        row.classList.toggle("feat-hidden", !wontSupport);
                     }
                 });
                 var catRows = document.querySelectorAll(".feature-table tbody tr.feat-cat");
