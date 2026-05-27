@@ -10,9 +10,9 @@
  *    on top: the fragment writes `(d, d, d, gaussianAlpha)` so the swapchain blend
  *    accumulates a soft-edged depth visualisation matching BJS `V80DRL#19`.
  *
- *  Both compute linear depth from `in.pos.z` (NDC z in [0,1] for WebGPU) and the
- *  per-mesh projection matrix that's already present in the GS UBO, so no extra
- *  uniforms are required.
+ *  Both compute linear depth from `in.pos.z` (reverse-Z NDC z in [0,1] for
+ *  WebGPU) and the per-mesh projection matrix that's already present in the GS
+ *  UBO, so no extra uniforms are required.
  *
  *  Apply by passing the fragment in `loadSplat(scene, url, [gsLinearDepthFragment])`. */
 
@@ -20,9 +20,9 @@ import type { GsShaderFragment } from "./gaussian-splatting-mesh.js";
 
 const GS_LINEAR_DEPTH_HELPERS = /* wgsl */ `
 fn gsLinearDepth(ndcZ: f32) -> f32 {
-    // BJS uses a left-handed perspective matrix (mat4PerspectiveLHToRef), with
-    //   projection[2][2] = far / (far-near)
-    //   projection[3][2] = -far*near / (far-near)
+    // Lite uses a reverse-Z left-handed perspective matrix:
+    //   projection[2][2] = -near / (far-near)
+    //   projection[3][2] =  far*near / (far-near)
     // For a point at camera-space depth viewZ (positive in front in LH):
     //   pos2d.z = projection[2][2] * viewZ + projection[3][2]
     //   pos2d.w = viewZ
@@ -32,8 +32,8 @@ fn gsLinearDepth(ndcZ: f32) -> f32 {
     let p22 = u.projection[2][2];
     let p32 = u.projection[3][2];
     let viewZ = p32 / (ndcZ - p22);
-    let near = -p32 / p22;
-    let far  =  p32 / (1.0 - p22);
+    let near = p32 / (1.0 - p22);
+    let far  = -p32 / p22;
     return clamp((viewZ - near) / (far - near), 0.0, 1.0);
 }
 `;
