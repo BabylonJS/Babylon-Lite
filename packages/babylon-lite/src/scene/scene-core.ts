@@ -21,6 +21,7 @@ import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { updateFloatingOriginOffset, type FloatingOriginMode } from "../large-world/floating-origin.js";
+import { resolveScenePrecisionPolicy, type ScenePrecisionPolicy } from "./_scene-precision.js";
 
 /** Options accepted by `createSceneContext`. */
 export interface SceneContextOptions {
@@ -120,6 +121,9 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     /** Mutable backing store for public floatingOriginOffset. */
     _floatingOriginOffset: [number, number, number];
 
+    /** @internal Captured matrix-precision policy for this scene. */
+    _matrixPolicy: ScenePrecisionPolicy;
+
     /** Frame graph driving this scene's rendering. Created eagerly by
      *  `createSceneContext` with a default `RenderTask` that mirrors
      *  `_renderables` into the swapchain. User code may add additional tasks
@@ -160,6 +164,7 @@ export function createSceneContext(engine: EngineContext, options: SceneContextO
     const eng = engine as EngineContextInternal;
     const eyePosition: [number, number, number] = [0, 0, 0];
     const floatingOriginOffset: [number, number, number] = [0, 0, 0];
+    const matrixPolicy = resolveScenePrecisionPolicy(eng, options);
 
     // Closures below capture `ctx` by-reference via this object.
     const ctxLocal: Omit<SceneContextInternal, "_frameGraph"> = {
@@ -190,6 +195,7 @@ export function createSceneContext(engine: EngineContext, options: SceneContextO
         _floatingOriginMode: options.useFloatingOrigin === true,
         _eyePosition: eyePosition,
         _floatingOriginOffset: floatingOriginOffset,
+        _matrixPolicy: matrixPolicy,
 
         _update(): void {
             updateFloatingOriginOffset(ctx);
