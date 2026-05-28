@@ -6,6 +6,7 @@
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
 
@@ -44,15 +45,21 @@ export interface WorldMatrixPacket {
     readonly mesh: Mesh;
     readonly meshUBO: GPUBuffer;
     _lastWorldVersion: number;
+    /** Per-packet reusable F32 scratch (16 floats) for packing the mesh world
+     *  matrix at GPU upload time. Lazy-allocated on first upload so HPM-off
+     *  packets that never re-upload pay nothing; F64-backed worldMatrix is
+     *  correctly downcast to 16 F32s here (REQ-UPL-1). */
+    _meshWorldUploadScratch?: Float32Array;
 }
 
 /** Write world matrices to UBOs for packets whose version has changed. */
 export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: WorldMatrixPacket[]): void {
     const device = engine.device;
     for (const p of packets) {
-        const wm = p.mesh.worldMatrix;
         if (p.mesh.worldMatrixVersion !== p._lastWorldVersion) {
-            device.queue.writeBuffer(p.meshUBO, 0, wm as unknown as Float32Array<ArrayBuffer>);
+            const scratch = p._meshWorldUploadScratch ?? (p._meshWorldUploadScratch = new Float32Array(16));
+            packMat4IntoF32(scratch, p.mesh.worldMatrix, 0);
+            device.queue.writeBuffer(p.meshUBO, 0, scratch as Float32Array<ArrayBuffer>);
             p._lastWorldVersion = p.mesh.worldMatrixVersion;
         }
     }

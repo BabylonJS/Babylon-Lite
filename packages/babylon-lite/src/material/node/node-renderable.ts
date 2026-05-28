@@ -18,6 +18,7 @@ import { compileNodePipeline } from "./node-pipeline.js";
 import { NODE_ESM_SHADOW_OUTPUT, NODE_NO_COLOR_OUTPUT } from "./node-flags.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import { MAX_LIGHTS } from "../../light/types.js";
+import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 // Per-engine cached no-op morph target: a 1×1 rgba32float texture + a UBO with
 // count=0 + sensible texWidth/rowsPerBand. Meshes without their own morph
@@ -117,7 +118,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             const meshUboBytes = 96 + 16 * Math.ceil(MAX_LIGHTS / 4);
             const _meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
             const _meshScratch = new Float32Array(((meshUboBytes + 15) & ~15) / 4);
-            _meshScratch.set(_mesh.worldMatrix as unknown as Float32Array, 0);
+            packMat4IntoF32(_meshScratch, _mesh.worldMatrix, 0);
             const recv = _mesh.receiveShadows ? 1 : 0;
             _meshScratch[16] = recv;
             if (compile._usesMeshAttributeFlags) {
@@ -187,7 +188,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             const recvChanged = recv !== pkt._lastReceivesShadow;
             const lightsChanged = scene.lights.length !== pkt._lastLightsCount;
             if (worldChanged || recvChanged || lightsChanged) {
-                pkt._meshScratch.set(pkt._mesh.worldMatrix as unknown as Float32Array, 0);
+                packMat4IntoF32(pkt._meshScratch, pkt._mesh.worldMatrix, 0);
                 pkt._meshScratch[16] = recv;
                 if (compile._usesMeshAttributeFlags) {
                     writeAttributeFlags(pkt._mesh, pkt._meshScratch);
