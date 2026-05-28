@@ -8,11 +8,12 @@ import type { RenderTarget } from "../engine/render-target.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
 export function writeShadowUboFields(out: Float32Array, sg: { _lightMatrix: Float32Array; _depthValues: Float32Array; _shadowsInfo: Float32Array }): void {
-    out.set(sg._lightMatrix, 0);
+    packMat4IntoF32(out, sg._lightMatrix, 0);
     out[16] = sg._depthValues[0]!;
     out[17] = sg._depthValues[1]!;
     out[18] = 0;

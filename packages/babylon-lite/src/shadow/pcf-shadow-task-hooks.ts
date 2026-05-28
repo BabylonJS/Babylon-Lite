@@ -9,6 +9,7 @@ import type { SpotLight } from "../light/spot-light.js";
 import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateShadowCameraBase, writeShadowUboFields } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
 export interface PcfLightMatrix {
     _view: Float32Array;
@@ -133,7 +134,7 @@ export function renderPcfShadowMap(
     const matrix = computeLightMatrix(casterMeshes);
     const matrixChanged = sg._light.lightType === "directional" || lightVersion !== state._lastLightVersion;
     if (matrixChanged) {
-        sg._lightMatrix.set(matrix._viewProj);
+        packMat4IntoF32(sg._lightMatrix, matrix._viewProj, 0);
         sg._version++;
         writeShadowUboFields(state._shadowUboData, sg);
         engine.device.queue.writeBuffer(sg._shadowUBO, 0, state._shadowUboData as Float32Array<ArrayBuffer>);
