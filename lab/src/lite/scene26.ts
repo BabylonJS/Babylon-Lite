@@ -85,14 +85,21 @@ async function main(): Promise<void> {
     // Skybox: PBR skybox mode — samples cubemap using view direction (like BJS SKYBOX_MODE)
     // BJS skybox has vReflectivityColor=(1,1,1) → F0=1, matching metallic=1 with white baseColor.
     // roughness=0.3 (microSurface=0.7), no direct lighting, double-sided
-    const skybox = createBox(engine, 20);
+    const skybox = createBox(engine, 5);
     skybox.material = createPbrMaterial({
         baseColorTexture: createSolidTexture2D(engine, 1, 1, 1),
         ormTexture: createSolidTexture2D(engine, 1.0, 0.3, 1.0), // occ=1, rough=0.3, metal=1 → F0=(1,1,1)
+        environmentIntensity: 1.008,
         directIntensity: 0,
         doubleSided: true,
         skyboxMode: true,
     });
+    const syncSkybox = (): void => {
+        const w = cam.worldMatrix;
+        skybox.position.set(w[12]!, w[13]!, w[14]!);
+    };
+    syncSkybox();
+    onBeforeRender(scene, syncSkybox);
     addToScene(scene, skybox);
 
     // Handle seekTime
