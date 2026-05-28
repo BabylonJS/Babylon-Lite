@@ -33,7 +33,7 @@ export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAc
 }
 
 /** Mixin world-matrix accessors (parent, worldMatrix, worldMatrixVersion) onto a light object.
- *  Also adds _lightVersion from the LightVersionState.
+ *  Also adds _lightVersion from the LightVersionState and forwards _rebindAllocator to wm.
  *  Returns the same object reference typed as R (defineProperties adds the accessors at runtime). */
 export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAccessors, lvs?: LightVersionState): R {
     Object.defineProperties(target, {
@@ -62,6 +62,7 @@ export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAcce
             configurable: true,
         },
     });
+    (target as { _rebindAllocator?: WorldMatrixAccessors["_rebindAllocator"] })._rebindAllocator = wm._rebindAllocator;
     if (lvs) {
         Object.defineProperty(target, "_lightVersion", {
             get() {

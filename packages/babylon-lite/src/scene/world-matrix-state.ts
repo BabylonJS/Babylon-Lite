@@ -11,6 +11,7 @@ import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import { asMat4Storage } from "../math/_mat4-storage.js";
+import type { MatrixAllocator } from "../math/_matrix-allocator.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */
@@ -21,6 +22,9 @@ export interface WorldMatrixAccessors {
     markLocalDirty(): void;
     /** Reference to parent — set directly. */
     parent: IWorldMatrixProvider | null;
+    /** @internal Reallocate `_ownedWorld` from the given allocator and invalidate caches.
+     *  Called by `bindEntityMatrixPolicy` when the owning entity attaches to a scene. */
+    _rebindAllocator(allocator: MatrixAllocator): void;
 }
 
 /**
@@ -35,8 +39,10 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
     let _lastLocalVersion = -1;
     let _lastParentVersion = -1;
     let _cachedWorld: Mat4 | null = null;
-    // TODO(M0/01_03): allocate via engine policy
-    const _ownedWorld = new Float32Array(16) as unknown as Mat4;
+    // Default storage is F32 — re-allocated through _rebindAllocator at scene-attach
+    // time if the scene's policy is F64. Production code always rebinds before the
+    // first read; the F32 default keeps standalone entity construction working.
+    let _ownedWorld: Mat4 = new Float32Array(16) as unknown as Mat4;
     let _parent: IWorldMatrixProvider | null = null;
 
     return {
@@ -54,6 +60,13 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             _localVersion++;
             _worldVersion++;
             _cachedWorld = null;
+        },
+
+        _rebindAllocator(allocator: MatrixAllocator): void {
+            _ownedWorld = allocator.allocate();
+            _cachedWorld = null;
+            _lastLocalVersion = -1;
+            _lastParentVersion = -1;
         },
 
         getWorldMatrix(): Mat4 {

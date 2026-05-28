@@ -125,6 +125,7 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         configurable: true,
         enumerable: false,
     });
+    (mesh as MeshInternal)._rebindAllocator = wm._rebindAllocator;
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────

@@ -6,6 +6,7 @@ import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import { asMat4Storage } from "../math/_mat4-storage.js";
 
 /** ArcRotateCamera — orbits around a target point.
  *  Uses Babylon.js convention: left-handed, alpha=rotation around Y, beta=elevation.
@@ -62,11 +63,35 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         };
     }
 
+    // Lazy reusable local-world matrix; allocated via the bound policy on first read.
+    let _localMat: Mat4 | null = null;
+
     function cameraLocalWorldMatrix(): Mat4 {
+        if (!_localMat) {
+            const a = cam._boundPolicy?.allocator;
+            _localMat = (a ? a.allocate() : new Float32Array(16)) as unknown as Mat4;
+        }
         const eye = localEyePosition();
         const v = mat4LookAtLH(eye, cam.target, Vec3Up);
+        const m = asMat4Storage(_localMat);
         // Transpose upper 3×3 of view = camera-to-world rotation; translation = eye.
-        return new Float32Array([v[0]!, v[4]!, v[8]!, 0, v[1]!, v[5]!, v[9]!, 0, v[2]!, v[6]!, v[10]!, 0, eye.x, eye.y, eye.z, 1]) as unknown as Mat4;
+        m[0] = v[0]!;
+        m[1] = v[4]!;
+        m[2] = v[8]!;
+        m[3] = 0;
+        m[4] = v[1]!;
+        m[5] = v[5]!;
+        m[6] = v[9]!;
+        m[7] = 0;
+        m[8] = v[2]!;
+        m[9] = v[6]!;
+        m[10] = v[10]!;
+        m[11] = 0;
+        m[12] = eye.x;
+        m[13] = eye.y;
+        m[14] = eye.z;
+        m[15] = 1;
+        return _localMat;
     }
 
     const wm = createWorldMatrixState(cameraLocalWorldMatrix);
@@ -120,6 +145,12 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
             enumerable: true,
         });
     }
+
+    cam._rebindAllocator = (alloc) => {
+        wm._rebindAllocator(alloc);
+        cam._viewCache = cam._projCache = cam._vpCache = undefined;
+        onDirty();
+    };
 
     return cam;
 }

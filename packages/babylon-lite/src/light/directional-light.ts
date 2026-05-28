@@ -1,7 +1,7 @@
 /** DirectionalLight — plain data (pillar 4b: no scene reference).
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { LightBase } from "./types.js";
+import type { LightBase, LightBaseInternal } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
@@ -17,10 +17,18 @@ export interface DirectionalLight extends LightBase {
 }
 
 export function createDirectionalLight(direction: [number, number, number], intensity = 1): DirectionalLight {
-    const _localMatrix = new Float32Array(16) as unknown as Mat4;
-    const { wm, onDirty, lvs } = createLightBase(() =>
-        localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix)
-    );
+    // Lazy `_localMatrix`: allocated via the bound precision policy on first
+    // worldMatrix read so HPM-on lights produce F64 storage without a
+    // per-light rebind closure. `applyWorldMatrixAccessors` forwards
+    // `_rebindAllocator` to wm, so the world cache is rebound on attach.
+    let _localMatrix: Mat4 | null = null;
+    const { wm, onDirty, lvs } = createLightBase(() => {
+        if (!_localMatrix) {
+            const a = (light as unknown as LightBaseInternal)._boundPolicy?.allocator;
+            _localMatrix = (a ? a.allocate() : new Float32Array(16)) as unknown as Mat4;
+        }
+        return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix);
+    });
 
     const light = applyWorldMatrixAccessors<DirectionalLight>(
         {

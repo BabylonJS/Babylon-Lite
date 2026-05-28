@@ -6,6 +6,7 @@ import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import { asMat4Storage } from "../math/_mat4-storage.js";
 
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
@@ -40,28 +41,35 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
     const dy = target.y - position.y;
     const dz = target.z - position.z;
 
-    const _localMat = new Float32Array(16);
+    // Lazy `_localMat`: allocated through bound policy on first read so HPM-on
+    // cameras get F64 storage without a per-camera rebind closure.
+    let _localMat: Mat4 | null = null;
 
     function cameraLocalWorldMatrix(): Mat4 {
+        if (!_localMat) {
+            const a = cam._boundPolicy?.allocator;
+            _localMat = (a ? a.allocate() : new Float32Array(16)) as unknown as Mat4;
+        }
         const view = mat4LookAtLH(cam.position, cam.target, Vec3Up);
+        const m = asMat4Storage(_localMat);
         // Camera-to-world = transpose upper 3×3 of view + eye position
-        _localMat[0] = view[0]!;
-        _localMat[1] = view[4]!;
-        _localMat[2] = view[8]!;
-        _localMat[3] = 0;
-        _localMat[4] = view[1]!;
-        _localMat[5] = view[5]!;
-        _localMat[6] = view[9]!;
-        _localMat[7] = 0;
-        _localMat[8] = view[2]!;
-        _localMat[9] = view[6]!;
-        _localMat[10] = view[10]!;
-        _localMat[11] = 0;
-        _localMat[12] = cam.position.x;
-        _localMat[13] = cam.position.y;
-        _localMat[14] = cam.position.z;
-        _localMat[15] = 1;
-        return _localMat as unknown as Mat4;
+        m[0] = view[0]!;
+        m[1] = view[4]!;
+        m[2] = view[8]!;
+        m[3] = 0;
+        m[4] = view[1]!;
+        m[5] = view[5]!;
+        m[6] = view[9]!;
+        m[7] = 0;
+        m[8] = view[2]!;
+        m[9] = view[6]!;
+        m[10] = view[10]!;
+        m[11] = 0;
+        m[12] = cam.position.x;
+        m[13] = cam.position.y;
+        m[14] = cam.position.z;
+        m[15] = 1;
+        return _localMat;
     }
 
     const wm = createWorldMatrixState(cameraLocalWorldMatrix);
@@ -122,6 +130,12 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
         configurable: true,
         enumerable: true,
     });
+
+    cam._rebindAllocator = (alloc) => {
+        wm._rebindAllocator(alloc);
+        cam._viewCache = cam._projCache = cam._vpCache = undefined;
+        onDirty();
+    };
 
     return cam;
 }

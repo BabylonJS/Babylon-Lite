@@ -22,7 +22,8 @@ import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { updateFloatingOriginOffset, type FloatingOriginMode } from "../large-world/floating-origin.js";
 import { resolveScenePrecisionPolicy, type ScenePrecisionPolicy } from "./_scene-precision.js";
-import { bindEntityMatrixPolicy, type MatrixBindable } from "./_entity-precision-bind.js";
+import { bindEntityMatrixPolicy } from "./_entity-precision-bind.js";
+import type { MatrixBindable } from "./_entity-precision-bind.js";
 
 /** Options accepted by `createSceneContext`. */
 export interface SceneContextOptions {
@@ -228,27 +229,6 @@ export function createSceneContext(engine: EngineContext, options: SceneContextO
     };
 
     const ctx = ctxLocal as SceneContextInternal;
-    // Install a setter on `scene.camera` so direct assignment auto-binds the
-    // camera to this scene's precision policy. Cameras typically bypass
-    // addToScene (lab scenes do `scene.camera = createArcRotateCamera(...)`),
-    // but they own matrix caches (_viewCache/_projCache/_vpCache) that need
-    // the bound allocator. Same cross-engine fast-fail rules apply.
-    {
-        let _cam: Camera | null = null;
-        Object.defineProperty(ctx, "camera", {
-            get() {
-                return _cam;
-            },
-            set(v: Camera | null) {
-                if (v !== null && v !== undefined) {
-                    bindEntityMatrixPolicy(v as unknown as MatrixBindable, ctx._matrixPolicy);
-                }
-                _cam = v;
-            },
-            configurable: true,
-            enumerable: true,
-        });
-    }
     // Eagerly attach the frame graph + a default swapchain render-pass task. The
     // graph drives all GPU work for this scene; user code can add more tasks
     // (offscreen RTTs, post-FX, UI overlays) before/after.

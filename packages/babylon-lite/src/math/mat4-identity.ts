@@ -2,7 +2,6 @@ import type { Mat4 } from "./types.js";
 
 /** Create a new identity Mat4. */
 export function mat4Identity(): Mat4 {
-    // TODO(M0/01_03): allocate via engine policy
     const m = new Float32Array(16);
     m[0] = 1;
     m[5] = 1;

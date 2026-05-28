@@ -24,7 +24,9 @@ export function localMatrixFromDirection(dx: number, dy: number, dz: number, px 
         uy = fz * rx - fx * rz,
         uz = fx * ry - fy * rx;
 
-    // TODO(M0/01_03): allocate via engine policy
+    // F32 fallback used only when callers don't pass `out`. Light factories
+    // always pass a policy-allocated `_localMatrix` as `out` (see Task 2.3),
+    // so the F32 path is exercised only by ad-hoc / test usage.
     const out4: Mat4 = out ?? (new Float32Array(16) as unknown as Mat4);
     const m = asMat4Storage(out4);
     m[0] = rx;

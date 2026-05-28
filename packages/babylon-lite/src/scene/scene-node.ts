@@ -134,6 +134,7 @@ export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy
         get worldMatrixVersion() {
             return wm.getWorldMatrixVersion();
         },
+        _rebindAllocator: wm._rebindAllocator,
     };
     return node;
 }
