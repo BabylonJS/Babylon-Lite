@@ -3,6 +3,7 @@
 
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { EngineContextInternal } from "../engine/engine.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */
 export function syncThinInstanceBuffers(
@@ -30,7 +31,24 @@ export function syncThinInstanceBuffers(
         if (dirtyMax > dirtyMin) {
             const minByte = dirtyMin * 64;
             const maxByte = dirtyMax * 64;
-            device.queue.writeBuffer(ti._gpuBuffer, minByte, ti.matrices.buffer, ti.matrices.byteOffset + minByte, maxByte - minByte);
+            if (ti.matrices instanceof Float32Array) {
+                // Fast path: F32 source — direct byte copy, no per-instance pack.
+                device.queue.writeBuffer(ti._gpuBuffer, minByte, ti.matrices.buffer, ti.matrices.byteOffset + minByte, maxByte - minByte);
+            } else {
+                // F64 source (HPM-on path) — pack each dirty instance into a
+                // per-mesh reused F32 upload scratch, then writeBuffer the
+                // dirty subrange. Scratch is sized to capacity in F32 floats
+                // and grown when capacity grows; never per-frame allocated.
+                const neededFloats = ti._capacity * 16;
+                if (!ti._uploadF32 || ti._uploadF32.length < neededFloats) {
+                    ti._uploadF32 = new Float32Array(neededFloats);
+                }
+                const upload = ti._uploadF32;
+                for (let i = dirtyMin; i < dirtyMax; i++) {
+                    packMat4IntoF32(upload, ti.matrices, i * 16, i * 16);
+                }
+                device.queue.writeBuffer(ti._gpuBuffer, minByte, upload.buffer, upload.byteOffset + minByte, maxByte - minByte);
+            }
         }
         ti._dirtyMin = ti.count;
         ti._dirtyMax = 0;

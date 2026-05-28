@@ -84,4 +84,46 @@ describe("packMat4IntoF32", () => {
         expected[15] = 1;
         expect(Array.from(view)).toEqual(Array.from(expected));
     });
+
+    it("srcOffsetFloats reads a strided mat4 out of a packed slab (F32 source)", () => {
+        // Two mat4 slabs packed into one Float32Array(32). First is filled with
+        // 1..16, second with 100..115.
+        const slab = new Float32Array(32);
+        for (let i = 0; i < 16; i++) {
+            slab[i] = i + 1;
+            slab[16 + i] = 100 + i;
+        }
+        const view = new Float32Array(16);
+        packMat4IntoF32(view, slab, 0, 16);
+        for (let i = 0; i < 16; i++) {
+            expect(view[i]).toBe(100 + i);
+        }
+    });
+
+    it("srcOffsetFloats reads a strided mat4 out of a packed slab (F64 source, downcast)", () => {
+        const slab = new Float64Array(32);
+        const lossy = 1e5 + 1.23456789e-4;
+        slab[16 + 12] = lossy;
+        const view = new Float32Array(16);
+        packMat4IntoF32(view, slab, 0, 16);
+        // Position element [12] of the second instance lands at view[12].
+        expect(view[12]).toBe(Math.fround(lossy));
+        expect(view[12]).not.toBe(lossy);
+    });
+
+    it("composes repeated packs at different dest offsets without trampling earlier slots", () => {
+        // One F64 slab with two instances; pack each into its own dest slot.
+        const slab = new Float64Array(32);
+        for (let i = 0; i < 16; i++) {
+            slab[i] = i + 1;
+            slab[16 + i] = 100 + i;
+        }
+        const view = new Float32Array(32);
+        packMat4IntoF32(view, slab, 0, 0);
+        packMat4IntoF32(view, slab, 16, 16);
+        for (let i = 0; i < 16; i++) {
+            expect(view[i]).toBe(i + 1);
+            expect(view[16 + i]).toBe(100 + i);
+        }
+    });
 });
