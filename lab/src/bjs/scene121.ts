@@ -51,8 +51,9 @@ const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master
     for (let i = 0; i < 30000; i++) {
         positions[i * 8 + 1]! -= 2.0;
     }
-    gs.updateData(buf, undefined);
+    gs.updateData(buf, undefined, { flipY: false });
 
+    gs.scaling.y = -1;
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
 
     (window as unknown as { __gs: GaussianSplattingMesh }).__gs = gs;
