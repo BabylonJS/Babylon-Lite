@@ -37,7 +37,7 @@ export interface Color4 {
  *  Layout matches WebGPU/WGSL mat4x4<f32> memory order. Opaque-by-convention:
  *  callers MUST NOT depend on the underlying storage (Float32Array vs
  *  Float64Array). Internal kernels and uploaders use the `Mat4Storage` view
- *  from `_mat4-storage.ts` to access the concrete typed array behind the brand. */
+ *  defined below to access the concrete typed array behind the brand. */
 export interface Mat4 {
     readonly __brand: "Mat4";
     readonly length: 16;

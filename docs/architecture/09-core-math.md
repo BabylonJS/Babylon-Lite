@@ -40,9 +40,19 @@ export interface Color4 {
   a: number;
 }
 
-/** 4x4 column-major matrix stored as a flat Float32Array (16 elements).
+/** 4x4 column-major matrix (16 elements). Opaque-by-convention: the
+ *  underlying storage is `Float32Array` (default) or `Float64Array`
+ *  (after an HPM engine is created — see `30-high-precision-matrix.md`).
  *  Layout matches WebGPU/WGSL mat4x4<f32> memory order. */
-export type Mat4 = Float32Array & { readonly __brand: 'Mat4' };
+export interface Mat4 {
+  readonly __brand: 'Mat4';
+  readonly length: 16;
+  readonly [index: number]: number;
+}
+
+/** @internal Writable backing for Mat4 used by kernels and the GPU packer.
+ *  Raw typed-array union (no brand). Not re-exported from `index.ts`. */
+export type Mat4Storage = Float32Array | Float64Array;
 
 /** Quaternion rotation */
 export interface Quat {
@@ -139,15 +149,23 @@ Logical matrix:
   | m[3]  m[7]  m[11]  m[15] |
 ```
 
-This matches WGSL `mat4x4<f32>` which stores columns contiguously. A `Mat4` can be directly written to a GPU uniform buffer.
+This matches WGSL `mat4x4<f32>` which stores columns contiguously. Mat4 values are written to GPU uniform buffers via the single packing helper `packMat4IntoF32` (see `30-high-precision-matrix.md`) — never directly via `Float32Array.set(mat)`, because the backing may be `Float64Array` when HPM is enabled and must be down-cast at the upload boundary.
 
-### Branded Type Pattern
+### Branded Opaque Type
 
-`Mat4` is a branded `Float32Array`:
+`Mat4` is an opaque interface, not a typed array:
 ```typescript
-export type Mat4 = Float32Array & { readonly __brand: 'Mat4' };
+export interface Mat4 {
+  readonly __brand: 'Mat4';
+  readonly length: 16;
+  readonly [index: number]: number;
+}
 ```
-This prevents accidentally passing a raw `Float32Array` where a `Mat4` is expected, while still allowing all `Float32Array` methods. New instances are created via `new Float32Array(16) as Mat4`.
+This prevents callers from passing a raw `Float32Array` (or array of the wrong length, or arbitrary buffer) where a `Mat4` is expected — they would have to launder through `as unknown as Mat4`, which signals deliberate intent. The `readonly` indexer also prevents accidental writes to engine-vended matrices.
+
+Internal kernels (`mat4Multiply`, `mat4Invert`, `packMat4IntoF32`, the allocator) operate on `Mat4Storage = Float32Array | Float64Array` — a raw typed-array union without brand, so the kernel can write freely. The two types describe the same memory; you cross between them at the trust boundary via `as unknown as Mat4Storage` / `as unknown as Mat4`.
+
+New matrices are allocated via `allocateMat4()` from `_matrix-allocator.ts`, which returns `Float32Array(16)` by default and `Float64Array(16)` after `useHighPrecisionMatrix: true` is installed on the page (see `30-high-precision-matrix.md`).
 
 ## Shader Logic (Exact Math Formulas)
 

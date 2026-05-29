@@ -1,299 +1,163 @@
-# Large World Rendering / `useFloatingOrigin`
+# Module: Large World Rendering (LWR / Floating Origin)
+> Package path: `packages/babylon-lite/src/large-world/floating-origin.ts`
 
-Porting plan for BJS 9.0's "Large World Rendering" / floating-origin feature
-(authored upstream by @georgie). See companion doc
-[`28-geospatial-camera.md`](./28-geospatial-camera.md) — the two features are
-orthogonal but compose well (a Geospatial scene rendered at 1:1 meters
-needs floating origin to avoid float32 jitter).
+## Purpose
 
-## References
+Large World Rendering (LWR) lets the engine render coordinates far from the world origin (~1e5 metres and beyond, up to planet-scale) without the F32 jitter that normally appears in vertex transform pipelines at that magnitude. When `useFloatingOrigin: true` is set on the engine, every frame the active camera's world position is captured as the "floating origin" offset, and all GPU uploads subtract that offset from world-space translations *before* the implicit F32 store. The vertex shader then operates on small-magnitude eye-relative coordinates where F32 precision is comfortable, while the engine maintains accurate world positions on the CPU in F64.
 
-- Upstream impl: `packages/dev/core/src/Materials/floatingOriginMatrixOverrides.ts`
-- Upstream wiring: `scene.ts:2035-2038, 1255-1280, 2898-2905`
-- BJS PR: [#17334](https://github.com/BabylonJS/Babylon.js/pull/17334)
-- Forum announcement: [t/61114](https://forum.babylonjs.com/t/61114)
-- BJS doc: <https://doc.babylonjs.com/features/featuresDeepDive/scene/large_world>
-- BJS unit test: `packages/dev/core/test/unit/Meshes/babylon.instancedMesh.lwr.test.ts`
-- BJS visual test fixture: `packages/tools/tests/test/visualization/config.json` (entry "Havok FloatingOrigin Multi-Region", PG `#ND10JJ#0`)
-- Lite baseline: `packages/babylon-lite/src/scene/scene-camera.ts`, `scene/scene.ts`, mesh world-matrix uploaders
+LWR depends on the High-Precision Matrix substrate (`30-high-precision-matrix.md`): subtracting an F64-accurate eye offset from an already-F32-degraded world translation recovers nothing — the low bits were lost upstream. `useFloatingOrigin: true` therefore requires `useHighPrecisionMatrix: true` on the same engine; `createEngine` throws synchronously if the precondition is violated.
 
-## Design notes (Lite-shaped)
+## Public API Surface
 
-BJS achieves LWR with two cooperating mechanisms:
-1. **CPU**: swap `Matrix` storage from Float32Array to Float64Array engine-wide
-   (`useHighPrecisionMatrix`). This is what keeps precision alive across
-   parent-chain composition, picking inverses, world-space culling/LOD, and
-   any other CPU code path that touches absolute world coordinates.
-2. **GPU**: monkey-patch `Effect.prototype.setMatrix` and
-   `UniformBuffer.prototype._updateMatrixForUniform` to subtract
-   `scene._eyePosition` from `world` translation, zero `view` translation,
-   and decompose/recompose `worldView`/`viewProjection`/`worldViewProjection`.
-   Plus direct offsets on lights, sprites, particles, clip planes, instance
-   buffers, shadow generators, and the eye-position uniform.
+### Engine option (`engine/engine.ts`)
 
-These two mechanisms are **not independent** — the GPU offset trick relies on
-having precision-preserving world matrices feeding into it. Subtracting an
-F64-accurate eye offset from an already-F32-degraded world translation
-recovers nothing; the low bits were lost upstream. So the CPU substrate is a
-prerequisite for the GPU pass to actually deliver precision.
+```typescript
+export interface EngineOptions {
+    /** When true, every scene on this engine uses the floating-origin
+     *  (eye-relative upload) trick to render large-world coordinates without
+     *  F32 jitter. Requires `useHighPrecisionMatrix: true` — throws
+     *  synchronously if set without it. Defaults to false.
+     *
+     *  LWR is engine-wide: all scenes created against this engine inherit
+     *  the mode. The LWR runtime module (`large-world/floating-origin.js`)
+     *  is dynamically imported during `createEngine` only when this flag is
+     *  true, so non-LWR engines never pull the module into their bundle. */
+    useFloatingOrigin?: boolean;
+}
+```
 
-In Lite this maps to:
-- Lite has no `Matrix` class — math is on a branded `Float32Array` `Mat4`
-  type (`math/types.ts`). The high-precision step becomes a dual-precision
-  mat4 layer: `Mat4` widens to accept F32 or F64 backing, every mat4 op gains
-  an F64-capable path, and the GPU upload boundary becomes the single place
-  we downcast. Exposed via an engine option `useHighPrecisionMatrix` that
-  mirrors the BJS API surface (so BJS apps that depend on the flag can
-  migrate without rewriting their precision strategy).
-- Lite has no `Effect`/`UniformBuffer` global with mutable prototypes. Instead,
-  the offset path lives in the central upload path
-  (`scene-camera.ts` for view/proj, mesh world matrix uploaders, light UBO
-  builders, etc.). We add one helper module
-  (`large-world/floating-origin.ts`) and call into it explicitly from each
-  uploader. **Tree-shakable**: scenes that don't enable LWR import nothing
-  from this module and pay zero bundle cost (per `sideEffects: false`).
-- Public API: three flags, mirroring the BJS surface.
-  - `useHighPrecisionMatrix` on the engine constructor — engine-wide CPU
-    precision substrate, usable standalone for migrants who relied on it in
-    BJS without LWR (e.g., deep node hierarchies at moderate but non-trivial
-    coordinates).
-  - `useFloatingOrigin` on `createSceneContext` — per-scene GPU offset trick.
-    **Requires** `useHighPrecisionMatrix: true` on the engine; validated at
-    scene creation with a clear error.
-  - `useLargeWorldRendering` on the engine constructor — convenience that
-    forces `useHighPrecisionMatrix: true` and makes `useFloatingOrigin: true`
-    the **default** for scenes created on this engine. Per-scene
-    `useFloatingOrigin: false` still wins (so UI/HUD overlay scenes on an
-    LWR engine can opt out and stay in pure rendering mode).
-  - Plus `scene.floatingOriginOffset` read-only getter for app code that
-    needs to know the current offset (e.g., for world-space queries).
-- Multi-scene composition: scenes are independent `RenderingContext`s. An
-  LWR-enabled 3D scene and a non-LWR UI overlay scene can coexist on the
-  same engine — the engine-wide F64 substrate covers both (small overhead
-  for the UI scene's matrices, no correctness issue), and only scenes with
-  `useFloatingOrigin: true` perform the offset trick at upload.
+### Read-only offset accessor (`large-world/floating-origin.ts`)
 
-Milestones below are **feature-oriented** — each milestone is independently
-shippable and lands with the tests that validate what it added. No standalone
-"tests" milestone.
+```typescript
+/** Read the current floating-origin offset from a scene as a `Vec3`.
+ *  Returns the live offset (camera world position when FO is on).
+ *  For non-LWR engines this function is never reachable because the
+ *  module is not imported. */
+export function getFloatingOriginOffset(scene: SceneContext): Vec3;
+```
 
-## Milestone 0 — Dual-precision mat4 layer (`useHighPrecisionMatrix`)
+## Internal architecture
 
-Foundation for everything that follows. Ships **on its own** as a standalone
-feature — BJS migrants who use `useHighPrecisionMatrix` without LWR get value
-from this milestone immediately, and LWR builds on top of it.
+### Dynamic-import gate
 
-Today the `useHighPrecisionMatrix` field on `EngineOptions` /
-`EngineInternal` is dead plumbing (BJS-skeleton stub, never read). This
-milestone makes it real.
+`createEngine` only imports `floating-origin.ts` when `useFloatingOrigin: true`:
 
-- **m0-mat4-dual-precision**: Widen `Mat4` in `math/types.ts` to accept
-  Float32 or Float64 backing (branded variants `Mat4F32`, `Mat4F64`, with
-  `Mat4` as the union). Add F64-capable variants of every mat4 op currently
-  in `math/`: `mat4Multiply`, `mat4Invert`, `mat4LookAtLH`, `mat4Compose`,
-  `mat4FromQuat`, `mat4Identity`, `mat4Scale`, `mat4Translation`,
-  `mat4MultiplyInto`, `mat4ComposeInto`, `mat4PerspectiveLH`,
-  `mat4PerspectiveLHToRef`. Prefer generic dispatch on the view type over
-  duplicated kernels where the JIT will optimize it cleanly; benchmark to
-  confirm.
-- **m0-engine-flag**: Wire `EngineOptions.useHighPrecisionMatrix` through to
-  `EngineInternal` (already plumbed structurally — make it functional). When
-  `true`, all mat4 allocations on the CPU side use F64 backing.
-- **m0-upload-boundary**: Establish the GPU upload boundary as the single
-  place where F64 → F32 downcast happens. Audit every mat4 → GPU buffer
-  write site (mesh world UBO, view/proj UBO, light UBOs, thin-instance
-  buffer, shadow matrices) and route through a single
-  `writeMat4ToBuffer(view, mat)` helper that downcasts when input is F64.
-- **m0-world-space-reads**: Audit CPU-side world-space readers (picking,
-  frustum cull, AABB tests, distance-based LOD, `getCameraPosition` calls
-  that feed app logic) to use the F64 storage directly when the flag is on
-  rather than downcasting first.
+```typescript
+if (useFO) {
+    const { updateFloatingOriginOffset } = await import("../large-world/floating-origin.js");
+    _updateFOOffset = updateFloatingOriginOffset;
+}
+```
 
-_Validation_:
-- Pure-math unit tests: round-trip a chain of multiplies / inverts at
-  large coordinates (camera + parent chain ~1e6) and verify F64 mode
-  preserves sub-unit precision where F32 mode drifts. Mirror relevant
-  cases from `babylon.instancedMesh.lwr.test.ts`.
-- Parity scene at moderate-but-non-trivial coordinates (~1e5) with a deep
-  node hierarchy and visible jitter under F32; F64 mode eliminates the
-  jitter. Capture BJS golden with `useHighPrecisionMatrix: true` for ref.
-- Bundle-size: no scene's bundle-size ceiling is raised by this milestone.
-  Dual-precision paths add some bytes to scenes that already pull in mat4
-  ops; the F64-only specialized variants must be tree-shaken when only
-  the F32 path is reachable. Exact bundle deltas are a requirements-phase
-  decision, not a goal of zero.
-- `pnpm test` (build + parity) green. No `test:perf`.
+The function reference is stored on `engine._updateFOOffset`. Scene `_update` invokes it via optional chaining:
 
-## Milestone 1 — Floating-origin plumbing + mesh/view rendering path
+```typescript
+eng._updateFOOffset?.(ctx);
+```
 
-Depends on M0. With the dual-precision layer in place, floating-origin
-becomes "subtract the eye offset on the F64 side, then downcast at upload"
-— a clean overlay on the existing precision substrate.
+Non-LWR engines leave the field undefined, the call is a no-op, and the LWR module is never referenced statically anywhere in the package. Tree-shakers drop it entirely from non-LWR bundles. Validated by `tests/parity/bundle-size.spec.ts` ceilings.
 
-**Scope shipped in M1 (commits LWR M1.1–M1.5 + simplification `07be57e`):**
+### Per-frame offset update (`updateFloatingOriginOffset`)
 
-- **a1-types**: Add `useFloatingOrigin?: boolean` to `SceneContextOptions` and
-  a `_floatingOriginOffset: Vec3` (mutable by-reference array, default
-  `[0,0,0]`) on `SceneContextInternal`. The `Camera` interface gains
-  `_floatingOriginOffset?: readonly [number, number, number] | null` — the
-  scene's `_update` wires `camera._floatingOriginOffset = scene._floatingOriginOffset`
-  (idempotent reference assignment) so `getViewMatrix` reads the offset
-  directly from the camera. No scene reference needed on the camera
-  (preserves one-way ownership, pillar 4b).
-- **a1-validate-precondition**: At `createSceneContext` time, throw a clear
-  error if `useFloatingOrigin: true` is set on an engine that wasn't created
-  with `useHighPrecisionMatrix: true`.
-- **a1-pack-helper**: Add `packMat4IntoF32WithOffset(dst, src, dstOffset,
-  foOffset)` next to `packMat4IntoF32`. When `foOffset` is `[0,0,0]` the
-  result is bit-identical to `packMat4IntoF32`; otherwise it subtracts
-  `foOffset` from the translation column `[12..14]` while downcasting F64
-  → F32. Used for mesh-WORLD matrices only.
-- **a1-world-matrix-upload**: Route every mesh-world-matrix UBO write through
-  `packMat4IntoF32WithOffset`:
-  - `material/standard/standard-renderable.ts` (build + per-frame update)
-  - `material/pbr/pbr-renderable.ts` (build + per-frame update)
-  - `material/node/node-renderable.ts` (build + per-packet update)
-  - Intentionally LEFT on plain `packMat4IntoF32` (precision-only):
-    `mesh/thin-instance-gpu.ts` (thin-instances are mesh-local, not world),
-    and `render-task.ts` view/viewProj uploads (see next bullet).
-- **a1-view-baked-offset**: Bake the floating-origin offset into the view
-  matrix at *construction* time, NOT at upload time. `getViewMatrix` reads
-  `camera._floatingOriginOffset` and subtracts it from the camera world
-  position BEFORE computing `R_inv * -cameraPos`. When `offset ==
-  cameraPos`, the resulting translation column is mathematically zero. The
-  view + viewProj uploads in `frame-graph/render-task.ts` therefore stay on
-  the precision-only `packMat4IntoF32` helper — a second subtraction at
-  upload would double-bias the translation.
-- **a1-eye-position-uniform**: `writePassSceneUBO` writes
-  `camera.worldMatrix[12..14] - scene._floatingOriginOffset[0..2]` for
-  `vEyePosition`. Shader expressions of the form
-  `scene.vEyePosition.xyz - input.worldPos` now produce the eye-relative
-  vector at full precision because both sides live in the small-magnitude
-  eye-relative frame.
-- **a1-camera-offset-wire**: `scene-core._update` does a single reference-
-  identity check + assignment: if `ctx.camera._floatingOriginOffset !== ctx._floatingOriginOffset`,
-  wire it. Idempotent for a stationary `scene.camera`; auto re-wires if
-  the camera is reassigned. Zero staleness possible.
+Called once per frame from scene `_update`, before any render task runs. Reads the active camera's world matrix, copies its translation column into `scene._eyePosition`, and if the offset changed since last frame, copies the same into `scene._floatingOriginOffset`, bumps `scene._floatingOriginVersion`, and invalidates the camera's view-matrix caches:
 
-_Validation (M1 acceptance gate)_:
+```typescript
+const wm = camera.worldMatrix;
+eye[0] = wm[12]; eye[1] = wm[13]; eye[2] = wm[14];
+if (offset[0] !== eye[0] || offset[1] !== eye[1] || offset[2] !== eye[2]) {
+    offset[0] = eye[0]; offset[1] = eye[1]; offset[2] = eye[2];
+    scene._floatingOriginVersion++;
+    camera._viewVer = -1;
+    camera._vpVer = -1;
+}
+```
 
-- Pure-math unit tests for `packMat4IntoF32WithOffset` (zero-offset
-  identity, non-zero translation subtraction, F64 source → F32 dst).
-- Integration test: `scene200` (HPM off, FO off baseline) vs `scene201`
-  (HPM on, FO on, camera + meshes at 1e6) MUST diverge with MAD ≥ 5.0,
-  proving the offset path is engaged and meaningfully shifts pixels.
-  Both Lite-only scenes (no BJS golden yet — the parity scene with
-  golden is M2 scope).
+The version bump is the signal renderable closures use to re-pack mesh UBOs with the new offset (see below). The view/vp cache invalidation forces `getViewMatrix` to recompute on the next access — required because the view matrix is keyed on `worldMatrixVersion` only, and the camera's `worldMatrix` does not bump when only the FO offset changes.
 
-## Milestone 2 — Thin-instances + LWR engine convenience flag + golden parity
+### Three places the offset is subtracted
 
-Builds on M1's per-mesh path. M1 already handles the 80% case for
-ordinary meshes; M2 finishes the rendering coverage and lands the first
-golden-validated parity scene.
+1. **`getViewMatrix(camera)`** (`camera/camera.ts`): when `camera._floatingOriginOffset` is set, the offset is subtracted from the camera world position *before* the `R_inv * -cameraPos` calculation produces the view translation. When `offset == cameraPos` (the steady-state case), the resulting view translation is mathematically zero. The view matrix uploads therefore use the precision-only `packMat4IntoF32` (no 5th argument) — a second subtraction at upload would double-bias the translation.
 
-- **a2-thin-instances**: In `setThinInstances` upload path, subtract offset
-  from translation columns (F64 source → F32 GPU). M1 deliberately left
-  thin-instance matrices on the precision-only packer because they are
-  *mesh-local*, not world-space — but a thin-instance hierarchy whose
-  PARENT mesh is at ECEF-scale still needs the offset applied to the
-  parent's world matrix (already covered in M1) plus the local instance
-  packed in mesh-local space. This item only adds work if Lite grows
-  scenes whose instance matrices themselves carry world translations.
-- **a2-double-offset-guard**: Audit the upload chain for any path that
-  could subtract the offset twice (e.g. a pre-composed `worldView` whose
-  `world` was already offset-packed AND whose `view` was already
-  offset-baked). Today there is no such path — every upload site either
-  packs `world` with offset, OR uploads `view` whose offset was baked in
-  at construction (per a1-view-baked-offset), never both. Add a sanity
-  assertion in dev builds if/when a new upload path is introduced that
-  composes the two.
-- **a2-engine-convenience**: Add `useLargeWorldRendering?: boolean` to
-  `EngineOptions`. When `true`:
-  - Force `useHighPrecisionMatrix: true` on the engine (throw if the user
-    explicitly passed `useHighPrecisionMatrix: false` alongside it — that's
-    a contradiction, not a silent override).
-  - Set an engine-internal `_floatingOriginDefault = true` so
-    `createSceneContext` without an explicit `useFloatingOrigin` opts in.
-  - Per-scene `useFloatingOrigin: false` still wins (UI/HUD overlay scenes
-    on an LWR engine opt out cleanly).
-  This is the form most BJS apps actually use; landing it alongside the
-  underlying flags keeps the migration story complete.
+2. **Mesh-world UBO uploads** (`material/{standard,pbr,node}-renderable.ts`): each renderable's per-frame update calls `packMat4IntoF32(meshUboData, mesh.worldMatrix, 0, 0, _foOffset)`. The packer subtracts `_foOffset` from the translation column `[12..14]` during pack. Subtraction happens in JS number precision (F64) before the implicit F32 store, recovering the small remainder at full precision.
 
-_Validation_:
+3. **`vEyePosition` uniform** (`frame-graph/render-task.ts`): `writePassSceneUBO` writes `camera.worldMatrix[12..14] - scene._floatingOriginOffset[0..2]` for the eye-position uniform. Shader expressions of the form `vEyePosition - input.worldPos` now produce the eye-relative vector at full precision because both sides live in the small-magnitude frame.
 
-- Author Lite scene `lab/sceneN.html` and BJS ref `lab/babylon-ref-sceneN.html`
-  at ECEF-scale coordinates (camera at ~1e6, mesh chain showing sub-unit
-  precision survival). Mirror PG `#5U0N0Q` or `#P3E9YP#256`.
-- Capture BJS golden to `reference/sceneN-large-world/babylon-ref-golden.png`
-  (with explicit user approval).
-- Add `tests/parity/scenes/sceneN-large-world.spec.ts` with `maxMad` ceiling.
-- Add bundle-size ceiling in `scene-config.json` /
-  `tests/parity/bundle-size.spec.ts`; verify scenes that don't import the
-  LWR module pay zero bytes.
-- `pnpm test` (build + parity) green. No `test:perf`.
+### Per-renderable version tracking
 
-## Milestone 3 — Lighting & shadows
+The mesh UBO encodes `worldMatrix - foOffset`. The UBO contents depend on **two independent inputs**: the mesh moves (bumps `mesh.worldMatrixVersion`) OR the FO offset changes (bumps `scene._floatingOriginVersion`). Each renderable closure tracks both:
 
-- **a3-light-positions**: Subtract offset from point/spot light positions in
-  the light UBO builder (`light/` modules).
-- **a3-shadow-eyeAtCamera**: Add the `eyeAtCamera` flag pattern — when
-  rendering the shadow camera's view, take the *full* offset path (don't
-  zero view translation, since the shadow "camera" is the light, not the
-  active camera).
-- **a3-shadow-light-matrix**: Offset `lightMatrix` and `lightDataSM`
-  uniforms in shadow uploads.
-- **a3-pcf-csm-parity**: Verify both `createShadowGenerator` and
-  `createPcfShadowGenerator` paths in Lite work correctly. CSM is not yet
-  in Lite per `docs/porting-guide.md`; flag as out-of-scope.
+```typescript
+let _lastWorldVersion = -1;
+let _lastFoVersion = -1;
+const _foOffset = scene._floatingOriginOffset;
 
-_Validation_: Add a shadowed parity scene at ECEF scale (point/spot light +
-PCF shadows on the mesh chain) with golden + parity spec, OR extend the
-Milestone 2 scene with shadows if cheaper.
+const update = (): void => {
+    const foVer = scene._floatingOriginVersion;
+    if (mesh.worldMatrixVersion !== _lastWorldVersion || foVer !== _lastFoVersion || s.lights.length !== _lastLightsCount) {
+        packMat4IntoF32(meshUboData, mesh.worldMatrix, 0, 0, _foOffset);
+        device.queue.writeBuffer(meshUBO, 0, meshUboData);
+        _lastWorldVersion = mesh.worldMatrixVersion;
+        _lastFoVersion = foVer;
+        // ...
+    }
+};
+```
 
-## Milestone 4 — Auxiliary rendering paths
+Without the version check, a camera move (which changes the FO offset but does NOT change `mesh.worldMatrixVersion`) would leave every mesh UBO holding stale `world - oldOffset` bytes — visible as a per-frame displacement of every mesh.
 
-Port only what Lite actually has — verify each before scoping. Each item that
-lands extends parity coverage as applicable.
+For non-LWR engines, `scene._floatingOriginVersion` stays at 0 forever and the `foVer !== _lastFoVersion` branch is always false after the first frame — dead at runtime but bundled regardless. The cost is the price of LWR support; eliminating the dead bytes from non-LWR bundles would require two closure variants (likely a bundle regression overall).
 
-- **a4-clip-planes**: `d' = d + dot(normal, offset)` in clip plane upload
-  (only if Lite has clip plane support — verify).
-- **a4-sprites**: If `sprite/` module is in scope, offset vertex positions
-  on emit.
-- **a4-particles**: Same for any CPU/GPU particle systems Lite ships.
-- **a4-skybox-environment**: Verify `loadEnvironment`'s skybox path is
-  unaffected (skybox uses view rotation only, no translation). Bug-fix if
-  needed.
-- **a4-background-material**: If Lite has a `BackgroundMaterial` analog,
-  offset `vBackgroundCenter`.
+### Scene state fields
 
-_Validation_: For each path that ships, extend an existing LWR parity scene
-(or add a small focused one) so the offset is exercised on the GPU.
+```typescript
+interface SceneContextInternal {
+    /** Mutable backing for `scene.floatingOriginOffset` (the read-only
+     *  public accessor goes via `getFloatingOriginOffset`). Always
+     *  `[0, 0, 0]` on non-LWR scenes (write-skipped by the per-frame
+     *  updater when the engine has no `_updateFOOffset`). */
+    _floatingOriginOffset: [number, number, number];
+    /** Monotonic version counter bumped by `updateFloatingOriginOffset`
+     *  whenever the offset numerically changes. Renderable closures
+     *  compare against this to invalidate per-mesh UBO uploads. */
+    _floatingOriginVersion: number;
+    /** Camera world position copied each frame by
+     *  `updateFloatingOriginOffset` so consumers can read eye position
+     *  without bouncing through the camera. */
+    _eyePosition: [number, number, number];
+}
+```
 
-## Milestone 5 — Optional / later
+The fields exist on every scene regardless of `useFloatingOrigin` to keep the renderable closure shape uniform. For non-LWR scenes the version stays 0 and the offset stays `[0, 0, 0]`, so all subtractions are no-ops and all version comparisons are dead.
 
-Defer until concrete demand. Each item, when picked up, lands with its own
-parity coverage.
+## Validation
 
-- Havok multi-region floating origin (`floatingOriginWorldRadius`,
-  `_checkAndMigrateBody`, per-region gravity). Substantial — defer until
-  a real demand from a Lite physics scene appears.
-- Atmosphere addon "world origin = planet center" special case.
-- NME / NodeMaterial parity.
+- Unit: `tests/unit/floating-origin.test.ts` covers the per-frame update — offset tracking, version bumping on change, no bump when steady, camera cache invalidation.
+- Unit: `tests/unit/floating-origin-upload.test.ts` covers the precision-recovery path — `packMat4IntoF32` with `offsetXYZ` on a mesh at world `1e6 + delta` lands `delta` in the F32 view; the no-offset control case loses `delta` to F32 quantization.
+- Parity: `tests/parity/scenes/scene200-fo-off.spec.ts` and `scene201-fo-on.spec.ts` render the same far-from-origin scene with FO off vs FO on. The two captures MUST diverge (cross-golden MAD ≥ 5.0), proving the offset path is engaged and meaningfully shifts pixels.
+- Bundle: HPM-off bundles do not contain the LWR module; LWR-on bundle adds ~1-2 KB per scene for the FO logic.
 
-## Out of scope (don't port)
+## Tree-shaking proof
 
-- BJS prototype monkey-patching. Lite's centralized upload path is cleaner.
+Non-LWR bundles do not statically reference `large-world/floating-origin.js`. The only mention is `eng._updateFOOffset?.(scene)` in `scene-core.ts` — a property access on an undefined field, no module import. `createEngine`'s `await import(...)` lives inside `if (useFO)`, which the bundler proves unreachable when `useFloatingOrigin` is never set true in any reachable scene. Verified by bundle-size ceilings.
 
-## Cross-cutting conventions
+## Files / size
 
-- **Tree-shaking**: Module must be importable a la carte. No module-level
-  `Map`/`Set`/`WeakMap` allocations. Lazy-init any caches.
-- **Pure-state handles + standalone functions**: No classes, no methods.
-  Every scene operation is a free function over plain data.
-- **No bundle-size ceiling raises** without explicit user approval.
-- **No golden-reference changes** without explicit user approval.
-- **Validate via `pnpm test`** (build:bundle-scenes + parity). **Never run
-  `pnpm test:perf`** — perf is user/CI only.
-- **Iteration tip**: during dev on a single new scene, run
-  `npx playwright test tests/parity/scenes/<scene>.spec.ts` for fast
-  feedback; full `pnpm test` before declaring success.
+| File | Purpose |
+|------|---------|
+| `large-world/floating-origin.ts` (~70 lines) | `updateFloatingOriginOffset` per-frame update + `getFloatingOriginOffset` public read |
+| `engine/engine.ts` (FO block in `createEngine`) | Dynamic-import gate, `useFO && !useHpm` validation |
+| `scene/scene-core.ts` (`_eyePosition`, `_floatingOriginOffset`, `_floatingOriginVersion`, `_update` wiring) | Per-scene state + per-frame trigger |
+| `camera/camera.ts` (`_floatingOriginOffset?` field, `getViewMatrix` subtract) | View-matrix offset bake |
+| `material/{standard,pbr,node}-renderable.ts` (FO version tracking) | Mesh UBO invalidation when offset changes |
+| `frame-graph/render-task.ts` (`vEyePosition` subtract) | Scene UBO eye-position offset |
+| `math/pack-mat4-into-f32.ts` (`offsetXYZ` 5th arg) | Subtraction at the GPU pack boundary |
+
+## Out of scope
+
+- Light position offsetting (point/spot lights): not yet wired. Lights at far-from-origin scale will exhibit F32 jitter on their UBO positions.
+- Shadow-camera offsetting (light-space view): not yet wired. Shadow maps at far-from-origin scale will misalign with the camera's eye-relative frame.
+- Thin-instance per-instance world offsetting: not wired. Thin instances are mesh-local; only the parent mesh's world matrix is offset.
+- Clip planes, sprites, particles, background material centre: not wired.
+- Havok multi-region floating origin: not in scope.
+
+These extensions can be added incrementally — the substrate (per-frame version tracking, packer offset path, scene state) already supports them.
