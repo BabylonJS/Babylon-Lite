@@ -155,13 +155,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             },
         ]);
 
-        let _lastWorldVersion = -1;
-        let _lastFoVersion = -1;
+        let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
         const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
-        const update = (): void => {
-            const foVer = (s as SceneContextInternal)._floatingOriginVersion;
-            if (mesh.worldMatrixVersion !== _lastWorldVersion || foVer !== _lastFoVersion || s.lights.length !== _lastLightsCount) {
+        const _baseUpdate = (): void => {
+            if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
                 sortCenter[0] = mesh.worldMatrix[12]!;
                 sortCenter[1] = mesh.worldMatrix[13]!;
                 sortCenter[2] = mesh.worldMatrix[14]!;
@@ -169,7 +167,6 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
                 _lastWorldVersion = mesh.worldMatrixVersion;
-                _lastFoVersion = foVer;
                 _lastLightsCount = s.lights.length;
             }
             const uboVersion = mat._uboVersion;
@@ -180,6 +177,15 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 device.queue.writeBuffer(materialUBO, 0, _stdMatScratch.buffer, 0, 96);
             }
         };
+        // FO-version wrapper applied only when the engine has floating-origin
+        // on. The wrapper lives in the dynamic-imported `floating-origin.ts`
+        // module and is the sole owner of `_lastFoVersion` tracking. For
+        // non-LWR engines `_wrapRenderableForFO` is undefined and `update`
+        // is the bare closure — no FO bytes in the closure body.
+        const _invalidate = (): void => {
+            _lastWorldVersion = -1;
+        };
+        const update = (engine as EngineContextInternal)._wrapRenderableForFO?.(_baseUpdate, s as SceneContextInternal, _invalidate) ?? _baseUpdate;
 
         const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
             // For per-pass material overrides, skip the mesh.material === mat guard

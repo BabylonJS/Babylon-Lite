@@ -75,11 +75,7 @@ export interface MeshInternal extends Mesh {
 }
 
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
- *  Used by all mesh creation paths (factories, loaders).
- *
- *  Matrix storage for the mesh's world-matrix cache comes from the
- *  process-global `allocateMat4()` singleton (F32 by default; F64 after an
- *  HPM engine is created — see GUIDANCE pillar 4b″). */
+ *  Used by all mesh creation paths (factories, loaders). */
 export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
     const wm = createWorldMatrixState(() => {
         const p = mesh.position,

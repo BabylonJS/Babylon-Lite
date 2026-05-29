@@ -55,7 +55,6 @@ interface NodePacket {
     readonly _meshBG: GPUBindGroup;
     readonly _meshScratch: Float32Array;
     _lastWorldVersion: number;
-    _lastFoVersion: number;
     _lastReceivesShadow: number;
     _lastLightsCount: number;
 }
@@ -175,8 +174,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 _meshUBO,
                 _meshBG,
                 _meshScratch,
-                _lastWorldVersion: -1,
-                _lastFoVersion: -1,
+                _lastWorldVersion: _mesh.worldMatrixVersion,
                 _lastReceivesShadow: recv,
                 _lastLightsCount: scene.lights.length,
             });
@@ -187,12 +185,10 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
 
         const updatePacketUBO = (pkt: NodePacket): void => {
             const recv = pkt._mesh.receiveShadows ? 1 : 0;
-            const foVer = (scene as SceneContextInternal)._floatingOriginVersion;
             const worldChanged = pkt._mesh.worldMatrixVersion !== pkt._lastWorldVersion;
-            const foChanged = foVer !== pkt._lastFoVersion;
             const recvChanged = recv !== pkt._lastReceivesShadow;
             const lightsChanged = scene.lights.length !== pkt._lastLightsCount;
-            if (worldChanged || foChanged || recvChanged || lightsChanged) {
+            if (worldChanged || recvChanged || lightsChanged) {
                 packMat4IntoF32(pkt._meshScratch, pkt._mesh.worldMatrix, 0, 0, _foOffset);
                 pkt._meshScratch[16] = recv;
                 if (compile._usesMeshAttributeFlags) {
@@ -201,7 +197,6 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 writeMeshLightSelection(pkt._mesh, scene.lights, pkt._meshScratch.subarray(4));
                 device.queue.writeBuffer(pkt._meshUBO, 0, pkt._meshScratch as Float32Array<ArrayBuffer>);
                 pkt._lastWorldVersion = pkt._mesh.worldMatrixVersion;
-                pkt._lastFoVersion = foVer;
                 pkt._lastReceivesShadow = recv;
                 pkt._lastLightsCount = scene.lights.length;
             }
@@ -236,7 +231,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 const cy = pkt._mesh.position?.y ?? wm[13]!;
                 const cz = pkt._mesh.position?.z ?? wm[14]!;
                 const sortCenter: [number, number, number] = [cx, cy, cz];
-                const update = (): void => {
+                const _baseUpdate = (): void => {
                     updatePacketUBO(pkt);
                     updateNodeUBO();
                     // Update world center for sorting.
@@ -245,6 +240,10 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                     sortCenter[1] = m[13]!;
                     sortCenter[2] = m[14]!;
                 };
+                const _invalidate = (): void => {
+                    pkt._lastWorldVersion = -1;
+                };
+                const update = engine._wrapRenderableForFO?.(_baseUpdate, scene as SceneContextInternal, _invalidate) ?? _baseUpdate;
                 const draw = (pass: NodeRenderPass): number => {
                     drawPacket(pass, pkt);
                     return 1;
@@ -262,12 +261,18 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
         } else {
             // Opaque: batch all meshes into one renderable for state efficiency.
-            const update = (): void => {
+            const _baseUpdate = (): void => {
                 for (const pkt of packets) {
                     updatePacketUBO(pkt);
                 }
                 updateNodeUBO();
             };
+            const _invalidate = (): void => {
+                for (const pkt of packets) {
+                    pkt._lastWorldVersion = -1;
+                }
+            };
+            const update = engine._wrapRenderableForFO?.(_baseUpdate, scene as SceneContextInternal, _invalidate) ?? _baseUpdate;
             const draw = (pass: NodeRenderPass): number => {
                 let draws = 0;
                 for (const pkt of packets) {

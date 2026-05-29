@@ -109,6 +109,17 @@ export interface EngineContextInternal extends EngineContext {
      *  resulting world position into `scene._floatingOriginOffset`, bumping
      *  `scene._floatingOriginVersion` whenever the value changes. */
     _updateFOOffset?: (scene: import("../scene/scene-core.js").SceneContextInternal) => void;
+
+    /** @internal Per-renderable update closure wrapper. Set when the engine
+     *  was created with `useFloatingOrigin: true`. Wraps a renderable's bare
+     *  `update` closure so that when `scene._floatingOriginVersion` changes,
+     *  the wrapper calls `invalidate()` (which resets the renderable's
+     *  `_lastWorldVersion` to -1) before invoking the inner update — forcing
+     *  the next mesh-UBO re-pack to pick up the new FO offset. Undefined when
+     *  FO is off, so non-LWR renderables skip FO version tracking entirely
+     *  and stay in the slim shared closure (~80-150 bytes lighter per bundle
+     *  for FO-off scenes). */
+    _wrapRenderableForFO?: (inner: () => void, scene: import("../scene/scene-core.js").SceneContextInternal, invalidate: () => void) => () => void;
 }
 
 /** @internal Return true if `context` is already registered with `engine`. */
@@ -219,7 +230,7 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     // and install the F64 allocator into the process-global lazy singleton
     // in `_matrix-allocator.ts`. **Constraint:** allocator is process-global —
     // mixing HPM and non-HPM engines on the same page is unsupported (see
-    // GUIDANCE pillar 4b″, "single precision per page").
+    // `docs/architecture/30-high-precision-matrix.md`).
     if (useHpm) {
         const [{ allocateF64Mat4 }, { _setHpmAllocator }] = await Promise.all([import("../math/_mat4-storage-f64.js"), import("../math/_matrix-allocator.js")]);
         _setHpmAllocator(allocateF64Mat4);
@@ -231,9 +242,11 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     // `eng._updateFOOffset?.(scene)` which is a no-op when the field is
     // undefined. Tree-shakers drop the module from non-LWR bundles.
     let _updateFOOffset: ((scene: import("../scene/scene-core.js").SceneContextInternal) => void) | undefined;
+    let _wrapRenderableForFO: EngineContextInternal["_wrapRenderableForFO"];
     if (useFO) {
-        const { updateFloatingOriginOffset } = await import("../large-world/floating-origin.js");
+        const { updateFloatingOriginOffset, wrapRenderableForFO } = await import("../large-world/floating-origin.js");
         _updateFOOffset = updateFloatingOriginOffset;
+        _wrapRenderableForFO = wrapRenderableForFO;
     }
 
     const engine: EngineContextInternal = {
@@ -254,6 +267,7 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         _currentDelta: 0,
         _cbs: [],
         _updateFOOffset,
+        _wrapRenderableForFO,
     };
 
     resizeEngine(engine);

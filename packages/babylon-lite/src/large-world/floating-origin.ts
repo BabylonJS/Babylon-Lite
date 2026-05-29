@@ -67,3 +67,35 @@ export function updateFloatingOriginOffset(scene: SceneContextInternal): void {
         camera._vpVer = -1;
     }
 }
+
+/** Wrap a renderable's bare update closure with FO-version awareness.
+ *
+ *  Each renderable's `update` re-uploads the mesh UBO when its tracked inputs
+ *  change (worldMatrix, lights count, etc.). The mesh UBO ALSO depends on the
+ *  scene's floating-origin offset (which is subtracted from the world
+ *  translation at pack time), but renderables in non-LWR scenes have no
+ *  reason to know about FO. Rather than inline a `foVer !== _lastFoVersion`
+ *  check into every renderable closure (~80 bytes per renderable type ×
+ *  three material kinds), the FO version check lives here and is wrapped
+ *  around the renderable's update only when the engine has FO on.
+ *
+ *  How it works: the wrapper tracks `_lastFoVersion` locally. Each frame, if
+ *  `scene._floatingOriginVersion` differs, it calls `invalidate()` — which
+ *  resets the renderable's `_lastWorldVersion` to -1, forcing the inner
+ *  update's "worldMatrix changed" branch to fire and re-pack with the new
+ *  offset. Then the inner update runs as normal.
+ *
+ *  This module is dynamic-imported only when `useFloatingOrigin: true`, so
+ *  non-LWR engines leave `engine._wrapRenderableForFO` undefined and
+ *  renderables fall through to their bare update with zero wrapper overhead. */
+export function wrapRenderableForFO(inner: () => void, scene: SceneContextInternal, invalidate: () => void): () => void {
+    let _lastFoVersion = -1;
+    return (): void => {
+        const foVer = scene._floatingOriginVersion;
+        if (foVer !== _lastFoVersion) {
+            invalidate();
+            _lastFoVersion = foVer;
+        }
+        inner();
+    };
+}
