@@ -1176,5 +1176,25 @@
         "tags": ["navigation", "recast", "wasm", "raycast"],
         "skipPerf": true,
         "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 200,
+        "slug": "scene200-high-precision-jitter-hpm-off",
+        "name": "Scene 200 - High-Precision Matrix Jitter (HPM off)",
+        "maxMad": 5.0,
+        "maxRawKB": 50,
+        "description": "Pillar + satellites at world (~1e6, *, ~1e6) with useHighPrecisionMatrix=false. CPU view-proj chain stored as Float32Array; locks in the F32-only baseline output for the F64 substrate (HPM Phase 4.3).",
+        "tags": ["hpm", "precision", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 201,
+        "slug": "scene201-high-precision-jitter-hpm-on",
+        "name": "Scene 201 - High-Precision Matrix Jitter (HPM on)",
+        "maxMad": 0.5,
+        "maxRawKB": 50,
+        "description": "Same geometry as scene 200 but useHighPrecisionMatrix=true. F64 storage of the view-proj chain; tightens parity tolerance to verify HPM-on render stays stable (HPM Phase 4.3).",
+        "tags": ["hpm", "precision", "procedural", "std"],
+        "skipPerf": true
     }
 ]
