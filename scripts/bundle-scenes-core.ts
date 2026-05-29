@@ -34,7 +34,7 @@ import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle
  * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
  * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
  */
-function wgslMinifyPlugin(): Plugin {
+export function wgslMinifyPlugin(): Plugin {
     return {
         name: "wgsl-minify",
         enforce: "pre",
@@ -446,7 +446,7 @@ function mangleWgslIdentifiers(code: string): string {
  * Runs in generateBundle (after esbuild minification) with a shared nameCache
  * so cross-chunk property names stay consistent.
  */
-function terserPropertyManglePlugin(): Plugin {
+export function terserPropertyManglePlugin(): Plugin {
     return {
         name: "terser-property-mangle",
         async generateBundle(_options, bundle) {
@@ -535,8 +535,8 @@ export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
-const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
-const LITE_BUNDLE_TARGET = "esnext";
+export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
+export const LITE_BUNDLE_TARGET = "esnext";
 
 interface SceneConfigEntry {
     id: number;
@@ -872,7 +872,7 @@ function writeBundleInfoToDir(scene: string, result: unknown, infoDir: string, s
     writeFileSync(resolve(infoDir, `${scene}.json`), JSON.stringify({ scene, chunks }, null, 2));
 }
 
-function writeBundleInfo(scene: string, result: unknown): void {
+export function writeBundleInfo(scene: string, result: unknown): void {
     writeBundleInfoToDir(scene, result, bundleInfoDir, ROOT);
 }
 
@@ -901,7 +901,7 @@ const MIME: Record<string, string> = {
     ".wasm": "application/wasm",
 };
 
-function startStaticServer(root: string): Promise<{ server: Server; port: number }> {
+export function startStaticServer(root: string): Promise<{ server: Server; port: number }> {
     const publicDir = join(root, "public");
     return new Promise((res) => {
         const server = createServer((req, resp) => {
@@ -1020,7 +1020,7 @@ const VENDOR_RUNTIMES: VendorRuntime[] = [
     },
 ];
 
-function isLiteBundleExternal(id: string): boolean {
+export function isLiteBundleExternal(id: string): boolean {
     return VENDOR_RUNTIMES.some((runtime) => runtime.external(id));
 }
 
@@ -1111,7 +1111,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
     rmSync(sceneOutDir, { recursive: true, force: true });
 }
 
-function measurementBrowserArgs(): string[] {
+export function measurementBrowserArgs(): string[] {
     const swiftShaderArgs = process.env.CI
         ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
         : [];
@@ -1408,7 +1408,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
     return manifest;
 }
 
-async function measurePage(
+export async function measurePage(
     browser: any,
     port: number,
     scene: string,
