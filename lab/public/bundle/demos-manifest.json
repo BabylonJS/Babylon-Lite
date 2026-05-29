@@ -2,5 +2,9 @@
   "torus-states": {
     "rawKB": 11.9,
     "gzipKB": 5
+  },
+  "doom": {
+    "rawKB": 46.2,
+    "gzipKB": 18.4
   }
 }
