@@ -1,5 +1,6 @@
 import type { MeshInternal } from "../mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
+import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -222,17 +223,20 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     if (useFO && !useHpm) {
         throw new Error("Babylon Lite: useFloatingOrigin requires useHighPrecisionMatrix on the engine.");
     }
-    // Dynamic `await import` keeps the F64 module out of HPM-off bundles entirely:
-    // bundlers cannot prove the truthy branch of a runtime ternary is dead, so a
-    // static import of `_mat4-storage-f64.js` was retained in every bundle even
-    // with `sideEffects: false`. Splitting it behind `if (useHpm)` lets HPM-off
-    // builds drop the module; HPM-on builds load it as a side chunk on demand
-    // and install the F64 allocator into the process-global lazy singleton
-    // in `_matrix-allocator.ts`. **Constraint:** allocator is process-global —
-    // mixing HPM and non-HPM engines on the same page is unsupported (see
+    // Dynamic `await import` keeps the F64 backing module out of HPM-off
+    // bundles entirely: bundlers cannot prove the truthy branch of a runtime
+    // ternary is dead, so a static import of `_mat4-storage-f64.js` was
+    // retained in every bundle even with `sideEffects: false`. Splitting it
+    // behind `if (useHpm)` lets HPM-off builds drop the module; HPM-on builds
+    // load it as a side chunk on demand and install the F64 allocator into
+    // the process-global lazy singleton in `_matrix-allocator.ts`. The
+    // allocator module itself is statically imported above — it's the
+    // F64-specific module that we gate dynamically.
+    // **Constraint:** allocator is process-global — mixing HPM and non-HPM
+    // engines on the same page is unsupported (see
     // `docs/architecture/33-high-precision-matrix.md`).
     if (useHpm) {
-        const [{ allocateF64Mat4 }, { _setHpmAllocator }] = await Promise.all([import("../math/_mat4-storage-f64.js"), import("../math/_matrix-allocator.js")]);
+        const { allocateF64Mat4 } = await import("../math/_mat4-storage-f64.js");
         _setHpmAllocator(allocateF64Mat4);
     }
 
