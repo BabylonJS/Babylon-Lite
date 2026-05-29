@@ -21,13 +21,13 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
     attachControl(scene.camera, canvas, scene);
 
     // Single directional light shining down-and-to-the-right, matching the BJS scene.
-    const light = createDirectionalLight([-1, -2, -1], 1);
+    const light = createDirectionalLight(engine, [-1, -2, -1], 1);
     scene.lights.push(light);
 
     const material = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE63_NME_JSON });

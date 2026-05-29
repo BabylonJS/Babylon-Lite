@@ -38,11 +38,11 @@ async function main(): Promise<void> {
     });
     addDdsEnvironmentBackground(scene, { groundTextureUrl, skyboxUrl, skyboxSize: 1000, enableNoise: false });
 
-    const cam = createDefaultCamera(scene);
+    const cam = createDefaultCamera(engine, scene);
     cam.alpha = Math.PI / 2;
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
 
     await registerScene(engine, scene);
     await startEngine(engine);

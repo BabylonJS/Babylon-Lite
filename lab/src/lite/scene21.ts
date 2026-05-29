@@ -12,7 +12,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera matching BJS: alpha=-PI/2, beta=PI/2.7, radius=0.14
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.7, 0.14, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2.7, 0.14, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.01;
     attachControl(scene.camera, canvas, scene);
 

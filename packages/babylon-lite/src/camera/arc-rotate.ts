@@ -1,3 +1,4 @@
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { Camera, NormalizedViewport } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
 import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
@@ -46,8 +47,12 @@ export interface ArcRotateCamera extends Camera, IWorldMatrixProvider, IParentab
     readonly worldMatrixVersion: number;
 }
 
-/** Create a bare ArcRotateCamera with given params. Pure data, no scene knowledge. */
-export function createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera {
+/** Create a bare ArcRotateCamera with given params. Pure data, no scene knowledge.
+ *  `engine` is required so the camera's matrix caches are allocated from the
+ *  engine's precision policy at construction (F32 by default, F64 with HPM on). */
+export function createArcRotateCamera(engine: EngineContext, alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera {
+    const allocator = (engine as EngineContextInternal)._matrixPolicy;
+
     function localEyePosition(): Vec3 {
         const cosA = Math.cos(cam.alpha),
             sinA = Math.sin(cam.alpha);
@@ -63,14 +68,10 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         };
     }
 
-    // Lazy reusable local-world matrix; allocated via the bound policy on first read.
-    let _localMat: Mat4 | null = null;
+    // Reusable local-world matrix, allocated once from the engine policy.
+    const _localMat: Mat4 = allocator.allocate();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        if (!_localMat) {
-            const a = cam._boundPolicy?.allocator;
-            _localMat = (a ? a.allocate() : new Float32Array(16)) as unknown as Mat4;
-        }
         const eye = localEyePosition();
         const v = mat4LookAtLH(eye, cam.target, Vec3Up);
         const m = _localMat as unknown as Mat4Storage;
@@ -94,7 +95,7 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         return _localMat;
     }
 
-    const wm = createWorldMatrixState(cameraLocalWorldMatrix);
+    const wm = createWorldMatrixState(allocator, cameraLocalWorldMatrix);
     const onDirty = (): void => wm.markLocalDirty();
 
     const scalars = { alpha, beta, radius };
@@ -116,6 +117,13 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         inertialRadiusOffset: 0,
         inertialPanningX: 0,
         inertialPanningY: 0,
+
+        // Matrix caches pre-allocated from the engine's precision policy — F32
+        // by default, F64 with HPM on. Same allocator backs the camera world
+        // matrix above, so the camera's storage precision is uniform.
+        _viewCache: allocator.allocate() as unknown as Mat4Storage,
+        _projCache: allocator.allocate() as unknown as Mat4Storage,
+        _vpCache: allocator.allocate() as unknown as Mat4Storage,
 
         get parent() {
             return wm.parent;
@@ -145,12 +153,6 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
             enumerable: true,
         });
     }
-
-    cam._rebindAllocator = (alloc) => {
-        wm._rebindAllocator(alloc);
-        cam._viewCache = cam._projCache = cam._vpCache = undefined;
-        onDirty();
-    };
 
     return cam;
 }

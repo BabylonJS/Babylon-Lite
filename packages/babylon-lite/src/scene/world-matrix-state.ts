@@ -5,7 +5,11 @@
  *  - parent chain validation (recursive parent.worldMatrix call)
  *  - caching and staleness detection
  *
- *  Zero entity imports — depends only on Mat4 and mat4Multiply. */
+ *  The allocator is taken at construction time — entities pass through the
+ *  one from their owning engine (`engine._matrixPolicy.allocator`). With HPM
+ *  off this is the default F32 allocator; with HPM on it's the F64 allocator.
+ *  No rebind step exists or is needed; the engine's precision is fixed at
+ *  `createEngine` time and entities created against that engine inherit it. */
 
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
@@ -22,27 +26,24 @@ export interface WorldMatrixAccessors {
     markLocalDirty(): void;
     /** Reference to parent — set directly. */
     parent: IWorldMatrixProvider | null;
-    /** @internal Reallocate `_ownedWorld` from the given allocator and invalidate caches.
-     *  Called by `bindEntityMatrixPolicy` when the owning entity attaches to a scene. */
-    _rebindAllocator(allocator: MatrixAllocator): void;
 }
 
 /**
  * Create world matrix state for any entity type.
  *
+ * @param allocator - Per-engine matrix allocator (F32 or F64 depending on
+ *   `useHighPrecisionMatrix`). Entities obtain this from
+ *   `engine._matrixPolicy.allocator` at construction.
  * @param getLocalMatrix - Entity-specific function that returns the local (pre-parent)
  *   transform matrix. Called only when the cache is stale.
  */
-export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixAccessors {
+export function createWorldMatrixState(allocator: MatrixAllocator, getLocalMatrix: () => Mat4): WorldMatrixAccessors {
     let _localVersion = 0;
     let _worldVersion = 0;
     let _lastLocalVersion = -1;
     let _lastParentVersion = -1;
     let _cachedWorld: Mat4 | null = null;
-    // Default storage is F32 — re-allocated through _rebindAllocator at scene-attach
-    // time if the scene's policy is F64. Production code always rebinds before the
-    // first read; the F32 default keeps standalone entity construction working.
-    let _ownedWorld: Mat4 = new Float32Array(16) as unknown as Mat4;
+    const _ownedWorld: Mat4 = allocator.allocate();
     let _parent: IWorldMatrixProvider | null = null;
 
     return {
@@ -60,13 +61,6 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             _localVersion++;
             _worldVersion++;
             _cachedWorld = null;
-        },
-
-        _rebindAllocator(allocator: MatrixAllocator): void {
-            _ownedWorld = allocator.allocate();
-            _cachedWorld = null;
-            _lastLocalVersion = -1;
-            _lastParentVersion = -1;
         },
 
         getWorldMatrix(): Mat4 {

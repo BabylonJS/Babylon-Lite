@@ -10,10 +10,10 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera — FreeCamera at (0, 5, -10) targeting origin
-    scene.camera = createFreeCamera({ x: 0, y: 5, z: -10 }, { x: 0, y: 0, z: 0 });
+    scene.camera = createFreeCamera(engine, { x: 0, y: 5, z: -10 }, { x: 0, y: 0, z: 0 });
 
     // Hemispheric light — intensity 0.7
-    const light = createHemisphericLight([0, 1, 0]);
+    const light = createHemisphericLight(engine, [0, 1, 0]);
     light.intensity = 0.7;
     addToScene(scene, light);
 

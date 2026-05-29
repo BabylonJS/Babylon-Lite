@@ -67,21 +67,21 @@ const feature: GltfFeature = {
 
             if (def.type === "point") {
                 const { createPointLight } = await import("../light/point-light.js");
-                const pl = createPointLight([px, py, pz], intensity);
+                const pl = createPointLight(ctx._engine, [px, py, pz], intensity);
                 pl.diffuse = color;
                 pl.specular = color;
                 pl.range = range;
                 lights.push(pl);
             } else if (def.type === "directional") {
                 const { createDirectionalLight } = await import("../light/directional-light.js");
-                const dl = createDirectionalLight(dir, intensity);
+                const dl = createDirectionalLight(ctx._engine, dir, intensity);
                 dl.diffuse = color;
                 dl.specular = color;
                 lights.push(dl);
             } else if (def.type === "spot") {
                 const { createSpotLight } = await import("../light/spot-light.js");
                 const outer = def.spot?.outerConeAngle ?? Math.PI / 4;
-                const sl = createSpotLight([px, py, pz], dir, outer * 2, 1, intensity);
+                const sl = createSpotLight(ctx._engine, [px, py, pz], dir, outer * 2, 1, intensity);
                 sl.diffuse = color;
                 sl.specular = color;
                 sl.range = range;

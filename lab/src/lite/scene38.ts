@@ -27,13 +27,13 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 14, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 3, 14, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.5;
     camera.farPlane = 1000;
     scene.camera = camera;
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
-    const dir = createDirectionalLight([-0.5, -1, 0.3]);
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
+    const dir = createDirectionalLight(engine, [-0.5, -1, 0.3]);
     dir.diffuse = [0.9, 0.9, 0.9];
     addToScene(scene, dir);
 

@@ -6,7 +6,12 @@ import type { Mat4Storage } from "../math/_mat4-storage.js";
 
 /** Minimal camera contract — any camera that can provide view/projection matrices.
  *  Both ArcRotateCamera and FreeCamera implement this interface.
- *  Pure state, no scene knowledge (pillar 4b). */
+ *  Pure state, no scene knowledge (pillar 4b).
+ *
+ *  Note: camera factories (`createArcRotateCamera`, `createFreeCamera`) take
+ *  the engine at construction so the matrix caches below are allocated from
+ *  the engine's precision policy (F32 by default, F64 with HPM on). The
+ *  storage type is fixed at construction and never changes. */
 export interface Camera {
     fov: number;
     nearPlane: number;
@@ -15,22 +20,23 @@ export interface Camera {
     children: SceneNode[];
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-    /** @internal Cached view matrix + version. Allocated through the bound
-     *  precision policy on first read (F32 fallback for unbound cameras). */
-    _viewCache?: Mat4Storage;
+    /** @internal View matrix cache. Pre-allocated by the camera factory from the
+     *  engine's `_matrixPolicy` allocator. F32 by default, F64 with HPM on. */
+    _viewCache: Mat4Storage;
     _viewVer?: number;
-    /** @internal Cached projection matrix + version + aspect. */
-    _projCache?: Mat4Storage;
+    /** @internal Projection matrix cache. Same allocator as `_viewCache`. */
+    _projCache: Mat4Storage;
     _projVer?: number;
     _projAspect?: number;
-    /** @internal Cached view-projection matrix + version + aspect. */
-    _vpCache?: Mat4Storage;
+    /** @internal View-projection matrix cache. Same allocator. */
+    _vpCache: Mat4Storage;
     _vpVer?: number;
     _vpAspect?: number;
-    /** @internal Bound scene precision policy (set by addToScene on first attach). */
-    _boundPolicy?: import("../scene/_scene-precision.js").ScenePrecisionPolicy | null;
-    /** @internal Reallocate matrix-owning caches via the bound allocator. Invoked on first bind. */
-    _rebindAllocator?: (allocator: import("../math/_matrix-allocator.js").MatrixAllocator) => void;
+    /** @internal Floating-origin offset reference, wired by the scene's `_update`
+     *  when the camera is the active `scene.camera`. When non-null, `getViewMatrix`
+     *  bakes the offset into the view matrix translation so the GPU sees
+     *  eye-relative coordinates. Null = no LWR / standard view matrix. */
+    _floatingOriginOffset?: readonly [number, number, number] | null;
 }
 
 /** Babylon-compatible normalized camera viewport. x/y/width/height are fractions of the render target. */
@@ -41,36 +47,29 @@ export interface NormalizedViewport {
     height: number;
 }
 
-/** Allocate a Mat4 cache via the camera's bound precision policy.
- *  Falls back to Float32Array if the camera has not been attached to a scene yet. */
-function allocateCameraCache(camera: Camera): Mat4Storage {
-    const alloc = camera._boundPolicy?.allocator;
-    return alloc ? (alloc.allocate() as unknown as Mat4Storage) : new Float32Array(16);
-}
-
 /** Compute the view matrix for a camera. Cached per worldMatrixVersion.
  *
- *  Floating-origin awareness: when the camera is bound to a scene whose
- *  policy carries a non-zero `floatingOriginOffset` (LWR M1), that offset
- *  is subtracted from the camera world position BEFORE the translation
- *  column is computed via the (R_inv * -cameraPos) form. The effect is
- *  that the view matrix translation becomes `-R_inv * (cameraPos - offset)`,
- *  which is small when offset == cameraPos (the standard floating-origin
- *  bookkeeping). Mesh world matrices are also offset-subtracted at upload
- *  via packMat4IntoF32WithOffset, so vertex-shader `view * world` math is
+ *  Floating-origin awareness: when `camera._floatingOriginOffset` is set
+ *  (LWR M1 — wired by the scene's `_update` when the camera is the active
+ *  scene camera and the scene is FO-enabled), the offset is subtracted from
+ *  the camera world position BEFORE the translation column is computed via
+ *  the (R_inv * -cameraPos) form. The effect is that the view matrix
+ *  translation becomes `-R_inv * (cameraPos - offset)`, which is small when
+ *  offset == cameraPos (the standard floating-origin bookkeeping). Mesh
+ *  world matrices are also offset-subtracted at upload via
+ *  packMat4IntoF32WithOffset, so vertex-shader `view * world` math is
  *  preserved end-to-end.
  *
- *  When the offset is `[0,0,0]` (HPM-off scenes, or HPM-on scenes that did
- *  not opt into floating origin), the subtraction is a no-op and this path
- *  is bit-identical to the M0 view matrix. */
+ *  When the offset is null (FO disabled, or camera not currently scene.camera),
+ *  this path is bit-identical to a standard view matrix construction. */
 export function getViewMatrix(camera: Camera): Mat4 {
     const ver = camera.worldMatrixVersion;
-    if (camera._viewVer === ver && camera._viewCache) {
+    if (camera._viewVer === ver) {
         return camera._viewCache as unknown as Mat4;
     }
-    const v = camera._viewCache ?? (camera._viewCache = allocateCameraCache(camera));
+    const v = camera._viewCache;
     const w = camera.worldMatrix;
-    const off = camera._boundPolicy?.floatingOriginOffset;
+    const off = camera._floatingOriginOffset;
     const cx = off ? w[12]! - off[0]! : w[12]!;
     const cy = off ? w[13]! - off[1]! : w[13]!;
     const cz = off ? w[14]! - off[2]! : w[14]!;
@@ -97,10 +96,10 @@ export function getViewMatrix(camera: Camera): Mat4 {
 /** Compute the projection matrix for a camera. Cached per worldMatrixVersion + aspect. */
 export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
     const ver = camera.worldMatrixVersion;
-    if (camera._projVer === ver && camera._projAspect === aspectRatio && camera._projCache) {
+    if (camera._projVer === ver && camera._projAspect === aspectRatio) {
         return camera._projCache as unknown as Mat4;
     }
-    const p = camera._projCache ?? (camera._projCache = allocateCameraCache(camera));
+    const p = camera._projCache;
     mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
     camera._projVer = ver;
     camera._projAspect = aspectRatio;
@@ -110,10 +109,10 @@ export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
 /** Compute the view-projection matrix for a camera. Cached per worldMatrixVersion + aspect. */
 export function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
     const ver = camera.worldMatrixVersion;
-    if (camera._vpVer === ver && camera._vpAspect === aspectRatio && camera._vpCache) {
+    if (camera._vpVer === ver && camera._vpAspect === aspectRatio) {
         return camera._vpCache as unknown as Mat4;
     }
-    const vp = camera._vpCache ?? (camera._vpCache = allocateCameraCache(camera));
+    const vp = camera._vpCache;
     mat4MultiplyInto(vp, 0, getProjectionMatrix(camera, aspectRatio) as unknown as Mat4Storage, 0, getViewMatrix(camera) as unknown as Mat4Storage, 0);
     camera._vpVer = ver;
     camera._vpAspect = aspectRatio;

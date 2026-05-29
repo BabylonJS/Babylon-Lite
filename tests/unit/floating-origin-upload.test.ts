@@ -6,10 +6,10 @@
  * device:
  *
  *   1. View-matrix construction: a camera at world (1e6, 0, 0) whose
- *      bound precision policy carries a matching floating-origin offset
- *      must produce a view matrix whose translation column is exactly
- *      zero (mathematically: -R_inv * (cameraPos - offset) = 0). This
- *      proves getViewMatrix consumes _boundPolicy.floatingOriginOffset.
+ *      `_floatingOriginOffset` is wired to a matching offset array must
+ *      produce a view matrix whose translation column is exactly zero
+ *      (mathematically: -R_inv * (cameraPos - offset) = 0). This
+ *      proves getViewMatrix consumes camera._floatingOriginOffset.
  *
  *   2. Mesh-world UBO upload: a mesh whose worldMatrix translation is
  *      (1e6 + delta, 0, 0) packed via packMat4IntoF32WithOffset with the
@@ -26,8 +26,6 @@ import { describe, expect, it } from "vitest";
 import type { EngineContextInternal } from "../../packages/babylon-lite/src/engine/engine";
 import type { MatrixAllocator } from "../../packages/babylon-lite/src/math/_matrix-allocator";
 import { createF64MatrixAllocator } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
-import { resolveScenePrecisionPolicy } from "../../packages/babylon-lite/src/scene/_scene-precision";
-import { bindEntityMatrixPolicy } from "../../packages/babylon-lite/src/scene/_entity-precision-bind";
 import { createArcRotateCamera } from "../../packages/babylon-lite/src/camera/arc-rotate";
 import { getViewMatrix } from "../../packages/babylon-lite/src/camera/camera";
 import { packMat4IntoF32 } from "../../packages/babylon-lite/src/math/pack-mat4-into-f32";
@@ -40,19 +38,14 @@ function fakeEngine(allocator: MatrixAllocator): EngineContextInternal {
 describe("LWR M1 floating-origin upload integration", () => {
     const FAR = 1_000_000;
     const allocator = createF64MatrixAllocator();
+    const engine = fakeEngine(allocator);
     const offset: [number, number, number] = [FAR, 0, FAR];
-
-    // Simulate the scene policy with a pre-populated floating-origin offset
-    // reference (in production scene-core mutates this array in
-    // updateFloatingOriginOffset). The policy is what bindEntityMatrixPolicy
-    // attaches to entities; getViewMatrix reads the offset from there.
-    const policy = resolveScenePrecisionPolicy(fakeEngine(allocator), { useFloatingOrigin: true }, offset);
 
     it("getViewMatrix subtracts the offset from cameraPos — translation column lands at zero", () => {
         // Arc-rotate camera looking at the far point with the camera positioned
         // exactly at the floating-origin offset (cameraPos == offset).
-        const cam = createArcRotateCamera(0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
-        bindEntityMatrixPolicy(cam, policy);
+        const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
+        cam._floatingOriginOffset = offset;
         // Camera world position equals offset (within float precision).
         const w = cam.worldMatrix;
         expect(w[12]).toBeCloseTo(FAR, 0);
@@ -66,10 +59,9 @@ describe("LWR M1 floating-origin upload integration", () => {
         expect(Math.abs(v[14]!)).toBeLessThan(1e-3);
     });
 
-    it("getViewMatrix without offset (zero-offset policy) produces large-magnitude translation — control case", () => {
-        const noOffsetPolicy = resolveScenePrecisionPolicy(fakeEngine(allocator), {}, [0, 0, 0]);
-        const cam = createArcRotateCamera(0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
-        bindEntityMatrixPolicy(cam, noOffsetPolicy);
+    it("getViewMatrix without offset (null _floatingOriginOffset) produces large-magnitude translation — control case", () => {
+        const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
+        // No offset wired (cam._floatingOriginOffset stays undefined).
         const v = getViewMatrix(cam);
         // Without the offset the view translation is -R_inv * cameraPos, whose
         // magnitude is order 1e6. Confirms the offset path is what makes it small.
@@ -110,8 +102,8 @@ describe("LWR M1 floating-origin upload integration", () => {
     });
 
     it("vEyePosition-style write subtracts the offset, yielding eye-relative zero", () => {
-        const cam = createArcRotateCamera(0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
-        bindEntityMatrixPolicy(cam, policy);
+        const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
+        cam._floatingOriginOffset = offset;
         const w = cam.worldMatrix;
         const eyeX = w[12]! - offset[0];
         const eyeY = w[13]! - offset[1];

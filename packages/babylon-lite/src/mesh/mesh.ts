@@ -11,6 +11,7 @@ import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import type { MatrixAllocator } from "../math/_matrix-allocator.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
 
@@ -63,10 +64,6 @@ export interface Mesh extends SceneNode {
 export interface MeshInternal extends Mesh {
     _materialDirty: boolean;
     _gpu: MeshGPU;
-    /** @internal Bound scene precision policy (set by addToScene on first attach). */
-    _boundPolicy?: import("../scene/_scene-precision.js").ScenePrecisionPolicy | null;
-    /** @internal Reallocate matrix-owning caches via the bound allocator. Invoked on first bind. */
-    _rebindAllocator?: (allocator: import("../math/_matrix-allocator.js").MatrixAllocator) => void;
     _cpuPositions?: Float32Array;
     _cpuNormals?: Float32Array;
     _cpuUvs?: Float32Array;
@@ -79,9 +76,12 @@ export interface MeshInternal extends Mesh {
 }
 
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
- *  Used by all mesh creation paths (factories, loaders). */
-export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
-    const wm = createWorldMatrixState(() => {
+ *  Used by all mesh creation paths (factories, loaders).
+ *
+ *  `allocator` is the engine's matrix policy (F32 by default, F64 with HPM on);
+ *  the mesh's world-matrix cache is allocated from it at construction. */
+export function initMeshTransform(allocator: MatrixAllocator, mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
+    const wm = createWorldMatrixState(allocator, () => {
         const p = mesh.position,
             rq = mesh.rotationQuaternion,
             s = mesh.scaling;
@@ -125,7 +125,6 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         configurable: true,
         enumerable: false,
     });
-    (mesh as MeshInternal)._rebindAllocator = wm._rebindAllocator;
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────

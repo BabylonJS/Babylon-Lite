@@ -87,7 +87,7 @@ export function ensurePcfShadowTaskState(
     }
 
     const materialViews = new Map<Material, MaterialView>();
-    const camera = createShadowCamera(sg);
+    const camera = createShadowCamera(engine, sg);
     const rt = createShadowRenderTarget(sg);
     const state: PcfTaskState = {
         _task: createRenderTask(

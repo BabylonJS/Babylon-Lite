@@ -19,12 +19,12 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera: matching playground exactly
-    const cam = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 80, { x: 0, y: 0, z: 0 });
+    const cam = createArcRotateCamera(engine, Math.PI / 2, Math.PI / 2, 80, { x: 0, y: 0, z: 0 });
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
     // Light
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
 
     const random = seededRandom(42);
 

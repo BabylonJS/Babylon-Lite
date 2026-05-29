@@ -30,10 +30,6 @@ export interface LightBaseInternal extends LightBase {
     readonly _writeLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
     /** Monotonically increasing version — bumped when any UBO-relevant property changes. */
     readonly _lightVersion: number;
-    /** @internal Bound scene precision policy (set by addToScene on first attach). */
-    _boundPolicy?: import("../scene/_scene-precision.js").ScenePrecisionPolicy | null;
-    /** @internal Reallocate matrix-owning caches via the bound allocator. Invoked on first bind. */
-    _rebindAllocator?: (allocator: import("../math/_matrix-allocator.js").MatrixAllocator) => void;
 }
 
 /** Maximum number of scene lights packed into the shared lights UBO.

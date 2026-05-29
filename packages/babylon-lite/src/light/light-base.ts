@@ -1,6 +1,7 @@
 /** Shared light base — world matrix state + dirty callback used by all light factories.
  *  Eliminates boilerplate repeated across hemispheric, directional, point, and spot lights. */
 
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "../scene/parentable.js";
 import { createWorldMatrixState, type WorldMatrixAccessors } from "../scene/world-matrix-state.js";
@@ -16,9 +17,11 @@ export interface LightVersionState {
 }
 
 /** Create the world-matrix state + dirty callback shared by all light types.
- *  Returns `lvs` — a version state that callers bump when non-position properties change. */
-export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAccessors; onDirty: () => void; lvs: LightVersionState } {
-    const wm = createWorldMatrixState(getLocalMatrix);
+ *  `engine` provides the matrix allocator captured at engine creation — F32
+ *  by default, F64 when HPM is enabled. Returns `lvs` — a version state that
+ *  callers bump when non-position properties change. */
+export function createLightBase(engine: EngineContext, getLocalMatrix: () => Mat4): { wm: WorldMatrixAccessors; onDirty: () => void; lvs: LightVersionState } {
+    const wm = createWorldMatrixState((engine as EngineContextInternal)._matrixPolicy, getLocalMatrix);
     const lvs: LightVersionState = {
         _lightVersion: 0,
         bump() {
@@ -33,8 +36,8 @@ export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAc
 }
 
 /** Mixin world-matrix accessors (parent, worldMatrix, worldMatrixVersion) onto a light object.
- *  Also adds _lightVersion from the LightVersionState and forwards _rebindAllocator to wm.
- *  Returns the same object reference typed as R (defineProperties adds the accessors at runtime). */
+ *  Also adds _lightVersion from the LightVersionState. Returns the same object reference
+ *  typed as R (defineProperties adds the accessors at runtime). */
 export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAccessors, lvs?: LightVersionState): R {
     Object.defineProperties(target, {
         parent: {
@@ -62,7 +65,6 @@ export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAcce
             configurable: true,
         },
     });
-    (target as { _rebindAllocator?: WorldMatrixAccessors["_rebindAllocator"] })._rebindAllocator = wm._rebindAllocator;
     if (lvs) {
         Object.defineProperty(target, "_lightVersion", {
             get() {

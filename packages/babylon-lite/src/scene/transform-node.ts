@@ -3,6 +3,7 @@
  *  TransformNode is now a pure type alias for SceneNode, giving all scene entities
  *  a common base. createTransformNode delegates to createSceneNode. */
 
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
@@ -15,15 +16,17 @@ export type { SceneNode } from "./scene-node.js";
 export type TransformNode = SceneNode;
 
 /** Create a TransformNode (SceneNode) with TRS values and lazy world matrix.
- *  Parameters: name, position (px,py,pz), rotation quaternion (qx,qy,qz,qw), scaling (sx,sy,sz). */
-export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): TransformNode {
-    return createSceneNode(name, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+ *  Parameters: engine, name, position (px,py,pz), rotation quaternion (qx,qy,qz,qw), scaling (sx,sy,sz). */
+export function createTransformNode(engine: EngineContext, name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): TransformNode {
+    return createSceneNode(engine, name, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
 /** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers).
  *  Lights, cameras, and other non-mesh/non-TN children are shallow-cloned. */
-export function cloneTransformNode(src: SceneNode): SceneNode {
+export function cloneTransformNode(engine: EngineContext, src: SceneNode): SceneNode {
+    const eng = engine as EngineContextInternal;
     const clone = createTransformNode(
+        engine,
         src.name + "_clone",
         src.position.x,
         src.position.y,
@@ -38,7 +41,7 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
     );
     for (const child of src.children) {
         if (!("_gpu" in child) && !("lightType" in child)) {
-            const childClone = cloneTransformNode(child);
+            const childClone = cloneTransformNode(engine, child);
             childClone.parent = clone;
             clone.children.push(childClone);
         } else if ("_gpu" in child) {
@@ -51,6 +54,7 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
                 _gpu: { ...mi._gpu },
             } as unknown as MeshInternal;
             initMeshTransform(
+                eng._matrixPolicy,
                 meshClone,
                 mesh.position.x,
                 mesh.position.y,

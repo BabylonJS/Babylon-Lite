@@ -34,13 +34,13 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Main camera: orbit around the two meshes.
-    const mainCam = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.5, 8, { x: 1.5, y: 0, z: 0 });
+    const mainCam = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2.5, 8, { x: 1.5, y: 0, z: 0 });
     mainCam.nearPlane = 0.1;
     mainCam.farPlane = 100;
     scene.camera = mainCam;
     attachControl(mainCam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight([0, 1, 0]));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0]));
 
     // R1 render target is eagerly allocated so its color view can be wired as
     // B's diffuseTexture before the frame graph is built.
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     addToScene(scene, meshB);
 
     // R1 task: its own camera, only mesh A, runs before main so its texture is ready.
-    const r1Cam = createFreeCamera({ x: 0, y: 0, z: -3 }, { x: 0, y: 0, z: 0 });
+    const r1Cam = createFreeCamera(engine, { x: 0, y: 0, z: -3 }, { x: 0, y: 0, z: 0 });
     r1Cam.nearPlane = 0.1;
     r1Cam.farPlane = 100;
     const r1Task = createRenderTask({ name: "r1", rt: r1RT, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cam: r1Cam, cs: true }, engine, scene);

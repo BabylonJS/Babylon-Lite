@@ -56,11 +56,11 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const cam = createArcRotateCamera(1.8, 1.0, 14, { x: 0, y: 0, z: 0 });
+    const cam = createArcRotateCamera(engine, 1.8, 1.0, 14, { x: 0, y: 0, z: 0 });
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
-    const light = createHemisphericLight([0, 1, 0]);
+    const light = createHemisphericLight(engine, [0, 1, 0]);
     light.intensity = 0.7;
     addToScene(scene, light);
 

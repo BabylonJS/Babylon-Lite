@@ -29,13 +29,13 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const cam = createArcRotateCamera(0, 0.8, 90, { x: 0, y: 0, z: 0 });
+    const cam = createArcRotateCamera(engine, 0, 0.8, 90, { x: 0, y: 0, z: 0 });
     cam.nearPlane = 0.1;
     cam.farPlane = 1000;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
-    const light = createDirectionalLight([-1, -2, -1]);
+    const light = createDirectionalLight(engine, [-1, -2, -1]);
     light.position.set(20, 40, 20);
     addToScene(scene, light);
 
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     setShadowTaskCasterMeshes(light.shadowGenerator, [torus]);
 
     // Second light: SpotLight with PCF shadows (tests multi-light shadow support)
-    const spot = createSpotLight([48.8, 50, 6.8], [-18.8, -20, -6.8], 1.5, 12);
+    const spot = createSpotLight(engine, [48.8, 50, 6.8], [-18.8, -20, -6.8], 1.5, 12);
     spot.intensity = 3.0;
     addToScene(scene, spot);
 

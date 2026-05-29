@@ -1,3 +1,4 @@
+import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "./scene-core.js";
 import type { ArcRotateCamera } from "../camera/arc-rotate.js";
 import { createArcRotateCamera } from "../camera/arc-rotate.js";
@@ -5,8 +6,9 @@ import { vec3 } from "../math/vec3-ctor.js";
 
 /** Create an ArcRotateCamera framed to fit all loaded meshes, assign it to scene.
  *  Only the scene knows its contents — auto-framing logic lives here.
- *  Matches Babylon.js createDefaultCameraOrLight(true, true, true). */
-export function createDefaultCamera(scene: SceneContext): ArcRotateCamera {
+ *  Matches Babylon.js createDefaultCameraOrLight(true, true, true).
+ *  `engine` is required so the camera's matrix caches come from the engine's precision policy. */
+export function createDefaultCamera(engine: EngineContext, scene: SceneContext): ArcRotateCamera {
     // Compute world AABB across all meshes with bounds
     let minX = Infinity,
         minY = Infinity,
@@ -56,7 +58,7 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera {
     }
 
     // Babylon defaults: alpha = -π/2, beta = π/2
-    const cam = createArcRotateCamera(-(Math.PI / 2), Math.PI / 2, radius, center);
+    const cam = createArcRotateCamera(engine, -(Math.PI / 2), Math.PI / 2, radius, center);
     cam.nearPlane = radius * 0.01;
     cam.farPlane = radius * 1000;
 

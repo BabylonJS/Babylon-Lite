@@ -40,12 +40,12 @@ async function main(): Promise<void> {
         }
     }
 
-    const cam = createDefaultCamera(scene);
+    const cam = createDefaultCamera(engine, scene);
     cam.alpha = -0.7;
     cam.beta = Math.PI / 2.2;
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
 
     const manager = createAnimationManager({ engine });
     addAnimationGroups(manager, shark.animationGroups ?? []);

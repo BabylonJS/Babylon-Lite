@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.1, g: 0.12, b: 0.16, a: 1 };
 
-    scene.camera = createFreeCamera({ x: 0, y: 0, z: -6 }, { x: 0, y: 0, z: 1.2 });
+    scene.camera = createFreeCamera(engine, { x: 0, y: 0, z: -6 }, { x: 0, y: 0, z: 1.2 });
     scene.camera.fov = 0.8;
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 100;

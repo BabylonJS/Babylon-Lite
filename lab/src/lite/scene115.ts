@@ -210,7 +210,7 @@ async function main(): Promise<void> {
 
     addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/Alien/Alien.gltf"));
 
-    const cam = createDefaultCamera(scene);
+    const cam = createDefaultCamera(engine, scene);
     cam.alpha = Math.PI / 2;
     cam.beta = Math.PI / 2;
     cam.radius = 2;
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
     cam.nearPlane = 1;
     cam.farPlane = 10000;
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
     scene.fixedDeltaMs = 16.0;
 
     const seekFrame = getSeekFrame();

@@ -251,7 +251,7 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
         retainedSplatsData = newBuffer;
     };
 
-    initSplatTransform(mesh);
+    initSplatTransform(engine, mesh);
 
     // Ship the positions buffer to the worker once. After this `geom.positions`
     // is detached on this side — that's fine, we never need it again.
@@ -296,8 +296,8 @@ export function disposeGaussianSplattingMesh(mesh: GaussianSplattingMesh): void 
 
 // Same TRS + worldMatrix wiring as `initMeshTransform` in mesh/mesh.ts but
 // duplicated here to avoid pulling the Mesh module into the GS code path.
-function initSplatTransform(node: GaussianSplattingMesh): void {
-    const wm = createWorldMatrixState(() => {
+function initSplatTransform(engine: EngineContextInternal, node: GaussianSplattingMesh): void {
+    const wm = createWorldMatrixState(engine._matrixPolicy, () => {
         const p = node.position,
             rq = node.rotationQuaternion,
             s = node.scaling;

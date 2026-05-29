@@ -2184,8 +2184,8 @@
     "bjsGzipKB": 785.3
   },
   "scene200": {
-    "rawKB": 46.7,
-    "gzipKB": 18.4,
+    "rawKB": 45.3,
+    "gzipKB": 17.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene200-standard-renderable-8xxLxSVN.js",
@@ -2194,8 +2194,8 @@
     ]
   },
   "scene201": {
-    "rawKB": 47,
-    "gzipKB": 18.6,
+    "rawKB": 45.6,
+    "gzipKB": 18.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene201-_mat4-storage-f64-B2drjt-G.js",

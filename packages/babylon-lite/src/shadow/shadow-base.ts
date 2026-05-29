@@ -4,6 +4,7 @@
 
 import type { Camera } from "../camera/camera.js";
 import type { EngineContextInternal } from "../engine/engine.js";
+import type { Mat4Storage } from "../math/_mat4-storage.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
@@ -128,13 +129,18 @@ export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
     return sum;
 }
 
-/** Create the light-owned camera facade used by shadow render tasks. */
-export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera {
+/** Create the light-owned camera facade used by shadow render tasks.
+ *  Caches are pre-allocated from the engine's matrix policy. */
+export function createShadowCamera(engine: EngineContextInternal, sg: Pick<ShadowGenerator, "_light">): Camera {
+    const allocator = engine._matrixPolicy;
     return {
         fov: 1,
         nearPlane: 1,
         farPlane: 1,
         children: [],
+        _viewCache: allocator.allocate() as unknown as Mat4Storage,
+        _projCache: allocator.allocate() as unknown as Mat4Storage,
+        _vpCache: allocator.allocate() as unknown as Mat4Storage,
         get worldMatrix() {
             return sg._light.worldMatrix;
         },

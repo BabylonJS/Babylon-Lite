@@ -3,6 +3,7 @@
  *  Provides position, rotationQuaternion (source of truth), rotation (Euler XYZ proxy),
  *  scaling, parent, worldMatrix, worldMatrixVersion, and children. */
 
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { mat4Compose } from "../math/mat4-compose.js";
@@ -39,10 +40,6 @@ export interface SceneNode {
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
      *  Cascade is materialized at write-time by `setSubtreeVisible`. */
     visible?: boolean;
-    /** @internal Bound scene precision policy (set by addToScene on first attach). */
-    _boundPolicy?: import("./_scene-precision.js").ScenePrecisionPolicy | null;
-    /** @internal Reallocate matrix-owning caches via the bound allocator. Invoked on first bind. */
-    _rebindAllocator?: (allocator: import("../math/_matrix-allocator.js").MatrixAllocator) => void;
 }
 
 // ─── Math helpers ─────────────────────────────────────────────────────
@@ -102,9 +99,10 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
 
 // ─── Factory ──────────────────────────────────────────────────────────
 
-/** Create a SceneNode with given TRS (position and scaling in cartesian, rotation as quaternion). */
-export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
-    const wm = createWorldMatrixState(() => {
+/** Create a SceneNode with given TRS (position and scaling in cartesian, rotation as quaternion).
+ *  `engine` is required so the node's world-matrix cache is allocated from the engine's precision policy. */
+export function createSceneNode(engine: EngineContext, name: string, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+    const wm = createWorldMatrixState((engine as EngineContextInternal)._matrixPolicy, () => {
         const p = node.position,
             rq = node.rotationQuaternion,
             s = node.scaling;
@@ -134,7 +132,6 @@ export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy
         get worldMatrixVersion() {
             return wm.getWorldMatrixVersion();
         },
-        _rebindAllocator: wm._rebindAllocator,
     };
     return node;
 }

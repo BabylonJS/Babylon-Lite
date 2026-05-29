@@ -2,10 +2,12 @@
  *  Plain data, no scene knowledge (pillar 4b).
  *  Push-based dirty tracking via ObservableVec3. */
 
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { mat4Translation } from "../math/mat4-translation.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
+import type { Mat4 } from "../math/types.js";
+import type { Mat4Storage } from "../math/_mat4-storage.js";
 
 export interface PointLight extends LightBase {
     readonly lightType: "point";
@@ -16,8 +18,28 @@ export interface PointLight extends LightBase {
     range: number;
 }
 
-export function createPointLight(position: [number, number, number], intensity = 1.0): PointLight {
-    const { wm, onDirty, lvs } = createLightBase(() => mat4Translation(light.position.x, light.position.y, light.position.z));
+export function createPointLight(engine: EngineContext, position: [number, number, number], intensity = 1.0): PointLight {
+    const _localMatrix: Mat4 = (engine as EngineContextInternal)._matrixPolicy.allocate();
+    const { wm, onDirty, lvs } = createLightBase(engine, () => {
+        const m = _localMatrix as unknown as Mat4Storage;
+        m[0] = 1;
+        m[1] = 0;
+        m[2] = 0;
+        m[3] = 0;
+        m[4] = 0;
+        m[5] = 1;
+        m[6] = 0;
+        m[7] = 0;
+        m[8] = 0;
+        m[9] = 0;
+        m[10] = 1;
+        m[11] = 0;
+        m[12] = light.position.x;
+        m[13] = light.position.y;
+        m[14] = light.position.z;
+        m[15] = 1;
+        return _localMatrix;
+    });
 
     const light = applyWorldMatrixAccessors<PointLight>(
         {

@@ -27,12 +27,12 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    scene.camera = createArcRotateCamera(-Math.PI / 2.3, Math.PI / 2.5, 8, { x: 0, y: 1, z: 0 });
+    scene.camera = createArcRotateCamera(engine, -Math.PI / 2.3, Math.PI / 2.5, 8, { x: 0, y: 1, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 1000;
     attachControl(scene.camera, canvas, scene);
 
-    const light = createDirectionalLight([-1, -2, -1], 1);
+    const light = createDirectionalLight(engine, [-1, -2, -1], 1);
     light.position.set(5, 10, 5);
     addToScene(scene, light);
 

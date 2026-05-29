@@ -2,7 +2,8 @@
  *  Plain data, no scene knowledge (pillar 4b).
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { LightBase, LightBaseInternal } from "./types.js";
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
@@ -22,13 +23,16 @@ export interface SpotLight extends LightBase {
     range: number;
 }
 
-export function createSpotLight(position: [number, number, number], direction: [number, number, number], angle: number, exponent: number, intensity = 1.0): SpotLight {
-    let _localMatrix: Mat4 | null = null;
-    const { wm, onDirty, lvs } = createLightBase(() => {
-        if (!_localMatrix) {
-            const a = (light as unknown as LightBaseInternal)._boundPolicy?.allocator;
-            _localMatrix = (a ? a.allocate() : new Float32Array(16)) as unknown as Mat4;
-        }
+export function createSpotLight(
+    engine: EngineContext,
+    position: [number, number, number],
+    direction: [number, number, number],
+    angle: number,
+    exponent: number,
+    intensity = 1.0
+): SpotLight {
+    const _localMatrix: Mat4 = (engine as EngineContextInternal)._matrixPolicy.allocate();
+    const { wm, onDirty, lvs } = createLightBase(engine, () => {
         return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix);
     });
 

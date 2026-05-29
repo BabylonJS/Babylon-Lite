@@ -18,7 +18,7 @@ async function createAndRender() {
     const sphere = createSphere(engine);
     sphere.material = createStandardMaterial();
     addToScene(scene, sphere);
-    createDefaultCamera(scene);
+    createDefaultCamera(engine, scene);
 
     // Render one frame
     await registerScene(engine, scene);
@@ -57,7 +57,7 @@ async function run() {
         const sphere2 = createSphere(engine2);
         sphere2.material = createStandardMaterial();
         addToScene(scene2, sphere2);
-        createDefaultCamera(scene2);
+        createDefaultCamera(engine, scene2);
         await registerScene(engine2, scene2);
     await startEngine(engine2);
         stopEngine(engine2);

@@ -1,7 +1,8 @@
 /** Hemispheric light data.
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { LightBase, LightBaseInternal } from "./types.js";
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
@@ -18,13 +19,9 @@ export interface HemisphericLight extends LightBase {
 
 /** Create a hemispheric light. Returns plain data — caller adds to scene.
  *  Matches Babylon.js HemisphericLight behavior. */
-export function createHemisphericLight(direction: [number, number, number] = [0, 1, 0], intensity: number = 1.0): HemisphericLight {
-    let _localMatrix: Mat4 | null = null;
-    const { wm, onDirty, lvs } = createLightBase(() => {
-        if (!_localMatrix) {
-            const a = (light as unknown as LightBaseInternal)._boundPolicy?.allocator;
-            _localMatrix = (a ? a.allocate() : new Float32Array(16)) as unknown as Mat4;
-        }
+export function createHemisphericLight(engine: EngineContext, direction: [number, number, number] = [0, 1, 0], intensity: number = 1.0): HemisphericLight {
+    const _localMatrix: Mat4 = (engine as EngineContextInternal)._matrixPolicy.allocate();
+    const { wm, onDirty, lvs } = createLightBase(engine, () => {
         return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, 0, 0, 0, _localMatrix);
     });
 

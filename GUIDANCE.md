@@ -39,8 +39,15 @@
 - **Only the scene knows its contents.** Components never reference the scene.
 - A light is plain data. A camera is plain data. A mesh is plain data. None of them hold a reference to the scene.
 - The scene holds arrays of lights, cameras, meshes. The scene is the owner.
-- Factory functions like `createHemisphericLight()` return plain data — they do NOT take a scene parameter. The caller adds the result to the scene via `addToScene()`.
+- Factory functions like `createHemisphericLight()` return plain data — they do NOT take a **scene** parameter. The caller adds the result to the scene via `addToScene()`.
 - This ensures zero circular dependencies, trivial serialization, and maximum tree-shakability.
+
+### 4b″. Engine at Construction (Critical)
+
+- **Entities that own typed-array storage take the engine at construction time.**
+- The engine fixes its matrix-precision policy at `createEngine` time (`useHighPrecisionMatrix` → `Float32Array` vs `Float64Array` cache storage). Cameras, lights, meshes, transform nodes, shadow generators, and any other entity that owns matrix caches MUST receive `engine` as their first factory parameter so they allocate from `engine._matrixPolicy` immediately. The precision is fixed for the entity's lifetime; entities cannot move between engines with different policies.
+- This is distinct from pillar 4b (no scene reference). Engine ≠ scene. Holding an engine reference is fine; holding a scene reference is not.
+- Why: the alternative (default-F32-then-rebind-at-attach) requires per-entity `_boundPolicy` + `_rebindAllocator` machinery and adds a lazy-bind step in every render loop. Construction-time binding deletes all of it.
 
 ### 4b′. Pure State Interfaces (Critical)
 

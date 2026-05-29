@@ -56,7 +56,7 @@ export function createMeshFromData(
         _materialDirty: false,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
     } as unknown as MeshInternal;
-    initMeshTransform(mesh);
+    initMeshTransform(engine._matrixPolicy, mesh);
 
     // Retain CPU geometry for detailed picking (ray-triangle intersection)
     mesh._cpuPositions = positions;

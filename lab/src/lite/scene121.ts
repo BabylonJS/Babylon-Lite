@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    const camera = createArcRotateCamera(-1, 1, 10, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(engine, -1, 1, 10, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;

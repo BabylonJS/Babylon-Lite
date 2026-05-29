@@ -8,12 +8,12 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     scene.clearColor = { r: 20 / 255, g: 20 / 255, b: 25 / 255, a: 1.0 };
 
     // Camera — BJS ArcRotateCamera(PI/2, PI/2, 15, (0,0,0))
-    scene.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 15, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, Math.PI / 2, Math.PI / 2, 15, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     attachControl(scene.camera, canvas, scene);
 
     // Directional light — direction points FROM light (BJS convention)
-    const light = createDirectionalLight([0.45, -0.34, -0.83]);
+    const light = createDirectionalLight(engine, [0.45, -0.34, -0.83]);
     addToScene(scene, light);
 
     // Environment — Studio Softbox with rotationY=1.9

@@ -21,9 +21,6 @@ import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { updateFloatingOriginOffset, type FloatingOriginMode } from "../large-world/floating-origin.js";
-import { resolveScenePrecisionPolicy, type ScenePrecisionPolicy } from "./_scene-precision.js";
-import { bindEntityMatrixPolicy } from "./_entity-precision-bind.js";
-import type { MatrixBindable } from "./_entity-precision-bind.js";
 
 /** Options accepted by `createSceneContext`. */
 export interface SceneContextOptions {
@@ -135,9 +132,6 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
      *  [0,0,0]. */
     _floatingOriginVersion: number;
 
-    /** @internal Captured matrix-precision policy for this scene. */
-    _matrixPolicy: ScenePrecisionPolicy;
-
     /** Frame graph driving this scene's rendering. Created eagerly by
      *  `createSceneContext` with a default `RenderTask` that mirrors
      *  `_renderables` into the swapchain. User code may add additional tasks
@@ -178,7 +172,6 @@ export function createSceneContext(engine: EngineContext, options: SceneContextO
     const eng = engine as EngineContextInternal;
     const eyePosition: [number, number, number] = [0, 0, 0];
     const floatingOriginOffset: [number, number, number] = [0, 0, 0];
-    const matrixPolicy = resolveScenePrecisionPolicy(eng, options, floatingOriginOffset);
 
     // Closures below capture `ctx` by-reference via this object.
     const ctxLocal: Omit<SceneContextInternal, "_frameGraph"> = {
@@ -210,17 +203,21 @@ export function createSceneContext(engine: EngineContext, options: SceneContextO
         _eyePosition: eyePosition,
         _floatingOriginOffset: floatingOriginOffset,
         _floatingOriginVersion: 0,
-        _matrixPolicy: matrixPolicy,
 
         _update(): void {
-            // Lazily bind the active camera to the scene's matrix-precision policy
-            // so its view/proj caches use the correct allocator (F64 in HPM-on)
-            // and getViewMatrix can read floatingOriginOffset via _boundPolicy.
-            // `scene.camera = cam` is a bare property set (pillar 4b: cameras
-            // never reference the scene), so binding happens here on first use.
-            // `bindEntityMatrixPolicy` is idempotent for same-engine reattach.
-            if (ctx.camera) {
-                bindEntityMatrixPolicy(ctx.camera as unknown as MatrixBindable, ctx._matrixPolicy);
+            // Wire the active camera's floating-origin offset to this scene's
+            // offset array on every frame. The wire is a single reference
+            // assignment, idempotent for stationary `scene.camera` (the JS
+            // reference identity check skips the assignment). If the camera
+            // is reassigned to a different scene later, this re-wires it
+            // automatically — no staleness risk.
+            //
+            // When floating-origin is disabled (`_floatingOriginMode = false`),
+            // `_floatingOriginOffset` stays `[0, 0, 0]`, so `getViewMatrix`
+            // sees the offset and the subtraction is a no-op — view matrix is
+            // bit-identical to a standard non-FO matrix.
+            if (ctx.camera && ctx.camera._floatingOriginOffset !== ctx._floatingOriginOffset) {
+                ctx.camera._floatingOriginOffset = ctx._floatingOriginOffset;
             }
             updateFloatingOriginOffset(ctx);
             const d = ctx.fixedDeltaMs > 0 ? ctx.fixedDeltaMs : eng._currentDelta;
@@ -323,11 +320,6 @@ export function addDeferredSceneRenderables(
  */
 export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer): void {
     const ctx = scene as SceneContextInternal;
-    // AssetContainer entries are bound individually when their children recurse
-    // through addToScene below; everything else needs precision binding here.
-    if (!("entities" in entity)) {
-        bindEntityMatrixPolicy(entity as unknown as MatrixBindable, ctx._matrixPolicy);
-    }
     // AssetContainer from loadGltf / loadBabylon — process each field present
     if ("entities" in entity) {
         const result = entity as AssetContainer;

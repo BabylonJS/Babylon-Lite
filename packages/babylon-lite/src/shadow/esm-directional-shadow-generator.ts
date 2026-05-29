@@ -274,7 +274,7 @@ function ensureEsmShadowTaskState(
         throw new Error("ShadowTask: missing ESM metadata.");
     }
     const materialViews = new Map<Material, MaterialView>();
-    const camera = createShadowCamera(sg);
+    const camera = createShadowCamera(engine, sg);
     const taskState: EsmTaskState = {
         _task: createRenderTask(
             {

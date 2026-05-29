@@ -9,9 +9,9 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, 0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
 
     // PBR: baseColor=gold, metallic=0, roughness=1.0 (fully rough, non-metallic)
     const baseColorTex = createSolidTexture2D(engine, 1.0, 0.766, 0.336);

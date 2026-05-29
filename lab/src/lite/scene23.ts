@@ -11,7 +11,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera: alpha=0, beta=π/2, radius=5, target=origin
-    const cam = createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 

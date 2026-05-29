@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.025, g: 0.03, b: 0.045, a: 1 };
 
-    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 12, { x: 0, y: 1.1, z: 0 });
+    const camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 3, 12, { x: 0, y: 1.1, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 80;
     scene.camera = camera;
@@ -108,56 +108,56 @@ async function main(): Promise<void> {
     nmePlaneMat.specularColor = [0.04, 0.04, 0.04];
     nmePlane.material = nmePlaneMat;
 
-    const light0 = createHemisphericLight([0, 1, 0], 0.18);
+    const light0 = createHemisphericLight(engine, [0, 1, 0], 0.18);
     light0.diffuseColor = [0.5, 0.7, 1.0];
     light0.groundColor = [0.08, 0.06, 0.05];
-    const light1 = createPointLight([-4.5, 3.5, -3.4], 0.55);
+    const light1 = createPointLight(engine, [-4.5, 3.5, -3.4], 0.55);
     light1.diffuse = [1.0, 0.35, 0.25];
     light1.range = 12;
-    const light2 = createSpotLight([0, 4.5, -4.5], [0, -1, 1], Math.PI / 3, 2, 0.45);
+    const light2 = createSpotLight(engine, [0, 4.5, -4.5], [0, -1, 1], Math.PI / 3, 2, 0.45);
     light2.diffuse = [0.45, 0.75, 1.0];
     light2.range = 14;
 
-    const light3 = createDirectionalLight([-0.6, -1, -0.25], 0.65);
+    const light3 = createDirectionalLight(engine, [-0.6, -1, -0.25], 0.65);
     light3.position.set(3.5, 8, 5);
     light3.diffuse = [1.0, 0.85, 0.65];
 
-    const light4 = createSpotLight([-5, 5, 2.5], [1, -1, -0.35], Math.PI / 3.2, 3, 0.45);
+    const light4 = createSpotLight(engine, [-5, 5, 2.5], [1, -1, -0.35], Math.PI / 3.2, 3, 0.45);
     light4.diffuse = [0.6, 1.0, 0.7];
     light4.range = 13;
-    const light5 = createHemisphericLight([0.35, 1, 0.2], 0.16);
+    const light5 = createHemisphericLight(engine, [0.35, 1, 0.2], 0.16);
     light5.diffuseColor = [1.0, 0.75, 0.5];
     light5.groundColor = [0.04, 0.06, 0.09];
-    const light6 = createDirectionalLight([0.7, -1, 0.2], 0.22);
+    const light6 = createDirectionalLight(engine, [0.7, -1, 0.2], 0.22);
     light6.diffuse = [0.8, 0.85, 1.0];
-    const light7 = createPointLight([3.5, 3, 4.8], 0.42);
+    const light7 = createPointLight(engine, [3.5, 3, 4.8], 0.42);
     light7.diffuse = [1.0, 0.4, 0.85];
     light7.range = 10;
 
-    const light8 = createSpotLight([4.8, 6.0, -4.8], [-3.2, -4.95, 4.8], 1.25, 2, 0.75);
+    const light8 = createSpotLight(engine, [4.8, 6.0, -4.8], [-3.2, -4.95, 4.8], 1.25, 2, 0.75);
     light8.diffuse = [0.65, 0.9, 1.0];
     light8.range = 16;
 
-    const light9 = createPointLight([-2, 3.8, 4.2], 0.45);
+    const light9 = createPointLight(engine, [-2, 3.8, 4.2], 0.45);
     light9.diffuse = [1.0, 0.9, 0.45];
     light9.range = 10;
-    const light10 = createDirectionalLight([-0.25, -1, 0.8], 0.25);
+    const light10 = createDirectionalLight(engine, [-0.25, -1, 0.8], 0.25);
     light10.diffuse = [0.55, 1.0, 0.85];
-    const light11 = createSpotLight([5.3, 5, -2], [-1, -1, 0.15], Math.PI / 3.4, 2, 0.42);
+    const light11 = createSpotLight(engine, [5.3, 5, -2], [-1, -1, 0.15], Math.PI / 3.4, 2, 0.42);
     light11.diffuse = [0.9, 0.55, 1.0];
     light11.range = 12;
-    const light12 = createPointLight([0, 3.1, 0.3], 0.38);
+    const light12 = createPointLight(engine, [0, 3.1, 0.3], 0.38);
     light12.diffuse = [0.75, 1.0, 0.65];
     light12.range = 8;
 
-    const light13 = createDirectionalLight([0.85, -1, -0.55], 0.58);
+    const light13 = createDirectionalLight(engine, [0.85, -1, -0.55], 0.58);
     light13.position.set(6, 8, 5);
     light13.diffuse = [0.9, 0.8, 1.0];
 
-    const light14 = createSpotLight([-4.2, 3.6, 4.4], [1, -0.45, -1], Math.PI / 3, 2, 0.35);
+    const light14 = createSpotLight(engine, [-4.2, 3.6, 4.4], [1, -0.45, -1], Math.PI / 3, 2, 0.35);
     light14.diffuse = [0.4, 0.85, 1.0];
     light14.range = 12;
-    const light15 = createDirectionalLight([0, -1, -0.7], 0.2);
+    const light15 = createDirectionalLight(engine, [0, -1, -0.7], 0.2);
     light15.diffuse = [1.0, 0.65, 0.45];
 
     const lights = [light0, light1, light2, light3, light4, light5, light6, light7, light8, light9, light10, light11, light12, light13, light14, light15] as const;

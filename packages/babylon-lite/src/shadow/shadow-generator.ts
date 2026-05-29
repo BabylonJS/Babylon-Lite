@@ -43,8 +43,4 @@ export interface ShadowGenerator {
         casterMeshes: readonly import("../mesh/mesh.js").Mesh[]
     ): ShadowTaskInternalState;
     _renderShadowMap?(engine: import("../engine/engine.js").EngineContextInternal, state: ShadowTaskInternalState): number;
-    /** @internal Bound scene precision policy (set by addToScene on first attach). */
-    _boundPolicy?: import("../scene/_scene-precision.js").ScenePrecisionPolicy | null;
-    /** @internal Reallocate matrix-owning caches via the bound allocator. Invoked on first bind. */
-    _rebindAllocator?: (allocator: import("../math/_matrix-allocator.js").MatrixAllocator) => void;
 }

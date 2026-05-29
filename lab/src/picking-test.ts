@@ -38,8 +38,8 @@ async function run(): Promise<void> {
         const engine = await createEngine(canvas);
         const scene = createSceneContext(engine);
 
-        scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
-        addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+        scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+        addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
 
         const sphere = createSphere(engine, { segments: 16 });
         sphere.name = "test-sphere";

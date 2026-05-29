@@ -9,7 +9,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createArcRotateCamera(-Math.PI / 5, Math.PI / 3, 200, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, -Math.PI / 5, Math.PI / 3, 200, { x: 0, y: 0, z: 0 });
     attachControl(scene.camera, canvas, scene);
 
     const box = createBox(engine);

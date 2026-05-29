@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 7, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 7, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
     attachControl(scene.camera, canvas, scene);
@@ -44,16 +44,16 @@ async function main(): Promise<void> {
     scene.imageProcessing.exposure = 1.0;
     scene.imageProcessing.contrast = 1.0;
 
-    const hemi = createHemisphericLight([0, 1, 0], 1);
+    const hemi = createHemisphericLight(engine, [0, 1, 0], 1);
     addToScene(scene, hemi);
 
-    const point = createPointLight([0, 5, -2], 1);
+    const point = createPointLight(engine, [0, 5, -2], 1);
     addToScene(scene, point);
 
-    const spot = createSpotLight([-0.5, 0, -2], [0, 0, 1], Math.PI / 2, 1, 1);
+    const spot = createSpotLight(engine, [-0.5, 0, -2], [0, 0, 1], Math.PI / 2, 1, 1);
     addToScene(scene, spot);
 
-    const dir = createDirectionalLight([1, -1, 1], 10);
+    const dir = createDirectionalLight(engine, [1, -1, 1], 10);
     addToScene(scene, dir);
 
     const sphere = createSphere(engine, { segments: 32, diameter: 2 });

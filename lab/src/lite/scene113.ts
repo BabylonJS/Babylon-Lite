@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.28, 4.2, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2.28, 4.2, { x: 0, y: 0, z: 0 });
     camera.fov = 0.74;
     camera.nearPlane = 1;
     camera.farPlane = 10000;

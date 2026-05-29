@@ -20,12 +20,12 @@ async function main(): Promise<void> {
         }
     }
 
-    const cam = createDefaultCamera(scene);
+    const cam = createDefaultCamera(engine, scene);
     cam.alpha = 0; // 90° from default: side view
     cam.beta = Math.PI / 2.2; // slight elevation
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
 
     // Fixed timestep for deterministic animation (matches BJS useConstantAnimationDeltaTime)
     scene.fixedDeltaMs = 16.0;

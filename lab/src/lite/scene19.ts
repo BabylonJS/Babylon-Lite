@@ -15,13 +15,13 @@ async function main(): Promise<void> {
 
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    // Arc-rotate camera matching BJS createDefaultCamera(true,true,true)
+    // Arc-rotate camera matching BJS createDefaultCamera(engine, true,true,true)
     // BJS: alpha=-PI/2, beta=PI/2, radius=worldSize.length()=sqrt(12) for unit sphere
-    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, Math.sqrt(12), { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, Math.sqrt(12), { x: 0, y: 0, z: 0 });
     attachControl(scene.camera, canvas, scene);
 
     // Hemispheric light (BJS createDefaultCamera creates a hemi light with intensity 0.7)
-    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
 
     // DDS environment for IBL
     await loadDdsEnvironment(scene, "https://playground.babylonjs.com/textures/environment.dds", {
