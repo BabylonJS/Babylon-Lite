@@ -1196,5 +1196,15 @@
         "description": "Same geometry as scene 200 but useHighPrecisionMatrix=true. F64 storage of the view-proj chain; tightens parity tolerance to verify HPM-on render stays stable (HPM Phase 4.3).",
         "tags": ["hpm", "precision", "procedural", "std"],
         "skipPerf": true
+    },
+    {
+        "id": 202,
+        "slug": "scene202-lwr-side-by-side",
+        "name": "Scene 202 - LWR Side-by-Side (HPM on, FO off vs on)",
+        "maxMad": 5.0,
+        "maxRawKB": 60,
+        "description": "Single canvas, single engine (useHighPrecisionMatrix=true). Two scenes split into left/right viewports: left uses useFloatingOrigin=false, right uses true. Identical 5×5 grid + pillar at world OFFSET=5e6 in both. Demonstrates the LWR substrate's eye-relative upload path producing stable rasterization where the F32 path jitters.",
+        "tags": ["hpm", "lwr", "floating-origin", "precision", "procedural", "std"],
+        "skipPerf": true
     }
 ]
