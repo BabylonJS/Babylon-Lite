@@ -1,5 +1,18 @@
 # Task 2.3: World, camera, light, and shadow caches allocate via policy
 
+> **⚠ SUPERSEDED by commit `07be57e` (engine-at-construction simplification).**
+> This task originally migrated caches to a default-F32-at-construction +
+> rebind-on-attach pattern via `_rebindAllocator`. After the simplification,
+> camera factories (`createArcRotateCamera`, `createFreeCamera`), light
+> factories (`createDirectionalLight`, `createHemisphericLight`,
+> `createSpotLight`, `createPointLight`), `createSceneNode`,
+> `createTransformNode`, mesh `initMeshTransform`, and `createShadowCamera`
+> all take `engine` at construction and allocate matrix caches from
+> `engine._matrixPolicy.allocator` directly. The `_rebindAllocator` hook
+> has been deleted from every interface.
+>
+> Kept as historical record of the original M0 design.
+
 ## Goal
 
 Migrate every M0-scope matrix-owning cache from hard-coded `new Float32Array(16) as Mat4` allocation to allocation via the captured scene `_matrixPolicy.allocator`. After this task, when `useHighPrecisionMatrix: true`, world matrices, camera view/projection/view-projection caches, light local/world caches, and shadow caster scratch all hold `Float64Array(16)` storage on CPU. CPU readers continue to consume the matrices through `Mat4Storage` indexing, which is precision-agnostic.

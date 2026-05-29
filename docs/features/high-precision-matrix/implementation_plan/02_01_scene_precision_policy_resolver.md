@@ -1,5 +1,16 @@
 # Task 2.1: Scene precision policy resolver
 
+> **⚠ SUPERSEDED by commit `07be57e` (engine-at-construction simplification).**
+> This task originally introduced `ScenePrecisionPolicy` + `resolveScenePrecisionPolicy`
+> as a per-scene captured policy object. After the simplification, entities take
+> `engine` directly at construction and allocate caches from
+> `engine._matrixPolicy.allocator` immediately — no per-scene policy object is
+> needed. The `_scene-precision.ts` module has been deleted; floating-origin
+> offset is wired onto the active `scene.camera._floatingOriginOffset` field in
+> the scene's `_update`. See `GUIDANCE.md` pillar 4b″.
+>
+> Kept as historical record of the original M0 design.
+
 ## Goal
 
 Add the `ScenePrecisionPolicy` shape on `SceneContextInternal`, populated by an internal `resolveScenePrecisionPolicy(engine, options)` function called inside `createSceneContext`. M0 returns the engine's policy unmodified; the structural seam exists so M1 can later assert that `useFloatingOrigin: true` requires engine high-precision mode without restructuring the call sites. After this task, scenes carry a stable per-scene policy reference that subsequent tasks will use to bind entity matrix storage.

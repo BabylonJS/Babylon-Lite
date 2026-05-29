@@ -265,6 +265,14 @@ Rejected alternatives:
 
 ### D6. Validation hook for M1
 
+> **⚠ SUPERSEDED by commit `07be57e` (engine-at-construction simplification).**
+> The `ScenePrecisionPolicy` interface and `resolveScenePrecisionPolicy`
+> resolver described below have been deleted. Entities now take `engine`
+> at construction and allocate caches from `engine._matrixPolicy.allocator`
+> directly. The M1 validation guard described in step (3) below can land
+> as a check inside `createSceneContext` against `engine._matrixPolicy.storageKind`
+> when needed. See `GUIDANCE.md` pillar 4b″.
+
 Decision: introduce a dedicated scene-creation precision-resolution seam in `createSceneContext`; M0 uses it to capture engine precision policy, and M1 will extend the same seam to assert `useFloatingOrigin: true` requires engine high-precision mode.
 
 Internal API contract (M0):

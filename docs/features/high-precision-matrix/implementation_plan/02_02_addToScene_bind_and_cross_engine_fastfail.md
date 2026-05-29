@@ -1,5 +1,18 @@
 # Task 2.2: Bind matrix-owning state at attach; cross-engine fast-fail
 
+> **⚠ SUPERSEDED by commit `07be57e` (engine-at-construction simplification).**
+> This task originally introduced `bindEntityMatrixPolicy` /
+> `_entity-precision-bind.ts` + per-entity `_boundPolicy` / `_rebindAllocator`
+> machinery to defer matrix-storage decisions to attach time. After the
+> simplification, entities take `engine` at construction so storage is
+> allocated with the correct precision from the start — no bind step exists
+> and the whole `_entity-precision-bind.ts` module has been deleted. The
+> "cross-engine fast-fail" rule survives in spirit (entities can't be moved
+> between engines because their matrix caches are committed at construction)
+> but is no longer enforced by an explicit comparison.
+>
+> Kept as historical record of the original M0 design.
+
 ## Goal
 
 When an entity (mesh, camera, light, shadow generator, transform node, asset container) is added to a scene, bind its matrix-owning caches to the scene's captured `_matrixPolicy`. Entities are created standalone (no scene argument) per `GUIDANCE.md` §4b, so binding happens at the first attachment. If an already-bound entity is attached to a scene whose engine has a *different* precision policy, throw a synchronous configuration error at the `addToScene` call site. Same-engine reattach is permitted and is a no-op.

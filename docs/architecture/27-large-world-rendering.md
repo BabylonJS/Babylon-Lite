@@ -130,15 +130,16 @@ Depends on M0. With the dual-precision layer in place, floating-origin
 becomes "subtract the eye offset on the F64 side, then downcast at upload"
 — a clean overlay on the existing precision substrate.
 
-**Scope shipped in M1 (commits LWR M1.1–M1.5):**
+**Scope shipped in M1 (commits LWR M1.1–M1.5 + simplification `07be57e`):**
 
 - **a1-types**: Add `useFloatingOrigin?: boolean` to `SceneContextOptions` and
   a `_floatingOriginOffset: Vec3` (mutable by-reference array, default
-  `[0,0,0]`) on `SceneContextInternal`. `ScenePrecisionPolicy` gains a
-  `floatingOriginOffset` field threaded through by
-  `resolveScenePrecisionPolicy` so matrix-bound entities read the offset from
-  `_boundPolicy` without holding a scene pointer (preserves one-way
-  ownership, pillar 4b).
+  `[0,0,0]`) on `SceneContextInternal`. The `Camera` interface gains
+  `_floatingOriginOffset?: readonly [number, number, number] | null` — the
+  scene's `_update` wires `camera._floatingOriginOffset = scene._floatingOriginOffset`
+  (idempotent reference assignment) so `getViewMatrix` reads the offset
+  directly from the camera. No scene reference needed on the camera
+  (preserves one-way ownership, pillar 4b).
 - **a1-validate-precondition**: At `createSceneContext` time, throw a clear
   error if `useFloatingOrigin: true` is set on an engine that wasn't created
   with `useHighPrecisionMatrix: true`.
@@ -157,7 +158,7 @@ becomes "subtract the eye offset on the F64 side, then downcast at upload"
     and `render-task.ts` view/viewProj uploads (see next bullet).
 - **a1-view-baked-offset**: Bake the floating-origin offset into the view
   matrix at *construction* time, NOT at upload time. `getViewMatrix` reads
-  `_boundPolicy.floatingOriginOffset` and subtracts it from the camera world
+  `camera._floatingOriginOffset` and subtracts it from the camera world
   position BEFORE computing `R_inv * -cameraPos`. When `offset ==
   cameraPos`, the resulting translation column is mathematically zero. The
   view + viewProj uploads in `frame-graph/render-task.ts` therefore stay on
@@ -169,14 +170,10 @@ becomes "subtract the eye offset on the F64 side, then downcast at upload"
   `scene.vEyePosition.xyz - input.worldPos` now produce the eye-relative
   vector at full precision because both sides live in the small-magnitude
   eye-relative frame.
-- **a1-camera-lazy-bind**: `scene-core._update` calls
-  `bindEntityMatrixPolicy(scene._boundPolicy, scene.camera)` once per
-  active-camera assignment. `scene.camera = cam` is a bare property
-  assignment (cameras never reference the scene), so binding cannot happen
-  at assignment time. Doing it at `_update` is idempotent (same-engine
-  reattach is a no-op) and ensures cameras assigned directly get
-  F64-allocated caches + a populated `_boundPolicy.floatingOriginOffset`
-  before the first `getViewMatrix` call.
+- **a1-camera-offset-wire**: `scene-core._update` does a single reference-
+  identity check + assignment: if `ctx.camera._floatingOriginOffset !== ctx._floatingOriginOffset`,
+  wire it. Idempotent for a stationary `scene.camera`; auto re-wires if
+  the camera is reassigned. Zero staleness possible.
 
 _Validation (M1 acceptance gate)_:
 
