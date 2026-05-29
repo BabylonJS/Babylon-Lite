@@ -5,17 +5,15 @@
  *  - parent chain validation (recursive parent.worldMatrix call)
  *  - caching and staleness detection
  *
- *  The allocator is taken at construction time — entities pass through the
- *  one from their owning engine (`engine._matrixPolicy.allocator`). With HPM
- *  off this is the default F32 allocator; with HPM on it's the F64 allocator.
- *  No rebind step exists or is needed; the engine's precision is fixed at
- *  `createEngine` time and entities created against that engine inherit it. */
+ *  Backing storage comes from `allocateMat4()` — process-global lazy singleton
+ *  in `_matrix-allocator.ts`. F32 by default; F64 after an HPM engine is
+ *  constructed (see GUIDANCE pillar 4b″, "single precision per page"). */
 
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
-import type { MatrixAllocator } from "../math/_matrix-allocator.js";
+import type { Mat4Storage } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */
@@ -31,19 +29,16 @@ export interface WorldMatrixAccessors {
 /**
  * Create world matrix state for any entity type.
  *
- * @param allocator - Per-engine matrix allocator (F32 or F64 depending on
- *   `useHighPrecisionMatrix`). Entities obtain this from
- *   `engine._matrixPolicy.allocator` at construction.
  * @param getLocalMatrix - Entity-specific function that returns the local (pre-parent)
  *   transform matrix. Called only when the cache is stale.
  */
-export function createWorldMatrixState(allocator: MatrixAllocator, getLocalMatrix: () => Mat4): WorldMatrixAccessors {
+export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixAccessors {
     let _localVersion = 0;
     let _worldVersion = 0;
     let _lastLocalVersion = -1;
     let _lastParentVersion = -1;
     let _cachedWorld: Mat4 | null = null;
-    const _ownedWorld: Mat4 = allocator.allocate();
+    const _ownedWorld: Mat4 = allocateMat4();
     let _parent: IWorldMatrixProvider | null = null;
 
     return {

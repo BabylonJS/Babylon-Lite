@@ -86,11 +86,11 @@ async function main(): Promise<void> {
     left.clearColor = { r: 0, g: 0, b: 0, a: 1 };
     right.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    left.camera = createArcRotateCamera(engine, Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
+    left.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
     left.camera.nearPlane = 0.1;
     left.camera.viewport = { x: 0, y: 0, width: 0.5, height: 1 };
 
-    right.camera = createArcRotateCamera(engine, Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
+    right.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1, { x: 0, y: 0, z: 0 });
     right.camera.nearPlane = 0.1;
     right.camera.viewport = { x: 0.5, y: 0, width: 0.5, height: 1 };
 

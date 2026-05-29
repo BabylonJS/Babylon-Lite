@@ -1,5 +1,5 @@
 import type { Mat4 } from "./types.js";
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 import { mat4Identity } from "./mat4-identity.js";
 
 /** Create a translation matrix. */

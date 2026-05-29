@@ -19,13 +19,13 @@ async function main(): Promise<void> {
     // Camera: FreeCamera(0,5,-10) → target(0,0,0) equivalent
     // Lite formula: x=r*cos(a)*sin(b), y=r*cos(b), z=r*sin(a)*sin(b)
     // For pos (0,5,-10): alpha=-π/2, beta=atan(2), radius=√125
-    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.atan(2), Math.sqrt(125), { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.atan(2), Math.sqrt(125), { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
     attachControl(scene.camera, canvas, scene);
 
     // Hemispheric light
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
 
     // Environment for PBR IBL — load DDS prefiltered cubemap (matching BJS scene)
     await loadDdsEnvironment(scene, "https://playground.babylonjs.com/textures/environment.dds", {

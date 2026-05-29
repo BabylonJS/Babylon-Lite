@@ -8,12 +8,12 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createArcRotateCamera(engine, 0.4, 1.2, 20, { x: -10, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(0.4, 1.2, 20, { x: -10, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
     attachControl(scene.camera, canvas, scene);
 
-    addToScene(scene, createPointLight(engine, [10, 50, 50]));
+    addToScene(scene, createPointLight([10, 50, 50]));
 
     scene.fog = { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.85] };
 

@@ -16,12 +16,12 @@ async function main(): Promise<void> {
     selectVariant(container, "White");
     addToScene(scene, container);
 
-    const cam = createArcRotateCamera(engine, 2.372, 1, 5, { x: 0, y: 1, z: 0 });
+    const cam = createArcRotateCamera(2.372, 1, 5, { x: 0, y: 1, z: 0 });
     cam.nearPlane = 0.01;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 5));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 5));
 
     await registerScene(engine, scene);
     await startEngine(engine);

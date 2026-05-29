@@ -1,7 +1,7 @@
 /** Shared light matrix helper — builds a local matrix from a direction vector + optional position. */
 
 import type { Mat4 } from "../math/types.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
+import type { Mat4Storage } from "../math/types.js";
 
 /** Build a local matrix from a direction vector + optional position.
  *  Column 2 = forward (normalized direction), column 0 = right, column 1 = up. */

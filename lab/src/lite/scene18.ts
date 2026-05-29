@@ -10,7 +10,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // FreeCamera at (0, 10, -20) looking at origin
-    const cam = createFreeCamera(engine, { x: 0, y: 10, z: -20 }, { x: 0, y: 0, z: 0 });
+    const cam = createFreeCamera({ x: 0, y: 10, z: -20 }, { x: 0, y: 0, z: 0 });
     cam.nearPlane = 1;
     cam.farPlane = 10000;
     scene.camera = cam;
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     addToScene(scene, box);
 
     // SpotLight at (0, 20, -10) pointing (0, -1, 0.3), angle=1.2, exponent=24
-    const light = createSpotLight(engine, [0, 20, -10], [0, -1, 0.3], 1.2, 24);
+    const light = createSpotLight([0, 20, -10], [0, -1, 0.3], 1.2, 24);
     addToScene(scene, light);
 
     // PCF Shadow Generator — box casts shadow onto ground

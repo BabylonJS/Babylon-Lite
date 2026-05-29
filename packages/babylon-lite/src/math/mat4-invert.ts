@@ -1,5 +1,5 @@
 import type { Mat4 } from "./types.js";
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 
 /** Compute inverse of a Mat4. Returns null if singular. */
 export function mat4Invert(input: Mat4): Mat4 | null {

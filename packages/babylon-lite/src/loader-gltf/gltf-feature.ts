@@ -22,7 +22,6 @@ import type { GltfMeshData } from "./load-gltf.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
-import type { LoaderScratch } from "./_loader-scratch.js";
 
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
@@ -37,10 +36,6 @@ export interface GltfLoadCtx {
     /** Composed texture-wrap function aggregating every active feature's
      *  `wrapTexture` hook. Identity when no feature contributes one. */
     _wrapTex: TextureWrapFn;
-    /** Per-load mat4 scratch pool — sourced from the engine matrix-precision
-     *  policy. Threaded through helpers that need temporary 4×4 storage so
-     *  no shared module-level state survives across loadGltf calls (REQ-ARCH-3). */
-    _scratch: LoaderScratch;
     /** glTF-node-index → SceneNode, populated by buildNodeHierarchy. Consumers:
      *  KHR_node_visibility (load-time), KHR_animation_pointer (runtime pointer writers).
      *  `undefined` for a given index means the node was unreachable from any scene root. */

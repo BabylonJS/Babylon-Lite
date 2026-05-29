@@ -2,12 +2,12 @@
  *  Plain data, no scene knowledge (pillar 4b).
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
 import type { Mat4 } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface SpotLight extends LightBase {
     readonly lightType: "spot";
@@ -23,16 +23,9 @@ export interface SpotLight extends LightBase {
     range: number;
 }
 
-export function createSpotLight(
-    engine: EngineContext,
-    position: [number, number, number],
-    direction: [number, number, number],
-    angle: number,
-    exponent: number,
-    intensity = 1.0
-): SpotLight {
-    const _localMatrix: Mat4 = (engine as EngineContextInternal)._matrixPolicy.allocate();
-    const { wm, onDirty, lvs } = createLightBase(engine, () => {
+export function createSpotLight(position: [number, number, number], direction: [number, number, number], angle: number, exponent: number, intensity = 1.0): SpotLight {
+    const _localMatrix: Mat4 = allocateMat4();
+    const { wm, onDirty, lvs } = createLightBase(() => {
         return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix);
     });
 

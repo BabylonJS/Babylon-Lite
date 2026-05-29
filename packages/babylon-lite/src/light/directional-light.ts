@@ -1,12 +1,12 @@
 /** DirectionalLight — plain data (pillar 4b: no scene reference).
  *  Push-based dirty tracking via ObservableVec3. */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
 import type { Mat4 } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface DirectionalLight extends LightBase {
     readonly lightType: "directional";
@@ -17,9 +17,9 @@ export interface DirectionalLight extends LightBase {
     intensity: number;
 }
 
-export function createDirectionalLight(engine: EngineContext, direction: [number, number, number], intensity = 1): DirectionalLight {
-    const _localMatrix: Mat4 = (engine as EngineContextInternal)._matrixPolicy.allocate();
-    const { wm, onDirty, lvs } = createLightBase(engine, () => {
+export function createDirectionalLight(direction: [number, number, number], intensity = 1): DirectionalLight {
+    const _localMatrix: Mat4 = allocateMat4();
+    const { wm, onDirty, lvs } = createLightBase(() => {
         return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix);
     });
 

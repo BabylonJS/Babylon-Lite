@@ -59,15 +59,15 @@ export async function runHpmJitterScene(opts: HpmJitterOptions): Promise<void> {
 
     // ArcRotate camera ~25m back from the grid centre. Eye position is
     // (OFFSET + ~25*cos, ..., OFFSET + ~25*sin) — order 5e6 in magnitude.
-    const cam = createArcRotateCamera(engine, Math.PI / 4, Math.PI / 3, 25, { x: OFFSET, y: 1, z: OFFSET });
+    const cam = createArcRotateCamera(Math.PI / 4, Math.PI / 3, 25, { x: OFFSET, y: 1, z: OFFSET });
     cam.nearPlane = 0.5;
     cam.farPlane = 500;
     scene.camera = cam;
 
-    const hemi = createHemisphericLight(engine, [0, 1, 0], 0.4);
+    const hemi = createHemisphericLight([0, 1, 0], 0.4);
     addToScene(scene, hemi);
 
-    const dir = createDirectionalLight(engine, [-0.4, -1, -0.2]);
+    const dir = createDirectionalLight([-0.4, -1, -0.2]);
     dir.diffuse = [1, 1, 1];
     dir.specular = [0.3, 0.3, 0.3];
     addToScene(scene, dir);

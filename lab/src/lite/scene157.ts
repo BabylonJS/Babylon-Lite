@@ -32,13 +32,13 @@ async function main(): Promise<void> {
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     scene.fixedDeltaMs = 16.0;
 
-    scene.camera = createArcRotateCamera(engine, Math.PI / 2, Math.PI / 4, 3, { x: 0, y: 1, z: 0 });
+    scene.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 4, 3, { x: 0, y: 1, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
     attachControl(scene.camera, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.6));
-    addToScene(scene, createDirectionalLight(engine, [0, -0.5, -1], 0.8));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.6));
+    addToScene(scene, createDirectionalLight([0, -0.5, -1], 0.8));
 
     const xbot = await loadGltf(engine, XBOT_URL);
     for (const entity of xbot.entities) {

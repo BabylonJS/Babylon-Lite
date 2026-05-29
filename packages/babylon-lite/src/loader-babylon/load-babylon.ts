@@ -324,7 +324,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
         const { createPointLight } = await import("../light/point-light.js");
         for (const ld of data.lights) {
             if (ld.type === 0 && ld.position) {
-                const pl = createPointLight(engine, [ld.position[0]!, ld.position[1]!, ld.position[2]!], ld.intensity ?? 1);
+                const pl = createPointLight([ld.position[0]!, ld.position[1]!, ld.position[2]!], ld.intensity ?? 1);
                 if (ld.diffuse) {
                     pl.diffuse = [ld.diffuse[0]!, ld.diffuse[1]!, ld.diffuse[2]!];
                 }
@@ -430,7 +430,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
 
                     // Each mesh carries its own TRS from the node.
                     initMeshTransform(
-                        (engine as EngineContextInternal)._matrixPolicy,
                         mesh,
                         md.position?.[0] ?? 0,
                         md.position?.[1] ?? 0,
@@ -473,7 +472,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 const qz = cx * cy * sz_ + sx_ * sy_ * cz;
                 const qw = cx * cy * cz - sx_ * sy_ * sz_;
                 const tn = createTransformNode(
-                    engine,
                     md.name,
                     md.position?.[0] ?? 0,
                     md.position?.[1] ?? 0,
@@ -520,7 +518,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
     // Parse camera (dynamically imported — zero cost when loadCamera=false or no cameras in file)
     const camData =
         opts.loadCamera !== false && data.cameras?.length ? ((data.activeCameraID ? data.cameras.find((c) => c.id === data.activeCameraID) : null) ?? data.cameras[0]!) : null;
-    const camera = camData ? (await import("./parse-camera.js")).parseBabylonCamera(engine, camData) : undefined;
+    const camera = camData ? (await import("./parse-camera.js")).parseBabylonCamera(camData) : undefined;
 
     // Return AssetContainer — addToScene() handles entity registration, clearColor, and cleanup.
     // Only root entities (not children of any other node) are included; addToScene() recurses.

@@ -2,7 +2,7 @@ import type { Vec3, Mat4 } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import { mat4PerspectiveLHToRef } from "../math/mat4-perspective-lh-to-ref.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
+import type { Mat4Storage } from "../math/types.js";
 
 /** Minimal camera contract — any camera that can provide view/projection matrices.
  *  Both ArcRotateCamera and FreeCamera implement this interface.

@@ -1,5 +1,5 @@
 import type { Mat4 } from "./types.js";
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 import { mat4MultiplyInto } from "./mat4-multiply-into.js";
 
 /** Multiply two Mat4: out = a * b (column-major). */

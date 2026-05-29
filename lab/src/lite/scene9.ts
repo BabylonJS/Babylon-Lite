@@ -9,8 +9,7 @@ async function main(): Promise<void> {
     addToScene(scene, await loadBabylon(engine, "https://www.babylonjs.com/Scenes/Sponza/Sponza.babylon", { loadCamera: false }));
 
     // Arc-rotate camera: same params used in BJS reference for parity
-    scene.camera = createArcRotateCamera(engine, 
-        0, // alpha — looking down +X
+    scene.camera = createArcRotateCamera(0, // alpha — looking down +X
         Math.PI / 2.2, // beta  — slightly above horizon
         0.01, // radius — nearly at target (first-person view)
         { x: 5.0855, y: 2.492, z: 0.1654 }

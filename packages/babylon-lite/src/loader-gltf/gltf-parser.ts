@@ -7,8 +7,8 @@
 import type { Mat4 } from "../math/types.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
-import type { LoaderScratch } from "./_loader-scratch.js";
+import type { Mat4Storage } from "../math/types.js";
+import { getLoaderTmpLocal } from "./_loader-scratch.js";
 
 // glTF 2.0 component types
 const FLOAT = 5126;
@@ -133,7 +133,7 @@ export function findParent(parentMap: Map<number, number>, childIdx: number): nu
  * (the cached world matrix itself) instead of two. Recursion always resolves
  * `parentWorld` before touching the scratch, so the shared buffer is safe.
  */
-export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Map<number, number>, cache: Map<number, Mat4>, scratch: LoaderScratch): Mat4 {
+export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Map<number, number>, cache: Map<number, Mat4>): Mat4 {
     const cached = cache.get(nodeIdx);
     if (cached) {
         return cached;
@@ -142,9 +142,9 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
     const node = json.nodes[nodeIdx];
     const parentIdx = findParent(parentMap, nodeIdx);
     // Resolve parent FIRST so any recursive call can safely reuse the shared scratch below.
-    const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache, scratch) : RH_TO_LH_ROOT;
+    const parentWorld: Mat4 = parentIdx !== -1 ? computeNodeWorldMatrix(json, parentIdx, parentMap, cache) : RH_TO_LH_ROOT;
 
-    let localBuf: import("../math/_mat4-storage.js").Mat4Storage;
+    let localBuf: import("../math/types.js").Mat4Storage;
     if (node.matrix) {
         // Pre-built matrix — copy into a fresh Float32Array (cannot alias scratch safely across calls).
         localBuf = new Float32Array(node.matrix);
@@ -152,7 +152,7 @@ export function computeNodeWorldMatrix(json: any, nodeIdx: number, parentMap: Ma
         const t = node.translation ?? [0, 0, 0];
         const r = node.rotation ?? [0, 0, 0, 1];
         const s = node.scale ?? [1, 1, 1];
-        const local = scratch.tmpLocal as unknown as Mat4Storage;
+        const local = getLoaderTmpLocal() as unknown as Mat4Storage;
         mat4ComposeInto(local, 0, t[0], t[1], t[2], r[0], r[1], r[2], r[3], s[0], s[1], s[2]);
         localBuf = local;
     }

@@ -12,7 +12,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera: alpha=0, beta=π/2, radius=5, target=origin
-    scene.camera = createArcRotateCamera(engine, 0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     attachControl(scene.camera, canvas, scene);
 
     // Environment (same as Scene 1) — no explicit light, IBL only

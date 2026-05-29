@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     sphere.material = material;
     addToScene(scene, sphere);
 
-    createDefaultCamera(engine, scene);
+    createDefaultCamera(scene);
 
     await registerScene(engine, scene);
     await startEngine(engine);

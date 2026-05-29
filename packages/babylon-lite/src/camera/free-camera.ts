@@ -1,4 +1,3 @@
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { Camera } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
 import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
@@ -7,7 +6,8 @@ import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
+import type { Mat4Storage } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
@@ -35,18 +35,15 @@ export interface FreeCameraInternal extends FreeCamera {
     _pitch: number;
 }
 
-/** Create a FreeCamera at the given position looking at target. Pure data, no scene knowledge.
- *  `engine` is required so the camera's matrix caches use the engine's precision policy. */
-export function createFreeCamera(engine: EngineContext, position: Vec3, target: Vec3): FreeCamera {
-    const allocator = (engine as EngineContextInternal)._matrixPolicy;
-
+/** Create a FreeCamera at the given position looking at target. Pure data, no scene knowledge. */
+export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
     // Compute initial yaw/pitch from position→target direction
     const dx = target.x - position.x;
     const dy = target.y - position.y;
     const dz = target.z - position.z;
 
-    // Reusable local-world matrix, allocated once from the engine policy.
-    const _localMat: Mat4 = allocator.allocate();
+    // Reusable local-world matrix.
+    const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
         const view = mat4LookAtLH(cam.position, cam.target, Vec3Up);
@@ -71,7 +68,7 @@ export function createFreeCamera(engine: EngineContext, position: Vec3, target: 
         return _localMat;
     }
 
-    const wm = createWorldMatrixState(allocator, cameraLocalWorldMatrix);
+    const wm = createWorldMatrixState(cameraLocalWorldMatrix);
     const onDirty = () => wm.markLocalDirty();
 
     let _yaw = Math.atan2(dx, dz);
@@ -88,10 +85,10 @@ export function createFreeCamera(engine: EngineContext, position: Vec3, target: 
         inertia: 0.9,
         children: [] as SceneNode[],
 
-        // Matrix caches pre-allocated from the engine's precision policy.
-        _viewCache: allocator.allocate() as unknown as Mat4Storage,
-        _projCache: allocator.allocate() as unknown as Mat4Storage,
-        _vpCache: allocator.allocate() as unknown as Mat4Storage,
+        // Matrix caches use the process-global allocator.
+        _viewCache: allocateMat4() as unknown as Mat4Storage,
+        _projCache: allocateMat4() as unknown as Mat4Storage,
+        _vpCache: allocateMat4() as unknown as Mat4Storage,
 
         get parent() {
             return wm.parent;

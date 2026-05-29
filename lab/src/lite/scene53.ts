@@ -60,11 +60,11 @@ async function main(): Promise<void> {
     // PerspectiveLH(fov=0.8, near=1, far=100) → world z=-2 → NDC.z≈0.842,
     // world z=2 → NDC.z≈0.909. Sprite per-instance z values are picked to
     // straddle these two depths.
-    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 8, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 8, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 100;
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     // Front-left RED box. NDC.z ≈ 0.842.
     const frontBox = createBox(engine, 2);

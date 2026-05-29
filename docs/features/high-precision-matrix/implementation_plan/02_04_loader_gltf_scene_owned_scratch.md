@@ -1,3 +1,7 @@
+> **SUPERSEDED.** This task delivered the per-loadGltf LoaderScratch factory and parameter-threading. It was reverted to module-level lazy-init scratch ( _loader-scratch.ts getters) once the matrix allocator became a process-global lazy singleton. See GUIDANCE pillar 4b'' (single matrix precision per page).
+
+---
+
 # Task 2.4: glTF loader — replace module-local scratch with scene-owned scratch
 
 ## Goal

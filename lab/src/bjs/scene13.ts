@@ -39,7 +39,7 @@ import "@babylonjs/loaders/glTF";
     const light = new HemisphericLight("hemi", new Vector3(0, 1, 0), scene);
     light.intensity = 1.0;
 
-    scene.createDefaultCamera(true, true, true);
+    scene.createDefaultCamera(true, true);
     scene.createDefaultEnvironment({ createSkybox: false, createGround: true });
 
     const eng = engine as any;

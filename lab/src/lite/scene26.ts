@@ -69,12 +69,12 @@ async function main(): Promise<void> {
     addToScene(scene, lightSphere);
 
     // Camera: use createDefaultCamera to auto-frame, then add PI to alpha
-    const cam = createDefaultCamera(engine, scene);
+    const cam = createDefaultCamera(scene);
     cam.alpha += Math.PI;
     attachControl(cam, canvas, scene);
 
     // Point light (very low intensity, orbits via pivot offset)
-    const pointLight = createPointLight(engine, [0, 0.02, -0.2], 0.01);
+    const pointLight = createPointLight([0, 0.02, -0.2], 0.01);
     addToScene(scene, pointLight);
 
     // Environment: DDS cubemap (same file as BJS) for IBL, no auto-skybox

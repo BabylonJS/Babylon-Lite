@@ -1,7 +1,6 @@
 /** Shared light base — world matrix state + dirty callback used by all light factories.
  *  Eliminates boilerplate repeated across hemispheric, directional, point, and spot lights. */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "../scene/parentable.js";
 import { createWorldMatrixState, type WorldMatrixAccessors } from "../scene/world-matrix-state.js";
@@ -16,12 +15,9 @@ export interface LightVersionState {
     bump(): void;
 }
 
-/** Create the world-matrix state + dirty callback shared by all light types.
- *  `engine` provides the matrix allocator captured at engine creation — F32
- *  by default, F64 when HPM is enabled. Returns `lvs` — a version state that
- *  callers bump when non-position properties change. */
-export function createLightBase(engine: EngineContext, getLocalMatrix: () => Mat4): { wm: WorldMatrixAccessors; onDirty: () => void; lvs: LightVersionState } {
-    const wm = createWorldMatrixState((engine as EngineContextInternal)._matrixPolicy, getLocalMatrix);
+/** Create the world-matrix state + dirty callback shared by all light types. */
+export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAccessors; onDirty: () => void; lvs: LightVersionState } {
+    const wm = createWorldMatrixState(getLocalMatrix);
     const lvs: LightVersionState = {
         _lightVersion: 0,
         bump() {

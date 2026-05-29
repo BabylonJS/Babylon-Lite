@@ -1,5 +1,5 @@
 import type { Mat4 } from "./types.js";
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 import { mat4ComposeInto } from "./mat4-compose-into.js";
 
 /** Compose TRS (translation * rotation * scale) into a single Mat4. */

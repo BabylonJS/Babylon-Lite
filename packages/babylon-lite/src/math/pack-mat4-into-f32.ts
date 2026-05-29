@@ -1,5 +1,5 @@
 import type { Mat4 } from "./types.js";
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 
 const ZERO_OFFSET: readonly [number, number, number] = [0, 0, 0];
 

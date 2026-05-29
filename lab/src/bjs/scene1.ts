@@ -39,7 +39,7 @@ import "@babylonjs/loaders/glTF";
         );
     });
     scene.environmentTexture = envTex;
-    scene.createDefaultCamera(true, true, true);
+    scene.createDefaultCamera(true, true);
     (scene.activeCamera as ArcRotateCamera).alpha = 1.77538207638442;
     scene.createDefaultEnvironment({ createSkybox: true, createGround: true, skyboxSize: 1000 });
 

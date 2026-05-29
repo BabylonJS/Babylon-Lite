@@ -36,13 +36,13 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.fixedDeltaMs = 16.0;
 
-    const mainCamera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2.35, 8.5, { x: 0, y: -0.25, z: 0 });
+    const mainCamera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.35, 8.5, { x: 0, y: -0.25, z: 0 });
     mainCamera.nearPlane = 0.1;
     mainCamera.farPlane = 100;
     scene.camera = mainCamera;
     attachControl(mainCamera, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     const { rt: standardDepthRT, texture: standardDepthTexture } = createRenderTargetTexture(engine, {
         label: "standard-shadow-depth",
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
     pbrDepthDisplay.material = pbrDepthDisplayMaterial;
     addToScene(scene, pbrDepthDisplay);
 
-    const standardDepthCamera = createFreeCamera(engine, { x: -2.25, y: 1.0, z: -4.0 }, { x: -2.25, y: 1.0, z: 0 });
+    const standardDepthCamera = createFreeCamera({ x: -2.25, y: 1.0, z: -4.0 }, { x: -2.25, y: 1.0, z: 0 });
     standardDepthCamera.nearPlane = 2;
     standardDepthCamera.farPlane = 8;
     const standardDepthTask = createRenderTask(
@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     standardDepthTask.addMesh(standardMesh, { material: standardDepthView });
     addTaskAtStart(scene, standardDepthTask);
 
-    const pbrDepthCamera = createFreeCamera(engine, { x: 2.25, y: 1.0, z: -4.0 }, { x: 2.25, y: 1.0, z: 0 });
+    const pbrDepthCamera = createFreeCamera({ x: 2.25, y: 1.0, z: -4.0 }, { x: 2.25, y: 1.0, z: 0 });
     pbrDepthCamera.nearPlane = 2;
     pbrDepthCamera.farPlane = 8;
     const pbrDepthTask = createRenderTask(

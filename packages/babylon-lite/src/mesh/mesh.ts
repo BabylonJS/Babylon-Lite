@@ -11,7 +11,6 @@ import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { createWorldMatrixState } from "../scene/world-matrix-state.js";
-import type { MatrixAllocator } from "../math/_matrix-allocator.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
 
@@ -78,10 +77,11 @@ export interface MeshInternal extends Mesh {
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders).
  *
- *  `allocator` is the engine's matrix policy (F32 by default, F64 with HPM on);
- *  the mesh's world-matrix cache is allocated from it at construction. */
-export function initMeshTransform(allocator: MatrixAllocator, mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
-    const wm = createWorldMatrixState(allocator, () => {
+ *  Matrix storage for the mesh's world-matrix cache comes from the
+ *  process-global `allocateMat4()` singleton (F32 by default; F64 after an
+ *  HPM engine is created — see GUIDANCE pillar 4b″). */
+export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): void {
+    const wm = createWorldMatrixState(() => {
         const p = mesh.position,
             rq = mesh.rotationQuaternion,
             s = mesh.scaling;

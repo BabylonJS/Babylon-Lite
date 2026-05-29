@@ -10,13 +10,13 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    const camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const light = createHemisphericLight(engine, [0, 1, 0], 1.0);
+    const light = createHemisphericLight([0, 1, 0], 1.0);
     addToScene(scene, light);
 
     const material = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE84_NME_JSON });

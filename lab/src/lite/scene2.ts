@@ -19,12 +19,12 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
     attachControl(scene.camera, canvas, scene);
 
-    const light = createDirectionalLight(engine, [0, -1, 0]);
+    const light = createDirectionalLight([0, -1, 0]);
     light.diffuse = [1, 0, 0];
     light.specular = [0, 1, 0];
     addToScene(scene, light);

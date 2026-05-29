@@ -17,9 +17,11 @@ import { ObservableVec3 } from "../../math/observable-vec3.js";
 import { ObservableQuat } from "../../math/observable-quat.js";
 import { createWorldMatrixState } from "../../scene/world-matrix-state.js";
 import { eulerToQuat, createEulerProxy } from "../../scene/scene-node.js";
-import { buildSplatGeometry, type SplatGeometry, type ParsedSplat } from "../../loader-splat/splat-data.js";
-
-/** Names of the four WGSL slots a `GsShaderFragment` may inject into the
+import {
+    buildSplatGeometry,
+    type SplatGeometry,
+    type ParsedSplat,
+} from "../../loader-splat/splat-data.js"; /** Names of the four WGSL slots a `GsShaderFragment` may inject into the
  *  Gaussian-splat fragment shader. Markers in the WGSL source look like
  *  `\/*GS_FRAGMENT_MAIN_END*\/` — valid comments when no plugin is present. */
 export type GsFragmentSlot = "GS_FRAGMENT_DEFINITIONS" | "GS_FRAGMENT_MAIN_BEGIN" | "GS_FRAGMENT_BEFORE_FRAGCOLOR" | "GS_FRAGMENT_MAIN_END";
@@ -296,8 +298,8 @@ export function disposeGaussianSplattingMesh(mesh: GaussianSplattingMesh): void 
 
 // Same TRS + worldMatrix wiring as `initMeshTransform` in mesh/mesh.ts but
 // duplicated here to avoid pulling the Mesh module into the GS code path.
-function initSplatTransform(engine: EngineContextInternal, node: GaussianSplattingMesh): void {
-    const wm = createWorldMatrixState(engine._matrixPolicy, () => {
+function initSplatTransform(_engine: EngineContextInternal, node: GaussianSplattingMesh): void {
+    const wm = createWorldMatrixState(() => {
         const p = node.position,
             rq = node.rotationQuaternion,
             s = node.scaling;

@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     (getFrameGraph(scene)._tasks[0] as RenderTask)._config.transmission = { copyCount: 1 };
 
     // Exact camera values captured from the playground scene.
-    const cam = createArcRotateCamera(engine, Math.PI / 2, Math.PI / 2, 1.1856086997830126, { x: -0.2914360649171073, y: 0.4, z: 0.3975263311541397 });
+    const cam = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1.1856086997830126, { x: -0.2914360649171073, y: 0.4, z: 0.3975263311541397 });
     cam.fov = 0.8;
     cam.nearPlane = 0.0697417;
     cam.farPlane = 6974.17;

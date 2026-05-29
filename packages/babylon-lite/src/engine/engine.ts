@@ -4,9 +4,6 @@ import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
 
-import type { Mat4 } from "../math/types.js";
-import type { MatrixAllocator } from "../math/_matrix-allocator.js";
-
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
 // this. Per-scene bundle caches compare against it for invalidation.
@@ -103,12 +100,6 @@ export interface EngineContextInternal extends EngineContext {
     _currentDelta: number;
     _cbs: GPUCommandBuffer[];
 
-    /** @internal Per-engine matrix allocator captured at createEngine.
-     *  Resolved from `options.useHighPrecisionMatrix`. F32 by default; F64 when
-     *  HPM is enabled. Captured into scenes/entities so caches allocate via
-     *  the policy. */
-    _matrixPolicy: MatrixAllocator;
-
     /** @internal Per-frame floating-origin offset updater. Set when the engine
      *  was created with `useFloatingOrigin: true` (which requires
      *  `useHighPrecisionMatrix: true`). Undefined when FO is off — scene
@@ -180,18 +171,6 @@ export interface EngineOptions {
     useFloatingOrigin?: boolean;
 }
 
-/** @internal F32-backed Mat4 allocator. Colocated with createEngine so that
- *  the only outbound mat4-storage import dependency is the F64 module (which
- *  is tree-shaken when HPM is off). */
-function createF32MatrixAllocator(): MatrixAllocator {
-    return {
-        storageKind: "f32",
-        allocate(): Mat4 {
-            return new Float32Array(16) as unknown as Mat4;
-        },
-    };
-}
-
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
 export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOptions): Promise<EngineContext> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
@@ -236,13 +215,14 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     // bundlers cannot prove the truthy branch of a runtime ternary is dead, so a
     // static import of `_mat4-storage-f64.js` was retained in every bundle even
     // with `sideEffects: false`. Splitting it behind `if (useHpm)` lets HPM-off
-    // builds drop the module; HPM-on builds load it as a side chunk on demand.
-    let matrixPolicy: MatrixAllocator;
+    // builds drop the module; HPM-on builds load it as a side chunk on demand
+    // and install the F64 allocator into the process-global lazy singleton
+    // in `_matrix-allocator.ts`. **Constraint:** allocator is process-global —
+    // mixing HPM and non-HPM engines on the same page is unsupported (see
+    // GUIDANCE pillar 4b″, "single precision per page").
     if (useHpm) {
-        const { createF64MatrixAllocator } = await import("../math/_mat4-storage-f64.js");
-        matrixPolicy = createF64MatrixAllocator();
-    } else {
-        matrixPolicy = createF32MatrixAllocator();
+        const [{ allocateF64Mat4 }, { _setHpmAllocator }] = await Promise.all([import("../math/_mat4-storage-f64.js"), import("../math/_matrix-allocator.js")]);
+        _setHpmAllocator(allocateF64Mat4);
     }
 
     // Same dynamic-import trick for the LWR runtime. When `useFloatingOrigin` is
@@ -273,7 +253,6 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         _swapchainView: undefined!,
         _currentDelta: 0,
         _cbs: [],
-        _matrixPolicy: matrixPolicy,
         _updateFOOffset,
     };
 

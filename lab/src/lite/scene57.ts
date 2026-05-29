@@ -25,12 +25,12 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.09, g: 0.11, b: 0.14, a: 1 };
 
-    scene.camera = createFreeCamera(engine, CAMERA_POSITION, CAMERA_TARGET);
+    scene.camera = createFreeCamera(CAMERA_POSITION, CAMERA_TARGET);
     scene.camera.fov = 0.72;
     scene.camera.nearPlane = 0.5;
     scene.camera.farPlane = 80;
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.9));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.9));
 
     const addBoxAt = (position: [number, number, number], scale: [number, number, number], color: [number, number, number]): void => {
         const box = createBox(engine, 1);

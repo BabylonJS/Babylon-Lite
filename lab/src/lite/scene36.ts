@@ -23,11 +23,11 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera: ArcRotate at (3π/2, π/2, 60), target origin.
-    scene.camera = createArcRotateCamera(engine, (3 * Math.PI) / 2, Math.PI / 2, 60, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera((3 * Math.PI) / 2, Math.PI / 2, 60, { x: 0, y: 0, z: 0 });
     attachControl(scene.camera, canvas, scene);
 
     // Light: hemispheric pointing up, intensity 0.7.
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
 
     // Load the .basis texture (transcoded to the best GPU-supported format).
     const basisTex = await loadBasisTexture2D(engine, "https://playground.babylonjs.com/textures/plane.basis");

@@ -17,7 +17,7 @@ import "@babylonjs/loaders/glTF";
     await SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/UnlitTest/glTF-Binary/", "UnlitTest.glb", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
-    scene.createDefaultCamera(true, true, true);
+    scene.createDefaultCamera(true, true);
     (scene.activeCamera as ArcRotateCamera).alpha += Math.PI;
 
     const eng = engine as any;

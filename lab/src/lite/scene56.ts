@@ -25,11 +25,11 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.14, g: 0.16, b: 0.2, a: 1 };
 
-    scene.camera = createArcRotateCamera(engine, CAMERA_ALPHA, CAMERA_BETA, 10, { x: 0, y: 1, z: 0 });
+    scene.camera = createArcRotateCamera(CAMERA_ALPHA, CAMERA_BETA, 10, { x: 0, y: 1, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 100;
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.85));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.85));
 
     const box1 = createBox(engine, 1.2);
     box1.position.set(-2.5, 0.6, 0);

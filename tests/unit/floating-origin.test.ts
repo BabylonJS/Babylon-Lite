@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 
 import { createFreeCamera } from "../../packages/babylon-lite/src/camera/free-camera";
 import type { EngineContext, EngineContextInternal } from "../../packages/babylon-lite/src/engine/engine";
-import { createF64MatrixAllocator } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
+import { _setHpmAllocator, _resetMatrixAllocatorForTests } from "../../packages/babylon-lite/src/math/_matrix-allocator";
+import { allocateF64Mat4 } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
 import { getFloatingOriginOffset, updateFloatingOriginOffset } from "../../packages/babylon-lite/src/large-world/floating-origin";
 import { createSceneContext } from "../../packages/babylon-lite/src/scene/scene";
 import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
@@ -54,16 +55,20 @@ function makeMockEngine(hpm = false, useFO = false): EngineContext {
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 16.67,
         _cbs: [],
-        _matrixPolicy: hpm ? createF64MatrixAllocator() : { storageKind: "f32" as const, allocate: () => new Float32Array(16) as unknown as never },
         _updateFOOffset: useFO ? updateFloatingOriginOffset : undefined,
     } as EngineContextInternal;
 }
 
 describe("floating origin", () => {
+    // Install F64 allocator process-globally — these tests need HPM precision
+    // for the camera world matrix to round-trip far-from-origin coordinates.
+    beforeAll(() => _setHpmAllocator(allocateF64Mat4));
+    afterAll(() => _resetMatrixAllocatorForTests());
+
     it("tracks camera eye position as floating origin offset when engine has FO on", () => {
         const engine = makeMockEngine(true, true);
         const scene = createSceneContext(engine) as SceneContextInternal;
-        scene.camera = createFreeCamera(engine, { x: 1_000_000.25, y: -2_000_000.5, z: 3_000_000.75 }, { x: 0, y: 0, z: 0 });
+        scene.camera = createFreeCamera({ x: 1_000_000.25, y: -2_000_000.5, z: 3_000_000.75 }, { x: 0, y: 0, z: 0 });
 
         scene._update();
 
@@ -76,7 +81,7 @@ describe("floating origin", () => {
     it("keeps floating origin offset at zero when engine has FO off", () => {
         const engine = makeMockEngine(false, false);
         const scene = createSceneContext(engine) as SceneContextInternal;
-        scene.camera = createFreeCamera(engine, { x: 1234, y: 5678, z: 9012 }, { x: 0, y: 0, z: 0 });
+        scene.camera = createFreeCamera({ x: 1234, y: 5678, z: 9012 }, { x: 0, y: 0, z: 0 });
 
         scene._update();
 
@@ -89,7 +94,7 @@ describe("floating origin", () => {
     it("scene._update wires the camera's _floatingOriginOffset to the scene's offset array", () => {
         const engine = makeMockEngine(true, true);
         const scene = createSceneContext(engine) as SceneContextInternal;
-        const cam = createFreeCamera(engine, { x: 100, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
+        const cam = createFreeCamera({ x: 100, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
         scene.camera = cam;
 
         // Pre-wire: camera has no offset reference yet.

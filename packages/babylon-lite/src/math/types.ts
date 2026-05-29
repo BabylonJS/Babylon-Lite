@@ -51,3 +51,11 @@ export interface Quat {
     z: number;
     w: number;
 }
+
+/** @internal Storage view used by kernels, allocators, and the upload packer.
+ *  Raw typed-array union (no brand) so callers can pass `new Float32Array(16)`
+ *  directly to kernels without laundering through the `Mat4` brand. The brand
+ *  on `Mat4` exists to prevent users from spoofing matrices into the engine;
+ *  internal kernels operate on `Mat4Storage` precisely because they don't
+ *  need the brand check. Not re-exported from `index.ts`. */
+export type Mat4Storage = Float32Array | Float64Array;

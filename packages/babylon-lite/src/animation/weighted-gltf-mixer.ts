@@ -8,7 +8,7 @@ import { evaluateSampler } from "./evaluate.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
+import type { Mat4Storage } from "../math/types.js";
 
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;

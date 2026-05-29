@@ -9,19 +9,19 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 4, 5, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 4, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
     attachControl(scene.camera, canvas, scene);
 
     // Red spot light — slow decay (exponent 10)
-    const spot0 = createSpotLight(engine, [-1, 1, -1], [0, -1, 0], Math.PI / 2, 10);
+    const spot0 = createSpotLight([-1, 1, -1], [0, -1, 0], Math.PI / 2, 10);
     spot0.diffuse = [1, 0, 0];
     spot0.specular = [0, 1, 0];
     addToScene(scene, spot0);
 
     // Green spot light — fast decay (exponent 50)
-    const spot1 = createSpotLight(engine, [1, 1, 1], [0, -1, 0], Math.PI / 2, 50);
+    const spot1 = createSpotLight([1, 1, 1], [0, -1, 0], Math.PI / 2, 50);
     spot1.diffuse = [0, 1, 0];
     spot1.specular = [0, 1, 0];
     addToScene(scene, spot1);

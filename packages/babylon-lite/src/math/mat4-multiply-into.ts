@@ -1,4 +1,4 @@
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 
 /** Multiply a[aOff..+16] * b[bOff..+16] into dst[dOff..+16] (fully unrolled, zero allocation).
  *  Parameters accept either F32- or F64-backed storage (`Mat4Storage`). */

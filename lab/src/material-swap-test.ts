@@ -11,7 +11,7 @@ async function run() {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    const light = createHemisphericLight(engine, [0, 1, 0], 1.0);
+    const light = createHemisphericLight([0, 1, 0], 1.0);
     addToScene(scene, light);
 
     const sphere = createSphere(engine, { diameter: 2, segments: 16 });
@@ -21,7 +21,7 @@ async function run() {
     sphere.material = redMat;
     addToScene(scene, sphere);
 
-    createDefaultCamera(engine, scene);
+    createDefaultCamera(scene);
     await registerScene(engine, scene);
     await startEngine(engine);
 

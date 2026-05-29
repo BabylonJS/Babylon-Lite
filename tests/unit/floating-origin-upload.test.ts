@@ -21,29 +21,26 @@
  *   3. vEyePosition style write: camera.worldMatrix[12..14] minus the
  *      offset yields zero (eye-relative).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 
-import type { EngineContextInternal } from "../../packages/babylon-lite/src/engine/engine";
-import type { MatrixAllocator } from "../../packages/babylon-lite/src/math/_matrix-allocator";
-import { createF64MatrixAllocator } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
+import { allocateMat4, _setHpmAllocator, _resetMatrixAllocatorForTests } from "../../packages/babylon-lite/src/math/_matrix-allocator";
+import { allocateF64Mat4 } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
 import { createArcRotateCamera } from "../../packages/babylon-lite/src/camera/arc-rotate";
 import { getViewMatrix } from "../../packages/babylon-lite/src/camera/camera";
 import { packMat4IntoF32 } from "../../packages/babylon-lite/src/math/pack-mat4-into-f32";
 
-function fakeEngine(allocator: MatrixAllocator): EngineContextInternal {
-    return { _matrixPolicy: allocator } as unknown as EngineContextInternal;
-}
-
 describe("LWR M1 floating-origin upload integration", () => {
+    // Install F64 allocator process-globally for these precision-sensitive tests.
+    beforeAll(() => _setHpmAllocator(allocateF64Mat4));
+    afterAll(() => _resetMatrixAllocatorForTests());
+
     const FAR = 1_000_000;
-    const allocator = createF64MatrixAllocator();
-    const engine = fakeEngine(allocator);
     const offset: [number, number, number] = [FAR, 0, FAR];
 
     it("getViewMatrix subtracts the offset from cameraPos — translation column lands at zero", () => {
         // Arc-rotate camera looking at the far point with the camera positioned
         // exactly at the floating-origin offset (cameraPos == offset).
-        const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
+        const cam = createArcRotateCamera(0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
         cam._floatingOriginOffset = offset;
         // Camera world position equals offset (within float precision).
         const w = cam.worldMatrix;
@@ -59,7 +56,7 @@ describe("LWR M1 floating-origin upload integration", () => {
     });
 
     it("getViewMatrix without offset (null _floatingOriginOffset) produces large-magnitude translation — control case", () => {
-        const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
+        const cam = createArcRotateCamera(0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
         // No offset wired (cam._floatingOriginOffset stays undefined).
         const v = getViewMatrix(cam);
         // Without the offset the view translation is -R_inv * cameraPos, whose
@@ -68,12 +65,17 @@ describe("LWR M1 floating-origin upload integration", () => {
         expect(mag).toBeGreaterThan(1e5);
     });
 
+    it("allocator is F64-backed inside these tests (precision precondition)", () => {
+        const m = allocateMat4() as unknown as Float64Array;
+        expect(m).toBeInstanceOf(Float64Array);
+    });
+
     it("packMat4IntoF32 with offsetXYZ on a mesh at world (1e6 + delta) lands delta into the F32 view", () => {
         // At 1e6 the F32 ULP is ~0.0625 (2^(19-23)). Pick a delta well below
         // half-ULP so the precision-only invocation (no offset) demonstrably
         // loses it; the offset-aware invocation recovers it via the F64 subtraction.
         const delta = 1.5e-3;
-        const meshWorld = allocator.allocate();
+        const meshWorld = allocateMat4();
         const w = meshWorld as unknown as Float64Array;
         w[0] = 1;
         w[5] = 1;
@@ -102,7 +104,7 @@ describe("LWR M1 floating-origin upload integration", () => {
     });
 
     it("vEyePosition-style write subtracts the offset, yielding eye-relative zero", () => {
-        const cam = createArcRotateCamera(engine, 0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
+        const cam = createArcRotateCamera(0, Math.PI / 2, 0.0001, { x: FAR, y: 0, z: FAR });
         cam._floatingOriginOffset = offset;
         const w = cam.worldMatrix;
         const eyeX = w[12]! - offset[0];

@@ -21,8 +21,9 @@ import { computeAabb } from "../math/compute-aabb.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
 import type { Mat4 } from "../math/types.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
+import type { Mat4Storage } from "../math/types.js";
 import { setThinInstances } from "../mesh/thin-instance.js";
+import { getLoaderTmpInstance } from "./_loader-scratch.js";
 
 /** Collect every Mesh child (direct children only — matches buildNodeHierarchy). */
 function collectMeshesUnderNode(tn: { children?: unknown[] } | undefined): Mesh[] {
@@ -103,7 +104,7 @@ const ext: GltfFeature = {
             const nodeWorld = ctx._worldMatrixCache.get(nodeIdx);
             for (const mesh of meshesForNode) {
                 setThinInstances(mesh, matrices, count);
-                expandMeshAabbForInstances(mesh as MeshInternal, matrices, count, nodeWorld, ctx._scratch);
+                expandMeshAabbForInstances(mesh as MeshInternal, matrices, count, nodeWorld);
             }
         }
         return {};
@@ -113,15 +114,9 @@ export default ext;
 
 /** Expand a mesh's world-space AABB to enclose all thin instances so that
  *  auto-framing cameras see the full instanced grid, not just the base mesh.
- *  Uses `scratch.tmpInstance` from the per-load pool for the per-iteration
+ *  Uses the module-level `getLoaderTmpInstance()` scratch for the per-iteration
  *  instance world matrix — no per-call allocation. */
-function expandMeshAabbForInstances(
-    mesh: MeshInternal,
-    matrices: Float32Array,
-    count: number,
-    nodeWorld: Mat4 | undefined,
-    scratch: import("./_loader-scratch.js").LoaderScratch
-): void {
+function expandMeshAabbForInstances(mesh: MeshInternal, matrices: Float32Array, count: number, nodeWorld: Mat4 | undefined): void {
     const positions = mesh._cpuPositions;
     if (!positions || !nodeWorld || count === 0) {
         return;
@@ -164,7 +159,7 @@ function expandMeshAabbForInstances(
     let wMaxX = -Infinity,
         wMaxY = -Infinity,
         wMaxZ = -Infinity;
-    const instWorld = scratch.tmpInstance;
+    const instWorld = getLoaderTmpInstance();
     const instBuf = instWorld as unknown as Mat4Storage;
     for (let i = 0; i < count; i++) {
         for (let k = 0; k < 16; k++) {

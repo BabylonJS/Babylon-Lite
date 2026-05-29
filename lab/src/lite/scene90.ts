@@ -68,12 +68,12 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createArcRotateCamera(engine, -1.5, 1.6, 18, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(-1.5, 1.6, 18, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
     attachControl(scene.camera, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1));
 
     const [grassTexture, crateTexture, subtractLabel, intersectLabel, unionLabel, equalsLabel] = await Promise.all([
         loadTexture2D(engine, GRASS_URL, { invertY: true }),

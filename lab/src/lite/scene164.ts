@@ -35,14 +35,14 @@ async function main(): Promise<void> {
 
     addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/Alien/Alien.gltf"));
 
-    const cam = createDefaultCamera(engine, scene);
+    const cam = createDefaultCamera(scene);
     cam.alpha = Math.PI / 2;
     cam.beta = Math.PI / 2;
     cam.radius = 2;
     cam.target = { x: 0, y: 0, z: 0 };
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
     scene.fixedDeltaMs = 16.0;
 
     const params = new URLSearchParams(window.location.search);

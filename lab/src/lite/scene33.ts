@@ -22,7 +22,7 @@ async function main(): Promise<void> {
         brdfUrl: "/brdf-lut.png",
     });
 
-    const cam = createDefaultCamera(engine, scene);
+    const cam = createDefaultCamera(scene);
     cam.alpha += Math.PI;
     attachControl(cam, canvas, scene);
 

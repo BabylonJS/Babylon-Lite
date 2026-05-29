@@ -81,7 +81,7 @@ import "@babylonjs/core/Helpers/sceneHelpers";
     // Scattering disabled — no PrePass needed for phase 1 parity
 
     // Camera — auto-frame the dragon
-    scene.createDefaultCamera(true, true, true);
+    scene.createDefaultCamera(true, true);
     const cam = scene.activeCamera as ArcRotateCamera;
     cam.alpha += Math.PI;
 

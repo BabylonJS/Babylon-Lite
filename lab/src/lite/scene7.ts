@@ -12,7 +12,7 @@ async function main(): Promise<void> {
         brdfUrl: "/brdf-lut.png",
     });
 
-    const cam = createDefaultCamera(engine, scene);
+    const cam = createDefaultCamera(scene);
     // Match Babylon.js createDefaultCameraOrLight framing exactly
     cam.alpha = -4.401261725665929;
     cam.beta = Math.PI / 2;
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     cam.farPlane = 8178.094749263931;
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     // Fixed timestep matching Babylon.js useConstantAnimationDeltaTime (16.0ms)
     scene.fixedDeltaMs = 16.0;

@@ -10,12 +10,12 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     // Camera: matches playground exactly
-    scene.camera = createArcRotateCamera(engine, -Math.PI / 4, Math.PI / 2.5, 200, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(-Math.PI / 4, Math.PI / 2.5, 200, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     attachControl(scene.camera, canvas, scene);
 
     // Point light at (0, 40, 0) — matches playground
-    const light = createPointLight(engine, { x: 0, y: 40, z: 0 });
+    const light = createPointLight({ x: 0, y: 40, z: 0 });
     addToScene(scene, light);
 
     // HDR environment — loads room.hdr panorama, creates cubemap + prefiltered IBL

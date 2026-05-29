@@ -4,12 +4,13 @@
 
 import type { Camera } from "../camera/camera.js";
 import type { EngineContextInternal } from "../engine/engine.js";
-import type { Mat4Storage } from "../math/_mat4-storage.js";
+import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
@@ -130,17 +131,16 @@ export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
 }
 
 /** Create the light-owned camera facade used by shadow render tasks.
- *  Caches are pre-allocated from the engine's matrix policy. */
-export function createShadowCamera(engine: EngineContextInternal, sg: Pick<ShadowGenerator, "_light">): Camera {
-    const allocator = engine._matrixPolicy;
+ *  Caches are pre-allocated from the process-global allocator. */
+export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera {
     return {
         fov: 1,
         nearPlane: 1,
         farPlane: 1,
         children: [],
-        _viewCache: allocator.allocate() as unknown as Mat4Storage,
-        _projCache: allocator.allocate() as unknown as Mat4Storage,
-        _vpCache: allocator.allocate() as unknown as Mat4Storage,
+        _viewCache: allocateMat4() as unknown as Mat4Storage,
+        _projCache: allocateMat4() as unknown as Mat4Storage,
+        _vpCache: allocateMat4() as unknown as Mat4Storage,
         get worldMatrix() {
             return sg._light.worldMatrix;
         },

@@ -19,11 +19,11 @@ async function main(): Promise<void> {
         brdfUrl: "/brdf-lut.png",
     });
 
-    const cam = createDefaultCamera(engine, scene);
+    const cam = createDefaultCamera(scene);
     cam.alpha = Math.PI / 2;
     attachControl(cam, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 1.0));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     await registerScene(engine, scene);
     await startEngine(engine);

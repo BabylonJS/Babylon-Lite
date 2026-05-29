@@ -29,9 +29,9 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
-    scene.camera = createFreeCamera(engine, { x: -6, y: 4, z: -8 }, { x: 0, y: 0, z: 0 });
+    scene.camera = createFreeCamera({ x: -6, y: 4, z: -8 }, { x: 0, y: 0, z: 0 });
 
-    const light = createHemisphericLight(engine, [0, 1, 0]);
+    const light = createHemisphericLight([0, 1, 0]);
     light.intensity = 0.7;
     addToScene(scene, light);
 

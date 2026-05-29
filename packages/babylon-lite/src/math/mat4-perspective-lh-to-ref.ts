@@ -1,4 +1,4 @@
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 
 /** Write a reverse-Z perspective projection into `out` without allocating.
  *  WebGPU clip-space depth is [0, 1]; this maps near -> 1 and far -> 0.

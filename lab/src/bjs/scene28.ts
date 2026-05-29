@@ -17,7 +17,7 @@ import "@babylonjs/loaders/glTF";
     await SceneLoader.AppendAsync("https://assets.babylonjs.com/meshes/ClearCoatTest/", "ClearCoatTest.gltf", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
-    scene.createDefaultCamera(true, true, true);
+    scene.createDefaultCamera(true, true);
     (scene.activeCamera as ArcRotateCamera).alpha += Math.PI;
 
     const eng = engine as any;

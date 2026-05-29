@@ -53,11 +53,11 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1 };
 
-    const camera = createArcRotateCamera(engine, -1, 1, 10, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(-1, 1, 10, { x: 0, y: 0, z: 0 });
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    addToScene(scene, createHemisphericLight(engine, [0, 1, 0], 0.7));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
 
     const sphereMat = createStandardMaterial();
     const sphere = createSphere(engine, { diameter: 1, segments: 32 });

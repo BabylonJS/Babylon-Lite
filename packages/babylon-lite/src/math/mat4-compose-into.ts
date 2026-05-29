@@ -1,4 +1,4 @@
-import type { Mat4Storage } from "./_mat4-storage.js";
+import type { Mat4Storage } from "./types.js";
 
 /** Compose TRS directly into a Mat4 storage view at offset (zero allocation).
  *  Storage may be F32- or F64-backed. */

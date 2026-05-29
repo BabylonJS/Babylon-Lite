@@ -21,7 +21,7 @@ import "@babylonjs/loaders/glTF";
     );
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
-    scene.createDefaultCamera(true, true, true);
+    scene.createDefaultCamera(true, true);
     (scene.activeCamera as ArcRotateCamera).alpha += Math.PI;
 
     const eng = engine as any;

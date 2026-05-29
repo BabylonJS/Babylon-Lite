@@ -57,13 +57,13 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    const camera = createArcRotateCamera(engine, -Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
+    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const key = createDirectionalLight(engine, [0, 0, 1], 3.25);
+    const key = createDirectionalLight([0, 0, 1], 3.25);
     addToScene(scene, key);
 
     const aoDepth = createSolidTexture2D(engine, 0.5, 0.5, 0.5, 1);

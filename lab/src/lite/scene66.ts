@@ -32,12 +32,12 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
-    scene.camera = createArcRotateCamera(engine, 1.14, 0.95, 10, { x: 0, y: 0, z: 0 });
+    scene.camera = createArcRotateCamera(1.14, 0.95, 10, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 1000;
     attachControl(scene.camera, canvas, scene);
 
-    const light = createDirectionalLight(engine, [1, -1, 1], 0.7);
+    const light = createDirectionalLight([1, -1, 1], 0.7);
     addToScene(scene, light);
 
     // Meshes first (casters' world AABBs are needed for the shadow frustum fit).

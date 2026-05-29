@@ -1,75 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 
-import type { EngineContextInternal, RenderingContext } from "../../packages/babylon-lite/src/engine/engine";
-import type { MatrixAllocator } from "../../packages/babylon-lite/src/math/_matrix-allocator";
-import { createF64MatrixAllocator } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
+import { allocateMat4, _setHpmAllocator, _resetMatrixAllocatorForTests } from "../../packages/babylon-lite/src/math/_matrix-allocator";
+import { allocateF64Mat4 } from "../../packages/babylon-lite/src/math/_mat4-storage-f64";
 
-// `createEngine` requires a live WebGPU adapter and cannot run under Vitest. We
-// instead exercise the allocator factories directly here — they are the entire
-// observable surface of the `_matrixPolicy` field for Task 1.3. The real
-// `createEngine` selects between these two factories based on
-// `options.useHighPrecisionMatrix`; `engine.ts` (createF32MatrixAllocator) is a
-// module-local helper, so we replicate its trivial shape here to test it
-// without coupling to private exports.
-function createF32MatrixAllocatorForTest(): MatrixAllocator {
-    return {
-        storageKind: "f32",
-        allocate(): never {
-            return new Float32Array(16) as unknown as never;
-        },
-    };
-}
+// The matrix allocator is a process-global lazy singleton (GUIDANCE pillar 4,
+// lazy-init form). `createEngine` flips the singleton to F64 when
+// `useHighPrecisionMatrix: true`. We exercise the singleton directly here
+// because `createEngine` requires a live WebGPU adapter unavailable under
+// vitest. Each test resets back to F32 to avoid leaking state.
+//
+// **Constraint under test:** the allocator is process-global. Pages that mix
+// HPM and non-HPM engines on the same page are unsupported (see GUIDANCE
+// pillar 4b″, "single precision per page"). This test does not exercise the
+// constraint — it documents that the second installer wins silently.
 
-describe("engine matrix policy", () => {
-    it("default (HPM off) yields an F32 allocator that returns Float32Array", () => {
-        const p = createF32MatrixAllocatorForTest();
-        expect(p.storageKind).toBe("f32");
-        const m = p.allocate() as unknown as Float32Array;
+describe("matrix allocator (process-global singleton)", () => {
+    afterEach(() => _resetMatrixAllocatorForTests());
+
+    it("default (HPM never installed) yields a Float32Array", () => {
+        const m = allocateMat4() as unknown as Float32Array;
         expect(m).toBeInstanceOf(Float32Array);
         expect(m.length).toBe(16);
     });
 
-    it("HPM on yields an F64 allocator that returns Float64Array", () => {
-        const p = createF64MatrixAllocator();
-        expect(p.storageKind).toBe("f64");
-        const m = p.allocate() as unknown as Float64Array;
+    it("after _setHpmAllocator(allocateF64Mat4), allocateMat4 returns Float64Array", () => {
+        _setHpmAllocator(allocateF64Mat4);
+        const m = allocateMat4() as unknown as Float64Array;
         expect(m).toBeInstanceOf(Float64Array);
         expect(m.length).toBe(16);
     });
 
-    it("two allocator instances produce independent storage", () => {
-        const a = createF64MatrixAllocator();
-        const b = createF64MatrixAllocator();
-        const ma = a.allocate() as unknown as Float64Array;
-        const mb = b.allocate() as unknown as Float64Array;
-        expect(ma).not.toBe(mb);
-        ma[0] = 42;
-        expect(mb[0]).toBe(0);
+    it("each call returns a fresh, independent typed array", () => {
+        const a = allocateMat4() as unknown as Float32Array;
+        const b = allocateMat4() as unknown as Float32Array;
+        expect(a).not.toBe(b);
+        a[0] = 42;
+        expect(b[0]).toBe(0);
     });
 
-    it("two engines created with different HPM flags do not share allocator state", () => {
-        // Simulate two engines: one HPM-off (F32), one HPM-on (F64).
-        const off = createF32MatrixAllocatorForTest();
-        const on = createF64MatrixAllocator();
-        expect(off.storageKind).toBe("f32");
-        expect(on.storageKind).toBe("f64");
-        // No shared module-level mutable state: allocate twice and confirm
-        // each returns a fresh typed array.
-        const m1 = off.allocate() as unknown as Float32Array;
-        const m2 = off.allocate() as unknown as Float32Array;
-        expect(m1).not.toBe(m2);
-        const n1 = on.allocate() as unknown as Float64Array;
-        const n2 = on.allocate() as unknown as Float64Array;
-        expect(n1).not.toBe(n2);
-    });
-
-    // Silence unused-var noise for the RenderingContext type import (helps catch
-    // accidental moves of the EngineContextInternal field shape).
-    it("EngineContextInternal includes a _matrixPolicy field (type-level)", () => {
-        const _shape: Pick<EngineContextInternal, "_matrixPolicy" | "_renderingContexts"> = {
-            _matrixPolicy: createF64MatrixAllocator(),
-            _renderingContexts: [] as RenderingContext[],
-        };
-        expect(_shape._matrixPolicy.storageKind).toBe("f64");
+    it("_resetMatrixAllocatorForTests reverts to F32 default", () => {
+        _setHpmAllocator(allocateF64Mat4);
+        expect(allocateMat4()).toBeInstanceOf(Float64Array);
+        _resetMatrixAllocatorForTests();
+        expect(allocateMat4()).toBeInstanceOf(Float32Array);
     });
 });
