@@ -71,10 +71,10 @@ export function getOrCreateShaderPipeline(
     const device = engine.device;
     const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
-    const fragModule = sig.colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
-    const colorTarget: GPUColorTargetState | null = sig.colorFormat
+    const fragModule = sig._colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
+    const colorTarget: GPUColorTargetState | null = sig._colorFormat
         ? {
-              format: sig.colorFormat,
+              format: sig._colorFormat,
               ...(material.needAlphaBlending
                   ? {
                         blend: {
@@ -91,17 +91,17 @@ export function getOrCreateShaderPipeline(
         layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), bindings.group1BGL] }),
         vertex: { module: vertModule, entryPoint: "mainVertex", buffers: bindings.vertexBuffers },
         ...(fragModule && colorTarget ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: [colorTarget] } } : {}),
-        ...(sig.depthStencilFormat
+        ...(sig._depthStencilFormat
             ? {
                   depthStencil: {
-                      format: sig.depthStencilFormat,
+                      format: sig._depthStencilFormat,
                       depthCompare: material.depthCompare,
                       depthWriteEnabled: material.needAlphaBlending ? false : material.depthWrite,
                   },
               }
             : {}),
-        multisample: { count: sig.sampleCount },
-        primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: sig.flipY ? "cw" : "ccw" },
+        multisample: { count: sig._sampleCount },
+        primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: sig._flipY ? "cw" : "ccw" },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;

@@ -127,10 +127,11 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     // samples upright when sourced by a downstream pass. Depth-only shadow maps
     // can override this to preserve shadow-sampler UV conventions.
     const targetSignature = {
-        colorFormat: desc.colorFormat,
-        depthStencilFormat: desc.depthStencilFormat,
-        sampleCount: desc.sampleCount ?? 1,
-        flipY: desc.flipY ?? desc.resolveToSwapchain !== true,
+        _colorFormat: desc.colorFormat,
+        _depthStencilFormat: desc.depthStencilFormat,
+        _depthCompare: desc._depthCompare,
+        _sampleCount: desc.sampleCount ?? 1,
+        _flipY: desc.flipY ?? desc.resolveToSwapchain !== true,
     };
 
     const sceneBGL = getSceneBindGroupLayout(eng);
@@ -298,7 +299,7 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     if (depthView) {
         depthAttachment = {
             view: depthView,
-            depthClearValue: 1.0,
+            depthClearValue: rt._descriptor._depthClearValue ?? 0,
             depthLoadOp: "clear",
             depthStoreOp: "store",
         };
@@ -327,7 +328,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContextInternal, tar
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
-    writePassSceneUBO(task, eng, sc, camera, targetSignature.flipY === true);
+    writePassSceneUBO(task, eng, sc, camera, targetSignature._flipY);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
@@ -344,7 +345,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContextInternal, tar
 
 function executePass(task: RenderTask, eng: EngineContextInternal, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
     const sc = task.scene;
-    const sampleCount = targetSignature.sampleCount;
+    const sampleCount = targetSignature._sampleCount;
     prepareRenderTaskPass(task, eng, targetSignature, context);
     const att = task._colorAttachment;
     const cfg = task._config;
@@ -441,7 +442,7 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContextInternal)
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
  *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContextInternal, scene: SceneContextInternal, camera: Camera | null, flipY: boolean): void {
+function writePassSceneUBO(task: RenderTask, eng: EngineContextInternal, scene: SceneContextInternal, camera: Camera | null, flipY?: boolean): void {
     if (!camera) {
         return;
     }

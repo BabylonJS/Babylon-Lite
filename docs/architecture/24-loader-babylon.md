@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Parses Babylon.js `.babylon` scene files and returns a `LoaderResult` with meshes, standard materials, point lights, and scene-level settings. The caller passes the result to `addToScene()` which populates the `SceneContext`. Provides an alternative loading path to glTF for scenes authored in the Babylon.js editor or exported from 3ds Max / Unity.
+Parses Babylon.js `.babylon` scene files and returns an `AssetContainer` with meshes, standard materials, point lights, and scene-level settings. The caller passes the result to `addToScene(scene, result)` which populates the `SceneContext`. Provides an alternative loading path to glTF for scenes authored in the Babylon.js editor or exported from 3ds Max / Unity.
 
 ## Public API Surface
 
@@ -14,7 +14,7 @@ export async function loadBabylon(
     engine: Engine,
     url: string,
     opts?: LoadBabylonOptions
-): Promise<LoaderResult>;
+): Promise<AssetContainer>;
 ```
 
 ### Types
@@ -26,14 +26,14 @@ export interface LoadBabylonOptions {
 }
 
 /** Returned by both loadGltf() and loadBabylon(). Passed to addToScene(). */
-export type { LoaderResult } from "../loader-results.js";
+export type { AssetContainer } from "../asset-container.js";
 ```
 
 ### Usage
 
 ```typescript
 const result = await loadBabylon(engine, "https://example.com/scene.babylon");
-scene.add(result);  // entities[], clearColor, animationGroups dispatched into scene
+addToScene(scene, result);  // entities[], clearColor, animationGroups dispatched into scene
 ```
 
 - `entities`: flat array of all loaded `Mesh` and `LightBase` objects
@@ -207,7 +207,7 @@ One-shot async loader. No persistent state. Registers `clearTexture2DCache` disp
 
 | Babylon.js | Babylon Lite |
 |---|---|
-| `SceneLoader.Load(".babylon")` | `loadBabylon(scene, url)` |
+| `SceneLoader.Load(".babylon")` | `addToScene(scene, await loadBabylon(engine, url))` |
 | `StandardMaterial` | `createStandardMaterial()` → `StandardMaterialProps` |
 | `MultiMaterial` | `multiMatMap: Map<id, string[]>` |
 | `Mesh.subMeshes` | Split into individual GPU meshes per sub-mesh |

@@ -10,7 +10,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 |---|---|
 | `new WebGPUEngine(canvas); await engine.initAsync()` | `const engine = await createEngine(canvas)` |
 | `new Scene(engine)` | `createSceneContext(engine)` |
-| `engine.runRenderLoop(() => scene.render())` | `await startEngine(engine, scene)` |
+| `engine.runRenderLoop(() => scene.render())` | `await startEngine(engine)` |
 | `new ArcRotateCamera("cam", α, β, r, target, scene)` | `createArcRotateCamera(α, β, r, target)` |
 | `new FreeCamera("cam", position, scene)` | `createFreeCamera(position, target)` |
 | `scene.createDefaultCamera(true, true, true)` | `createDefaultCamera(scene)` |
@@ -59,7 +59,7 @@ addToScene(scene, light);
 
 ### 2. Engine & Render Loop
 
-BJS uses `runRenderLoop` with a callback. Lite uses a single `startEngine(engine, scene)` that returns a promise resolving after the first frame.
+BJS uses `runRenderLoop` with a callback. Lite uses a single `startEngine(engine)` that returns a promise resolving after the first frame.
 
 ```typescript
 // ❌ Babylon.js
@@ -73,7 +73,7 @@ engine.runRenderLoop(() => scene.render());
 const engine = await createEngine(canvas);
 const scene = createSceneContext(engine);
 // ... setup ...
-await startEngine(engine, scene);
+await startEngine(engine);
 ```
 
 ### 3. Plain Data, Not Classes
@@ -254,7 +254,7 @@ const cam = createDefaultCamera(scene);
 attachControl(cam, canvas, scene);
 addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
-await startEngine(engine, scene);
+await startEngine(engine);
 ```
 
 ---
@@ -340,6 +340,7 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | `KHR_materials_transmission` | ⚡ | Frame-graph scene-texture transmission for transmissive glTF materials (Scenes 30/33/112). |
 | `KHR_texture_transform` | ✅ | Auto-resolved at load (material-wide UV transform) |
 | `KHR_texture_basisu` | ✅ | Auto-detected; dynamically loads KTX2 decoder/upload path only for glTF assets that declare the extension (Scene 112) |
+| `EXT_texture_webp` | ✅ | Auto-detected through texture source selection; image decode is browser-native (Scene 37) |
 | `KHR_draco_mesh_compression` | ✅ | Auto-detected; loads `draco_decoder.js` + `.wasm` on demand from site root (override via `setDracoBaseUrl()`) |
 | `KHR_materials_emissive_strength` | ✅ | Auto-detected; multiplies emissive output (Scene 31) |
 | `KHR_materials_unlit` | ✅ | Auto-detected; emits base color directly with no lighting (Scene 32) |
@@ -351,6 +352,15 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | Specular anti-aliasing | ✅ | Auto-on for glTF; manual: `createPbrMaterial({ enableSpecularAA: true })` |
 | Morph targets | ✅ | PBR meshes only (not `StandardMaterial`) |
 | Skeletal animation (4 or 8 bones) | ✅ | Driven by `createAnimationController(scene)` |
+| Animation blending / weights / additive clips | ✅ | `AnimationManager` with `setAnimationWeight()`, `crossFadeAnimationGroups()`, and `setAnimationAdditive()` (Scenes 155-158) |
+| ShaderMaterial | ✅ | WGSL-only `createShaderMaterial()` with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163) |
+| Node Material | ✅ | NME snippet parser covering core, PBR, math, texture, procedural, normal, screen/depth, matrix, loop, and storage blocks (Scenes 60-89) |
+| Sprites / billboards | ⚡ | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards; not the full BJS SpriteManager API (Scenes 50-57) |
+| Gaussian splatting | ✅ | `.ply`, `.splat`, `.sog`, `.spz`, bake transforms, material plugin fragments (Scenes 120-126) |
+| CSG / CSG2 | ✅ | Mesh boolean subtract/intersect/union/add APIs (Scenes 90-91) |
+| Physics | ⚡ | Havok Physics V2 subset (Scene 40) |
+| Navigation / Recast | ⚡ | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, raycast (Scenes 170-175) |
+| Device-lost recovery | ✅ | Opt-in WebGPU device-loss recovery (Scene 164) |
 | Screen-space SSS (PrePass) | ❌ | Not implemented — only BRDF-layer translucency |
 
 See `lab/src/lite/scene*.ts` for end-to-end examples of each extension in action.

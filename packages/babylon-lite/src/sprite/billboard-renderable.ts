@@ -108,17 +108,17 @@ export function buildBillboardRenderable(engine: EngineContextInternal, system: 
 }
 
 function bindSystem(renderable: BillboardRenderableInternal, engine: EngineContextInternal, target: RenderTargetSignature): DrawBinding {
-    if (!target.depthStencilFormat) {
+    if (!target._depthStencilFormat) {
         throw new Error("BillboardSpriteSystem requires a depth-stencil render target.");
     }
-    const sampleCount = target.sampleCount === 1 ? 1 : 4;
+    const sampleCount = target._sampleCount === 1 ? 1 : 4;
     const pipeline = getOrCreateBillboardPipeline(
         engine,
         renderable._pipelineCache,
-        target.colorFormat!,
+        target._colorFormat!,
         sampleCount,
         renderable._system,
-        target.depthStencilFormat,
+        target._depthStencilFormat,
         getSceneBindGroupLayout(engine)
     );
     let bindGroup = renderable._bindGroups.get(pipeline);

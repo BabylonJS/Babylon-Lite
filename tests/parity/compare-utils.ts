@@ -18,11 +18,17 @@ export interface SceneConfig {
     note?: string;
     /** Skip this scene in parity tests. */
     skipParity?: boolean;
+    /** Skip this scene in parity tests only when running in CI. */
+    skipParityOnCI?: boolean;
     /** Skip this scene in perf tests. */
     skipPerf?: boolean;
 }
 
 let _sceneConfigCache: SceneConfig[] | null = null;
+
+export function shouldSkipParity(sceneConfig: Pick<SceneConfig, "skipParity" | "skipParityOnCI">, env: Pick<NodeJS.ProcessEnv, "CI"> = process.env): boolean {
+    return !!sceneConfig.skipParity || (!!sceneConfig.skipParityOnCI && !!env.CI);
+}
 
 function loadSceneConfigAll(): SceneConfig[] {
     if (!_sceneConfigCache) {
@@ -39,7 +45,10 @@ export function getSceneConfig(sceneId: number): SceneConfig {
     if (!entry) {
         throw new Error(`No scene-config.json entry for scene ${sceneId}`);
     }
-    return entry;
+    return {
+        ...entry,
+        skipParity: shouldSkipParity(entry) || undefined,
+    };
 }
 
 export interface CompareResult {

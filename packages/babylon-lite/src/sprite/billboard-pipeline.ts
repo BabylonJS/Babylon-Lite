@@ -33,9 +33,9 @@ const BLEND_MODE_TABLE: Readonly<Record<BillboardBlendMode, { index: number; des
     },
 };
 
-const DEPTH_MODE_TABLE: Readonly<Record<BillboardDepthMode, { index: number; compare: GPUCompareFunction; writeEnabled: boolean }>> = {
-    transparent: { index: 0, compare: "less-equal", writeEnabled: false },
-    cutout: { index: 1, compare: "less-equal", writeEnabled: true },
+const DEPTH_MODE_TABLE: Readonly<Record<BillboardDepthMode, { index: number; writeEnabled: boolean }>> = {
+    transparent: { index: 0, writeEnabled: false },
+    cutout: { index: 1, writeEnabled: true },
 };
 
 const BILLBOARD_POSITION_OFFSET_BYTES = 0;
@@ -412,7 +412,7 @@ function buildBillboardPipeline(
             targets: [blendEntry.descriptor ? { format, blend: blendEntry.descriptor, writeMask: GPUColorWrite.ALL } : { format, writeMask: GPUColorWrite.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
-        depthStencil: { format: depthStencilFormat, depthCompare: depthEntry.compare, depthWriteEnabled: depthEntry.writeEnabled },
+        depthStencil: { format: depthStencilFormat, depthCompare: "greater-equal", depthWriteEnabled: depthEntry.writeEnabled },
         multisample: { count: sampleCount },
     });
 }

@@ -141,4 +141,67 @@ describe("NodeMaterial emitter core", () => {
         const result = emitGraph(graph, emitters, fragRoot.id, null);
         expect(result.fragmentWgsl).toMatch(/\(nodeU\.color\)\.xyz/);
     });
+
+    it("exposes NodeMaterial fragment coordinate depth in logical standard-Z space", async () => {
+        const graph = parseNodeMaterialSource({
+            blocks: [
+                {
+                    customType: "BABYLON.FragCoordBlock",
+                    id: 1,
+                    name: "FragCoord",
+                    inputs: [],
+                    outputs: [{ name: "z" }],
+                },
+                {
+                    customType: "BABYLON.FragmentOutputBlock",
+                    id: 2,
+                    name: "out",
+                    inputs: [{ name: "rgb", targetBlockId: 1, targetConnectionName: "z" }],
+                    outputs: [],
+                },
+            ],
+            outputNodes: [2],
+        });
+        const emitters = await loadGraphEmitters(graph);
+        const result = emitGraph(graph, emitters, 2, null);
+
+        expect(result.fragmentWgsl).toContain("1.0 - _NME_FRAG_COORD_.z");
+    });
+
+    it("converts direct NodeMaterial FragDepthBlock depth inputs to reverse-Z writes", async () => {
+        const graph = parseNodeMaterialSource({
+            blocks: [
+                {
+                    customType: "BABYLON.InputBlock",
+                    id: 1,
+                    name: "depth",
+                    mode: 0,
+                    type: 0x1,
+                    value: 0.5,
+                    inputs: [],
+                    outputs: [{ name: "output" }],
+                },
+                {
+                    customType: "BABYLON.FragDepthBlock",
+                    id: 2,
+                    name: "FragDepth",
+                    inputs: [{ name: "depth", targetBlockId: 1, targetConnectionName: "output" }],
+                    outputs: [],
+                },
+                {
+                    customType: "BABYLON.FragmentOutputBlock",
+                    id: 3,
+                    name: "out",
+                    inputs: [],
+                    outputs: [],
+                },
+            ],
+            outputNodes: [2, 3],
+        });
+        const emitters = await loadGraphEmitters(graph);
+        const result = emitGraph(graph, emitters, 3, null);
+
+        expect(result.state.usesFragDepth).toBe(true);
+        expect(result.fragmentWgsl).toContain("_NME_FRAG_DEPTH_ = 1.0 - (nodeU.depth);");
+    });
 });

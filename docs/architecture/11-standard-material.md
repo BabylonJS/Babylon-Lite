@@ -267,7 +267,7 @@ The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is st
 | Cull mode     | `back` (or `none` if `DOUBLE_SIDED`) |
 | Front face    | `ccw`                                |
 | Depth format  | `depth24plus-stencil8`               |
-| Depth compare | `less-equal`                         |
+| Depth compare | `greater-equal`                      |
 | Depth write   | `true`                               |
 | MSAA          | `count = msaaSamples`                |
 | Color target  | Canvas preferred format, no blend    |

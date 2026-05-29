@@ -138,20 +138,20 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
 
 /** Resolve this sprite layer against a render-pass target and return the per-frame draw binding. */
 function bindLayer(r: SpriteRenderableInternal, engine: EngineContextInternal, target: RenderTargetSignature): DrawBinding {
-    if (!target.depthStencilFormat) {
+    if (!target._depthStencilFormat) {
         throw new Error("Depth-hosted Sprite2DLayer requires a depth-stencil render target.");
     }
-    const sampleCount = target.sampleCount === 1 ? 1 : 4;
+    const sampleCount = target._sampleCount === 1 ? 1 : 4;
     const depthWrite = r._layer.depth === "test-write";
     const pipeline = getOrCreateSpritePipeline(
         engine,
         r._pipelineCache,
-        target.colorFormat!,
+        target._colorFormat!,
         sampleCount,
         r._layer.blendMode,
         true,
         depthWrite,
-        target.depthStencilFormat,
+        target._depthStencilFormat,
         getSceneBindGroupLayout(engine)
     );
     let bindGroup = r._bindGroups.get(pipeline);

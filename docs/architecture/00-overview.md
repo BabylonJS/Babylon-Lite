@@ -4,12 +4,13 @@
 > It must be so complete that if all source code were deleted, an LLM could perfectly
 > regenerate the entire engine from this document alone. Treat this as the ground truth.
 >
-> **Revision scope**: Scenes 1–112 (BoomBox PBR, Sphere+DirectionalLight, Fog+Boxes+Skybox, Shadows+ESM,
+> **Revision scope**: Scenes 1–175 (BoomBox PBR, Sphere+DirectionalLight, Fog+Boxes+Skybox, Shadows+ESM,
 > Alien PBR+Skeleton, PBR Gold Sphere, ChibiRex Animated, HDR Glass Sphere, Sponza, PBR Rough Sphere,
 > Shark GLB, PBR Shader Balls, PBR Spheres Grid, Flight Helmet, SpotLights+Ground, Thin Instances,
 > PBR+Standard Thin Instances, Spotlight Hard Shadows (PCF), PBR Clearcoat, PBR Emissive Spheres Grid,
 > PBR Sheen Cloth, PBR Shadows, PBR Anisotropy, Hill Valley (.babylon), KTX Texture, PBR Subsurface,
-> Material Variants (KHR_materials_variants), CSG/CSG2, and FlightHelmetKTX via `KHR_texture_basisu`).
+> Material Variants (KHR_materials_variants), CSG/CSG2, FlightHelmetKTX via `KHR_texture_basisu`,
+> Gaussian splats, ShaderMaterial, device-loss recovery, Havok Physics V2, and Recast V2 navigation).
 > Detailed per-module specs are in the companion docs listed below.
 
 ## Architecture Document Index
@@ -28,7 +29,7 @@
 | [10-pbr-material.md](10-pbr-material.md)                           | PBR Material            | ShaderFragment composition, GGX/IBL, clearcoat, sheen                                          |
 | [11-standard-material.md](11-standard-material.md)                 | Standard Material       | ShaderFragment composition, Blinn-Phong                                                        |
 | [12-background-skybox.md](12-background-skybox.md)                 | Background/Skybox       | DDS/HDR/cubemap skybox, ground, background material                                            |
-| [13-loaders.md](13-loaders.md)                                     | Loaders                 | glTF 2.0, dynamic glTF features, .env, .hdr, .babylon, skybox                                  |
+| [13-loaders.md](13-loaders.md)                                     | Loaders                 | glTF 2.0, dynamic glTF features, .env, .hdr, .babylon, skybox, Gaussian splats                 |
 | [14-render-pipeline.md](14-render-pipeline.md)                     | Renderable Architecture | Renderable interfaces, entity-owned pipelines                                                  |
 | [15-morph-targets.md](15-morph-targets.md)                         | Morph Targets           | Vertex extension, GPU texture weights                                                          |
 | [16-animation-parity-testing.md](16-animation-parity-testing.md)   | Animation Parity        | Animated scene test methodology                                                                |
@@ -43,6 +44,7 @@
 | [25-resource-pool.md](25-resource-pool.md)                         | Resource Pool           | GPU buffer/texture pooling                                                                     |
 | [26-sprites.md](26-sprites.md)                                     | Sprites                 | 2D sprites, depth-hosted sprites, sprite renderables                                           |
 | [27-frame-graph.md](27-frame-graph.md)                             | Frame Graph             | Task ordering, RenderTask, passes, render targets, RTT texture flow                            |
+| [31-post-process.md](31-post-process.md)                           | Post Process            | Frame-graph fullscreen post-process helper and concrete post-process tasks                     |
 
 ---
 
@@ -225,15 +227,19 @@ babylon-lite/
 │   │       ├── load-skybox.ts     # High-level skybox loader
 │   │       └── skybox-renderable.ts # Skybox → deferred Renderable builder
 │
-├── lab/               # Dev sandbox (Scenes 1–112)
+├── lab/               # Dev sandbox (Scenes 1–175)
 │   ├── index.html
 │   ├── src/lite/scene1.ts          # Scene 1: BoomBox PBR
 │   ├── src/lite/scene2.ts          # Scene 2: Sphere + DirectionalLight
-│   ├── ...                         # Scenes 3–111
+│   ├── ...                         # Scenes 3–175
 │   ├── src/lite/scene74.ts         # Scene 74: EffectRenderer fullscreen pass
 │   ├── src/lite/scene75.ts         # Scene 75: EffectWrapper render-to-texture sphere
 │   ├── src/lite/scene76.ts         # Scene 76: EffectWrapper texture binding
 │   ├── src/lite/scene112.ts        # Scene 112: FlightHelmetKTX / KHR_texture_basisu
+│   ├── src/lite/scene120.ts        # Scene 120: Gaussian splatting
+│   ├── src/lite/scene159.ts        # Scene 159: ShaderMaterial basic
+│   ├── src/lite/scene164.ts        # Scene 164: device-loss recovery
+│   ├── src/lite/scene175.ts        # Scene 175: navigation raycast
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── vite.config.ts
@@ -241,11 +247,14 @@ babylon-lite/
 ├── reference/                     # Per-scene reference data
 │   ├── scene1-boombox/            # Scene 1 reference data
 │   ├── scene2-sphere/             # Scene 2 reference data
-│   ├── ...                        # Scenes 3–111
+│   ├── ...                        # Scenes 3–175
 │   ├── scene74-effect-renderer/   # EffectRenderer fullscreen golden
 │   ├── scene75-effect-rtt-sphere/ # EffectWrapper RTT golden
 │   ├── scene76-effect-texture/    # EffectWrapper texture-binding golden
 │   ├── scene112-khr-texture-basisu/ # KHR_texture_basisu golden
+│   ├── scene120-gaussian-splatting/ # Gaussian splatting golden
+│   ├── scene164-device-lost-recovery/ # Device-loss recovery golden
+│   ├── scene175-navigation-raycast/ # Navigation raycast golden
 │   └── (each contains golden screenshots for parity tests)
 │
 └── docs/architecture/

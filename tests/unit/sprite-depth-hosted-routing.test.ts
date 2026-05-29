@@ -166,11 +166,11 @@ describe("addDepthHostedSpriteLayer", () => {
         const depthShaderDescriptor = device.createShaderModule.mock.calls
             .map((call) => call[0] as GPUShaderModuleDescriptor)
             .find((descriptor) => descriptor.code.includes("@location(6) iZ: f32"));
-        expect(depthShaderDescriptor?.code).toContain("vec4<f32>(ndc, in.iZ, 1.0)");
+        expect(depthShaderDescriptor?.code).toContain("vec4<f32>(ndc, 1.0 - in.iZ, 1.0)");
         device.createRenderPipeline.mockClear();
         const renderable = scene._renderables[0]!;
 
-        const first = renderable.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth32float", sampleCount: 1 });
+        const first = renderable.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
         expect(device.createRenderPipeline).toHaveBeenCalledTimes(1);
         let descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         expect(descriptor.depthStencil?.format).toBe("depth32float");
@@ -178,7 +178,7 @@ describe("addDepthHostedSpriteLayer", () => {
         expect(vertexBuffer.arrayStride).toBe(DEPTH_INSTANCE_STRIDE_BYTES);
         expect(vertexBuffer.attributes.map((attr) => attr.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
-        const second = renderable.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth24plus-stencil8", sampleCount: 1 });
+        const second = renderable.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 });
         expect(second.pipeline).not.toBe(first.pipeline);
         expect(device.createRenderPipeline).toHaveBeenCalledTimes(2);
         descriptor = device.createRenderPipeline.mock.calls[1]![0] as GPURenderPipelineDescriptor;
@@ -200,7 +200,7 @@ describe("addDepthHostedSpriteLayer", () => {
         const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).label === "sprite-depth-hosted-instances");
         expect((instanceBufferCreate![0] as GPUBufferDescriptor).size).toBe(DEPTH_INSTANCE_STRIDE_BYTES);
 
-        const binding = scene._renderables[0]!.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth24plus-stencil8", sampleCount: 1 });
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 });
         device.queue.writeBuffer.mockClear();
         binding.update?.({ targetWidth: 512, targetHeight: 256 });
 
@@ -215,7 +215,7 @@ describe("addDepthHostedSpriteLayer", () => {
         addDepthHostedSpriteLayer(scene, layer);
         await registerScene(engine, scene);
 
-        const binding = scene._renderables[0]!.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth24plus-stencil8", sampleCount: 1 });
+        const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 });
         const queue = (engine.device as unknown as { queue: { writeBuffer: ReturnType<typeof vi.fn> } }).queue;
         queue.writeBuffer.mockClear();
         binding.update?.({ targetWidth: 512, targetHeight: 256 });
@@ -241,8 +241,8 @@ describe("addDepthHostedSpriteLayer", () => {
         device.createBindGroup.mockClear();
 
         const renderable = scene._renderables[0]!;
-        const first = renderable.bind(engine, { colorFormat: "bgra8unorm", depthStencilFormat: "depth32float", sampleCount: 1 });
-        const second = renderable.bind(engine, { colorFormat: "rgba16float", depthStencilFormat: "depth32float", sampleCount: 1 });
+        const first = renderable.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+        const second = renderable.bind(engine, { _colorFormat: "rgba16float", _depthStencilFormat: "depth32float", _sampleCount: 1 });
 
         expect(second.pipeline).not.toBe(first.pipeline);
         expect(device.createBindGroup).toHaveBeenCalledTimes(2);

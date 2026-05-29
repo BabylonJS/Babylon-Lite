@@ -175,8 +175,8 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
     const sampleCount = rt._descriptor.sampleCount ?? 1;
     const targetSignature: RenderTargetSignature = {
-        colorFormat: rt._descriptor.colorFormat,
-        sampleCount,
+        _colorFormat: rt._descriptor.colorFormat,
+        _sampleCount: sampleCount,
     };
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const task: EffectRenderTaskInternal = {
@@ -262,8 +262,8 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
     });
 
     const targetSignature: RenderTargetSignature = {
-        colorFormat: rt._descriptor.colorFormat,
-        sampleCount: rt._descriptor.sampleCount ?? 1,
+        _colorFormat: rt._descriptor.colorFormat,
+        _sampleCount: rt._descriptor.sampleCount ?? 1,
     };
 
     const colorAttachment: GPURenderPassColorAttachment = {
@@ -410,10 +410,10 @@ function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: Rend
         fragment: {
             module: getShaderModule(wrapper),
             entryPoint: "effectFragment",
-            targets: [{ format: targetSignature.colorFormat!, blend: wrapper.options.blend }],
+            targets: [{ format: targetSignature._colorFormat!, blend: wrapper.options.blend }],
         },
         primitive: { topology: "triangle-list" },
-        multisample: { count: targetSignature.sampleCount },
+        multisample: { count: targetSignature._sampleCount },
     });
     wrapper._pipelines.set(key, pipeline);
     return pipeline;

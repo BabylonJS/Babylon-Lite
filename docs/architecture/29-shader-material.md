@@ -322,7 +322,7 @@ primitive.topology = "triangle-list";
 primitive.frontFace = target.flipY ? "cw" : "ccw";
 primitive.cullMode = options.backFaceCulling === false ? "none" : "back";
 depthStencil.format = target.depthStencilFormat ?? "depth24plus-stencil8";
-depthStencil.depthCompare = options.depthCompare ?? "less-equal";
+depthStencil.depthCompare = options.depthCompare ?? "greater-equal";
 depthStencil.depthWriteEnabled = options.needAlphaBlending ? false : (options.depthWrite ?? true);
 multisample.count = target.sampleCount;
 ```

@@ -91,11 +91,18 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask, engine: EngineCon
         desc.colorFormat = "rgba16float";
     }
     desc.sampleCount = engine.msaaSamples;
-    const sig = task._targetSignature as { colorFormat?: GPUTextureFormat; depthStencilFormat?: GPUTextureFormat; sampleCount: number; flipY?: boolean };
-    sig.colorFormat = desc.colorFormat;
-    sig.depthStencilFormat = desc.depthStencilFormat;
-    sig.sampleCount = desc.sampleCount;
-    sig.flipY = desc.flipY ?? true;
+    const sig = task._targetSignature as {
+        _colorFormat?: GPUTextureFormat;
+        _depthStencilFormat?: GPUTextureFormat;
+        _depthCompare?: GPUCompareFunction;
+        _sampleCount: number;
+        _flipY?: boolean;
+    };
+    sig._colorFormat = desc.colorFormat;
+    sig._depthStencilFormat = desc.depthStencilFormat;
+    sig._depthCompare = desc._depthCompare;
+    sig._sampleCount = desc.sampleCount;
+    sig._flipY = desc.flipY ?? true;
 }
 
 function executeRenderTaskLinear(scene: SceneContextInternal, execute: () => number): number {
@@ -202,7 +209,7 @@ function configureTransmissionSource(state: RenderTaskTransmissionState, task: R
     state._sourceWidth = rt._width;
     state._sourceHeight = rt._height;
     state._sourceTexture = rt._colorTexture;
-    const sampleCount = task._targetSignature.sampleCount;
+    const sampleCount = task._targetSignature._sampleCount;
     if (!state._sourceTexture) {
         return;
     }

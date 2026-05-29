@@ -13,6 +13,7 @@
  */
 
 import type { EngineContextInternal } from "../../engine/engine.js";
+import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
@@ -130,6 +131,7 @@ export interface CompileOpts {
     readonly _engine: EngineContextInternal;
     readonly _format: GPUTextureFormat;
     readonly _depthStencilFormat?: GPUTextureFormat;
+    readonly _depthCompare?: GPUCompareFunction;
     readonly _msaaSamples: number;
     readonly _backFaceCulling?: boolean;
     readonly _noColorOutput?: boolean;
@@ -415,7 +417,7 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
                   layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
                   vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
                   fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
-                  depthStencil: { format: depthFormat, depthCompare: "less-equal", depthWriteEnabled: true },
+                  depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
                   multisample: { count: _msaaSamples },
                   primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
               }
@@ -429,6 +431,7 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
                       _vertexBuffers,
                       _format,
                       _depthStencilFormat: opts._depthStencilFormat,
+                      _depthCompare: opts._depthCompare,
                       _msaaSamples,
                       _cullMode: opts._backFaceCulling !== false ? "back" : "none",
                       _blend: esmShadowOutput ? undefined : blend,

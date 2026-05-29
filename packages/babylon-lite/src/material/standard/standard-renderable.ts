@@ -60,8 +60,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on standardGroupBuilder._rebuildSingle).
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-        const materialInput = (materialOverride ?? mesh.material) as StandardMaterialProps;
-        const mat = materialInput;
+        const mat = (materialOverride ?? mesh.material) as StandardMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
         const features = renderFeatures.features;
@@ -79,7 +78,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
         }
         let shaderKey = "";
-        if (meshFeatures & MSH_RECEIVE_SHADOWS && shadowFragment && hasSomeShadows) {
+        if (meshFeatures & MSH_RECEIVE_SHADOWS && shadowFragment) {
             const slots = shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
             shaderKey = _standardShaderVariantKey(slots);
             frags.push(shadowFragment(slots));
@@ -135,11 +134,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
         const needsUV = (features & NEEDS_UV) !== 0;
         const needsUV2 = (features & NEEDS_UV2) !== 0;
-        const hasShadow = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
-        const hasOpacityTexture = (features & HAS_OPACITY_TEXTURE) !== 0;
         const hasThinInstances = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
         const hasInstanceColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
-        const isTransparent = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) === 0 && (hasOpacityTexture || mat.alpha < 1);
+        const isTransparent = !shadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || mat.alpha < 1);
 
         const boundTextures = collectStdBoundTextures(mat);
         for (const t of boundTextures) {
@@ -179,7 +176,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
             // For per-pass material overrides, skip the mesh.material === mat guard
             // because the override material is intentionally not the mesh's current one.
-            if (!isOverride && mesh.material !== materialInput) {
+            if (!isOverride && mesh.material !== mat) {
                 return 0;
             }
             const g = (mesh as MeshInternal)._gpu;
@@ -200,7 +197,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
             pass.setBindGroup(1, meshBindGroup);
-            if (hasShadow && shadowBindGroup) {
+            if (receiveShadows && shadowBindGroup) {
                 pass.setBindGroup(2, shadowBindGroup);
             }
             if (ti && ti.count > 0) {

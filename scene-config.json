@@ -251,7 +251,6 @@
         "maxRawKB": 90.7,
         "description": "Georgia Tech Dragon with PBR subsurface translucency, thickness map, point light, DDS environment.",
         "tags": ["pbr", "gltf", "env"],
-        "skipParity": true,
         "skipPerf": true
     },
     {
@@ -865,8 +864,9 @@
         "maxRawKB": 82,
         "description": "Frame-graph RTT demo for Standard and PBR material views with shadow-depth feature overrides; the normal source materials render in the main pass and the depth RTTs are displayed on planes.",
         "tags": ["std", "pbr", "frame-graph", "rtt", "shadow"],
-        "skipParity": true,
-        "skipPerf": true
+        "skipParityOnCI": true,
+        "skipPerf": true,
+        "skipNotes": "Scene 116 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: the shadow-depth RTT observables can complete and the page can mark ready while the preview planes still occasionally sample an empty depth texture, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs and force-recaptures the golden on each test run. The scene remains in the lab/bundle config and can be re-enabled once the BJS reference readiness signal is reliable on CI."
     },
     {
         "id": 120,
@@ -936,6 +936,30 @@
         "tags": ["gaussian-splatting", "material-plugin"]
     },
     {
+        "id": 127,
+        "slug": "scene127-gs-depth-rendering",
+        "name": "Scene 127 — Gaussian Splatting Depth Rendering",
+        "maxMad": 3,
+        "description": "Port of PG #V80DRL#12 — visualizes camera-space linear depth for box+sphere+ground+GS, using createLinearDepthMaterial on standard meshes and gsLinearDepthFragment on the GS splat.",
+        "tags": ["gaussian-splatting", "depth-rendering"]
+    },
+    {
+        "id": 128,
+        "slug": "scene128-gs-depth-rendering-alpha",
+        "name": "Scene 128 — Gaussian Splatting Depth Rendering (Alpha-blended)",
+        "maxMad": 1,
+        "description": "Port of PG #V80DRL#19 — same as scene 127 but uses gsAlphaBlendedDepthFragment so the GS splat writes alpha-modulated depth for soft-edged splats.",
+        "tags": ["gaussian-splatting", "depth-rendering", "alpha-blend"]
+    },
+    {
+        "id": 129,
+        "slug": "scene129-gs-gpu-picking",
+        "name": "Scene 129 — Gaussian Splatting GPU Picking",
+        "maxMad": 1,
+        "description": "Minimal port of PG #3LNCE6#36 — extends GPU picking to handle GaussianSplattingMesh via the gsGpuPickingFragment plugin and the dedicated gs-picking-pipeline. Ground disappears when picking is not valid;",
+        "tags": ["gaussian-splatting", "gpu-picking"]
+    },
+    {
         "id": 140,
         "slug": "scene140-nme-pcf-alpha-discard-shadows",
         "name": "Scene 140 — NME PCF Alpha Discard Shadows",
@@ -953,6 +977,36 @@
         "maxRawKB": 137,
         "description": "Scene 65 ESM directional-shadow setup with three caster materials: NodeMaterial, Standard, and PBR spheres all cast shadows onto a NodeMaterial receiver.",
         "tags": ["nme", "standard", "pbr", "shadows"],
+        "skipPerf": true
+    },
+    {
+        "id": 142,
+        "slug": "scene142-post-process-viewports",
+        "name": "Scene 142 — Post-process Viewports",
+        "maxMad": 0.05,
+        "maxRawKB": 65,
+        "description": "Deterministic colored boxes rendered into four Lite frame-graph post-process viewport quadrants.",
+        "tags": ["post-process", "frame-graph", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 143,
+        "slug": "scene143-pipelined-post-processes",
+        "name": "Scene 143 — Pipelined Post-processes",
+        "maxMad": 0.05,
+        "maxRawKB": 73,
+        "description": "Sponza rendered through a Lite frame-graph blur task followed by chromatic aberration.",
+        "tags": ["post-process", "frame-graph", "babylon"],
+        "skipPerf": true
+    },
+    {
+        "id": 144,
+        "slug": "scene144-bloom-post-process",
+        "name": "Scene 144 — Bloom Post-process",
+        "maxMad": 0.05,
+        "maxRawKB": 112,
+        "description": "Tarisland dragon asset rendered through a Lite frame-graph bloom task using the Babylon.js Playground bloom settings.",
+        "tags": ["post-process", "frame-graph", "gltf", "animation"],
         "skipPerf": true
     },
     {

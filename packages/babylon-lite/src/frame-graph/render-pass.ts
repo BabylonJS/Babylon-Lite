@@ -102,7 +102,7 @@ export function createRenderPass(name: string, task: Task): RenderPass {
             if (depthView) {
                 depthAttachment = {
                     view: depthView,
-                    depthClearValue: 1.0,
+                    depthClearValue: depthRt._descriptor._depthClearValue ?? 0,
                     depthLoadOp: "clear",
                     depthStoreOp: "store",
                     ...(hasStencil ? { stencilClearValue: 0, stencilLoadOp: "clear" as const, stencilStoreOp: "store" as const } : {}),

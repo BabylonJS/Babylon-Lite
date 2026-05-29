@@ -61,6 +61,7 @@ export interface AnimationClip {
 /** Per-node rest pose TRS + parent link for hierarchy traversal. */
 export interface NodeRest {
     readonly parentIdx: number; // -1 for root nodes
+    readonly _matrix?: Mat4;
     tx: number;
     ty: number;
     tz: number;

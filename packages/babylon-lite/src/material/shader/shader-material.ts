@@ -181,7 +181,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         needAlphaTesting: options.needAlphaTesting ?? false,
         backFaceCulling: options.backFaceCulling ?? true,
         depthWrite: options.depthWrite ?? true,
-        depthCompare: options.depthCompare ?? "less-equal",
+        depthCompare: options.depthCompare ?? "greater-equal",
         _buildGroup: shaderGroupBuilder as MeshGroupBuilder,
         _uboVersion: 0,
         _uniformValues: uniformValues,

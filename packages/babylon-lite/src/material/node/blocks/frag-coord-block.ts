@@ -24,6 +24,6 @@ export const emitter: BlockEmitter = {
         if (!out) {
             throw new Error(`NodeMaterial: FragCoordBlock has no output "${outputName}"`);
         }
-        return { expr: `vec4<f32>(_NME_FRAG_COORD_.x, _NME_SCREEN_SIZE_.y - _NME_FRAG_COORD_.y, _NME_FRAG_COORD_.z, _NME_FRAG_COORD_.w)${out.swizzle}`, type: out.type };
+        return { expr: `vec4<f32>(_NME_FRAG_COORD_.x, _NME_SCREEN_SIZE_.y - _NME_FRAG_COORD_.y, 1.0 - _NME_FRAG_COORD_.z, _NME_FRAG_COORD_.w)${out.swizzle}`, type: out.type };
     },
 };

@@ -5,6 +5,7 @@
 
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
+import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
 
@@ -69,6 +70,8 @@ export interface PipelineDescriptorOpts {
     _format: GPUTextureFormat;
     /** Depth-stencil format. Default: `"depth24plus-stencil8"` (matches the engine's default RT). */
     _depthStencilFormat?: GPUTextureFormat;
+    /** Depth compare. Default: reverse-Z `"greater-equal"`. */
+    _depthCompare?: GPUCompareFunction;
     _msaaSamples: number;
     _depthWriteEnabled?: boolean;
     _cullMode?: GPUCullMode;
@@ -77,8 +80,8 @@ export interface PipelineDescriptorOpts {
     _flipY?: boolean;
 }
 
-/** Build a render pipeline descriptor with the engine's default state:
- *  depth24plus-stencil8, less-equal, triangle-list, ccw front face (cw if flipY). */
+/** Build a render pipeline descriptor with the engine's default reverse-Z state:
+ *  depth24plus-stencil8, greater-equal, triangle-list, ccw front face (cw if flipY). */
 export function createDefaultPipelineDescriptor(opts: PipelineDescriptorOpts): GPURenderPipelineDescriptor {
     const target: GPUColorTargetState = opts._blend ? { format: opts._format, blend: opts._blend } : { format: opts._format };
     return {
@@ -86,7 +89,11 @@ export function createDefaultPipelineDescriptor(opts: PipelineDescriptorOpts): G
         layout: opts._engine.device.createPipelineLayout({ bindGroupLayouts: opts._bgls }),
         vertex: { module: opts._vertModule, entryPoint: "main", buffers: opts._vertexBuffers },
         fragment: { module: opts._fragModule, entryPoint: "main", targets: [target] },
-        depthStencil: { format: opts._depthStencilFormat ?? "depth24plus-stencil8", depthCompare: "less-equal", depthWriteEnabled: opts._depthWriteEnabled ?? true },
+        depthStencil: {
+            format: opts._depthStencilFormat ?? "depth24plus-stencil8",
+            depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+            depthWriteEnabled: opts._depthWriteEnabled ?? true,
+        },
         multisample: { count: opts._msaaSamples },
         primitive: { topology: "triangle-list", cullMode: opts._cullMode ?? "back", frontFace: opts._flipY ? "cw" : "ccw" },
     };

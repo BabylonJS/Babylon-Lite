@@ -138,7 +138,7 @@ Used for normals (`getPickedNormal`) and UVs (`getPickedUV`).
 
 ### Depth / Stencil
 - Format: `depth32float`
-- Compare: `less`
+- Compare: `greater`
 - Write: enabled
 - No stencil
 

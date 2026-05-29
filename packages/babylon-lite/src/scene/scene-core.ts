@@ -19,6 +19,7 @@ import { createRenderTask } from "../frame-graph/render-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
+import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -64,6 +65,10 @@ export interface SceneContext {
     fixedDeltaMs: number;
 }
 
+export interface SceneContextOptions {
+    defaultRenderTask?: boolean;
+}
+
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
 export interface SceneContextInternal extends SceneContext, RenderingContext {
     /** All renderables in this scene. The active frame-graph tasks bucket them
@@ -71,6 +76,11 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     _renderables: Renderable[];
     /** Pre-pass work (shadow maps, compute, etc.). */
     _prePasses: PrePassRenderable[];
+    /** GaussianSplatting meshes attached to this scene.  Populated by
+     *  `attachGaussianSplattingMesh`.  Scene-core stays GS-agnostic apart from
+     *  this opaque registry (used by `gpu-picker` to iterate GS meshes without
+     *  scanning `_renderables`). */
+    _gsMeshes: GaussianSplattingMesh[];
     /** Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
     /** Per-frame callbacks run before rendering (animation, physics, etc.). */
@@ -133,7 +143,7 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
 }
 
 /** Create an empty scene context bound to the given engine. */
-export function createSceneContext(engine: EngineContext): SceneContext {
+export function createSceneContext(engine: EngineContext, options?: SceneContextOptions): SceneContext {
     const eng = engine as EngineContextInternal;
 
     // Closures below capture `ctx` by-reference via this object.
@@ -150,6 +160,7 @@ export function createSceneContext(engine: EngineContext): SceneContext {
         imageProcessing: { exposure: 1.0, contrast: 1.0, toneMappingEnabled: false },
         _renderables: [],
         _prePasses: [],
+        _gsMeshes: [],
         _uniformUpdaters: [],
         fixedDeltaMs: 0,
         _beforeRender: [],
@@ -195,26 +206,28 @@ export function createSceneContext(engine: EngineContext): SceneContext {
     // (offscreen RTTs, post-FX, UI overlays) before/after.
     const fg = createFrameGraph(eng, ctx);
     ctx._frameGraph = fg;
-    const swapRT = createRenderTarget({
-        label: "scene-swapchain",
-        colorFormat: eng.format,
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: eng.msaaSamples,
-        size: "canvas",
-        resolveToSwapchain: true,
-    });
-    _appendTask(
-        fg,
-        createRenderTask(
-            {
-                name: "scene",
-                rt: swapRT,
-                clrColor: ctx.clearColor,
-            },
-            eng,
-            ctx
-        )
-    );
+    if (options?.defaultRenderTask !== false) {
+        const swapRT = createRenderTarget({
+            label: "scene-swapchain",
+            colorFormat: eng.format,
+            depthStencilFormat: "depth24plus-stencil8",
+            sampleCount: eng.msaaSamples,
+            size: "canvas",
+            resolveToSwapchain: true,
+        });
+        _appendTask(
+            fg,
+            createRenderTask(
+                {
+                    name: "scene",
+                    rt: swapRT,
+                    clrColor: ctx.clearColor,
+                },
+                eng,
+                ctx
+            )
+        );
+    }
     ctx._disposables.push(() => fg.dispose());
     return ctx;
 }
@@ -335,6 +348,7 @@ export function disposeScene(scene: SceneContext): void {
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
     ctx._prePasses.length = 0;
+    ctx._gsMeshes.length = 0;
     ctx._uniformUpdaters.length = 0;
     ctx._beforeRender.length = 0;
     ctx._deferredBuilders.length = 0;

@@ -1,0 +1,4 @@
+
+> babylon-lite-workspace@ lint C:\Repos\Babylon-Lite
+> eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit
+

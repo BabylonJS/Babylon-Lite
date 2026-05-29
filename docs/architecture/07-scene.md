@@ -78,7 +78,11 @@ export function unregisterScene(engine: Engine, scene: SceneContext): void;
 export function disposeScene(scene: SceneContext): void;
 
 /** Create an empty scene context bound to the given engine. */
-export function createSceneContext(engine: Engine): SceneContext;
+export interface SceneContextOptions {
+    defaultRenderTask?: boolean;
+}
+
+export function createSceneContext(engine: Engine, options?: SceneContextOptions): SceneContext;
 
 /** Create an ArcRotateCamera framed to fit all loaded meshes, assign it to scene. */
 export function createDefaultCamera(scene: SceneContext): ArcRotateCamera;
@@ -88,7 +92,7 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera;
 
 ### SceneContext — Flat Data Struct
 
-`createSceneContext(engine)` returns a plain object with these defaults:
+`createSceneContext(engine, options?)` returns a plain object with these defaults. By default it also appends the swapchain render task named `"scene"`; pass `{ defaultRenderTask: false }` when the caller will provide the final swapchain task explicitly, such as a post-process chain.
 
 | Field                     | Default                                                       | Description                                                               |
 | ------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |

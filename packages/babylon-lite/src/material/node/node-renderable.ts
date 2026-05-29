@@ -92,6 +92,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                   _engine: engine,
                   _format: esmShadowOutput ? "rgba16float" : engine.format,
                   _depthStencilFormat: "depth32float",
+                  _depthCompare: "less-equal",
                   _msaaSamples: 1,
                   _backFaceCulling: material._graph.backFaceCulling,
                   _noColorOutput: noColorOutput,

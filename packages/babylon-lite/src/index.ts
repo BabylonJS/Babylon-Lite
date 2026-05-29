@@ -16,6 +16,7 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+export type { SceneContextOptions } from "./scene/scene.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
@@ -31,6 +32,7 @@ export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js"
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
+export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
 export { createShadowTask } from "./frame-graph/shadow-task.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
@@ -42,6 +44,20 @@ export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectR
 export type { EffectBindingKind, EffectBindingLayout, EffectWrapperOptions, EffectWrapper, EffectRenderTaskConfig, EffectRenderTask } from "./effect/effect-renderer.js";
 export { createEffectRenderer, registerEffectRenderer, unregisterEffectRenderer, disposeEffectRenderer } from "./effect/effect-renderer.js";
 export type { EffectRendererOptions, EffectRenderer } from "./effect/effect-renderer.js";
+
+// ─── Post-processes ─────────────────────────────────────────────────
+export { createBlackAndWhitePostProcessTask } from "./post-process/black-and-white.js";
+export type { BlackAndWhitePostProcessTask, BlackAndWhitePostProcessTaskConfig } from "./post-process/black-and-white.js";
+export { createAnaglyphPostProcessTask } from "./post-process/anaglyph.js";
+export type { AnaglyphPostProcessTask, AnaglyphPostProcessTaskConfig } from "./post-process/anaglyph.js";
+export { createBlurPostProcessTask } from "./post-process/blur.js";
+export type { BlurPostProcessTask, BlurPostProcessTaskConfig } from "./post-process/blur.js";
+export { createExtractHighlightsPostProcessTask } from "./post-process/extract-highlights.js";
+export type { ExtractHighlightsPostProcessTask, ExtractHighlightsPostProcessTaskConfig } from "./post-process/extract-highlights.js";
+export { createChromaticAberrationPostProcessTask } from "./post-process/chromatic-aberration.js";
+export type { ChromaticAberrationPostProcessTask, ChromaticAberrationPostProcessTaskConfig } from "./post-process/chromatic-aberration.js";
+export { createBloomPostProcessTask } from "./post-process/bloom.js";
+export type { BloomPostProcessTask, BloomPostProcessTaskConfig } from "./post-process/bloom.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
@@ -123,6 +139,12 @@ export type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-sp
 export { bakeCurrentTransformIntoVertices, bakeTransformIntoVertices } from "./mesh/GaussianSplatting/gaussian-splatting-bake.js";
 export type { GsShaderFragment, GsFragmentSlot } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { createProceduralGaussianSplattingMesh } from "./mesh/GaussianSplatting/create-gaussian-splatting-mesh.js";
+export { gsLinearDepthFragment, gsAlphaBlendedDepthFragment } from "./mesh/GaussianSplatting/gs-depth-fragments.js";
+export { gsGpuPickingFragment, encodeIdToColor } from "./mesh/GaussianSplatting/gs-gpu-picking-fragment.js";
+
+// ─── Linear-depth material (matches BJS DepthRenderer's linear depth output) ──
+export { createLinearDepthMaterial } from "./render/linear-depth-material.js";
+export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.js";
 
 // ─── Shadows ─────────────────────────────────────────────────────────
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";

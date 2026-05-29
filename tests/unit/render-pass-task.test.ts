@@ -6,7 +6,9 @@ import type { Mat4 } from "../../packages/babylon-lite/src/math/types";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../../packages/babylon-lite/src/render/renderable";
 import { createSceneContext, registerScene } from "../../packages/babylon-lite/src/scene/scene";
 import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
-import { enableSceneTransmission } from "../../packages/babylon-lite/src/frame-graph/transmission";
+import { createRenderTarget } from "../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTask } from "../../packages/babylon-lite/src/frame-graph/render-task";
+import { enableRenderTaskTransmission, enableSceneTransmission } from "../../packages/babylon-lite/src/frame-graph/transmission";
 
 const gpuGlobals = globalThis as typeof globalThis & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
@@ -168,6 +170,23 @@ function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "or
 }
 
 describe("RenderPassTask transparent sorting", () => {
+    it("preserves custom depth compare when transmission retargets a render task", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContextInternal;
+        const rt = createRenderTarget({
+            colorFormat: "bgra8unorm",
+            depthStencilFormat: "depth32float",
+            _depthCompare: "less-equal",
+            sampleCount: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "standard-z-offscreen", rt }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
+    });
+
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;

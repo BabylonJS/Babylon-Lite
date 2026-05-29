@@ -10,7 +10,7 @@ export interface Ray {
 
 /**
  * Create a picking ray from screen coordinates.
- * Uses left-handed coordinates with WebGPU 0-to-1 depth range.
+ * Uses left-handed coordinates with WebGPU reverse-Z 0-to-1 depth range.
  */
 export function createPickingRay(x: number, y: number, vpMatrix: Mat4, width: number, height: number): Ray | null {
     const invVP = mat4Invert(vpMatrix);
@@ -22,10 +22,9 @@ export function createPickingRay(x: number, y: number, vpMatrix: Mat4, width: nu
     const ndcX = (2 * x) / width - 1;
     const ndcY = 1 - (2 * y) / height;
 
-    // Unproject near point (depth = 0 for WebGPU 0-to-1 range)
-    const near = unprojectPoint(invVP, ndcX, ndcY, 0);
-    // Unproject far point (depth = 1)
-    const far = unprojectPoint(invVP, ndcX, ndcY, 1);
+    // Reverse-Z maps near to 1 and far to 0.
+    const near = unprojectPoint(invVP, ndcX, ndcY, 1);
+    const far = unprojectPoint(invVP, ndcX, ndcY, 0);
 
     const dx = far[0] - near[0];
     const dy = far[1] - near[1];

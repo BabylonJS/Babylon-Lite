@@ -17,7 +17,7 @@ import type { _PbrBindCtx, PbrExt } from "./pbr-flags.js";
 import { _getPbrExtsSorted, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBLE_SIDED, PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
 import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
@@ -108,9 +108,9 @@ export function getOrCreatePbrPipeline(engine: EngineContextInternal, sig: Rende
 
     const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
     const noColorOutput = (features2 & PBR2_NO_COLOR_OUTPUT) !== 0;
-    const fragModule = !sig.colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
 
-    const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig.colorFormat!, writeMask: GPUColorWrite.ALL };
+    const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig._colorFormat!, writeMask: GPUColorWrite.ALL };
     if (hasAlpha && fragTarget) {
         fragTarget.blend = {
             color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -122,17 +122,17 @@ export function getOrCreatePbrPipeline(engine: EngineContextInternal, sig: Rende
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
         ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: fragTarget ? [fragTarget] : [] } } : {}),
-        ...(sig.depthStencilFormat
+        ...(sig._depthStencilFormat
             ? {
                   depthStencil: {
-                      format: sig.depthStencilFormat,
-                      depthCompare: "less-equal" as GPUCompareFunction,
+                      format: sig._depthStencilFormat,
+                      depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
                       depthWriteEnabled: noColorOutput || esmShadowOutput || !hasAlpha,
                   },
               }
             : {}),
-        multisample: { count: sig.sampleCount },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: sig.flipY ? "cw" : "ccw" },
+        multisample: { count: sig._sampleCount },
+        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: sig._flipY ? "cw" : "ccw" },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

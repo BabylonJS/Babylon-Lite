@@ -67,11 +67,12 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
                     _vertModule,
                     _fragModule,
                     _vertexBuffers: SKYBOX_POS_BUFFER,
-                    _format: sig.colorFormat!,
-                    _depthStencilFormat: sig.depthStencilFormat,
-                    _msaaSamples: sig.sampleCount,
+                    _format: sig._colorFormat!,
+                    _depthStencilFormat: sig._depthStencilFormat,
+                    _depthCompare: sig._depthCompare,
+                    _msaaSamples: sig._sampleCount,
                     _depthWriteEnabled: false,
-                    _flipY: sig.flipY,
+                    _flipY: sig._flipY,
                 })
             );
             _cmPipelines.set(key, pipeline);

@@ -202,6 +202,7 @@ export function parseAnimationData(
         const s = n.scale ?? [1, 1, 1];
         nodes.push({
             parentIdx: findParent(parentMap, i),
+            _matrix: n.matrix as Mat4 | undefined,
             tx: t[0],
             ty: t[1],
             tz: t[2],

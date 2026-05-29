@@ -164,7 +164,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
                     entryPoint: "main",
                     targets: [
                         {
-                            format: sig.colorFormat!,
+                            format: sig._colorFormat!,
                             blend: {
                                 color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                                 alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -173,12 +173,12 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
                     ],
                 },
                 depthStencil: {
-                    format: sig.depthStencilFormat ?? "depth24plus-stencil8",
-                    depthCompare: "less-equal",
+                    format: sig._depthStencilFormat ?? "depth24plus-stencil8",
+                    depthCompare: sig._depthCompare ?? "greater-equal",
                     depthWriteEnabled: false,
                 },
-                multisample: { count: sig.sampleCount },
-                primitive: { topology: "triangle-list", cullMode: "back", frontFace: sig.flipY ? "cw" : "ccw" },
+                multisample: { count: sig._sampleCount },
+                primitive: { topology: "triangle-list", cullMode: "back", frontFace: sig._flipY ? "cw" : "ccw" },
             });
             _gndPipelines.set(key, pipeline);
             return pipeline;

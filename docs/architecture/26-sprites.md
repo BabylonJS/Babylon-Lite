@@ -589,8 +589,8 @@ export interface Sprite2DLayerOptions {
     /**
      * Depth participation:
      *  - "none"        (default) → drawn by a `SpriteRenderer` registered on the engine. Pipeline has no depth attachment; the per-instance layout has no Z slot. HUD overlays must use this mode and live on a `SpriteRenderer` (not on `addDepthHostedSpriteLayer`).
-     *  - "test"                  → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "less-equal"`, `depthWrite: false`. Sprites occlude behind 3D geometry but do not write depth.
-     *  - "test-write"            → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "less-equal"`, `depthWrite: true`. Sprites direct-draw after cached opaque meshes and before transparent renderables.
+     *  - "test"                  → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "greater-equal"`, `depthWrite: false`. Sprites occlude behind 3D geometry but do not write depth.
+     *  - "test-write"            → drawn inside the scene's 3D pass via `addDepthHostedSpriteLayer` with `depthCompare: "greater-equal"`, `depthWrite: true`. Sprites direct-draw after cached opaque meshes and before transparent renderables.
      *  Each value is a pipeline-cache key bit, baked at composition time. No runtime branch.
      *  Pure-2D engines (no scene) can only use `"none"` — they have no depth attachment.
      */
@@ -1045,9 +1045,9 @@ sample count, `_orientation`, blend mode, `_depthMode`, and depth format. The
 shader module cache also keys by `_depthMode`: transparent shaders have no
 discard path, while cutout shaders sample texture alpha, discard below
 `billboards.axisAndCutoff.w`, and return the sampled color multiplied by tint and
-`opacityMul`. The `"transparent"` depth mode uses depth compare `less-equal`,
+`opacityMul`. The `"transparent"` depth mode uses depth compare `greater-equal`,
 depth write off, no culling, and alpha or premultiplied blending. The
-`"cutout"` depth mode uses depth compare `less-equal`, depth write on, no
+`"cutout"` depth mode uses depth compare `greater-equal`, depth write on, no
 blend state, and no culling. Unsupported `additive` and `multiply` blend modes
 throw during system creation.
 
@@ -1308,8 +1308,8 @@ loses one tick of animation in the captured image. All sprite families
 | Layer `depth`  | Drawn via                                                                       | Depth attachment        | Depth compare | Depth write | Instance layout / Z                  | Render order                                                |
 | -------------- | ------------------------------------------------------------------------------- | ----------------------- | ------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
 | `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none          | `false`     | 52 B / 13 floats; no slot [13]       | engine registration order; layer order within the renderer  |
-| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `less-equal`  | `false`     | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
-| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `less-equal`  | `true`      | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
+| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `greater-equal` | `false`   | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
+| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `greater-equal` | `true`    | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
 
 The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`. `SpriteRenderer`
 layers always request `hasDepth = false` and `sampleCount = 1`, so their pipelines are built without a depth-stencil descriptor. Depth-hosted layers request `hasDepth = true`, use the target depth-stencil format provided by the frame graph, and set `depthWrite` from the layer's `depth` mode.
@@ -1536,7 +1536,7 @@ IDs `1..M`), ends that pass, then opens a second render pass that loads
 the same color/depth attachments and dispatches each registered
 contributor with the next free pick ID. Each contributor returns the next
 free ID after its draws; the picker accumulates and uses the result to
-bound mesh-vs-contributor ID dispatch. The depth-test contract (`less`)
+bound mesh-vs-contributor ID dispatch. The depth-test contract (`greater`)
 carries across the pass boundary because the second pass loads the
 previous depth, so closest-hit semantics are preserved across mesh +
 contributor draws.

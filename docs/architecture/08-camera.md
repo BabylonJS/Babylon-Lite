@@ -212,7 +212,7 @@ Both cameras use the same world-matrix-to-view inversion (described above). This
 
 ### Projection Matrix
 
-Both cameras: `mat4PerspectiveLH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with zero-to-one depth range.
+Both cameras: `mat4PerspectiveLH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
 
 ### View-Projection Matrix
 

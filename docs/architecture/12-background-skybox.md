@@ -271,7 +271,7 @@ export async function loadCubeTexture(
 | Topology | `triangle-list` |
 | Cull mode | `back` |
 | Front face | `ccw` |
-| Depth compare | `less-equal` |
+| Depth compare | `greater-equal` |
 | Depth write | **`false`** |
 | MSAA | `count = msaaSamples` |
 | Blend | None |
@@ -286,7 +286,7 @@ Both DDS and HDR cubemap skyboxes use the same pipeline configuration via `creat
 | Topology | `triangle-list` |
 | Cull mode | `back` |
 | Front face | `ccw` |
-| Depth compare | `less-equal` |
+| Depth compare | `greater-equal` |
 | Depth write | **`false`** |
 | MSAA | `count = msaaSamples` |
 | Blend | None |
@@ -299,7 +299,7 @@ Both DDS and HDR cubemap skyboxes use the same pipeline configuration via `creat
 | Topology | `triangle-list` |
 | Cull mode | `back` |
 | Front face | `ccw` |
-| Depth compare | `less-equal` |
+| Depth compare | `greater-equal` |
 | Depth write | **`false`** |
 | MSAA | `count = msaaSamples` |
 | Blend | Premultiplied alpha: `src=one, dst=one-minus-src-alpha` (both color and alpha) |
@@ -312,7 +312,7 @@ Both DDS and HDR cubemap skyboxes use the same pipeline configuration via `creat
 | Topology | `triangle-list` |
 | Cull mode | **`none`** (sees inside of box) |
 | Front face | `ccw` |
-| Depth compare | `less-equal` |
+| Depth compare | `greater-equal` |
 | Depth write | `true` |
 | MSAA | `count = msaaSamples` |
 | Blend | None |

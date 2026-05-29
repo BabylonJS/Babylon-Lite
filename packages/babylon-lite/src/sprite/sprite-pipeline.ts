@@ -24,7 +24,7 @@ const SPRITE_DEPTH_OFFSET_BYTES = 52;
 function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1): string {
     const group = `@group(${spriteGroupIndex})`;
     const zAttribute = hasDepth ? `,\n@location(6) iZ: f32` : "";
-    const zPosition = hasDepth ? "in.iZ" : "0.0";
+    const zPosition = hasDepth ? "1.0 - in.iZ" : "0.0";
     return `struct Layer {
 viewPos: vec2<f32>,
 viewScale: f32,
@@ -267,7 +267,7 @@ function buildSpritePipeline(
     if (hasDepth) {
         descriptor.depthStencil = {
             format: depthStencilFormat!,
-            depthCompare: "less-equal",
+            depthCompare: "greater-equal",
             depthWriteEnabled: depthWrite,
         };
     }

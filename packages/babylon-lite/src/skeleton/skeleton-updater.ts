@@ -198,23 +198,28 @@ export function createAnimationController(
                       // 3. Compute local → world matrices in topological order
                       for (let idx = 0; idx < numNodes; idx++) {
                           const nodeIdx = topoOrder[idx]!;
+                          const node = nodes[nodeIdx]!;
                           const off = nodeIdx * TRS_STRIDE;
-                          mat4ComposeInto(
-                              localMat,
-                              nodeIdx * 16,
-                              currentTRS[off + T_OFF]!,
-                              currentTRS[off + T_OFF + 1]!,
-                              currentTRS[off + T_OFF + 2]!,
-                              currentTRS[off + R_OFF]!,
-                              currentTRS[off + R_OFF + 1]!,
-                              currentTRS[off + R_OFF + 2]!,
-                              currentTRS[off + R_OFF + 3]!,
-                              currentTRS[off + S_OFF]!,
-                              currentTRS[off + S_OFF + 1]!,
-                              currentTRS[off + S_OFF + 2]!
-                          );
+                          if (node._matrix) {
+                              localMat.set(node._matrix, nodeIdx * 16);
+                          } else {
+                              mat4ComposeInto(
+                                  localMat,
+                                  nodeIdx * 16,
+                                  currentTRS[off + T_OFF]!,
+                                  currentTRS[off + T_OFF + 1]!,
+                                  currentTRS[off + T_OFF + 2]!,
+                                  currentTRS[off + R_OFF]!,
+                                  currentTRS[off + R_OFF + 1]!,
+                                  currentTRS[off + R_OFF + 2]!,
+                                  currentTRS[off + R_OFF + 3]!,
+                                  currentTRS[off + S_OFF]!,
+                                  currentTRS[off + S_OFF + 1]!,
+                                  currentTRS[off + S_OFF + 2]!
+                              );
+                          }
 
-                          const parentIdx = nodes[nodeIdx]!.parentIdx;
+                          const parentIdx = node.parentIdx;
                           if (parentIdx >= 0) {
                               mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
                           } else {

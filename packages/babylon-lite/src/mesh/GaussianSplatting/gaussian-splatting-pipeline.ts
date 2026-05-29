@@ -46,7 +46,72 @@ export function applyGsFragments(wgsl: string, fragments: readonly GsShaderFragm
             slotCode[slot] = (slotCode[slot] ?? "") + code + "\n";
         }
     }
-    return wgsl.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, (_, slot: string) => slotCode[slot] ?? "");
+    const spliced = wgsl.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, (_, slot: string) => slotCode[slot] ?? "");
+
+    // Field-name mangler for the GS shader. Mirrors `mangleGaussianSplattingWgsl`
+    // in `scripts/bundle-scenes-core.ts` (build-time mangling of the base WGSL).
+    //
+    // The build-time mangler renames struct fields like `u.projection → u.p` in
+    // the bundled `gaussian-splatting.wgsl`. Fragment-plugin code (e.g.
+    // `gsLinearDepthFragment`) lives in TS string constants that reference the
+    // un-mangled names (`u.projection`), so without normalisation the spliced
+    // WGSL has both `u.projection` (from the fragment) and `u.p` (from the base),
+    // causing a WebGPU parse error.
+    //
+    // Running the same mangler at runtime on the final spliced string makes both
+    // parts use the mangled names. The substitution is idempotent (single-letter
+    // mangled names don't match the `\bfullName\b` regexes) and harmless in dev
+    // mode (where the base WGSL is un-mangled, so this just normalises everything
+    // to the mangled form — WebGPU accepts both).
+    //
+    // KEEP IN SYNC with `scripts/bundle-scenes-core.ts:mangleGaussianSplattingWgsl`.
+    //
+    // Inlined here (rather than a top-level constant) so it tree-shakes out when
+    // fragments are never used — scenes that don't use depth/picking fragments
+    // (e.g. scenes 120-126) pay zero runtime cost for this mangling table.
+    const mangles: [string, string][] = [
+        ["world", "w"],
+        ["view", "v"],
+        ["projection", "p"],
+        ["viewport", "vp"],
+        ["focal", "f"],
+        ["dataSize", "ds"],
+        ["alpha", "a"],
+        ["_pad", "_p"],
+        ["vColor", "vc"],
+        ["vPos", "vq"],
+        ["dataUv", "du"],
+        ["splatIndex", "si"],
+        ["corner", "co"],
+        ["center", "ce"],
+        ["color", "cl"],
+        ["covA", "ca"],
+        ["covB", "cb"],
+        ["worldPos", "wp"],
+        ["modelView", "mv"],
+        ["camspace", "cs"],
+        ["pos2d", "p2"],
+        ["bounds", "bd"],
+        ["Vrk", "vr"],
+        ["invZ2", "iz2"],
+        ["invZ", "iz"],
+        ["cov2d", "c2"],
+        ["kernelSize", "ks"],
+        ["radius", "ra"],
+        ["epsilon", "ep"],
+        ["lambda1", "l1"],
+        ["lambda2", "l2"],
+        ["diag", "dg"],
+        ["majorAxis", "ma"],
+        ["minorAxis", "mi"],
+        ["vCenter", "vc2"],
+    ];
+
+    let mangled = spliced;
+    for (const [from, to] of mangles) {
+        mangled = mangled.replace(new RegExp(`\\b${from}\\b`, "g"), to);
+    }
+    return mangled;
 }
 
 function getOrCreatePipeline(engine: EngineContextInternal, sig: RenderTargetSignature, fragments?: readonly GsShaderFragment[]): PipelineEntry {
@@ -98,7 +163,7 @@ function getOrCreatePipeline(engine: EngineContextInternal, sig: RenderTargetSig
             entryPoint: "fs",
             targets: [
                 {
-                    format: sig.colorFormat!,
+                    format: sig._colorFormat!,
                     blend: {
                         // BJS GS material uses ALPHA_COMBINE: src*srcAlpha + dst*(1-srcAlpha)
                         color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -110,11 +175,11 @@ function getOrCreatePipeline(engine: EngineContextInternal, sig: RenderTargetSig
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         depthStencil: {
-            format: sig.depthStencilFormat ?? "depth24plus-stencil8",
-            depthCompare: "less-equal",
+            format: sig._depthStencilFormat ?? "depth24plus-stencil8",
+            depthCompare: sig._depthCompare ?? "greater-equal",
             depthWriteEnabled: false,
         },
-        multisample: { count: sig.sampleCount },
+        multisample: { count: sig._sampleCount },
     });
     entry = { pipeline, meshBindGroupLayout };
     _cache.entries.set(key, entry);
@@ -153,11 +218,11 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
             layout: entry.meshBindGroupLayout,
             entries: [
                 { binding: 0, resource: { buffer: ubo } },
-                { binding: 1, resource: mesh._gs.sampler },
-                { binding: 2, resource: mesh._gs.centersView },
-                { binding: 3, resource: mesh._gs.covAView },
-                { binding: 4, resource: mesh._gs.covBView },
-                { binding: 5, resource: mesh._gs.colorsView },
+                { binding: 1, resource: mesh._gs._sampler },
+                { binding: 2, resource: mesh._gs._centersView },
+                { binding: 3, resource: mesh._gs._covAView },
+                { binding: 4, resource: mesh._gs._covBView },
+                { binding: 5, resource: mesh._gs._colorsView },
             ],
         });
         bindGroups.set(entry.pipeline, bg);
@@ -261,9 +326,9 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
                 update,
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
-                    pass.setVertexBuffer(0, mesh._gs.quadBuffer);
-                    pass.setVertexBuffer(1, mesh._gs.splatIndexBuffer);
-                    pass.setIndexBuffer(mesh._gs.indexBuffer, "uint16");
+                    pass.setVertexBuffer(0, mesh._gs._quadBuffer);
+                    pass.setVertexBuffer(1, mesh._gs._splatIndexBuffer);
+                    pass.setIndexBuffer(mesh._gs._indexBuffer, "uint16");
                     pass.drawIndexed(6, mesh.vertexCount);
                     return 1;
                 },
@@ -277,7 +342,14 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
  *  registers a disposer that frees per-mesh GPU buffers and the worker.
  *  Called from the deferred builder installed by `addToScene`. */
 export function attachGaussianSplattingMesh(scene: SceneContext, mesh: GaussianSplattingMesh, fragments?: readonly GsShaderFragment[]): void {
-    const ctx = scene as unknown as { _renderables: Renderable[]; _disposables: (() => void)[] };
+    const ctx = scene as unknown as { _renderables: Renderable[]; _disposables: (() => void)[]; _gsMeshes: GaussianSplattingMesh[] };
     ctx._renderables.push(buildGaussianSplattingRenderable(scene, mesh, fragments));
-    ctx._disposables.push(() => disposeGaussianSplattingMesh(mesh));
+    ctx._gsMeshes.push(mesh);
+    ctx._disposables.push(() => {
+        const i = ctx._gsMeshes.indexOf(mesh);
+        if (i >= 0) {
+            ctx._gsMeshes.splice(i, 1);
+        }
+        disposeGaussianSplattingMesh(mesh);
+    });
 }

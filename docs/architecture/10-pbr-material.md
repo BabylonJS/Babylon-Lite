@@ -445,7 +445,7 @@ Base vertex buffers are defined by the template. Fragment modules add additional
 | Cull mode     | `back` (or `none` if `PBR_HAS_DOUBLE_SIDED`)                  |
 | Front face    | `ccw`                                                         |
 | Depth format  | `depth24plus-stencil8`                                        |
-| Depth compare | `less-equal`                                                  |
+| Depth compare | `greater-equal`                                               |
 | Depth write   | `true` (disabled for alpha-blend variants)                    |
 | MSAA          | `count = msaaSamples` (4)                                     |
 | Color target  | Canvas preferred format, alpha blend if `PBR_HAS_ALPHA_BLEND` |

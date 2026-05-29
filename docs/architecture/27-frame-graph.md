@@ -57,7 +57,7 @@ export interface FrameGraph {
 }
 ```
 
-`createSceneContext(engine)` creates a frame graph immediately and appends one default swapchain `RenderTask` named `"scene"`. `registerSceneWithShadowSupport()` inserts the internal shadow adapter task named `"shadow"` at the front, while ordinary `registerScene()` stays shadow-free so non-shadow scenes do not retain the shadow task module. User code normally accesses the graph through `getFrameGraph(scene)` or passes the scene directly to `addTask*()`.
+`createSceneContext(engine, options?)` creates a frame graph immediately and appends one default swapchain `RenderTask` named `"scene"` unless `options.defaultRenderTask === false`. Post-process pipelines that render the scene to an offscreen source and resolve their final fullscreen pass to the swapchain disable the default task to avoid a duplicate scene render. `registerSceneWithShadowSupport()` inserts the internal shadow adapter task named `"shadow"` at the front, while ordinary `registerScene()` stays shadow-free so non-shadow scenes do not retain the shadow task module. User code normally accesses the graph through `getFrameGraph(scene)` or passes the scene directly to `addTask*()`.
 
 `build()` runs in two phases (mirroring the implicit shape of BJS' `frameGraph.buildAsync`):
 
@@ -316,7 +316,7 @@ This keeps the refraction texture and all bind groups stable between graph rebui
 
 ### Default Scene Pass
 
-`createSceneContext(engine)` creates:
+`createSceneContext(engine)` creates this task by default; `createSceneContext(engine, { defaultRenderTask: false })` skips it for scenes that provide their own final swapchain task:
 
 ```typescript
 const swapRT = createRenderTarget({

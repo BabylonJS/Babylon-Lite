@@ -16,7 +16,7 @@ export const emitter: BlockEmitter = {
         const depthConn = block.inputs.get("depth");
         if (depthConn?.source) {
             const depth = ctx.cast(ctx.resolve(block, "depth", stage, state), "f32");
-            state.fragment.body.push(`_NME_FRAG_DEPTH_ = ${depth.expr};`);
+            state.fragment.body.push(`_NME_FRAG_DEPTH_ = 1.0 - (${depth.expr});`);
         } else if (block.inputs.get("worldPos")?.source && block.inputs.get("viewProjection")?.source) {
             const worldPos = ctx.cast(ctx.resolve(block, "worldPos", stage, state), "vec4f");
             const viewProjection = ctx.cast(ctx.resolve(block, "viewProjection", stage, state), "mat4f");

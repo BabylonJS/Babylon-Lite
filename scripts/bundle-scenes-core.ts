@@ -18,9 +18,19 @@ import { minify as terserMinify } from "terser";
 import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
 
 /**
- * Vite plugin: minify WGSL shader text using miniray (whitespace removal + comment stripping).
- * For `?raw` WGSL imports: miniray minification (no identifier mangling — miniray's mangler
- * produces invalid WGSL on some shaders).
+ * Vite plugin: minify WGSL shader text using miniray (whitespace removal + identifier mangling).
+ * For `?raw` WGSL imports: miniray minifies whitespace AND short-renames module/local identifiers.
+ *   - Caveat 1: miniray's mangler does NOT guard against shadowing module-scope vars (e.g. it may
+ *     rename a local to the same letter as a uniform binding). We pass `keepNames: ["u", "in",
+ *     "finalColor"]` for `gaussian-splatting.wgsl` to reserve (a) the uniform binding name `u`
+ *     so locals don't collide with it (otherwise WGSL parsing fails with "cannot index into
+ *     mat3x3"), and (b) the fragment-stage identifiers `in` (parameter) / `finalColor` (local)
+ *     that runtime fragment-plugin code (`gsLinearDepthFragment` etc.) references.
+ *   - Caveat 2: miniray strips block comments. The GS shaders embed `/* GS_FRAGMENT_* *\/`
+ *     markers used by `applyGsFragments` to splice in fragment-plugin code at runtime. We
+ *     encode each marker as a `const _GS_FRAGMENT_X_:u32=0u;` declaration before miniray
+ *     (which survives with `treeShaking: false`), then decode back to a comment marker
+ *     after minification — keeping the runtime API and source format unchanged.
  * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
  * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
  */
@@ -36,9 +46,16 @@ function wgslMinifyPlugin(): Plugin {
             const match = code.match(/^export default "(.*)"$/s);
             if (!match) return null;
             const raw = JSON.parse(`"${match[1]}"`);
-            const result = minifyWgslMiniray(raw, { mangle: false });
-            const minified = typeof result === "string" ? result : result.code;
-            const compact = id.includes("gaussian-splatting.wgsl") ? mangleGaussianSplattingWgsl(minified) : minified;
+            const isGs = id.includes("gaussian-splatting.wgsl");
+            // Encode `/* GS_FRAGMENT_X *\/` comment markers as const declarations so they
+            // survive miniray's comment stripping. Decoded back below.
+            const encoded = isGs ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;") : raw;
+            const result = minifyWgslMiniray(encoded, isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : {});
+            let minified = typeof result === "string" ? result : result.code;
+            if (isGs) {
+                minified = minified.replace(/const\s+_(GS_FRAGMENT_\w+)_\s*:\s*u32\s*=\s*0u\s*;/g, "/*$1*/");
+            }
+            const compact = isGs ? mangleGaussianSplattingWgsl(minified) : minified;
             return { code: `export default ${JSON.stringify(compact)}`, map: null };
         },
         renderChunk(code: string, chunk) {
@@ -58,6 +75,9 @@ function replaceWgslIdentifiers(code: string, replacements: readonly (readonly [
 }
 
 function mangleGaussianSplattingWgsl(code: string): string {
+    // KEEP IN SYNC with `packages/babylon-lite/src/mesh/GaussianSplatting/gaussian-splatting-pipeline.ts:GS_FIELD_MANGLE`.
+    // The runtime version normalises any spliced fragment-plugin code to use these mangled
+    // names so the WebGPU compiler sees a single consistent identifier set.
     return replaceWgslIdentifiers(code, [
         ["world", "w"],
         ["view", "v"],

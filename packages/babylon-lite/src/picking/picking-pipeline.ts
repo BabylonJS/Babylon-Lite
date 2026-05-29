@@ -104,7 +104,7 @@ function createPickingPipelineInternal(engine: EngineContextInternal, opts: Pick
         },
         depthStencil: {
             format: "depth24plus",
-            depthCompare: "less",
+            depthCompare: "greater",
             depthWriteEnabled: true,
         },
         primitive: {

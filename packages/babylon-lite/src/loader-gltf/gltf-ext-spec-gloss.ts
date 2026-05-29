@@ -25,7 +25,8 @@ const ext: GltfFeature = {
             return null;
         }
         const [diffuse, specGloss] = await Promise.all([ctx._texture(sg.diffuseTexture, true), ctx._texture(sg.specularGlossinessTexture, true)]);
-        const out: Partial<PbrMaterialProps> = {};
+        const sf = sg.specularFactor;
+        const out: Partial<PbrMaterialProps> = { metallicFactor: 0, roughnessFactor: 1 - (sg.glossinessFactor ?? 1), reflectance: sf ? Math.max(sf[0], sf[1], sf[2]) : 1 };
         if (diffuse) {
             out.baseColorTexture = diffuse;
         }

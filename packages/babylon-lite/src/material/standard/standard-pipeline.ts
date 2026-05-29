@@ -19,7 +19,7 @@ import { createStandardTemplate } from "./standard-template.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import {
     DIFFUSE_USES_UV2,
     DISABLE_LIGHTING,
@@ -168,36 +168,36 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
     const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
     const noColorOutput = (features & NO_COLOR_OUTPUT) !== 0;
     const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
-    const fragModule = !sig.colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
+    const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
 
     const needsBlend = !esmShadowOutput && ((features & HAS_OPACITY_TEXTURE) !== 0 || (features & MATERIAL_ALPHA_BLEND) !== 0);
     const colorTarget: GPUColorTargetState | null = noColorOutput
         ? null
         : needsBlend
           ? {
-                format: sig.colorFormat!,
+                format: sig._colorFormat!,
                 blend: {
                     color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
                     alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
                 },
             }
-          : { format: sig.colorFormat! };
+          : { format: sig._colorFormat! };
 
     const pipeline = device.createRenderPipeline({
         layout: device.createPipelineLayout({ bindGroupLayouts: bgls }),
         vertex: { module: vertModule, entryPoint: "main", buffers: composed._vertexBufferLayouts },
         ...(fragModule ? { fragment: { module: fragModule, entryPoint: "main", targets: colorTarget ? [colorTarget] : [] } } : {}),
-        ...(sig.depthStencilFormat
+        ...(sig._depthStencilFormat
             ? {
                   depthStencil: {
-                      format: sig.depthStencilFormat,
-                      depthCompare: "less-equal" as GPUCompareFunction,
+                      format: sig._depthStencilFormat,
+                      depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
                       depthWriteEnabled: noColorOutput || esmShadowOutput || !needsBlend,
                   },
               }
             : {}),
-        multisample: { count: sig.sampleCount },
-        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: sig.flipY ? "cw" : "ccw" },
+        multisample: { count: sig._sampleCount },
+        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: sig._flipY ? "cw" : "ccw" },
     });
 
     bindings._pipelines.set(key, pipeline);
