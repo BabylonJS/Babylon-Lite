@@ -297,6 +297,18 @@ export {
     disposeSpriteRenderer,
 } from "./sprite/sprite-renderer.js";
 
+// ─── Text ────────────────────────────────────────────────────────────
+export type { Font } from "./text/internal.js";
+export { loadFont, createFontFromBuffer, getGlyphId, getGlyphIds } from "./text/font.js";
+export type { QuadCurve, GlyphBounds, GlyphCurves, PlacedGlyph, GlyphRun, TextDescriptor, TextLayoutOptions } from "./text/public-types.js";
+export { extractGlyphCurves } from "./text/curves.js";
+export type { DefaultTextDescriptor } from "./text/internal.js";
+export { createDefaultTextDescriptor, updateDefaultTextDescriptor } from "./text/default-descriptor.js";
+export type { TextData } from "./text/internal.js";
+export { createTextData, updateTextData, disposeTextData } from "./text/text-data.js";
+export type { TextRenderableOptions, TextRenderable } from "./text/text-renderable.js";
+export { createTextRenderable, disposeTextRenderable, addTextRenderable } from "./text/text-renderable.js";
+
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
     createHavokWorld,

@@ -1151,5 +1151,14 @@
         "tags": ["navigation", "recast", "wasm", "raycast"],
         "skipPerf": true,
         "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 181,
+        "slug": "scene181-text-editor",
+        "name": "Scene 181 - Live Text Editor",
+        "description": "Edit a textarea to drive a streaming text renderable in real time. Demonstrates in-place atlas growth and instance buffer reuse.",
+        "tags": ["text", "font", "demo", "interactive"],
+        "skipParity": true,
+        "skipPerf": true
     }
 ]
