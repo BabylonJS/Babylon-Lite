@@ -184,6 +184,34 @@ describe("SpriteAnimationManager", () => {
         expect(target.remove).not.toHaveBeenCalled();
     });
 
+    it("rejects non-finite from/to when replaying", () => {
+        const animation = createSpriteFrameAnimation({ setFrame: vi.fn() }, 0, 1, false, 50);
+
+        expect(() => playSpriteFrameAnimation(animation, Infinity, 1)).toThrow(/finite from\/to/);
+        expect(() => playSpriteFrameAnimation(animation, 0, NaN)).toThrow(/finite from\/to/);
+        expect(animation.from).toBe(0);
+        expect(animation.to).toBe(1);
+        expect(animation.current).toBe(0);
+    });
+
+    it("removes the finished animation by identity when onEnd clears the manager", () => {
+        const manager = createSpriteAnimationManager();
+        const finished = createSpriteFrameAnimation({ setFrame: vi.fn() }, 0, 1, false, 50, {
+            onEnd: () => clearSpriteAnimations(manager),
+        });
+        const other = createSpriteFrameAnimation({ setFrame: vi.fn() }, 0, 5, false, 50);
+
+        addSpriteAnimation(manager, other);
+        addSpriteAnimation(manager, finished);
+
+        expect(() => {
+            updateSpriteAnimationManager(manager, 51);
+            updateSpriteAnimationManager(manager, 51);
+        }).not.toThrow();
+
+        expect(manager.animations).toEqual([]);
+    });
+
     it("uses fixedDeltaMs when supplied", () => {
         const manager = createSpriteAnimationManager({ fixedDeltaMs: 51 });
         const layer = createSprite2DLayer(makeMockAtlas());

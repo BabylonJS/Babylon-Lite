@@ -33,6 +33,30 @@ describe("AnimationManager", () => {
         expect(task.active).toBe(false);
     });
 
+    it("does not skip a task when an earlier task removes itself during update", () => {
+        const manager = createAnimationManager();
+        const calls: string[] = [];
+        const first = createAnimationTask((m) => {
+            calls.push("first");
+            removeAnimationTask(m, first);
+        });
+        const second = createAnimationTask(() => {
+            calls.push("second");
+        });
+
+        addAnimationTask(manager, first);
+        addAnimationTask(manager, second);
+
+        updateAnimationManager(manager, 16);
+
+        expect(calls).toEqual(["first", "second"]);
+        expect(manager.animations).toEqual([second]);
+
+        calls.length = 0;
+        updateAnimationManager(manager, 16);
+        expect(calls).toEqual(["second"]);
+    });
+
     it("uses fixed deltas for manual and autonomous updates", () => {
         const callbacks: Array<(now: number) => void> = [];
         const requestAnimationFrameMock = vi.fn((callback: (now: number) => void) => {

@@ -105,8 +105,12 @@ export function updateAnimationManager(manager: AnimationManager, deltaMs: numbe
         return;
     }
     const handledCategory = manager._taskCategoryHandler?.(manager, step) ? manager._taskCategory : undefined;
-    for (let index = 0; index < manager.animations.length; index++) {
-        const task = manager.animations[index]! as AnimationTaskInternal;
+    // Snapshot the list so a task's _update callback can remove itself or other
+    // tasks (via removeAnimationTask) without shifting unvisited tasks out of the
+    // iteration. Removed tasks are marked inactive and skipped below.
+    const tasks = manager.animations.slice();
+    for (let index = 0; index < tasks.length; index++) {
+        const task = tasks[index]! as AnimationTaskInternal;
         if (!task.active || (task._category && task._category === handledCategory)) {
             continue;
         }

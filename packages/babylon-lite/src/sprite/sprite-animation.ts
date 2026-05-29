@@ -186,6 +186,9 @@ export function playSpriteFrameAnimation(
     delayMs = animation.delayMs,
     options?: PlaySpriteAnimationOptions
 ): void {
+    if (!Number.isFinite(from) || !Number.isFinite(to)) {
+        throw new Error("Sprite frame animation requires finite from/to frame indices.");
+    }
     const fromFrame = Math.trunc(from);
     const toFrame = Math.trunc(to);
     animation.from = fromFrame;
@@ -211,20 +214,15 @@ export function updateSpriteAnimationManager(manager: SpriteAnimationManager, de
     if (!Number.isFinite(stepMs) || stepMs < 0) {
         return;
     }
-    const animations = manager.animations;
-    for (let index = animations.length - 1; index >= 0; index--) {
-        const animation = animations[index]!;
+    // Snapshot the list so onEnd callbacks (invoked from advanceSpriteAnimation)
+    // can safely clear or remove animations from the same manager without
+    // corrupting iteration, and remove finished animations by identity rather
+    // than by a possibly-stale index.
+    const animations = manager.animations.slice();
+    for (const animation of animations) {
         if (!advanceSpriteAnimation(animation, stepMs)) {
-            removeSpriteAnimationAt(manager, index);
+            removeSpriteAnimation(manager, animation);
         }
-    }
-}
-
-function removeSpriteAnimationAt(manager: SpriteAnimationManager, index: number): void {
-    const animation = manager.animations[index]!;
-    manager.animations.splice(index, 1);
-    if (getSpriteAnimationOwner(animation) === manager) {
-        clearSpriteAnimationOwner(animation);
     }
 }
 
