@@ -72,7 +72,6 @@ function installCamera(scene: SceneContext, map: DoomMap): void {
     scene.camera = cam;
 
     let yaw = yaw0;
-    let pitch = 0;
     const collLines = buildCollisionLines(map);
     const keys = new Set<string>();
     const onDown = (e: KeyboardEvent): void => {
@@ -85,31 +84,34 @@ function installCamera(scene: SceneContext, map: DoomMap): void {
 
     onBeforeRender(scene, (deltaMs) => {
         const dt = deltaMs / 1000;
-        if (keys.has("ArrowLeft")) yaw -= TURN_SPEED * dt;
-        if (keys.has("ArrowRight")) yaw += TURN_SPEED * dt;
-        if (keys.has("ArrowUp")) pitch = Math.min(pitch + TURN_SPEED * dt, 1.2);
-        if (keys.has("ArrowDown")) pitch = Math.max(pitch - TURN_SPEED * dt, -1.2);
+        const strafeMod = keys.has("AltLeft") || keys.has("AltRight");
+        if (!strafeMod) {
+            if (keys.has("ArrowLeft")) yaw += TURN_SPEED * dt;
+            if (keys.has("ArrowRight")) yaw -= TURN_SPEED * dt;
+        }
 
         const fx = Math.cos(yaw);
         const fz = Math.sin(yaw);
         const speed = (keys.has("ShiftLeft") ? 2 : 1) * MOVE_SPEED * dt;
         let mx = 0;
         let mz = 0;
-        if (keys.has("KeyW")) {
+        if (keys.has("ArrowUp")) {
             mx += fx;
             mz += fz;
         }
-        if (keys.has("KeyS")) {
+        if (keys.has("ArrowDown")) {
             mx -= fx;
             mz -= fz;
         }
-        if (keys.has("KeyA")) {
-            mx += fz;
-            mz -= fx;
-        }
-        if (keys.has("KeyD")) {
+        const strafeLeft = keys.has("Comma") || (strafeMod && keys.has("ArrowLeft"));
+        const strafeRight = keys.has("Period") || (strafeMod && keys.has("ArrowRight"));
+        if (strafeLeft) {
             mx -= fz;
             mz += fx;
+        }
+        if (strafeRight) {
+            mx += fz;
+            mz -= fx;
         }
         const currentFloor = floorHeightAt(map, eye.x, eye.z);
         const moved = tryMove(collLines, eye.x, eye.z, mx * speed, mz * speed, currentFloor);
@@ -120,10 +122,9 @@ function installCamera(scene: SceneContext, map: DoomMap): void {
         cam.position.x = eye.x;
         cam.position.y = eye.y;
         cam.position.z = eye.z;
-        const cp = Math.cos(pitch);
-        cam.target.x = eye.x + fx * cp;
-        cam.target.y = eye.y + Math.sin(pitch);
-        cam.target.z = eye.z + fz * cp;
+        cam.target.x = eye.x + fx;
+        cam.target.y = eye.y;
+        cam.target.z = eye.z + fz;
     });
 }
 
