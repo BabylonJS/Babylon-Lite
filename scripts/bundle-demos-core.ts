@@ -154,7 +154,7 @@ export async function buildDemoBundles(): Promise<void> {
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         try {
             for (const demo of demos) {
-                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${demo.slug}`, `bundle-demo-${demo.slug}.html`, "/bundle/demos/");
+                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${demo.slug}`, `demo-${demo.slug}.html`, "/bundle/demos/");
                 manifest[demo.slug] = { rawKB, gzipKB };
                 writeFileSync(DEMOS_MANIFEST_FILE, JSON.stringify(manifest, null, 2));
                 console.log(`  measured ${demo.slug}: ${rawKB} KB raw, ${gzipKB} KB gzip`);

@@ -9,8 +9,13 @@
   </style>
 </head>
 <body>
+  <!--
+    This page loads the production-BUNDLED demo (tree-shaken + minified) from
+    /bundle/demos/, NOT the raw TypeScript source, so it renders the exact thin
+    artifact whose size we advertise. Run `pnpm build:bundle-demos` (also part of
+    `pnpm dev:lab`) to (re)generate the bundle that this page references.
+  -->
   <canvas id="renderCanvas"></canvas>
-  <script src="/loader.js"></script>
-  <script type="module" src="/src/demos/torus-states.ts"></script>
+  <script type="module" src="/bundle/demos/torus-states.js"></script>
 </body>
 </html>
