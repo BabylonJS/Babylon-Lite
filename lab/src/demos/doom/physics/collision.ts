@@ -10,7 +10,7 @@
 //   - Collisions resolve by pushing the player out of the line along its normal,
 //     which preserves tangential motion (wall sliding).
 
-import type { DoomMap } from "../wad/map.js";
+import type { DoomMap, Sector } from "../wad/map.js";
 
 export const PLAYER_RADIUS = 16;
 export const PLAYER_HEIGHT = 56;
@@ -26,8 +26,9 @@ export interface CollLine {
     y2: number;
     oneSided: boolean;
     blocking: boolean;
-    openTop: number;
-    openBottom: number;
+    /** Front/back sector indices; back is -1 for one-sided lines. */
+    frontSec: number;
+    backSec: number;
 }
 
 export function buildCollisionLines(map: DoomMap): CollLine[] {
@@ -37,17 +38,10 @@ export function buildCollisionLines(map: DoomMap): CollLine[] {
         const v1 = map.vertices[ld.start];
         const v2 = map.vertices[ld.end];
         if (!v1 || !v2) continue;
-        const frontSec = map.sectors[map.sidedefs[ld.front].sector];
-        if (!frontSec) continue;
+        const frontSec = map.sidedefs[ld.front].sector;
+        if (map.sectors[frontSec] === undefined) continue;
         const oneSided = ld.back < 0;
-        const backSec = oneSided ? null : map.sectors[map.sidedefs[ld.back].sector];
-
-        let openTop = 0;
-        let openBottom = 0;
-        if (backSec) {
-            openTop = Math.min(frontSec.ceilHeight, backSec.ceilHeight);
-            openBottom = Math.max(frontSec.floorHeight, backSec.floorHeight);
-        }
+        const backSec = oneSided ? -1 : map.sidedefs[ld.back].sector;
 
         lines.push({
             x1: v1.x,
@@ -56,17 +50,24 @@ export function buildCollisionLines(map: DoomMap): CollLine[] {
             y2: v2.y,
             oneSided,
             blocking: (ld.flags & ML_BLOCKING) !== 0,
-            openTop,
-            openBottom,
+            frontSec,
+            backSec,
         });
     }
     return lines;
 }
 
-function lineBlocks(line: CollLine, currentFloor: number): boolean {
+// Live opening test against current sector heights, so doors/lifts that mutate
+// sector floor/ceiling immediately affect passability.
+function lineBlocks(line: CollLine, currentFloor: number, sectors: Sector[]): boolean {
     if (line.oneSided || line.blocking) return true;
-    if (line.openTop - line.openBottom < PLAYER_HEIGHT) return true;
-    if (line.openBottom - currentFloor > MAX_STEP) return true;
+    const front = sectors[line.frontSec];
+    const back = sectors[line.backSec];
+    if (!front || !back) return true;
+    const openTop = Math.min(front.ceilHeight, back.ceilHeight);
+    const openBottom = Math.max(front.floorHeight, back.floorHeight);
+    if (openTop - openBottom < PLAYER_HEIGHT) return true;
+    if (openBottom - currentFloor > MAX_STEP) return true;
     return false;
 }
 
@@ -74,7 +75,7 @@ function lineBlocks(line: CollLine, currentFloor: number): boolean {
  * Resolves a desired move from (fromX,fromY) by (dx,dy) against blocking lines,
  * sliding along walls. `currentFloor` is the floor height the player stands on.
  */
-export function tryMove(lines: CollLine[], fromX: number, fromY: number, dx: number, dy: number, currentFloor: number): { x: number; y: number } {
+export function tryMove(lines: CollLine[], fromX: number, fromY: number, dx: number, dy: number, currentFloor: number, sectors: Sector[]): { x: number; y: number } {
     let px = fromX + dx;
     let py = fromY + dy;
     const r2 = PLAYER_RADIUS * PLAYER_RADIUS;
@@ -82,7 +83,7 @@ export function tryMove(lines: CollLine[], fromX: number, fromY: number, dx: num
     for (let iter = 0; iter < 4; iter++) {
         let moved = false;
         for (const line of lines) {
-            if (!lineBlocks(line, currentFloor)) continue;
+            if (!lineBlocks(line, currentFloor, sectors)) continue;
             // Extent gate: only react if the destination is near this segment.
             const cp = closestPointOnSegment(line, px, py);
             const gx = px - cp.x;

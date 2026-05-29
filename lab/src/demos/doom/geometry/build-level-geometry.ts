@@ -22,6 +22,13 @@ export interface Batch {
 
 export type LevelBatches = Map<string, Batch>;
 
+export interface GeometryFilter {
+    /** Return true to emit wall geometry for this linedef index. */
+    includeLine?: (ldIndex: number) => boolean;
+    /** Return true to emit floor/ceiling geometry for this subsector index. */
+    includeSubsector?: (ssIndex: number) => boolean;
+}
+
 function batchFor(map: LevelBatches, name: string): Batch {
     let b = map.get(name);
     if (!b) {
@@ -51,15 +58,17 @@ function addQuad(b: Batch, c: [V3, V3, V3, V3], uv: [number, number][], lr: numb
     b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
-export function buildLevelBatches(map: DoomMap, textures: DoomTextureCache): LevelBatches {
+export function buildLevelBatches(map: DoomMap, textures: DoomTextureCache, filter: GeometryFilter = {}): LevelBatches {
     const batches: LevelBatches = new Map();
-    buildWalls(map, textures, batches);
-    buildFlats(map, textures, batches);
+    buildWalls(map, textures, batches, filter.includeLine);
+    buildFlats(map, textures, batches, filter.includeSubsector);
     return batches;
 }
 
-function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatches): void {
-    for (const ld of map.linedefs) {
+function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatches, includeLine?: (i: number) => boolean): void {
+    for (let li = 0; li < map.linedefs.length; li++) {
+        if (includeLine && !includeLine(li)) continue;
+        const ld = map.linedefs[li];
         if (ld.front < 0) continue;
         const v1 = map.vertices[ld.start];
         const v2 = map.vertices[ld.end];
@@ -207,9 +216,10 @@ function emitWallSegment(
     );
 }
 
-function buildFlats(map: DoomMap, textures: DoomTextureCache, batches: LevelBatches): void {
+function buildFlats(map: DoomMap, textures: DoomTextureCache, batches: LevelBatches, includeSubsector?: (i: number) => boolean): void {
     const polys = buildSubsectorPolygons(map);
     for (let i = 0; i < map.subsectors.length; i++) {
+        if (includeSubsector && !includeSubsector(i)) continue;
         const poly = polys[i];
         const ss = map.subsectors[i];
         if (!poly || poly.length < 3 || ss.segCount === 0) continue;
@@ -227,15 +237,21 @@ function buildFlats(map: DoomMap, textures: DoomTextureCache, batches: LevelBatc
 }
 
 function sectorOfSubsector(map: DoomMap, ssIndex: number): Sector | null {
+    const idx = sectorIndexOfSubsector(map, ssIndex);
+    return idx < 0 ? null : (map.sectors[idx] ?? null);
+}
+
+/** Index of the sector a subsector belongs to, or -1 if undeterminable. */
+export function sectorIndexOfSubsector(map: DoomMap, ssIndex: number): number {
     const ss = map.subsectors[ssIndex];
     const seg = map.segs[ss.firstSeg];
-    if (!seg) return null;
+    if (!seg) return -1;
     const ld = map.linedefs[seg.linedef];
-    if (!ld) return null;
+    if (!ld) return -1;
     const sideRef = seg.side === 0 ? ld.front : ld.back;
-    if (sideRef < 0) return null;
+    if (sideRef < 0) return -1;
     const side = map.sidedefs[sideRef];
-    return side ? (map.sectors[side.sector] ?? null) : null;
+    return side ? side.sector : -1;
 }
 
 function addFlatPoly(b: Batch, poly: { x: number; y: number }[], height: number, lr: number, ceiling: boolean): void {
