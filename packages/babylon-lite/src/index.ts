@@ -16,6 +16,7 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+export type { SceneContextOptions } from "./scene/scene.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js"
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
+export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
 export { createShadowTask } from "./frame-graph/shadow-task.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
@@ -43,6 +45,20 @@ export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectR
 export type { EffectBindingKind, EffectBindingLayout, EffectWrapperOptions, EffectWrapper, EffectRenderTaskConfig, EffectRenderTask } from "./effect/effect-renderer.js";
 export { createEffectRenderer, registerEffectRenderer, unregisterEffectRenderer, disposeEffectRenderer } from "./effect/effect-renderer.js";
 export type { EffectRendererOptions, EffectRenderer } from "./effect/effect-renderer.js";
+
+// ─── Post-processes ─────────────────────────────────────────────────
+export { createBlackAndWhitePostProcessTask } from "./post-process/black-and-white.js";
+export type { BlackAndWhitePostProcessTask, BlackAndWhitePostProcessTaskConfig } from "./post-process/black-and-white.js";
+export { createAnaglyphPostProcessTask } from "./post-process/anaglyph.js";
+export type { AnaglyphPostProcessTask, AnaglyphPostProcessTaskConfig } from "./post-process/anaglyph.js";
+export { createBlurPostProcessTask } from "./post-process/blur.js";
+export type { BlurPostProcessTask, BlurPostProcessTaskConfig } from "./post-process/blur.js";
+export { createExtractHighlightsPostProcessTask } from "./post-process/extract-highlights.js";
+export type { ExtractHighlightsPostProcessTask, ExtractHighlightsPostProcessTaskConfig } from "./post-process/extract-highlights.js";
+export { createChromaticAberrationPostProcessTask } from "./post-process/chromatic-aberration.js";
+export type { ChromaticAberrationPostProcessTask, ChromaticAberrationPostProcessTaskConfig } from "./post-process/chromatic-aberration.js";
+export { createBloomPostProcessTask } from "./post-process/bloom.js";
+export type { BloomPostProcessTask, BloomPostProcessTaskConfig } from "./post-process/bloom.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";

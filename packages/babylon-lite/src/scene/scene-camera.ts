@@ -16,29 +16,31 @@ export function createDefaultCamera(scene: SceneContext): ArcRotateCamera {
         maxZ = -Infinity;
 
     for (const m of scene.meshes) {
-        if (!m.boundMin || !m.boundMax) {
+        const boundMin = m.boundMin;
+        const boundMax = m.boundMax;
+        if (!boundMin || !boundMax) {
             continue;
         }
         if (m.visible === false) {
             continue;
         }
-        if (m.boundMin[0]! < minX) {
-            minX = m.boundMin[0]!;
+        if (boundMin[0]! < minX) {
+            minX = boundMin[0]!;
         }
-        if (m.boundMin[1]! < minY) {
-            minY = m.boundMin[1]!;
+        if (boundMin[1]! < minY) {
+            minY = boundMin[1]!;
         }
-        if (m.boundMin[2]! < minZ) {
-            minZ = m.boundMin[2]!;
+        if (boundMin[2]! < minZ) {
+            minZ = boundMin[2]!;
         }
-        if (m.boundMax[0]! > maxX) {
-            maxX = m.boundMax[0]!;
+        if (boundMax[0]! > maxX) {
+            maxX = boundMax[0]!;
         }
-        if (m.boundMax[1]! > maxY) {
-            maxY = m.boundMax[1]!;
+        if (boundMax[1]! > maxY) {
+            maxY = boundMax[1]!;
         }
-        if (m.boundMax[2]! > maxZ) {
-            maxZ = m.boundMax[2]!;
+        if (boundMax[2]! > maxZ) {
+            maxZ = boundMax[2]!;
         }
     }
 

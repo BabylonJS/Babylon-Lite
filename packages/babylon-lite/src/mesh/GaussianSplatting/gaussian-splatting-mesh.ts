@@ -34,27 +34,27 @@ export interface GsShaderFragment {
 
 /** Per-mesh GPU resources owned by a GaussianSplattingMesh. */
 export interface GaussianSplattingGpu {
-    centersTex: GPUTexture;
-    centersView: GPUTextureView;
-    covATex: GPUTexture;
-    covAView: GPUTextureView;
-    covBTex: GPUTexture;
-    covBView: GPUTextureView;
-    colorsTex: GPUTexture;
-    colorsView: GPUTextureView;
-    sampler: GPUSampler;
+    _centersTex: GPUTexture;
+    _centersView: GPUTextureView;
+    _covATex: GPUTexture;
+    _covAView: GPUTextureView;
+    _covBTex: GPUTexture;
+    _covBView: GPUTextureView;
+    _colorsTex: GPUTexture;
+    _colorsView: GPUTextureView;
+    _sampler: GPUSampler;
     /** Quad vertex buffer (4 vec2 corners). */
-    quadBuffer: GPUBuffer;
+    _quadBuffer: GPUBuffer;
     /** Quad index buffer (uint16 [0,1,2,0,2,3]). */
-    indexBuffer: GPUBuffer;
+    _indexBuffer: GPUBuffer;
     /** Per-instance splatIndex (Float32 × vertexCount), back-to-front order. */
-    splatIndexBuffer: GPUBuffer;
+    _splatIndexBuffer: GPUBuffer;
     /** CPU-side scratch matching `splatIndexBuffer`. */
-    splatIndexCpu: Float32Array;
+    _splatIndexCpu: Float32Array;
     /** Packed view-dependent SH textures (1..5 rgba32uint), `null` when
      *  the cloud has no SH data. Layout: 16 bytes per splat per texture. */
-    shTextures: GPUTexture[] | null;
-    shViews: GPUTextureView[] | null;
+    _shTextures: GPUTexture[] | null;
+    _shViews: GPUTextureView[] | null;
 }
 
 /** Public Gaussian-splatting mesh handle.  `_kind` is a brand so consumers can
@@ -111,15 +111,17 @@ export interface GaussianSplattingMesh extends SceneNode {
  *  `keepInRam:true` semantics on BJS `GaussianSplattingMesh`. */
 export function createGaussianSplattingMesh(engine: EngineContextInternal, name: string, geom: SplatGeometry, worker: Worker, parsed: ParsedSplat): GaussianSplattingMesh {
     const device = engine.device;
+    const queue = device.queue;
+    const { textureWidth, textureHeight, vertexCount } = geom;
 
     // ── Textures (RGBA32F, one texel per splat) ──────────────────────
     const makeRgba32f = (data: Float32Array): { tex: GPUTexture; view: GPUTextureView } => {
         const tex = device.createTexture({
-            size: [geom.textureWidth, geom.textureHeight],
+            size: [textureWidth, textureHeight],
             format: "rgba32float",
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
         });
-        device.queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: geom.textureWidth * 16 }, { width: geom.textureWidth, height: geom.textureHeight });
+        queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: textureWidth * 16 }, { width: textureWidth, height: textureHeight });
         return { tex, view: tex.createView() };
     };
     const centers = makeRgba32f(geom.centersRGBA);
@@ -135,26 +137,24 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
     });
 
     // ── Quad geometry (shared by all instances) ──────────────────────
-    const quadData = new Float32Array([-2, -2, 2, -2, 2, 2, -2, 2]);
-    const quadBuffer = device.createBuffer({ size: quadData.byteLength, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true });
-    new Float32Array(quadBuffer.getMappedRange()).set(quadData);
+    const quadBuffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true });
+    new Float32Array(quadBuffer.getMappedRange()).set([-2, -2, 2, -2, 2, 2, -2, 2]);
     quadBuffer.unmap();
 
-    const indexData = new Uint16Array([0, 1, 2, 0, 2, 3]);
     const indexBuffer = device.createBuffer({ size: 12, usage: GPUBufferUsage.INDEX, mappedAtCreation: true });
-    new Uint16Array(indexBuffer.getMappedRange()).set(indexData);
+    new Uint16Array(indexBuffer.getMappedRange()).set([0, 1, 2, 0, 2, 3]);
     indexBuffer.unmap();
 
     // ── Instance buffer: identity splatIndex until the first sort lands. ──
-    const splatIndexCpu = new Float32Array(geom.vertexCount);
-    for (let i = 0; i < geom.vertexCount; i++) {
+    const splatIndexCpu = new Float32Array(vertexCount);
+    for (let i = 0; i < vertexCount; i++) {
         splatIndexCpu[i] = i;
     }
     const splatIndexBuffer = device.createBuffer({
         size: splatIndexCpu.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(splatIndexBuffer, 0, splatIndexCpu.buffer, 0, splatIndexCpu.byteLength);
+    queue.writeBuffer(splatIndexBuffer, 0, splatIndexCpu.buffer, 0, splatIndexCpu.byteLength);
 
     // ── First-sort gate ──────────────────────────────────────────────
     let firstResolve: (() => void) | null = null;
@@ -167,22 +167,19 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
 
     // ── Compose mesh ─────────────────────────────────────────────────
     // `shDegree` comes from the parser (0 means "no view-dependent SH").
-    // The SH attacher (`gaussian-splatting-pipeline-sh.ts`, dynamic-imported
-    // when `parsed.shDegree > 0`) creates the rgba32uint textures and
-    // patches `mesh._gs.shTextures` in place. Keeping all SH-specific code
-    // out of this module lets scenes that only need the static splat path
-    // stay below their bundle ceilings.
+    // The SH attacher is dynamic-imported when needed and patches `_gs` in place,
+    // keeping SH-specific code out of static splat scenes.
     const mesh = {
         _kind: "gs-mesh",
         name,
-        vertexCount: geom.vertexCount,
-        textureWidth: geom.textureWidth,
-        textureHeight: geom.textureHeight,
+        vertexCount,
+        textureWidth,
+        textureHeight,
         boundMin: geom.boundMin.slice() as [number, number, number],
         boundMax: geom.boundMax.slice() as [number, number, number],
         shDegree: parsed.shDegree ?? 0,
         _worker: worker,
-        _depthMix: new BigInt64Array(geom.vertexCount),
+        _depthMix: new BigInt64Array(vertexCount),
         _sortWorldMatrix: new Float32Array(16),
         _sortCameraForward: new Float32Array(3),
         _sortCameraPosition: new Float32Array(3),
@@ -190,45 +187,43 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
         firstSortReady,
         _firstSortResolve: firstResolve,
         _gs: {
-            centersTex: centers.tex,
-            centersView: centers.view,
-            covATex: covA.tex,
-            covAView: covA.view,
-            covBTex: covB.tex,
-            covBView: covB.view,
-            colorsTex: colors.tex,
-            colorsView: colors.view,
-            sampler,
-            quadBuffer,
-            indexBuffer,
-            splatIndexBuffer,
-            splatIndexCpu,
-            shTextures: null,
-            shViews: null,
+            _centersTex: centers.tex,
+            _centersView: centers.view,
+            _covATex: covA.tex,
+            _covAView: covA.view,
+            _covBTex: covB.tex,
+            _covBView: covB.view,
+            _colorsTex: colors.tex,
+            _colorsView: colors.view,
+            _sampler: sampler,
+            _quadBuffer: quadBuffer,
+            _indexBuffer: indexBuffer,
+            _splatIndexBuffer: splatIndexBuffer,
+            _splatIndexCpu: splatIndexCpu,
+            _shTextures: null,
+            _shViews: null,
         },
     } as unknown as GaussianSplattingMesh;
 
     // splatsData getter — always returns the most-recently-loaded raw row buffer.
     Object.defineProperty(mesh, "splatsData", {
         get: () => retainedSplatsData,
-        configurable: true,
-        enumerable: false,
     });
 
     // updateData: replace splat data in place. Vertex count must match.
     (mesh as { updateData: (b: ArrayBuffer) => void }).updateData = (newBuffer: ArrayBuffer): void => {
         const newGeom = buildSplatGeometry(newBuffer);
         if (newGeom.vertexCount !== mesh.vertexCount) {
-            throw new Error(`GaussianSplattingMesh.updateData: vertex count mismatch (got ${newGeom.vertexCount}, expected ${mesh.vertexCount})`);
+            throw Error("GS vertex count mismatch");
         }
         const gs = mesh._gs;
         const writeTex = (tex: GPUTexture, data: Float32Array): void => {
-            device.queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: newGeom.textureWidth * 16 }, { width: newGeom.textureWidth, height: newGeom.textureHeight });
+            queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: newGeom.textureWidth * 16 }, { width: newGeom.textureWidth, height: newGeom.textureHeight });
         };
-        writeTex(gs.centersTex, newGeom.centersRGBA);
-        writeTex(gs.covATex, newGeom.covARGBA);
-        writeTex(gs.covBTex, newGeom.covBRGBA);
-        writeTex(gs.colorsTex, newGeom.colorsRGBA);
+        writeTex(gs._centersTex, newGeom.centersRGBA);
+        writeTex(gs._covATex, newGeom.covARGBA);
+        writeTex(gs._covBTex, newGeom.covBRGBA);
+        writeTex(gs._colorsTex, newGeom.colorsRGBA);
 
         mesh.boundMin = newGeom.boundMin.slice() as [number, number, number];
         mesh.boundMax = newGeom.boundMax.slice() as [number, number, number];
@@ -255,17 +250,17 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
 
     // Ship the positions buffer to the worker once. After this `geom.positions`
     // is detached on this side — that's fine, we never need it again.
-    worker.postMessage({ p: geom.positions, n: geom.vertexCount }, [geom.positions.buffer]);
+    worker.postMessage({ p: geom.positions, n: vertexCount }, [geom.positions.buffer]);
 
     worker.onmessage = (e: MessageEvent) => {
         const data = e.data as { d: BigInt64Array };
         mesh._depthMix = data.d;
         const indices = new Uint32Array(data.d.buffer);
-        const cpu = mesh._gs.splatIndexCpu;
+        const cpu = mesh._gs._splatIndexCpu;
         for (let j = 0; j < mesh.vertexCount; j++) {
             cpu[j] = indices[2 * j]!;
         }
-        device.queue.writeBuffer(mesh._gs.splatIndexBuffer, 0, cpu.buffer, 0, cpu.byteLength);
+        queue.writeBuffer(mesh._gs._splatIndexBuffer, 0, cpu.buffer, 0, cpu.byteLength);
         mesh._canPostToWorker = true;
         if (mesh._firstSortResolve) {
             mesh._firstSortResolve();
@@ -279,18 +274,9 @@ export function createGaussianSplattingMesh(engine: EngineContextInternal, name:
 /** Free all GPU + worker resources owned by a GS mesh. */
 export function disposeGaussianSplattingMesh(mesh: GaussianSplattingMesh): void {
     const gs = mesh._gs;
-    gs.centersTex.destroy();
-    gs.covATex.destroy();
-    gs.covBTex.destroy();
-    gs.colorsTex.destroy();
-    gs.quadBuffer.destroy();
-    gs.indexBuffer.destroy();
-    gs.splatIndexBuffer.destroy();
-    if (gs.shTextures) {
-        for (const tex of gs.shTextures) {
-            tex.destroy();
-        }
-    }
+    [gs._centersTex, gs._covATex, gs._covBTex, gs._colorsTex, gs._quadBuffer, gs._indexBuffer, gs._splatIndexBuffer, ...(gs._shTextures ?? [])].forEach((resource) =>
+        resource.destroy()
+    );
     mesh._worker.terminate();
 }
 

@@ -74,7 +74,7 @@ export interface FrameGraph {
 }
 ```
 
-`createSceneContext()` eagerly creates a `FrameGraph` with one default `RenderTask` named `"scene"` that renders into the swapchain. User code can add tasks with `addTask()`, `addTaskAtStart()`, or `addTaskBefore()`.
+`createSceneContext()` eagerly creates a `FrameGraph` with one default `RenderTask` named `"scene"` that renders into the swapchain unless called with `{ defaultRenderTask: false }`. Post-process pipelines that render the scene to an offscreen source and write their final pass to the swapchain disable this default task so the scene is not drawn twice. User code can add tasks with `addTask()`, `addTaskAtStart()`, or `addTaskBefore()`.
 
 ### RenderTask
 
@@ -107,7 +107,7 @@ Important fields:
 ```text
 createSceneContext(engine)
   -> createFrameGraph(engine, scene)
-  -> append default swapchain RenderTask
+  -> append default swapchain RenderTask unless defaultRenderTask is false
   -> build frame graph
 
 startEngine/registerScene frame:

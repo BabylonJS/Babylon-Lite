@@ -218,11 +218,11 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
             layout: entry.meshBindGroupLayout,
             entries: [
                 { binding: 0, resource: { buffer: ubo } },
-                { binding: 1, resource: mesh._gs.sampler },
-                { binding: 2, resource: mesh._gs.centersView },
-                { binding: 3, resource: mesh._gs.covAView },
-                { binding: 4, resource: mesh._gs.covBView },
-                { binding: 5, resource: mesh._gs.colorsView },
+                { binding: 1, resource: mesh._gs._sampler },
+                { binding: 2, resource: mesh._gs._centersView },
+                { binding: 3, resource: mesh._gs._covAView },
+                { binding: 4, resource: mesh._gs._covBView },
+                { binding: 5, resource: mesh._gs._colorsView },
             ],
         });
         bindGroups.set(entry.pipeline, bg);
@@ -326,9 +326,9 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
                 update,
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
-                    pass.setVertexBuffer(0, mesh._gs.quadBuffer);
-                    pass.setVertexBuffer(1, mesh._gs.splatIndexBuffer);
-                    pass.setIndexBuffer(mesh._gs.indexBuffer, "uint16");
+                    pass.setVertexBuffer(0, mesh._gs._quadBuffer);
+                    pass.setVertexBuffer(1, mesh._gs._splatIndexBuffer);
+                    pass.setIndexBuffer(mesh._gs._indexBuffer, "uint16");
                     pass.drawIndexed(6, mesh.vertexCount);
                     return 1;
                 },

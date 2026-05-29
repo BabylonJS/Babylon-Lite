@@ -3,11 +3,10 @@
  *  TransformNode is now a pure type alias for SceneNode, giving all scene entities
  *  a common base. createTransformNode delegates to createSceneNode. */
 
-import type { Mesh } from "../mesh/mesh.js";
-import type { MeshInternal } from "../mesh/mesh.js";
+import type { Mesh, MeshInternal } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import type { SceneNode } from "./scene-node.js";
-import { createSceneNode } from "./scene-node.js";
+import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
 
 export type { SceneNode } from "./scene-node.js";
 
@@ -23,19 +22,21 @@ export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0
 /** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers).
  *  Lights, cameras, and other non-mesh/non-TN children are shallow-cloned. */
 export function cloneTransformNode(src: SceneNode): SceneNode {
-    const clone = createTransformNode(
-        src.name + "_clone",
-        src.position.x,
-        src.position.y,
-        src.position.z,
-        src.rotationQuaternion.x,
-        src.rotationQuaternion.y,
-        src.rotationQuaternion.z,
-        src.rotationQuaternion.w,
-        src.scaling.x,
-        src.scaling.y,
-        src.scaling.z
-    );
+    const clone = src._localMatrix
+        ? createSceneNodeFromMatrix(src.name + "_clone", src._localMatrix)
+        : createTransformNode(
+              src.name + "_clone",
+              src.position.x,
+              src.position.y,
+              src.position.z,
+              src.rotationQuaternion.x,
+              src.rotationQuaternion.y,
+              src.rotationQuaternion.z,
+              src.rotationQuaternion.w,
+              src.scaling.x,
+              src.scaling.y,
+              src.scaling.z
+          );
     for (const child of src.children) {
         if (!("_gpu" in child) && !("lightType" in child)) {
             const childClone = cloneTransformNode(child);

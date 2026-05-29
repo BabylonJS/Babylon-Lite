@@ -386,14 +386,14 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
         if (bg) {
             return bg;
         }
-        const shViews = mesh._gs.shViews ?? [];
+        const shViews = mesh._gs._shViews ?? [];
         const entries: GPUBindGroupEntry[] = [
             { binding: 0, resource: { buffer: ubo } },
-            { binding: 1, resource: mesh._gs.sampler },
-            { binding: 2, resource: mesh._gs.centersView },
-            { binding: 3, resource: mesh._gs.covAView },
-            { binding: 4, resource: mesh._gs.covBView },
-            { binding: 5, resource: mesh._gs.colorsView },
+            { binding: 1, resource: mesh._gs._sampler },
+            { binding: 2, resource: mesh._gs._centersView },
+            { binding: 3, resource: mesh._gs._covAView },
+            { binding: 4, resource: mesh._gs._covBView },
+            { binding: 5, resource: mesh._gs._colorsView },
         ];
         for (let i = 0; i < entry.shTextureCount; i++) {
             entries.push({ binding: 6 + i, resource: shViews[i]! });
@@ -493,9 +493,9 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
                 update,
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
-                    pass.setVertexBuffer(0, mesh._gs.quadBuffer);
-                    pass.setVertexBuffer(1, mesh._gs.splatIndexBuffer);
-                    pass.setIndexBuffer(mesh._gs.indexBuffer, "uint16");
+                    pass.setVertexBuffer(0, mesh._gs._quadBuffer);
+                    pass.setVertexBuffer(1, mesh._gs._splatIndexBuffer);
+                    pass.setIndexBuffer(mesh._gs._indexBuffer, "uint16");
                     pass.drawIndexed(6, mesh.vertexCount);
                     return 1;
                 },
@@ -509,7 +509,7 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
  *  `attachParsedSplat` (in `load-splat.ts`) when the parsed asset carries SH
  *  coefficients. Reads `mesh.shDegree` (set at mesh construction), creates
  *  the `rgba32uint` SH textures (1..5 depending on degree), patches
- *  `mesh._gs.shTextures` in place, and installs the SH renderable. */
+ *  `mesh._gs` in place, and installs the SH renderable. */
 export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: GaussianSplattingMesh, shFlat: Uint8Array, fragments?: readonly GsShaderFragment[]): void {
     const engine = scene.engine as EngineContextInternal;
     const device = engine.device;
@@ -546,8 +546,8 @@ export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: Gaussia
         textures.push(tex);
         views.push(tex.createView());
     }
-    (mesh._gs as { shTextures: GPUTexture[]; shViews: GPUTextureView[] }).shTextures = textures;
-    (mesh._gs as { shTextures: GPUTexture[]; shViews: GPUTextureView[] }).shViews = views;
+    mesh._gs._shTextures = textures;
+    mesh._gs._shViews = views;
 
     const ctx = scene as unknown as { _renderables: Renderable[]; _disposables: (() => void)[]; _gsMeshes: GaussianSplattingMesh[] };
     ctx._renderables.push(buildGaussianSplattingRenderableSH(scene, mesh, fragments));

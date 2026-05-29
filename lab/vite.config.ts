@@ -50,6 +50,15 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
+                if (url === "/demos-config.json") {
+                    const filePath = resolve(__dirname, "../demos-config.json");
+                    if (existsSync(filePath)) {
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        createReadStream(filePath).pipe(res);
+                        return;
+                    }
+                }
                 if (url === "/lab-api/signature") {
                     // Returns mtimes for current/master bundle and perf manifests plus per-scene parity images
                     // so the dashboard can auto-refresh only when data actually changes.

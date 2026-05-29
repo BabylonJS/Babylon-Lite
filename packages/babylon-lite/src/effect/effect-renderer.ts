@@ -90,6 +90,12 @@ export interface EffectRendererOptions {
     clear?: boolean;
     /** Clear colour. Defaults to opaque black. */
     clearColor?: GPUColorDict;
+    /**
+     * Per-frame callback invoked just before the effect is drawn, receiving the
+     * frame delta in milliseconds. Use it to update uniforms (e.g. time, animation
+     * state). This is the effect-path equivalent of a scene's `onBeforeRender`.
+     */
+    update?: (deltaMs: number) => void;
 }
 
 /**
@@ -252,6 +258,7 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
     const name = options?.name ?? effect.name;
     const clear = options?.clear !== false;
     const clearColor: GPUColorDict = options?.clearColor ?? { r: 0, g: 0, b: 0, a: 1 };
+    const update = options?.update;
 
     const rt = createRenderTarget({
         label: `${name}-swapchain`,
@@ -287,7 +294,9 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
         _pipeline: null,
         _bindGroup: null,
         _disposed: false,
-        _update(): void {},
+        _update(): void {
+            update?.(eng._currentDelta);
+        },
         _record(): number {
             if (er._disposed) {
                 return 0;

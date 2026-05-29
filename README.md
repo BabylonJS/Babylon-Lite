@@ -9,7 +9,7 @@ A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output
 
 - **Node.js** ≥ 18
 - **pnpm** ≥ 9 (`corepack enable` to activate the version pinned in `package.json`)
-- A browser with **WebGPU** support (Chrome 113+, Edge 113+, or Firefox Nightly)
+- A browser with **WebGPU** support (Chrome 113+, Edge 113+, or recent Firefox and Safari)
 
 ## Getting Started
 

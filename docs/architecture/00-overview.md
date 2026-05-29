@@ -45,10 +45,11 @@
 | [26-sprites.md](26-sprites.md)                                     | Sprites                 | 2D sprites, depth-hosted sprites, sprite renderables                                           |
 | [27-effect-renderer.md](27-effect-renderer.md)                     | Effect Renderer         | Fullscreen post-process pipeline, render-to-texture composition                                |
 | [27-frame-graph.md](27-frame-graph.md)                             | Frame Graph             | Task ordering, RenderTask, passes, render targets, RTT texture flow                            |
-| [27-large-world-rendering.md](27-large-world-rendering.md)         | LWR / Floating Origin   | `useFloatingOrigin` engine flag, eye-relative upload, FO version tracking                      |
 | [28-bundle-size-tooling.md](28-bundle-size-tooling.md)             | Bundle-Size Tooling     | Per-scene bundle ceilings, lab Bundle tab, runtime-fetched vs built-but-not-fetched accounting |
 | [29-shader-material.md](29-shader-material.md)                     | Shader Material         | User-supplied WGSL pipelines, vertex/fragment slot composition                                 |
-| [30-high-precision-matrix.md](30-high-precision-matrix.md)         | High-Precision Matrix   | `useHighPrecisionMatrix` engine flag, F64 backing, `allocateMat4` singleton, `packMat4IntoF32` |
+| [31-post-process.md](31-post-process.md)                           | Post Process            | Frame-graph fullscreen post-process helper and concrete post-process tasks                     |
+| [32-large-world-rendering.md](32-large-world-rendering.md)         | LWR / Floating Origin   | `useFloatingOrigin` engine flag, eye-relative upload, FO version tracking                      |
+| [33-high-precision-matrix.md](33-high-precision-matrix.md)         | High-Precision Matrix   | `useHighPrecisionMatrix` engine flag, F64 backing, `allocateMat4` singleton, `packMat4IntoF32` |
 
 ---
 

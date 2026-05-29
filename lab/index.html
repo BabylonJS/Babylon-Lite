@@ -3424,6 +3424,7 @@
             <button class="tab" data-tab="bundle">Bundle <span class="tab-badge tab-badge-bundle">dist</span></button>
             <button class="tab" data-tab="perf">Perf</button>
             <button class="tab" data-tab="perfreg">Perf Regression</button>
+            <button class="tab" data-tab="demos">Demos <span class="tab-badge" style="background: #2d2238; color: #c792ea">showcase</span></button>
         </div>
 
         <div id="panel-source" class="tab-panel active">
@@ -3433,6 +3434,17 @@
                 <input id="source-search" class="scene-search" type="search" placeholder="Filter source scenes…" aria-label="Filter source scenes" oninput="setSceneSearch('source', this.value)" />
             </div>
             <div class="grid" id="source-grid"></div>
+        </div>
+
+        <div id="panel-demos" class="tab-panel">
+            <div class="tab-hint">
+                💡 Standalone showcase demos built on Babylon Lite — pure Lite, no Babylon.js comparison. Each is production-bundled so its
+                real shipped size is advertised. Regenerate sizes with <code>pnpm build:bundle-demos</code>.
+            </div>
+            <div class="perf-toolbar">
+                <input id="demos-search" class="scene-search" type="search" placeholder="Filter demos…" aria-label="Filter demos" oninput="setSceneSearch('demos', this.value)" />
+            </div>
+            <div class="grid" id="demos-grid"></div>
         </div>
 
         <div id="panel-parity" class="tab-panel">
@@ -3656,6 +3668,7 @@
 
             var activeSceneSearch = {
                 source: "",
+                demos: "",
                 parity: "",
                 bundle: "",
                 perf: "",
@@ -3695,6 +3708,8 @@
                 syncSceneSearchInputs();
                 if (tabName === "source") {
                     applySourceFilters();
+                } else if (tabName === "demos") {
+                    applyDemosFilters();
                 } else if (tabName === "bundle") {
                     applyBundleFilters();
                 } else if (tabName === "parity") {
@@ -3910,6 +3925,70 @@
                     if (sbtn) sbtn.classList.add("active-toggle");
                 }
             })();
+
+            function initDemosGrid(demos) {
+                var grid = document.getElementById("demos-grid");
+                if (!grid) return;
+                grid.innerHTML = (demos || [])
+                    .map(function (d) {
+                        var demoKey = "demo-" + d.slug;
+                        var tags = d.tags || [];
+                        var searchAttr = escapeAttr(
+                            normalizeSearchText([demoKey, d.slug, d.name, d.description, tags.join(" ")].join(" "))
+                        );
+                        return (
+                            '<a class="card" href="/demo-' +
+                            d.slug +
+                            '.html" data-scene="' +
+                            demoKey +
+                            '" data-tags="' +
+                            tags.join(" ") +
+                            '" data-search="' +
+                            searchAttr +
+                            '">' +
+                            renderHideBtn(demoKey) +
+                            '<div class="card-image">' +
+                            '<img src="/thumbnails/demo-' +
+                            d.slug +
+                            '.png" onerror="this.style.display=\'none\'" alt="' +
+                            escapeAttr(d.name) +
+                            '" loading="lazy" decoding="async" />' +
+                            "</div>" +
+                            '<div class="card-body">' +
+                            "<h2>" +
+                            escapeAttr(d.name) +
+                            "</h2>" +
+                            "<p>" +
+                            escapeAttr(d.description) +
+                            "</p>" +
+                            renderBadges(tags) +
+                            '<div class="size-info" data-demo-size="' +
+                            d.slug +
+                            '"></div>' +
+                            "</div></a>"
+                        );
+                    })
+                    .join("");
+            }
+
+            function loadDemosManifest() {
+                fetchOptionalJson("/bundle/demos-manifest.json").then(function (manifest) {
+                    if (!manifest) return;
+                    Object.keys(manifest).forEach(function (slug) {
+                        var sizes = manifest[slug];
+                        var el = document.querySelector('[data-demo-size="' + slug + '"]');
+                        if (!el) return;
+                        el.innerHTML =
+                            '<div class="size-row"><span class="size-label">Lite</span>' +
+                            '<span><span class="size-value">' +
+                            sizes.rawKB +
+                            "</span> KB min</span>" +
+                            '<span class="size-gzip">' +
+                            sizes.gzipKB +
+                            " KB gzip</span></div>";
+                    });
+                });
+            }
 
             function initBundleGrid(config) {
                 var grid = document.getElementById("bundle-grid");
@@ -5319,6 +5398,15 @@
                     console.warn("Failed to load scene-config.json");
                 });
 
+            fetchOptionalJson("/demos-config.json")
+                .then(function (demos) {
+                    if (!demos) return;
+                    window.DEMOS_CONFIG = demos;
+                    initDemosGrid(demos);
+                    applyHiddenState();
+                    loadDemosManifest();
+                });
+
             // ── Auto-refresh: poll /lab-api/signature every ~1s and reload
             //    bundle / perf / parity data when their source files change.
             var _lastSig = null;
@@ -5710,6 +5798,13 @@
                         });
                     }
                     c.classList.toggle("filter-hidden", !show);
+                });
+            }
+
+            function applyDemosFilters() {
+                var cards = document.querySelectorAll("#demos-grid .card");
+                cards.forEach(function (c) {
+                    c.classList.toggle("filter-hidden", !cardMatchesSearch(c, "demos"));
                 });
             }
 

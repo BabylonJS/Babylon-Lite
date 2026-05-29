@@ -276,11 +276,11 @@ export function createGsPickMeshResources(engine: EngineContextInternal, mesh: G
         layout: cache.meshBGL,
         entries: [
             { binding: 0, resource: { buffer: meshUbo } },
-            { binding: 1, resource: mesh._gs.sampler },
-            { binding: 2, resource: mesh._gs.centersView },
-            { binding: 3, resource: mesh._gs.covAView },
-            { binding: 4, resource: mesh._gs.covBView },
-            { binding: 5, resource: mesh._gs.colorsView },
+            { binding: 1, resource: mesh._gs._sampler },
+            { binding: 2, resource: mesh._gs._centersView },
+            { binding: 3, resource: mesh._gs._covAView },
+            { binding: 4, resource: mesh._gs._covBView },
+            { binding: 5, resource: mesh._gs._colorsView },
         ],
     });
 
@@ -350,9 +350,9 @@ export function drawGsForPicking(
     pass.setPipeline(cache.pipeline);
     pass.setBindGroup(1, res.meshBG);
     pass.setBindGroup(2, res.pickingBG);
-    pass.setVertexBuffer(0, mesh._gs.quadBuffer);
-    pass.setVertexBuffer(1, mesh._gs.splatIndexBuffer);
-    pass.setIndexBuffer(mesh._gs.indexBuffer, "uint16");
+    pass.setVertexBuffer(0, mesh._gs._quadBuffer);
+    pass.setVertexBuffer(1, mesh._gs._splatIndexBuffer);
+    pass.setIndexBuffer(mesh._gs._indexBuffer, "uint16");
     pass.drawIndexed(6, mesh.vertexCount);
 }
 

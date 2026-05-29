@@ -230,7 +230,7 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     // and install the F64 allocator into the process-global lazy singleton
     // in `_matrix-allocator.ts`. **Constraint:** allocator is process-global —
     // mixing HPM and non-HPM engines on the same page is unsupported (see
-    // `docs/architecture/30-high-precision-matrix.md`).
+    // `docs/architecture/33-high-precision-matrix.md`).
     if (useHpm) {
         const [{ allocateF64Mat4 }, { _setHpmAllocator }] = await Promise.all([import("../math/_mat4-storage-f64.js"), import("../math/_matrix-allocator.js")]);
         _setHpmAllocator(allocateF64Mat4);

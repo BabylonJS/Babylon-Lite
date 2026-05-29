@@ -342,23 +342,28 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
 
     for (let idx = 0; idx < nodes.length; idx++) {
         const nodeIdx = target.topoOrder[idx]!;
+        const node = nodes[nodeIdx]!;
         const off = nodeIdx * TRS_STRIDE;
-        mat4ComposeInto(
-            localMat,
-            nodeIdx * 16,
-            trs[off + T_OFF]!,
-            trs[off + T_OFF + 1]!,
-            trs[off + T_OFF + 2]!,
-            trs[off + R_OFF]!,
-            trs[off + R_OFF + 1]!,
-            trs[off + R_OFF + 2]!,
-            trs[off + R_OFF + 3]!,
-            trs[off + S_OFF]!,
-            trs[off + S_OFF + 1]!,
-            trs[off + S_OFF + 2]!
-        );
+        if (node._matrix) {
+            localMat.set(node._matrix, nodeIdx * 16);
+        } else {
+            mat4ComposeInto(
+                localMat,
+                nodeIdx * 16,
+                trs[off + T_OFF]!,
+                trs[off + T_OFF + 1]!,
+                trs[off + T_OFF + 2]!,
+                trs[off + R_OFF]!,
+                trs[off + R_OFF + 1]!,
+                trs[off + R_OFF + 2]!,
+                trs[off + R_OFF + 3]!,
+                trs[off + S_OFF]!,
+                trs[off + S_OFF + 1]!,
+                trs[off + S_OFF + 2]!
+            );
+        }
 
-        const parentIdx = nodes[nodeIdx]!.parentIdx;
+        const parentIdx = node.parentIdx;
         if (parentIdx >= 0) {
             mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
         } else {

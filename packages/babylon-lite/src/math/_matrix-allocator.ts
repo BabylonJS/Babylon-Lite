@@ -11,7 +11,7 @@ import type { Mat4 } from "./types.js";
  *  **Constraint:** the allocator is process-global. Pages that mix
  *  HPM and non-HPM engines are unsupported — the second engine silently
  *  inherits the first engine's storage precision. See
- *  `docs/architecture/30-high-precision-matrix.md` for the rationale
+ *  `docs/architecture/33-high-precision-matrix.md` for the rationale
  *  (single precision per page).
  *
  *  This pattern replaces the per-engine `_matrixPolicy` field that previously

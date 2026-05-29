@@ -17,6 +17,7 @@ const ROOT = resolve(__dirname, "..");
 const LAB_DIR = resolve(ROOT, "lab");
 const DIST_DIR = resolve(LAB_DIR, "dist");
 const SCENE_CONFIG = resolve(ROOT, "scene-config.json");
+const DEMOS_CONFIG = resolve(ROOT, "demos-config.json");
 const REFERENCE_DIR = resolve(ROOT, "reference");
 
 const ROOT_RELATIVE_PREFIXES = [
@@ -28,6 +29,8 @@ const ROOT_RELATIVE_PREFIXES = [
     "bundle-baseline-scene",
     "bundle-bjs-scene",
     "bundle-scene",
+    "demo-",
+    "demos-config.json",
     "draco_decoder.js",
     "draco_decoder.wasm",
     "lab-api",
@@ -66,6 +69,9 @@ function runViteBuild(basePath: string): void {
 function copyStaticRuntimeData(): void {
     mkdirSync(DIST_DIR, { recursive: true });
     cpSync(SCENE_CONFIG, resolve(DIST_DIR, "scene-config.json"));
+    if (existsSync(DEMOS_CONFIG)) {
+        cpSync(DEMOS_CONFIG, resolve(DIST_DIR, "demos-config.json"));
+    }
     if (existsSync(REFERENCE_DIR)) {
         const target = resolve(DIST_DIR, "reference");
         rmSync(target, { recursive: true, force: true });

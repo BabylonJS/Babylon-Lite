@@ -1,0 +1,8 @@
+[
+    {
+        "slug": "torus-states",
+        "name": "Torus States",
+        "description": "Fullscreen WGSL raymarched twisted-torus SDF that auto-morphs through 7 states. Pure Lite effect pipeline — no scene, camera, or mesh. Reproduction of Robert Penner's demo.",
+        "tags": ["effect", "shader", "procedural"]
+    }
+]

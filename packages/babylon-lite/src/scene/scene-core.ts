@@ -68,6 +68,10 @@ export interface SceneContext {
     readonly floatingOriginOffset: readonly [number, number, number];
 }
 
+export interface SceneContextOptions {
+    defaultRenderTask?: boolean;
+}
+
 /** @internal SceneContext with internal rendering state — for renderable/loader code only. Not re-exported from index.ts. */
 export interface SceneContextInternal extends SceneContext, RenderingContext {
     /** All renderables in this scene. The active frame-graph tasks bucket them
@@ -159,7 +163,7 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
 }
 
 /** Create an empty scene context bound to the given engine. */
-export function createSceneContext(engine: EngineContext): SceneContext {
+export function createSceneContext(engine: EngineContext, options?: SceneContextOptions): SceneContext {
     const eng = engine as EngineContextInternal;
     const eyePosition: [number, number, number] = [0, 0, 0];
     const floatingOriginOffset: [number, number, number] = [0, 0, 0];
@@ -245,26 +249,28 @@ export function createSceneContext(engine: EngineContext): SceneContext {
     // (offscreen RTTs, post-FX, UI overlays) before/after.
     const fg = createFrameGraph(eng, ctx);
     ctx._frameGraph = fg;
-    const swapRT = createRenderTarget({
-        label: "scene-swapchain",
-        colorFormat: eng.format,
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: eng.msaaSamples,
-        size: "canvas",
-        resolveToSwapchain: true,
-    });
-    _appendTask(
-        fg,
-        createRenderTask(
-            {
-                name: "scene",
-                rt: swapRT,
-                clrColor: ctx.clearColor,
-            },
-            eng,
-            ctx
-        )
-    );
+    if (options?.defaultRenderTask !== false) {
+        const swapRT = createRenderTarget({
+            label: "scene-swapchain",
+            colorFormat: eng.format,
+            depthStencilFormat: "depth24plus-stencil8",
+            sampleCount: eng.msaaSamples,
+            size: "canvas",
+            resolveToSwapchain: true,
+        });
+        _appendTask(
+            fg,
+            createRenderTask(
+                {
+                    name: "scene",
+                    rt: swapRT,
+                    clrColor: ctx.clearColor,
+                },
+                eng,
+                ctx
+            )
+        );
+    }
     ctx._disposables.push(() => fg.dispose());
     return ctx;
 }
