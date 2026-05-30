@@ -517,7 +517,8 @@ function installPlayerControls(
             if (dx * dx + dy * dy <= ITEM_PICKUP_RADIUS * ITEM_PICKUP_RADIUS && Math.abs(dz) <= ITEM_PICKUP_HEIGHT) {
                 item.picked = true;
                 for (const m of item.meshes) m.visible = false;
-                grantPickup(player, item.cls, item.flags);
+                const label = grantPickup(player, item.cls, item.flags);
+                hud.message(label);
                 hud.setStats(player, monsters.kills, monsters.total);
             }
         }
@@ -544,38 +545,54 @@ function installPlayerControls(
 }
 
 /**
- * Apply a touched item's effect to the player. Mirrors Quake's pickup amounts,
- * collapsed onto this demo's single-weapon / single-ammo-counter model:
- * health heals (mega overheals), armour raises the armour ceiling, ammo and
- * weapons top up the shared ammo counter. Powerup artifacts are collected but
- * grant no persistent stat (no powerup state in this demo).
+ * Apply a touched item's effect to the player and return a short pickup label
+ * for the HUD. Mirrors Quake's pickup amounts, collapsed onto this demo's
+ * single-weapon / single-ammo-counter model: health heals (mega overheals),
+ * armour raises the armour ceiling, ammo and weapons top up the shared ammo
+ * counter. Powerup artifacts are collected (labelled) but grant no persistent
+ * stat (no powerup state in this demo).
  */
-function grantPickup(player: Player, cls: string, flags: number): void {
+function grantPickup(player: Player, cls: string, flags: number): string {
     if (cls === "item_health") {
-        if (flags & 2) player.health = Math.min(250, player.health + 100); // megahealth
-        else if (flags & 1) player.health = Math.min(100, player.health + 15); // rotten
-        else player.health = Math.min(100, player.health + 25);
-        return;
+        if (flags & 2) {
+            player.health = Math.min(250, player.health + 100); // megahealth
+            return "You got the megahealth!";
+        }
+        if (flags & 1) {
+            player.health = Math.min(100, player.health + 15); // rotten
+            return "You got 15 health";
+        }
+        player.health = Math.min(100, player.health + 25);
+        return "You got 25 health";
     }
     if (cls === "item_armor1") {
         player.armor = Math.max(player.armor, 100);
-        return;
+        return "You got armor";
     }
     if (cls === "item_armor2") {
         player.armor = Math.max(player.armor, 150);
-        return;
+        return "You got combat armor";
     }
     if (cls === "item_armorInv") {
         player.armor = Math.max(player.armor, 200);
-        return;
+        return "You got red armor";
     }
+    const artifacts: Record<string, string> = {
+        item_artifact_super_damage: "Quad Damage!",
+        item_artifact_envirosuit: "You got the environment suit",
+        item_artifact_invulnerability: "You got the Pentagram of Protection",
+        item_artifact_invisibility: "You got the Ring of Shadows",
+    };
+    if (artifacts[cls]) return artifacts[cls];
     let add = 0;
-    if (cls === "item_shells") add = 20;
-    else if (cls === "item_spikes") add = 25;
-    else if (cls === "item_rockets") add = 5;
-    else if (cls === "item_cells") add = 6;
-    else if (cls.startsWith("weapon_")) add = 10;
+    let label = "You got ammo";
+    if (cls === "item_shells") (add = 20), (label = "You got shells");
+    else if (cls === "item_spikes") (add = 25), (label = "You got nails");
+    else if (cls === "item_rockets") (add = 5), (label = "You got rockets");
+    else if (cls === "item_cells") (add = 6), (label = "You got cells");
+    else if (cls.startsWith("weapon_")) (add = 10), (label = "You got a weapon");
     if (add > 0) player.ammo = Math.min(200, player.ammo + add);
+    return label;
 }
 
 /**
