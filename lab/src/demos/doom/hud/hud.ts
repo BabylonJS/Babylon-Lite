@@ -49,13 +49,19 @@ export class DoomHud {
         this.crosshair = cross;
 
         // Status bar container, centered like the original 320-wide STBAR.
+        // The status bar is centered with left:50% + translateX(-50%) so it stays
+        // centered regardless of the host page's layout / horizontal overflow
+        // (flex justify-content was being defeated by the demo page container).
         const root = document.createElement("div");
-        root.style.cssText = "position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;pointer-events:none;z-index:50;font-family:'Courier New',monospace";
-
-        const bar = document.createElement("div");
-        bar.style.cssText = [
+        root.style.cssText = [
+            "position:fixed",
+            "left:50%",
+            "bottom:0",
+            "transform:translateX(-50%)",
+            "box-sizing:border-box",
             "display:flex",
             "align-items:stretch",
+            "justify-content:center",
             "gap:6px",
             "width:100%",
             "max-width:860px",
@@ -63,6 +69,9 @@ export class DoomHud {
             `background:linear-gradient(180deg,${STEEL} 0%,${STEEL_DARK} 100%)`,
             "border-top:2px solid #6b6b6b",
             "box-shadow:inset 0 2px 0 #7a7a7a, inset 0 -2px 0 #1a1a1a",
+            "pointer-events:none",
+            "z-index:50",
+            "font-family:'Courier New',monospace",
         ].join(";");
 
         this.ammoBig = DoomHud.bigNumber();
@@ -70,14 +79,13 @@ export class DoomHud {
         this.armorEl = DoomHud.bigNumber();
         this.faceEl = DoomHud.makeFace();
 
-        bar.appendChild(DoomHud.panel("AMMO", this.ammoBig, ""));
-        bar.appendChild(DoomHud.panel("HEALTH", this.healthEl, "%"));
-        bar.appendChild(this.makeArms());
-        bar.appendChild(this.makeFacePanel());
-        bar.appendChild(DoomHud.panel("ARMOR", this.armorEl, "%"));
-        bar.appendChild(this.makeAmmoList());
+        root.appendChild(DoomHud.panel("AMMO", this.ammoBig, ""));
+        root.appendChild(DoomHud.panel("HEALTH", this.healthEl, "%"));
+        root.appendChild(this.makeArms());
+        root.appendChild(this.makeFacePanel());
+        root.appendChild(DoomHud.panel("ARMOR", this.armorEl, "%"));
+        root.appendChild(this.makeAmmoList());
 
-        root.appendChild(bar);
         document.body.appendChild(pain);
         document.body.appendChild(cross);
         document.body.appendChild(message);
