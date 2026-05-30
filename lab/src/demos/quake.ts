@@ -72,9 +72,16 @@ const MOVER_KINDS = new Set(["door", "secret", "button", "plat"]);
 // All offsets are a couple of units at most — sub-pixel at gameplay distances and
 // well inside the door's own thickness, so collision (BSP hulls) is unaffected.
 const BRUSH_BASE_NUDGE = 0.4;
-const MOVER_BASE_NUDGE = 1.4;
-const brushNudge = (modelIndex: number, isMover: boolean): number =>
-    (isMover ? MOVER_BASE_NUDGE : BRUSH_BASE_NUDGE) + ((modelIndex * 7) % 16) * 0.04;
+const brushNudge = (modelIndex: number): number =>
+    BRUSH_BASE_NUDGE + ((modelIndex * 7) % 16) * 0.04;
+
+// Movers render solid (zero geometry nudge) and instead win coplanar depth ties
+// via a per-model clip-space depth bias (reverse-Z → larger is nearer). The base
+// keeps leaves in front of the world / func_wall backing; the per-model jitter
+// separates coplanar sibling leaves so they don't z-fight each other.
+const MOVER_BIAS_BASE = 1.2e-3;
+const moverDepthBias = (modelIndex: number): number =>
+    MOVER_BIAS_BASE + ((modelIndex * 7) % 16) * 4e-5;
 
 const START_SHELLS = 25;
 const START_NAILS = 0;
@@ -211,7 +218,7 @@ async function main(): Promise<void> {
         if (!model) continue;
         const isMover = MOVER_KINDS.has(ent.kind);
         const isKillable = !isMover && !!ent.targetname && killTargetNames.has(ent.targetname);
-        const nudge = brushNudge(ent.modelIndex, isMover);
+        const nudge = isMover ? 0 : brushNudge(ent.modelIndex);
         const batches = buildModelGeometry(bsp, atlas, model.firstFace, model.numFaces, nudge);
         if (isMover) moverBatches.push({ ent, batches });
         else if (isKillable) killableBatches.push({ ent, batches });
@@ -235,7 +242,7 @@ async function main(): Promise<void> {
 
     let matId = 0;
     let drawn = 0;
-    const makeMeshes = (batches: Map<number, GeometryBatch>, tag: string): Mesh[] => {
+    const makeMeshes = (batches: Map<number, GeometryBatch>, tag: string, depthBias = 0): Mesh[] => {
         const meshes: Mesh[] = [];
         for (const [miptex, batch] of batches) {
             if (batch.idx.length === 0) continue;
@@ -254,7 +261,7 @@ async function main(): Promise<void> {
                 skyMaterials.push(skyMat);
                 mesh.material = skyMat;
             } else {
-                mesh.material = createQuakeMaterial(`quakeMat_${matId}`, textures.get(miptex).texture, lightTex);
+                mesh.material = createQuakeMaterial(`quakeMat_${matId}`, textures.get(miptex).texture, lightTex, depthBias);
             }
             addToScene(scene, mesh);
             meshes.push(mesh);
@@ -266,7 +273,7 @@ async function main(): Promise<void> {
 
     makeMeshes(worldBatches, "world");
     for (const { ent, batches } of moverBatches) {
-        const meshes = makeMeshes(batches, "mover");
+        const meshes = makeMeshes(batches, "mover", moverDepthBias(ent.modelIndex));
         const [ex, ey, ez] = quakeToEngine(ent.offset[0], ent.offset[1], ent.offset[2]);
         for (const m of meshes) m.position.set(ex, ey, ez);
         moverMeshes.set(ent, meshes);
