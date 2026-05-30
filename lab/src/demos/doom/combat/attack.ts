@@ -25,8 +25,12 @@ function rayWallDistance(world: DoomWorld, ox: number, oy: number, dx: number, d
         const u = (tx * dy - ty * dx) / denom; // along segment
         if (t < 0 || t > best) continue;
         if (u < 0 || u > 1) continue;
-        if (!line.oneSided && !line.blocking) {
-            // Two-sided: blocks hitscan only when the opening is fully closed.
+        if (!line.oneSided) {
+            // Two-sided line: blocks hitscan/sight only when the vertical opening
+            // is fully closed. The ML_BLOCKING flag (line.blocking) stops movement
+            // in DOOM but NOT hitscans or line-of-sight, so it is ignored here —
+            // otherwise shots fired over an impassable ledge into a pit are wrongly
+            // absorbed by the ledge line and deal no damage.
             const front = world.sectors[line.frontSec];
             const back = world.sectors[line.backSec];
             if (front && back) {
