@@ -105,7 +105,6 @@ function name8(data: Uint8Array, offset: number): string {
 }
 
 function eachRecord(data: Uint8Array, recordSize: number): DataView[] {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const count = Math.floor(data.length / recordSize);
     const out: DataView[] = new Array(count);
     for (let i = 0; i < count; i++) {
