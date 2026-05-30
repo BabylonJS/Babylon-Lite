@@ -12,6 +12,7 @@ import {
     registerScene,
     parseNodeMaterialFromSnippet,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE63_NME_JSON } from "../shared/scene63-nme.js";
 
 async function main(): Promise<void> {
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Single directional light shining down-and-to-the-right, matching the BJS scene.
     const light = createDirectionalLight([-1, -2, -1], 1);

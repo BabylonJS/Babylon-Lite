@@ -19,6 +19,7 @@ import {
     parseNodeMaterialFromSnippet,
     loadEnvironment,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE67_NME_JSON } from "../shared/scene67-nme.js";
 
 async function main(): Promise<void> {
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 7, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Environment IBL — required for both Lite and BJS PBR-MR to render.
     // No skybox/ground (black background).

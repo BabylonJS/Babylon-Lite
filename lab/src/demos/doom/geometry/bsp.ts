@@ -65,8 +65,8 @@ function clipHalfPlane(poly: Pt[], px: number, py: number, dx: number, dy: numbe
     const result: Pt[] = [];
     const inside = (s: number): boolean => (keepRight ? s <= EPS : s >= -EPS);
     for (let i = 0; i < poly.length; i++) {
-        const a = poly[i];
-        const b = poly[(i + 1) % poly.length];
+        const a = poly[i]!;
+        const b = poly[(i + 1) % poly.length]!;
         const sa = signed(px, py, dx, dy, a.x, a.y);
         const sb = signed(px, py, dx, dy, b.x, b.y);
         const ina = inside(sa);
@@ -99,8 +99,8 @@ function dedupe(poly: Pt[]): Pt[] {
 export function signedArea(poly: Pt[]): number {
     let a = 0;
     for (let i = 0; i < poly.length; i++) {
-        const p = poly[i];
-        const q = poly[(i + 1) % poly.length];
+        const p = poly[i]!;
+        const q = poly[(i + 1) % poly.length]!;
         a += p.x * q.y - q.x * p.y;
     }
     return a / 2;

@@ -89,7 +89,7 @@ export class SpriteStore {
         const lumps = this.wad.lumps;
         let inNs = false;
         for (let i = 0; i < lumps.length; i++) {
-            const name = lumps[i].name;
+            const name = lumps[i]!.name;
             if (name === "S_START" || name === "SS_START") {
                 inNs = true;
                 continue;
@@ -98,7 +98,7 @@ export class SpriteStore {
                 inNs = false;
                 continue;
             }
-            if (!inNs || lumps[i].size === 0) continue;
+            if (!inNs || lumps[i]!.size === 0) continue;
             this.indexLump(name, i);
         }
     }
@@ -220,7 +220,7 @@ export class SpriteStore {
                     const si = yy * w + xx;
                     if (!opaque[si]) continue;
                     const di = ((oy + yy) * atlasW + (ox + xx)) * 4;
-                    rgba[di] = indices[si];
+                    rgba[di] = indices[si]!;
                     rgba[di + 3] = 255;
                 }
             }
@@ -257,12 +257,12 @@ export class SpriteStore {
         const list = this.frames.get(sprite);
         const f = list?.[frame];
         if (!f) return null;
-        if (!f.rotated) return f.rots[0];
+        if (!f.rotated) return f.rots[0] ?? null;
         // BAM angle math (documented Doom sprite-rotation selection).
         const viewToThing = radToBam(Math.atan2(mobjY - viewY, mobjX - viewX));
         const thingAngle = radToBam(mobjAngleRad);
         const rot = ((viewToThing - thingAngle + 0x90000000) >>> 29) & 7;
-        return f.rots[rot] ?? f.rots[0];
+        return f.rots[rot] ?? f.rots[0] ?? null;
     }
 }
 

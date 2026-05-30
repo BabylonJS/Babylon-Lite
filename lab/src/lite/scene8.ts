@@ -2,6 +2,7 @@
 // PBR glass sphere with HDR environment, alpha transparency, and custom exposure/contrast.
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createSphere, createPbrMaterial, createSolidTexture2D, createPointLight, loadHdrEnvironment, attachControl, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -12,10 +13,10 @@ async function main(): Promise<void> {
     // Camera: matches playground exactly
     scene.camera = createArcRotateCamera(-Math.PI / 4, Math.PI / 2.5, 200, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Point light at (0, 40, 0) — matches playground
-    const light = createPointLight({ x: 0, y: 40, z: 0 });
+    const light = createPointLight({ x: 0, y: 40, z: 0 } as unknown as [number, number, number]);
     addToScene(scene, light);
 
     // HDR environment — loads room.hdr panorama, creates cubemap + prefiltered IBL

@@ -21,7 +21,7 @@ import "@babylonjs/loaders/glTF";
     let min = new Vector3(Infinity, Infinity, Infinity);
     let max = new Vector3(-Infinity, -Infinity, -Infinity);
     for (const m of result.meshes) {
-        m.refreshBoundingInfo();
+        m.refreshBoundingInfo({});
         const bi = m.getBoundingInfo();
         min = Vector3.Minimize(min, bi.boundingBox.minimumWorld);
         max = Vector3.Maximize(max, bi.boundingBox.maximumWorld);

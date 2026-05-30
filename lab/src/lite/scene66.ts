@@ -23,19 +23,21 @@ import {
     setShadowTaskCasterMeshes,
 } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE66_MORPH_PERIOD_MS, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
+    const engineInternal = engine as Parameters<typeof createMorphTargets>[0];
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
     scene.camera = createArcRotateCamera(1.14, 0.95, 10, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const light = createDirectionalLight([1, -1, 1], 0.7);
     addToScene(scene, light);
@@ -56,7 +58,7 @@ async function main(): Promise<void> {
     const deltas = sphereScrambleDeltas(sphereData.vertexCount);
     const freeze = new URLSearchParams(location.search).has("freeze");
     // Freeze at max scramble (sin²(π/2)=1) for deterministic capture.
-    const morph = createMorphTargets(engine, [{ positions: deltas, normals: null }], sphereData.vertexCount, [freeze ? 1 : 0]);
+    const morph = createMorphTargets(engineInternal, [{ positions: deltas, normals: null }], sphereData.vertexCount, [freeze ? 1 : 0]);
     sphere.morphTargets = morph;
 
     // PCF directional shadow (sphere + box are casters). orthoMinZ/orthoMaxZ
@@ -109,7 +111,7 @@ async function main(): Promise<void> {
             const t = (performance.now() - t0) / SCENE66_MORPH_PERIOD_MS;
             const s = Math.sin(t * Math.PI * 2);
             w[0] = s * s;
-            engine.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
+            engineInternal.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
         });
     }
 

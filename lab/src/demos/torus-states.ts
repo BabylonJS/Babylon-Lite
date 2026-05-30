@@ -167,8 +167,8 @@ async function main(): Promise<void> {
     });
     const u = new Float32Array(20);
     const start = performance.now();
-    let from = STATES[0];
-    let to = STATES[0];
+    let from = STATES[0]!;
+    let to = STATES[0]!;
     let idx = 0;
     let transStart = -DURATION_MS;
     let lastSwitch = 0;
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
                 lastSwitch += DWELL_MS;
                 from = lerpState(from, to, cubicInOut(Math.min(1, (now - transStart) / DURATION_MS)));
                 idx = (idx + 1) % STATES.length;
-                to = STATES[idx];
+                to = STATES[idx]!;
                 transStart = now;
             }
             const s = lerpState(from, to, cubicInOut(Math.min(1, (now - transStart) / DURATION_MS)));

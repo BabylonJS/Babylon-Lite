@@ -192,7 +192,8 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
     const onDown = (e: KeyboardEvent): void => {
         if (e.code === "Space" && !keys.has("Space")) usePressed = true;
         if (e.code === "ControlLeft" || e.code === "ControlRight") firing = true;
-        if (e.code in weaponKeys) player.selectWeapon(weaponKeys[e.code]);
+        const wk = weaponKeys[e.code];
+        if (wk !== undefined) player.selectWeapon(wk);
         keys.add(e.code);
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     };

@@ -50,10 +50,10 @@ export function buildCollisionLines(map: DoomMap): CollLine[] {
         const v1 = map.vertices[ld.start];
         const v2 = map.vertices[ld.end];
         if (!v1 || !v2) continue;
-        const frontSec = map.sidedefs[ld.front].sector;
+        const frontSec = map.sidedefs[ld.front]!.sector;
         if (map.sectors[frontSec] === undefined) continue;
         const oneSided = ld.back < 0;
-        const backSec = oneSided ? -1 : map.sidedefs[ld.back].sector;
+        const backSec = oneSided ? -1 : map.sidedefs[ld.back]!.sector;
 
         lines.push({
             x1: v1.x,

@@ -45,7 +45,7 @@ void (async function () {
     dirLight.shadowMaxZ = 12;
 
     const result = await SceneLoader.ImportMeshAsync("", server + "meshes/Demos/pbr_mr_specular/", "shaderBall_rotation.glb", scene);
-    const middleRoot = result.meshes[0];
+    const middleRoot = result.meshes[0]!;
     middleRoot.name = "shaderBallMiddleRoot";
     for (const m of middleRoot.getChildMeshes()) {
         if (m.material) {

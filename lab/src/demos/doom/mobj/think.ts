@@ -22,7 +22,7 @@ export function setMobjState(world: DoomWorld, m: Mobj, stateId: number): boolea
             m.removed = true;
             return false;
         }
-        const st = STATES[id];
+        const st = STATES[id]!;
         m.stateId = id;
         m.tics = st.tics;
         m.sprite = st.sprite;
@@ -49,7 +49,7 @@ export function tickMobj(world: DoomWorld, m: Mobj): void {
     // State countdown.
     if (m.tics > 0) {
         m.tics--;
-        if (m.tics === 0) setMobjState(world, m, STATES[m.stateId].next);
+        if (m.tics === 0) setMobjState(world, m, STATES[m.stateId]!.next);
     }
 }
 
@@ -91,8 +91,8 @@ function applyGravity(world: DoomWorld, m: Mobj): void {
 export function tryWalk(world: DoomWorld, m: Mobj, dir: Dir): boolean {
     if (dir === Dir.NONE) return false;
     const speed = m.info.speed;
-    const dx = Math.cos(DIR_ANGLE[dir]) * speed;
-    const dy = Math.sin(DIR_ANGLE[dir]) * speed;
+    const dx = Math.cos(DIR_ANGLE[dir]!) * speed;
+    const dy = Math.sin(DIR_ANGLE[dir]!) * speed;
     const floor = world.floorAt(m.x + dx, m.y + dy);
     // Reject big step-ups / openings via collision resolution: if blocked the
     // resolved position barely advances.

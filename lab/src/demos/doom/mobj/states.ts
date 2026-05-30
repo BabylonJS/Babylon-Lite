@@ -66,7 +66,7 @@ function seg(sprite: string, frames: FrameSpec[]): Segment {
 }
 
 function link(end: number, next: number): void {
-    STATES[end].next = next;
+    STATES[end]!.next = next;
 }
 
 // A=0,B=1,... helper for readability.

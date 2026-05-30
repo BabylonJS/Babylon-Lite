@@ -18,6 +18,7 @@ import {
     parseNodeMaterialFromSnippet,
     setShadowTaskCasterMeshes,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE65_NME_JSON } from "../shared/scene65-nme.js";
 
 async function main(): Promise<void> {
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2.3, Math.PI / 2.5, 8, { x: 0, y: 1, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const light = createDirectionalLight([-1, -2, -1], 1);
     light.position.set(5, 10, 5);

@@ -2,6 +2,7 @@
 // Based on playground #6HWS9M#85 (without performancePriority)
 
 import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, createSphere, createPbrMaterial, createSolidTexture2D, loadEnvironment, createHemisphericLight, setParent, registerScene } from "babylon-lite";
+import type { Mesh } from "babylon-lite";
 
 // Seeded PRNG for deterministic positions/colors across BJS and Lite
 function seededRandom(seed: number): () => number {
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
     }
 
     // Create 2500 spheres with random positions
-    const meshes = [];
+    const meshes: Mesh[] = [];
     for (let i = 0; i < sphereCount; i++) {
         const sphere = createSphere(engine, { diameter: 2, segments: 32 });
         sphere.position.set(20 - random() * 40, 20 - random() * 40, 20 - random() * 40);

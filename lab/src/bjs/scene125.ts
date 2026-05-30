@@ -4,6 +4,7 @@ import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Scene } from "@babylonjs/core/scene";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import "@babylonjs/loaders/SPLAT/splatFileLoader";
@@ -34,7 +35,7 @@ const SPLAT_URL = "https://raw.githubusercontent.com/CedricGuillemet/dump/master
     result.meshes[0]!.scaling.scaleInPlace(10);
     result.meshes[0]!.rotation.z = Math.PI * 0.75;
     result.meshes[0]!.rotation.x = Math.PI * 0.25;
-    result.meshes[0]!.bakeCurrentTransformIntoVertices();
+    (result.meshes[0] as Mesh).bakeCurrentTransformIntoVertices();
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());

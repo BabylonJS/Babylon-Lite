@@ -48,11 +48,11 @@ export function buildColormapLut(playpal: Uint8Array, colormap: Uint8Array, pale
     for (let light = 0; light < COLORMAP_COUNT; light++) {
         const mapBase = light * PALETTE_SIZE;
         for (let i = 0; i < PALETTE_SIZE; i++) {
-            const palIdx = colormap[mapBase + i];
+            const palIdx = colormap[mapBase + i]!;
             const p = palBase + palIdx * 3;
-            rgba[o] = playpal[p];
-            rgba[o + 1] = playpal[p + 1];
-            rgba[o + 2] = playpal[p + 2];
+            rgba[o] = playpal[p]!;
+            rgba[o + 1] = playpal[p + 1]!;
+            rgba[o + 2] = playpal[p + 2]!;
             rgba[o + 3] = 255;
             o += 4;
         }
@@ -66,9 +66,9 @@ export function buildPaletteRgba(playpal: Uint8Array, paletteIndex = 0): Uint8Ar
     const rgba = new Uint8Array(PALETTE_SIZE * 4);
     for (let i = 0; i < PALETTE_SIZE; i++) {
         const p = base + i * 3;
-        rgba[i * 4] = playpal[p];
-        rgba[i * 4 + 1] = playpal[p + 1];
-        rgba[i * 4 + 2] = playpal[p + 2];
+        rgba[i * 4] = playpal[p]!;
+        rgba[i * 4 + 1] = playpal[p + 1]!;
+        rgba[i * 4 + 2] = playpal[p + 2]!;
         rgba[i * 4 + 3] = 255;
     }
     return rgba;

@@ -122,7 +122,7 @@ export class Player {
 
     selectWeapon(w: Weapon): void {
         if (!this.weaponsOwned.has(w)) return;
-        if (WEAPONS[w].ammo !== Ammo.NONE && this.ammo[WEAPONS[w].ammo] <= 0) return;
+        if (WEAPONS[w].ammo !== Ammo.NONE && this.ammo[WEAPONS[w].ammo]! <= 0) return;
         this.pendingWeapon = w;
     }
 
@@ -130,9 +130,9 @@ export class Player {
     fire(): boolean {
         if (this.health <= 0 || this.refireDelay > 0) return false;
         const def = WEAPONS[this.weapon];
-        if (def.ammo !== Ammo.NONE && this.ammo[def.ammo] <= 0) {
+        if (def.ammo !== Ammo.NONE && this.ammo[def.ammo]! <= 0) {
             // Auto-switch down when out of ammo.
-            this.selectWeapon(this.ammo[Ammo.BULLETS] > 0 ? Weapon.PISTOL : Weapon.FIST);
+            this.selectWeapon(this.ammo[Ammo.BULLETS]! > 0 ? Weapon.PISTOL : Weapon.FIST);
             return false;
         }
         this.refireDelay = def.refire;
@@ -146,11 +146,11 @@ export class Player {
                 break;
             case Weapon.PISTOL:
             case Weapon.CHAINGUN:
-                this.ammo[Ammo.BULLETS]--;
+                this.ammo[Ammo.BULLETS] = this.ammo[Ammo.BULLETS]! - 1;
                 lineAttack(this.world, p, p.angle + (Math.random() - Math.random()) * 0.04, MISSILE_RANGE, (1 + Math.floor(Math.random() * 3)) * 5);
                 break;
             case Weapon.SHOTGUN:
-                this.ammo[Ammo.SHELLS]--;
+                this.ammo[Ammo.SHELLS] = this.ammo[Ammo.SHELLS]! - 1;
                 for (let i = 0; i < 7; i++) {
                     lineAttack(this.world, p, p.angle + (Math.random() - Math.random()) * 0.18, MISSILE_RANGE, (1 + Math.floor(Math.random() * 3)) * 5);
                 }
@@ -159,7 +159,7 @@ export class Player {
             case Weapon.PLASMA:
             case Weapon.BFG:
                 // Treated as hitscan placeholders for v1 (no rocket mobj yet).
-                this.ammo[def.ammo]--;
+                this.ammo[def.ammo] = this.ammo[def.ammo]! - 1;
                 lineAttack(this.world, p, p.angle, MISSILE_RANGE, (1 + Math.floor(Math.random() * 5)) * 10);
                 break;
         }
@@ -242,8 +242,8 @@ export class Player {
 
     private giveAmmo(type: Ammo, amount: number): boolean {
         if (type === Ammo.NONE) return false;
-        if (this.ammo[type] >= this.maxAmmo[type]) return false;
-        this.ammo[type] = Math.min(this.maxAmmo[type], this.ammo[type] + amount);
+        if (this.ammo[type]! >= this.maxAmmo[type]!) return false;
+        this.ammo[type] = Math.min(this.maxAmmo[type]!, this.ammo[type]! + amount);
         return true;
     }
 
@@ -264,6 +264,6 @@ export class Player {
 
     currentAmmo(): number {
         const a = WEAPONS[this.weapon].ammo;
-        return a === Ammo.NONE ? -1 : this.ammo[a];
+        return a === Ammo.NONE ? -1 : this.ammo[a]!;
     }
 }

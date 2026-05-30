@@ -5,6 +5,7 @@
 // Ground: 6×6 standard material
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createBox, createGround, createPbrMaterial, createStandardMaterial, createSolidTexture2D, loadTexture2D, setThinInstances, setThinInstanceColors, attachControl, mat4Identity, mat4Translation, mat4Compose, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 
 async function main(): Promise<void> {
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.atan(2), Math.sqrt(125), { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Hemispheric light
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));

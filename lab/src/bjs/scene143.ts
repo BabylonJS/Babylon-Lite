@@ -4,7 +4,6 @@ import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { BlurPostProcess } from "@babylonjs/core/PostProcesses/blurPostProcess";
-import { ChromaticAberrationPostProcess } from "@babylonjs/core/PostProcesses/chromaticAberrationPostProcess";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/core/Loading/loadingScreen";
 import "@babylonjs/core/Loading/Plugins/babylonFileLoader";

@@ -18,6 +18,7 @@ import {
     parseNodeMaterialFromSnippet,
     loadEnvironment,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE68_NME_JSON } from "../shared/scene68-nme.js";
 
 async function main(): Promise<void> {
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 7, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
         skipSkybox: true,

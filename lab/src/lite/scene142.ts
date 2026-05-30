@@ -18,6 +18,7 @@ import {
     registerScene,
     startEngine,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 function bjsEulerToQuaternion(rx: number, ry: number, rz: number): [number, number, number, number] {
     const halfRoll = rz * 0.5;
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.45, 2.2, { x: 0, y: 0.25, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 100;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
     const leftCamera = createArcRotateCamera(-Math.PI / 2 - 0.035, Math.PI / 2.45, 2.2, { x: 0, y: 0.25, z: 0 });
     leftCamera.nearPlane = 0.1;
     leftCamera.farPlane = 100;
@@ -90,7 +91,7 @@ async function main(): Promise<void> {
         scene
     );
 
-    const colors: readonly (readonly [number, number, number])[] = [
+    const colors: [number, number, number][] = [
         [1, 0.12, 0.05],
         [0.05, 0.85, 0.16],
         [0.15, 0.32, 1],

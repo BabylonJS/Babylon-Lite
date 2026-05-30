@@ -21,7 +21,7 @@ import "@babylonjs/loaders/glTF";
 
     await SceneLoader.ImportMeshAsync("", "https://playground.babylonjs.com/scenes/Alien/", "Alien.gltf", scene);
 
-    const _cam = new ArcRotateCamera("cam", Math.PI / 2, Math.PI / 2, 2, new Vector3(0, 0, 0), scene);
+    new ArcRotateCamera("cam", Math.PI / 2, Math.PI / 2, 2, new Vector3(0, 0, 0), scene);
 
     engine.getDeltaTime = function () {
         return 16;

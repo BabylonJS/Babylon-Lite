@@ -2,6 +2,7 @@
 // Matches BJS playground #V1JE4Z#1
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createBox, createStandardMaterial, setThinInstances, setThinInstanceColors, attachControl, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -10,7 +11,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine);
 
     scene.camera = createArcRotateCamera(-Math.PI / 5, Math.PI / 3, 200, { x: 0, y: 0, z: 0 });
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const box = createBox(engine);
     const mat = createStandardMaterial();

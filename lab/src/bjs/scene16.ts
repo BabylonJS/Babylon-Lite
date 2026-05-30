@@ -32,11 +32,11 @@ import { Scene } from "@babylonjs/core/scene";
     const colorData = new Float32Array(4 * instanceCount);
 
     for (let x = 0; x < numPerSide; x++) {
-        m.m[12] = -size / 2 + ofst * x;
+        (m.m as number[])[12] = -size / 2 + ofst * x;
         for (let y = 0; y < numPerSide; y++) {
-            m.m[13] = -size / 2 + ofst * y;
+            (m.m as number[])[13] = -size / 2 + ofst * y;
             for (let z = 0; z < numPerSide; z++) {
-                m.m[14] = -size / 2 + ofst * z;
+                (m.m as number[])[14] = -size / 2 + ofst * z;
                 m.copyToArray(matricesData, index * 16);
 
                 const coli = Math.floor(col);

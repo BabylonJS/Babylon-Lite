@@ -5,6 +5,7 @@
 // default hemispheric light from createDefaultCamera equivalent.
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createSphere, createPbrMaterial, createSolidTexture2D, attachControl, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 
 async function main(): Promise<void> {
@@ -18,7 +19,7 @@ async function main(): Promise<void> {
     // Arc-rotate camera matching BJS createDefaultCamera(true,true,true)
     // BJS: alpha=-PI/2, beta=PI/2, radius=worldSize.length()=sqrt(12) for unit sphere
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, Math.sqrt(12), { x: 0, y: 0, z: 0 });
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Hemispheric light (BJS createDefaultCamera creates a hemi light with intensity 0.7)
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));

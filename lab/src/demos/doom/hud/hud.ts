@@ -236,7 +236,7 @@ export class DoomHud {
                     const si = yy * it.w + xx;
                     if (!it.opaque[si]) continue;
                     const di = ((it.ay + yy) * atlasW + (it.ax + xx)) * 4;
-                    rgba[di] = it.indices[si];
+                    rgba[di] = it.indices[si]!;
                     rgba[di + 3] = 255;
                 }
             }

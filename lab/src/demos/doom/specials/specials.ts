@@ -83,7 +83,7 @@ export class SpecialsManager {
         let bestT = Infinity;
         let bestLine = -1;
         for (let i = 0; i < this.map.linedefs.length; i++) {
-            const ld = this.map.linedefs[i];
+            const ld = this.map.linedefs[i]!;
             const a = this.map.vertices[ld.start];
             const b = this.map.vertices[ld.end];
             if (!a || !b) continue;
@@ -105,8 +105,8 @@ export class SpecialsManager {
     // two-sided line whose current opening is too small to reach past.
     private useBlocked(ld: DoomMap["linedefs"][number]): boolean {
         if (ld.back < 0) return true;
-        const front = this.map.sectors[this.map.sidedefs[ld.front]?.sector];
-        const back = this.map.sectors[this.map.sidedefs[ld.back]?.sector];
+        const front = this.map.sectors[this.map.sidedefs[ld.front]!.sector];
+        const back = this.map.sectors[this.map.sidedefs[ld.back]!.sector];
         if (!front || !back) return true;
         return Math.min(front.ceilHeight, back.ceilHeight) - Math.max(front.floorHeight, back.floorHeight) < PLAYER_CLEARANCE;
     }
@@ -114,7 +114,7 @@ export class SpecialsManager {
     /** Trigger WALK specials crossed by the player's movement segment. */
     crossLines(x0: number, y0: number, x1: number, y1: number): void {
         for (let i = 0; i < this.map.linedefs.length; i++) {
-            const ld = this.map.linedefs[i];
+            const ld = this.map.linedefs[i]!;
             const def = getSpecial(ld.special);
             if (!def || def.trigger !== "walk") continue;
             if (!def.repeatable && this.triggeredLines.has(i)) continue;
@@ -128,7 +128,7 @@ export class SpecialsManager {
     }
 
     private activate(lineIndex: number, fromWalk: boolean): void {
-        const ld = this.map.linedefs[lineIndex];
+        const ld = this.map.linedefs[lineIndex]!;
         const def = getSpecial(ld.special);
         if (!def) return;
 
@@ -297,27 +297,27 @@ export class SpecialsManager {
         if (tag === 0) return [];
         const out: number[] = [];
         for (let i = 0; i < this.map.sectors.length; i++) {
-            if (this.map.sectors[i].tag === tag) out.push(i);
+            if (this.map.sectors[i]!.tag === tag) out.push(i);
         }
         return out;
     }
 
     private lowestNeighborCeiling(sec: number): number {
         let min = Infinity;
-        for (const n of this.neighbors[sec]) min = Math.min(min, this.map.sectors[n].ceilHeight);
-        return min === Infinity ? this.map.sectors[sec].ceilHeight : min;
+        for (const n of this.neighbors[sec]!) min = Math.min(min, this.map.sectors[n]!.ceilHeight);
+        return min === Infinity ? this.map.sectors[sec]!.ceilHeight : min;
     }
 
     private lowestNeighborFloor(sec: number): number {
         let min = Infinity;
-        for (const n of this.neighbors[sec]) min = Math.min(min, this.map.sectors[n].floorHeight);
-        return min === Infinity ? this.map.sectors[sec].floorHeight : min;
+        for (const n of this.neighbors[sec]!) min = Math.min(min, this.map.sectors[n]!.floorHeight);
+        return min === Infinity ? this.map.sectors[sec]!.floorHeight : min;
     }
 
     private swapSwitchTexture(lineIndex: number): void {
-        const ld = this.map.linedefs[lineIndex];
+        const ld = this.map.linedefs[lineIndex]!;
         if (ld.front < 0) return;
-        const side = this.map.sidedefs[ld.front];
+        const side = this.map.sidedefs[ld.front]!;
         for (const slot of ["upper", "middle", "lower"] as const) {
             const name = side[slot];
             const swapped = swapSwitchName(name);
@@ -344,9 +344,9 @@ export class SpecialsManager {
 
         // Lines: any wall touching a dynamic sector, plus all switch lines.
         for (let i = 0; i < this.map.linedefs.length; i++) {
-            const ld = this.map.linedefs[i];
-            const fSec = ld.front >= 0 ? this.map.sidedefs[ld.front].sector : -1;
-            const bSec = ld.back >= 0 ? this.map.sidedefs[ld.back].sector : -1;
+            const ld = this.map.linedefs[i]!;
+            const fSec = ld.front >= 0 ? this.map.sidedefs[ld.front]!.sector : -1;
+            const bSec = ld.back >= 0 ? this.map.sidedefs[ld.back]!.sector : -1;
             const def = getSpecial(ld.special);
             const isSwitch = def?.trigger === "switch";
             if (isSwitch || this.dynamicSectors.has(fSec) || this.dynamicSectors.has(bSec)) {
@@ -366,8 +366,8 @@ function buildSectorAdjacency(map: DoomMap): number[][] {
     const sets: Set<number>[] = map.sectors.map(() => new Set<number>());
     for (const ld of map.linedefs) {
         if (ld.front < 0 || ld.back < 0) continue;
-        const a = map.sidedefs[ld.front].sector;
-        const b = map.sidedefs[ld.back].sector;
+        const a = map.sidedefs[ld.front]!.sector;
+        const b = map.sidedefs[ld.back]!.sector;
         if (a === b) continue;
         if (sets[a] && sets[b]) {
             sets[a].add(b);

@@ -33,7 +33,7 @@ const MANUAL_END_FRAME = 4 * MANUAL_FRAME_RATE;
     let min = new Vector3(Infinity, Infinity, Infinity);
     let max = new Vector3(-Infinity, -Infinity, -Infinity);
     for (const mesh of result.meshes) {
-        mesh.refreshBoundingInfo();
+        mesh.refreshBoundingInfo({});
         const bounds = mesh.getBoundingInfo().boundingBox;
         min = Vector3.Minimize(min, bounds.minimumWorld);
         max = Vector3.Maximize(max, bounds.maximumWorld);

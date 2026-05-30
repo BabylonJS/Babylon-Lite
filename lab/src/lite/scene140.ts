@@ -23,19 +23,21 @@ import {
     setShadowTaskCasterMeshes,
 } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE66_MORPH_PERIOD_MS, createScene66FinalAlphaDiscardJson, getScene66Nme, sanitizeName, sphereScrambleDeltas } from "../shared/scene66-nme.js";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
+    const engineInternal = engine as Parameters<typeof createMorphTargets>[0];
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
 
     scene.camera = createArcRotateCamera(1.14, 0.95, 10, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const params = new URLSearchParams(location.search);
     const shadowHoleProbe = params.has("shadowHoleProbe");
@@ -58,7 +60,7 @@ async function main(): Promise<void> {
     const sphereData = createSphereData({ segments: 16, diameter: 2 });
     const deltas = sphereScrambleDeltas(sphereData.vertexCount);
     const freeze = params.has("freeze");
-    const morph = createMorphTargets(engine, [{ positions: deltas, normals: null }], sphereData.vertexCount, [freeze ? 1 : 0]);
+    const morph = createMorphTargets(engineInternal, [{ positions: deltas, normals: null }], sphereData.vertexCount, [freeze ? 1 : 0]);
     sphere.morphTargets = morph;
 
     const sg = noShadows
@@ -110,7 +112,7 @@ async function main(): Promise<void> {
         const w = new Float32Array([0]);
         const setMorphWeight = (value: number): void => {
             w[0] = value;
-            engine.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
+            engineInternal.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
         };
         (globalThis as { __scene140SetMorphWeight?: (value: number) => void }).__scene140SetMorphWeight = setMorphWeight;
         setMorphWeight(0);
@@ -136,7 +138,7 @@ async function main(): Promise<void> {
                 const s = Math.sin(t * Math.PI * 2);
                 w[0] = s * s;
             }
-            engine.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
+            engineInternal.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
         });
     }
 

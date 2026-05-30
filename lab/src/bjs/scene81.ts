@@ -30,9 +30,9 @@ type TextureOwnerBlock = {
 
     const material = NodeMaterial.Parse(SCENE81_NME_JSON, scene);
     const atlas = new Texture(SCENE81_TEXTURE_URL, scene, true, true, Texture.NEAREST_SAMPLINGMODE);
-    (material.getBlockByName("AtlasUV") as TextureOwnerBlock).texture = atlas;
-    (material.getBlockByName("TriAtlas") as TextureOwnerBlock).texture = atlas;
-    (material.getBlockByName("BiAtlas") as TextureOwnerBlock).texture = atlas;
+    (material.getBlockByName("AtlasUV") as unknown as TextureOwnerBlock).texture = atlas;
+    (material.getBlockByName("TriAtlas") as unknown as TextureOwnerBlock).texture = atlas;
+    (material.getBlockByName("BiAtlas") as unknown as TextureOwnerBlock).texture = atlas;
     material.build(false);
 
     const sphere = MeshBuilder.CreateSphere("sphere", { segments: 48, diameter: 2.6 }, scene);
