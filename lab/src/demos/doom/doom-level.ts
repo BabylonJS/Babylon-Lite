@@ -35,12 +35,17 @@ const TIC_SECONDS = 1 / 35; // DOOM simulation tic rate
 // of sliding, and lifts teleport instead of gliding.
 const MAX_FRAME_SECONDS = 0.05;
 
+// Bump this whenever the demo bundle is rebuilt so we can confirm in-browser which
+// build is actually loaded (printed to console + flashed on screen at level start).
+const DOOM_BUILD_TAG = "2026-05-30b melee-collision";
+
 export interface DoomLevel {
     map: DoomMap;
     dispose(): void;
 }
 
 export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBytes: ArrayBuffer, mapName = "E1M1"): DoomLevel {
+    console.log("[doom] build " + DOOM_BUILD_TAG);
     const wad = parseWad(wadBytes);
     const map = parseMap(wad, mapName);
 
@@ -116,6 +121,7 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
     if (sky) addToScene(scene, sky);
 
     installCamera(scene, map, specials, dynamicGeo, playerSectorRef, sky, world, spriteRenderer, player, hud, sound, weaponView);
+    hud.flashMessage("BUILD " + DOOM_BUILD_TAG);
 
     return {
         map,
