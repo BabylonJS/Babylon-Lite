@@ -14,12 +14,13 @@ import { createSky } from "./render/sky.js";
 import { buildLevelBatches } from "./geometry/build-level-geometry.js";
 import { DynamicGeometry } from "./geometry/dynamic-geometry.js";
 import { SpecialsManager } from "./specials/specials.js";
-import { buildCollisionLines, tryMove, VIEW_HEIGHT } from "./physics/collision.js";
+import { buildCollisionLines, tryMove, blockAgainstThings, PLAYER_RADIUS, VIEW_HEIGHT } from "./physics/collision.js";
 import { floorHeightAt, sectorIndexAt } from "./wad/bsp-query.js";
 import { SpriteStore } from "./render/sprites.js";
 import { SpriteRenderer } from "./render/sprite-render.js";
 import { WeaponView } from "./render/weapon-view.js";
 import { DoomWorld } from "./mobj/world.js";
+import { MF } from "./mobj/info.js";
 import { Player, Weapon } from "./player/player.js";
 import { DoomHud } from "./hud/hud.js";
 import { DoomSound } from "./sound/sound.js";
@@ -239,8 +240,13 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
         const fromZ = eye.z;
         const currentFloor = floorHeightAt(map, eye.x, eye.z);
         const moved = tryMove(collLines, eye.x, eye.z, mx * speed, mz * speed, currentFloor, map.sectors);
-        eye.x = moved.x;
-        eye.z = moved.y;
+        // Block against solid things (monsters, barrels, columns) like vanilla Doom,
+        // then re-resolve walls so a thing can't shove the player through geometry.
+        const blockers = world.mobjs.filter((m) => (m.flags & MF.SOLID) !== 0 && m.health > 0);
+        const pushed = blockAgainstThings(moved.x, moved.y, blockers, PLAYER_RADIUS);
+        const resolved = tryMove(collLines, pushed.x, pushed.y, 0, 0, currentFloor, map.sectors);
+        eye.x = resolved.x;
+        eye.z = resolved.y;
         playerSectorRef.value = sectorIndexAt(map, eye.x, eye.z);
 
         // World interactivity: USE (Space), walk-over triggers, and timed movers.

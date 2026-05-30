@@ -104,14 +104,19 @@ export function tryWalk(world: DoomWorld, m: Mobj, dir: Dir): boolean {
     });
     const advanced = Math.hypot(next.x - m.x, next.y - m.y);
     if (advanced < speed * 0.5) return false;
-    // Mobj-vs-mobj blocking.
-    for (const o of world.mobjs) {
-        if (o === m || o.removed) continue;
-        if ((o.flags & MF.SOLID) === 0) continue;
+    // Mobj-vs-mobj blocking, plus the player (who is not in the mobjs list) so an
+    // approaching monster stops at melee range instead of shoving the player.
+    const blocksThing = (o: Mobj): boolean => {
+        if ((o.flags & MF.SOLID) === 0) return false;
         const ddx = next.x - o.x;
         const ddy = next.y - o.y;
         const rr = m.radius + o.radius;
-        if (ddx * ddx + ddy * ddy < rr * rr) return false;
+        return ddx * ddx + ddy * ddy < rr * rr;
+    };
+    if (m !== world.player && world.player.health > 0 && blocksThing(world.player)) return false;
+    for (const o of world.mobjs) {
+        if (o === m || o.removed) continue;
+        if (blocksThing(o)) return false;
     }
     m.x = next.x;
     m.y = next.y;
