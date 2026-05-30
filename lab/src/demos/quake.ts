@@ -31,7 +31,7 @@ import {
 
 import { parseBsp } from "./quake/bsp/parse-bsp.js";
 import { parsePalette } from "./quake/palette.js";
-import { parseEntities, parseVec3 } from "./quake/entities/parse-entities.js";
+import { parseEntities, parseVec3, filterEntitiesBySkill } from "./quake/entities/parse-entities.js";
 import { buildLevelGeometry, buildModelGeometry, quakeToEngine, type GeometryBatch } from "./quake/geometry/build-geometry.js";
 import { QuakeTextureCache } from "./quake/render/texture-cache.js";
 import { createQuakeMaterial } from "./quake/render/quake-material.js";
@@ -100,7 +100,12 @@ async function main(): Promise<void> {
 
     const bsp = parseBsp(bspBytes);
     const palette = parsePalette(palBytes);
-    const entities = parseEntities(bsp.entities);
+    const params = new URLSearchParams(location.search);
+    // Apply Quake's skill/deathmatch entity culling (default skill 1 = Normal).
+    // Without this, deathmatch-only brushes seal the single-player spawn.
+    const skillParam = Number(params.get("skill"));
+    const skill = Number.isFinite(skillParam) && params.get("skill") !== null ? skillParam : 1;
+    const entities = filterEntitiesBySkill(parseEntities(bsp.entities), skill);
 
     const textures = new QuakeTextureCache(engine, bsp.mipTextures, palette);
 
@@ -113,7 +118,6 @@ async function main(): Promise<void> {
     const origin = parseVec3(start?.origin);
     const view: View = { yaw: ((start?.angle ? Number(start.angle) : 0) * Math.PI) / 180, pitch: 0 };
     // Optional dev override: ?spawn=x,y,z&yaw=deg
-    const params = new URLSearchParams(location.search);
     const spawnParam = params.get("spawn");
     if (spawnParam) {
         const p = spawnParam.split(",").map(Number);
@@ -308,6 +312,7 @@ function installPlayerControls(
         canvas.releasePointerCapture(e.pointerId);
         dragging = false;
     });
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointermove", (e) => {
         if (!dragging) return;
         const dx = e.clientX - lastX;
