@@ -39,7 +39,55 @@ const DIST_PER_BAND: f32 = ${DIST_PER_BAND.toFixed(1)};
 // fine vertical "bars". We instead average several taps across the pixel's
 // texel footprint -- but only AFTER the COLORMAP lookup, so we average final
 // RGB colors (valid) rather than palette indices (averaging indices is garbage).
-const MAX_TAPS: i32 = 8;
+const MAX_TAPS: i32 = 16;
+
+// Look up one palette-indexed texel and run it through the COLORMAP, blending the
+// two adjacent light rows. Returns RGB in .xyz and coverage (1 opaque / 0 clear)
+// in .w. Palette indices are NEVER interpolated -- only the resulting RGB is.
+fn colormapTexel(su: f32, v0: f32, v1: f32, frac: f32) -> vec3<f32> {
+  let c0 = textureSampleLevel(colormapTex, colormapTexSampler, vec2<f32>(su, v0), 0.0);
+  let c1 = textureSampleLevel(colormapTex, colormapTexSampler, vec2<f32>(su, v1), 0.0);
+  return mix(c0, c1, frac).rgb;
+}
+
+// Sample the wall texture at sampleUv as a coverage-weighted BILINEAR blend of the
+// POST-COLORMAP RGB of the surrounding 2x2 texels. This smooths the head-on
+// magnification "bars": with nearest sampling, non-integer magnification produces
+// uneven texel-block widths whose differing palette indices the COLORMAP amplifies
+// into faint vertical seams. Filtering the final RGB (not the indices) removes them.
+// Transparent texels contribute zero weight so alpha edges don't bleed dark halos.
+fn sampleBilinear(sampleUv: vec2<f32>, dims: vec2<f32>, v0: f32, v1: f32, frac: f32) -> vec4<f32> {
+  let tc = sampleUv * dims - vec2<f32>(0.5, 0.5);
+  let base = floor(tc);
+  let f = fract(tc);
+  var accum = vec3<f32>(0.0, 0.0, 0.0);
+  var w = 0.0;
+  for (var j = 0; j < 4; j = j + 1) {
+    let ox = f32(j & 1);
+    let oy = f32((j >> 1) & 1);
+    let bw = mix(1.0 - f.x, f.x, ox) * mix(1.0 - f.y, f.y, oy);
+    // REPEAT addressing on the nearest sampler wraps edge texels for tiling walls.
+    let suv = (base + vec2<f32>(ox, oy) + vec2<f32>(0.5, 0.5)) / dims;
+    let s = textureSampleLevel(srcTex, srcTexSampler, suv, 0.0);
+    if (s.a >= 0.5) {
+      let su = (floor(s.r * 255.0 + 0.5) + 0.5) / 256.0;
+      accum = accum + colormapTexel(su, v0, v1, frac) * bw;
+      w = w + bw;
+    }
+  }
+  if (w <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+  return vec4<f32>(accum / w, w);
+}
+
+// Single NEAREST tap (palette-exact). Used along the footprint for minified
+// (glancing) walls, where 2x2 bilinear cannot integrate the many-texels-per-pixel.
+fn sampleNearest(sampleUv: vec2<f32>, v0: f32, v1: f32, frac: f32) -> vec4<f32> {
+  let s = textureSampleLevel(srcTex, srcTexSampler, sampleUv, 0.0);
+  if (s.a < 0.5) { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+  let su = (floor(s.r * 255.0 + 0.5) + 0.5) / 256.0;
+  return vec4<f32>(colormapTexel(su, v0, v1, frac), 1.0);
+}
+
 @fragment fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
   let uv = input.uv;
   // Screen-space derivatives MUST be evaluated in uniform control flow (here,
@@ -73,21 +121,22 @@ const MAX_TAPS: i32 = 8;
   let v0 = (r0 + 0.5) / 34.0;
   let v1 = (r1 + 0.5) / 34.0;
 
+  // Magnified / near-1:1 walls (taps == 1): bilinear-filter the final RGB so the
+  // head-on texel seams ("bars") disappear. Minified walls keep the nearest
+  // multi-tap footprint integration (bilinear's 2x2 can't fix heavy minification).
   var acc = vec3<f32>(0.0, 0.0, 0.0);
   var cover = 0.0;
-  for (var i = 0; i < taps; i = i + 1) {
-    // Spread taps evenly across the footprint, centered on the fragment.
-    let t = (f32(i) + 0.5) / tapsF - 0.5;
-    let sampleUv = uv + majorUv * t;
-    // textureSampleLevel (explicit LOD 0) is safe inside the loop -- it needs no
-    // implicit derivative -- and the nearest sampler keeps each tap palette-exact.
-    let s = textureSampleLevel(srcTex, srcTexSampler, sampleUv, 0.0);
-    if (s.a >= 0.5) {
-      let su = (floor(s.r * 255.0 + 0.5) + 0.5) / 256.0;
-      let c0 = textureSampleLevel(colormapTex, colormapTexSampler, vec2<f32>(su, v0), 0.0);
-      let c1 = textureSampleLevel(colormapTex, colormapTexSampler, vec2<f32>(su, v1), 0.0);
-      acc = acc + mix(c0, c1, frac).rgb;
-      cover = cover + 1.0;
+  if (taps <= 1) {
+    let c = sampleBilinear(uv, dims, v0, v1, frac);
+    acc = c.rgb * c.w;
+    cover = c.w;
+  } else {
+    for (var i = 0; i < taps; i = i + 1) {
+      // Spread taps evenly across the footprint, centered on the fragment.
+      let t = (f32(i) + 0.5) / tapsF - 0.5;
+      let c = sampleNearest(uv + majorUv * t, v0, v1, frac);
+      acc = acc + c.rgb * c.w;
+      cover = cover + c.w;
     }
   }
   if (cover < 0.5) { discard; }
