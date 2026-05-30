@@ -36,7 +36,7 @@ export interface MdlModel {
 
 const stripDigits = (s: string): string => s.replace(/\d+$/, "");
 
-export function parseMdl(buffer: ArrayBuffer, palette: Uint8Array): MdlModel {
+export function parseMdl(buffer: ArrayBuffer, palette: Uint8Array, skinIndex = 0): MdlModel {
     const dv = new DataView(buffer);
     const bytes = new Uint8Array(buffer);
     if (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== "IDPO") throw new Error("MDL: bad magic (expected IDPO)");
@@ -54,22 +54,23 @@ export function parseMdl(buffer: ArrayBuffer, palette: Uint8Array): MdlModel {
 
     // ─── Skins ───────────────────────────────────────────────────────────────
     const skinSize = skinWidth * skinHeight;
-    let skin0: Uint8Array | null = null;
+    const wantSkin = Math.max(0, Math.min(skinIndex, numSkins - 1));
+    let chosen: Uint8Array | null = null;
     for (let i = 0; i < numSkins; i++) {
         const group = dv.getInt32(off, true);
         off += 4;
         if (group === 0) {
-            if (!skin0) skin0 = bytes.subarray(off, off + skinSize);
+            if (i === wantSkin) chosen = bytes.subarray(off, off + skinSize);
             off += skinSize;
         } else {
             const nb = dv.getInt32(off, true);
             off += 4 + nb * 4; // skip per-frame intervals
-            if (!skin0) skin0 = bytes.subarray(off, off + skinSize);
+            if (i === wantSkin) chosen = bytes.subarray(off, off + skinSize); // first group member
             off += nb * skinSize;
         }
     }
-    if (!skin0) throw new Error("MDL: no skin");
-    const skinRgba = indicesToRgba(skin0, palette);
+    if (!chosen) throw new Error("MDL: no skin");
+    const skinRgba = indicesToRgba(chosen, palette);
 
     // ─── Texture coordinates (stverts) ─────────────────────────────────────────
     const onseam = new Int32Array(numVerts);

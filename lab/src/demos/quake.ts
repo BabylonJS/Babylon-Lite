@@ -39,6 +39,7 @@ import { QuakePhysics, type MoveInput } from "./quake/physics/collision.js";
 import { MoverSystem, type WorldEnt } from "./quake/entities/mover-system.js";
 import { MonsterSystem } from "./quake/combat/monsters.js";
 import { Viewmodel } from "./quake/render/viewmodel.js";
+import { spawnItemModels, type SpawnedItem } from "./quake/render/items.js";
 
 const BSP_URL = "/librequake/lq_e1m1.bsp";
 const PALETTE_URL = "/librequake/palette.lmp";
@@ -52,6 +53,9 @@ const SHOTGUN_RANGE = 2048;
 const SHOTGUN_DAMAGE = 24; // 4 pellets worth in one hitscan
 const START_AMMO = 25;
 const START_HEALTH = 100;
+const ITEM_PICKUP_RADIUS = 48; // Quake item touch range (player half-width + item).
+const ITEM_PICKUP_HEIGHT = 56; // vertical reach: player box + item height overlap.
+const ITEM_SPIN_SPEED = 1.6; // radians/sec — Quake-3-style pickup rotation.
 
 const STEPSIZE = 18; // Quake STEPSIZE — must match physics; used for view-Z stair smoothing.
 const STAIR_SMOOTH_SPEED = 180; // units/sec the smoothed eye catches up after a step-up.
@@ -198,8 +202,8 @@ async function main(): Promise<void> {
         moverMeshes.set(ent, meshes);
     }
 
-    // Item pickups as spinning emissive boxes.
-    const itemMeshes = createItemMeshes(engine, scene, movers.ents);
+    // Pickup items rendered as their real Quake models (inert decorations).
+    const items = await spawnItemModels({ engine, scene, palette, lightTex, whiteUV: atlas.whiteUV, physics }, movers.ents);
 
     // Enemies + combat.
     const player: Player = { health: START_HEALTH, armor: 0, ammo: START_AMMO, dead: false };
@@ -246,6 +250,61 @@ async function main(): Promise<void> {
         }
     }
 
+    // Optional dev override: ?goto=item[:classfilter] teleports the player to
+    // stand facing the nearest matching pickup (mirrors ?goto=monster).
+    const gotoItem = params.get("goto");
+    if (gotoItem && gotoItem.startsWith("item")) {
+        const want = gotoItem.includes(":") ? gotoItem.split(":")[1] : "";
+        const cand = movers.ents.filter((e) => e.isItem && (!want || e.cls.includes(want)));
+        let best: WorldEnt | undefined;
+        let bestD = Infinity;
+        for (const e of cand) {
+            const d = (e.origin[0] - origin[0]) ** 2 + (e.origin[1] - origin[1]) ** 2 + (e.origin[2] - origin[2]) ** 2;
+            if (d < bestD) {
+                bestD = d;
+                best = e;
+            }
+        }
+        if (best) {
+            const drop = physics.castMove([best.origin[0], best.origin[1], best.origin[2]], [best.origin[0], best.origin[1], best.origin[2] - 256]);
+            const floorZ = drop.fraction < 1 ? drop.endpos[2] : best.origin[2];
+            const aim: [number, number, number] = [best.origin[0], best.origin[1], floorZ + 12];
+            const eye: [number, number, number] = [best.origin[0], best.origin[1], floorZ + 40];
+            const s = Math.SQRT1_2;
+            const dirs: [number, number][] = [
+                [1, 0],
+                [-1, 0],
+                [0, 1],
+                [0, -1],
+                [s, s],
+                [s, -s],
+                [-s, s],
+                [-s, -s],
+            ];
+            let px = best.origin[0];
+            let py = best.origin[1];
+            let bestClear = -1;
+            for (const [dx, dy] of dirs) {
+                const tr = physics.castMove(eye, [best.origin[0] + dx * 120, best.origin[1] + dy * 120, eye[2]]);
+                const clear = 120 * tr.fraction;
+                if (clear > bestClear) {
+                    bestClear = clear;
+                    const stand = Math.max(60, Math.min(110, clear * 0.85));
+                    px = best.origin[0] + dx * stand;
+                    py = best.origin[1] + dy * stand;
+                }
+            }
+            physics.origin[0] = px;
+            physics.origin[1] = py;
+            physics.origin[2] = floorZ + 24;
+            const eyeZ = floorZ + 24 + 22;
+            const horiz = Math.hypot(aim[0] - px, aim[1] - py);
+            view.yaw = Math.atan2(aim[1] - py, aim[0] - px);
+            view.pitch = Math.atan2(aim[2] - eyeZ, horiz);
+            console.log("[goto-item]", best.cls, "@", best.origin.join(","), "floorZ", floorZ, "stand", Math.round(horiz));
+        }
+    }
+
     // First-person weapon viewmodel (shotgun).
     const viewmodel = new Viewmodel(engine, scene, lightTex, palette, atlas.whiteUV);
     await viewmodel.load();
@@ -259,7 +318,7 @@ async function main(): Promise<void> {
     cam.farPlane = 20000;
     scene.camera = cam;
 
-    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, itemMeshes, monsters, viewmodel, player, hud, impacts);
+    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, items, monsters, viewmodel, player, hud, impacts);
 
     await registerScene(engine, scene);
     await startEngine(engine);
@@ -276,7 +335,7 @@ function installPlayerControls(
     view: View,
     movers: MoverSystem,
     moverMeshes: Map<WorldEnt, Mesh[]>,
-    itemMeshes: { ent: WorldEnt; mesh: Mesh }[],
+    items: SpawnedItem[],
     monsters: MonsterSystem,
     viewmodel: Viewmodel,
     player: Player,
@@ -409,8 +468,8 @@ function installPlayerControls(
         return undefined;
     };
 
-    let spin = 0;
     let smoothEyeZ = physics.eye[2];
+    let itemSpin = 0;
     onBeforeRender(scene, (deltaMs) => {
         const dt = Math.min(deltaMs / 1000, MAX_FRAME);
         let forward = 0;
@@ -443,17 +502,23 @@ function installPlayerControls(
             prev[2] = ent.offset[2];
         }
 
-        // Item pickups: spin, hide once collected, grant ammo/health.
-        spin += dt * 2;
-        for (const { ent, mesh } of itemMeshes) {
-            if (ent.picked) {
-                if (mesh.visible !== false) {
-                    mesh.visible = false;
-                    grantPickup(player, ent.cls);
-                    hud.setStats(player, monsters.kills, monsters.total);
-                }
-            } else {
-                mesh.rotation.set(0, spin, 0);
+        // Spin live items (Quake-3 style) and grant pickups on touch. physics.origin
+        // is the player centre (feet + 24); items rest on the floor at qpos. Use a
+        // box-overlap-style test: generous horizontally, lenient vertically so items
+        // on low pedestals or steps still register.
+        itemSpin += dt * ITEM_SPIN_SPEED;
+        const pOrigin = physics.origin;
+        for (const item of items) {
+            if (item.picked) continue;
+            for (const m of item.meshes) m.rotation.set(0, itemSpin, 0);
+            const dx = item.qpos[0] - pOrigin[0];
+            const dy = item.qpos[1] - pOrigin[1];
+            const dz = item.qpos[2] - pOrigin[2];
+            if (dx * dx + dy * dy <= ITEM_PICKUP_RADIUS * ITEM_PICKUP_RADIUS && Math.abs(dz) <= ITEM_PICKUP_HEIGHT) {
+                item.picked = true;
+                for (const m of item.meshes) m.visible = false;
+                grantPickup(player, item.cls, item.flags);
+                hud.setStats(player, monsters.kills, monsters.total);
             }
         }
 
@@ -478,32 +543,39 @@ function installPlayerControls(
     });
 }
 
-/** Spawn a colored emissive box for every item/weapon entity in the map. */
-function createItemMeshes(engine: Engine, scene: ReturnType<typeof createSceneContext>, ents: WorldEnt[]): { ent: WorldEnt; mesh: Mesh }[] {
-    const out: { ent: WorldEnt; mesh: Mesh }[] = [];
-    for (const ent of ents) {
-        if (!ent.isItem) continue;
-        const mesh = createBox(engine, 16);
-        const [ex, ey, ez] = quakeToEngine(ent.origin[0], ent.origin[1], ent.origin[2] + 16);
-        mesh.position.set(ex, ey, ez);
-        const mat = createStandardMaterial();
-        mat.emissiveColor = itemColor(ent.cls);
-        mat.diffuseColor = [0.1, 0.1, 0.1];
-        mesh.material = mat;
-        addToScene(scene, mesh);
-        out.push({ ent, mesh });
+/**
+ * Apply a touched item's effect to the player. Mirrors Quake's pickup amounts,
+ * collapsed onto this demo's single-weapon / single-ammo-counter model:
+ * health heals (mega overheals), armour raises the armour ceiling, ammo and
+ * weapons top up the shared ammo counter. Powerup artifacts are collected but
+ * grant no persistent stat (no powerup state in this demo).
+ */
+function grantPickup(player: Player, cls: string, flags: number): void {
+    if (cls === "item_health") {
+        if (flags & 2) player.health = Math.min(250, player.health + 100); // megahealth
+        else if (flags & 1) player.health = Math.min(100, player.health + 15); // rotten
+        else player.health = Math.min(100, player.health + 25);
+        return;
     }
-    return out;
-}
-
-function itemColor(cls: string): [number, number, number] {
-    if (cls.startsWith("weapon_")) return [0.9, 0.7, 0.1];
-    if (cls.includes("health")) return [0.9, 0.15, 0.15];
-    if (cls.includes("armor")) return [0.2, 0.6, 0.9];
-    if (cls.includes("cells") || cls.includes("rockets") || cls.includes("shells") || cls.includes("spikes")) return [0.8, 0.6, 0.2];
-    if (cls.includes("key")) return [0.9, 0.85, 0.2];
-    if (cls.includes("artifact")) return [0.6, 0.2, 0.9];
-    return [0.7, 0.7, 0.7];
+    if (cls === "item_armor1") {
+        player.armor = Math.max(player.armor, 100);
+        return;
+    }
+    if (cls === "item_armor2") {
+        player.armor = Math.max(player.armor, 150);
+        return;
+    }
+    if (cls === "item_armorInv") {
+        player.armor = Math.max(player.armor, 200);
+        return;
+    }
+    let add = 0;
+    if (cls === "item_shells") add = 20;
+    else if (cls === "item_spikes") add = 25;
+    else if (cls === "item_rockets") add = 5;
+    else if (cls === "item_cells") add = 6;
+    else if (cls.startsWith("weapon_")) add = 10;
+    if (add > 0) player.ammo = Math.min(200, player.ammo + add);
 }
 
 /**
@@ -638,14 +710,6 @@ function hurtPlayer(player: Player, amount: number, hud: Hud): void {
         hud.showDead();
     }
     hud.message("");
-}
-
-/** Grant ammo / health / armor when an item box is collected. */
-function grantPickup(player: Player, cls: string): void {
-    if (cls.includes("health")) player.health = Math.min(100, player.health + 25);
-    else if (cls.includes("armor")) player.armor = Math.min(200, player.armor + 50);
-    else if (cls.startsWith("weapon_")) player.ammo += 10;
-    else player.ammo += 8; // ammo boxes (shells/spikes/rockets/cells)
 }
 
 /** DOM HUD: stats bar, transient messages, muzzle flash, death + level-complete overlays. */

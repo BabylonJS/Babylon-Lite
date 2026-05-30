@@ -17,7 +17,6 @@ type V3 = [number, number, number];
 const PLAYER_MINS: V3 = [-16, -16, -24];
 const PLAYER_MAXS: V3 = [16, 16, 32];
 const DOOR_TRIGGER_PAD = 60; // Quake expands touch-open doors by 60 units.
-const ITEM_PICKUP_RADIUS = 40;
 
 // spawnflags
 const DOOR_START_OPEN = 1;
@@ -65,7 +64,6 @@ export interface WorldEnt {
     fired: boolean;
     nextTouch: number;
     isItem: boolean;
-    picked: boolean;
     origin: V3;
 }
 
@@ -87,7 +85,6 @@ export class MoverSystem {
     private readonly scheduled: { time: number; ent: WorldEnt }[] = [];
     private time = 0;
     secrets = 0;
-    itemsTaken = 0;
 
     constructor(
         private readonly bsp: BspData,
@@ -127,7 +124,6 @@ export class MoverSystem {
                 fired: false,
                 nextTouch: 0,
                 isItem: ITEM_CLASSES.test(cls),
-                picked: false,
                 origin: parseVec3(kv.origin),
             };
 
@@ -298,7 +294,6 @@ export class MoverSystem {
 
         this.handleTouch(pmin, pmax);
         this.advanceMovers(dt);
-        this.handleItems();
     }
 
     private handleTouch(pmin: V3, pmax: V3): void {
@@ -443,25 +438,6 @@ export class MoverSystem {
             ent.state = "rest";
             ent.waitTimer = 0;
         }
-    }
-
-    private handleItems(): void {
-        const p = this.physics.origin;
-        for (const ent of this.ents) {
-            if (!ent.isItem || ent.picked) continue;
-            const dx = ent.origin[0] - p[0];
-            const dy = ent.origin[1] - p[1];
-            const dz = ent.origin[2] - (p[2] + 16);
-            if (dx * dx + dy * dy + dz * dz <= ITEM_PICKUP_RADIUS * ITEM_PICKUP_RADIUS) {
-                ent.picked = true;
-                this.itemsTaken++;
-                this.hooks.message?.(`Picked up ${this.itemLabel(ent.cls)}`);
-            }
-        }
-    }
-
-    private itemLabel(cls: string): string {
-        return cls.replace(/^item_/, "").replace(/^weapon_/, "").replace(/_/g, " ");
     }
 
     private overlap(amin: V3, amax: V3, bmin: V3, bmax: V3): boolean {

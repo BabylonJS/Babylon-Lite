@@ -34,6 +34,31 @@ const PAK_WANTED: Record<string, string> = {
     "progs/soldier.mdl": "progs/soldier.mdl",
     "progs/dog.mdl": "progs/dog.mdl",
     "progs/v_shot.mdl": "progs/v_shot.mdl",
+    // Pickup item models — weapons / armor / artifacts are alias (.mdl) models…
+    "progs/g_shot.mdl": "progs/g_shot.mdl", // super shotgun
+    "progs/g_nail.mdl": "progs/g_nail.mdl", // nailgun
+    "progs/g_nail2.mdl": "progs/g_nail2.mdl", // super nailgun
+    "progs/g_rock.mdl": "progs/g_rock.mdl", // grenade launcher
+    "progs/g_rock2.mdl": "progs/g_rock2.mdl", // rocket launcher
+    "progs/g_light.mdl": "progs/g_light.mdl", // lightning gun
+    "progs/armor.mdl": "progs/armor.mdl", // armor (skins 0/1/2)
+    "progs/quaddama.mdl": "progs/quaddama.mdl", // quad damage
+    "progs/suit.mdl": "progs/suit.mdl", // biosuit
+    "progs/invulner.mdl": "progs/invulner.mdl", // pentagram
+    "progs/invisibl.mdl": "progs/invisibl.mdl", // ring
+    // …while ammo & health pickups are small brush (.bsp) models.
+    "maps/b_shell0.bsp": "maps/b_shell0.bsp", // shells (small)
+    "maps/b_shell1.bsp": "maps/b_shell1.bsp", // shells (big)
+    "maps/b_nail0.bsp": "maps/b_nail0.bsp", // spikes (small)
+    "maps/b_nail1.bsp": "maps/b_nail1.bsp", // spikes (big)
+    "maps/b_rock0.bsp": "maps/b_rock0.bsp", // rockets (small)
+    "maps/b_rock1.bsp": "maps/b_rock1.bsp", // rockets (big)
+    "maps/b_batt0.bsp": "maps/b_batt0.bsp", // cells (small)
+    "maps/b_batt1.bsp": "maps/b_batt1.bsp", // cells (big)
+    "maps/b_bh10.bsp": "maps/b_bh10.bsp", // health (rotten, 15)
+    "maps/b_bh25.bsp": "maps/b_bh25.bsp", // health (25)
+    "maps/b_bh100.bsp": "maps/b_bh100.bsp", // megahealth (100)
+    "maps/b_explob.bsp": "maps/b_explob.bsp", // exploding box
 };
 /** License / attribution docs pulled straight from the zip (BSD-3 compliance). */
 const ZIP_LICENSE_FILES: Record<string, string> = {
