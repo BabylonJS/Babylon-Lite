@@ -647,7 +647,7 @@ function installPlayerControls(
 
         const riding = ridingEnt();
         movers.update(dt);
-        monsters.update(dt, [physics.origin[0], physics.origin[1], physics.origin[2]]);
+        monsters.update(dt, [physics.origin[0], physics.origin[1], physics.origin[2]], player.dead);
         grenades.update(dt);
 
         // Sync mover meshes; carry the player along with whatever lift they ride.

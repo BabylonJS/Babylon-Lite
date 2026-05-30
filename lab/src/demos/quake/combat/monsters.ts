@@ -189,10 +189,17 @@ export class MonsterSystem {
         if (tr.fraction < 1) m.origin[2] = tr.endpos[2];
     }
 
-    update(dt: number, playerOrigin: V3): void {
+    update(dt: number, playerOrigin: V3, playerDead = false): void {
         for (const m of this.monsters) {
             if (m.state === "dead") {
                 this.animateDeath(m, dt);
+                continue;
+            }
+            // Player is dead: enemies stop firing and chasing — stand down.
+            if (playerDead) {
+                if (m.state === "chase") m.anim = "stand";
+                this.placeMesh(m);
+                this.animateAlive(m, dt);
                 continue;
             }
             const dx = playerOrigin[0] - m.origin[0];
