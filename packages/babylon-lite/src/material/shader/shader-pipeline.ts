@@ -77,10 +77,16 @@ export function getOrCreateShaderPipeline(
               format: sig._colorFormat,
               ...(material.needAlphaBlending
                   ? {
-                        blend: {
-                            color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-                            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                        } satisfies GPUBlendState,
+                        blend:
+                            material.blendMode === "additive"
+                                ? ({
+                                      color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+                                      alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+                                  } satisfies GPUBlendState)
+                                : ({
+                                      color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+                                      alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+                                  } satisfies GPUBlendState),
                     }
                   : {}),
           }

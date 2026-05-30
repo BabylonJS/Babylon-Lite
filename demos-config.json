@@ -16,5 +16,11 @@
         "name": "LibreQuake — E1M1",
         "description": "Playable port of LibreQuake's first level (lq_e1m1) on Lite: clean-room Quake BSP v29 parser with embedded textures and grayscale lightmaps, player physics + BSP collision, working doors/lifts/triggers, MDL enemies (soldiers & dogs) with AI, a shotgun with hitscan combat, items and a HUD. Ships the BSD-3-Clause LibreQuake assets — no id data or GPL source.",
         "tags": ["game", "fps", "bsp", "quake", "showcase"]
+    },
+    {
+        "slug": "minecraft",
+        "name": "Voxel Sandbox",
+        "description": "Minecraft-style creative voxel sandbox built on Lite. Procedurally generated, infinitely streaming chunk world with break/place editing, ambient occlusion, water, day-night sky and fog. Ships CC0 Kenney textures; optionally load your own resource pack at runtime. Original clean-room engine — no Mojang code or assets.",
+        "tags": ["game", "voxel", "sandbox", "showcase"]
     }
 ]
