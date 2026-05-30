@@ -665,7 +665,7 @@ function installPlayerControls(
 
     // FPS counter (top-left), averaged over a short window using the raw frame delta.
     const fpsEl = document.createElement("div");
-    fpsEl.style.cssText = "position:fixed;left:8px;top:6px;color:#ff0;font:bold 14px monospace;text-shadow:0 0 3px #000,0 1px 2px #000;pointer-events:none;z-index:9999;";
+    fpsEl.style.cssText = "position:fixed;right:8px;top:6px;color:#ff0;font:bold 14px monospace;text-shadow:0 0 3px #000,0 1px 2px #000;pointer-events:none;z-index:9999;";
     document.body.appendChild(fpsEl);
     let fpsAccum = 0;
     let fpsFrames = 0;
