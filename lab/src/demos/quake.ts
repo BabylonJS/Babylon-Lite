@@ -44,7 +44,7 @@ import { MoverSystem, type WorldEnt } from "./quake/entities/mover-system.js";
 import { MonsterSystem } from "./quake/combat/monsters.js";
 import { Viewmodel } from "./quake/render/viewmodel.js";
 import { GrenadeSystem } from "./quake/combat/grenades.js";
-import { WEAPONS, WEAPON_ORDER, WEAPON_PICKUPS, type WeaponId } from "./quake/combat/weapons.js";
+import { WEAPONS, WEAPON_ORDER, WEAPON_PICKUPS, type WeaponId, type AmmoType } from "./quake/combat/weapons.js";
 import { spawnItemModels, type SpawnedItem } from "./quake/render/items.js";
 import { QuakeSound } from "./quake/audio/sound.js";
 import { SbarHud } from "./quake/hud/sbar.js";
@@ -77,6 +77,7 @@ const brushNudge = (modelIndex: number, isMover: boolean): number =>
     (isMover ? MOVER_BASE_NUDGE : BRUSH_BASE_NUDGE) + ((modelIndex * 7) % 16) * 0.04;
 
 const START_SHELLS = 25;
+const START_NAILS = 0;
 const START_ROCKETS = 0;
 const START_HEALTH = 100;
 const ITEM_PICKUP_RADIUS = 48; // Quake item touch range (player half-width + item).
@@ -97,6 +98,7 @@ interface Player {
     health: number;
     armor: number;
     shells: number;
+    nails: number;
     rockets: number;
     weapon: WeaponId;
     owned: Set<WeaponId>;
@@ -253,7 +255,7 @@ async function main(): Promise<void> {
     const items = await spawnItemModels({ engine, scene, palette, lightTex, whiteUV: atlas.whiteUV, physics }, movers.ents);
 
     // Enemies + combat.
-    const player: Player = { health: START_HEALTH, armor: 0, shells: START_SHELLS, rockets: START_ROCKETS, weapon: "shotgun", owned: new Set<WeaponId>(["shotgun"]), dead: false };
+    const player: Player = { health: START_HEALTH, armor: 0, shells: START_SHELLS, nails: START_NAILS, rockets: START_ROCKETS, weapon: "shotgun", owned: new Set<WeaponId>(["shotgun"]), dead: false };
     const monsters = new MonsterSystem(engine, scene, physics, lightTex, atlas.whiteUV, palette, {
         damage: (amount) => {
             hurtPlayer(player, amount, hud, sound);
@@ -408,7 +410,7 @@ async function main(): Promise<void> {
     await startEngine(engine);
     canvas.dataset.drawCalls = String(drawn);
     canvas.dataset.ready = "true";
-    hud.message("WASD move  ·  mouse look  ·  LMB fire  ·  1-3 / wheel switch weapon");
+    hud.message("WASD move  ·  mouse look  ·  LMB fire  ·  1-5 / wheel switch weapon");
 }
 
 /** First-person controls + the per-frame game loop (physics, movers, sync). */
@@ -471,12 +473,20 @@ function installPlayerControls(
         switchWeapon(owned[(i + dir + owned.length) % owned.length]);
     };
 
+    // Read/spend the ammo pool backing a weapon's ammo type.
+    const ammoOf = (t: AmmoType): number => (t === "shells" ? player.shells : t === "nails" ? player.nails : player.rockets);
+    const spendAmmo = (t: AmmoType, n: number): void => {
+        if (t === "shells") player.shells -= n;
+        else if (t === "nails") player.nails -= n;
+        else player.rockets -= n;
+    };
+
     const fire = (): void => {
         if (player.dead) return;
         const def = WEAPONS[player.weapon];
         const now = performance.now() / 1000;
         if (now - lastFire < def.refire) return;
-        const have = def.ammo === "shells" ? player.shells : player.rockets;
+        const have = ammoOf(def.ammo);
         if (have < def.ammoPerShot) return;
 
         // Quake view direction from yaw/pitch (X fwd, Y left, Z up).
@@ -516,8 +526,7 @@ function installPlayerControls(
         }
 
         lastFire = now;
-        if (def.ammo === "shells") player.shells -= def.ammoPerShot;
-        else player.rockets -= def.ammoPerShot;
+        spendAmmo(def.ammo, def.ammoPerShot);
         hud.muzzle();
         viewmodel.fire();
         sound.play(def.fireSound);
@@ -530,7 +539,9 @@ function installPlayerControls(
         keys.add(e.code);
         if (e.code === "Digit1") switchWeapon("shotgun");
         else if (e.code === "Digit2") switchWeapon("supershotgun");
-        else if (e.code === "Digit3") switchWeapon("grenade");
+        else if (e.code === "Digit3") switchWeapon("nailgun");
+        else if (e.code === "Digit4") switchWeapon("supernailgun");
+        else if (e.code === "Digit5") switchWeapon("grenade");
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     });
     canvas.addEventListener("keyup", (e) => keys.delete(e.code));
@@ -740,9 +751,10 @@ function grantPickup(player: Player, cls: string, flags: number): { label: strin
         player.owned.add(weaponId);
         const def = WEAPONS[weaponId];
         if (def.ammo === "shells") player.shells = Math.min(100, player.shells + 5);
+        else if (def.ammo === "nails") player.nails = Math.min(200, player.nails + 30);
         else player.rockets = Math.min(100, player.rockets + 5);
         player.weapon = weaponId;
-        const hint = player.owned.size >= 2 ? "  (keys 1-3 or mouse wheel to switch)" : "";
+        const hint = player.owned.size >= 2 ? "  (keys 1-5 or mouse wheel to switch)" : "";
         return { label: `You got the ${def.name}${hint}`, sound: "weapons/pkup.wav" };
     }
 
@@ -755,7 +767,10 @@ function grantPickup(player: Player, cls: string, flags: number): { label: strin
         player.rockets = Math.min(100, player.rockets + 5);
         return { label: "You got rockets", sound: "weapons/lock4.wav" };
     }
-    if (cls === "item_spikes") return { label: "You got nails", sound: "weapons/lock4.wav" };
+    if (cls === "item_spikes") {
+        player.nails = Math.min(200, player.nails + (flags & 1 ? 50 : 25));
+        return { label: "You got nails", sound: "weapons/lock4.wav" };
+    }
     if (cls === "item_cells") return { label: "You got cells", sound: "weapons/lock4.wav" };
     return { label: "You got ammo", sound: "weapons/lock4.wav" };
 }
@@ -975,7 +990,7 @@ async function createHud(palette: Palette): Promise<Hud> {
         },
         setStats(player: Player, kills: number, total: number) {
             const def = WEAPONS[player.weapon];
-            const ammoCount = def.ammo === "shells" ? player.shells : player.rockets;
+            const ammoCount = def.ammo === "shells" ? player.shells : def.ammo === "nails" ? player.nails : player.rockets;
             if (sbar) {
                 const weapons = WEAPON_ORDER.filter((id) => player.owned.has(id)).map((id) => ({
                     invIcon: WEAPONS[id].invIcon,
@@ -993,7 +1008,7 @@ async function createHud(palette: Palette): Promise<Hud> {
                 });
                 return;
             }
-            const ammoLabel = def.ammo === "shells" ? "SHELLS" : "ROCKETS";
+            const ammoLabel = def.ammo === "shells" ? "SHELLS" : def.ammo === "nails" ? "NAILS" : "ROCKETS";
             stats!.innerHTML =
                 `<span style="color:#ff6b6b">HEALTH ${Math.max(0, Math.ceil(player.health))}</span>` +
                 `&nbsp;&nbsp;<span style="color:#6bb6ff">ARMOR ${Math.max(0, Math.round(player.armor))}</span>` +

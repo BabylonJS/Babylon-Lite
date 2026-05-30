@@ -35,6 +35,8 @@ const PAK_WANTED: Record<string, string> = {
     "progs/dog.mdl": "progs/dog.mdl",
     "progs/v_shot.mdl": "progs/v_shot.mdl",
     "progs/v_shot2.mdl": "progs/v_shot2.mdl", // super shotgun viewmodel
+    "progs/v_nail.mdl": "progs/v_nail.mdl", // nailgun viewmodel
+    "progs/v_nail2.mdl": "progs/v_nail2.mdl", // super nailgun viewmodel
     "progs/v_rock.mdl": "progs/v_rock.mdl", // grenade launcher viewmodel
     "progs/grenade.mdl": "progs/grenade.mdl", // grenade projectile
     // Pickup item models — weapons / armor / artifacts are alias (.mdl) models…
@@ -70,6 +72,7 @@ const PAK_WANTED: Record<string, string> = {
     // pain/death and doors. Decoded at runtime via the Web Audio API.
     "sound/weapons/guncock.wav": "sound/weapons/guncock.wav", // shotgun fire
     "sound/weapons/shotgn2.wav": "sound/weapons/shotgn2.wav", // super shotgun fire
+    "sound/weapons/rocket1i.wav": "sound/weapons/rocket1i.wav", // nailgun / super nailgun fire
     "sound/weapons/grenade.wav": "sound/weapons/grenade.wav", // grenade launcher fire
     "sound/weapons/bounce.wav": "sound/weapons/bounce.wav", // grenade bounce
     "sound/weapons/r_exp3.wav": "sound/weapons/r_exp3.wav", // explosion
