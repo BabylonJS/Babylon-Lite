@@ -18,6 +18,7 @@ import { buildCollisionLines, tryMove, VIEW_HEIGHT } from "./physics/collision.j
 import { floorHeightAt, sectorIndexAt } from "./wad/bsp-query.js";
 import { SpriteStore } from "./render/sprites.js";
 import { SpriteRenderer } from "./render/sprite-render.js";
+import { WeaponView } from "./render/weapon-view.js";
 import { DoomWorld } from "./mobj/world.js";
 import { Player, Weapon } from "./player/player.js";
 import { DoomHud } from "./hud/hud.js";
@@ -98,6 +99,7 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
     const player = new Player(world);
     const sound = new DoomSound(wad);
     const hud = new DoomHud(player);
+    const weaponView = new WeaponView(wad);
     world.events = {
         message: (text) => {
             player.setMessage(text);
@@ -112,17 +114,18 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
     const sky = skyTex ? createSky(engine, skyTex.texture, colormapTex) : null;
     if (sky) addToScene(scene, sky);
 
-    installCamera(scene, map, specials, dynamicGeo, playerSectorRef, sky, world, spriteRenderer, player, hud, sound);
+    installCamera(scene, map, specials, dynamicGeo, playerSectorRef, sky, world, spriteRenderer, player, hud, sound, weaponView);
 
     return {
         map,
         dispose: () => {
             hud.dispose();
+            weaponView.dispose();
         },
     };
 }
 
-function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsManager, dynamicGeo: DynamicGeometry, playerSectorRef: { value: number }, sky: Mesh | null, world: DoomWorld, spriteRenderer: SpriteRenderer, player: Player, hud: DoomHud, sound: DoomSound): void {
+function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsManager, dynamicGeo: DynamicGeometry, playerSectorRef: { value: number }, sky: Mesh | null, world: DoomWorld, spriteRenderer: SpriteRenderer, player: Player, hud: DoomHud, sound: DoomSound, weaponView: WeaponView): void {
     const start = map.things.find((t) => t.type === 1) ?? map.things[0];
     const sx = start ? start.x : 0;
     const sz = start ? start.y : 0;
@@ -294,6 +297,7 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
 
         // Rebuild all mobj billboards once per frame, facing the camera.
         spriteRenderer.rebuild(world.collectSprites(eye.x, eye.z));
+        weaponView.update(player, dt, fromX !== eye.x || fromZ !== eye.z);
         hud.update();
     });
 }
