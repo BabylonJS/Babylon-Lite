@@ -222,7 +222,7 @@ function emitWallSegment(
     // the back sector — i.e. the opposite direction — so their U must run the other
     // way to avoid a horizontal mirror. Both anchor xOffset at v1.
     const u1 = side.xOffset / texW;
-    const u2 = (side.xOffset + (backSide ? len : -len)) / texW;
+    const u2 = (side.xOffset + (backSide ? -len : len)) / texW;
     const vTop = (textureMid - yTop) / texH;
     const vBottom = (textureMid - yBottom) / texH;
 
@@ -282,7 +282,7 @@ function emitMidtexture(
     if (drawTop <= drawBottom) return;
 
     const u1 = side.xOffset / texW;
-    const u2 = (side.xOffset + (backSide ? len : -len)) / texW;
+    const u2 = (side.xOffset + (backSide ? -len : len)) / texW;
     const vTop = (unclippedTop - drawTop) / texH;
     const vBottom = (unclippedTop - drawBottom) / texH;
 
