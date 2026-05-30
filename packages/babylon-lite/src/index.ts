@@ -99,6 +99,8 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
+export { createTexture2DFromPixels } from "./texture/pixels-texture.js";
+export type { PixelsTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 

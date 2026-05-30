@@ -47,9 +47,10 @@ async function main(): Promise<void> {
 
     // Sphere at light position — emissive yellow
     const sphere = createSphere(engine, { segments: 10, diameter: 2 });
-    sphere.material = createStandardMaterial();
+    const sphereMat = createStandardMaterial();
+    sphere.material = sphereMat;
     sphere.position.set(20, 40, 20);
-    sphere.material.emissiveColor = [1, 1, 0];
+    sphereMat.emissiveColor = [1, 1, 0];
     addToScene(scene, sphere);
 
     // Ground from heightmap — PBR material, receives shadows
@@ -103,9 +104,10 @@ async function main(): Promise<void> {
     // Emissive sphere to visualize spotlight position
     const spotSphere = createSphere(engine, { diameter: 2 });
     spotSphere.position.set(48.8, 50, 6.8);
-    spotSphere.material = createStandardMaterial();
-    spotSphere.material.emissiveColor = [0, 0.5, 1];
-    spotSphere.material.disableLighting = true;
+    const spotMat = createStandardMaterial();
+    spotSphere.material = spotMat;
+    spotMat.emissiveColor = [0, 0.5, 1];
+    spotMat.disableLighting = true;
     addToScene(scene, spotSphere);
 
     // --- Interactive: toggle torus rotation ---

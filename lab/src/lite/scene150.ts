@@ -16,6 +16,7 @@ import {
     startAnimationManager,
     startEngine,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 const FRAME_RATE = 10;
 const END_FRAME = 2 * FRAME_RATE;
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 4, 10, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     addToScene(scene, createDirectionalLight([0, -1, 1], 0.75));
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.5));

@@ -12,6 +12,7 @@ import {
     parseNodeMaterialFromSnippet,
     loadTexture2D,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { SCENE62_NME_JSON, SCENE62_TEXTURE_URL } from "../shared/scene62-nme.js";
 
 async function main(): Promise<void> {
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const diffuse = await loadTexture2D(engine, SCENE62_TEXTURE_URL);
     const material = await parseNodeMaterialFromSnippet(engine, "", {

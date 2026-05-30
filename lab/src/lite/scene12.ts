@@ -1,5 +1,6 @@
 import { onBeforeRender, addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createDirectionalLight, cloneTransformNode, attachControl, loadGltf, loadEnvironment, loadTexture2D, createPbrMaterial, createSolidTexture2D, goToFrame, registerScene } from "babylon-lite";
 import type { TransformNode } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     const __initStart = performance.now();
@@ -10,7 +11,7 @@ export async function scene12(canvas: HTMLCanvasElement): Promise<void> {
     // Camera — BJS ArcRotateCamera(PI/2, PI/2, 15, (0,0,0))
     scene.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 15, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Directional light — direction points FROM light (BJS convention)
     const light = createDirectionalLight([0.45, -0.34, -0.83]);

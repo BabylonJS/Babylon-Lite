@@ -24,7 +24,7 @@ function collectMeshes(container: AssetContainer): Mesh[] {
     const visit = (node: unknown): void => {
         if (node && typeof node === "object") {
             if ("_gpu" in node && "material" in node) {
-                meshes.push(node as Mesh);
+                meshes.push(node as unknown as Mesh);
             }
             const children = (node as { children?: readonly unknown[] }).children;
             if (children) {

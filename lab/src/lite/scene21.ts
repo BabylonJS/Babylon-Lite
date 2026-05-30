@@ -3,6 +3,7 @@
 // Static model, no animation.
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, loadEnvironment, loadGltf, createPbrMaterial, createSolidTexture2D, loadTexture2D, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -14,7 +15,7 @@ async function main(): Promise<void> {
     // Camera matching BJS: alpha=-PI/2, beta=PI/2.7, radius=0.14
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.7, 0.14, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.01;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Load cloth GLB + environment + sheen texture in parallel
     const [gltfResult, , sheenTex2D] = await Promise.all([

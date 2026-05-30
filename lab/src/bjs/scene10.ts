@@ -21,7 +21,7 @@ import { Scene } from "@babylonjs/core/scene";
     cam.lowerRadiusLimit = 2;
     cam.upperRadiusLimit = 10;
 
-    const _light = new HemisphericLight("light1", new Vector3(0, 1, 0), scene);
+    new HemisphericLight("light1", new Vector3(0, 1, 0), scene);
 
     const sphere = Mesh.CreateSphere("sphere1", 16, 2, scene);
     const pbr = new PBRMetallicRoughnessMaterial("pbr", scene);
@@ -42,7 +42,7 @@ import { Scene } from "@babylonjs/core/scene";
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

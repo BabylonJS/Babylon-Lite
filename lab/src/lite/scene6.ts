@@ -4,6 +4,7 @@
 //   → metallic = 1.0, roughness = 0.6, baseColor = gold
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPbrMaterial, createSphere, createSolidTexture2D, loadEnvironment, attachControl, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -13,7 +14,7 @@ async function main(): Promise<void> {
 
     // Camera: alpha=0, beta=π/2, radius=5, target=origin
     scene.camera = createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Environment (same as Scene 1) — no explicit light, IBL only
     await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
