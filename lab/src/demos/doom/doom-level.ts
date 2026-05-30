@@ -98,7 +98,7 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
     // Player state, HUD overlay and sound, wired to world events.
     const player = new Player(world);
     const sound = new DoomSound(wad);
-    const hud = new DoomHud(player, computeAchievableArms(map));
+    const hud = new DoomHud(wad, player);
     const weaponView = new WeaponView(wad);
     world.events = {
         message: (text) => {
@@ -123,27 +123,6 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
             weaponView.dispose();
         },
     };
-}
-
-// Weapon THING doomednums present in a map decide which ARMS slots can ever be
-// filled. The pistol (slot 2) is always achievable because the player spawns
-// with it. The chainsaw (doomednum 2005) is slot 1 and not part of the ARMS row.
-const WEAPON_THING_TO_SLOT: Record<number, Weapon> = {
-    2001: Weapon.SHOTGUN,
-    2002: Weapon.CHAINGUN,
-    2003: Weapon.ROCKET,
-    2004: Weapon.PLASMA,
-    2006: Weapon.BFG,
-};
-
-/** Set of ARMS weapons the player can obtain on this level (pistol + map pickups). */
-function computeAchievableArms(map: DoomMap): ReadonlySet<Weapon> {
-    const achievable = new Set<Weapon>([Weapon.PISTOL]);
-    for (const thing of map.things) {
-        const weapon = WEAPON_THING_TO_SLOT[thing.type];
-        if (weapon !== undefined) achievable.add(weapon);
-    }
-    return achievable;
 }
 
 function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsManager, dynamicGeo: DynamicGeometry, playerSectorRef: { value: number }, sky: Mesh | null, world: DoomWorld, spriteRenderer: SpriteRenderer, player: Player, hud: DoomHud, sound: DoomSound, weaponView: WeaponView): void {
@@ -319,6 +298,6 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
         // Rebuild all mobj billboards once per frame, facing the camera.
         spriteRenderer.rebuild(world.collectSprites(eye.x, eye.z));
         weaponView.update(player, dt, fromX !== eye.x || fromZ !== eye.z);
-        hud.update();
+        hud.update(dt);
     });
 }

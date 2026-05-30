@@ -1,52 +1,84 @@
-// DOOM status-bar HUD rendered with DOM/CSS so it costs nothing in the WebGPU
-// bundle and never touches the parity-tested engine. Styled to evoke the classic
-// STBAR: a steel bar with large red counters, an ARMS panel, a face box, and the
-// per-type ammo list, plus a center crosshair for aiming.
+// DOOM status bar rendered from the real WAD STBAR graphics.
+//
+// The classic status bar (STBAR) and all of its widgets — the big red counters,
+// the ARMS panel, the animated face, the keys and the per-type ammo list — are
+// decoded straight from the IWAD's UI lumps and blitted onto a 2D canvas overlay
+// (palette 0, nearest sampling), exactly like the weapon view. This keeps it out
+// of the WebGPU bundle and away from the parity-tested engine while looking
+// pixel-faithful. Widget coordinates come from public DOOM documentation
+// (st_stuff.c layout constants); no GPL Doom source is used.
+//
+// A handful of feedback effects that have no STBAR equivalent — the full-screen
+// pain/pickup tint, the pickup message line, a center crosshair (our addition,
+// since DOOM has none) and the death prompt — stay as lightweight DOM overlays.
 
+import type { Wad } from "../wad/wad-file.js";
+import { findLumpIndex, getLump } from "../wad/wad-file.js";
+import { decodePatch } from "../wad/graphics.js";
+import { parsePlaypal } from "../wad/palette.js";
 import type { Player } from "../player/player.js";
 import { Weapon } from "../player/player.js";
 import { Pickup } from "../mobj/info.js";
 
-const RED = "#d21d12";
-const STEEL_DARK = "#2c2c2c";
+const FRAME_W = 320;
+const FRAME_H = 200;
+const BAR_Y = 168; // top of the 32px status bar in the virtual 320x200 frame
 
-/** One ARMS panel entry: the on-screen slot number and the weapon it selects. */
-interface ArmsSlot {
-    slot: number;
-    weapon: Weapon;
-}
-
-/**
- * Canonical DOOM ARMS slots (the STBAR shows weapon slots 2..7). The HUD only
- * renders the subset that is actually obtainable on the loaded level so it never
- * advertises a slot the player can never fill (e.g. the BFG is absent from E1M1).
- */
-export const ARMS_SLOTS: readonly ArmsSlot[] = [
-    { slot: 2, weapon: Weapon.PISTOL },
-    { slot: 3, weapon: Weapon.SHOTGUN },
-    { slot: 4, weapon: Weapon.CHAINGUN },
-    { slot: 5, weapon: Weapon.ROCKET },
-    { slot: 6, weapon: Weapon.PLASMA },
-    { slot: 7, weapon: Weapon.BFG },
+// ARMS panel: the six selectable weapon slots, displayed as digits 2..7. The grey
+// digits are baked into STARMS; a yellow STYSNUM is drawn over a slot once owned.
+const ARMS_WEAPONS: readonly Weapon[] = [
+    Weapon.PISTOL,
+    Weapon.SHOTGUN,
+    Weapon.CHAINGUN,
+    Weapon.ROCKET,
+    Weapon.PLASMA,
+    Weapon.BFG,
 ];
 
+// Small ammo list rows: [player.ammo index, virtual Y]. DOOM lists clip, shell,
+// rocket, cell top-to-bottom; player.ammo is [bullets, shells, cells, rockets].
+const AMMO_ROWS: readonly [number, number][] = [
+    [0, 173],
+    [1, 179],
+    [3, 185],
+    [2, 191],
+];
+
+// Key rows: [card pickup, skull pickup, virtual Y] for blue, yellow, red.
+const KEY_ROWS: readonly [Pickup, Pickup, number][] = [
+    [Pickup.KEY_BLUE, Pickup.KEY_BLUE_SKULL, 171],
+    [Pickup.KEY_YELLOW, Pickup.KEY_YELLOW_SKULL, 181],
+    [Pickup.KEY_RED, Pickup.KEY_RED_SKULL, 191],
+];
+
+/** A decoded UI patch ready to blit: its pixel canvas plus pivot offsets. */
+interface DecodedPatch {
+    canvas: HTMLCanvasElement;
+    width: number;
+    height: number;
+    leftOffset: number;
+    topOffset: number;
+}
+
 export class DoomHud {
-    private readonly root: HTMLDivElement;
+    private readonly canvas: HTMLCanvasElement;
+    private readonly ctx: CanvasRenderingContext2D;
+    private readonly palette: Uint8Array;
+    private readonly cache = new Map<string, DecodedPatch | null>();
+
     private readonly crosshair: HTMLDivElement;
     private readonly messageEl: HTMLDivElement;
     private readonly painEl: HTMLDivElement;
     private readonly deathEl: HTMLDivElement;
 
-    private readonly ammoBig: HTMLSpanElement;
-    private readonly healthEl: HTMLSpanElement;
-    private readonly armorEl: HTMLSpanElement;
-    private readonly armsCells: { el: HTMLSpanElement; weapon: Weapon }[] = [];
-    private readonly ammoNow: HTMLSpanElement[] = [];
-    private readonly ammoMax: HTMLSpanElement[] = [];
-    private readonly keyDots: HTMLDivElement[] = [];
-    private readonly faceEl: HTMLDivElement;
+    /** Advance widths (px) for the tall (STTNUM) and small (STYSNUM) digit fonts. */
+    private readonly tallW: number;
+    private readonly shortW: number;
+    private faceTime = 0;
 
-    constructor(private readonly player: Player, achievableWeapons: ReadonlySet<Weapon>) {
+    constructor(private readonly wad: Wad, private readonly player: Player) {
+        this.palette = parsePlaypal(wad); // palette 0 used (full-bright UI)
+
         // Red damage / pickup full-screen tint.
         const pain = document.createElement("div");
         pain.style.cssText = "position:fixed;inset:0;pointer-events:none;background:#ff0000;opacity:0;transition:opacity .1s linear;z-index:48";
@@ -76,159 +108,84 @@ export class DoomHud {
             `<div style="margin-top:14px;color:#e8e8b0;font-weight:bold;font-size:18px;text-shadow:2px 2px 0 #000">Press SPACE to restart</div>`;
         this.deathEl = death;
 
-        // Status bar container, centered like the original 320-wide STBAR.
-        // The status bar is centered with left:50% + translateX(-50%) so it stays
-        // centered regardless of the host page's layout / horizontal overflow
-        // (flex justify-content was being defeated by the demo page container).
-        const root = document.createElement("div");
-        root.style.cssText = [
-            "position:fixed",
-            "left:50%",
-            "bottom:0",
-            "transform:translateX(-50%)",
-            "box-sizing:border-box",
-            "display:flex",
-            "align-items:stretch",
-            "justify-content:center",
-            "gap:6px",
-            "padding:6px 10px",
-            "pointer-events:none",
-            "z-index:50",
-            "font-family:'Courier New',monospace",
-        ].join(";");
-
-        this.ammoBig = DoomHud.bigNumber();
-        this.healthEl = DoomHud.bigNumber();
-        this.armorEl = DoomHud.bigNumber();
-        this.faceEl = DoomHud.makeFace();
-
-        root.appendChild(DoomHud.panel("AMMO", this.ammoBig, ""));
-        root.appendChild(DoomHud.panel("HEALTH", this.healthEl, "%"));
-        root.appendChild(this.makeArms(achievableWeapons));
-        root.appendChild(this.makeFacePanel());
-        root.appendChild(DoomHud.panel("ARMOR", this.armorEl, "%"));
-        root.appendChild(this.makeAmmoList());
+        // Status-bar canvas, drawn above the weapon overlay (z-index 47).
+        const canvas = document.createElement("canvas");
+        canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:50;image-rendering:pixelated";
+        this.canvas = canvas;
+        this.ctx = canvas.getContext("2d")!;
 
         document.body.appendChild(pain);
         document.body.appendChild(cross);
         document.body.appendChild(death);
         document.body.appendChild(message);
-        document.body.appendChild(root);
-        this.root = root;
+        document.body.appendChild(canvas);
+
+        this.tallW = this.decode("STTNUM0")?.width ?? 14;
+        this.shortW = this.decode("STYSNUM0")?.width ?? 4;
     }
 
-    private static bevel(): string {
-        return "background:#1b1b1b;border:2px solid #111;box-shadow:inset 2px 2px 0 #000,inset -1px -1px 0 #333;border-radius:2px";
-    }
-
-    private static bigNumber(): HTMLSpanElement {
-        const s = document.createElement("span");
-        s.textContent = "0";
-        s.style.cssText = `color:${RED};font-weight:bold;font-size:40px;line-height:1;text-shadow:0 0 6px rgba(210,29,18,.6),2px 2px 0 #000;font-variant-numeric:tabular-nums`;
-        return s;
-    }
-
-    /** A labelled bezeled panel showing one big counter. */
-    private static panel(label: string, value: HTMLElement, suffix: string): HTMLDivElement {
-        const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:4px 8px;min-width:96px;" + DoomHud.bevel();
-        const row = document.createElement("div");
-        row.style.cssText = "display:flex;align-items:baseline";
-        row.appendChild(value);
-        if (suffix) {
-            const suf = document.createElement("span");
-            suf.textContent = suffix;
-            suf.style.cssText = `color:${RED};font-weight:bold;font-size:20px;margin-left:2px;text-shadow:2px 2px 0 #000`;
-            row.appendChild(suf);
+    /** Decodes a UI lump to a pixel canvas (palette 0, full-bright). Cached. */
+    private decode(name: string): DecodedPatch | null {
+        const cached = this.cache.get(name);
+        if (cached !== undefined) return cached;
+        const idx = findLumpIndex(this.wad, name);
+        if (idx < 0) {
+            this.cache.set(name, null);
+            return null;
         }
-        const l = document.createElement("span");
-        l.textContent = label;
-        l.style.cssText = "font-size:11px;font-weight:bold;letter-spacing:2px;color:#c8a06a";
-        wrap.appendChild(row);
-        wrap.appendChild(l);
-        return wrap;
-    }
-
-    /** ARMS panel: the obtainable weapon slots (from ARMS_SLOTS), lit when owned. */
-    private makeArms(achievableWeapons: ReadonlySet<Weapon>): HTMLDivElement {
-        const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 8px;" + DoomHud.bevel();
-        const grid = document.createElement("div");
-        grid.style.cssText = "display:grid;grid-template-columns:repeat(3,18px);grid-auto-rows:16px;gap:1px 6px";
-        for (const { slot, weapon } of ARMS_SLOTS) {
-            if (!achievableWeapons.has(weapon)) continue;
-            const cell = document.createElement("span");
-            cell.textContent = String(slot);
-            cell.style.cssText = "font-weight:bold;font-size:15px;text-align:center;line-height:16px";
-            this.armsCells.push({ el: cell, weapon });
-            grid.appendChild(cell);
+        const img = decodePatch(getLump(this.wad, idx));
+        const c = document.createElement("canvas");
+        c.width = img.width;
+        c.height = img.height;
+        const data = new ImageData(img.width, img.height);
+        for (let i = 0; i < img.width * img.height; i++) {
+            if (!img.opaque[i]) continue;
+            const p = img.indices[i] * 3;
+            data.data[i * 4 + 0] = this.palette[p];
+            data.data[i * 4 + 1] = this.palette[p + 1];
+            data.data[i * 4 + 2] = this.palette[p + 2];
+            data.data[i * 4 + 3] = 255;
         }
-        const l = document.createElement("span");
-        l.textContent = "ARMS";
-        l.style.cssText = "font-size:11px;font-weight:bold;letter-spacing:2px;color:#c8a06a";
-        wrap.appendChild(grid);
-        wrap.appendChild(l);
-        return wrap;
+        c.getContext("2d")!.putImageData(data, 0, 0);
+        const dec: DecodedPatch = { canvas: c, width: img.width, height: img.height, leftOffset: img.leftOffset, topOffset: img.topOffset };
+        this.cache.set(name, dec);
+        return dec;
     }
 
-    private static makeFace(): HTMLDivElement {
-        const face = document.createElement("div");
-        face.style.cssText = "position:relative;width:34px;height:38px;background:#c89a6a;border-radius:4px 4px 6px 6px;transition:filter .15s linear";
-        face.innerHTML =
-            `<div style="position:absolute;top:0;left:0;right:0;height:9px;background:#6b3f25;border-radius:4px 4px 0 0"></div>` +
-            `<div style="position:absolute;top:13px;left:7px;width:6px;height:6px;background:#fff;border-radius:50%"></div>` +
-            `<div style="position:absolute;top:13px;right:7px;width:6px;height:6px;background:#fff;border-radius:50%"></div>` +
-            `<div style="position:absolute;top:15px;left:9px;width:3px;height:3px;background:#000;border-radius:50%"></div>` +
-            `<div style="position:absolute;top:15px;right:9px;width:3px;height:3px;background:#000;border-radius:50%"></div>` +
-            `<div style="position:absolute;bottom:6px;left:10px;right:10px;height:3px;background:#7a3b2a;border-radius:2px"></div>`;
-        return face;
+    /** Blits one patch at virtual (vx,vy), honoring its pivot offsets. */
+    private drawPatch(name: string, vx: number, vy: number, scale: number, frameLeft: number): void {
+        const p = this.decode(name);
+        if (!p) return;
+        const dx = frameLeft + (vx - p.leftOffset) * scale;
+        const dy = (vy - p.topOffset) * scale;
+        this.ctx.drawImage(p.canvas, dx, dy, p.width * scale, p.height * scale);
     }
 
-    private makeFacePanel(): HTMLDivElement {
-        const wrap = document.createElement("div");
-        wrap.style.cssText = "display:flex;align-items:center;justify-content:center;padding:4px 10px;" + DoomHud.bevel();
-        const col = document.createElement("div");
-        col.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:3px";
-        col.appendChild(this.faceEl);
-        const keys = document.createElement("div");
-        keys.style.cssText = "display:flex;gap:4px;height:8px";
-        for (const color of ["#2b6bff", "#ffd23b", "#ff3b3b"]) {
-            const dot = document.createElement("div");
-            dot.style.cssText = `width:8px;height:8px;border-radius:2px;background:${color};opacity:.15;box-shadow:0 0 2px #000`;
-            this.keyDots.push(dot);
-            keys.appendChild(dot);
-        }
-        col.appendChild(keys);
-        wrap.appendChild(col);
-        return wrap;
+    /**
+     * Draws an integer right-justified so its rightmost edge sits at virtual `rightX`.
+     * `prefix` (e.g. "STTNUM"/"STYSNUM") + digit picks the font lump.
+     */
+    private drawNum(value: number, rightX: number, y: number, prefix: string, advance: number, maxDigits: number, scale: number, frameLeft: number): void {
+        let v = Math.max(0, Math.floor(value));
+        let x = rightX;
+        let n = 0;
+        do {
+            x -= advance;
+            this.drawPatch(`${prefix}${v % 10}`, x, y, scale, frameLeft);
+            v = Math.floor(v / 10);
+            n++;
+        } while (v > 0 && n < maxDigits);
     }
 
-    /** Per-type ammo counts (now/max) on the right. */
-    private makeAmmoList(): HTMLDivElement {
-        const wrap = document.createElement("div");
-        wrap.style.cssText = "display:grid;grid-template-columns:auto auto auto auto;align-items:center;gap:1px 6px;padding:4px 10px;" + DoomHud.bevel();
-        // Display order: bullets, shells, rockets, cells. Player.ammo indices:
-        // 0=bullets, 1=shells, 2=cells, 3=rockets.
-        const rows: [string, number][] = [["BULL", 0], ["SHEL", 1], ["RCKT", 3], ["CELL", 2]];
-        for (const [label, idx] of rows) {
-            const l = document.createElement("span");
-            l.textContent = label;
-            l.style.cssText = "font-size:11px;font-weight:bold;color:#c8a06a";
-            const now = document.createElement("span");
-            now.style.cssText = `color:${RED};font-weight:bold;font-size:14px;text-align:right;font-variant-numeric:tabular-nums`;
-            const slash = document.createElement("span");
-            slash.textContent = "/";
-            slash.style.cssText = "color:#8a8a8a;font-size:12px";
-            const max = document.createElement("span");
-            max.style.cssText = "color:#e0c080;font-weight:bold;font-size:14px;text-align:right;font-variant-numeric:tabular-nums";
-            this.ammoNow[idx] = now;
-            this.ammoMax[idx] = max;
-            wrap.appendChild(l);
-            wrap.appendChild(now);
-            wrap.appendChild(slash);
-            wrap.appendChild(max);
-        }
-        return wrap;
+    /** Picks the status-bar face lump for the current player state. */
+    private faceLump(): string {
+        const p = this.player;
+        if (p.dead) return "STFDEAD0";
+        // Pain level 0 (healthy) .. 4 (near death), matching DOOM's face stride.
+        const pl = Math.max(0, Math.min(4, Math.floor(((100 - Math.max(0, p.health)) * 5) / 101)));
+        if (p.painFlash > 0.6) return `STFOUCH${pl}`;
+        const look = Math.floor(this.faceTime / 0.5) % 3; // left / center / right glance
+        return `STFST${pl}${look}`;
     }
 
     flashMessage(text: string): void {
@@ -236,47 +193,78 @@ export class DoomHud {
         this.messageEl.style.opacity = "1";
     }
 
-    update(): void {
+    update(dt: number): void {
+        this.faceTime += dt;
+        this.resize();
+        const ctx = this.ctx;
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        ctx.imageSmoothingEnabled = false;
+
         const p = this.player;
-        const ammo = p.currentAmmo();
-        this.ammoBig.textContent = ammo < 0 ? "--" : String(ammo);
-        this.healthEl.textContent = String(p.health);
-        this.armorEl.textContent = String(p.armor);
+        const scale = this.canvas.height / FRAME_H;
+        const frameLeft = (this.canvas.width - FRAME_W * scale) / 2;
 
-        // ARMS: light each obtainable slot when its weapon is owned.
-        for (const { el, weapon } of this.armsCells) {
-            const owned = p.weaponsOwned.has(weapon);
-            el.style.color = owned ? RED : "#555";
-            el.style.textShadow = owned ? "1px 1px 0 #000" : "none";
+        // Background bar + the ARMS panel overlay.
+        this.drawPatch("STBAR", 0, BAR_Y, scale, frameLeft);
+        this.drawPatch("STARMS", 104, BAR_Y, scale, frameLeft);
+
+        // Ready-weapon ammo (tall, right-justified). Skip for ammo-less weapons.
+        const ready = p.currentAmmo();
+        if (ready >= 0) this.drawNum(ready, 44, 171, "STTNUM", this.tallW, 3, scale, frameLeft);
+
+        // Health + armor percentages (tall number then a '%').
+        this.drawNum(p.health, 90, 171, "STTNUM", this.tallW, 3, scale, frameLeft);
+        this.drawPatch("STTPRCNT", 90, 171, scale, frameLeft);
+        this.drawNum(p.armor, 221, 171, "STTNUM", this.tallW, 3, scale, frameLeft);
+        this.drawPatch("STTPRCNT", 221, 171, scale, frameLeft);
+
+        // ARMS: light owned slots with the yellow digit over the baked-in grey.
+        for (let i = 0; i < ARMS_WEAPONS.length; i++) {
+            if (!p.weaponsOwned.has(ARMS_WEAPONS[i])) continue;
+            const x = 111 + (i % 3) * 12;
+            const ry = 172 + Math.floor(i / 3) * 10;
+            this.drawPatch(`STYSNUM${i + 2}`, x, ry, scale, frameLeft);
         }
 
-        for (let i = 0; i < 4; i++) {
-            if (this.ammoNow[i]) this.ammoNow[i].textContent = String(p.ammo[i]);
-            if (this.ammoMax[i]) this.ammoMax[i].textContent = String(p.maxAmmo[i]);
+        // Face.
+        this.drawPatch(this.faceLump(), 143, BAR_Y, scale, frameLeft);
+
+        // Keys: combined card+skull icon if both are held.
+        for (let c = 0; c < KEY_ROWS.length; c++) {
+            const [card, skull, ky] = KEY_ROWS[c];
+            const hasCard = p.keys.has(card);
+            const hasSkull = p.keys.has(skull);
+            let lump: string | null = null;
+            if (hasCard && hasSkull) lump = `STKEYS${c + 6}`;
+            else if (hasSkull) lump = `STKEYS${c + 3}`;
+            else if (hasCard) lump = `STKEYS${c}`;
+            if (lump) this.drawPatch(lump, 239, ky, scale, frameLeft);
         }
 
-        const hasBlue = p.keys.has(Pickup.KEY_BLUE) || p.keys.has(Pickup.KEY_BLUE_SKULL);
-        const hasYellow = p.keys.has(Pickup.KEY_YELLOW) || p.keys.has(Pickup.KEY_YELLOW_SKULL);
-        const hasRed = p.keys.has(Pickup.KEY_RED) || p.keys.has(Pickup.KEY_RED_SKULL);
-        this.keyDots[0].style.opacity = hasBlue ? "1" : "0.15";
-        this.keyDots[1].style.opacity = hasYellow ? "1" : "0.15";
-        this.keyDots[2].style.opacity = hasRed ? "1" : "0.15";
+        // Per-type ammo list: current (right edge 288) and max (right edge 314).
+        for (const [idx, ay] of AMMO_ROWS) {
+            this.drawNum(p.ammo[idx], 288, ay, "STYSNUM", this.shortW, 3, scale, frameLeft);
+            this.drawNum(p.maxAmmo[idx], 314, ay, "STYSNUM", this.shortW, 3, scale, frameLeft);
+        }
 
-        // Face reacts to state: dead, hurt, or healthy.
-        this.faceEl.style.filter = p.health <= 0
-            ? "grayscale(1) brightness(.5)"
-            : p.painFlash > 0.2 ? "brightness(1.25) sepia(.5) hue-rotate(-20deg)" : "none";
-
+        // DOM feedback overlays.
         this.messageEl.style.opacity = p.messageTics > 0 ? "1" : "0";
         this.painEl.style.opacity = (p.painFlash * 0.4).toFixed(2);
-
-        // Death overlay + hide the crosshair while dead.
         this.deathEl.style.opacity = p.dead ? "1" : "0";
         this.crosshair.style.opacity = p.dead ? "0" : ".85";
     }
 
+    private resize(): void {
+        const w = this.canvas.clientWidth;
+        const h = this.canvas.clientHeight;
+        if (w > 0 && h > 0 && (this.canvas.width !== w || this.canvas.height !== h)) {
+            this.canvas.width = w;
+            this.canvas.height = h;
+        }
+    }
+
     dispose(): void {
-        this.root.remove();
+        this.canvas.remove();
         this.crosshair.remove();
         this.deathEl.remove();
         this.messageEl.remove();
