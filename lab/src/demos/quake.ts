@@ -37,6 +37,7 @@ import { QuakeTextureCache } from "./quake/render/texture-cache.js";
 import { createQuakeMaterial } from "./quake/render/quake-material.js";
 import { QuakePhysics, type MoveInput } from "./quake/physics/collision.js";
 import { MoverSystem, type WorldEnt } from "./quake/entities/mover-system.js";
+import { MonsterSystem } from "./quake/combat/monsters.js";
 
 const BSP_URL = "/librequake/lq_e1m1.bsp";
 const PALETTE_URL = "/librequake/palette.lmp";
@@ -46,11 +47,23 @@ const MAX_FRAME = 0.05;
 
 const MOVER_KINDS = new Set(["door", "secret", "button", "plat"]);
 
+const SHOTGUN_RANGE = 2048;
+const SHOTGUN_DAMAGE = 24; // 4 pellets worth in one hitscan
+const START_AMMO = 25;
+const START_HEALTH = 100;
+
 type Engine = Awaited<ReturnType<typeof createEngine>>;
 
 interface View {
     yaw: number;
     pitch: number;
+}
+
+interface Player {
+    health: number;
+    armor: number;
+    ammo: number;
+    dead: boolean;
 }
 
 async function fetchBytes(url: string, hint: string): Promise<ArrayBuffer> {
@@ -98,6 +111,19 @@ async function main(): Promise<void> {
     const start = entities.find((e) => e.classname === "info_player_start") ?? entities.find((e) => e.classname?.startsWith("info_player"));
     const origin = parseVec3(start?.origin);
     const view: View = { yaw: ((start?.angle ? Number(start.angle) : 0) * Math.PI) / 180, pitch: 0 };
+    // Optional dev override: ?spawn=x,y,z&yaw=deg
+    const params = new URLSearchParams(location.search);
+    const spawnParam = params.get("spawn");
+    if (spawnParam) {
+        const p = spawnParam.split(",").map(Number);
+        if (p.length === 3 && p.every((n) => Number.isFinite(n))) {
+            origin[0] = p[0];
+            origin[1] = p[1];
+            origin[2] = p[2];
+        }
+    }
+    const yawParam = params.get("yaw");
+    if (yawParam && Number.isFinite(Number(yawParam))) view.yaw = (Number(yawParam) * Math.PI) / 180;
     const physics = new QuakePhysics(bsp, [origin[0], origin[1], origin[2]]);
 
     const hud = createHud();
@@ -167,6 +193,51 @@ async function main(): Promise<void> {
     // Item pickups as spinning emissive boxes.
     const itemMeshes = createItemMeshes(engine, scene, movers.ents);
 
+    // Enemies + combat.
+    const player: Player = { health: START_HEALTH, armor: 0, ammo: START_AMMO, dead: false };
+    const monsters = new MonsterSystem(engine, scene, physics, lightTex, atlas.whiteUV, palette, {
+        damage: (amount) => {
+            hurtPlayer(player, amount, hud);
+            hud.setStats(player, monsters.kills, monsters.total);
+        },
+        message: (m) => hud.message(m),
+    });
+    const monsterClasses = new Set<string>();
+    for (const e of entities) if (e.classname) monsterClasses.add(e.classname);
+    await monsters.load(monsterClasses);
+    monsters.spawn(entities);
+    hud.setStats(player, monsters.kills, monsters.total);
+
+    // Optional dev override: ?goto=monster teleports the player just in front of
+    // the nearest monster and faces it (handy for verifying monster rendering).
+    if (params.get("goto") === "monster") {
+        const target = monsters.nearestOrigin([origin[0], origin[1], origin[2]]);
+        if (target) {
+            const eye: [number, number, number] = [target[0], target[1], target[2] + 22];
+            const dirs: [number, number][] = [
+                [1, 0],
+                [-1, 0],
+                [0, 1],
+                [0, -1],
+            ];
+            let px = target[0];
+            let py = target[1];
+            for (const [dx, dy] of dirs) {
+                const to: [number, number, number] = [target[0] + dx * 112, target[1] + dy * 112, eye[2]];
+                const tr = physics.castMove(eye, to);
+                if (tr.fraction > 0.6) {
+                    px = eye[0] + dx * 112 * tr.fraction * 0.9;
+                    py = eye[1] + dy * 112 * tr.fraction * 0.9;
+                    break;
+                }
+            }
+            physics.origin[0] = px;
+            physics.origin[1] = py;
+            physics.origin[2] = target[2];
+            view.yaw = Math.atan2(target[1] - py, target[0] - px);
+        }
+    }
+
     // Camera spawned at the player eye.
     const [cx, cy, cz] = quakeToEngine(physics.eye[0], physics.eye[1], physics.eye[2]);
     const cam = createFreeCamera({ x: cx, y: cy, z: cz }, { x: cx + Math.cos(view.yaw), y: cy, z: cz + Math.sin(view.yaw) });
@@ -174,7 +245,7 @@ async function main(): Promise<void> {
     cam.farPlane = 20000;
     scene.camera = cam;
 
-    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, itemMeshes);
+    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, itemMeshes, monsters, player, hud);
 
     await registerScene(engine, scene);
     await startEngine(engine);
@@ -191,12 +262,26 @@ function installPlayerControls(
     view: View,
     movers: MoverSystem,
     moverMeshes: Map<WorldEnt, Mesh[]>,
-    itemMeshes: { ent: WorldEnt; mesh: Mesh }[]
+    itemMeshes: { ent: WorldEnt; mesh: Mesh }[],
+    monsters: MonsterSystem,
+    player: Player,
+    hud: Hud
 ): void {
     const keys = new Set<string>();
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
+
+    const fire = (): void => {
+        if (player.dead || player.ammo <= 0) return;
+        player.ammo--;
+        // Quake view direction from yaw/pitch (X fwd, Y left, Z up).
+        const cp = Math.cos(view.pitch);
+        const dir: [number, number, number] = [Math.cos(view.yaw) * cp, Math.sin(view.yaw) * cp, Math.sin(view.pitch)];
+        monsters.hitscan([physics.eye[0], physics.eye[1], physics.eye[2]], dir, SHOTGUN_RANGE, SHOTGUN_DAMAGE);
+        hud.muzzle();
+        hud.setStats(player, monsters.kills, monsters.total);
+    };
 
     if (!canvas.hasAttribute("tabindex")) canvas.tabIndex = 0;
     canvas.addEventListener("keydown", (e) => {
@@ -210,6 +295,7 @@ function installPlayerControls(
         lastX = e.clientX;
         lastY = e.clientY;
         canvas.focus();
+        if (e.button === 0) fire();
     });
     canvas.addEventListener("pointerup", (e) => {
         canvas.releasePointerCapture(e.pointerId);
@@ -250,6 +336,7 @@ function installPlayerControls(
 
         const riding = ridingEnt();
         movers.update(dt);
+        monsters.update(dt, [physics.origin[0], physics.origin[1], physics.origin[2]]);
 
         // Sync mover meshes; carry the player along with whatever lift they ride.
         for (const [ent, meshes] of moverMeshes) {
@@ -266,11 +353,15 @@ function installPlayerControls(
             prev[2] = ent.offset[2];
         }
 
-        // Item pickups: spin, hide once collected.
+        // Item pickups: spin, hide once collected, grant ammo/health.
         spin += dt * 2;
         for (const { ent, mesh } of itemMeshes) {
             if (ent.picked) {
-                if (mesh.visible !== false) mesh.visible = false;
+                if (mesh.visible !== false) {
+                    mesh.visible = false;
+                    grantPickup(player, ent.cls);
+                    hud.setStats(player, monsters.kills, monsters.total);
+                }
             } else {
                 mesh.rotation.set(0, spin, 0);
             }
@@ -311,13 +402,52 @@ function itemColor(cls: string): [number, number, number] {
     return [0.7, 0.7, 0.7];
 }
 
-/** Minimal DOM HUD: transient messages + a level-complete banner. */
-function createHud(): { message: (text: string) => void; complete: (map: string) => void } {
+interface Hud {
+    message: (text: string) => void;
+    complete: (map: string) => void;
+    setStats: (player: Player, kills: number, total: number) => void;
+    muzzle: () => void;
+    showDead: () => void;
+}
+
+/** Apply damage to the player (armor soaks 60%); shows the death overlay at 0 HP. */
+function hurtPlayer(player: Player, amount: number, hud: Hud): void {
+    if (player.dead) return;
+    const soak = Math.min(player.armor, amount * 0.6);
+    player.armor -= soak;
+    player.health -= amount - soak;
+    if (player.health <= 0) {
+        player.health = 0;
+        player.dead = true;
+        hud.showDead();
+    }
+    hud.message("");
+}
+
+/** Grant ammo / health / armor when an item box is collected. */
+function grantPickup(player: Player, cls: string): void {
+    if (cls.includes("health")) player.health = Math.min(100, player.health + 25);
+    else if (cls.includes("armor")) player.armor = Math.min(200, player.armor + 50);
+    else if (cls.startsWith("weapon_")) player.ammo += 10;
+    else player.ammo += 8; // ammo boxes (shells/spikes/rockets/cells)
+}
+
+/** DOM HUD: stats bar, transient messages, muzzle flash, death + level-complete overlays. */
+function createHud(): Hud {
     const msg = document.createElement("div");
     msg.style.cssText =
         "position:fixed;left:0;right:0;top:16px;margin:auto;max-width:80%;text-align:center;color:#ffe;font:16px monospace;text-shadow:0 0 4px #000,0 2px 4px #000;pointer-events:none;z-index:9998;opacity:0;transition:opacity .3s;";
     document.body.appendChild(msg);
     let hideTimer = 0;
+
+    const stats = document.createElement("div");
+    stats.style.cssText =
+        "position:fixed;left:0;right:0;bottom:12px;text-align:center;color:#ffe;font:bold 20px monospace;text-shadow:0 0 4px #000,0 2px 4px #000;pointer-events:none;z-index:9998;letter-spacing:1px;";
+    document.body.appendChild(stats);
+
+    const flash = document.createElement("div");
+    flash.style.cssText = "position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:9997;transition:opacity .08s;";
+    document.body.appendChild(flash);
 
     const banner = document.createElement("div");
     banner.style.cssText =
@@ -326,10 +456,26 @@ function createHud(): { message: (text: string) => void; complete: (map: string)
 
     return {
         message(text: string) {
+            if (!text) return;
             msg.textContent = text;
             msg.style.opacity = "1";
             window.clearTimeout(hideTimer);
             hideTimer = window.setTimeout(() => (msg.style.opacity = "0"), 3000);
+        },
+        setStats(player: Player, kills: number, total: number) {
+            stats.innerHTML =
+                `<span style="color:#ff6b6b">HEALTH ${Math.max(0, Math.ceil(player.health))}</span>` +
+                `&nbsp;&nbsp;<span style="color:#6bb6ff">ARMOR ${Math.max(0, Math.round(player.armor))}</span>` +
+                `&nbsp;&nbsp;<span style="color:#ffd86b">SHELLS ${player.ammo}</span>` +
+                `&nbsp;&nbsp;<span style="color:#b6ffb6">KILLS ${kills}/${total}</span>`;
+        },
+        muzzle() {
+            flash.style.opacity = "0.35";
+            window.setTimeout(() => (flash.style.opacity = "0"), 60);
+        },
+        showDead() {
+            banner.style.display = "flex";
+            banner.innerHTML = `<div style="color:#ff5555">YOU DIED</div><div style="font-size:18px;margin-top:12px;opacity:.8">Reload the page to try again</div>`;
         },
         complete(map: string) {
             if (banner.style.display === "flex") return;

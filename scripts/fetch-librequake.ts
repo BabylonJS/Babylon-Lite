@@ -30,6 +30,10 @@ const PAK_IN_ZIP = "full/id1/pak0.pak";
 const PAK_WANTED: Record<string, string> = {
     "maps/lq_e1m1.bsp": "lq_e1m1.bsp",
     "gfx/palette.lmp": "palette.lmp",
+    // Alias (.mdl) models for E1M1 enemies + the player shotgun viewmodel.
+    "progs/soldier.mdl": "progs/soldier.mdl",
+    "progs/dog.mdl": "progs/dog.mdl",
+    "progs/v_shot.mdl": "progs/v_shot.mdl",
 };
 /** License / attribution docs pulled straight from the zip (BSD-3 compliance). */
 const ZIP_LICENSE_FILES: Record<string, string> = {
@@ -157,6 +161,7 @@ async function main(): Promise<void> {
         const bytes = lumps.get(pakName.toLowerCase());
         if (!bytes) throw new Error(`librequake pak: ${pakName} not found`);
         const dest = join(OUT_DIR, outName);
+        mkdirSync(dirname(dest), { recursive: true });
         writeFileSync(dest, bytes);
         const mb = bytes.length / 1048576;
         console.log(`Extracted ${outName} → ${dest} (${mb >= 0.1 ? mb.toFixed(1) + " MB" : (bytes.length / 1024).toFixed(0) + " KB"})`);

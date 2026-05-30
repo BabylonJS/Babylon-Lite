@@ -67,6 +67,12 @@ export class QuakePhysics {
         return [this.origin[0], this.origin[1], this.origin[2] + VIEW_HEIGHT];
     }
 
+    /** Public point/box trace against the world + moving brush hulls. */
+    castMove(start: V3, end: V3): { fraction: number; endpos: V3; normal: V3 | null } {
+        const tr = this.trace(start, end);
+        return { fraction: tr.fraction, endpos: [tr.endpos[0], tr.endpos[1], tr.endpos[2]], normal: tr.planeNormal };
+    }
+
     // ─── Hull queries ──────────────────────────────────────────────────────
     /** pointContents starting from an arbitrary clip node. */
     private hullContentsAt(num: number, p: V3): number {
