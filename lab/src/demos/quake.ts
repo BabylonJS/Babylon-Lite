@@ -38,6 +38,7 @@ import { createQuakeMaterial } from "./quake/render/quake-material.js";
 import { QuakePhysics, type MoveInput } from "./quake/physics/collision.js";
 import { MoverSystem, type WorldEnt } from "./quake/entities/mover-system.js";
 import { MonsterSystem } from "./quake/combat/monsters.js";
+import { Viewmodel } from "./quake/render/viewmodel.js";
 
 const BSP_URL = "/librequake/lq_e1m1.bsp";
 const PALETTE_URL = "/librequake/palette.lmp";
@@ -238,6 +239,10 @@ async function main(): Promise<void> {
         }
     }
 
+    // First-person weapon viewmodel (shotgun).
+    const viewmodel = new Viewmodel(engine, scene, lightTex, palette, atlas.whiteUV);
+    await viewmodel.load();
+
     // Camera spawned at the player eye.
     const [cx, cy, cz] = quakeToEngine(physics.eye[0], physics.eye[1], physics.eye[2]);
     const cam = createFreeCamera({ x: cx, y: cy, z: cz }, { x: cx + Math.cos(view.yaw), y: cy, z: cz + Math.sin(view.yaw) });
@@ -245,7 +250,7 @@ async function main(): Promise<void> {
     cam.farPlane = 20000;
     scene.camera = cam;
 
-    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, itemMeshes, monsters, player, hud);
+    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, itemMeshes, monsters, viewmodel, player, hud);
 
     await registerScene(engine, scene);
     await startEngine(engine);
@@ -264,6 +269,7 @@ function installPlayerControls(
     moverMeshes: Map<WorldEnt, Mesh[]>,
     itemMeshes: { ent: WorldEnt; mesh: Mesh }[],
     monsters: MonsterSystem,
+    viewmodel: Viewmodel,
     player: Player,
     hud: Hud
 ): void {
@@ -280,6 +286,7 @@ function installPlayerControls(
         const dir: [number, number, number] = [Math.cos(view.yaw) * cp, Math.sin(view.yaw) * cp, Math.sin(view.pitch)];
         monsters.hitscan([physics.eye[0], physics.eye[1], physics.eye[2]], dir, SHOTGUN_RANGE, SHOTGUN_DAMAGE);
         hud.muzzle();
+        viewmodel.fire();
         hud.setStats(player, monsters.kills, monsters.total);
     };
 
@@ -371,6 +378,9 @@ function installPlayerControls(
         cam.position.set(px, py, pz);
         const cp = Math.cos(view.pitch);
         cam.target.set(px + Math.cos(view.yaw) * cp, py + Math.sin(view.pitch), pz + Math.sin(view.yaw) * cp);
+
+        if (player.dead) viewmodel.hide();
+        else viewmodel.update([px, py, pz], view.yaw, view.pitch, dt);
     });
 }
 
