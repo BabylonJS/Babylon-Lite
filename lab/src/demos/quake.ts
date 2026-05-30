@@ -41,6 +41,7 @@ import { MoverSystem, type WorldEnt } from "./quake/entities/mover-system.js";
 import { MonsterSystem } from "./quake/combat/monsters.js";
 import { Viewmodel } from "./quake/render/viewmodel.js";
 import { spawnItemModels, type SpawnedItem } from "./quake/render/items.js";
+import { QuakeSound } from "./quake/audio/sound.js";
 
 const BSP_URL = "/librequake/lq_e1m1.bsp";
 const PALETTE_URL = "/librequake/palette.lmp";
@@ -140,12 +141,15 @@ async function main(): Promise<void> {
     const physics = new QuakePhysics(bsp, [origin[0], origin[1], origin[2]]);
 
     const hud = createHud();
+    const sound = new QuakeSound();
+    sound.preload(["weapons/guncock.wav", "weapons/lock4.wav", "weapons/pkup.wav", "items/health1.wav", "items/armor1.wav", "player/pain1.wav", "player/pain2.wav", "soldier/sight1.wav"]);
     const movers = new MoverSystem(bsp, entities, physics, {
         message: (m) => hud.message(m),
         complete: (map) => hud.complete(map),
         teleport: (yaw) => {
             view.yaw = yaw;
         },
+        sound: (path, origin) => sound.play(path, { origin }),
     });
 
     // Brush-entity geometry. Movers (doors/buttons/lifts) get their own meshes so
@@ -210,10 +214,11 @@ async function main(): Promise<void> {
     const player: Player = { health: START_HEALTH, armor: 0, ammo: START_AMMO, dead: false };
     const monsters = new MonsterSystem(engine, scene, physics, lightTex, atlas.whiteUV, palette, {
         damage: (amount) => {
-            hurtPlayer(player, amount, hud);
+            hurtPlayer(player, amount, hud, sound);
             hud.setStats(player, monsters.kills, monsters.total);
         },
         message: (m) => hud.message(m),
+        sound: (path, origin) => sound.play(path, { origin }),
     });
     const monsterClasses = new Set<string>();
     for (const e of entities) if (e.classname) monsterClasses.add(e.classname);
@@ -319,7 +324,7 @@ async function main(): Promise<void> {
     cam.farPlane = 20000;
     scene.camera = cam;
 
-    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, items, monsters, viewmodel, player, hud, impacts);
+    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, items, monsters, viewmodel, player, hud, impacts, sound);
 
     await registerScene(engine, scene);
     await startEngine(engine);
@@ -341,7 +346,8 @@ function installPlayerControls(
     viewmodel: Viewmodel,
     player: Player,
     hud: Hud,
-    impacts: ImpactFx
+    impacts: ImpactFx,
+    sound: QuakeSound
 ): void {
     const keys = new Set<string>();
     let dragging = false;
@@ -390,11 +396,13 @@ function installPlayerControls(
         }
         hud.muzzle();
         viewmodel.fire();
+        sound.play("weapons/guncock.wav");
         hud.setStats(player, monsters.kills, monsters.total);
     };
 
     if (!canvas.hasAttribute("tabindex")) canvas.tabIndex = 0;
     canvas.addEventListener("keydown", (e) => {
+        sound.resume();
         keys.add(e.code);
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     });
@@ -408,6 +416,7 @@ function installPlayerControls(
         prevButtons = buttons;
     };
     canvas.addEventListener("pointerdown", (e) => {
+        sound.resume();
         canvas.setPointerCapture(e.pointerId);
         canvas.focus();
         if (!dragging) {
@@ -483,6 +492,7 @@ function installPlayerControls(
         }
         const input: MoveInput = { forward, side, jump: !player.dead && keys.has("Space") };
         physics.update(dt, input, view.yaw);
+        sound.setListener([physics.eye[0], physics.eye[1], physics.eye[2]], view.yaw);
 
         const riding = ridingEnt();
         movers.update(dt);
@@ -518,8 +528,9 @@ function installPlayerControls(
             if (dx * dx + dy * dy <= ITEM_PICKUP_RADIUS * ITEM_PICKUP_RADIUS && Math.abs(dz) <= ITEM_PICKUP_HEIGHT) {
                 item.picked = true;
                 for (const m of item.meshes) setMeshVisible(m, false);
-                const label = grantPickup(player, item.cls, item.flags);
-                hud.message(label);
+                const pickup = grantPickup(player, item.cls, item.flags);
+                sound.play(pickup.sound);
+                hud.message(pickup.label);
                 hud.setStats(player, monsters.kills, monsters.total);
             }
         }
@@ -553,36 +564,36 @@ function installPlayerControls(
  * counter. Powerup artifacts are collected (labelled) but grant no persistent
  * stat (no powerup state in this demo).
  */
-function grantPickup(player: Player, cls: string, flags: number): string {
+function grantPickup(player: Player, cls: string, flags: number): { label: string; sound: string } {
     if (cls === "item_health") {
         if (flags & 2) {
             player.health = Math.min(250, player.health + 100); // megahealth
-            return "You got the megahealth!";
+            return { label: "You got the megahealth!", sound: "items/r_item2.wav" };
         }
         if (flags & 1) {
             player.health = Math.min(100, player.health + 15); // rotten
-            return "You got 15 health";
+            return { label: "You got 15 health", sound: "items/health1.wav" };
         }
         player.health = Math.min(100, player.health + 25);
-        return "You got 25 health";
+        return { label: "You got 25 health", sound: "items/health1.wav" };
     }
     if (cls === "item_armor1") {
         player.armor = Math.max(player.armor, 100);
-        return "You got armor";
+        return { label: "You got armor", sound: "items/armor1.wav" };
     }
     if (cls === "item_armor2") {
         player.armor = Math.max(player.armor, 150);
-        return "You got combat armor";
+        return { label: "You got combat armor", sound: "items/armor1.wav" };
     }
     if (cls === "item_armorInv") {
         player.armor = Math.max(player.armor, 200);
-        return "You got red armor";
+        return { label: "You got red armor", sound: "items/armor1.wav" };
     }
-    const artifacts: Record<string, string> = {
-        item_artifact_super_damage: "Quad Damage!",
-        item_artifact_envirosuit: "You got the environment suit",
-        item_artifact_invulnerability: "You got the Pentagram of Protection",
-        item_artifact_invisibility: "You got the Ring of Shadows",
+    const artifacts: Record<string, { label: string; sound: string }> = {
+        item_artifact_super_damage: { label: "Quad Damage!", sound: "items/damage.wav" },
+        item_artifact_envirosuit: { label: "You got the environment suit", sound: "items/suit.wav" },
+        item_artifact_invulnerability: { label: "You got the Pentagram of Protection", sound: "items/protect.wav" },
+        item_artifact_invisibility: { label: "You got the Ring of Shadows", sound: "items/inv1.wav" },
     };
     if (artifacts[cls]) return artifacts[cls];
     let add = 0;
@@ -593,7 +604,8 @@ function grantPickup(player: Player, cls: string, flags: number): string {
     else if (cls === "item_cells") (add = 6), (label = "You got cells");
     else if (cls.startsWith("weapon_")) (add = 10), (label = "You got a weapon");
     if (add > 0) player.ammo = Math.min(200, player.ammo + add);
-    return label;
+    // Weapons play the weapon pickup chime; ammo boxes use the ammo lock sound.
+    return { label, sound: cls.startsWith("weapon_") ? "weapons/pkup.wav" : "weapons/lock4.wav" };
 }
 
 /**
@@ -717,7 +729,7 @@ interface Hud {
 }
 
 /** Apply damage to the player (armor soaks 60%); shows the death overlay at 0 HP. */
-function hurtPlayer(player: Player, amount: number, hud: Hud): void {
+function hurtPlayer(player: Player, amount: number, hud: Hud, sound: QuakeSound): void {
     if (player.dead) return;
     const soak = Math.min(player.armor, amount * 0.6);
     player.armor -= soak;
@@ -725,7 +737,10 @@ function hurtPlayer(player: Player, amount: number, hud: Hud): void {
     if (player.health <= 0) {
         player.health = 0;
         player.dead = true;
+        sound.playRandom(["player/death1.wav", "player/death2.wav", "player/death3.wav", "player/death4.wav", "player/death5.wav"]);
         hud.showDead();
+    } else {
+        sound.playRandom(["player/pain1.wav", "player/pain2.wav", "player/pain3.wav", "player/pain4.wav", "player/pain5.wav", "player/pain6.wav"]);
     }
     hud.message("");
 }

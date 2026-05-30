@@ -59,6 +59,41 @@ const PAK_WANTED: Record<string, string> = {
     "maps/b_bh25.bsp": "maps/b_bh25.bsp", // health (25)
     "maps/b_bh100.bsp": "maps/b_bh100.bsp", // megahealth (100)
     "maps/b_explob.bsp": "maps/b_explob.bsp", // exploding box
+    // Sound effects (RIFF WAV) for weapon fire, pickups, player + monster
+    // pain/death and doors. Decoded at runtime via the Web Audio API.
+    "sound/weapons/guncock.wav": "sound/weapons/guncock.wav", // shotgun fire
+    "sound/weapons/pkup.wav": "sound/weapons/pkup.wav", // weapon pickup
+    "sound/weapons/lock4.wav": "sound/weapons/lock4.wav", // ammo pickup
+    "sound/items/health1.wav": "sound/items/health1.wav", // health
+    "sound/items/r_item2.wav": "sound/items/r_item2.wav", // megahealth
+    "sound/items/armor1.wav": "sound/items/armor1.wav", // armor
+    "sound/items/damage.wav": "sound/items/damage.wav", // quad damage
+    "sound/items/suit.wav": "sound/items/suit.wav", // biosuit
+    "sound/items/protect.wav": "sound/items/protect.wav", // pentagram
+    "sound/items/inv1.wav": "sound/items/inv1.wav", // ring of shadows
+    "sound/player/pain1.wav": "sound/player/pain1.wav",
+    "sound/player/pain2.wav": "sound/player/pain2.wav",
+    "sound/player/pain3.wav": "sound/player/pain3.wav",
+    "sound/player/pain4.wav": "sound/player/pain4.wav",
+    "sound/player/pain5.wav": "sound/player/pain5.wav",
+    "sound/player/pain6.wav": "sound/player/pain6.wav",
+    "sound/player/death1.wav": "sound/player/death1.wav",
+    "sound/player/death2.wav": "sound/player/death2.wav",
+    "sound/player/death3.wav": "sound/player/death3.wav",
+    "sound/player/death4.wav": "sound/player/death4.wav",
+    "sound/player/death5.wav": "sound/player/death5.wav",
+    "sound/soldier/sight1.wav": "sound/soldier/sight1.wav",
+    "sound/soldier/pain1.wav": "sound/soldier/pain1.wav",
+    "sound/soldier/pain2.wav": "sound/soldier/pain2.wav",
+    "sound/soldier/death1.wav": "sound/soldier/death1.wav",
+    "sound/soldier/sattck1.wav": "sound/soldier/sattck1.wav", // soldier shoot
+    "sound/dog/dsight.wav": "sound/dog/dsight.wav",
+    "sound/dog/dpain1.wav": "sound/dog/dpain1.wav",
+    "sound/dog/ddeath.wav": "sound/dog/ddeath.wav",
+    "sound/dog/dattack1.wav": "sound/dog/dattack1.wav",
+    "sound/doors/doormv1.wav": "sound/doors/doormv1.wav", // door moving
+    "sound/doors/drclos4.wav": "sound/doors/drclos4.wav", // door stop
+    "sound/doors/baseuse.wav": "sound/doors/baseuse.wav", // button press
 };
 /** License / attribution docs pulled straight from the zip (BSD-3 compliance). */
 const ZIP_LICENSE_FILES: Record<string, string> = {

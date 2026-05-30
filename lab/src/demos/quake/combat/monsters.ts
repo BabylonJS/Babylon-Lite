@@ -43,14 +43,18 @@ interface MonsterDef {
     runFps: number;
     attackFps: number;
     deathFps: number;
+    sightSnd: string;
+    attackSnd: string;
+    painSnds: string[];
+    deathSnd: string;
 }
 
 // Frame ranges follow the id1 alias-model layout (LibreQuake keeps it intact):
 //   soldier: stand 0-7, deathc 18-28, run 73-80, shoot 81-89 (flash ~85)
 //   dog:     attack 0-7, death 8-16, run 48-59, stand 69-77
 const DEFS: Record<string, MonsterDef> = {
-    monster_army: { classname: "monster_army", url: "/librequake/progs/soldier.mdl", health: 30, speed: 70, sightRange: 1200, attackRange: 600, attackDamage: 5, attackInterval: 1.0, stand: [0, 7], run: [73, 80], attack: [81, 89], death: [18, 28], standFps: 5, runFps: 10, attackFps: 10, deathFps: 8 },
-    monster_dog: { classname: "monster_dog", url: "/librequake/progs/dog.mdl", health: 25, speed: 150, sightRange: 1000, attackRange: 80, attackDamage: 6, attackInterval: 0.6, stand: [69, 77], run: [48, 59], attack: [0, 7], death: [8, 16], standFps: 6, runFps: 14, attackFps: 12, deathFps: 10 },
+    monster_army: { classname: "monster_army", url: "/librequake/progs/soldier.mdl", health: 30, speed: 70, sightRange: 1200, attackRange: 600, attackDamage: 5, attackInterval: 1.0, stand: [0, 7], run: [73, 80], attack: [81, 89], death: [18, 28], standFps: 5, runFps: 10, attackFps: 10, deathFps: 8, sightSnd: "soldier/sight1.wav", attackSnd: "soldier/sattck1.wav", painSnds: ["soldier/pain1.wav", "soldier/pain2.wav"], deathSnd: "soldier/death1.wav" },
+    monster_dog: { classname: "monster_dog", url: "/librequake/progs/dog.mdl", health: 25, speed: 150, sightRange: 1000, attackRange: 80, attackDamage: 6, attackInterval: 0.6, stand: [69, 77], run: [48, 59], attack: [0, 7], death: [8, 16], standFps: 6, runFps: 14, attackFps: 12, deathFps: 10, sightSnd: "dog/dsight.wav", attackSnd: "dog/dattack1.wav", painSnds: ["dog/dpain1.wav"], deathSnd: "dog/ddeath.wav" },
 };
 
 const MON_MINS: V3 = [-16, -16, -24];
@@ -81,6 +85,8 @@ interface SpawnEnt {
 export interface MonsterHooks {
     damage: (amount: number) => void;
     message?: (text: string) => void;
+    /** Play a positional sound at a monster's Quake-space origin. */
+    sound?: (path: string, origin: V3) => void;
 }
 
 export class MonsterSystem {
@@ -195,7 +201,10 @@ export class MonsterSystem {
             const dist = Math.hypot(dx, dy, dz);
 
             if (m.state === "idle") {
-                if (dist < m.def.sightRange && this.canSee(m, playerOrigin)) m.state = "chase";
+                if (dist < m.def.sightRange && this.canSee(m, playerOrigin)) {
+                    m.state = "chase";
+                    this.hooks.sound?.(m.def.sightSnd, m.origin);
+                }
             }
 
             if (m.state === "chase") {
@@ -207,6 +216,7 @@ export class MonsterSystem {
                     m.attackTimer = m.def.attackInterval;
                     m.anim = "attack";
                     m.animTime = 0;
+                    this.hooks.sound?.(m.def.attackSnd, m.origin);
                     this.hooks.damage(m.def.attackDamage);
                 } else {
                     const moving = dist > m.def.attackRange * 0.6;
@@ -315,7 +325,12 @@ export class MonsterSystem {
             m.frame = m.def.death[0];
             this.writeFrame(m, m.def.death[0]);
             this.kills++;
+            this.hooks.sound?.(m.def.deathSnd, m.origin);
             this.hooks.message?.(`${this.kills}/${this.total} enemies down`);
+        } else {
+            // Woke a dormant monster (e.g. shot from behind) and hurt it.
+            if (m.state === "idle") m.state = "chase";
+            this.hooks.sound?.(m.def.painSnds[(Math.random() * m.def.painSnds.length) | 0]!, m.origin);
         }
     }
 }

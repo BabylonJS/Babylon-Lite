@@ -30,6 +30,8 @@ export interface WorldHooks {
     message?: (text: string) => void;
     complete?: (map: string) => void;
     teleport?: (yawRadians: number) => void;
+    /** Play a positional sound at a mover's Quake-space center. */
+    sound?: (path: string, origin: V3) => void;
 }
 
 type MoverKind = "none" | "door" | "button" | "plat" | "secret";
@@ -250,6 +252,7 @@ export class MoverSystem {
         ent.moving = true;
         ent.state = "moving";
         ent.fired = true;
+        this.hooks.sound?.("doors/doormv1.wav", this.moverCenter(ent));
         if (ent.kv.message) this.hooks.message?.(ent.kv.message);
         this.fire(ent.target);
     }
@@ -258,6 +261,7 @@ export class MoverSystem {
         ent.dest = [...ent.pos1];
         ent.moving = true;
         ent.state = "moving";
+        this.hooks.sound?.("doors/doormv1.wav", this.moverCenter(ent));
     }
 
     private pressButton(ent: WorldEnt): void {
@@ -265,6 +269,7 @@ export class MoverSystem {
         ent.dest = [...ent.pos2];
         ent.moving = true;
         ent.state = "moving";
+        this.hooks.sound?.("doors/baseuse.wav", this.moverCenter(ent));
         this.fire(ent.target);
         if (ent.kv.message) this.hooks.message?.(ent.kv.message);
     }
@@ -274,6 +279,12 @@ export class MoverSystem {
         ent.dest = dir === "up" ? [...ent.pos1] : [...ent.pos2];
         ent.moving = true;
         ent.state = "moving";
+        this.hooks.sound?.("doors/doormv1.wav", this.moverCenter(ent));
+    }
+
+    /** World-space center of a mover at its current offset (Quake space). */
+    private moverCenter(ent: WorldEnt): V3 {
+        return [(ent.bmins[0] + ent.bmaxs[0]) / 2 + ent.offset[0], (ent.bmins[1] + ent.bmaxs[1]) / 2 + ent.offset[1], (ent.bmins[2] + ent.bmaxs[2]) / 2 + ent.offset[2]];
     }
 
     // ─── Per-frame update ────────────────────────────────────────────────────
@@ -397,6 +408,7 @@ export class MoverSystem {
                     ent.dest = [...ent.pos1];
                     ent.moving = true;
                     ent.state = "moving";
+                    this.hooks.sound?.("doors/doormv1.wav", this.moverCenter(ent));
                 }
                 continue;
             }
@@ -419,6 +431,7 @@ export class MoverSystem {
     }
 
     private onArrive(ent: WorldEnt): void {
+        this.hooks.sound?.("doors/drclos4.wav", this.moverCenter(ent));
         const atPos2 = len([ent.offset[0] - ent.pos2[0], ent.offset[1] - ent.pos2[1], ent.offset[2] - ent.pos2[2]]) < 1;
         if (ent.kind === "door" || ent.kind === "secret") {
             if (atPos2) {
