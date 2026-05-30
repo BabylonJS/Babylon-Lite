@@ -179,6 +179,14 @@ async function main(): Promise<void> {
     const hud = await createHud(palette);
     const sound = new QuakeSound();
     sound.preload(["weapons/guncock.wav", "weapons/shotgn2.wav", "weapons/grenade.wav", "weapons/bounce.wav", "weapons/r_exp3.wav", "weapons/lock4.wav", "weapons/pkup.wav", "items/health1.wav", "items/armor1.wav", "player/pain1.wav", "player/pain2.wav", "soldier/sight1.wav"]);
+    // Brush entities removed via killtarget (forcefields, hidden walls) must be
+    // hideable, so collect every killtarget name up-front and render those brush
+    // models as their own meshes instead of baking them into the static world.
+    const killTargetNames = new Set<string>();
+    for (const e of entities) if (e.killtarget) killTargetNames.add(e.killtarget);
+    const moverMeshes = new Map<WorldEnt, Mesh[]>();
+    const killableMeshes = new Map<WorldEnt, Mesh[]>();
+
     const movers = new MoverSystem(bsp, entities, physics, {
         message: (m) => hud.message(m),
         complete: (map) => hud.complete(map),
@@ -186,21 +194,27 @@ async function main(): Promise<void> {
             view.yaw = yaw;
         },
         sound: (path, origin) => sound.play(path, { origin }),
+        kill: (ent) => {
+            for (const m of moverMeshes.get(ent) ?? []) setMeshVisible(m, false);
+            for (const m of killableMeshes.get(ent) ?? []) setMeshVisible(m, false);
+        },
     });
 
-    // Brush-entity geometry. Movers (doors/buttons/lifts) get their own meshes so
-    // we can translate them; every other brush model (func_wall, func_illusionary,
-    // func_detail …) is merged into the static world so it renders without cost.
-    const moverMeshes = new Map<WorldEnt, Mesh[]>();
+    // Brush-entity geometry. Movers (doors/buttons/lifts) and killable brushes get
+    // their own meshes so we can translate or hide them; every other brush model
+    // (func_wall, func_illusionary, func_detail …) is merged into the static world.
     const moverBatches: { ent: WorldEnt; batches: Map<number, GeometryBatch> }[] = [];
+    const killableBatches: { ent: WorldEnt; batches: Map<number, GeometryBatch> }[] = [];
     for (const ent of movers.ents) {
         if (ent.modelIndex < 0) continue;
         const model = bsp.models[ent.modelIndex];
         if (!model) continue;
         const isMover = MOVER_KINDS.has(ent.kind);
+        const isKillable = !isMover && !!ent.targetname && killTargetNames.has(ent.targetname);
         const nudge = brushNudge(ent.modelIndex, isMover);
         const batches = buildModelGeometry(bsp, atlas, model.firstFace, model.numFaces, nudge);
         if (isMover) moverBatches.push({ ent, batches });
+        else if (isKillable) killableBatches.push({ ent, batches });
         else mergeBatches(worldBatches, batches);
     }
 
@@ -256,6 +270,11 @@ async function main(): Promise<void> {
         const [ex, ey, ez] = quakeToEngine(ent.offset[0], ent.offset[1], ent.offset[2]);
         for (const m of meshes) m.position.set(ex, ey, ez);
         moverMeshes.set(ent, meshes);
+    }
+    for (const { ent, batches } of killableBatches) {
+        const meshes = makeMeshes(batches, "killable");
+        killableMeshes.set(ent, meshes);
+        if (ent.killed) for (const m of meshes) setMeshVisible(m, false);
     }
 
     // Pickup items rendered as their real Quake models (inert decorations).

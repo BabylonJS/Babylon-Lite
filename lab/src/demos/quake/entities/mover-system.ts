@@ -25,6 +25,7 @@ const SECRET_OPEN_ONCE = 1;
 const SOLID_BRUSH = new Set(["func_wall", "func_door", "func_door_secret", "func_button", "func_plat"]);
 const TRIGGER_VOLUMES = new Set(["trigger_once", "trigger_multiple", "trigger_changelevel", "trigger_teleport", "trigger_push", "trigger_secret"]);
 const ITEM_CLASSES = /^(item_|weapon_)/;
+const CONTENTS_EMPTY = -1; // killed brush hulls are retargeted here so traces pass through.
 
 export interface WorldHooks {
     message?: (text: string) => void;
@@ -32,6 +33,8 @@ export interface WorldHooks {
     teleport?: (yawRadians: number) => void;
     /** Play a positional sound at a mover's Quake-space center. */
     sound?: (path: string, origin: V3) => void;
+    /** A brush entity was removed via killtarget — hide its mesh(es). */
+    kill?: (ent: WorldEnt) => void;
 }
 
 type MoverKind = "none" | "door" | "button" | "plat" | "secret";
@@ -64,6 +67,7 @@ export interface WorldEnt {
     count: number;
     countGoal: number;
     fired: boolean;
+    killed: boolean;
     nextTouch: number;
     isItem: boolean;
     origin: V3;
@@ -124,6 +128,7 @@ export class MoverSystem {
                 count: 0,
                 countGoal: Number(kv.count) || 0,
                 fired: false,
+                killed: false,
                 nextTouch: 0,
                 isItem: ITEM_CLASSES.test(cls),
                 origin: parseVec3(kv.origin),
@@ -240,7 +245,16 @@ export class MoverSystem {
     private killTargets(name: string): void {
         const list = this.byName.get(name);
         if (!list) return;
-        for (const e of list) e.fired = true; // disable
+        for (const e of list) {
+            e.fired = true; // disable trigger logic
+            if (e.killed) continue;
+            e.killed = true;
+            // Remove the brush from collision so the player can pass through
+            // (Quake removes the entity entirely). Retarget its clip hull to an
+            // empty leaf so world + mover traces ignore it.
+            if (e.hullIndex >= 0) this.physics.brushHulls[e.hullIndex].headNode = CONTENTS_EMPTY;
+            this.hooks.kill?.(e);
+        }
     }
 
     private openDoor(ent: WorldEnt): void {
