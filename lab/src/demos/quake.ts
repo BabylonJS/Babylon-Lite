@@ -281,6 +281,12 @@ function installPlayerControls(
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
+    // Track raw button bitmask so we can detect a left-button press even while the
+    // right button is held. Pointer Events only emit `pointerdown` on the 0->nonzero
+    // buttons transition; a second button pressed afterwards arrives as `pointermove`,
+    // so firing must be edge-detected from `e.buttons`, not bound to `pointerdown`.
+    const LEFT_BUTTON = 1;
+    let prevButtons = 0;
 
     const fire = (): void => {
         if (player.dead || player.ammo <= 0) return;
@@ -300,21 +306,46 @@ function installPlayerControls(
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     });
     canvas.addEventListener("keyup", (e) => keys.delete(e.code));
+    // Fire on the rising edge of the left button, regardless of other buttons held.
+    const handleButtons = (buttons: number): void => {
+        if ((buttons & LEFT_BUTTON) && !(prevButtons & LEFT_BUTTON)) fire();
+        prevButtons = buttons;
+    };
     canvas.addEventListener("pointerdown", (e) => {
         canvas.setPointerCapture(e.pointerId);
-        dragging = true;
-        lastX = e.clientX;
-        lastY = e.clientY;
         canvas.focus();
-        if (e.button === 0) fire();
+        if (!dragging) {
+            lastX = e.clientX;
+            lastY = e.clientY;
+        }
+        dragging = e.buttons !== 0;
+        handleButtons(e.buttons);
     });
     canvas.addEventListener("pointerup", (e) => {
-        canvas.releasePointerCapture(e.pointerId);
+        handleButtons(e.buttons);
+        if (e.buttons === 0) {
+            canvas.releasePointerCapture(e.pointerId);
+            dragging = false;
+        }
+    });
+    canvas.addEventListener("pointercancel", () => {
+        prevButtons = 0;
         dragging = false;
     });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointermove", (e) => {
-        if (!dragging) return;
+        // A button pressed while another is held arrives here, not as pointerdown.
+        handleButtons(e.buttons);
+        if (e.buttons === 0) {
+            dragging = false;
+            return;
+        }
+        if (!dragging) {
+            dragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            return;
+        }
         const dx = e.clientX - lastX;
         const dy = e.clientY - lastY;
         lastX = e.clientX;
