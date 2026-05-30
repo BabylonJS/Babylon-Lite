@@ -512,51 +512,70 @@ function itemColor(cls: string): [number, number, number] {
  * vanishes within a fraction of a second. Pooled so firing never allocates.
  */
 class ImpactFx {
-    private readonly pool: Mesh[] = [];
-    private readonly born: number[] = [];
-    private next = 0;
-    private static readonly SIZE = 14;
+    private readonly blood: Mesh[] = [];
+    private readonly spark: Mesh[] = [];
+    private readonly bornBlood: number[] = [];
+    private readonly bornSpark: number[] = [];
+    private nextBlood = 0;
+    private nextSpark = 0;
+    private static readonly SIZE = 9;
     private static readonly LIFE = 0.45;
 
-    constructor(engine: Engine, scene: ReturnType<typeof createSceneContext>, count = 16) {
+    constructor(engine: Engine, scene: ReturnType<typeof createSceneContext>, count = 12) {
+        // Two fixed-colour pools (red blood / yellow spark). The colour is baked at
+        // construction because Standard material colour changes made after the scene is
+        // registered are not re-uploaded to the GPU; only transforms update per frame.
+        this.build(engine, scene, this.blood, this.bornBlood, [0.85, 0.04, 0.04], count);
+        this.build(engine, scene, this.spark, this.bornSpark, [1, 0.85, 0.35], count);
+    }
+
+    private build(engine: Engine, scene: ReturnType<typeof createSceneContext>, pool: Mesh[], born: number[], color: [number, number, number], count: number): void {
         for (let i = 0; i < count; i++) {
             const mesh = createBox(engine, ImpactFx.SIZE);
             const mat = createStandardMaterial();
-            mat.emissiveColor = [1, 0.9, 0.4];
+            mat.emissiveColor = color;
             mat.diffuseColor = [0, 0, 0];
             mesh.material = mat;
-            mesh.visible = false;
+            // Kept permanently in the scene (and thus in the cached opaque render bundle);
+            // hidden by collapsing to zero scale rather than toggling `visible`, which
+            // would not invalidate the bundle and so would never reappear.
+            mesh.scaling.set(0, 0, 0);
             addToScene(scene, mesh);
-            this.pool.push(mesh);
-            this.born.push(-1);
+            pool.push(mesh);
+            born.push(-1);
         }
     }
 
-    /** point is in Quake space; blood=true tints the marker red. */
+    /** point is in Quake space; blood=true uses the red pool, else the spark pool. */
     spawn(point: [number, number, number], blood: boolean): void {
-        const i = this.next;
-        this.next = (this.next + 1) % this.pool.length;
-        const mesh = this.pool[i];
+        const pool = blood ? this.blood : this.spark;
+        const born = blood ? this.bornBlood : this.bornSpark;
+        const i = blood ? this.nextBlood : this.nextSpark;
+        if (blood) this.nextBlood = (this.nextBlood + 1) % pool.length;
+        else this.nextSpark = (this.nextSpark + 1) % pool.length;
         const [ex, ey, ez] = quakeToEngine(point[0], point[1], point[2]);
-        mesh.position.set(ex, ey, ez);
-        mesh.scaling.set(1, 1, 1);
-        (mesh.material as ReturnType<typeof createStandardMaterial>).emissiveColor = blood ? [0.75, 0.05, 0.05] : [1, 0.9, 0.45];
-        mesh.visible = true;
-        this.born[i] = performance.now() / 1000;
+        pool[i].position.set(ex, ey, ez);
+        pool[i].scaling.set(1, 1, 1);
+        born[i] = performance.now() / 1000;
     }
 
     update(): void {
         const now = performance.now() / 1000;
-        for (let i = 0; i < this.pool.length; i++) {
-            if (this.born[i] < 0) continue;
-            const t = (now - this.born[i]) / ImpactFx.LIFE;
+        this.tick(now, this.blood, this.bornBlood);
+        this.tick(now, this.spark, this.bornSpark);
+    }
+
+    private tick(now: number, pool: Mesh[], born: number[]): void {
+        for (let i = 0; i < pool.length; i++) {
+            if (born[i] < 0) continue;
+            const t = (now - born[i]) / ImpactFx.LIFE;
             if (t >= 1) {
-                this.pool[i].visible = false;
-                this.born[i] = -1;
+                pool[i].scaling.set(0, 0, 0);
+                born[i] = -1;
             } else {
                 // Hold full size briefly, then shrink so the hit is clearly seen.
                 const k = t < 0.45 ? 1 : 1 - (t - 0.45) / 0.55;
-                this.pool[i].scaling.set(k, k, k);
+                pool[i].scaling.set(k, k, k);
             }
         }
     }
