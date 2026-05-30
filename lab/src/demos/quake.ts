@@ -25,6 +25,7 @@ import {
     createTexture2DFromPixels,
     onBeforeRender,
     registerScene,
+    setMeshVisible,
     startEngine,
     type Mesh,
 } from "babylon-lite";
@@ -516,7 +517,7 @@ function installPlayerControls(
             const dz = item.qpos[2] - pOrigin[2];
             if (dx * dx + dy * dy <= ITEM_PICKUP_RADIUS * ITEM_PICKUP_RADIUS && Math.abs(dz) <= ITEM_PICKUP_HEIGHT) {
                 item.picked = true;
-                for (const m of item.meshes) m.visible = false;
+                for (const m of item.meshes) setMeshVisible(m, false);
                 const label = grantPickup(player, item.cls, item.flags);
                 hud.message(label);
                 hud.setStats(player, monsters.kills, monsters.total);

@@ -8,6 +8,7 @@ export {
     createSceneContext,
     createDefaultCamera,
     removeFromScene,
+    setMeshVisible,
     onBeforeRender,
     onSceneDispose,
     addToScene,
