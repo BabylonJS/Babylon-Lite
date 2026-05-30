@@ -83,8 +83,11 @@ export class SbarHud {
     private resize(): void {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
-        // Keep the bar compact so the weapon viewmodel stays visible above it.
-        this.scale = Math.max(2, Math.min(3, Math.floor(window.innerWidth / 640)));
+        // Size the 320px-wide bar to roughly a third of the viewport, snapped to
+        // an integer scale (1-3) so the pixel art stays crisp. Scale 1 keeps the
+        // bar compact on smaller windows so the weapon viewmodel stays visible.
+        const target = (window.innerWidth * 0.34) / BAR_W;
+        this.scale = Math.max(1, Math.min(3, Math.round(target)));
         this.draw();
     }
 
