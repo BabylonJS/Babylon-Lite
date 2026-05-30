@@ -638,8 +638,10 @@ function installPlayerControls(
             if (keys.has("KeyA") || keys.has("ArrowLeft")) side -= MOVE_SPEED;
         }
         const input: MoveInput = { forward, side, jump: !player.dead && keys.has("Space") };
-        physics.update(dt, input, view.yaw);
+        physics.update(dt, input, view.yaw, view.pitch);
         sound.setListener([physics.eye[0], physics.eye[1], physics.eye[2]], view.yaw);
+        // Underwater view blend while the eyes are submerged.
+        hud.underwater(physics.waterLevel >= 3 ? physics.waterType : 0);
 
         const riding = ridingEnt();
         movers.update(dt);
@@ -924,6 +926,7 @@ interface Hud {
     setStats: (player: Player, kills: number, total: number) => void;
     muzzle: () => void;
     pain: (amount: number) => void;
+    underwater: (contents: number) => void;
     showDead: () => void;
 }
 
@@ -974,6 +977,12 @@ async function createHud(palette: Palette): Promise<Hud> {
     const damage = document.createElement("div");
     damage.style.cssText = "position:fixed;inset:0;background:#b30000;opacity:0;pointer-events:none;z-index:9996;transition:opacity .4s ease-out;";
     document.body.appendChild(damage);
+
+    // Quake underwater view blend: a full-screen colour wash while the eyes are
+    // submerged, tinted by the liquid (water = blue, slime = green, lava = orange).
+    const underwater = document.createElement("div");
+    underwater.style.cssText = "position:fixed;inset:0;opacity:0;pointer-events:none;z-index:9995;transition:opacity .25s ease-out;";
+    document.body.appendChild(underwater);
 
     const banner = document.createElement("div");
     banner.style.cssText =
@@ -1032,6 +1041,21 @@ async function createHud(palette: Palette): Promise<Hud> {
                     damage.style.opacity = "0";
                 }),
             );
+        },
+        underwater(contents: number) {
+            // contents: -3 water, -4 slime, -5 lava; anything else clears the wash.
+            if (contents === -3) {
+                underwater.style.background = "rgb(40,90,150)";
+                underwater.style.opacity = "0.5";
+            } else if (contents === -4) {
+                underwater.style.background = "rgb(50,90,30)";
+                underwater.style.opacity = "0.62";
+            } else if (contents === -5) {
+                underwater.style.background = "rgb(200,70,0)";
+                underwater.style.opacity = "0.62";
+            } else {
+                underwater.style.opacity = "0";
+            }
         },
         showDead() {
             banner.style.display = "flex";

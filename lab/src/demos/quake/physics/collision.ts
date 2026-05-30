@@ -9,6 +9,11 @@
 import type { BspData, BspClipNodes, BspNodes, BspPlane } from "../bsp/parse-bsp.js";
 
 const CONTENTS_SOLID = -2;
+// Liquid leaf contents (Quake): water=-3, slime=-4, lava=-5. Note CONTENTS_SKY
+// is -6, so a plain `<= -3` test would wrongly classify sky leaves as liquid.
+const CONTENTS_EMPTY = -1;
+const CONTENTS_WATER = -3;
+const CONTENTS_LAVA = -5;
 const DIST_EPSILON = 0.03125;
 
 const GRAVITY = 800;
@@ -20,6 +25,11 @@ const STOPSPEED = 100;
 const STEPSIZE = 18;
 const JUMPSPEED = 270;
 const VIEW_HEIGHT = 22;
+
+// Swimming (SV_WaterMove): water is slower, idle drifts you down, jump swims up.
+const WATER_ACCELERATE = 10;
+const WATER_SPEED_SCALE = 0.7;
+const WATER_SINK_SPEED = 60;
 
 export interface MoveInput {
     /** Desired horizontal move in Quake space (already rotated by view yaw). */
@@ -40,6 +50,9 @@ type V3 = [number, number, number];
 
 const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
+/** True for water/slime/lava leaf contents (−3…−5), excluding sky (−6) and solid. */
+const isLiquid = (c: number): boolean => c <= CONTENTS_WATER && c >= CONTENTS_LAVA;
+
 export class QuakePhysics {
     private readonly clip: BspClipNodes;
     private readonly planes: BspPlane[];
@@ -52,6 +65,11 @@ export class QuakePhysics {
     readonly origin: V3;
     readonly velocity: V3 = [0, 0, 0];
     onGround = false;
+
+    /** Liquid immersion: 0 none, 1 feet, 2 waist (swimming), 3 fully submerged. */
+    waterLevel = 0;
+    /** Leaf contents of the liquid the player is in (water/slime/lava) or empty. */
+    waterType = CONTENTS_EMPTY;
 
     /** Moving brush models (doors/plats) to also collide against. */
     brushHulls: { headNode: number; offset: V3 }[] = [];
@@ -311,6 +329,68 @@ export class QuakePhysics {
         this.velocity[2] += accelSpeed * wishDir[2];
     }
 
+    /** Leaf contents at a point via the hull-0 point tree (water/slime/lava/solid/empty). */
+    private pointContents(p: V3): number {
+        let num = this.worldRoot0;
+        while (num >= 0) {
+            const plane = this.planes[this.nodes.planeNum[num]];
+            const d = dot(plane.normal, p) - plane.planeDist;
+            num = d < 0 ? this.nodes.child1[num] : this.nodes.child0[num];
+        }
+        return this.nodes.leafContents[-num - 1];
+    }
+
+    /** Sample feet/waist/eye to classify how deep the player is in a liquid. */
+    private checkWater(): void {
+        const o = this.origin;
+        this.waterLevel = 0;
+        this.waterType = CONTENTS_EMPTY;
+        // Just above the feet (player box bottom ≈ origin − 24).
+        const feet = this.pointContents([o[0], o[1], o[2] - 23]);
+        if (!isLiquid(feet)) return; // empty/solid/sky → not in a liquid
+        this.waterType = feet;
+        this.waterLevel = 1;
+        if (isLiquid(this.pointContents([o[0], o[1], o[2]]))) {
+            this.waterLevel = 2;
+            if (isLiquid(this.pointContents([o[0], o[1], o[2] + VIEW_HEIGHT]))) this.waterLevel = 3;
+        }
+    }
+
+    /**
+     * Swim (SV_WaterMove): full 3-D movement with no gravity. Look direction
+     * (yaw+pitch) drives the forward axis so looking down + forward dives; jump
+     * swims straight up; releasing all keys drifts you gently downward.
+     */
+    private waterMove(dt: number, input: MoveInput, yaw: number, pitch: number): void {
+        const cp = Math.cos(pitch);
+        const fwd: V3 = [Math.cos(yaw) * cp, Math.sin(yaw) * cp, Math.sin(pitch)];
+        const right: V3 = [Math.sin(yaw), -Math.cos(yaw), 0];
+        const wish: V3 = [fwd[0] * input.forward + right[0] * input.side, fwd[1] * input.forward + right[1] * input.side, fwd[2] * input.forward];
+        if (input.jump) wish[2] += MAXSPEED;
+        else if (input.forward === 0 && input.side === 0) wish[2] -= WATER_SINK_SPEED;
+
+        let wishSpeed = Math.hypot(wish[0], wish[1], wish[2]);
+        const wishDir: V3 = wishSpeed > 0 ? [wish[0] / wishSpeed, wish[1] / wishSpeed, wish[2] / wishSpeed] : [0, 0, 0];
+        if (wishSpeed > MAXSPEED) wishSpeed = MAXSPEED;
+        wishSpeed *= WATER_SPEED_SCALE;
+
+        // 3-D water friction.
+        const v = this.velocity;
+        const speed = Math.hypot(v[0], v[1], v[2]);
+        if (speed > 0) {
+            const control = speed < STOPSPEED ? STOPSPEED : speed;
+            let newSpeed = speed - dt * control * FRICTION;
+            if (newSpeed < 0) newSpeed = 0;
+            const scale = newSpeed / speed;
+            v[0] *= scale;
+            v[1] *= scale;
+            v[2] *= scale;
+        }
+
+        this.accelerate(wishDir, wishSpeed, WATER_ACCELERATE, dt);
+        this.flyMove(dt);
+    }
+
     private checkGround(): void {
         if (this.velocity[2] > 180) {
             this.onGround = false;
@@ -373,8 +453,18 @@ export class QuakePhysics {
         }
     }
 
-    /** Advance the simulation by dt seconds given the desired move and view yaw. */
-    update(dt: number, input: MoveInput, yaw: number): void {
+    /** Advance the simulation by dt seconds given the desired move and view angles. */
+    update(dt: number, input: MoveInput, yaw: number, pitch: number): void {
+        this.checkWater();
+
+        // Waist-deep or more → swim (3-D, no gravity).
+        if (this.waterLevel >= 2) {
+            this.onGround = false;
+            this.groundBrush = -1;
+            this.waterMove(dt, input, yaw, pitch);
+            return;
+        }
+
         // Build wish direction in the horizontal plane from view yaw.
         const fwd: V3 = [Math.cos(yaw), Math.sin(yaw), 0];
         const right: V3 = [Math.sin(yaw), -Math.cos(yaw), 0];
