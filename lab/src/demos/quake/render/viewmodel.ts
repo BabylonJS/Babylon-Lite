@@ -19,7 +19,7 @@ import type { WeaponId, WeaponDef } from "../combat/weapons.js";
 // aren't hidden behind the status bar.
 const DEPTH = 3; // forward
 const SIDE = 2; // right
-const VERT = 1.2; // up
+const VERT = 2.2; // up
 const SCALE = 1;
 
 type V4 = [number, number, number, number];
