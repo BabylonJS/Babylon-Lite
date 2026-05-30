@@ -34,6 +34,9 @@ const PAK_WANTED: Record<string, string> = {
     "progs/soldier.mdl": "progs/soldier.mdl",
     "progs/dog.mdl": "progs/dog.mdl",
     "progs/v_shot.mdl": "progs/v_shot.mdl",
+    "progs/v_shot2.mdl": "progs/v_shot2.mdl", // super shotgun viewmodel
+    "progs/v_rock.mdl": "progs/v_rock.mdl", // grenade launcher viewmodel
+    "progs/grenade.mdl": "progs/grenade.mdl", // grenade projectile
     // Pickup item models — weapons / armor / artifacts are alias (.mdl) models…
     "progs/g_shot.mdl": "progs/g_shot.mdl", // super shotgun
     "progs/g_nail.mdl": "progs/g_nail.mdl", // nailgun
@@ -66,6 +69,10 @@ const PAK_WANTED: Record<string, string> = {
     // Sound effects (RIFF WAV) for weapon fire, pickups, player + monster
     // pain/death and doors. Decoded at runtime via the Web Audio API.
     "sound/weapons/guncock.wav": "sound/weapons/guncock.wav", // shotgun fire
+    "sound/weapons/shotgn2.wav": "sound/weapons/shotgn2.wav", // super shotgun fire
+    "sound/weapons/grenade.wav": "sound/weapons/grenade.wav", // grenade launcher fire
+    "sound/weapons/bounce.wav": "sound/weapons/bounce.wav", // grenade bounce
+    "sound/weapons/r_exp3.wav": "sound/weapons/r_exp3.wav", // explosion
     "sound/weapons/pkup.wav": "sound/weapons/pkup.wav", // weapon pickup
     "sound/weapons/lock4.wav": "sound/weapons/lock4.wav", // ammo pickup
     "sound/items/health1.wav": "sound/items/health1.wav", // health

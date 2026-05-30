@@ -40,6 +40,8 @@ import { QuakePhysics, type MoveInput } from "./quake/physics/collision.js";
 import { MoverSystem, type WorldEnt } from "./quake/entities/mover-system.js";
 import { MonsterSystem } from "./quake/combat/monsters.js";
 import { Viewmodel } from "./quake/render/viewmodel.js";
+import { GrenadeSystem } from "./quake/combat/grenades.js";
+import { WEAPONS, WEAPON_ORDER, WEAPON_PICKUPS, type WeaponId } from "./quake/combat/weapons.js";
 import { spawnItemModels, type SpawnedItem } from "./quake/render/items.js";
 import { QuakeSound } from "./quake/audio/sound.js";
 import { SbarHud } from "./quake/hud/sbar.js";
@@ -52,9 +54,8 @@ const MAX_FRAME = 0.05;
 
 const MOVER_KINDS = new Set(["door", "secret", "button", "plat"]);
 
-const SHOTGUN_RANGE = 2048;
-const SHOTGUN_DAMAGE = 24; // 4 pellets worth in one hitscan
-const START_AMMO = 25;
+const START_SHELLS = 25;
+const START_ROCKETS = 0;
 const START_HEALTH = 100;
 const ITEM_PICKUP_RADIUS = 48; // Quake item touch range (player half-width + item).
 const ITEM_PICKUP_HEIGHT = 56; // vertical reach: player box + item height overlap.
@@ -73,7 +74,10 @@ interface View {
 interface Player {
     health: number;
     armor: number;
-    ammo: number;
+    shells: number;
+    rockets: number;
+    weapon: WeaponId;
+    owned: Set<WeaponId>;
     dead: boolean;
 }
 
@@ -143,7 +147,7 @@ async function main(): Promise<void> {
 
     const hud = await createHud(palette);
     const sound = new QuakeSound();
-    sound.preload(["weapons/guncock.wav", "weapons/lock4.wav", "weapons/pkup.wav", "items/health1.wav", "items/armor1.wav", "player/pain1.wav", "player/pain2.wav", "soldier/sight1.wav"]);
+    sound.preload(["weapons/guncock.wav", "weapons/shotgn2.wav", "weapons/grenade.wav", "weapons/bounce.wav", "weapons/r_exp3.wav", "weapons/lock4.wav", "weapons/pkup.wav", "items/health1.wav", "items/armor1.wav", "player/pain1.wav", "player/pain2.wav", "soldier/sight1.wav"]);
     const movers = new MoverSystem(bsp, entities, physics, {
         message: (m) => hud.message(m),
         complete: (map) => hud.complete(map),
@@ -212,7 +216,7 @@ async function main(): Promise<void> {
     const items = await spawnItemModels({ engine, scene, palette, lightTex, whiteUV: atlas.whiteUV, physics }, movers.ents);
 
     // Enemies + combat.
-    const player: Player = { health: START_HEALTH, armor: 0, ammo: START_AMMO, dead: false };
+    const player: Player = { health: START_HEALTH, armor: 0, shells: START_SHELLS, rockets: START_ROCKETS, weapon: "shotgun", owned: new Set<WeaponId>(["shotgun"]), dead: false };
     const monsters = new MonsterSystem(engine, scene, physics, lightTex, atlas.whiteUV, palette, {
         damage: (amount) => {
             hurtPlayer(player, amount, hud, sound);
@@ -312,11 +316,38 @@ async function main(): Promise<void> {
         }
     }
 
-    // First-person weapon viewmodel (shotgun).
+    // First-person weapon viewmodels (all three weapons preloaded; only the
+    // active one is shown).
     const viewmodel = new Viewmodel(engine, scene, lightTex, palette, atlas.whiteUV);
-    await viewmodel.load();
+    await viewmodel.load(WEAPON_ORDER.map((id) => WEAPONS[id]));
+    viewmodel.select(player.weapon);
 
     const impacts = new ImpactFx(engine, scene);
+
+    // Grenade-launcher projectiles. Splash damage hurts the player too (authentic
+    // Quake self-damage), scaled by closest-point distance to the blast.
+    const grenades = new GrenadeSystem(
+        { engine, scene, physics, monsters, palette, lightTex, whiteUV: atlas.whiteUV },
+        {
+            sound: (name, at) => sound.play(name, { origin: at }),
+            explosion: (at) => impacts.explosion(at),
+            playerSplash: (center, radius, maxDamage) => {
+                const p = physics.origin;
+                const dx = p[0] - center[0];
+                const dy = p[1] - center[1];
+                const dz = p[2] + 24 - center[2];
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (dist >= radius) return;
+                const dmg = maxDamage * (1 - dist / radius) * 0.5;
+                if (dmg > 0) {
+                    hurtPlayer(player, dmg, hud, sound);
+                    hud.setStats(player, monsters.kills, monsters.total);
+                }
+            },
+            onChange: () => hud.setStats(player, monsters.kills, monsters.total),
+        }
+    );
+    await grenades.load();
 
     // Camera spawned at the player eye.
     const [cx, cy, cz] = quakeToEngine(physics.eye[0], physics.eye[1], physics.eye[2]);
@@ -325,7 +356,7 @@ async function main(): Promise<void> {
     cam.farPlane = 20000;
     scene.camera = cam;
 
-    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, items, monsters, viewmodel, player, hud, impacts, sound);
+    installPlayerControls(scene, canvas, physics, cam, view, movers, moverMeshes, items, monsters, viewmodel, grenades, player, hud, impacts, sound);
 
     await registerScene(engine, scene);
     await startEngine(engine);
@@ -345,6 +376,7 @@ function installPlayerControls(
     items: SpawnedItem[],
     monsters: MonsterSystem,
     viewmodel: Viewmodel,
+    grenades: GrenadeSystem,
     player: Player,
     hud: Hud,
     impacts: ImpactFx,
@@ -374,30 +406,65 @@ function installPlayerControls(
     });
     const maxPitch = Math.PI / 2 - 0.01;
 
+    let lastFire = 0; // global refire timestamp (seconds)
+
+    const switchWeapon = (id: WeaponId): void => {
+        if (player.dead || !player.owned.has(id) || player.weapon === id) return;
+        player.weapon = id;
+        viewmodel.select(id);
+        hud.setStats(player, monsters.kills, monsters.total);
+    };
+
     const fire = (): void => {
-        if (player.dead || player.ammo <= 0) return;
-        player.ammo--;
+        if (player.dead) return;
+        const def = WEAPONS[player.weapon];
+        const now = performance.now() / 1000;
+        if (now - lastFire < def.refire) return;
+        const have = def.ammo === "shells" ? player.shells : player.rockets;
+        if (have < def.ammoPerShot) return;
+
         // Quake view direction from yaw/pitch (X fwd, Y left, Z up).
         const cp = Math.cos(view.pitch);
         const eye: [number, number, number] = [physics.eye[0], physics.eye[1], physics.eye[2]];
         const dir: [number, number, number] = [Math.cos(view.yaw) * cp, Math.sin(view.yaw) * cp, Math.sin(view.pitch)];
-        const monPoint = monsters.hitscan(eye, dir, SHOTGUN_RANGE, SHOTGUN_DAMAGE);
-        if (monPoint) {
-            // Pull the blood marker a little toward the shooter so it sits proud of the body.
-            impacts.spawn([monPoint[0] - dir[0] * 6, monPoint[1] - dir[1] * 6, monPoint[2] - dir[2] * 6], true);
+
+        if (def.projectile) {
+            // Grenade launcher: launch a bouncing projectile. Only spend ammo and
+            // play effects if the pool wasn't exhausted.
+            if (!grenades.launch(eye, dir)) return;
         } else {
-            // No monster hit: mark where the pellets strike world geometry.
-            const end: [number, number, number] = [eye[0] + dir[0] * SHOTGUN_RANGE, eye[1] + dir[1] * SHOTGUN_RANGE, eye[2] + dir[2] * SHOTGUN_RANGE];
-            const wall = physics.castMove(eye, end);
-            if (wall.fraction < 1) {
-                const n = wall.normal ?? [0, 0, 0];
-                // Push the spark out along the surface normal so it isn't embedded in the wall.
-                impacts.spawn([wall.endpos[0] + n[0] * 4, wall.endpos[1] + n[1] * 4, wall.endpos[2] + n[2] * 4], false);
+            // Hitscan pellets with a spread basis derived from yaw (stays stable at
+            // steep pitch, unlike a forward-derived right vector).
+            const rightX = Math.sin(view.yaw);
+            const rightY = -Math.cos(view.yaw);
+            // up = cross(right, forward)
+            const upX = rightY * dir[2] - 0 * dir[1];
+            const upY = 0 * dir[0] - rightX * dir[2];
+            const upZ = rightX * dir[1] - rightY * dir[0];
+            for (let i = 0; i < def.pellets; i++) {
+                const sx = (Math.random() * 2 - 1) * def.spreadX;
+                const sy = (Math.random() * 2 - 1) * def.spreadY;
+                const pd: [number, number, number] = [dir[0] + rightX * sx + upX * sy, dir[1] + rightY * sx + upY * sy, dir[2] + upZ * sy];
+                const monPoint = monsters.hitscan(eye, pd, def.range, def.dmgPerPellet);
+                if (monPoint) {
+                    impacts.spawn([monPoint[0] - pd[0] * 6, monPoint[1] - pd[1] * 6, monPoint[2] - pd[2] * 6], true);
+                } else {
+                    const end: [number, number, number] = [eye[0] + pd[0] * def.range, eye[1] + pd[1] * def.range, eye[2] + pd[2] * def.range];
+                    const wall = physics.castMove(eye, end);
+                    if (wall.fraction < 1) {
+                        const n = wall.normal ?? [0, 0, 0];
+                        impacts.spawn([wall.endpos[0] + n[0] * 4, wall.endpos[1] + n[1] * 4, wall.endpos[2] + n[2] * 4], false);
+                    }
+                }
             }
         }
+
+        lastFire = now;
+        if (def.ammo === "shells") player.shells -= def.ammoPerShot;
+        else player.rockets -= def.ammoPerShot;
         hud.muzzle();
         viewmodel.fire();
-        sound.play("weapons/guncock.wav");
+        sound.play(def.fireSound);
         hud.setStats(player, monsters.kills, monsters.total);
     };
 
@@ -405,6 +472,9 @@ function installPlayerControls(
     canvas.addEventListener("keydown", (e) => {
         sound.resume();
         keys.add(e.code);
+        if (e.code === "Digit1") switchWeapon("shotgun");
+        else if (e.code === "Digit2") switchWeapon("supershotgun");
+        else if (e.code === "Digit3") switchWeapon("grenade");
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     });
     canvas.addEventListener("keyup", (e) => keys.delete(e.code));
@@ -498,6 +568,7 @@ function installPlayerControls(
         const riding = ridingEnt();
         movers.update(dt);
         monsters.update(dt, [physics.origin[0], physics.origin[1], physics.origin[2]]);
+        grenades.update(dt);
 
         // Sync mover meshes; carry the player along with whatever lift they ride.
         for (const [ent, meshes] of moverMeshes) {
@@ -530,6 +601,7 @@ function installPlayerControls(
                 item.picked = true;
                 for (const m of item.meshes) setMeshVisible(m, false);
                 const pickup = grantPickup(player, item.cls, item.flags);
+                viewmodel.select(player.weapon);
                 sound.play(pickup.sound);
                 hud.message(pickup.label);
                 hud.setStats(player, monsters.kills, monsters.total);
@@ -559,11 +631,10 @@ function installPlayerControls(
 
 /**
  * Apply a touched item's effect to the player and return a short pickup label
- * for the HUD. Mirrors Quake's pickup amounts, collapsed onto this demo's
- * single-weapon / single-ammo-counter model: health heals (mega overheals),
- * armour raises the armour ceiling, ammo and weapons top up the shared ammo
- * counter. Powerup artifacts are collected (labelled) but grant no persistent
- * stat (no powerup state in this demo).
+ * for the HUD. Mirrors Quake's pickup amounts: health heals (mega overheals),
+ * armour raises the armour ceiling, ammo boxes top up the matching ammo pool,
+ * and weapon pickups grant the weapon (auto-switching to it) plus a little ammo.
+ * Powerup artifacts are collected (labelled) but grant no persistent stat.
  */
 function grantPickup(player: Player, cls: string, flags: number): { label: string; sound: string } {
     if (cls === "item_health") {
@@ -597,16 +668,30 @@ function grantPickup(player: Player, cls: string, flags: number): { label: strin
         item_artifact_invisibility: { label: "You got the Ring of Shadows", sound: "items/inv1.wav" },
     };
     if (artifacts[cls]) return artifacts[cls];
-    let add = 0;
-    let label = "You got ammo";
-    if (cls === "item_shells") (add = 20), (label = "You got shells");
-    else if (cls === "item_spikes") (add = 25), (label = "You got nails");
-    else if (cls === "item_rockets") (add = 5), (label = "You got rockets");
-    else if (cls === "item_cells") (add = 6), (label = "You got cells");
-    else if (cls.startsWith("weapon_")) (add = 10), (label = "You got a weapon");
-    if (add > 0) player.ammo = Math.min(200, player.ammo + add);
-    // Weapons play the weapon pickup chime; ammo boxes use the ammo lock sound.
-    return { label, sound: cls.startsWith("weapon_") ? "weapons/pkup.wav" : "weapons/lock4.wav" };
+
+    // Weapon pickups: grant the weapon, give a little ammo of its type, auto-switch.
+    const weaponId = WEAPON_PICKUPS[cls];
+    if (weaponId) {
+        player.owned.add(weaponId);
+        const def = WEAPONS[weaponId];
+        if (def.ammo === "shells") player.shells = Math.min(100, player.shells + 5);
+        else player.rockets = Math.min(100, player.rockets + 5);
+        player.weapon = weaponId;
+        return { label: `You got the ${def.name}`, sound: "weapons/pkup.wav" };
+    }
+
+    // Ammo boxes route to the matching pool.
+    if (cls === "item_shells") {
+        player.shells = Math.min(100, player.shells + 20);
+        return { label: "You got shells", sound: "weapons/lock4.wav" };
+    }
+    if (cls === "item_rockets") {
+        player.rockets = Math.min(100, player.rockets + 5);
+        return { label: "You got rockets", sound: "weapons/lock4.wav" };
+    }
+    if (cls === "item_spikes") return { label: "You got nails", sound: "weapons/lock4.wav" };
+    if (cls === "item_cells") return { label: "You got cells", sound: "weapons/lock4.wav" };
+    return { label: "You got ammo", sound: "weapons/lock4.wav" };
 }
 
 /**
@@ -620,14 +705,20 @@ function grantPickup(player: Player, cls: string, flags: number): { label: strin
 class ImpactFx {
     private readonly blood: Particles;
     private readonly spark: Particles;
+    private readonly fireball: Particles;
+    private readonly emberSmoke: Particles;
     private last = performance.now() / 1000;
 
     constructor(engine: Engine, scene: ReturnType<typeof createSceneContext>) {
-        // Two fixed-colour pools. Colours are baked at construction because Standard
+        // Fixed-colour pools. Colours are baked at construction because Standard
         // material colour changes made after the scene is registered are not re-uploaded
         // to the GPU; only per-frame transforms (position/scale) update.
         this.blood = new Particles(engine, scene, [0.62, 0.03, 0.03], 48);
         this.spark = new Particles(engine, scene, [0.78, 0.76, 0.7], 40);
+        // Explosion: a fast bright-orange fireball plus a darker, slower ember/smoke
+        // cloud so grenade blasts read like Quake's r_explosion rather than a flat puff.
+        this.fireball = new Particles(engine, scene, [1.0, 0.55, 0.12], 64, { size: 5.5, maxLife: 0.55, speedBase: 140, speedRand: 220, upBias: 70 });
+        this.emberSmoke = new Particles(engine, scene, [0.35, 0.16, 0.06], 48, { size: 6.5, maxLife: 0.7, speedBase: 40, speedRand: 90, upBias: 90 });
     }
 
     /** point is in Quake space; blood=true sprays red, else a grey dust puff. */
@@ -636,16 +727,33 @@ class ImpactFx {
         (blood ? this.blood : this.spark).burst(ex, ey, ez, blood ? 12 : 9);
     }
 
+    /** Big fireball + ember cloud for a grenade detonation (Quake-space point). */
+    explosion(point: [number, number, number]): void {
+        const [ex, ey, ez] = quakeToEngine(point[0], point[1], point[2]);
+        this.fireball.burst(ex, ey, ez, 40);
+        this.emberSmoke.burst(ex, ey, ez, 26);
+    }
+
     update(): void {
         const now = performance.now() / 1000;
         const dt = Math.min(now - this.last, 0.05);
         this.last = now;
         this.blood.tick(dt);
         this.spark.tick(dt);
+        this.fireball.tick(dt);
+        this.emberSmoke.tick(dt);
     }
 }
 
 /** A single fixed-colour pool of tiny particle boxes with velocity + gravity. */
+interface ParticleOpts {
+    size?: number;
+    maxLife?: number;
+    speedBase?: number;
+    speedRand?: number;
+    upBias?: number;
+}
+
 class Particles {
     private readonly mesh: Mesh[] = [];
     private readonly px: number[] = [];
@@ -656,13 +764,21 @@ class Particles {
     private readonly vz: number[] = [];
     private readonly life: number[] = [];
     private next = 0;
-    private static readonly SIZE = 2.6;
-    private static readonly MAX_LIFE = 0.4;
+    private readonly size: number;
+    private readonly maxLife: number;
+    private readonly speedBase: number;
+    private readonly speedRand: number;
+    private readonly upBias: number;
     private static readonly GRAVITY = 520; // engine units / s² (Y-up)
 
-    constructor(engine: Engine, scene: ReturnType<typeof createSceneContext>, color: [number, number, number], count: number) {
+    constructor(engine: Engine, scene: ReturnType<typeof createSceneContext>, color: [number, number, number], count: number, opts: ParticleOpts = {}) {
+        this.size = opts.size ?? 2.6;
+        this.maxLife = opts.maxLife ?? 0.4;
+        this.speedBase = opts.speedBase ?? 35;
+        this.speedRand = opts.speedRand ?? 75;
+        this.upBias = opts.upBias ?? 45;
         for (let i = 0; i < count; i++) {
-            const m = createBox(engine, Particles.SIZE);
+            const m = createBox(engine, this.size);
             const mat = createStandardMaterial();
             mat.emissiveColor = color;
             mat.diffuseColor = [0, 0, 0];
@@ -688,12 +804,12 @@ class Particles {
             const theta = Math.random() * Math.PI * 2;
             const cosP = 2 * Math.random() - 1;
             const sinP = Math.sqrt(1 - cosP * cosP);
-            const spd = 35 + Math.random() * 75;
+            const spd = this.speedBase + Math.random() * this.speedRand;
             this.px[i] = x; this.py[i] = y; this.pz[i] = z;
             this.vx[i] = Math.cos(theta) * sinP * spd;
-            this.vy[i] = cosP * spd * 0.6 + 45;
+            this.vy[i] = cosP * spd * 0.6 + this.upBias;
             this.vz[i] = Math.sin(theta) * sinP * spd;
-            this.life[i] = Particles.MAX_LIFE * (0.7 + Math.random() * 0.6);
+            this.life[i] = this.maxLife * (0.7 + Math.random() * 0.6);
             this.mesh[i].position.set(x, y, z);
             this.mesh[i].scaling.set(1, 1, 1);
         }
@@ -714,7 +830,7 @@ class Particles {
             this.pz[i] += this.vz[i] * dt;
             this.mesh[i].position.set(this.px[i], this.py[i], this.pz[i]);
             // Shrink to a point near end of life so it fades out rather than popping.
-            const f = this.life[i] / Particles.MAX_LIFE;
+            const f = this.life[i] / this.maxLife;
             const k = f < 0.5 ? f * 2 : 1;
             this.mesh[i].scaling.set(k, k, k);
         }
@@ -784,20 +900,30 @@ async function createHud(palette: Palette): Promise<Hud> {
             hideTimer = window.setTimeout(() => (msg.style.opacity = "0"), 3000);
         },
         setStats(player: Player, kills: number, total: number) {
+            const def = WEAPONS[player.weapon];
+            const ammoCount = def.ammo === "shells" ? player.shells : player.rockets;
             if (sbar) {
+                const weapons = WEAPON_ORDER.filter((id) => player.owned.has(id)).map((id) => ({
+                    invIcon: WEAPONS[id].invIcon,
+                    ibarSlotX: WEAPONS[id].ibarSlotX,
+                    selected: id === player.weapon,
+                }));
                 sbar.setStats({
                     health: player.health,
                     armor: player.armor,
-                    ammo: player.ammo,
+                    ammo: ammoCount,
                     kills,
                     total,
+                    weapons,
+                    ammoIcon: def.ammoIcon,
                 });
                 return;
             }
+            const ammoLabel = def.ammo === "shells" ? "SHELLS" : "ROCKETS";
             stats!.innerHTML =
                 `<span style="color:#ff6b6b">HEALTH ${Math.max(0, Math.ceil(player.health))}</span>` +
                 `&nbsp;&nbsp;<span style="color:#6bb6ff">ARMOR ${Math.max(0, Math.round(player.armor))}</span>` +
-                `&nbsp;&nbsp;<span style="color:#ffd86b">SHELLS ${player.ammo}</span>` +
+                `&nbsp;&nbsp;<span style="color:#ffd86b">${def.name.toUpperCase()} · ${ammoLabel} ${ammoCount}</span>` +
                 `&nbsp;&nbsp;<span style="color:#b6ffb6">KILLS ${kills}/${total}</span>`;
         },
         muzzle() {

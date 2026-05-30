@@ -316,6 +316,58 @@ export class MonsterSystem {
         return [origin[0] + dir[0] * bestT, origin[1] + dir[1] * bestT, origin[2] + dir[2] * bestT];
     }
 
+    /** Squared distance from a point to a live monster's AABB (0 if inside). */
+    private aabbDistSq(m: Monster, p: V3): number {
+        let d = 0;
+        for (let i = 0; i < 3; i++) {
+            const lo = m.origin[i] + MON_MINS[i];
+            const hi = m.origin[i] + MON_MAXS[i];
+            const v = p[i] < lo ? lo - p[i] : p[i] > hi ? p[i] - hi : 0;
+            d += v * v;
+        }
+        return d;
+    }
+
+    /** Body centre of a monster (origin + half-bbox) — used as a LOS/aim target. */
+    private bodyCenter(m: Monster): V3 {
+        return [m.origin[0], m.origin[1], m.origin[2] + (MON_MINS[2] + MON_MAXS[2]) / 2];
+    }
+
+    /** True if any live monster's AABB is within `radius` of `point` (grenade touch). */
+    hasLiveMonsterWithin(point: V3, radius: number): boolean {
+        const r2 = radius * radius;
+        for (const m of this.monsters) {
+            if (m.state === "dead") continue;
+            if (this.aabbDistSq(m, point) <= r2) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Quake-style splash damage: every live monster within `radius` of `center`
+     * takes `maxDamage` falling off linearly to zero at the edge, gated by a
+     * line-of-sight check so explosions don't damage through walls. Returns the
+     * number of monsters killed so callers can refresh the HUD.
+     */
+    radiusDamage(center: V3, radius: number, maxDamage: number): number {
+        const before = this.kills;
+        for (const m of this.monsters) {
+            if (m.state === "dead") continue;
+            const d2 = this.aabbDistSq(m, center);
+            if (d2 >= radius * radius) continue;
+            const body = this.bodyCenter(m);
+            const dir: V3 = [body[0] - center[0], body[1] - center[1], body[2] - center[2]];
+            const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+            // Nudge the LOS trace start a touch toward the target so a grenade
+            // resting against a wall doesn't immediately self-occlude.
+            const start: V3 = [center[0] + (dir[0] / len) * 4, center[1] + (dir[1] / len) * 4, center[2] + (dir[2] / len) * 4];
+            if (this.physics.castMove(start, body).fraction < 0.99) continue;
+            const points = maxDamage * (1 - Math.sqrt(d2) / radius);
+            if (points > 0) this.damageMonster(m, points);
+        }
+        return this.kills - before;
+    }
+
     private damageMonster(m: Monster, amount: number): void {
         if (m.state === "dead") return;
         m.health -= amount;

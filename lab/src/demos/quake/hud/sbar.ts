@@ -15,12 +15,25 @@ const BAR_W = 320;
 const BAR_H = 24;
 const DIGIT_ADVANCE = 24; // each NUM_/ANUM_ pic is 24px wide
 
+export interface SbarWeaponSlot {
+    /** Base lump name without the INV_/INV2_ prefix (e.g. "SHOTGUN"). */
+    invIcon: string;
+    /** X offset within the ibar in 320-wide bar pixels. */
+    ibarSlotX: number;
+    /** True if this is the currently-selected weapon (uses INV2_ icon). */
+    selected: boolean;
+}
+
 export interface SbarStats {
     health: number;
     armor: number;
     ammo: number;
     kills: number;
     total: number;
+    /** Owned weapons drawn on the ibar; empty falls back to the lone shotgun. */
+    weapons?: SbarWeaponSlot[];
+    /** sbar ammo-count icon lump for the active weapon (defaults to SB_SHELLS). */
+    ammoIcon?: string;
 }
 
 export class SbarHud {
@@ -135,9 +148,12 @@ export class SbarHud {
 
         // --- Inventory bar (weapons) ---
         this.blit("IBAR", 0, 0, ox, ibarY, false);
-        // Shotgun is the only weapon; show it selected (INV2_) in slot 0.
         // Weapon icons are 24x16 and sit in the lower part of the 24px ibar.
-        this.blit("INV2_SHOTGUN", 0, 8, ox, ibarY);
+        // INV2_ = selected weapon, INV_ = owned-but-inactive.
+        const slots = this.stats.weapons && this.stats.weapons.length > 0 ? this.stats.weapons : [{ invIcon: "SHOTGUN", ibarSlotX: 0, selected: true }];
+        for (const w of slots) {
+            this.blit((w.selected ? "INV2_" : "INV_") + w.invIcon, w.ibarSlotX, 8, ox, ibarY);
+        }
 
         // --- Status bar ---
         this.blit("SBAR", 0, 0, ox, sbarY, false);
@@ -158,8 +174,8 @@ export class SbarHud {
         // Health count.
         this.drawNum(ox, sbarY, 136, 0, health, 3, health <= 25);
 
-        // Ammo (shells) icon + count.
-        this.blit("SB_SHELLS", 0, 0, ox + 224 * s, sbarY);
+        // Ammo icon + count for the active weapon.
+        this.blit(this.stats.ammoIcon ?? "SB_SHELLS", 0, 0, ox + 224 * s, sbarY);
         this.drawNum(ox, sbarY, 248, 0, this.stats.ammo, 3, this.stats.ammo <= 10);
 
         // Kill counter is not part of the classic sbar; show it subtly above-left
