@@ -9,6 +9,6 @@
         "slug": "doom",
         "name": "DOOM (id Tech 1)",
         "description": "Playable id Tech 1 / Doom-format level player built on Lite. Ships the BSD-licensed Freedoom IWAD; optionally load your own legally-owned doom1.wad at runtime. Clean-room engine reimplemented from public format specs — no id data or GPL source.",
-        "tags": ["game", "fps", "wad", "showcase"]
+        "tags": ["game", "fps", "showcase"]
     }
 ]

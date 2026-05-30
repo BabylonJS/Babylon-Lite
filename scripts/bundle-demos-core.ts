@@ -75,7 +75,7 @@ function loadDemosConfig(): DemoConfigEntry[] {
     return JSON.parse(readFileSync(resolve(ROOT, "demos-config.json"), "utf-8")) as DemoConfigEntry[];
 }
 
-async function buildDemo(slug: string): Promise<void> {
+export async function buildDemo(slug: string): Promise<void> {
     const demoOutDir = resolve(demosDir, slug);
     rmSync(demoOutDir, { recursive: true, force: true });
 

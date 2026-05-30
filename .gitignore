@@ -56,3 +56,5 @@ _bjs_diag.mjs
 _pix.mjs
 _bjs67_defines.txt
 .DS_Store
+# Generated public Pages site
+pages-dist/
