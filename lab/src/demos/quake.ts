@@ -408,6 +408,7 @@ async function main(): Promise<void> {
     await startEngine(engine);
     canvas.dataset.drawCalls = String(drawn);
     canvas.dataset.ready = "true";
+    hud.message("WASD move  ·  mouse look  ·  LMB fire  ·  1-3 / wheel switch weapon");
 }
 
 /** First-person controls + the per-frame game loop (physics, movers, sync). */
@@ -459,6 +460,15 @@ function installPlayerControls(
         player.weapon = id;
         viewmodel.select(id);
         hud.setStats(player, monsters.kills, monsters.total);
+    };
+
+    // Cycle to the next/previous owned weapon in slot order (mouse wheel).
+    const cycleWeapon = (dir: number): void => {
+        if (player.dead) return;
+        const owned = WEAPON_ORDER.filter((id) => player.owned.has(id));
+        if (owned.length < 2) return;
+        const i = owned.indexOf(player.weapon);
+        switchWeapon(owned[(i + dir + owned.length) % owned.length]);
     };
 
     const fire = (): void => {
@@ -524,6 +534,15 @@ function installPlayerControls(
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     });
     canvas.addEventListener("keyup", (e) => keys.delete(e.code));
+    // Mouse wheel cycles weapons, like most modern FPS controls.
+    canvas.addEventListener(
+        "wheel",
+        (e) => {
+            e.preventDefault();
+            cycleWeapon(e.deltaY > 0 ? 1 : -1);
+        },
+        { passive: false },
+    );
     // Fire on the rising edge of the left button; grab/release the mouse (pointer
     // lock) on the rising/falling edge of the right button so look is free-cursor.
     const handleButtons = (buttons: number): void => {
@@ -723,7 +742,8 @@ function grantPickup(player: Player, cls: string, flags: number): { label: strin
         if (def.ammo === "shells") player.shells = Math.min(100, player.shells + 5);
         else player.rockets = Math.min(100, player.rockets + 5);
         player.weapon = weaponId;
-        return { label: `You got the ${def.name}`, sound: "weapons/pkup.wav" };
+        const hint = player.owned.size >= 2 ? "  (keys 1-3 or mouse wheel to switch)" : "";
+        return { label: `You got the ${def.name}${hint}`, sound: "weapons/pkup.wav" };
     }
 
     // Ammo boxes route to the matching pool.
@@ -985,15 +1005,18 @@ async function createHud(palette: Palette): Promise<Hud> {
             window.setTimeout(() => (flash.style.opacity = "0"), 60);
         },
         pain(amount: number) {
-            // Snap to an intensity scaled by the hit, then fade. Force a reflow
-            // between the two writes so the snap-in isn't smoothed by the
-            // transition and only the fade-out animates.
-            const intensity = Math.min(0.6, 0.22 + amount * 0.012);
+            // Snap to an intensity scaled by the hit, then fade. Two rAFs guarantee
+            // the snap-in is painted for a frame before the fade starts, so the
+            // browser can't coalesce both writes and skip the flash entirely.
+            const intensity = Math.min(0.7, 0.35 + amount * 0.015);
             damage.style.transition = "none";
             damage.style.opacity = String(intensity);
-            void damage.offsetWidth;
-            damage.style.transition = "opacity .4s ease-out";
-            damage.style.opacity = "0";
+            requestAnimationFrame(() =>
+                requestAnimationFrame(() => {
+                    damage.style.transition = "opacity .5s ease-out";
+                    damage.style.opacity = "0";
+                }),
+            );
         },
         showDead() {
             banner.style.display = "flex";
