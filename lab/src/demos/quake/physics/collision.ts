@@ -31,6 +31,13 @@ const WATER_ACCELERATE = 10;
 const WATER_SPEED_SCALE = 0.7;
 const WATER_SINK_SPEED = 60;
 
+// Water jump (SV_CheckWaterJump): at the surface, facing a ledge, launch up and
+// out so the player can climb onto platforms. During WATERJUMP_TIME seconds the
+// horizontal velocity is locked so the scripted arc carries them over the lip.
+const WATERJUMP_UP = 350;
+const WATERJUMP_FWD = 50;
+const WATERJUMP_TIME = 2;
+
 export interface MoveInput {
     /** Desired horizontal move in Quake space (already rotated by view yaw). */
     forward: number;
@@ -76,6 +83,8 @@ export class QuakePhysics {
     /** The brush hull index the player is currently standing on, or -1. */
     groundBrush = -1;
     private _root = 0;
+    /** Cooldown after a water-jump launch; also preserves launch velocity while still submerged. */
+    private waterJumpTime = 0;
 
     constructor(bsp: BspData, spawn: V3) {
         this.clip = bsp.clipNodes;
@@ -391,6 +400,31 @@ export class QuakePhysics {
         this.flyMove(dt);
     }
 
+    /**
+     * Quake's SV_CheckWaterJump: when treading at the surface and looking at a
+     * ledge, detect a solid wall just in front with open space above it and fling
+     * the player up and out so they can mount the platform. Returns true if the
+     * jump was launched.
+     */
+    private checkWaterJump(yaw: number): boolean {
+        // Only hop out when not plunging downward.
+        if (this.velocity[2] < -180) return false;
+        const o = this.origin;
+        const flat: V3 = [Math.cos(yaw), Math.sin(yaw), 0];
+        // Solid wall ~24 units ahead at head height?
+        const spot: V3 = [o[0] + 24 * flat[0], o[1] + 24 * flat[1], o[2] + 8];
+        if (this.pointContents(spot) !== CONTENTS_SOLID) return false;
+        // Open air just above that wall (the ledge surface we want to land on)?
+        spot[2] += 24;
+        if (this.pointContents(spot) !== CONTENTS_EMPTY) return false;
+        // Launch up and out.
+        this.velocity[0] = flat[0] * WATERJUMP_FWD;
+        this.velocity[1] = flat[1] * WATERJUMP_FWD;
+        this.velocity[2] = WATERJUMP_UP;
+        this.waterJumpTime = WATERJUMP_TIME;
+        return true;
+    }
+
     private checkGround(): void {
         if (this.velocity[2] > 180) {
             this.onGround = false;
@@ -456,11 +490,22 @@ export class QuakePhysics {
     /** Advance the simulation by dt seconds given the desired move and view angles. */
     update(dt: number, input: MoveInput, yaw: number, pitch: number): void {
         this.checkWater();
+        if (this.waterJumpTime > 0) this.waterJumpTime -= dt;
 
         // Waist-deep or more → swim (3-D, no gravity).
         if (this.waterLevel >= 2) {
             this.onGround = false;
             this.groundBrush = -1;
+            // Mid water-jump: keep the scripted velocity so we rise out cleanly.
+            if (this.waterJumpTime > 0) {
+                this.flyMove(dt);
+                return;
+            }
+            // At the surface, looking at a ledge, press jump/forward to vault out.
+            if ((input.jump || input.forward > 0) && this.checkWaterJump(yaw)) {
+                this.flyMove(dt);
+                return;
+            }
             this.waterMove(dt, input, yaw, pitch);
             return;
         }
@@ -477,6 +522,7 @@ export class QuakePhysics {
         this.checkGround();
 
         if (this.onGround) {
+            this.waterJumpTime = 0;
             this.applyFriction(dt);
             this.velocity[2] = 0;
             this.accelerate(wishDir, wishSpeed, ACCELERATE, dt);
