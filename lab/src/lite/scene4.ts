@@ -26,9 +26,10 @@ async function main(): Promise<void> {
 
     // Sphere at light position — emissive yellow
     const sphere = createSphere(engine, { segments: 10, diameter: 2 });
-    sphere.material = createStandardMaterial();
+    const sphereMat = createStandardMaterial();
+    sphere.material = sphereMat;
     sphere.position.set(20, 40, 20);
-    sphere.material.emissiveColor = [1, 1, 0];
+    sphereMat.emissiveColor = [1, 1, 0];
     addToScene(scene, sphere);
 
     // Ground from heightmap — receives shadows
@@ -40,10 +41,11 @@ async function main(): Promise<void> {
         maxHeight: 10,
     });
     ground.position.set(0, -2.05, 0);
-    ground.material = createStandardMaterial();
-    ground.material.specularColor = [0, 0, 0];
-    ground.material.diffuseTexture = await loadTexture2D(engine, "https://playground.babylonjs.com/textures/ground.jpg");
-    ground.material.uvScale = [6, 6];
+    const groundMat = createStandardMaterial();
+    ground.material = groundMat;
+    groundMat.specularColor = [0, 0, 0];
+    groundMat.diffuseTexture = await loadTexture2D(engine, "https://playground.babylonjs.com/textures/ground.jpg");
+    groundMat.uvScale = [6, 6];
     ground.receiveShadows = true;
     addToScene(scene, ground);
 
@@ -76,9 +78,10 @@ async function main(): Promise<void> {
     // Emissive sphere to visualize spotlight position
     const spotSphere = createSphere(engine, { diameter: 2 });
     spotSphere.position.set(48.8, 50, 6.8);
-    spotSphere.material = createStandardMaterial();
-    spotSphere.material.emissiveColor = [0, 0.5, 1];
-    spotSphere.material.disableLighting = true;
+    const spotMat = createStandardMaterial();
+    spotSphere.material = spotMat;
+    spotMat.emissiveColor = [0, 0.5, 1];
+    spotMat.disableLighting = true;
     addToScene(scene, spotSphere);
 
     // --- Interactive: toggle torus rotation ---

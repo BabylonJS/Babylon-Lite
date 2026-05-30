@@ -22,7 +22,7 @@ export function setMobjState(world: DoomWorld, m: Mobj, stateId: number): boolea
             m.removed = true;
             return false;
         }
-        const st = STATES[id];
+        const st = STATES[id]!;
         m.stateId = id;
         m.tics = st.tics;
         m.sprite = st.sprite;
@@ -49,7 +49,7 @@ export function tickMobj(world: DoomWorld, m: Mobj): void {
     // State countdown.
     if (m.tics > 0) {
         m.tics--;
-        if (m.tics === 0) setMobjState(world, m, STATES[m.stateId].next);
+        if (m.tics === 0) setMobjState(world, m, STATES[m.stateId]!.next);
     }
 }
 
@@ -91,8 +91,8 @@ function applyGravity(world: DoomWorld, m: Mobj): void {
 export function tryWalk(world: DoomWorld, m: Mobj, dir: Dir): boolean {
     if (dir === Dir.NONE) return false;
     const speed = m.info.speed;
-    const dx = Math.cos(DIR_ANGLE[dir]) * speed;
-    const dy = Math.sin(DIR_ANGLE[dir]) * speed;
+    const dx = Math.cos(DIR_ANGLE[dir]!) * speed;
+    const dy = Math.sin(DIR_ANGLE[dir]!) * speed;
     const floor = world.floorAt(m.x + dx, m.y + dy);
     // Reject big step-ups / openings via collision resolution: if blocked the
     // resolved position barely advances.
@@ -104,14 +104,19 @@ export function tryWalk(world: DoomWorld, m: Mobj, dir: Dir): boolean {
     });
     const advanced = Math.hypot(next.x - m.x, next.y - m.y);
     if (advanced < speed * 0.5) return false;
-    // Mobj-vs-mobj blocking.
-    for (const o of world.mobjs) {
-        if (o === m || o.removed) continue;
-        if ((o.flags & MF.SOLID) === 0) continue;
+    // Mobj-vs-mobj blocking, plus the player (who is not in the mobjs list) so an
+    // approaching monster stops at melee range instead of shoving the player.
+    const blocksThing = (o: Mobj): boolean => {
+        if ((o.flags & MF.SOLID) === 0) return false;
         const ddx = next.x - o.x;
         const ddy = next.y - o.y;
         const rr = m.radius + o.radius;
-        if (ddx * ddx + ddy * ddy < rr * rr) return false;
+        return ddx * ddx + ddy * ddy < rr * rr;
+    };
+    if (m !== world.player && world.player.health > 0 && blocksThing(world.player)) return false;
+    for (const o of world.mobjs) {
+        if (o === m || o.removed) continue;
+        if (blocksThing(o)) return false;
     }
     m.x = next.x;
     m.y = next.y;

@@ -162,7 +162,7 @@ export class DoomWorld {
         this.handlePickups();
         if (this.mobjs.some((m) => m.removed)) {
             for (let i = this.mobjs.length - 1; i >= 0; i--) {
-                if (this.mobjs[i].removed) this.mobjs.splice(i, 1);
+                if (this.mobjs[i]!.removed) this.mobjs.splice(i, 1);
             }
         }
     }

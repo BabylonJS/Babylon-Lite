@@ -14,11 +14,13 @@ import { createSky } from "./render/sky.js";
 import { buildLevelBatches } from "./geometry/build-level-geometry.js";
 import { DynamicGeometry } from "./geometry/dynamic-geometry.js";
 import { SpecialsManager } from "./specials/specials.js";
-import { buildCollisionLines, tryMove, VIEW_HEIGHT } from "./physics/collision.js";
+import { buildCollisionLines, tryMove, blockAgainstThings, PLAYER_RADIUS, VIEW_HEIGHT } from "./physics/collision.js";
 import { floorHeightAt, sectorIndexAt } from "./wad/bsp-query.js";
 import { SpriteStore } from "./render/sprites.js";
 import { SpriteRenderer } from "./render/sprite-render.js";
+import { WeaponView } from "./render/weapon-view.js";
 import { DoomWorld } from "./mobj/world.js";
+import { MF } from "./mobj/info.js";
 import { Player, Weapon } from "./player/player.js";
 import { DoomHud } from "./hud/hud.js";
 import { DoomSound } from "./sound/sound.js";
@@ -54,7 +56,6 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
 
     const playerSectorRef = { value: -1 };
     const specials = new SpecialsManager(map, {
-        onExit: () => console.log("[doom] level exit triggered"),
         playerSector: () => playerSectorRef.value,
     });
 
@@ -97,7 +98,8 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
     // Player state, HUD overlay and sound, wired to world events.
     const player = new Player(world);
     const sound = new DoomSound(wad);
-    const hud = new DoomHud(player);
+    const hud = new DoomHud(wad, player);
+    const weaponView = new WeaponView(wad);
     world.events = {
         message: (text) => {
             player.setMessage(text);
@@ -112,17 +114,18 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
     const sky = skyTex ? createSky(engine, skyTex.texture, colormapTex) : null;
     if (sky) addToScene(scene, sky);
 
-    installCamera(scene, map, specials, dynamicGeo, playerSectorRef, sky, world, spriteRenderer, player, hud, sound);
+    installCamera(scene, map, specials, dynamicGeo, playerSectorRef, sky, world, spriteRenderer, player, hud, sound, weaponView);
 
     return {
         map,
         dispose: () => {
             hud.dispose();
+            weaponView.dispose();
         },
     };
 }
 
-function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsManager, dynamicGeo: DynamicGeometry, playerSectorRef: { value: number }, sky: Mesh | null, world: DoomWorld, spriteRenderer: SpriteRenderer, player: Player, hud: DoomHud, sound: DoomSound): void {
+function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsManager, dynamicGeo: DynamicGeometry, playerSectorRef: { value: number }, sky: Mesh | null, world: DoomWorld, spriteRenderer: SpriteRenderer, player: Player, hud: DoomHud, sound: DoomSound, weaponView: WeaponView): void {
     const start = map.things.find((t) => t.type === 1) ?? map.things[0];
     const sx = start ? start.x : 0;
     const sz = start ? start.y : 0;
@@ -139,7 +142,22 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
     let ticAccum = 0;
     let usePressed = false;
     let firing = false;
+    let viewHeight = VIEW_HEIGHT;
+    let wasDead = false;
     const collLines = buildCollisionLines(map);
+
+    // Doom death: the view sinks toward the floor; press USE to respawn at start.
+    const DEATH_VIEW_HEIGHT = 6;
+    const DEATH_SINK_SPEED = 36; // units/sec, ~1s from standing to corpse height
+    const respawn = (): void => {
+        player.respawn();
+        eye.x = sx;
+        eye.z = sz;
+        yaw = yaw0;
+        viewHeight = VIEW_HEIGHT;
+        eye.y = floorHeightAt(map, sx, sz) + VIEW_HEIGHT;
+        playerSectorRef.value = sectorIndexAt(map, sx, sz);
+    };
     const keys = new Set<string>();
     const weaponKeys: Record<string, Weapon> = {
         Digit1: Weapon.FIST,
@@ -153,7 +171,8 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
     const onDown = (e: KeyboardEvent): void => {
         if (e.code === "Space" && !keys.has("Space")) usePressed = true;
         if (e.code === "ControlLeft" || e.code === "ControlRight") firing = true;
-        if (e.code in weaponKeys) player.selectWeapon(weaponKeys[e.code]);
+        const wk = weaponKeys[e.code];
+        if (wk !== undefined) player.selectWeapon(wk);
         keys.add(e.code);
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
     };
@@ -178,6 +197,13 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
 
     onBeforeRender(scene, (deltaMs) => {
         const dt = Math.min(deltaMs / 1000, MAX_FRAME_SECONDS);
+        const dead = player.dead;
+
+        // Play the death sound once on the kill, and reset the flag on respawn.
+        if (dead && !wasDead) sound.play("PLDETH");
+        wasDead = dead;
+
+        // The view can still be turned while dead (Doom lets you look around).
         const strafeMod = keys.has("AltLeft") || keys.has("AltRight");
         if (!strafeMod) {
             if (keys.has("ArrowLeft")) yaw += TURN_SPEED * dt;
@@ -189,35 +215,47 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
         const speed = (keys.has("ShiftLeft") ? 2 : 1) * MOVE_SPEED * dt;
         let mx = 0;
         let mz = 0;
-        if (keys.has("ArrowUp")) {
-            mx += fx;
-            mz += fz;
-        }
-        if (keys.has("ArrowDown")) {
-            mx -= fx;
-            mz -= fz;
-        }
-        const strafeLeft = keys.has("Comma") || (strafeMod && keys.has("ArrowLeft"));
-        const strafeRight = keys.has("Period") || (strafeMod && keys.has("ArrowRight"));
-        if (strafeLeft) {
-            mx -= fz;
-            mz += fx;
-        }
-        if (strafeRight) {
-            mx += fz;
-            mz -= fx;
+        // No movement, firing, or door use once dead; SPACE respawns instead.
+        if (!dead) {
+            if (keys.has("ArrowUp")) {
+                mx += fx;
+                mz += fz;
+            }
+            if (keys.has("ArrowDown")) {
+                mx -= fx;
+                mz -= fz;
+            }
+            const strafeLeft = keys.has("Comma") || (strafeMod && keys.has("ArrowLeft"));
+            const strafeRight = keys.has("Period") || (strafeMod && keys.has("ArrowRight"));
+            if (strafeLeft) {
+                mx -= fz;
+                mz += fx;
+            }
+            if (strafeRight) {
+                mx += fz;
+                mz -= fx;
+            }
         }
         const fromX = eye.x;
         const fromZ = eye.z;
         const currentFloor = floorHeightAt(map, eye.x, eye.z);
         const moved = tryMove(collLines, eye.x, eye.z, mx * speed, mz * speed, currentFloor, map.sectors);
-        eye.x = moved.x;
-        eye.z = moved.y;
+        // Block against solid things (monsters, barrels, columns) like vanilla Doom,
+        // then re-resolve walls so a thing can't shove the player through geometry.
+        const blockers = world.mobjs.filter((m) => (m.flags & MF.SOLID) !== 0 && m.health > 0);
+        const pushed = blockAgainstThings(moved.x, moved.y, blockers, PLAYER_RADIUS);
+        const resolved = tryMove(collLines, pushed.x, pushed.y, 0, 0, currentFloor, map.sectors);
+        eye.x = resolved.x;
+        eye.z = resolved.y;
         playerSectorRef.value = sectorIndexAt(map, eye.x, eye.z);
 
         // World interactivity: USE (Space), walk-over triggers, and timed movers.
         if (usePressed) {
-            specials.tryUse(eye.x, eye.z, yaw);
+            if (dead) {
+                respawn();
+            } else {
+                specials.tryUse(eye.x, eye.z, yaw);
+            }
             usePressed = false;
         }
         if (fromX !== eye.x || fromZ !== eye.z) {
@@ -231,7 +269,7 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
             world.player.y = eye.z;
             world.player.z = floorHeightAt(map, eye.x, eye.z);
             world.player.angle = yaw;
-            if (firing) player.fire();
+            if (firing && !dead) player.fire();
             player.tic();
             world.tic();
             ticAccum -= TIC_SECONDS;
@@ -240,8 +278,14 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
             dynamicGeo.rebuild();
         }
 
-        // Recompute eye height after movers have run so the view tracks lifts/floors.
-        eye.y = floorHeightAt(map, eye.x, eye.z) + VIEW_HEIGHT;
+        // View height: stand at eye level when alive; when dead, sink the camera
+        // toward the corpse height like Doom's P_DeathThink.
+        if (dead) {
+            viewHeight = Math.max(DEATH_VIEW_HEIGHT, viewHeight - DEATH_SINK_SPEED * dt);
+        } else {
+            viewHeight = VIEW_HEIGHT;
+        }
+        eye.y = floorHeightAt(map, eye.x, eye.z) + viewHeight;
 
         // Keep the sky dome centered on the camera so it has no parallax (infinite sky).
         if (sky) {
@@ -259,6 +303,7 @@ function installCamera(scene: SceneContext, map: DoomMap, specials: SpecialsMana
 
         // Rebuild all mobj billboards once per frame, facing the camera.
         spriteRenderer.rebuild(world.collectSprites(eye.x, eye.z));
-        hud.update();
+        weaponView.update(player, dt, fromX !== eye.x || fromZ !== eye.z);
+        hud.update(dt);
     });
 }

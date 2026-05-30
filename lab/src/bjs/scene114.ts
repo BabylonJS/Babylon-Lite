@@ -222,7 +222,7 @@ async function waitFrames(frameCount: number): Promise<void> {
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     await waitFrames(4);
 
-    const pickCamera = scene.activeCamera ?? camera;
+    const pickCamera = (scene.activeCamera ?? camera) as ArcRotateCamera;
     const deformedPickOptions = { applySkeleton: true, applyMorph: true, updatePositionsArray: true } satisfies IMeshDataOptions;
     morphTarget.refreshBoundingInfo(deformedPickOptions);
     skeletonTarget.refreshBoundingInfo(deformedPickOptions);

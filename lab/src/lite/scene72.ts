@@ -26,6 +26,7 @@ import {
     loadTexture2D,
 } from "babylon-lite";
 import type { Mesh, Texture2D } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 import { getScene72Nme } from "../shared/scene72-nme.js";
 
 function sanitize(name: string): string {
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 7, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
         skipSkybox: true,

@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "babylon-lite": ["../packages/babylon-lite/src/index.ts"],
+      "babylon-lite/*": ["../packages/babylon-lite/src/*"]
+    }
+  },
+  "include": ["src", "../packages/babylon-lite/src/vite-env.d.ts"]
+}

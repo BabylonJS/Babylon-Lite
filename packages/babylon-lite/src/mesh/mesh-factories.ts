@@ -36,7 +36,7 @@ import type { ExtrudeShapeOptions } from "./create-extrude.js";
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
 export function createMeshFromData(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     name: string,
     positions: Float32Array,
     normals: Float32Array,
@@ -54,7 +54,7 @@ export function createMeshFromData(
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _materialDirty: false,
-        _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
+        _gpu: uploadMeshToGPU(engine as EngineContextInternal, positions, normals, indices, uvs, uvs2, tangents, colors),
     } as unknown as MeshInternal;
     initMeshTransform(mesh);
 

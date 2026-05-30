@@ -79,7 +79,7 @@ export class DoomSound {
         const audio = this.ctx.createBuffer(1, n, rate);
         const channel = audio.getChannelData(0);
         for (let i = 0; i < n; i++) {
-            channel[i] = (lump[start + i] - 128) / 128;
+            channel[i] = (lump[start + i]! - 128) / 128;
         }
         return audio;
     }

@@ -85,7 +85,7 @@ const NEGATIVE_WEIGHT = 0.75;
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

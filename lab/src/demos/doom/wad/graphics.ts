@@ -57,15 +57,15 @@ export function decodePatch(data: Uint8Array): IndexedImage {
         let colOffset = view.getUint32(8 + x * 4, true);
         // Each column: posts until topdelta byte == 0xFF.
         for (;;) {
-            const topDelta = data[colOffset++];
+            const topDelta = data[colOffset++]!;
             if (topDelta === 0xff) break;
-            const length = data[colOffset++];
+            const length = data[colOffset++]!;
             colOffset++; // unused padding byte before the run
             for (let row = 0; row < length; row++) {
                 const y = topDelta + row;
                 if (y >= 0 && y < height) {
                     const di = y * width + x;
-                    indices[di] = data[colOffset];
+                    indices[di] = data[colOffset]!;
                     opaque[di] = 1;
                 }
                 colOffset++;
@@ -89,7 +89,7 @@ export function parsePnames(wad: Wad): string[] {
         const limit = p + 8;
         while (end < limit && data[end] !== 0) end++;
         let s = "";
-        for (let j = p; j < end; j++) s += String.fromCharCode(data[j]);
+        for (let j = p; j < end; j++) s += String.fromCharCode(data[j]!);
         names[i] = s.toUpperCase();
         p += 8;
     }
@@ -114,7 +114,7 @@ export function parseTextureLump(wad: Wad, lumpName: string): TextureDef[] {
         const off = view.getInt32(4 + t * 4, true);
         let p = off;
         let name = "";
-        for (let j = 0; j < 8 && data[p + j] !== 0; j++) name += String.fromCharCode(data[p + j]);
+        for (let j = 0; j < 8 && data[p + j] !== 0; j++) name += String.fromCharCode(data[p + j]!);
         name = name.toUpperCase();
         p += 8;
         p += 4; // masked (unused)
@@ -165,7 +165,7 @@ function blit(src: IndexedImage, dstIndices: Uint8Array, dstOpaque: Uint8Array, 
             const dx = ox + x;
             if (dx < 0 || dx >= dstW) continue;
             const di = dy * dstW + dx;
-            dstIndices[di] = src.indices[si];
+            dstIndices[di] = src.indices[si]!;
             dstOpaque[di] = 1;
         }
     }
@@ -180,8 +180,8 @@ export function indexedToIndexRgba(img: IndexedImage): Uint8Array {
     const n = img.width * img.height;
     const rgba = new Uint8Array(n * 4);
     for (let i = 0; i < n; i++) {
-        rgba[i * 4] = img.indices[i];
-        rgba[i * 4 + 3] = img.opaque[i] ? 255 : 0;
+        rgba[i * 4] = img.indices[i]!;
+        rgba[i * 4 + 3] = img.opaque[i]! ? 255 : 0;
     }
     return rgba;
 }

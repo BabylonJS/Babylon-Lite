@@ -32,7 +32,7 @@ import "@babylonjs/loaders";
     window.addEventListener("resize", () => engine.resize());
     // Wait several frames to ensure all textures are fully uploaded (large scene)
     for (let i = 0; i < 15; i++) {
-        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     }
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

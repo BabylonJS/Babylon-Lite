@@ -32,7 +32,7 @@ function readName(bytes: Uint8Array, offset: number): string {
     const limit = offset + 8;
     while (end < limit && bytes[end] !== 0) end++;
     let s = "";
-    for (let i = offset; i < end; i++) s += String.fromCharCode(bytes[i]);
+    for (let i = offset; i < end; i++) s += String.fromCharCode(bytes[i]!);
     return s.toUpperCase();
 }
 
@@ -73,7 +73,7 @@ export function findLumpIndex(wad: Wad, name: string, from = 0): number {
         return idx === undefined ? -1 : idx;
     }
     for (let i = from; i < wad.lumps.length; i++) {
-        if (wad.lumps[i].name === upper) return i;
+        if (wad.lumps[i]!.name === upper) return i;
     }
     return -1;
 }
@@ -88,13 +88,13 @@ export function getLump(wad: Wad, ref: string | number): Uint8Array {
     if (index < 0 || index >= wad.lumps.length) {
         throw new Error(`Lump not found: ${ref}`);
     }
-    const { offset, size } = wad.lumps[index];
+    const { offset, size } = wad.lumps[index]!;
     return wad.bytes.subarray(offset, offset + size);
 }
 
 export function tryGetLump(wad: Wad, ref: string | number): Uint8Array | undefined {
     const index = typeof ref === "number" ? ref : findLumpIndex(wad, ref);
     if (index < 0 || index >= wad.lumps.length) return undefined;
-    const { offset, size } = wad.lumps[index];
+    const { offset, size } = wad.lumps[index]!;
     return wad.bytes.subarray(offset, offset + size);
 }

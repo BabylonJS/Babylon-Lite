@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Babylon.lite demos</title>
+        <meta name="description" content="Standalone showcase demos built on Babylon Lite — a WebGPU-exclusive, tree-shakable, minimal-footprint rendering engine." />
+        <style>
+            :root {
+                --bjs-red: #bb464b;
+                --bjs-coral: #e0684b;
+                --bjs-light: #e0ded8;
+                --bjs-mid: #d5d2ca;
+                --bjs-dark: #292929;
+                --bg: #1b1718;
+                --card-bg: #221d1e;
+                --border: #3a3132;
+                --text: #efe9e6;
+                --muted: #b3a8a6;
+            }
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+            html {
+                scroll-behavior: smooth;
+            }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                color: var(--text);
+                /* Branded static baseline (shown when WebGPU is unavailable, and
+                   behind the live effect before its first frame): a dimmed
+                   Babylon logo watermark lit by a soft brand-red glow. */
+                background:
+                    radial-gradient(1100px 760px at 50% -8%, rgba(187, 70, 75, 0.2), transparent 58%),
+                    linear-gradient(180deg, rgba(27, 23, 24, 0.82), rgba(27, 23, 24, 0.93)),
+                    url("babylon-logo.svg") no-repeat center 38% / min(52vmin, 540px),
+                    var(--bg);
+                background-attachment: fixed;
+                min-height: 100vh;
+                position: relative;
+                overflow-x: hidden;
+            }
+            /* Live Babylon Lite background effect (raymarched brand cube).
+               Transparent so the branded baseline shows through until/unless the
+               effect renders an opaque frame over it. */
+            #bgCanvas {
+                position: fixed;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 0;
+                display: block;
+                background: transparent;
+            }
+            /* No WebGPU: hide the (blank) canvas so only the branded baseline shows. */
+            body.no-webgpu #bgCanvas {
+                display: none;
+            }
+            /* Readability scrim above the effect, below the content */
+            body::before {
+                content: "";
+                position: fixed;
+                inset: 0;
+                z-index: 1;
+                pointer-events: none;
+                background:
+                    radial-gradient(130% 85% at 50% 0%, rgba(15, 12, 13, 0.82), rgba(15, 12, 13, 0.3) 42%, transparent 72%),
+                    linear-gradient(to bottom, rgba(15, 12, 13, 0.45), transparent 26%);
+            }
+            .wrap {
+                position: relative;
+                z-index: 2;
+                max-width: 1140px;
+                margin: 0 auto;
+                padding: 2rem 1.5rem 4rem;
+            }
+            header {
+                text-align: center;
+                margin-bottom: 1.5rem;
+                position: relative;
+                isolation: isolate;
+            }
+            /* Soft dark halo that follows the header text so the live effect
+               never competes with the title/intro for legibility. */
+            header::before {
+                content: "";
+                position: absolute;
+                z-index: -1;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: min(46rem, 92vw);
+                height: 150%;
+                background: radial-gradient(60% 60% at 50% 50%, rgba(12, 9, 10, 0.78), rgba(12, 9, 10, 0.45) 45%, transparent 75%);
+                pointer-events: none;
+                filter: blur(8px);
+            }
+            header .logo {
+                width: 56px;
+                height: 56px;
+                margin: 0 auto 0.6rem;
+                display: block;
+            }
+            header h1 {
+                font-size: clamp(2rem, 5vw, 3rem);
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                text-shadow: 0 2px 18px rgba(8, 6, 7, 0.85);
+            }
+            header h1 .dot {
+                color: var(--bjs-coral);
+            }
+            header h1 .brand {
+                color: var(--bjs-red);
+            }
+            header h1 .lite {
+                color: #fff;
+            }
+            header p {
+                margin-top: 0.6rem;
+                color: var(--muted);
+                font-size: 0.95rem;
+                max-width: 44rem;
+                margin-left: auto;
+                margin-right: auto;
+                line-height: 1.45;
+                text-shadow: 0 1px 12px rgba(8, 6, 7, 0.9);
+            }
+            /* Tag filter pills between the header and the demo grid. */
+            .filters {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 0.5rem;
+                margin: 0 0 1.5rem;
+            }
+            .filter-pill {
+                font: inherit;
+                font-size: 0.8rem;
+                line-height: 1;
+                padding: 0.45rem 0.9rem;
+                border-radius: 999px;
+                color: var(--muted);
+                background: rgba(20, 16, 18, 0.55);
+                border: 1px solid var(--border);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                cursor: pointer;
+                text-transform: capitalize;
+                transition:
+                    color 0.18s ease,
+                    border-color 0.18s ease,
+                    background 0.18s ease;
+            }
+            .filter-pill:hover,
+            .filter-pill:focus-visible {
+                color: var(--bjs-light);
+                border-color: var(--bjs-coral);
+                outline: none;
+            }
+            .filter-pill.is-active {
+                color: #fff;
+                background: var(--bjs-red);
+                border-color: var(--bjs-red);
+            }
+            .card.is-hidden {
+                display: none;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                gap: 1.5rem;
+            }
+            .card {
+                display: flex;
+                flex-direction: column;
+                background: var(--card-bg);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                overflow: hidden;
+                text-decoration: none;
+                color: inherit;
+                transition:
+                    transform 0.18s ease,
+                    border-color 0.18s ease,
+                    box-shadow 0.18s ease;
+            }
+            .card:hover {
+                transform: translateY(-4px);
+                border-color: var(--bjs-coral);
+                box-shadow: 0 12px 30px -12px rgba(224, 104, 75, 0.55);
+            }
+            .card-image {
+                aspect-ratio: 16 / 9;
+                background: #0f0c0d;
+                position: relative;
+                overflow: hidden;
+            }
+            .card-image img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+            }
+            .card-body {
+                padding: 1.1rem 1.2rem 1.3rem;
+                display: flex;
+                flex-direction: column;
+                gap: 0.55rem;
+                flex: 1;
+            }
+            .card-body h2 {
+                font-size: 1.15rem;
+                font-weight: 650;
+            }
+            .card-body p {
+                font-size: 0.85rem;
+                line-height: 1.5;
+                color: var(--muted);
+                flex: 1;
+            }
+            .tags {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.4rem;
+            }
+            .tag {
+                font-size: 0.68rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                padding: 0.18rem 0.5rem;
+                border-radius: 999px;
+                background: rgba(187, 70, 75, 0.16);
+                color: #e9a09f;
+                border: 1px solid rgba(187, 70, 75, 0.35);
+            }
+            .size {
+                margin-top: 0.2rem;
+                font-size: 0.74rem;
+                color: var(--bjs-mid);
+                font-variant-numeric: tabular-nums;
+            }
+            .size strong {
+                color: var(--bjs-coral);
+                font-weight: 700;
+            }
+            footer {
+                margin-top: 4rem;
+                text-align: center;
+                color: var(--muted);
+                font-size: 0.82rem;
+                position: relative;
+                isolation: isolate;
+                text-shadow: 0 1px 12px rgba(8, 6, 7, 0.9);
+            }
+            /* Soft dark halo so the live effect never competes with the footer. */
+            footer::before {
+                content: "";
+                position: absolute;
+                z-index: -1;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: min(40rem, 92vw);
+                height: 260%;
+                background: radial-gradient(60% 55% at 50% 50%, rgba(12, 9, 10, 0.7), rgba(12, 9, 10, 0.38) 48%, transparent 78%);
+                pointer-events: none;
+                filter: blur(8px);
+            }
+            footer a {
+                color: var(--bjs-coral);
+                text-decoration: none;
+            }
+            footer a:hover {
+                text-decoration: underline;
+            }
+            /* Shown only when WebGPU is unavailable (no animated background). */
+            .gpu-note {
+                display: none;
+                margin: 0.7rem auto 0;
+                max-width: 34rem;
+                padding: 0.5rem 0.9rem;
+                border: 1px solid var(--border);
+                border-radius: 999px;
+                background: rgba(187, 70, 75, 0.1);
+                color: var(--muted);
+                font-size: 0.78rem;
+            }
+            body.no-webgpu .gpu-note {
+                display: block;
+            }
+            /* WebGPU absent: the demos are WebGPU-only, so disable the cards. */
+            body.no-webgpu .card {
+                pointer-events: none;
+                cursor: not-allowed;
+                opacity: 0.5;
+                filter: saturate(0.6);
+            }
+            body.no-webgpu .card:hover {
+                transform: none;
+                border-color: var(--border);
+                box-shadow: none;
+            }
+            .card-disabled-badge {
+                display: none;
+                align-self: flex-start;
+                margin-top: 0.2rem;
+                font-size: 0.68rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                padding: 0.18rem 0.5rem;
+                border-radius: 999px;
+                background: rgba(41, 41, 41, 0.5);
+                color: var(--muted);
+                border: 1px solid var(--border);
+            }
+            body.no-webgpu .card-disabled-badge {
+                display: inline-block;
+            }
+            /* Effect manually turned off -> reveal the branded static baseline. */
+            body.effect-off #bgCanvas {
+                display: none;
+            }
+            /* Subtle, well-designed toggle to turn the live effect off/on. */
+            .fx-toggle {
+                position: fixed;
+                right: 1.1rem;
+                bottom: 1.1rem;
+                z-index: 5;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.5rem 0.8rem;
+                border-radius: 999px;
+                font: inherit;
+                font-size: 0.82rem;
+                line-height: 1;
+                color: var(--muted);
+                background: rgba(20, 16, 18, 0.5);
+                border: 1px solid var(--border);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                cursor: pointer;
+                opacity: 0.5;
+                transition:
+                    opacity 0.2s ease,
+                    color 0.2s ease,
+                    border-color 0.2s ease,
+                    background 0.2s ease;
+            }
+            .fx-toggle:hover,
+            .fx-toggle:focus-visible {
+                opacity: 1;
+                color: var(--bjs-light);
+                border-color: var(--bjs-coral);
+                outline: none;
+            }
+            .fx-toggle svg {
+                width: 16px;
+                height: 16px;
+                display: block;
+                color: var(--bjs-coral);
+            }
+            .fx-toggle .fx-icon-off {
+                display: none;
+            }
+            .fx-toggle.off svg {
+                color: var(--muted);
+            }
+            .fx-toggle.off .fx-icon-on {
+                display: none;
+            }
+            .fx-toggle.off .fx-icon-off {
+                display: block;
+            }
+            /* No WebGPU: there is no live effect, so hide the toggle. */
+            body.no-webgpu .fx-toggle {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="bgCanvas" aria-hidden="true"></canvas>
+        <div class="wrap">
+            <header>
+                <img class="logo" src="babylon-logo.svg" alt="Babylon logo" />
+                <h1><span class="brand">Babylon</span><span class="lite">.lite</span> <span class="dot">demos</span></h1>
+                <p>
+                    Standalone showcase pages built on Babylon&nbsp;Lite — a WebGPU-exclusive, fully tree-shakable rendering engine. Each demo is production-bundled, so the size it
+                    actually ships is shown right on its card. Sizes cover the <strong>engine and demo code only</strong> — external assets (textures, game data, etc.) aren’t included.
+                </p>
+            </header>
+            <!--FILTERS-->
+            <main class="grid">
+                <!--CARDS-->
+            </main>
+            <footer>
+                Built with <a href="https://github.com/BabylonJS/Babylon-Lite">Babylon&nbsp;Lite</a> · WebGPU only
+                <p class="gpu-note">These demos require WebGPU, which isn’t available in this browser. Try the latest Chrome, Edge, or another WebGPU-capable browser.</p>
+            </footer>
+        </div>
+        <button id="fxToggle" class="fx-toggle" type="button" aria-pressed="true" title="Turn the background effect off">
+            <span class="fx-icon-on" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12c2.5 0 2.5-5 5-5s2.5 5 5 5 2.5-5 5-5 2.5 5 5 5" />
+                    <path d="M2 18c2.5 0 2.5-5 5-5s2.5 5 5 5 2.5-5 5-5 2.5 5 5 5" opacity="0.5" />
+                </svg>
+            </span>
+            <span class="fx-icon-off" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12c2.5 0 2.5-5 5-5s2.5 5 5 5 2.5-5 5-5 2.5 5 5 5" />
+                    <line x1="3" y1="3" x2="21" y2="21" />
+                </svg>
+            </span>
+            <span class="fx-label">Effect</span>
+        </button>
+        <script type="module" src="bundle/demos/landing-bg.js"></script>
+        <script>
+            // Tag filter pills — multi-select. "All" resets; any number of tag
+            // pills can be active at once and a card shows if it matches ANY of them.
+            (function () {
+                var pills = Array.prototype.slice.call(document.querySelectorAll(".filter-pill"));
+                var cards = Array.prototype.slice.call(document.querySelectorAll("a.card"));
+                if (!pills.length) return;
+                var allPill = document.querySelector('.filter-pill[data-filter="all"]');
+
+                function setActive(pill, on) {
+                    pill.classList.toggle("is-active", on);
+                    pill.setAttribute("aria-pressed", on ? "true" : "false");
+                }
+
+                function apply() {
+                    var active = pills
+                        .filter(function (p) { return p !== allPill && p.classList.contains("is-active"); })
+                        .map(function (p) { return p.getAttribute("data-filter"); });
+                    // No tag selected -> behave as "All".
+                    if (allPill) setActive(allPill, active.length === 0);
+                    cards.forEach(function (card) {
+                        var tags = (card.getAttribute("data-tags") || "").split(" ");
+                        var show = active.length === 0 || active.some(function (f) { return tags.indexOf(f) !== -1; });
+                        card.classList.toggle("is-hidden", !show);
+                    });
+                }
+
+                pills.forEach(function (pill) {
+                    pill.addEventListener("click", function () {
+                        if (pill === allPill) {
+                            // Reset: clear every tag selection.
+                            pills.forEach(function (p) { if (p !== allPill) setActive(p, false); });
+                        } else {
+                            setActive(pill, !pill.classList.contains("is-active"));
+                        }
+                        apply();
+                    });
+                });
+            })();
+        </script>
+    </body>
+</html>

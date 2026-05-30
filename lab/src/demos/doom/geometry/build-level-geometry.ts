@@ -51,8 +51,10 @@ interface V3 {
 function addQuad(b: Batch, c: [V3, V3, V3, V3], uv: [number, number][], lr: number): void {
     const base = b.pos.length / 3;
     for (let i = 0; i < 4; i++) {
-        b.pos.push(c[i].x, c[i].y, c[i].z);
-        b.uv.push(uv[i][0], uv[i][1]);
+        const corner = c[i]!;
+        const texcoord = uv[i]!;
+        b.pos.push(corner.x, corner.y, corner.z);
+        b.uv.push(texcoord[0], texcoord[1]);
         b.col.push(lr, 0, 0, 1);
     }
     b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
@@ -68,17 +70,17 @@ export function buildLevelBatches(map: DoomMap, textures: DoomTextureCache, filt
 function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatches, includeLine?: (i: number) => boolean): void {
     for (let li = 0; li < map.linedefs.length; li++) {
         if (includeLine && !includeLine(li)) continue;
-        const ld = map.linedefs[li];
+        const ld = map.linedefs[li]!;
         if (ld.front < 0) continue;
         const v1 = map.vertices[ld.start];
         const v2 = map.vertices[ld.end];
         if (!v1 || !v2) continue;
         const len = Math.hypot(v2.x - v1.x, v2.y - v1.y);
 
-        const frontSide = map.sidedefs[ld.front];
-        const frontSec = map.sectors[frontSide.sector];
-        const backSide = ld.back >= 0 ? map.sidedefs[ld.back] : null;
-        const backSec = backSide ? map.sectors[backSide.sector] : null;
+        const frontSide = map.sidedefs[ld.front]!;
+        const frontSec = map.sectors[frontSide.sector]!;
+        const backSide = ld.back >= 0 ? map.sidedefs[ld.back]! : null;
+        const backSec = backSide ? map.sectors[backSide.sector]! : null;
 
         // Doom "fake contrast": E-W walls darker, N-S walls brighter.
         let contrast = 0;
@@ -142,7 +144,7 @@ function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatc
         // midtexture; fall back to the back side's when the front has none.
         const midSide = frontSide.middle !== "-" && frontSide.middle !== "" ? frontSide : backSide && backSide.middle !== "-" && backSide.middle !== "" ? backSide : null;
         if (midSide) {
-            const lightSec = midSide === frontSide ? frontSec : backSec;
+            const lightSec = midSide === frontSide ? frontSec : backSec!;
             emitMidtexture(
                 batches,
                 textures,
@@ -154,7 +156,8 @@ function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatc
                 Math.min(frontSec.ceilHeight, backSec.ceilHeight),
                 midSide,
                 (ld.flags & ML_DONTPEGBOTTOM) !== 0,
-                light01(lightSec.light + contrast)
+                light01(lightSec.light + contrast),
+                midSide === backSide
             );
         }
 
@@ -172,7 +175,8 @@ function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatc
                     frontSec.floorHeight,
                     backSide,
                     (texH) => (ld.flags & ML_DONTPEGBOTTOM ? backSec.ceilHeight : frontSec.floorHeight + texH) + backSide.yOffset,
-                    light01(backSec.light + contrast)
+                    light01(backSec.light + contrast),
+                    true
                 );
             }
             if (!skyBoth && frontSec.ceilHeight < backSec.ceilHeight) {
@@ -187,7 +191,8 @@ function buildWalls(map: DoomMap, textures: DoomTextureCache, batches: LevelBatc
                     backSec.ceilHeight,
                     backSide,
                     (texH) => (ld.flags & ML_DONTPEGTOP ? backSec.ceilHeight : frontSec.ceilHeight + texH) + backSide.yOffset,
-                    light01(backSec.light + contrast)
+                    light01(backSec.light + contrast),
+                    true
                 );
             }
         }
@@ -205,7 +210,8 @@ function emitWallSegment(
     yTop: number,
     side: Sidedef,
     textureMidFn: (texH: number) => number,
-    lr: number
+    lr: number,
+    backSide = false
 ): void {
     if (yTop <= yBottom) return;
     const tex = textures.getWall(texName);
@@ -213,8 +219,12 @@ function emitWallSegment(
     const { width: texW, height: texH } = tex;
     const textureMid = textureMidFn(texH);
 
-    const u1 = side.xOffset / texW;
-    const u2 = (side.xOffset + len) / texW;
+    // DOOM textures front sides starting from v1, back sides from v2 (the opposite
+    // viewpoint). Both cover the SAME texel window [xOffset, xOffset+len] so the
+    // designer-authored xOffset still lands the graphic correctly; only the endpoint
+    // -> U assignment is swapped for back sides, which un-mirrors them.
+    const u1 = (side.xOffset + (backSide ? len : 0)) / texW;
+    const u2 = (side.xOffset + (backSide ? 0 : len)) / texW;
     const vTop = (textureMid - yTop) / texH;
     const vBottom = (textureMid - yBottom) / texH;
 
@@ -248,7 +258,8 @@ function emitMidtexture(
     openTop: number,
     side: Sidedef,
     pegBottom: boolean,
-    lr: number
+    lr: number,
+    backSide = false
 ): void {
     if (openTop <= openBottom) return;
     const tex = textures.getWall(texName);
@@ -272,8 +283,8 @@ function emitMidtexture(
     const drawBottom = Math.max(yBottom, openBottom);
     if (drawTop <= drawBottom) return;
 
-    const u1 = side.xOffset / texW;
-    const u2 = (side.xOffset + len) / texW;
+    const u1 = (side.xOffset + (backSide ? len : 0)) / texW;
+    const u2 = (side.xOffset + (backSide ? 0 : len)) / texW;
     const vTop = (unclippedTop - drawTop) / texH;
     const vBottom = (unclippedTop - drawBottom) / texH;
 
@@ -301,7 +312,7 @@ function buildFlats(map: DoomMap, textures: DoomTextureCache, batches: LevelBatc
     for (let i = 0; i < map.subsectors.length; i++) {
         if (includeSubsector && !includeSubsector(i)) continue;
         const poly = polys[i];
-        const ss = map.subsectors[i];
+        const ss = map.subsectors[i]!;
         if (!poly || poly.length < 3 || ss.segCount === 0) continue;
         const sector = sectorOfSubsector(map, i);
         if (!sector) continue;
@@ -323,7 +334,7 @@ function sectorOfSubsector(map: DoomMap, ssIndex: number): Sector | null {
 
 /** Index of the sector a subsector belongs to, or -1 if undeterminable. */
 export function sectorIndexOfSubsector(map: DoomMap, ssIndex: number): number {
-    const ss = map.subsectors[ssIndex];
+    const ss = map.subsectors[ssIndex]!;
     const seg = map.segs[ss.firstSeg];
     if (!seg) return -1;
     const ld = map.linedefs[seg.linedef];

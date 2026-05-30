@@ -1,6 +1,7 @@
 // Scene 3: Fog + Boxes — matches Babylon #7G0IQW
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPointLight, createBox, createStandardMaterial, loadSkybox, attachControl, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -11,7 +12,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(0.4, 1.2, 20, { x: -10, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     addToScene(scene, createPointLight([10, 50, 50]));
 

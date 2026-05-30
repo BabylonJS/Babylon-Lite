@@ -50,10 +50,10 @@ export function buildCollisionLines(map: DoomMap): CollLine[] {
         const v1 = map.vertices[ld.start];
         const v2 = map.vertices[ld.end];
         if (!v1 || !v2) continue;
-        const frontSec = map.sidedefs[ld.front].sector;
+        const frontSec = map.sidedefs[ld.front]!.sector;
         if (map.sectors[frontSec] === undefined) continue;
         const oneSided = ld.back < 0;
-        const backSec = oneSided ? -1 : map.sidedefs[ld.back].sector;
+        const backSec = oneSided ? -1 : map.sidedefs[ld.back]!.sector;
 
         lines.push({
             x1: v1.x,
@@ -130,6 +130,39 @@ export function tryMove(lines: CollLine[], fromX: number, fromY: number, dx: num
         if (!moved) break;
     }
 
+    return { x: px, y: py };
+}
+
+export interface BlockThing {
+    x: number;
+    y: number;
+    radius: number;
+}
+
+/**
+ * Pushes a mover at (px,py) out of any solid thing it overlaps, mirroring the
+ * wall resolver: the push is purely radial so tangential motion is preserved and
+ * the mover slides around the obstacle. Faithful to vanilla Doom, where solid
+ * things (monsters, barrels, columns) block movement and are effectively
+ * infinitely tall for the 2D collision test.
+ */
+export function blockAgainstThings(px: number, py: number, things: readonly BlockThing[], radius: number): { x: number; y: number } {
+    for (let iter = 0; iter < 4; iter++) {
+        let moved = false;
+        for (const o of things) {
+            const dx = px - o.x;
+            const dy = py - o.y;
+            const rr = radius + o.radius;
+            const d2 = dx * dx + dy * dy;
+            if (d2 >= rr * rr) continue;
+            const d = Math.sqrt(d2) || 1e-4;
+            const push = rr - d;
+            px += (dx / d) * push;
+            py += (dy / d) * push;
+            moved = true;
+        }
+        if (!moved) break;
+    }
     return { x: px, y: py };
 }
 

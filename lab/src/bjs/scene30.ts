@@ -47,7 +47,7 @@ import "@babylonjs/loaders/glTF";
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.camAlpha = String(cam.alpha);
     canvas.dataset.camBeta = String(cam.beta);
     canvas.dataset.camRadius = String(cam.radius);

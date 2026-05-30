@@ -44,10 +44,17 @@ const DIST_PER_BAND: f32 = ${DIST_PER_BAND.toFixed(1)};
   let sectorLight = input.light.x * 255.0;
   let fullbright = input.light.y;
   let baseRow = clamp(31.0 - floor(sectorLight / 8.0), 0.0, 31.0);
-  let distBand = floor(input.dist / DIST_PER_BAND);
-  var row = clamp(baseRow + distBand, 0.0, 31.0);
-  row = mix(row, 0.0, step(0.5, fullbright));
-  let lut = textureSample(colormapTex, colormapTexSampler, vec2<f32>((idx + 0.5) / 256.0, (row + 0.5) / 34.0));
+  // Blend between adjacent COLORMAP light levels by distance (matches the wall
+  // material) so depth-cueing is a smooth gradient, not hard banding.
+  let lightRow = clamp(baseRow + input.dist / DIST_PER_BAND, 0.0, 31.0);
+  let row = mix(lightRow, 0.0, step(0.5, fullbright));
+  let r0 = floor(row);
+  let r1 = min(r0 + 1.0, 31.0);
+  let frac = row - r0;
+  let u = (idx + 0.5) / 256.0;
+  let c0 = textureSample(colormapTex, colormapTexSampler, vec2<f32>(u, (r0 + 0.5) / 34.0));
+  let c1 = textureSample(colormapTex, colormapTexSampler, vec2<f32>(u, (r1 + 0.5) / 34.0));
+  let lut = mix(c0, c1, frac);
   return vec4<f32>(lut.rgb, 1.0);
 }`;
 
@@ -112,7 +119,7 @@ export class SpriteRenderer {
         const ah = this.store.atlasHeight;
 
         for (let i = 0; i < n; i++) {
-            const s = sprites[i];
+            const s = sprites[i]!;
             const img = s.image;
             let left: number;
             let right: number;

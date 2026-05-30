@@ -99,13 +99,12 @@ export const NF_SUBSECTOR = 0x8000;
 function name8(data: Uint8Array, offset: number): string {
     let s = "";
     for (let i = 0; i < 8 && data[offset + i] !== 0; i++) {
-        s += String.fromCharCode(data[offset + i]);
+        s += String.fromCharCode(data[offset + i]!);
     }
     return s.toUpperCase();
 }
 
 function eachRecord(data: Uint8Array, recordSize: number): DataView[] {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const count = Math.floor(data.length / recordSize);
     const out: DataView[] = new Array(count);
     for (let i = 0; i < count; i++) {
@@ -129,7 +128,7 @@ export function parseMap(wad: Wad, mapName: string): DoomMap {
     // Map sub-lumps follow the marker in a known order; find each by name after it.
     const sub = (lumpName: string): Uint8Array => {
         for (let i = markerIdx + 1; i < wad.lumps.length && i <= markerIdx + 11; i++) {
-            if (wad.lumps[i].name === lumpName) return getLump(wad, i);
+            if (wad.lumps[i]!.name === lumpName) return getLump(wad, i);
         }
         const fallback = tryGetLump(wad, lumpName);
         if (fallback) return fallback;
