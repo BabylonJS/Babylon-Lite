@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     const water = new WaterSim(world, renderer);
     // Flood connected sub-sea-level air (caves opening into the seafloor) from the
     // ocean as each chunk activates, so there are never dry pockets under water.
-    renderer.onChunkActivated = (cx, cz) => water.seedChunk(cx, cz);
+    renderer.onChunkActivated = (cx, cz) => water.settleChunk(cx, cz);
     const player = new PlayerController(scene, world, renderer, highlight, hud, canvas, particles, falling, water);
 
     const mobs = new Mobs(engine, scene, world, { fogStart: FOG_START, fogEnd: FOG_END, fogColor: FOG_COLOR });
@@ -176,7 +176,7 @@ async function main(): Promise<void> {
 
         player.update(dt);
         falling.update(dt);
-        water.update();
+        water.update(dt);
         renderer.processQueue();
         renderer.setTime(time);
         renderer.setCameraPos([player.camera.position.x, player.camera.position.y, player.camera.position.z]);

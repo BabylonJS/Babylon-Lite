@@ -6,7 +6,7 @@
 
 import { createFreeCamera, type FreeCamera, type SceneContext } from "babylon-lite";
 
-import { Block, HOTBAR, blockDef, blockColor } from "./blocks.js";
+import { Block, HOTBAR, blockDef, blockColor, isIndestructible } from "./blocks.js";
 import { CHUNK_SX, CHUNK_SZ, WORLD_H } from "./constants.js";
 import type { World } from "./world.js";
 import type { ChunkRenderer } from "./chunk-renderer.js";
@@ -164,6 +164,7 @@ export class PlayerController {
         if (!this.target) return;
         const { bx, by, bz } = this.target;
         const removed = this.world.getBlock(bx, by, bz);
+        if (isIndestructible(removed)) return; // bedrock and other world-floor blocks can't be mined
         const aff = this.world.setBlock(bx, by, bz, Block.AIR);
         if (aff) {
             this.particles.burst(bx + 0.5, by + 0.5, bz + 0.5, blockColor(removed));
