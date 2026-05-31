@@ -35,6 +35,7 @@ import {
     LITE_BUNDLE_TARGET,
     NAME_POLYFILL,
 } from "./bundle-scenes-core";
+import { fetchDemoAssets } from "./demo-fetchers";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -43,6 +44,8 @@ interface DemoConfigEntry {
     name: string;
     description: string;
     tags?: string[];
+    /** Optional id of the asset fetcher for this demo (see scripts/demo-fetchers.ts). */
+    fetch?: string;
 }
 
 interface DemoManifestEntry {
@@ -155,6 +158,11 @@ export async function buildDemoBundles(): Promise<void> {
         console.log("No demos configured; skipping demo bundle build.");
         return;
     }
+
+    // Make sure every demo's runtime assets (IWAD, textures, tilesets, …) are
+    // present locally before bundling. Each fetcher is idempotent.
+    await fetchDemoAssets(demos);
+
     mkdirSync(demosDir, { recursive: true });
 
     for (const demo of demos) {

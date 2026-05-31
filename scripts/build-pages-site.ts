@@ -21,6 +21,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { buildDemo } from "./bundle-demos-core";
+import { fetchDemoAssets } from "./demo-fetchers";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LAB = resolve(ROOT, "lab");
@@ -43,6 +44,8 @@ interface DemoConfigEntry {
     tags?: string[];
     /** When false, the demo is hidden on mobile devices (see index.template.html). */
     mobile?: boolean;
+    /** Optional id of the asset fetcher for this demo (see scripts/demo-fetchers.ts). */
+    fetch?: string;
 }
 interface DemoSize {
     rawKB: number;
@@ -135,6 +138,10 @@ async function main(): Promise<void> {
         throw new Error(`No demos found in ${DEMOS_CONFIG}`);
     }
     const sizes = readJson<Record<string, DemoSize>>(DEMOS_MANIFEST, {});
+
+    // 0. Make sure every demo's runtime assets are present locally before we
+    //    build bundles and copy asset trees below. Each fetcher is idempotent.
+    await fetchDemoAssets(demos);
 
     // 1. Build each demo's production bundle into lab/public/bundle/demos/.
     for (const demo of demos) {

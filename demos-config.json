@@ -18,6 +18,7 @@
         "name": "DOOM (id Tech 1)",
         "description": "Playable id Tech 1 / Doom-format level player built on Lite. Ships the BSD-licensed Freedoom IWAD; optionally load your own legally-owned doom1.wad at runtime. Clean-room engine reimplemented from public format specs — no id data or GPL source.",
         "tags": ["game", "fps", "showcase"],
+        "fetch": "freedoom",
         "mobile": false
     },
     {
@@ -25,6 +26,7 @@
         "name": "LibreQuake — E1M1",
         "description": "Playable port of LibreQuake's first level (lq_e1m1) on Lite: clean-room Quake BSP v29 parser with embedded textures and grayscale lightmaps, player physics + BSP collision, working doors/lifts/triggers, MDL enemies (soldiers & dogs) with AI, a shotgun with hitscan combat, items and a HUD. Ships the BSD-3-Clause LibreQuake assets — no id data or GPL source.",
         "tags": ["game", "fps", "showcase"],
+        "fetch": "librequake",
         "mobile": false
     },
     {
@@ -32,6 +34,7 @@
         "name": "Voxel Sandbox",
         "description": "Minecraft-style creative voxel sandbox built on Lite. Procedurally generated, infinitely streaming chunk world with break/place editing, ambient occlusion, water, day-night sky and fog. Ships CC0 Kenney textures; optionally load your own resource pack at runtime. Original clean-room engine — no Mojang code or assets.",
         "tags": ["game", "voxel", "sandbox", "showcase"],
+        "fetch": "voxelpack",
         "mobile": false
     },
     {
@@ -39,6 +42,7 @@
         "name": "Freeciv — Isometric Map",
         "description": "Civilization-style isometric strategy map rendered on Lite's pure-2D sprite path — no scene, camera, or mesh. A procedurally generated continent of diamond terrain tiles with rivers, roads, cities and units, drawn from the GPLv2 Freeciv amplio2 tileset sliced clean-room from its plain-text .spec grids. Drag to pan, scroll to zoom, hover for tile info, click the scout to send it pathfinding across the map, and jump around with the overview minimap. Ships no Freeciv code or assets.",
         "tags": ["game", "strategy", "2d", "showcase"],
+        "fetch": "freeciv",
         "mobile": false
     }
 ]

@@ -83,7 +83,7 @@ function extractEntry(buf: Buffer, entry: ZipEntry): Buffer {
     throw new Error(`freedoom zip: unsupported compression method ${entry.method} for ${entry.name}`);
 }
 
-async function main(): Promise<void> {
+export async function fetchFreedoom(): Promise<void> {
     mkdirSync(OUT_DIR, { recursive: true });
 
     const allPresent = [...WANTED, ...LICENSE_FILES].every((w) => existsSync(join(OUT_DIR, w)));
@@ -130,7 +130,11 @@ async function main(): Promise<void> {
     console.log("Done. Freedoom IWADs are gitignored; re-run this script to restore them.");
 }
 
-main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-});
+// Run only when invoked directly (e.g. `pnpm fetch:freedoom`), not when imported
+// by the demo-asset registry (scripts/demo-fetchers.ts).
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    fetchFreedoom().catch((err) => {
+        console.error(err);
+        process.exit(1);
+    });
+}

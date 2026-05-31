@@ -1,7 +1,11 @@
 # Minecraft-style voxel demo — game data
 
 This folder holds the texture data the voxel demo reads at runtime. The image
-files are **not committed to git** (see `.gitignore`); fetch them with:
+files are **not committed to git** (see `.gitignore`).
+
+They are fetched **automatically** by the demo build (`pnpm build:bundle-demos`
+and the Pages-site build) because the `minecraft` entry in `demos-config.json`
+declares `"fetch": "voxelpack"`. You can also fetch them manually with:
 
 ```sh
 pnpm fetch:voxelpack

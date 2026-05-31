@@ -187,7 +187,7 @@ function extractFromPak(pak: Buffer, wanted: Record<string, string>): Map<string
     return out;
 }
 
-async function main(): Promise<void> {
+export async function fetchLibrequake(): Promise<void> {
     mkdirSync(OUT_DIR, { recursive: true });
 
     const allPresent = [...Object.values(PAK_WANTED), ...Object.values(ZIP_LICENSE_FILES)].every((w) => existsSync(join(OUT_DIR, w)));
@@ -244,7 +244,11 @@ async function main(): Promise<void> {
     console.log("Done. LibreQuake assets are gitignored; re-run this script to restore them.");
 }
 
-main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-});
+// Run only when invoked directly (e.g. `pnpm fetch:librequake`), not when
+// imported by the demo-asset registry (scripts/demo-fetchers.ts).
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    fetchLibrequake().catch((err) => {
+        console.error(err);
+        process.exit(1);
+    });
+}

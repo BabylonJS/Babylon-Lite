@@ -130,7 +130,7 @@ async function fetchFile(file: RemoteFile): Promise<Buffer> {
     return bytes;
 }
 
-async function main(): Promise<void> {
+export async function fetchFreeciv(): Promise<void> {
     const files = buildFileList();
 
     const allPresent = files.every((f) => existsSync(join(OUT_DIR, f.dest)));
@@ -175,7 +175,11 @@ async function main(): Promise<void> {
     console.log("Freeciv assets are gitignored; re-run this script to restore them.");
 }
 
-main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-});
+// Run only when invoked directly (e.g. `pnpm fetch:freeciv`), not when imported
+// by the demo-asset registry (scripts/demo-fetchers.ts).
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    fetchFreeciv().catch((err) => {
+        console.error(err);
+        process.exit(1);
+    });
+}
