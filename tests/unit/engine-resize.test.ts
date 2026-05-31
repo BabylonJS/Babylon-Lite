@@ -14,6 +14,7 @@ function makeEngine(canvas: Partial<HTMLCanvasElement>, contexts: RenderingConte
         canvas: canvas as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         device: {} as GPUDevice,
         context: {} as GPUCanvasContext,
         format: "bgra8unorm",
@@ -81,5 +82,17 @@ describe("resizeEngine", () => {
         expect(canvas.width).toBe(800);
         expect(canvas.height).toBe(600);
         expect(resizeCalls).toBe(1);
+    });
+
+    it("clamps the backing store to maxDevicePixelRatio", () => {
+        setDevicePixelRatio(3);
+        const canvas = { width: 0, height: 0, clientWidth: 400, clientHeight: 300 };
+        const engine = makeEngine(canvas) as EngineContextInternal;
+        engine.maxDevicePixelRatio = 1;
+
+        resizeEngine(engine);
+
+        expect(canvas.width).toBe(400);
+        expect(canvas.height).toBe(300);
     });
 });
