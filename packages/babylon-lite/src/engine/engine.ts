@@ -22,6 +22,13 @@ export interface EngineContext {
 
     /** Number of GPU draw calls in the last rendered frame. */
     drawCallCount: number;
+
+    /** Clamps the effective device pixel ratio used for the swapchain backing store.
+     *  The backing store is sized at `min(devicePixelRatio, maxDevicePixelRatio) * cssPixels`.
+     *  `maxDevicePixelRatio = 1` renders at native CSS-pixel resolution (no DPR upscaling);
+     *  the default `Infinity` is unclamped (full devicePixelRatio). Mutable at runtime — set
+     *  before the next `resizeEngine` to take effect (mirrors `setHardwareScalingRatio`). */
+    maxDevicePixelRatio: number;
 }
 
 /**
@@ -126,6 +133,14 @@ export interface EngineOptions {
      * with alpha < 1 will let HTML content underneath show through). Defaults to "opaque".
      */
     alphaMode?: GPUCanvasAlphaMode;
+    /**
+     * Clamps the effective device pixel ratio used for the swapchain backing store.
+     * The backing store is sized at `min(devicePixelRatio, maxDevicePixelRatio) * cssPixels`.
+     * `maxDevicePixelRatio: 1` renders at native CSS-pixel resolution (no DPR upscaling) —
+     * useful on high-DPI/iOS devices where `devicePixelRatio` is ~3. Defaults to unclamped
+     * (full devicePixelRatio). Equivalent to Babylon.js `setHardwareScalingRatio`.
+     */
+    maxDevicePixelRatio?: number;
 }
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
@@ -171,6 +186,7 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         canvas,
         msaaSamples,
         drawCallCount: 0,
+        maxDevicePixelRatio: options?.maxDevicePixelRatio ?? Infinity,
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
@@ -197,7 +213,7 @@ export function resizeEngine(engine: EngineContext): void {
     if (!(clientWidth > 0 && clientHeight > 0)) {
         return;
     }
-    const scale = globalThis.devicePixelRatio || 1;
+    const scale = Math.min(globalThis.devicePixelRatio || 1, eng.maxDevicePixelRatio);
     const w = (clientWidth * scale) | 0;
     const h = (clientHeight * scale) | 0;
     if (w === canvas.width && h === canvas.height) {

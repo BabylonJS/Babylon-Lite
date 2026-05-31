@@ -158,7 +158,7 @@ const lerpState = (a: MorphState, b: MorphState, n: number): MorphState => ({
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = await createEngine(canvas);
+    const engine = await createEngine(canvas, { maxDevicePixelRatio: 1 });
 
     const effect = createEffectWrapper(engine, {
         name: "torus-states",
