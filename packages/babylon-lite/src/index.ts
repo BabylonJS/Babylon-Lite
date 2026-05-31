@@ -8,6 +8,7 @@ export {
     createSceneContext,
     createDefaultCamera,
     removeFromScene,
+    setMeshVisible,
     onBeforeRender,
     onSceneDispose,
     addToScene,
@@ -89,6 +90,7 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshPositions,
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";

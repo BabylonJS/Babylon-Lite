@@ -35,6 +35,8 @@ lab/public/doom/*.wad
 lab/public/doom/COPYING.txt
 lab/public/doom/CREDITS.txt
 .freedoom-cache/
+lab/public/librequake/
+.librequake-cache/
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
 test-results/

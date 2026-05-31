@@ -14,6 +14,7 @@
         "build:bundle-demos": "tsx scripts/build-bundle-demos.ts",
         "build:bundle-master-info": "tsx scripts/build-master-bundle-info.ts",
         "fetch:freedoom": "tsx scripts/fetch-freedoom.ts",
+        "fetch:librequake": "tsx scripts/fetch-librequake.ts",
         "test": "pnpm build:bundle-scenes && pnpm test:parity",
         "test:watch": "vitest",
         "test:bundle-size": "npx playwright test tests/parity/bundle-size.spec.ts",

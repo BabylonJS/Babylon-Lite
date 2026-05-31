@@ -68,6 +68,22 @@ export function createMeshFromData(
     return mesh as Mesh;
 }
 
+/** Update a mesh's GPU vertex positions in place (e.g. CPU vertex animation).
+ *  `positions` must hold tightly-packed XYZ floats matching the mesh's vertex count.
+ *  `vertexOffset` is the first vertex to overwrite (defaults to 0).
+ *  The mesh must have been created via createMeshFromData / a mesh factory.
+ *  Zero-allocation GPU upload only — CPU-side picking geometry is not refreshed. */
+export function updateMeshPositions(engine: EngineContext, mesh: Mesh, positions: Float32Array, vertexOffset = 0): void {
+    const gpu = (mesh as MeshInternal)._gpu;
+    (engine as EngineContextInternal).device.queue.writeBuffer(
+        gpu.positionBuffer,
+        vertexOffset * 3 * 4,
+        positions.buffer as ArrayBuffer,
+        positions.byteOffset,
+        positions.byteLength
+    );
+}
+
 /** Create a sphere mesh. Caller must assign material. */
 export function createSphere(engine: EngineContext, options?: SphereOptions): Mesh {
     const data = createSphereData(options);
