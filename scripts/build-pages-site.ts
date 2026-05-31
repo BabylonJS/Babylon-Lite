@@ -31,6 +31,7 @@ const DEMOS_CONFIG = resolve(ROOT, "demos-config.json");
 const DEMOS_BUNDLE_SRC = resolve(LAB, "public/bundle/demos");
 const DEMOS_MANIFEST = resolve(LAB, "public/bundle/demos-manifest.json");
 const DOOM_SRC = resolve(LAB, "public/doom");
+const LIBREQUAKE_SRC = resolve(LAB, "public/librequake");
 const THUMBS_SRC = resolve(LAB, "public/thumbnails");
 
 interface DemoConfigEntry {
@@ -89,10 +90,11 @@ function rewriteDemoHtml(html: string): string {
     return html.replace(/(["'])\/bundle\//g, "$1./bundle/");
 }
 
-/** Make a demo bundle deployable under any base path. The only root-relative
- *  reference in any demo bundle is the DOOM demo's `fetch("/doom/...")`. */
+/** Make a demo bundle deployable under any base path. Demos that fetch runtime
+ *  data use root-relative URLs (DOOM `/doom/...`, Quake `/librequake/...`); make
+ *  them relative so the site works under any Pages base path. */
 function rewriteBundle(code: string): string {
-    return code.replace(/(["'])\/doom\//g, "$1doom/");
+    return code.replace(/(["'])\/doom\//g, "$1doom/").replace(/(["'])\/librequake\//g, "$1librequake/");
 }
 
 /** Fail loudly if any root-relative URL survives in the assembled site. */
@@ -162,6 +164,14 @@ async function main(): Promise<void> {
             if (file === "freedoom2.wad") continue;
             cpSync(resolve(DOOM_SRC, file), resolve(doomOut, file));
         }
+    }
+
+    // 4b. Quake demo data (BSD-licensed LibreQuake: BSP, palette, models, sounds,
+    //     license/attribution files). Fetched at dev/build time by
+    //     `pnpm fetch:librequake` into lab/public/librequake/ (not committed). The
+    //     whole tree is copied since the demo fetches many nested assets at runtime.
+    if (demos.some((d) => d.slug === "quake") && existsSync(LIBREQUAKE_SRC)) {
+        cpSync(LIBREQUAKE_SRC, resolve(SITE, "librequake"), { recursive: true });
     }
 
     // 5. Thumbnails for the demo cards.
