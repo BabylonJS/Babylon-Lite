@@ -23,6 +23,9 @@ import {
     type Sprite2DLayer,
 } from "babylon-lite";
 import { loadFreecivSheet } from "./freeciv/atlas.js";
+import { createAtmosphere } from "./freeciv/atmosphere.js";
+import { createBackdrop } from "./freeciv/backdrop.js";
+import { createWater } from "./freeciv/water.js";
 import { generateWorld, type GameMap } from "./freeciv/worldgen.js";
 import { buildTilemap, type Bounds, type TileLayers, type TileSheets } from "./freeciv/tilemap.js";
 import { createLiveSim } from "./freeciv/live.js";
@@ -79,8 +82,11 @@ async function main(): Promise<void> {
     // tint actually shows) — the terrain diamonds (`t.unknown1` / `mask.tile`) are
     // black-filled masks, so tinting them only darkens the tile.
     const highlightLayer = createSprite2DLayer(select.grid("grid_main").atlas, { capacity: 1, order: 15 });
+    // Animated caustic shimmer over the sea (order 0.5: above ocean, below coast).
+    const waterFx = createWater(engine, world);
     const layers = [
         tileLayers.ocean,
+        waterFx.layer,
         tileLayers.coast,
         tileLayers.terrain,
         tileLayers.forest,
@@ -157,11 +163,20 @@ async function main(): Promise<void> {
         applyView(view, layers);
     };
 
+    // Subdued public-domain Mercator 1569 world map behind the playfield, plus a
+    // soft sea halo so the map's coastline edges melt into open water. Both live in
+    // world space, so they pan/zoom with the tiles (added to `layers`).
+    const backdrop = await createBackdrop(engine, world, `${BASE_URL}/mercator-1569.png`);
+    layers.push(...backdrop.layers);
+
     const sr = createSpriteRenderer(engine, {
         layers,
         clearValue: { r: 0.149, g: 0.29, b: 0.451, a: 1 }, // deep ocean blue
     });
     registerSpriteRenderer(sr);
+
+    // Drifting clouds over the parchment backdrop, behind the map (subtle).
+    const atmosphere = createAtmosphere(engine, sr);
 
     installControls(engine, view, layers, picker.hover, onMapClick);
     recenter();
@@ -188,6 +203,8 @@ async function main(): Promise<void> {
         const dt = Math.min(100, now - last);
         last = now;
         sim.step(dt);
+        atmosphere.update(view);
+        waterFx.update();
         labels.update(view, engine);
         minimap.update();
         requestAnimationFrame(tick);
@@ -276,7 +293,9 @@ function fitView(view: View, engine: EngineContext, b: Bounds): void {
     const h = engine.canvas.height || 1;
     const mapW = b.maxX - b.minX + TILE_W;
     const mapH = b.maxY - b.minY + TILE_H;
-    view.zoom = Math.min(w / mapW, h / mapH) * 0.95;
+    // Seed the zoom on the ladder so the very first frame is already crack-free and
+    // in lock-step with the wheel handler (snapped to ½, the widest rung).
+    view.zoom = snapZoom(Math.min(w / mapW, h / mapH) * 0.95);
     const cx = (b.minX + b.maxX) / 2;
     const cy = (b.minY + b.maxY) / 2;
     view.x = cx - w / 2 / view.zoom;
@@ -303,25 +322,41 @@ function applyView(view: View, layers: readonly Sprite2DLayer[]): void {
 }
 
 /**
- * Snap a zoom factor so nearest-filtered diamond tiles tessellate without seams.
- *
- * Above 1 (zoomed in, tiles large) we MUST snap to an integer so one texel maps to
- * a whole number of device pixels — otherwise every shared diamond edge resamples
- * at a fractional offset and a 1px crack appears between tiles. Integer levels
- * (1, 2, 3, …) are far apart in zoom-value, so crossing one is rare and zoom feels
- * stable.
- *
- * Below 1 (whole-map overview, tiles minified) we DON'T snap: the reciprocal levels
- * 1/n are bunched into the tiny 0.15–1 range, so snapping there means almost every
- * wheel notch jumps a level — that's the "choppy when far" feel. Minified tiles are
- * small enough that a sub-pixel crack is effectively invisible, so we trade the
- * (imperceptible) seam for genuinely smooth overview zoom. A true both-worlds fix
- * (smooth AND seamless at all zooms) needs an integer-scale render-to-texture pass.
- * Clamped to the same range the wheel handler uses.
+ * Discrete zoom ladder. Every rung is seam-safe for nearest-filtered diamond tiles:
+ * the ≥1 rungs are integers (one texel maps to a whole number of device pixels, so
+ * shared diamond edges never resample at a fractional offset — no 1px cracks), and
+ * the ½ rung minifies the tiles enough that any sub-pixel seam is invisible. The
+ * whole-map overview lives on the minimap, so the main canvas need not zoom out
+ * past ½. Zoom is quantised to these rungs (see the wheel handler) so it can never
+ * land on a crack-producing fractional scale — which is why the old render-time
+ * integer snap is gone and `view.zoom` is always exactly one of these values.
+ */
+const ZOOM_LEVELS = [0.5, 1, 2, 4, 8] as const;
+
+/** Index of the ladder rung nearest `zoom`, compared in log space so the
+ *  power-of-two gaps feel perceptually even. */
+function nearestZoomLevel(zoom: number): number {
+    const target = Math.log(zoom);
+    let best = 0;
+    let bestErr = Infinity;
+    for (let i = 0; i < ZOOM_LEVELS.length; i++) {
+        const err = Math.abs(Math.log(ZOOM_LEVELS[i]!) - target);
+        if (err < bestErr) {
+            bestErr = err;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/**
+ * Snap an arbitrary zoom to its nearest ladder rung. Because the wheel handler keeps
+ * `view.zoom` ON a rung at all times, this is effectively identity for the live view;
+ * it only does real work for the one-off `fitView` seed. Kept as the single chokepoint
+ * so `screenToTile`, the city labels and the minimap all read the same rendered scale.
  */
 function snapZoom(zoom: number): number {
-    const z = zoom >= 1 ? Math.round(zoom) : zoom;
-    return Math.min(6, Math.max(0.15, z));
+    return ZOOM_LEVELS[nearestZoomLevel(zoom)]!;
 }
 
 /**
@@ -495,24 +530,45 @@ function installControls(
     });
     canvas.addEventListener("pointercancel", endDrag);
 
+    // Discrete, device-independent zoom: scroll accumulates until it crosses one
+    // notch's worth of delta, then steps exactly one ladder rung. This kills the old
+    // "dead zone then lurch" feel (continuous zoom rounded to an integer at render
+    // time) — every step is the same size and lands on a seam-safe rung. No tween:
+    // an animated transit would pass through fractional integer-zooms and flash the
+    // 1px tile cracks the ladder exists to avoid.
+    const WHEEL_NOTCH = 100; // device-px of scroll per zoom step (one mouse notch)
+    let wheelAccum = 0;
     canvas.addEventListener(
         "wheel",
         (e) => {
             e.preventDefault();
+            wheelAccum += e.deltaY;
+            let steps = 0; // +1 per notch = zoom IN (scroll up → negative deltaY)
+            while (wheelAccum <= -WHEEL_NOTCH) {
+                steps++;
+                wheelAccum += WHEEL_NOTCH;
+            }
+            while (wheelAccum >= WHEEL_NOTCH) {
+                steps--;
+                wheelAccum -= WHEEL_NOTCH;
+            }
+            if (steps === 0) return;
+
+            const idx = nearestZoomLevel(view.zoom);
+            const next = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + steps));
+            if (next === idx) return; // already at a rail
+
             const rect = canvas.getBoundingClientRect();
             const sx = (e.clientX - rect.left) * dpr();
             const sy = (e.clientY - rect.top) * dpr();
-            // Anchor the zoom on the cursor using the SNAPPED view that is actually
-            // rendered (not the continuous `view.zoom`). Otherwise the cursor's world
-            // point is held fixed in the logical view while the snapped origin keeps
-            // re-rounding, so the target appears to orbit the corner instead of
-            // staying under the pointer.
+            // Hold the world point under the cursor fixed across the step. Anchor on the
+            // SNAPPED origin that is actually rendered (matching `applyView`), else the
+            // target appears to orbit the corner instead of staying under the pointer.
             const zBefore = snapZoom(view.zoom);
             const wx = Math.round(view.x * zBefore) / zBefore + sx / zBefore;
             const wy = Math.round(view.y * zBefore) / zBefore + sy / zBefore;
-            const factor = Math.exp(-e.deltaY * 0.001);
-            view.zoom = Math.min(6, Math.max(0.15, view.zoom * factor));
-            const zAfter = snapZoom(view.zoom);
+            const zAfter = ZOOM_LEVELS[next]!;
+            view.zoom = zAfter;
             view.x = wx - sx / zAfter;
             view.y = wy - sy / zAfter;
             view.userMoved = true;
