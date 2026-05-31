@@ -219,6 +219,25 @@
             body.no-compatible-demos .filters {
                 display: none;
             }
+            /* Shown after the visible demos when, on mobile, some desktop-only
+               demos are hidden but at least one mobile-compatible demo remains. */
+            .more-demos-msg {
+                display: none;
+                grid-column: 1 / -1;
+                margin: 1rem auto;
+                max-width: 34rem;
+                padding: 1.1rem 1.3rem;
+                text-align: center;
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                background: var(--card-bg);
+                color: var(--muted);
+                font-size: 0.95rem;
+                line-height: 1.5;
+            }
+            body.has-hidden-demos .more-demos-msg {
+                display: block;
+            }
             .card-image {
                 aspect-ratio: 16 / 9;
                 background: #0f0c0d;
@@ -425,6 +444,7 @@
             <main class="grid">
                 <!--CARDS-->
                 <p class="no-demos-msg" id="noDemosMsg">No compatible demo was found. Please try on a desktop device.</p>
+                <p class="more-demos-msg" id="moreDemosMsg">✨ More demos are available on desktop — visit this page on a computer with WebGPU to explore them all.</p>
             </main>
             <footer>
                 Built with <a href="https://github.com/BabylonJS/Babylon-Lite">Babylon&nbsp;Lite</a> · WebGPU only
@@ -509,6 +529,10 @@
                 var compatible = cards.filter(function (c) { return c.getAttribute("data-mobile") !== "false"; });
                 if (compatible.length === 0) {
                     document.body.classList.add("no-compatible-demos");
+                } else if (compatible.length < cards.length) {
+                    // Some desktop-only demos are hidden, but at least one remains:
+                    // invite the user to view the rest on desktop.
+                    document.body.classList.add("has-hidden-demos");
                 }
             })();
         </script>
