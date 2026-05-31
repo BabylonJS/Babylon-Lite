@@ -232,7 +232,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
 
     // Pre-warm pipelines currently in use, so the first frame doesn't pay compile cost.
     for (const layer of rr.layers) {
-        getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false);
+        getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false, false, undefined, undefined);
     }
 
     return rr;
@@ -328,7 +328,7 @@ function spriteRendererRecord(rr: SpriteRendererInternal): number {
             continue;
         }
         const sampleCount = 1;
-        const pipeline = getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, sampleCount, layer.blendMode, false);
+        const pipeline = getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, sampleCount, layer.blendMode, false, false, undefined, undefined);
         if (lg.pipeline !== pipeline) {
             lg.pipeline = pipeline;
             lg.bindGroup = null;
@@ -372,7 +372,7 @@ export function addSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLayer)
         return;
     }
     rr.layers.push(layer);
-    getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false);
+    getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false, false, undefined, undefined);
 }
 
 /** Remove a layer from the renderer and destroy any GPU resources cached for it. */

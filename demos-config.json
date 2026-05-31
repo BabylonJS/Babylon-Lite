@@ -26,5 +26,12 @@
         "description": "Minecraft-style creative voxel sandbox built on Lite. Procedurally generated, infinitely streaming chunk world with break/place editing, ambient occlusion, water, day-night sky and fog. Ships CC0 Kenney textures; optionally load your own resource pack at runtime. Original clean-room engine — no Mojang code or assets.",
         "tags": ["game", "voxel", "sandbox", "showcase"],
         "mobile": false
+    },
+    {
+        "slug": "freeciv",
+        "name": "Freeciv — Isometric Map",
+        "description": "Civilization-style isometric strategy map rendered on Lite's pure-2D sprite path — no scene, camera, or mesh. A procedurally generated continent of diamond terrain tiles with cities and units, drawn from the GPLv2 Freeciv amplio2 tileset sliced clean-room from its plain-text .spec grids. Drag to pan, scroll to zoom. Ships no Freeciv code or assets.",
+        "tags": ["game", "strategy", "2d", "showcase"],
+        "mobile": false
     }
 ]

@@ -4,8 +4,8 @@ import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 
 export interface SpritePipelineDeviceCache {
-    _shaderModule: GPUShaderModule | null;
-    _sceneShaderModule: GPUShaderModule | null;
+    /** Keyed by `${hasDepth?1:0}` — one module per WGSL variant. */
+    _shaderModules: Map<string, GPUShaderModule>;
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
@@ -169,8 +169,7 @@ function getSpritePipelineDeviceCache(engine: EngineContextInternal, cache: Spri
     let deviceCache = cache._devices.get(engine.device);
     if (!deviceCache) {
         deviceCache = {
-            _shaderModule: null,
-            _sceneShaderModule: null,
+            _shaderModules: new Map(),
             _pipelines: new Map(),
         };
         cache._devices.set(engine.device, deviceCache);
@@ -200,12 +199,13 @@ function spritePipelineKey(
 }
 
 function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDeviceCache, hasDepth: boolean): GPUShaderModule {
-    if (hasDepth) {
-        cache._sceneShaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1) });
-        return cache._sceneShaderModule;
+    const key = `${hasDepth ? 1 : 0}`;
+    let module = cache._shaderModules.get(key);
+    if (!module) {
+        module = engine.device.createShaderModule({ code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0) });
+        cache._shaderModules.set(key, module);
     }
-    cache._shaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(false, 0) });
-    return cache._shaderModule;
+    return module;
 }
 
 function buildSpritePipeline(
