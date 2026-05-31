@@ -109,7 +109,8 @@ function rewriteBundle(code: string): string {
         .replace(/(["'])\/librequake\//g, "$1librequake/")
         .replace(/(["'])\/minecraft\//g, "$1minecraft/")
         .replace(/(["'])\/freeciv\//g, "$1freeciv/")
-        .replace(/(["'])\/(draco_decoder\.(?:js|wasm))/g, "$1$2");
+        .replace(/(["'])\/(draco_decoder\.(?:js|wasm))/g, "$1$2")
+        .replace(/(["'])\/(brdf-lut\.png)/g, "$1$2");
 }
 
 /** Fail loudly if any root-relative URL survives in the assembled site. */
@@ -209,10 +210,11 @@ async function main(): Promise<void> {
         cpSync(FREECIV_SRC, resolve(SITE, "freeciv"), { recursive: true });
     }
 
-    // 4e. Draco decoder (JS glue + WASM). glTF demos load it relative to the page
-    //     only when an asset uses KHR_draco_mesh_compression; the bundle ships a
-    //     (rewritten) relative reference, so place the files at the site root.
-    for (const file of DRACO_FILES) {
+    // 4e. Draco decoder (JS glue + WASM) and the PBR BRDF LUT. glTF/PBR demos load
+    //     these relative to the page (Draco only on KHR_draco_mesh_compression
+    //     assets); the bundle ships rewritten relative references, so place the
+    //     files at the site root.
+    for (const file of [...DRACO_FILES, "brdf-lut.png"]) {
         const src = resolve(LAB, "public", file);
         if (existsSync(src)) cpSync(src, resolve(SITE, file));
     }
