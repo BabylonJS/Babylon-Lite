@@ -76,12 +76,19 @@ const brushNudge = (modelIndex: number): number =>
     BRUSH_BASE_NUDGE + ((modelIndex * 7) % 16) * 0.04;
 
 // Movers render solid (zero geometry nudge) and instead win coplanar depth ties
-// via a per-model clip-space depth bias (reverse-Z → larger is nearer). The base
-// keeps leaves in front of the world / func_wall backing; the per-model jitter
-// separates coplanar sibling leaves so they don't z-fight each other.
-const MOVER_BIAS_BASE = 1.2e-3;
+// via a per-model depth pull toward the camera. Unlike the geometric brushNudge,
+// the pull is applied in clip space by the quake material as `DEPTH_BIAS / w`,
+// which (see quake-material.ts) yields a CONSTANT view-space pull of
+// `DEPTH_BIAS / near` world units at every distance — so the value below is the
+// pull in world units multiplied by the camera near plane (fixed at 1 for this
+// demo). The base keeps leaves in front of the world / func_wall backing (whose
+// geometric nudge tops out at ~1 unit); the per-model jitter separates coplanar
+// sibling leaves so they don't z-fight each other. Kept comfortably below the
+// recess depth of inset buttons/torches so those stay correctly behind the wall.
+const MOVER_CAMERA_NEAR = 1; // matches cam.nearPlane; pull(world) = bias / near.
+const MOVER_PULL_BASE = 1.1; // world units of toward-camera pull for a closed leaf.
 const moverDepthBias = (modelIndex: number): number =>
-    MOVER_BIAS_BASE + ((modelIndex * 7) % 16) * 4e-5;
+    (MOVER_PULL_BASE + ((modelIndex * 7) % 16) * 0.02) * MOVER_CAMERA_NEAR;
 
 const START_SHELLS = 25;
 const START_NAILS = 0;

@@ -9,10 +9,17 @@ const OVERBRIGHT = 2.5;
 
 // Movers (doors/buttons/lifts) sit coplanar with the static world and with each
 // other, so they z-fight. Rather than physically expanding the brush (which tears
-// small cuboids like buttons apart), we bias their clip-space depth toward the
+// small cuboids like buttons apart), we pull their depth a fixed amount toward the
 // camera. The engine uses reverse-Z (depthCompare "greater-equal"), so a larger
-// NDC z is nearer — we ADD the bias. A per-model jitter keeps coplanar siblings
-// (e.g. two door leaves) from fighting each other.
+// NDC z is nearer — we ADD to clip-space z.
+//
+// Crucially the term is `DEPTH_BIAS / w`, NOT `DEPTH_BIAS * w`. With reverse-Z the
+// NDC shift is `(DEPTH_BIAS / w) / w = DEPTH_BIAS / w²`, and since `w == z_view` this
+// translates to a CONSTANT view-space pull of `DEPTH_BIAS / near` world units at all
+// distances. A constant *NDC* bias (`* w`) instead pulls by `bias·z²/near`, which
+// explodes with distance (≈0.5u at z=20 but ≈190u at z=500) and yanks recessed
+// buttons/torches clean through the wall in front of them — the depth bug this fixes.
+// `DEPTH_BIAS` is therefore expressed as `pull · near` (world units × near plane).
 const vertexSource = (depthBias: number) => `struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
@@ -22,7 +29,7 @@ const DEPTH_BIAS: f32 = ${depthBias.toExponential(6)};
 @vertex fn mainVertex(input: VertexInput) -> VertexOutput {
   var out: VertexOutput;
   out.position = shaderSystem.worldViewProjection * vec4<f32>(input.position, 1.0);
-  out.position.z = out.position.z + DEPTH_BIAS * out.position.w;
+  out.position.z = out.position.z + DEPTH_BIAS / out.position.w;
   out.uv = input.uv;
   out.uv2 = input.uv2;
   return out;
