@@ -3,8 +3,8 @@
         "slug": "offscreen",
         "name": "Offscreen (Worker)",
         "description": "Side-by-side proof that Lite renders identically on the main thread (left, regular canvas) and inside a Web Worker via OffscreenCanvas (right). A button runs heavy synchronous work on the main thread: the left canvas freezes while the worker-driven right canvas keeps spinning at full speed. Reproduction of the Babylon.js Offscreen demo.",
-        "tags": ["worker", "offscreen", "showcase"],
-        "mobile": false
+        "tags": ["worker", "showcase"],
+        "mobile": true
     },
     {
         "slug": "torus-states",
@@ -24,7 +24,7 @@
         "slug": "quake",
         "name": "LibreQuake — E1M1",
         "description": "Playable port of LibreQuake's first level (lq_e1m1) on Lite: clean-room Quake BSP v29 parser with embedded textures and grayscale lightmaps, player physics + BSP collision, working doors/lifts/triggers, MDL enemies (soldiers & dogs) with AI, a shotgun with hitscan combat, items and a HUD. Ships the BSD-3-Clause LibreQuake assets — no id data or GPL source.",
-        "tags": ["game", "fps", "bsp", "showcase"],
+        "tags": ["game", "fps", "showcase"],
         "mobile": false
     },
     {
