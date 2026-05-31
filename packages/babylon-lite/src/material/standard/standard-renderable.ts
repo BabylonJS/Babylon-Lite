@@ -154,14 +154,15 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         let _lastLightsCount = s.lights.length;
         const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
         const update = (): void => {
-            if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+            const worldVersion = mesh.worldMatrixVersion;
+            if (worldVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
                 sortCenter[0] = mesh.worldMatrix[12]!;
                 sortCenter[1] = mesh.worldMatrix[13]!;
                 sortCenter[2] = mesh.worldMatrix[14]!;
                 meshUboData.set(mesh.worldMatrix, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
-                _lastWorldVersion = mesh.worldMatrixVersion;
+                _lastWorldVersion = worldVersion;
                 _lastLightsCount = s.lights.length;
             }
             const uboVersion = mat._uboVersion;

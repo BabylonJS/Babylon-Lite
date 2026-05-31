@@ -50,4 +50,23 @@ describe("world matrix parent propagation", () => {
         expect(child.worldMatrixVersion).toBe(v0);
         expect(child.worldMatrixVersion).toBe(v0);
     });
+
+    it("propagates an ancestor change through a static intermediate node", () => {
+        // root → mid (never animated) → leaf (never animated). Animating only the
+        // root must still surface on the leaf's version even though the
+        // intermediate node's own local transform never changed.
+        const root = createSceneNode("root");
+        const mid = createSceneNode("mid");
+        const leaf = createSceneNode("leaf");
+        mid.parent = root;
+        leaf.parent = mid;
+
+        const midV0 = mid.worldMatrixVersion;
+        const leafV0 = leaf.worldMatrixVersion;
+
+        root.rotation.y = 1.0;
+
+        expect(mid.worldMatrixVersion).not.toBe(midV0);
+        expect(leaf.worldMatrixVersion).not.toBe(leafV0);
+    });
 });

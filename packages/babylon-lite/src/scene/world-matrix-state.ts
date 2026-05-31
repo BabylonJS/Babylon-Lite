@@ -1,9 +1,9 @@
 /** Shared version-based lazy world matrix computation.
  *
  *  Each entity provides only getLocalMatrix(). This module handles:
- *  - version tracking (_localVersion, _worldVersion, _lastParentVersion)
- *  - parent chain validation (recursive parent.worldMatrix call)
- *  - caching and staleness detection
+ *  - version tracking (_worldVersion bumped by own TRS changes and ancestor motion)
+ *  - parent chain validation (version-only walk via detectParentChange)
+ *  - caching and staleness detection (_cachedWorld nulled on any change)
  *
  *  Zero entity imports — depends only on Mat4 and mat4Multiply. */
 
@@ -29,13 +29,29 @@ export interface WorldMatrixAccessors {
  *   transform matrix. Called only when the cache is stale.
  */
 export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixAccessors {
-    let _localVersion = 0;
     let _worldVersion = 0;
-    let _lastLocalVersion = -1;
-    let _lastParentVersion = -1;
+    let _lastSeenParentVersion = -1;
     let _cachedWorld: Mat4 | null = null;
     const _ownedWorld = new Float32Array(16) as Mat4;
     let _parent: IWorldMatrixProvider | null = null;
+
+    // Detect whether an ancestor moved since we last looked. This is a pure
+    // version-only walk up the parent chain (no matrix math): it bumps our own
+    // version and invalidates our cached matrix when a parent's version changed.
+    // Both getWorldMatrix and getWorldMatrixVersion run it so that ancestor-only
+    // changes (e.g. animating a parent transform node) are observed even when
+    // nothing reads this node's world matrix directly.
+    function detectParentChange(): void {
+        if (_parent === null) {
+            return;
+        }
+        const pv = _parent.worldMatrixVersion;
+        if (pv !== _lastSeenParentVersion) {
+            _lastSeenParentVersion = pv;
+            _worldVersion++;
+            _cachedWorld = null;
+        }
+    }
 
     return {
         get parent(): IWorldMatrixProvider | null {
@@ -44,55 +60,36 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
         set parent(p: IWorldMatrixProvider | null) {
             if (p !== _parent) {
                 _parent = p;
+                _lastSeenParentVersion = -1;
+                _worldVersion++;
                 _cachedWorld = null;
             }
         },
 
         markLocalDirty(): void {
-            _localVersion++;
             _worldVersion++;
             _cachedWorld = null;
         },
 
         getWorldMatrix(): Mat4 {
-            return ensureCurrent();
+            detectParentChange();
+            if (_cachedWorld !== null) {
+                return _cachedWorld;
+            }
+            const local = getLocalMatrix();
+            if (_parent !== null) {
+                const pw = _parent.worldMatrix;
+                mat4MultiplyInto(_ownedWorld as Float32Array, 0, pw as Float32Array, 0, local as Float32Array, 0);
+                _cachedWorld = _ownedWorld;
+            } else {
+                _cachedWorld = local;
+            }
+            return _cachedWorld;
         },
 
         getWorldMatrixVersion(): number {
-            // Validating the parent chain here is essential: ancestor-only changes
-            // (e.g. animating a parent transform node) never call this node's
-            // getWorldMatrix(), so _worldVersion would otherwise stay stale and
-            // per-frame consumers that gate on the version would miss the change.
-            ensureCurrent();
+            detectParentChange();
             return _worldVersion;
         },
     };
-
-    function ensureCurrent(): Mat4 {
-        // Reading the parent's version validates the parent chain with a single
-        // recursive descent (getWorldMatrixVersion forces a lazy recompute).
-        // Doing this once — rather than also poking _parent.worldMatrix — keeps
-        // the stable fast path O(depth) instead of O(2^depth) for deep hierarchies.
-        const parentVersion = _parent !== null ? _parent.worldMatrixVersion : -1;
-
-        // Fast path: cache valid + local unchanged + parent unchanged
-        if (_cachedWorld !== null && _localVersion === _lastLocalVersion && parentVersion === _lastParentVersion) {
-            return _cachedWorld;
-        }
-
-        // Recompute
-        const local = getLocalMatrix();
-        if (_parent !== null) {
-            const pw = _parent.worldMatrix;
-            mat4MultiplyInto(_ownedWorld as Float32Array, 0, pw as Float32Array, 0, local as Float32Array, 0);
-            _cachedWorld = _ownedWorld;
-        } else {
-            _cachedWorld = local;
-        }
-
-        _lastLocalVersion = _localVersion;
-        _lastParentVersion = parentVersion;
-        _worldVersion++;
-        return _cachedWorld;
-    }
 }
