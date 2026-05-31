@@ -4,15 +4,19 @@
     "gzipKB": 5
   },
   "doom": {
-    "rawKB": 96.5,
-    "gzipKB": 32.2
+    "rawKB": 106.1,
+    "gzipKB": 36.1
   },
   "quake": {
-    "rawKB": 121.2,
-    "gzipKB": 43.7
+    "rawKB": 96.9,
+    "gzipKB": 33.5
   },
   "minecraft": {
     "rawKB": 101,
     "gzipKB": 36
+  },
+  "freeciv": {
+    "rawKB": 42,
+    "gzipKB": 16.4
   }
 }

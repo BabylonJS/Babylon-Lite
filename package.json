@@ -16,6 +16,7 @@
         "fetch:freedoom": "tsx scripts/fetch-freedoom.ts",
         "fetch:librequake": "tsx scripts/fetch-librequake.ts",
         "fetch:voxelpack": "tsx scripts/fetch-voxelpack.ts",
+        "fetch:freeciv": "tsx scripts/fetch-freeciv.ts",
         "test": "pnpm build:bundle-scenes && pnpm test:parity",
         "test:watch": "vitest",
         "test:bundle-size": "npx playwright test tests/parity/bundle-size.spec.ts",

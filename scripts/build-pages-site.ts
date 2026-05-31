@@ -33,6 +33,7 @@ const DEMOS_MANIFEST = resolve(LAB, "public/bundle/demos-manifest.json");
 const DOOM_SRC = resolve(LAB, "public/doom");
 const LIBREQUAKE_SRC = resolve(LAB, "public/librequake");
 const MINECRAFT_SRC = resolve(LAB, "public/minecraft");
+const FREECIV_SRC = resolve(LAB, "public/freeciv");
 const THUMBS_SRC = resolve(LAB, "public/thumbnails");
 
 interface DemoConfigEntry {
@@ -100,7 +101,8 @@ function rewriteBundle(code: string): string {
     return code
         .replace(/(["'])\/doom\//g, "$1doom/")
         .replace(/(["'])\/librequake\//g, "$1librequake/")
-        .replace(/(["'])\/minecraft\//g, "$1minecraft/");
+        .replace(/(["'])\/minecraft\//g, "$1minecraft/")
+        .replace(/(["'])\/freeciv\//g, "$1freeciv/");
 }
 
 /** Fail loudly if any root-relative URL survives in the assembled site. */
@@ -186,6 +188,14 @@ async function main(): Promise<void> {
     //     at runtime from /minecraft/voxelpack/, so copy the whole tree.
     if (demos.some((d) => d.slug === "minecraft") && existsSync(MINECRAFT_SRC)) {
         cpSync(MINECRAFT_SRC, resolve(SITE, "minecraft"), { recursive: true });
+    }
+
+    // 4d. Freeciv demo data (GPLv2 amplio2 tileset PNGs + plain-text .spec grids,
+    //     tilespec, and COPYING). Fetched at dev/build time by `pnpm fetch:freeciv`
+    //     into lab/public/freeciv/ (not committed). The demo fetches the sheets and
+    //     .spec files at runtime from /freeciv/amplio2/, so copy the whole tree.
+    if (demos.some((d) => d.slug === "freeciv") && existsSync(FREECIV_SRC)) {
+        cpSync(FREECIV_SRC, resolve(SITE, "freeciv"), { recursive: true });
     }
 
     // 5. Thumbnails for the demo cards.
