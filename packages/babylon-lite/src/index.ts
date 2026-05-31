@@ -19,6 +19,10 @@ export {
 } from "./scene/scene.js";
 export type { SceneContextOptions } from "./scene/scene.js";
 
+// Subtree visibility toggle (used to hide a node before deferring its disposal,
+// e.g. streaming voxel chunks). Standalone module — bundled only when used.
+export { setSubtreeVisible } from "./scene/visibility.js";
+
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
 // RenderTask, and user tasks can render offscreen RTTs, overlays, etc.

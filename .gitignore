@@ -37,6 +37,9 @@ lab/public/doom/CREDITS.txt
 .freedoom-cache/
 lab/public/librequake/
 .librequake-cache/
+lab/public/minecraft/voxelpack/*.png
+lab/public/minecraft/voxelpack/License.txt
+.voxelpack-cache/
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
 test-results/

@@ -9,7 +9,12 @@ import type { RenderTask } from "../frame-graph/render-task.js";
 export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
     const sc = scene as SceneContextInternal;
     const fns = sc._meshDisposables.get(mesh);
+    // Whether this call actually mutated scene state — used to gate the renderable
+    // version bump so a no-op removal (mesh never registered) doesn't needlessly
+    // invalidate the cached opaque bundle.
+    let didMutate = false;
     if (fns) {
+        didMutate = true;
         for (const fn of fns) {
             fn();
         }
@@ -18,10 +23,23 @@ export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
     const mi2 = scene.meshes.indexOf(mesh);
     if (mi2 >= 0) {
         scene.meshes.splice(mi2, 1);
+        didMutate = true;
     }
     const i = sc._renderables.findIndex((r) => r.mesh === mesh);
     if (i >= 0) {
         sc._renderables.splice(i, 1);
+        didMutate = true;
+    }
+    // Invalidate any auto-mirroring render task so it rebuilds its binding lists +
+    // cached opaque bundle without this mesh BEFORE its GPU buffers (vertex data +
+    // per-packet system UBO) are touched again. Done whenever the mesh actually
+    // belonged to the scene — NOT gated on owning a standalone renderable: meshes
+    // sharing a material at the initial scene build are merged into one combined
+    // renderable whose `mesh` is undefined, yet their now-destroyed buffers are
+    // still referenced by that renderable's update()/draw() and the cached bundle.
+    // Mirrors the version bump done on add (material-swap) and initial build.
+    if (didMutate) {
+        sc._renderableVersion++;
     }
     // Drop from the material group registry so a later full rebuild (e.g. device-lost
     // recovery) doesn't try to re-materialize a disposed mesh.
