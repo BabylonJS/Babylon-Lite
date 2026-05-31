@@ -60,19 +60,19 @@ class Batch {
         // Vertex colour packs four baked terms: r = ambient-occlusion multiplier,
         // g = skylight (0..1), b = blocklight (0..1), a = fluid flag (1 = animated
         // water surface, 0 = static). The shader combines them.
-        const aoMul = [AO_LUT[ao[0]], AO_LUT[ao[1]], AO_LUT[ao[2]], AO_LUT[ao[3]]];
+        const aoMul = [AO_LUT[ao[0]!]!, AO_LUT[ao[1]!]!, AO_LUT[ao[2]!]!, AO_LUT[ao[3]!]!];
         const fluidFlag = fluid ? 1 : 0;
         // (cu,cv): (0,0),(1,0),(1,1),(0,1) -> atlas corners.
         const uvU = [rect.u0, rect.u1, rect.u1, rect.u0];
         const uvV = [rect.v1, rect.v1, rect.v0, rect.v0];
         for (let i = 0; i < 4; i++) {
-            this.pos.push(corners[i][0], corners[i][1], corners[i][2]);
+            this.pos.push(corners[i]![0], corners[i]![1], corners[i]![2]);
             this.nrm.push(normal[0], normal[1], normal[2]);
-            this.uv.push(uvU[i], uvV[i]);
+            this.uv.push(uvU[i]!, uvV[i]!);
             this.col.push(aoMul[i]!, sky[i]!, blk[i]!, fluidFlag);
         }
         // Flip the triangulation diagonal toward the brighter pair to avoid AO seams.
-        if (ao[0] + ao[2] > ao[1] + ao[3]) {
+        if (ao[0]! + ao[2]! > ao[1]! + ao[3]!) {
             this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
         } else {
             this.idx.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);

@@ -49,6 +49,8 @@ export interface BlockDef {
     sway: boolean;
     /** Light emitted by this block, 0..15 (0 = not a light source). */
     light: number;
+    /** Cannot be broken or replaced by the player (e.g. bedrock world floor). */
+    indestructible: boolean;
 }
 
 function def(id: Block, name: string, faces: Partial<BlockDef["faces"]> & { all?: string }, opts: Partial<BlockDef> = {}): BlockDef {
@@ -64,6 +66,7 @@ function def(id: Block, name: string, faces: Partial<BlockDef["faces"]> & { all?
         fluid: opts.fluid ?? false,
         sway: opts.sway ?? false,
         light: opts.light ?? 0,
+        indestructible: opts.indestructible ?? false,
     };
 }
 
@@ -86,7 +89,7 @@ const DEFS: Record<number, BlockDef> = {
     [Block.GRAVEL]: def(Block.GRAVEL, "Gravel", { all: "gravel_stone" }),
     [Block.ICE]: def(Block.ICE, "Ice", { all: "ice" }, { renderMode: "blend", hidesNeighborFaces: false, castsAO: false }),
     [Block.CACTUS]: def(Block.CACTUS, "Cactus", { top: "cactus_top", side: "cactus_side", bottom: "cactus_top" }, { renderMode: "cutout", hidesNeighborFaces: false }),
-    [Block.BEDROCK]: def(Block.BEDROCK, "Bedrock", { all: "greystone" }),
+    [Block.BEDROCK]: def(Block.BEDROCK, "Bedrock", { all: "greystone" }, { indestructible: true }),
     [Block.WOOL_RED]: def(Block.WOOL_RED, "Red Wool", { all: "cotton_red" }),
     [Block.WOOL_GREEN]: def(Block.WOOL_GREEN, "Green Wool", { all: "cotton_green" }),
     [Block.WOOL_BLUE]: def(Block.WOOL_BLUE, "Blue Wool", { all: "cotton_blue" }),
@@ -133,6 +136,11 @@ export function isAir(id: number): boolean {
     return id === Block.AIR;
 }
 
+/** True if a block cannot be broken or replaced by the player (e.g. bedrock). */
+export function isIndestructible(id: number): boolean {
+    return DEFS[id]?.indestructible === true;
+}
+
 /** Light emitted by a block (0..15). Air and non-source blocks emit 0. */
 export function blockLight(id: number): number {
     return DEFS[id]?.light ?? 0;
@@ -149,6 +157,7 @@ export function allReferencedTiles(): string[] {
     const set = new Set<string>();
     for (const id of Object.keys(DEFS)) {
         const d = DEFS[Number(id)];
+        if (!d) continue;
         set.add(d.faces.top);
         set.add(d.faces.side);
         set.add(d.faces.bottom);

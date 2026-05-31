@@ -104,7 +104,9 @@ export class ChunkRenderer {
 
         // Unload chunks beyond the keep radius.
         for (const [key, cm] of this.active) {
-            const [cx, cz] = key.split(",").map(Number);
+            const parts = key.split(",");
+            const cx = Number(parts[0]);
+            const cz = Number(parts[1]);
             if (Math.abs(cx - ccx) > keep || Math.abs(cz - ccz) > keep) {
                 this.retire(cm.meshes);
                 this.active.delete(key);

@@ -13,6 +13,7 @@ export default tseslint.config(
         ignores: [
             "dist/**",
             "**/dist/**",
+            "pages-dist/**",
             "node_modules/**",
             "**/node_modules/**",
             "reference/**",
