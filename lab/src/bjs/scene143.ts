@@ -4,7 +4,6 @@ import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { BlurPostProcess } from "@babylonjs/core/PostProcesses/blurPostProcess";
-import { ChromaticAberrationPostProcess } from "@babylonjs/core/PostProcesses/chromaticAberrationPostProcess";
 import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/core/Loading/loadingScreen";
 import "@babylonjs/core/Loading/Plugins/babylonFileLoader";
@@ -45,7 +44,7 @@ import "@babylonjs/loaders";
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
     for (let i = 0; i < 10; i++) {
-        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     }
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";

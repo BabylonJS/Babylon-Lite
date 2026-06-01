@@ -60,7 +60,7 @@ import { Scene } from "@babylonjs/core/scene";
     window.addEventListener("resize", () => engine.resize());
     // Wait several frames to ensure skybox cube faces are fully uploaded
     for (let i = 0; i < 10; i++) {
-        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     }
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";

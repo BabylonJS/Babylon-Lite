@@ -101,6 +101,10 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     _renderableVersion: number;
     /** Lazily-loaded processor; populated on first material reassignment. */
     _processSwaps?: (scene: SceneContext) => void;
+    /** True once the initial deferred build (buildScene) has run. Meshes added after
+     *  this point are materialized via the per-frame swap drain rather than the
+     *  boot-only deferred-builder path. */
+    _built: boolean;
 
     // ─── Stashed internal state (typed to avoid `as any` casts) ────
     _envTextures?: EnvironmentTextures;
@@ -114,10 +118,27 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     _frameGraph: FrameGraph;
 }
 
+/** Queue a mesh for renderable (re)build on the next frame's material-swap drain.
+ *  Shared by the material setter (runtime material change) and addToScene (runtime
+ *  mesh add). Lazily loads the swap processor so scenes that never mutate at runtime
+ *  don't pull it into their bundle. */
+function enqueueMaterialSwap(scene: SceneContextInternal, mesh: Mesh): void {
+    const mi = mesh as MeshInternal;
+    if (mi._materialDirty) {
+        return;
+    }
+    mi._materialDirty = true;
+    scene._materialSwapQueue.push(mesh);
+    if (!scene._processSwaps) {
+        void import("./scene-material-swap.js").then((m) => {
+            scene._processSwaps = m.processMaterialSwaps;
+        });
+    }
+}
+
 /** Install a property setter on mesh.material that sets _materialDirty
  *  and pushes the mesh into the scene's swap queue for processing. */
 function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
-    const mi = mesh as MeshInternal;
     let _mat = mesh.material;
     Object.defineProperty(mesh, "material", {
         get() {
@@ -126,15 +147,7 @@ function installMaterialSetter(scene: SceneContextInternal, mesh: Mesh): void {
         set(v) {
             if (v !== _mat) {
                 _mat = v;
-                if (!mi._materialDirty) {
-                    mi._materialDirty = true;
-                    scene._materialSwapQueue.push(mesh);
-                    if (!scene._processSwaps) {
-                        void import("./scene-material-swap.js").then((m) => {
-                            scene._processSwaps = m.processMaterialSwaps;
-                        });
-                    }
-                }
+                enqueueMaterialSwap(scene, mesh);
             }
         },
         configurable: true,
@@ -170,6 +183,7 @@ export function createSceneContext(engine: EngineContext, options?: SceneContext
         _meshDisposables: new Map(),
         _materialSwapQueue: [],
         _renderableVersion: 0,
+        _built: false,
         _drawCallsPre: 0,
 
         _update(): void {
@@ -315,6 +329,12 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 });
             }
             group.push(mesh);
+            // Added after the initial build: the deferred builder for this group has
+            // already run (and only runs at boot), so materialize this mesh's renderable
+            // through the per-frame material-swap drain instead.
+            if (ctx._built) {
+                enqueueMaterialSwap(ctx, mesh);
+            }
         }
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
@@ -373,6 +393,7 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     }
     ctx._materialSwapQueue.length = 0;
     ctx._renderableVersion++;
+    ctx._built = true;
 }
 
 /**

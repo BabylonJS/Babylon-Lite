@@ -2,6 +2,7 @@
 // Matches Babylon playground #20OAV9#3.
 
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createSpotLight, createGround, createStandardMaterial, attachControl, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -12,7 +13,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 4, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     // Red spot light — slow decay (exponent 10)
     const spot0 = createSpotLight([-1, 1, -1], [0, -1, 0], Math.PI / 2, 10);

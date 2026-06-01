@@ -22,6 +22,15 @@ interface ShaderPacket {
     _bindGroup: GPUBindGroup;
     _lastResourceVersion: number;
     _boundTextures: Texture2D[];
+    /** Set when the owning mesh is removed and this packet's GPU resources are
+     *  destroyed. A combined (multi-mesh) renderable keeps every packet in its
+     *  closure, so update()/draw() must skip disposed packets to avoid writing to
+     *  or submitting an already-destroyed systemUBO / vertex buffer. */
+    _disposed?: boolean;
+    /** Back-reference to the combined renderable's packet array, so disposal can
+     *  splice this packet out and stop retaining/iterating dead chunk state every
+     *  frame (set only for merged opaque renderables). */
+    _owner?: ShaderPacket[];
 }
 
 interface ShaderMaterialRenderState extends ShaderMaterial {
@@ -97,9 +106,19 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
 }
 
 function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, packets: readonly ShaderPacket[], isOverride: boolean): Renderable {
+    // Only merged renderables (>1 mesh) can outlive an individual packet's mesh,
+    // so give those packets a back-reference enabling disposal-time compaction.
+    if (packets.length > 1) {
+        for (const packet of packets) {
+            packet._owner = packets as ShaderPacket[];
+        }
+    }
     const update = (context: DrawUpdateContext): void => {
         updateCustomUbo(scene.engine as EngineContextInternal, material);
         for (const packet of packets) {
+            if (packet._disposed) {
+                continue;
+            }
             if (!isOverride && packet.mesh.material !== material) {
                 continue;
             }
@@ -109,6 +128,9 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
     const draw = (pass: ShaderRenderPass, engine: EngineContextInternal): number => {
         let draws = 0;
         for (const packet of packets) {
+            if (packet._disposed) {
+                continue;
+            }
             if (!isOverride && packet.mesh.material !== material) {
                 continue;
             }
@@ -134,6 +156,9 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
     const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     const update = (context: DrawUpdateContext): void => {
+        if (packet._disposed) {
+            return;
+        }
         if (!isOverride && packet.mesh.material !== material) {
             return;
         }
@@ -145,6 +170,9 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         sortCenter[2] = m[14]!;
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContextInternal): number => {
+        if (packet._disposed) {
+            return 0;
+        }
         if (!isOverride && packet.mesh.material !== material) {
             return 0;
         }
@@ -279,6 +307,14 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
     const internal = scene as SceneContextInternal;
     const list = internal._meshDisposables.get(mesh) ?? [];
     list.push(() => {
+        packet._disposed = true;
+        if (packet._owner) {
+            const oi = packet._owner.indexOf(packet);
+            if (oi >= 0) {
+                packet._owner.splice(oi, 1);
+            }
+            packet._owner = undefined;
+        }
         packet.systemUBO.destroy();
         for (const tex of packet._boundTextures) {
             releaseTexture(tex);

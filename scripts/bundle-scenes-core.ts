@@ -34,7 +34,15 @@ import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle
  * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
  * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
  */
-function wgslMinifyPlugin(): Plugin {
+export function wgslMinifyPlugin(opts: { mangle?: boolean } = {}): Plugin {
+    // Identifier mangling shortens scene WGSL to satisfy bundle-size ceilings, but it
+    // rewrites bare tokens (e.g. worldPos -> wp) PER CHUNK. That is only safe when a
+    // shader's struct declaration and all its usages land in the same chunk. The demo
+    // bundler splits code far more aggressively, so the declaration and usage can end up
+    // in different chunks (and esbuild may turn no-substitution templates into plain
+    // strings the mangler skips), producing inconsistent names like "struct member wp
+    // not found". Demos have no size ceilings, so they opt out of mangling entirely.
+    const mangle = opts.mangle !== false;
     return {
         name: "wgsl-minify",
         enforce: "pre",
@@ -59,9 +67,9 @@ function wgslMinifyPlugin(): Plugin {
             return { code: `export default ${JSON.stringify(compact)}`, map: null };
         },
         renderChunk(code: string, chunk) {
-            const minified = minifyTemplateWgsl(code);
+            const minified = minifyTemplateWgsl(code, mangle);
             const isPbrChunk = chunk.fileName?.includes("pbr-metallic-roughness-block") || chunk.name?.includes("pbr-metallic-roughness-block");
-            return { code: isPbrChunk ? mangleInlineWgsl(minified) : minified, map: null };
+            return { code: mangle && isPbrChunk ? mangleInlineWgsl(minified) : minified, map: null };
         },
     };
 }
@@ -203,8 +211,9 @@ function mangleInlineWgsl(code: string): string {
         .replace(/\b0\.0005\b/g, "5e-4");
 }
 
-/** Strip spaces around WGSL operators inside template literal content. */
-function minifyTemplateWgsl(code: string): string {
+/** Strip spaces around WGSL operators inside template literal content.
+ *  When `mangle` is true, also shorten known WGSL identifiers (scene size optimization). */
+function minifyTemplateWgsl(code: string, mangle = true): string {
     const out: string[] = [];
     let i = 0;
     const len = code.length;
@@ -238,7 +247,7 @@ function minifyTemplateWgsl(code: string): string {
         if (ch === "`") {
             out.push("`");
             i++;
-            i = processTemplateLiteral(code, i, len, out);
+            i = processTemplateLiteral(code, i, len, out, mangle);
             continue;
         }
 
@@ -248,11 +257,12 @@ function minifyTemplateWgsl(code: string): string {
     return out.join("");
 }
 
-function processTemplateLiteral(code: string, i: number, len: number, out: string[]): number {
+function processTemplateLiteral(code: string, i: number, len: number, out: string[], mangle = true): number {
     const wgsl: string[] = [];
     const flushWgsl = (): void => {
         if (wgsl.length > 0) {
-            out.push(mangleWgslIdentifiers(wgsl.join("")));
+            const joined = wgsl.join("");
+            out.push(mangle ? mangleWgslIdentifiers(joined) : joined);
             wgsl.length = 0;
         }
     };
@@ -287,7 +297,7 @@ function processTemplateLiteral(code: string, i: number, len: number, out: strin
                 } else if (ec === "`") {
                     out.push("`");
                     i++;
-                    i = processTemplateLiteral(code, i, len, out);
+                    i = processTemplateLiteral(code, i, len, out, mangle);
                     continue;
                 } else if (ec === '"' || ec === "'") {
                     const q = ec;
@@ -446,7 +456,7 @@ function mangleWgslIdentifiers(code: string): string {
  * Runs in generateBundle (after esbuild minification) with a shared nameCache
  * so cross-chunk property names stay consistent.
  */
-function terserPropertyManglePlugin(): Plugin {
+export function terserPropertyManglePlugin(): Plugin {
     return {
         name: "terser-property-mangle",
         async generateBundle(_options, bundle) {
@@ -535,8 +545,8 @@ export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
-const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
-const LITE_BUNDLE_TARGET = "esnext";
+export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
+export const LITE_BUNDLE_TARGET = "esnext";
 
 interface SceneConfigEntry {
     id: number;
@@ -888,7 +898,7 @@ function writeBundleInfoToDir(scene: string, result: unknown, infoDir: string, s
     writeFileSync(resolve(infoDir, `${scene}.json`), JSON.stringify({ scene, chunks }, null, 2));
 }
 
-function writeBundleInfo(scene: string, result: unknown): void {
+export function writeBundleInfo(scene: string, result: unknown): void {
     writeBundleInfoToDir(scene, result, bundleInfoDir, ROOT);
 }
 
@@ -914,7 +924,7 @@ const MIME: Record<string, string> = {
     ".wasm": "application/wasm",
 };
 
-function startStaticServer(root: string): Promise<{ server: Server; port: number }> {
+export function startStaticServer(root: string): Promise<{ server: Server; port: number }> {
     const publicDir = join(root, "public");
     return new Promise((res) => {
         const server = createServer((req, resp) => {
@@ -1033,7 +1043,7 @@ const VENDOR_RUNTIMES: VendorRuntime[] = [
     },
 ];
 
-function isLiteBundleExternal(id: string): boolean {
+export function isLiteBundleExternal(id: string): boolean {
     return VENDOR_RUNTIMES.some((runtime) => runtime.external(id));
 }
 
@@ -1124,7 +1134,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
     rmSync(sceneOutDir, { recursive: true, force: true });
 }
 
-function measurementBrowserArgs(): string[] {
+export function measurementBrowserArgs(): string[] {
     const swiftShaderArgs = process.env.CI
         ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
         : [];
@@ -1421,7 +1431,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
     return manifest;
 }
 
-async function measurePage(
+export async function measurePage(
     browser: any,
     port: number,
     scene: string,

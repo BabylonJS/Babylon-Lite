@@ -12,9 +12,23 @@ export function bumpVisibilityEpoch(): void {
     _vis = (_vis + 1) | 0;
 }
 
+/**
+ * A surface Babylon Lite can render into. Either a DOM canvas (main thread) or an
+ * `OffscreenCanvas` (e.g. one transferred to a Web Worker via
+ * `transferControlToOffscreen()`). Both expose `getContext("webgpu")` plus a
+ * read/write backing-store `width`/`height`; only the DOM canvas exposes layout
+ * (`clientWidth`/`clientHeight`) and attributes (`setAttribute`).
+ */
+export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
+
+/** @internal Type guard: true for a DOM canvas (has layout + attributes). */
+function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
+    return "clientWidth" in canvas;
+}
+
 /** Handle to the WebGPU engine — pure state, no attached methods. */
 export interface EngineContext {
-    readonly canvas: HTMLCanvasElement;
+    readonly canvas: RenderCanvas;
     readonly msaaSamples: number;
     /** Preferred GPU texture format for the swapchain. Use as the `colorFormat`
      *  for offscreen RTs that are sampled by main-pass materials. */
@@ -22,6 +36,13 @@ export interface EngineContext {
 
     /** Number of GPU draw calls in the last rendered frame. */
     drawCallCount: number;
+
+    /** Clamps the effective device pixel ratio used for the swapchain backing store.
+     *  The backing store is sized at `min(devicePixelRatio, maxDevicePixelRatio) * cssPixels`.
+     *  `maxDevicePixelRatio = 1` renders at native CSS-pixel resolution (no DPR upscaling);
+     *  the default `Infinity` is unclamped (full devicePixelRatio). Mutable at runtime — set
+     *  before the next `resizeEngine` to take effect (mirrors `setHardwareScalingRatio`). */
+    maxDevicePixelRatio: number;
 }
 
 /**
@@ -126,10 +147,20 @@ export interface EngineOptions {
      * with alpha < 1 will let HTML content underneath show through). Defaults to "opaque".
      */
     alphaMode?: GPUCanvasAlphaMode;
+    /**
+     * Clamps the effective device pixel ratio used for the swapchain backing store.
+     * The backing store is sized at `min(devicePixelRatio, maxDevicePixelRatio) * cssPixels`.
+     * `maxDevicePixelRatio: 1` renders at native CSS-pixel resolution (no DPR upscaling) —
+     * useful on high-DPI/iOS devices where `devicePixelRatio` is ~3. Defaults to unclamped
+     * (full devicePixelRatio). Equivalent to Babylon.js `setHardwareScalingRatio`.
+     */
+    maxDevicePixelRatio?: number;
 }
 
-/** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
-export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOptions): Promise<EngineContext> {
+/** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain.
+ *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred to
+ *  a Web Worker) — see {@link RenderCanvas}. */
+export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
@@ -157,7 +188,7 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
     const versionToLog = `Babylon Lite v${VERSION}`;
     // eslint-disable-next-line no-console
     console.log(`${versionToLog} - WebGPU engine`);
-    if (canvas.setAttribute) {
+    if (isDomCanvas(canvas)) {
         canvas.setAttribute("data-engine", versionToLog);
     }
 
@@ -171,6 +202,7 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
         canvas,
         msaaSamples,
         drawCallCount: 0,
+        maxDevicePixelRatio: options?.maxDevicePixelRatio ?? Infinity,
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
@@ -188,18 +220,41 @@ export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOp
 /** Resize the swapchain backing-store to match the canvas client size. When the size
  *  changes, asks every registered rendering context to rebuild its canvas-sized GPU
  *  resources via the optional `_resize` hook. If the canvas has not been laid out yet,
- *  preserves its explicit backing-store size. */
+ *  preserves its explicit backing-store size.
+ *
+ *  Only DOM canvases are auto-sized from layout here. An `OffscreenCanvas` has no layout
+ *  box, so its size is pushed in externally via {@link setEngineSize} (e.g. from the host
+ *  thread that owns the visible canvas) and this call is a no-op for it. */
 export function resizeEngine(engine: EngineContext): void {
     const eng = engine as EngineContextInternal;
     const canvas = eng.canvas;
+    if (!isDomCanvas(canvas)) {
+        return;
+    }
     const clientWidth = canvas.clientWidth;
     const clientHeight = canvas.clientHeight;
     if (!(clientWidth > 0 && clientHeight > 0)) {
         return;
     }
-    const scale = globalThis.devicePixelRatio || 1;
+    const scale = Math.min(globalThis.devicePixelRatio || 1, eng.maxDevicePixelRatio);
     const w = (clientWidth * scale) | 0;
     const h = (clientHeight * scale) | 0;
+    setEngineSize(engine, w, h);
+}
+
+/** Set the swapchain backing-store size directly, in device pixels. Use this when the
+ *  engine renders into an `OffscreenCanvas` whose layout size is only known on another
+ *  thread (the host posts the CSS size × devicePixelRatio). When the size changes, asks
+ *  every registered rendering context to rebuild its canvas-sized GPU resources via the
+ *  optional `_resize` hook. */
+export function setEngineSize(engine: EngineContext, widthPx: number, heightPx: number): void {
+    const eng = engine as EngineContextInternal;
+    const canvas = eng.canvas;
+    const w = widthPx | 0;
+    const h = heightPx | 0;
+    if (!(w > 0 && h > 0)) {
+        return;
+    }
     if (w === canvas.width && h === canvas.height) {
         return;
     }

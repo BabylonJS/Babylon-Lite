@@ -1,10 +1,12 @@
-/** Subtree visibility cascade helper. Only imported by modules that toggle
- *  visibility (KHR_node_visibility loader, KHR_animation_pointer writer) —
- *  bundle cost is paid only by scenes that actually use those features.
+/** Mesh/node visibility toggle. Public entry point is `setMeshVisible`
+ *  (barrel-exported); also used internally by the KHR_node_visibility loader
+ *  and KHR_animation_pointer writer.
  *
  *  This helper is the sole place that bumps the module-scoped visibility
- *  epoch (see `visibility-epoch.ts`), so the engine's bundle invalidation
- *  is O(1) and the hot SceneNode write path stays a plain field assignment. */
+ *  epoch (see `visibility-epoch.ts`). The bump invalidates the cached opaque
+ *  render bundle so a hidden mesh actually stops drawing — a bare
+ *  `node.visible = …` field write does NOT, by design, so the hot SceneNode
+ *  write path stays a plain field assignment and bundle invalidation is O(1). */
 
 import type { SceneNode } from "./scene-node.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";

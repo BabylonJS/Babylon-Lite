@@ -3,7 +3,7 @@
 
 import type { Mat4 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "../scene/parentable.js";
-import { createWorldMatrixState, type WorldMatrixAccessors } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState, type WorldMatrixAccessors } from "../scene/world-matrix-state.js";
 
 export { ObservableVec3 } from "../math/observable-vec3.js";
 
@@ -71,5 +71,7 @@ export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAcce
             configurable: true,
         });
     }
+    // Tag so children parented to this light get push invalidation (O(1) reads).
+    attachWorldMatrixState(target, wm);
     return target as R;
 }

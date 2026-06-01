@@ -1,4 +1,5 @@
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, attachControl, loadBabylon, registerScene } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -17,7 +18,7 @@ async function main(): Promise<void> {
     );
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     await registerScene(engine, scene);
     await startEngine(engine);

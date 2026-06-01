@@ -2,12 +2,13 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
-export type { EngineContext, EngineOptions } from "./engine/engine.js";
+export { createEngine, startEngine, stopEngine, resizeEngine, setEngineSize, disposeEngine, VERSION } from "./engine/engine.js";
+export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export {
     createSceneContext,
     createDefaultCamera,
     removeFromScene,
+    setMeshVisible,
     onBeforeRender,
     onSceneDispose,
     addToScene,
@@ -17,6 +18,10 @@ export {
     unregisterScene,
 } from "./scene/scene.js";
 export type { SceneContextOptions } from "./scene/scene.js";
+
+// Subtree visibility toggle (used to hide a node before deferring its disposal,
+// e.g. streaming voxel chunks). Standalone module — bundled only when used.
+export { setSubtreeVisible } from "./scene/visibility.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
@@ -89,6 +94,7 @@ export {
     createTube,
     createExtrudeShape,
     createMeshFromData,
+    updateMeshPositions,
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
@@ -99,6 +105,8 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
+export { createTexture2DFromPixels } from "./texture/pixels-texture.js";
+export type { PixelsTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 

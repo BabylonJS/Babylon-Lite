@@ -3,7 +3,7 @@ import type { Vec3, Mat4 } from "../math/types.js";
 import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
 
@@ -120,6 +120,9 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
             enumerable: true,
         });
     }
+
+    // Tag so children parented to this camera get push invalidation (O(1) reads).
+    attachWorldMatrixState(cam, wm);
 
     return cam;
 }

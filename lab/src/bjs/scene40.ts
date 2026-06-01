@@ -44,10 +44,10 @@ import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
     scene.enablePhysics(new Vector3(0, -9.8, 0), hk);
 
     // Dynamic sphere body
-    const _sphereAggregate = new PhysicsAggregate(sphere, PhysicsShapeType.SPHERE, { mass: 1, restitution: 0.75 }, scene);
+    new PhysicsAggregate(sphere, PhysicsShapeType.SPHERE, { mass: 1, restitution: 0.75 }, scene);
 
     // Static ground body
-    const _groundAggregate = new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
+    new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
     // Render and wait for sphere to settle
     const eng = engine as any;

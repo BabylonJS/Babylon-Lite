@@ -20,15 +20,16 @@ async function main(): Promise<void> {
 
     // Ground: 6×6, 2 subdivisions
     const ground = createGround(engine, { width: 6, height: 6, subdivisions: 2 });
-    ground.material = createStandardMaterial();
+    const groundMat = createStandardMaterial();
+    ground.material = groundMat;
 
     // Load texture with KTX compressed format selection + PNG fallback
-    ground.material.diffuseTexture = await loadKtxTexture2D(
+    groundMat.diffuseTexture = await loadKtxTexture2D(
         engine,
         "https://raw.githubusercontent.com/Vinc3r/BJS-KTX-textures/master/BJS/UVgrid.png",
         ["-astc.ktx", "-dxt.ktx", "-etc2.ktx"]
     );
-    ground.material.uvScale = [2, 2];
+    groundMat.uvScale = [2, 2];
 
     addToScene(scene, ground);
 

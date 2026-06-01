@@ -3,15 +3,20 @@
 
 ## Purpose
 
-The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adapter and device, configures the swap chain on an HTML canvas, creates MSAA and depth/stencil render targets, and drives the per-frame render loop via `requestAnimationFrame`. All other modules depend on the Engine for GPU device access and frame orchestration.
+The Engine module is the lowest layer of Babylon Lite. It acquires a WebGPU adapter and device, configures the swap chain on a render canvas, creates MSAA and depth/stencil render targets, and drives the per-frame render loop via `requestAnimationFrame`. All other modules depend on the Engine for GPU device access and frame orchestration.
+
+The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `OffscreenCanvas` (e.g. one transferred to a Web Worker via `transferControlToOffscreen()`). The engine runs unchanged in both cases — see *Offscreen / Worker Rendering* below.
 
 ## Public API Surface
 
 ```typescript
+/** A surface the engine can render into: a DOM canvas or an OffscreenCanvas. */
+export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
+
 /** Handle to the WebGPU engine — public API surface.
  *  GPU internals (device, context, format) are @internal (EngineContextInternal) — not user-facing. */
 export interface EngineContext {
-  readonly canvas: HTMLCanvasElement;
+  readonly canvas: RenderCanvas;
   readonly msaaSamples: number;           // 1 or 4
   readonly format: GPUTextureFormat;
 
@@ -23,13 +28,15 @@ export interface EngineContext {
 export function startEngine(engine: EngineContext): Promise<void>;
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
-/** Resize render targets to match canvas size. */
+/** Resize render targets to match canvas layout size. No-op for an OffscreenCanvas. */
 export function resizeEngine(engine: EngineContext): void;
+/** Set the backing-store size directly in device pixels (used for OffscreenCanvas). */
+export function setEngineSize(engine: EngineContext, widthPx: number, heightPx: number): void;
 /** Release all engine-owned GPU resources (render targets, device). */
 export function disposeEngine(engine: EngineContext): void;
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
-export async function createEngine(canvas: HTMLCanvasElement, options?: EngineOptions): Promise<EngineContext>;
+export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
 ```
 
 ### Internal Types (not exported)
@@ -66,17 +73,35 @@ The engine no longer owns per-frame color/depth render targets directly. Render 
 
 ### Resize Logic
 
-Called at the **start of every frame** (inside the rAF callback), not on a resize event:
+`resizeEngine(engine)` is called at the **start of every frame** (inside the rAF callback), not on a resize event. It auto-sizes only a **DOM canvas** from its layout box:
 
 ```
+if canvas is not an HTMLCanvasElement: return         // OffscreenCanvas → externally sized
 w = canvas.clientWidth * devicePixelRatio | 0
 h = canvas.clientHeight * devicePixelRatio | 0
-if (w == canvas.width && h == canvas.height) return;
+setEngineSize(engine, w, h)                           // applies only if changed
+```
+
+`setEngineSize(engine, w, h)` is the shared apply path:
+
+```
+if w<=0 or h<=0: return
+if (w == canvas.width && h == canvas.height) return
 canvas.width = w; canvas.height = h;
 for each registered context: context._resize?.()
 ```
 
 The bitwise OR with 0 (`| 0`) truncates to integer.
+
+### Offscreen / Worker Rendering
+
+An `OffscreenCanvas` has no layout box (`clientWidth`/`clientHeight`) and no attributes, so:
+
+- `createEngine` skips the `setAttribute("data-engine", …)` tag for it (guarded by a DOM-canvas check).
+- `resizeEngine` is a **no-op** for it — the visible canvas lives on another thread.
+- The host thread (which owns the visible canvas) measures the CSS size, multiplies by `devicePixelRatio`, and posts those device-pixel dimensions to the worker, which calls `setEngineSize(engine, w, h)`. This both sets the backing store **and** fires `_resize()` hooks so canvas-sized GPU resources rebuild.
+
+Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF render loop) is identical — dedicated workers in Chromium expose `requestAnimationFrame`/`cancelAnimationFrame`. See the **Offscreen** lab demo (`lab/src/demos/offscreen*.ts`) for an end-to-end main-thread-vs-worker example.
 
 ### Render Loop
 

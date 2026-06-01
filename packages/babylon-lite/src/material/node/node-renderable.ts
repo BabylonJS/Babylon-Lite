@@ -183,7 +183,8 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
 
         const updatePacketUBO = (pkt: NodePacket): void => {
             const recv = pkt._mesh.receiveShadows ? 1 : 0;
-            const worldChanged = pkt._mesh.worldMatrixVersion !== pkt._lastWorldVersion;
+            const worldVersion = pkt._mesh.worldMatrixVersion;
+            const worldChanged = worldVersion !== pkt._lastWorldVersion;
             const recvChanged = recv !== pkt._lastReceivesShadow;
             const lightsChanged = scene.lights.length !== pkt._lastLightsCount;
             if (worldChanged || recvChanged || lightsChanged) {
@@ -194,7 +195,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 }
                 writeMeshLightSelection(pkt._mesh, scene.lights, pkt._meshScratch.subarray(4));
                 device.queue.writeBuffer(pkt._meshUBO, 0, pkt._meshScratch as Float32Array<ArrayBuffer>);
-                pkt._lastWorldVersion = pkt._mesh.worldMatrixVersion;
+                pkt._lastWorldVersion = worldVersion;
                 pkt._lastReceivesShadow = recv;
                 pkt._lastLightsCount = scene.lights.length;
             }

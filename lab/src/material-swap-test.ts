@@ -46,7 +46,7 @@ async function run() {
                     return;
                 }
                 const builder = (greenMat as any)._buildGroup;
-                if (builder?._rebuildSingle && scene._materialSwapQueue.length === 0) {
+                if (builder?._rebuildSingle && (scene as unknown as { _materialSwapQueue: unknown[] })._materialSwapQueue.length === 0) {
                     signaled = true;
                     (window as any).phase = "green";
                     resolve();
