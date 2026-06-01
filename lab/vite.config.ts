@@ -60,6 +60,24 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
+                // Serve pre-built bundle JS (scenes + demos) directly from lab/public/bundle.
+                // Vite caches the public-file list at startup and never refreshes it for paths
+                // matching `server.watch.ignored` (which includes **/public/bundle/**). So any
+                // bundle (re)generated AFTER the dev server started is absent from that cache:
+                // Vite's static middleware skips it and the transform middleware then 404s the
+                // `<script type="module">` request (plain GET still falls through to 200, which
+                // is why the file looks present yet demos break). Serving these build outputs
+                // ourselves — before Vite's internal middlewares — makes a freshly regenerated
+                // bundle load immediately without a dev-server restart.
+                if (url.startsWith("/bundle/") && (url.endsWith(".js") || url.endsWith(".mjs"))) {
+                    const filePath = resolve(__dirname, "public", url.slice(1));
+                    if (existsSync(filePath) && statSync(filePath).isFile()) {
+                        res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+                        res.setHeader("Cache-Control", "no-cache");
+                        createReadStream(filePath).pipe(res);
+                        return;
+                    }
+                }
                 if (url === "/lab-api/signature") {
                     // Returns mtimes for current/master bundle and perf manifests plus per-scene parity images
                     // so the dashboard can auto-refresh only when data actually changes.
