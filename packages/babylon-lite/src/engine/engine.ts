@@ -47,6 +47,7 @@ export interface RenderingContext {
     _resize?(): void;
 }
 
+/** @internal */
 interface DeviceLostRecoveryCapture {
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;

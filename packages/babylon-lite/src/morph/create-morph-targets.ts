@@ -7,7 +7,7 @@
  *  creation time — no global registration needed. */
 
 import type { MorphTargetData } from "../animation/types.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 
 /** Create morph target GPU data from parsed glTF targets.
@@ -17,12 +17,13 @@ import { createMappedBuffer } from "../resource/gpu-buffers.js";
  *  @param morphWeights Initial morph weights (one per target, may be null)
  */
 export function createMorphTargets(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     targets: { positions: Float32Array; normals: Float32Array | null }[],
     vertexCount: number,
     morphWeights: number[] | null
 ): MorphTargetData {
-    const device = engine.device;
+    const engineInternal = engine as EngineContextInternal;
+    const device = engineInternal.device;
     const targetCount = Math.min(targets.length, 4); // max 4 (vec4 weights)
     const texWidth = Math.min(vertexCount, 2048);
     const rowsPerBand = Math.ceil(vertexCount / texWidth);
@@ -71,7 +72,7 @@ export function createMorphTargets(
     u32[1] = texWidth;
     u32[2] = rowsPerBand;
 
-    const weightsBuffer = createMappedBuffer(engine, new Uint8Array(uboData), GPUBufferUsage.UNIFORM);
+    const weightsBuffer = createMappedBuffer(engineInternal, new Uint8Array(uboData), GPUBufferUsage.UNIFORM);
 
     return { texture, count: targetCount, weightsBuffer, targets: targets.slice(0, targetCount), weights };
 }

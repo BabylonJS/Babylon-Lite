@@ -69,7 +69,7 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
         configureTransmissionSource(state, task, engine);
     };
     if (execute) {
-        task.execute = () => executeRenderTaskLinear(task.scene, execute);
+        task.execute = () => executeRenderTaskLinear(task.scene as SceneContextInternal, execute);
     }
     task.dispose = () => {
         disposeRenderTaskTransmission(state);
@@ -356,7 +356,7 @@ function beginTaskPass(task: RenderTask, resolveTarget: GPUTextureView | null, s
     } else {
         att.resolveTarget = undefined;
     }
-    return task.engine._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+    return (task.engine as EngineContextInternal)._currentEncoder.beginRenderPass(task._renderPassDescriptor);
 }
 
 function setPassState(task: RenderTask, pass: GPURenderPassEncoder): void {
@@ -379,9 +379,9 @@ function setPassState(task: RenderTask, pass: GPURenderPassEncoder): void {
 }
 
 function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
-    const eng = task.engine;
+    const eng = task.engine as EngineContextInternal;
     const rt = task._config.rt;
-    const scene = task.scene;
+    const scene = task.scene as SceneContextInternal;
     const opaqueBindings = task._opaqueBindings;
     const opaqueBundles = task._opaqueBundles;
 
