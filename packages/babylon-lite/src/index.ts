@@ -2,7 +2,7 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
+export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, disposeEngine, VERSION } from "./engine/engine.js";
 export type { EngineContext, EngineOptions } from "./engine/engine.js";
 export {
     createSceneContext,

@@ -265,16 +265,17 @@ export function disposeEngine(engine: EngineContext): void {
     eng.device.destroy();
 }
 
-function renderFrame(engine: EngineContextInternal, delta: number): void {
-    const ctxs = engine._renderingContexts;
+export function renderFrame(engine: EngineContext, delta: number): void {
+    const eng = engine as EngineContextInternal;
+    const ctxs = eng._renderingContexts;
     if (ctxs.length === 0) {
         return;
     }
 
-    const encoder = engine.device.createCommandEncoder({ label: "frame" });
-    engine._currentEncoder = encoder;
-    engine._currentDelta = delta;
-    engine._swapchainView = engine.context.getCurrentTexture().createView();
+    const encoder = eng.device.createCommandEncoder({ label: "frame" });
+    eng._currentEncoder = encoder;
+    eng._currentDelta = delta;
+    eng._swapchainView = eng.context.getCurrentTexture().createView();
 
     let drawCalls = 0;
     for (let i = 0; i < ctxs.length; i++) {
@@ -284,8 +285,8 @@ function renderFrame(engine: EngineContextInternal, delta: number): void {
         drawCalls += s._record();
     }
 
-    const finalEncoder = engine._currentEncoder;
-    engine._cbs[0] = finalEncoder.finish();
-    engine.device.queue.submit(engine._cbs);
-    engine.drawCallCount = drawCalls;
+    const finalEncoder = eng._currentEncoder;
+    eng._cbs[0] = finalEncoder.finish();
+    eng.device.queue.submit(eng._cbs);
+    eng.drawCallCount = drawCalls;
 }
