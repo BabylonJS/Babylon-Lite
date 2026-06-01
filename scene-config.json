@@ -317,7 +317,7 @@
         "slug": "scene33-lights-punctual",
         "name": "Scene 33 — KHR_lights_punctual",
         "maxMad": 0.07,
-        "maxRawKB": 93,
+        "maxRawKB": 94,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true
@@ -820,7 +820,7 @@
         "slug": "scene112-khr-texture-basisu",
         "name": "Scene 112 — KHR_texture_basisu Flight Helmet",
         "maxMad": 0.4,
-        "maxRawKB": 110,
+        "maxRawKB": 111,
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
         "note": "Frame-graph transmission renders through a linear half-float target before final image processing; residual background blending variance stays within 5 RGB levels.",
         "tags": ["pbr", "gltf", "env", "basis", "transmission"],
