@@ -5,22 +5,26 @@
   },
   "doom": {
     "rawKB": 106.3,
-    "gzipKB": 36.2
-  },
-  "quake": {
-    "rawKB": 122.5,
-    "gzipKB": 44
-  },
-  "minecraft": {
-    "rawKB": 101.1,
     "gzipKB": 36.1
   },
+  "quake": {
+    "rawKB": 122.8,
+    "gzipKB": 44.1
+  },
+  "minecraft": {
+    "rawKB": 102.7,
+    "gzipKB": 36.6
+  },
   "offscreen": {
-    "rawKB": 168.3,
-    "gzipKB": 68.6
+    "rawKB": 169,
+    "gzipKB": 68.9
   },
   "freeciv": {
     "rawKB": 42.2,
     "gzipKB": 16.5
+  },
+  "platformer": {
+    "rawKB": 35.2,
+    "gzipKB": 13.4
   }
 }

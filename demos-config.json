@@ -44,5 +44,12 @@
         "tags": ["game", "strategy", "2d", "showcase"],
         "fetch": "freeciv",
         "mobile": false
+    },
+    {
+        "slug": "platformer",
+        "name": "Platformer — World 1-1",
+        "description": "Super Mario Bros-style side-scrolling platformer built on Lite's pure-2D sprite path — no scene, camera, or mesh. A full level with run/jump physics, stompable enemies, mushroom/fire-flower/star power-ups, ?-blocks and breakable bricks, a pipe warp to an underground coin room, moving and one-way platforms, and a flagpole goal. Hand-rolled clean-room swept-AABB tile physics, keyboard/gamepad/touch input, DOM HUD, and Web Audio SFX. Ships a curated CC0 Kenney Pixel Platformer asset subset — no Nintendo code or assets.",
+        "tags": ["game", "platformer", "2d", "showcase"],
+        "mobile": true
     }
 ]
