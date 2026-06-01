@@ -53,7 +53,7 @@ function stripComment(line: string): string {
 function matchAssign(line: string, key: string): string | null {
     const m = line.match(new RegExp(`^${key}\\s*=\\s*(.+)$`));
     if (!m) return null;
-    return m[1].trim().replace(/^"(.*)"$/, "$1");
+    return m[1]!.trim().replace(/^"(.*)"$/, "$1");
 }
 
 interface GridDraft {
@@ -93,15 +93,15 @@ export function parseSpec(text: string): ParsedSpec {
             if (!m || !current) continue;
             const row = Number(m[1]);
             const col = Number(m[2]);
-            for (const q of m[3].matchAll(/"([^"]+)"/g)) {
-                current.tags.set(q[1], { row, col });
+            for (const q of m[3]!.matchAll(/"([^"]+)"/g)) {
+                current.tags.set(q[1]!, { row, col });
             }
             continue;
         }
 
         const sectionMatch = line.match(/^\[(\w+)\]$/);
         if (sectionMatch) {
-            section = sectionMatch[1];
+            section = sectionMatch[1]!;
             continue;
         }
 

@@ -274,7 +274,8 @@ function createCityLabels(cities: readonly { x: number; y: number; name: string;
 
     return {
         update(view: View, engine: EngineContext): void {
-            const dpr = (engine.canvas.width || 1) / (engine.canvas.clientWidth || 1);
+            const cv = engine.canvas as HTMLCanvasElement;
+            const dpr = (cv.width || 1) / (cv.clientWidth || 1);
             // Match the snapped transform the tiles render with so labels don't
             // drift off their tiles by a fraction of a pixel.
             const z = snapZoom(view.zoom);
@@ -447,8 +448,8 @@ function findPath(world: GameMap, sx: number, sy: number, gx: number, gy: number
         let u = -1;
         let best = Infinity;
         for (let i = 0; i < N; i++) {
-            if (!done[i] && dist[i] < best) {
-                best = dist[i];
+            if (!done[i] && dist[i]! < best) {
+                best = dist[i]!;
                 u = i;
             }
         }
@@ -467,8 +468,8 @@ function findPath(world: GameMap, sx: number, sy: number, gx: number, gy: number
             if (done[v]) continue;
             const onRoadStep = onRoad && world.hasRoad(nx, ny);
             const cost = onRoadStep ? ROAD_DISCOUNT : 1;
-            const nd = dist[u] + cost;
-            if (nd < dist[v]) {
+            const nd = dist[u]! + cost;
+            if (nd < dist[v]!) {
                 dist[v] = nd;
                 prev[v] = u;
             }
@@ -476,7 +477,7 @@ function findPath(world: GameMap, sx: number, sy: number, gx: number, gy: number
     }
     if (dist[goal] === Infinity) return null;
     const path: Array<[number, number]> = [];
-    for (let cur = goal; cur !== start && cur !== -1; cur = prev[cur]) {
+    for (let cur = goal; cur !== start && cur !== -1; cur = prev[cur]!) {
         const cx = cur % W;
         path.push([cx, (cur - cx) / W]);
     }
@@ -494,7 +495,7 @@ function installControls(
     onHover?: HoverFn,
     onClick?: (tileX: number, tileY: number) => void,
 ): void {
-    const canvas = engine.canvas;
+    const canvas = engine.canvas as HTMLCanvasElement;
     const dpr = (): number => (canvas.width || 1) / (canvas.clientWidth || 1);
     let dragging = false;
     let lastX = 0;

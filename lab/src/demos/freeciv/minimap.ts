@@ -150,7 +150,7 @@ export function createMinimap(engine: EngineContext, sr: SpriteRenderer, world: 
 
     /** Current minimap rectangle in DEVICE pixels (bottom-right anchored). */
     function rect(): { x0: number; y0: number; w: number; h: number; dpr: number } {
-        const canvas = engine.canvas;
+        const canvas = engine.canvas as HTMLCanvasElement;
         const dpr = (canvas.width || 1) / (canvas.clientWidth || 1);
         const aspect = tw / th;
         const cssW = aspect >= 1 ? MINIMAP_MAX : Math.round(MINIMAP_MAX * aspect);
