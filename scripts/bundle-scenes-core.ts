@@ -47,7 +47,7 @@ export function wgslMinifyPlugin(opts: { mangle?: boolean } = {}): Plugin {
         name: "wgsl-minify",
         enforce: "pre",
         async buildStart() {
-            await initMiniray();
+            await initMiniray({});
         },
         transform(code: string, id: string) {
             if (!id.includes(".wgsl")) return null;
@@ -474,12 +474,12 @@ export function terserPropertyManglePlugin(): Plugin {
                 const wasmReserved: string[] = [];
                 const wasmObjMatch = chunk.code.match(/\{(_abort_js:[^}]+)\}/);
                 if (wasmObjMatch) {
-                    const keys = wasmObjMatch[1].match(/\b(_\w+)\s*:/g);
+                    const keys = wasmObjMatch[1]!.match(/\b(_\w+)\s*:/g);
                     if (keys) wasmReserved.push(...keys.map((k) => k.replace(/\s*:/, "")));
                 }
 
                 const result = await terserMinify(chunk.code, {
-                    ecma: 2022,
+                    ecma: 2022 as unknown as 5,
                     module: true,
                     compress: {
                         passes: 2,
@@ -517,7 +517,7 @@ export function terserPropertyManglePlugin(): Plugin {
                         },
                     },
                     nameCache,
-                    sourceMap: chunk.map ? { content: chunk.map as object, asObject: true } : false,
+                    sourceMap: chunk.map ? ({ content: chunk.map as object, asObject: true } as unknown as boolean) : false,
                 });
 
                 if (result.code) {

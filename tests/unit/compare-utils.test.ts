@@ -24,10 +24,10 @@ function makeBrowserSpy(): { browser: Browser; screenshotCalls: () => number } {
     };
     const browser = {
         newContext: async () => context,
-    } satisfies Partial<Browser>;
+    };
 
     return {
-        browser: browser as Browser,
+        browser: browser as unknown as Browser,
         screenshotCalls: () => screenshotCount,
     };
 }

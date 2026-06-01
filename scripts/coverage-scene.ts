@@ -17,7 +17,7 @@ import { createRequire } from "module";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "vite";
-import type { Plugin, ViteDevServer } from "vite";
+import type { Plugin } from "vite";
 
 type CoverageMode = "prod" | "dev";
 
@@ -176,7 +176,7 @@ function parseArgs(argv: string[]): CliOptions {
 
 function normalizeSceneArg(sceneArg: string): { sceneName: string; query: string } {
     const [rawScene, rawQuery = ""] = sceneArg.split("?", 2);
-    const sceneName = /^\d+$/.test(rawScene) ? `scene${rawScene}` : rawScene || "scene1";
+    const sceneName = /^\d+$/.test(rawScene ?? "") ? `scene${rawScene}` : rawScene || "scene1";
     const query = rawQuery ? `?${rawQuery}` : "";
     return { sceneName, query };
 }
@@ -349,7 +349,7 @@ async function collectCoverage(page: Page, url: string, timeoutMs: number, settl
 }
 
 function stripQueryAndHash(value: string): string {
-    return value.split("#", 1)[0].split("?", 1)[0];
+    return value.split("#", 1)[0]!.split("?", 1)[0]!;
 }
 
 function normalizePathCase(value: string): string {
@@ -437,8 +437,8 @@ function mergePreciseUsedBytes(totalBytes: number, functions: CoverageFunction[]
 
     let usedBytes = 0;
     for (let i = 0; i < sortedPoints.length - 1; i++) {
-        const start = sortedPoints[i];
-        const end = sortedPoints[i + 1];
+        const start = sortedPoints[i]!;
+        const end = sortedPoints[i + 1]!;
         const covering = ranges
             .filter((range) => range.startOffset <= start && range.endOffset >= end)
             .sort((a, b) => a.endOffset - a.startOffset - (b.endOffset - b.startOffset))[0];

@@ -19,9 +19,9 @@ const gpuGlobals = globalThis as typeof globalThis & {
     GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number };
 };
 
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 };
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4 };
+gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage & { VERTEX: number; FRAGMENT: number };
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage & { UNIFORM: number; COPY_DST: number };
+gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4 } as unknown as GPUTextureUsage & { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number };
 
 function makeMockEngine(): EngineContext {
     const device = {
@@ -54,7 +54,7 @@ function makeMockEngine(): EngineContext {
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 0,
         _cbs: [],
-    } as EngineContextInternal;
+    } as unknown as EngineContextInternal;
 }
 
 function makeRenderingContext(): RenderingContext {

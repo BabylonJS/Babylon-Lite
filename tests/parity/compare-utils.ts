@@ -26,7 +26,7 @@ export interface SceneConfig {
 
 let _sceneConfigCache: SceneConfig[] | null = null;
 
-export function shouldSkipParity(sceneConfig: Pick<SceneConfig, "skipParity" | "skipParityOnCI">, env: Pick<NodeJS.ProcessEnv, "CI"> = process.env): boolean {
+export function shouldSkipParity(sceneConfig: Pick<SceneConfig, "skipParity" | "skipParityOnCI">, env: { CI?: string } = process.env): boolean {
     return !!sceneConfig.skipParity || (!!sceneConfig.skipParityOnCI && !!env.CI);
 }
 
@@ -94,7 +94,7 @@ export function compareImages(actualPath: string, referencePath: string): Compar
             let pixMax = 0;
             let pixSum = 0;
             for (let c = 0; c < 3; c++) {
-                const d = Math.abs(actual.data[ai + c] - ref.data[ri + c]);
+                const d = Math.abs(actual.data[ai + c]! - ref.data[ri + c]!);
                 pixSum += d;
                 if (d > pixMax) pixMax = d;
             }
@@ -140,9 +140,9 @@ export function compareRegion(actualPath: string, referencePath: string, bgColor
         for (let x = 0; x < w; x++) {
             const ri = (y * ref.width + x) * 4;
             // Check if reference pixel is background
-            const dr = ref.data[ri] - bgColor[0];
-            const dg = ref.data[ri + 1] - bgColor[1];
-            const db = ref.data[ri + 2] - bgColor[2];
+            const dr = ref.data[ri]! - bgColor[0];
+            const dg = ref.data[ri + 1]! - bgColor[1];
+            const db = ref.data[ri + 2]! - bgColor[2];
             if (Math.sqrt(dr * dr + dg * dg + db * db) <= threshold) continue;
 
             regionPixels++;
@@ -150,7 +150,7 @@ export function compareRegion(actualPath: string, referencePath: string, bgColor
             let pixMax = 0;
             let pixSum = 0;
             for (let c = 0; c < 3; c++) {
-                const d = Math.abs(actual.data[ai + c] - ref.data[ri + c]);
+                const d = Math.abs(actual.data[ai + c]! - ref.data[ri + c]!);
                 pixSum += d;
                 if (d > pixMax) pixMax = d;
             }
@@ -200,7 +200,7 @@ export function generateDiffMap(actualPath: string, referencePath: string, outpu
 
             let pixMax = 0;
             for (let c = 0; c < 3; c++) {
-                const d = Math.abs(actual.data[ai + c] - ref.data[ri + c]);
+                const d = Math.abs(actual.data[ai + c]! - ref.data[ri + c]!);
                 if (d > pixMax) pixMax = d;
             }
 

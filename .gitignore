@@ -65,3 +65,5 @@ _bjs67_defines.txt
 .DS_Store
 # Generated public Pages site
 pages-dist/
+
+build-timeline.json
