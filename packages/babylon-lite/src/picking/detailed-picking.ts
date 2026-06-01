@@ -164,7 +164,7 @@ function hasCpuDeformationData(mesh: MeshInternal): boolean {
 }
 
 /** Möller-Trumbore ray-triangle intersection with Babylon.js Ray epsilon semantics.
- *  Returns { t, u, v } or null if no intersection.
+ *  Returns `{ t, u, v }` or null if no intersection.
  *  u and v are Möller weights for vertices 1 and 2; BJS exposes (1 - u - v, u). */
 function rayTriangleIntersect(
     ox: number,

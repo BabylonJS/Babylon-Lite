@@ -16,6 +16,12 @@ export interface PointLight extends LightBase {
     range: number;
 }
 
+/**
+ * Creates a point light that emits in all directions from `position` with distance falloff.
+ * @param position - World-space position of the light.
+ * @param intensity - Scalar multiplier applied to the light's diffuse and specular contribution.
+ * @returns Plain `PointLight` data to be added to a scene via `addToScene`.
+ */
 export function createPointLight(position: [number, number, number], intensity = 1.0): PointLight {
     const { wm, onDirty, lvs } = createLightBase(() => mat4Translation(light.position.x, light.position.y, light.position.z));
 

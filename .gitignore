@@ -65,3 +65,6 @@ _bjs67_defines.txt
 .DS_Store
 # Generated public Pages site
 pages-dist/
+
+# Generated TypeDoc API documentation (regenerated on demand)
+lab/public/api-docs/

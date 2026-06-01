@@ -3,15 +3,26 @@ import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { shaderGroupBuilder } from "./shader-group-builder.js";
 
+/** Vertex attribute names a ShaderMaterial can bind. */
 export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";
+/** WGSL scalar/vector/matrix types supported for ShaderMaterial uniforms. */
 export type ShaderUniformType = "f32" | "u32" | "i32" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>" | "mat4x4<f32>";
+/** Built-in uniform names automatically populated by the renderer each frame
+ *  (transforms, camera position, screen size, alpha cutoff). */
 export type ShaderSystemUniformName = "world" | "view" | "projection" | "viewProjection" | "worldView" | "worldViewProjection" | "cameraPosition" | "screenSize" | "alphaCutoff";
+/** A uniform entry: either a system uniform name or an explicit custom declaration. */
 export type ShaderUniformOption = ShaderSystemUniformName | ShaderUniformDecl;
+/** Accepted value shape when setting a ShaderMaterial uniform. */
 export type ShaderUniformValue = number | readonly number[] | Float32Array;
+/** A sampler entry: either a bare sampler name or an explicit declaration. */
 export type ShaderSamplerOption = string | ShaderSamplerDecl;
+/** Value of a WGSL preprocessor define — boolean toggle or numeric constant. */
 export type ShaderDefineValue = boolean | number;
+/** Map of WGSL preprocessor define names to their values. */
 export type ShaderDefineMap = Readonly<Record<string, ShaderDefineValue>>;
 
+/** Options describing a ShaderMaterial: WGSL sources, attributes, uniforms,
+ *  samplers, defines, and blend/depth state. Passed to `createShaderMaterial()`. */
 export interface ShaderMaterialOptions {
     readonly name?: string;
     readonly vertexSource: string;
@@ -31,17 +42,20 @@ export interface ShaderMaterialOptions {
     readonly depthCompare?: GPUCompareFunction;
 }
 
+/** A custom uniform declaration: WGSL identifier, type, and optional default. */
 export interface ShaderUniformDecl {
     readonly name: string;
     readonly type: ShaderUniformType;
     readonly defaultValue?: number | readonly number[];
 }
 
+/** A sampler declaration: WGSL identifier and the bound texture's sample type. */
 export interface ShaderSamplerDecl {
     readonly name: string;
     readonly sampleType?: "float" | "unfilterable-float" | "depth";
 }
 
+/** A resolved WGSL preprocessor define (name + value). */
 export interface ShaderDefine {
     readonly name: string;
     readonly value: ShaderDefineValue;
@@ -57,6 +71,9 @@ export interface ShaderTextureSlot {
     current: Texture2D | null;
 }
 
+/** A custom WGSL material: compiled from user-supplied vertex/fragment sources
+ *  with declared attributes, uniforms, samplers, and defines. Update its values
+ *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
     readonly vertexSource: string;
@@ -122,6 +139,10 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
     return isSystemUniform(name);
 }
 
+/** Create a ShaderMaterial from WGSL sources and declarations, validating
+ *  attributes, uniforms, samplers, and defines.
+ *  @param options - Sources, attributes, uniforms, samplers, defines, and render state.
+ *  @returns The constructed `ShaderMaterial`. */
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial {
     if (!options.vertexSource || !options.fragmentSource) {
         throw new Error("ShaderMaterial: vertexSource and fragmentSource must be non-empty WGSL strings.");
@@ -257,6 +278,11 @@ function normalizeUniformValue(decl: ShaderUniformDecl, value: ShaderUniformValu
     return arr;
 }
 
+/** Set a declared uniform's value, validating its element count against the
+ *  declared type and bumping the material's UBO version.
+ *  @param material - Target material.
+ *  @param name - Declared uniform name.
+ *  @param value - New value (scalar, array, or `Float32Array`). */
 export function setShaderUniform(material: ShaderMaterial, name: string, value: ShaderUniformValue): void {
     const slot = material._uniformValues.get(name);
     if (!slot) {
@@ -267,6 +293,11 @@ export function setShaderUniform(material: ShaderMaterial, name: string, value: 
     material._uboVersion = material._uniformVersion;
 }
 
+/** Bind (or clear) the texture for a declared sampler, enforcing that depth and
+ *  non-depth samplers receive a matching `Texture2D`.
+ *  @param material - Target material.
+ *  @param name - Declared sampler name.
+ *  @param texture - Texture to bind, or `null` to clear. */
 export function setShaderTexture(material: ShaderMaterial, name: string, texture: Texture2D | null): void {
     const slot = material._textureSlots.get(name);
     if (!slot) {
@@ -286,14 +317,17 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
     material._resourceVersion++;
 }
 
+/** Set a declared `f32` uniform. Convenience wrapper over `setShaderUniform()`. */
 export function setShaderFloat(material: ShaderMaterial, name: string, value: number): void {
     setShaderUniform(material, name, value);
 }
 
+/** Set a declared `vec3<f32>` uniform. Convenience wrapper over `setShaderUniform()`. */
 export function setShaderVector3(material: ShaderMaterial, name: string, value: readonly [number, number, number]): void {
     setShaderUniform(material, name, value);
 }
 
+/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`. */
 export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array): void {
     setShaderUniform(material, name, value);
 }

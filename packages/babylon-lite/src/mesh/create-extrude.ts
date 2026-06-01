@@ -18,6 +18,7 @@ import { createRibbonData, type RibbonData } from "./create-ribbon.js";
 import { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./create-tube.js";
 export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./create-tube.js";
 
+/** Options for `createExtrudeShapeData`: a 2D `shape` swept along a 3D `path`. */
 export interface ExtrudeShapeOptions {
     shape: Vec3[];
     path: Vec3[];

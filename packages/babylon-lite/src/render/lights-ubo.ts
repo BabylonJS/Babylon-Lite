@@ -134,7 +134,7 @@ function affectsMesh(light: LightBase, mesh: Mesh): boolean {
 
 /** @internal
  * Writes mesh light indices when data is provided. Return encoding:
- * 0 = no lights, N > 0 = one light at index N - 1, N < 0 = -affectedCount. */
+ * 0 = no lights, `N > 0` = one light at index N - 1, `N < 0` = -affectedCount. */
 export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[], data?: Float32Array): number {
     const u32 = data ? new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4) : null;
     let count = 0;

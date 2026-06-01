@@ -20,10 +20,11 @@ export interface DiscData {
     indices: Uint32Array;
 }
 
+/** Options for `createDiscData`. Subset of Babylon's CreateDisc. */
 export interface DiscOptions {
     radius?: number;
     tessellation?: number;
-    /** Fraction of circumference (0<arc≤1). Default 1 (full disc). */
+    /** Fraction of circumference (`0 < arc ≤ 1`). Default 1 (full disc). */
     arc?: number;
 }
 

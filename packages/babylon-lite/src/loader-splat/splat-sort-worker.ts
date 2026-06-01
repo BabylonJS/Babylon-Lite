@@ -7,10 +7,10 @@
  *
  *  Protocol
  *  --------
- *  Init (once):  { p: Float32Array, n: number }
+ *  Init (once):  `{ p: Float32Array, n: number }`
  *                — buffer is transferred and retained on the worker side.
  *                — positions are in mesh-LOCAL space (stride 3, xyz per splat).
- *  Sort  (N×):   { m: Float32Array(16), f: Float32Array(3), c: Float32Array(3), d: BigInt64Array }
+ *  Sort  (N×):   `{ m: Float32Array(16), f: Float32Array(3), c: Float32Array(3), d: BigInt64Array }`
  *                — depthMix is round-tripped via transferable; layout is
  *                  high-32 bits = packed depth (then bit-inverted), low-32 bits = splat index.
  *                  After sort, low-32 bits give the back-to-front order.

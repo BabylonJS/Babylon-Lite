@@ -6,7 +6,9 @@ import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
 import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
+/** Source sampling filter for a post-process pass. */
 export type PostProcessSamplingMode = "nearest" | "linear";
+/** Output blend mode: `0` opaque, `1` additive, `2` premultiplied, `7` non-premultiplied alpha. */
 export type PostProcessAlphaMode = 0 | 1 | 2 | 7;
 
 export interface PostProcessShaderConfig {
@@ -22,6 +24,7 @@ export interface PostProcessShaderConfig {
     extraTextures?: readonly RenderTarget[];
 }
 
+/** Shared user-facing settings for a post-process pass: source/target textures, sampling, alpha mode, viewport, and clear. */
 export interface PostProcessTaskSettings {
     name?: string;
     sourceTexture: RenderTarget;
@@ -37,6 +40,7 @@ export interface PostProcessTaskConfig extends PostProcessTaskSettings {
     _shader: PostProcessShaderConfig;
 }
 
+/** A fullscreen post-process pass that samples a source texture, applies a fragment shader, and writes to an output target. */
 export interface PostProcessTask extends Task, PostProcessTaskSettings {
     readonly name: string;
     sourceSamplingMode: PostProcessSamplingMode;
@@ -45,6 +49,7 @@ export interface PostProcessTask extends Task, PostProcessTaskSettings {
     viewport: NormalizedViewport | null;
     clear: boolean;
     outputTexture: RenderTarget;
+    /** Recompute and upload the pass's uniform buffer from current settings. Call after mutating effect parameters. */
     updateUniforms(): void;
 }
 

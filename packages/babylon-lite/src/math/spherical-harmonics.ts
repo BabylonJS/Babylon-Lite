@@ -6,12 +6,12 @@
  * SphericalPolynomial.FromHarmonics convention.
  *
  * Input layout (Float64Array, 27 entries):
- *   sh[ch * 9 + band]  where ch ∈ {0=R, 1=G, 2=B}, band ∈ 0..8
+ *   sh[ch * 9 + band]  where ch ∈ `{0=R, 1=G, 2=B}`, band ∈ 0..8
  *   Band order: L00, L1_-1, L10, L11, L2_-2, L2_-1, L20, L21, L22
  *   Standard (positive) SH basis — no Condon-Shortley negation.
  *
  * Output layout (Float32Array, 27 entries):
- *   poly[field * 3 + ch]  where field ∈ {x,y,z,xx,yy,zz,yz,zx,xy}
+ *   poly[field * 3 + ch]  where field ∈ `{x,y,z,xx,yy,zz,yz,zx,xy}`
  */
 export function shToPolynomial(sh: Float64Array): Float32Array {
     const invPI = 1 / Math.PI;

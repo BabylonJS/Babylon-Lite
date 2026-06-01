@@ -11,6 +11,7 @@ export interface SphereMeshData {
     indexCount: number;
 }
 
+/** Options for {@link createSphereData}. Subset of Babylon's CreateSphere. */
 export interface SphereOptions {
     segments?: number;
     diameter?: number;

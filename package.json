@@ -33,7 +33,9 @@
         "format": "prettier --write \"packages/**/src/**/*.ts\" \"apps/**/src/**/*.ts\" \"tests/**/*.ts\"",
         "format:check": "prettier --check \"packages/**/src/**/*.ts\" \"apps/**/src/**/*.ts\" \"tests/**/*.ts\"",
         "analyze-bundle": "tsx scripts/analyze-bundle.ts",
-        "coverage:scene": "tsx scripts/coverage-scene.ts"
+        "coverage:scene": "tsx scripts/coverage-scene.ts",
+        "docs": "typedoc",
+        "docs:check": "typedoc --emit none --treatValidationWarningsAsErrors"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -45,12 +47,14 @@
         "eslint": "^10.1.0",
         "eslint-config-prettier": "^10.1.8",
         "eslint-plugin-prettier": "^5.5.5",
+        "eslint-plugin-tsdoc": "^0.5.2",
         "globals": "^17.4.0",
         "miniray": "^0.3.1",
         "pngjs": "^7.0.0",
         "rollup-plugin-visualizer": "^7.0.1",
         "terser": "^5.46.1",
         "tsx": "^4.21.0",
+        "typedoc": "^0.28.19",
         "typescript": "^5.7.0",
         "typescript-eslint": "^8.57.2",
         "vite": "^6.0.0",

@@ -144,7 +144,7 @@ export interface EngineOptions {
     msaaSamples?: 1 | 4;
     /**
      * WebGPU canvas alpha mode. Use "premultiplied" to enable canvas transparency (clear color
-     * with alpha < 1 will let HTML content underneath show through). Defaults to "opaque".
+     * with `alpha < 1` will let HTML content underneath show through). Defaults to "opaque".
      */
     alphaMode?: GPUCanvasAlphaMode;
     /**

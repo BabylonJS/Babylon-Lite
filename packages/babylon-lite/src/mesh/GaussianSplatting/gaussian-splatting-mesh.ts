@@ -89,6 +89,7 @@ export interface GaussianSplattingMesh extends SceneNode {
     /** Resolves on the first sort completion. The lab scene awaits this
      *  before flagging `dataset.ready`. */
     readonly firstSortReady: Promise<void>;
+    /** Resolver for {@link firstSortReady}; called once the first sort completes, then cleared to null. */
     _firstSortResolve: (() => void) | null;
     /** GPU resources, populated by `createGaussianSplattingMesh`. */
     _gs: GaussianSplattingGpu;

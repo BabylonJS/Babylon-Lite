@@ -2,9 +2,11 @@
  * Havok Physics V2 integration for Babylon Lite.
  *
  * Standalone-function API consistent with Lite conventions:
+ * ```ts
  *   const world = await createHavokWorld(scene);
  *   setPhysicsGravity(world, { x: 0, y: -9.81, z: 0 });
  *   const agg = createPhysicsAggregate(world, sphere, PhysicsShapeType.SPHERE, { mass: 1 });
+ * ```
  *
  * The WASM binary is loaded lazily on first call and cached for subsequent worlds.
  */
@@ -17,6 +19,7 @@ import { onBeforeRender } from "../scene/scene-core.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
+/** Geometry type of a physics collision shape. */
 export const enum PhysicsShapeType {
     SPHERE = 0,
     CAPSULE = 1,
@@ -28,6 +31,7 @@ export const enum PhysicsShapeType {
     HEIGHTFIELD = 7,
 }
 
+/** How a body moves: `STATIC` (immovable), `ANIMATED` (driven by the node transform), or `DYNAMIC` (simulated). */
 export const enum PhysicsMotionType {
     STATIC = 0,
     ANIMATED = 1,
@@ -36,6 +40,7 @@ export const enum PhysicsMotionType {
 
 // ─── Option interfaces ───────────────────────────────────────────────
 
+/** Geometry parameters describing a collision shape; which fields apply depends on the shape type. */
 export interface PhysicsShapeParameters {
     center?: Vec3;
     radius?: number;
@@ -45,11 +50,13 @@ export interface PhysicsShapeParameters {
     extents?: Vec3;
 }
 
+/** Options for `createPhysicsShape`: the shape type plus its geometry parameters. */
 export interface PhysicsShapeOptions {
     type: PhysicsShapeType;
     parameters?: PhysicsShapeParameters;
 }
 
+/** Options for `createPhysicsAggregate`: mass, material (friction/restitution), and optional shape geometry overrides. */
 export interface PhysicsAggregateOptions {
     mass: number;
     friction?: number;
@@ -66,16 +73,19 @@ export interface PhysicsAggregateOptions {
 
 // ─── Opaque handles (pure state — no methods) ────────────────────────
 
+/** Opaque handle to a Havok rigid body, bound to a scene node and a motion type. */
 export interface PhysicsBody {
     /** @internal */ readonly _hkBody: any;
     readonly node: SceneNode;
     readonly motionType: PhysicsMotionType;
 }
 
+/** Opaque handle to a Havok collision shape. */
 export interface PhysicsShape {
     /** @internal */ readonly _hkShape: any;
 }
 
+/** A body and its shape wired together, as produced by `createPhysicsAggregate`. */
 export interface PhysicsAggregate {
     readonly body: PhysicsBody;
     readonly shape: PhysicsShape;
@@ -83,6 +93,7 @@ export interface PhysicsAggregate {
 
 // ─── PhysicsWorld — pure-state handle ────────────────────────────────
 
+/** Pure-state handle to a Havok physics world: the WASM module, the native world, its bodies, and the timestep. */
 export interface PhysicsWorld {
     /** @internal */ readonly _hknp: any;
     /** @internal */ readonly _hkWorld: any;
@@ -96,9 +107,11 @@ export interface PhysicsWorld {
  * Create a Havok physics world and register per-frame stepping on the scene.
  *
  * The caller is responsible for loading the WASM binary externally:
+ * ```ts
  *   import HavokPhysics from "@babylonjs/havok";
  *   const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
  *   const world = createHavokWorld(scene, hknp);
+ * ```
  */
 export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3): PhysicsWorld {
     const hkWorld = hknp.HP_World_Create()[1];
@@ -170,10 +183,20 @@ function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
 
 // ─── Gravity ─────────────────────────────────────────────────────────
 
+/**
+ * Sets the world's gravity vector.
+ * @param world - The physics world.
+ * @param gravity - Gravity acceleration in m/s².
+ */
 export function setPhysicsGravity(world: PhysicsWorld, gravity: Vec3): void {
     world._hknp.HP_World_SetGravity(world._hkWorld, [gravity.x, gravity.y, gravity.z]);
 }
 
+/**
+ * Returns the world's current gravity vector.
+ * @param world - The physics world.
+ * @returns Gravity acceleration in m/s².
+ */
 export function getPhysicsGravity(world: PhysicsWorld): Vec3 {
     const g = world._hknp.HP_World_GetGravity(world._hkWorld)[1];
     return { x: g[0], y: g[1], z: g[2] };
@@ -181,20 +204,41 @@ export function getPhysicsGravity(world: PhysicsWorld): Vec3 {
 
 // ─── Timestep ────────────────────────────────────────────────────────
 
+/**
+ * Sets the fixed simulation timestep used by each world step.
+ * @param world - The physics world.
+ * @param dt - Timestep in seconds (e.g. `1 / 60`).
+ */
 export function setPhysicsTimestep(world: PhysicsWorld, dt: number): void {
     world._timestep = dt;
 }
 
+/**
+ * Returns the world's fixed simulation timestep in seconds.
+ * @param world - The physics world.
+ * @returns The timestep in seconds.
+ */
 export function getPhysicsTimestep(world: PhysicsWorld): number {
     return world._timestep;
 }
 
 // ─── Velocity limits ─────────────────────────────────────────────────
 
+/**
+ * Clamps the maximum linear and angular speeds of bodies in the world.
+ * @param world - The physics world.
+ * @param maxLinear - Maximum linear speed.
+ * @param maxAngular - Maximum angular speed.
+ */
 export function setPhysicsVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: number): void {
     world._hknp.HP_World_SetSpeedLimit(world._hkWorld, maxLinear, maxAngular);
 }
 
+/**
+ * Returns the world's current maximum linear and angular speed limits.
+ * @param world - The physics world.
+ * @returns The `maxLinear` and `maxAngular` speed limits.
+ */
 export function getPhysicsVelocityLimits(world: PhysicsWorld): { maxLinear: number; maxAngular: number } {
     const limits = world._hknp.HP_World_GetSpeedLimit(world._hkWorld);
     return { maxLinear: limits[1], maxAngular: limits[2] };
@@ -202,6 +246,14 @@ export function getPhysicsVelocityLimits(world: PhysicsWorld): { maxLinear: numb
 
 // ─── Body ────────────────────────────────────────────────────────────
 
+/**
+ * Creates a rigid body bound to a scene node, adds it to the world, and seeds it with the node's transform.
+ * @param world - The physics world.
+ * @param node - The scene node the body follows / drives.
+ * @param motionType - Whether the body is static, animated (kinematic), or dynamic.
+ * @param startsAsleep - When true, the body is added in a sleeping state.
+ * @returns The created physics body handle.
+ */
 export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionType: PhysicsMotionType, startsAsleep = false): PhysicsBody {
     const { _hknp: hknp, _hkWorld: hkWorld } = world;
 
@@ -233,6 +285,12 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
 
 // ─── Shape ───────────────────────────────────────────────────────────
 
+/**
+ * Creates a collision shape (sphere, box, capsule, or cylinder) from the given options.
+ * @param world - The physics world.
+ * @param options - The shape type and its geometry parameters.
+ * @returns The created shape handle.
+ */
 export function createPhysicsShape(world: PhysicsWorld, options: PhysicsShapeOptions): PhysicsShape {
     const { _hknp: hknp } = world;
     const params = options.parameters ?? {};
@@ -275,10 +333,23 @@ export function createPhysicsShape(world: PhysicsWorld, options: PhysicsShapeOpt
 
 // ─── Shape ↔ Body wiring ─────────────────────────────────────────────
 
+/**
+ * Assigns a collision shape to a body.
+ * @param world - The physics world.
+ * @param body - The body to attach the shape to.
+ * @param shape - The collision shape.
+ */
 export function setPhysicsBodyShape(world: PhysicsWorld, body: PhysicsBody, shape: PhysicsShape): void {
     world._hknp.HP_Body_SetShape(body._hkBody, shape._hkShape);
 }
 
+/**
+ * Sets a shape's surface material properties.
+ * @param world - The physics world.
+ * @param shape - The collision shape.
+ * @param friction - Friction coefficient (used for both static and dynamic friction).
+ * @param restitution - Bounciness in `[0, 1]`.
+ */
 export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape, friction: number, restitution: number): void {
     // Material array: [staticFriction, dynamicFriction, restitution, frictionCombine, restitutionCombine]
     // Combine modes: 0 = GEOMETRIC_MEAN, 1 = MINIMUM, 2 = MAXIMUM
@@ -288,6 +359,12 @@ export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape
 
 // ─── Mass ────────────────────────────────────────────────────────────
 
+/**
+ * Sets a body's mass and a matching diagonal inertia tensor.
+ * @param world - The physics world.
+ * @param body - The body to update.
+ * @param mass - Mass in kilograms.
+ */
 export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass: number): void {
     // massProperties: [centerOfMass[3], mass, inertia[3], inertiaOrientation[4]]
     const massProps = [[0, 0, 0], mass, [mass, mass, mass], [0, 0, 0, 1]];
@@ -391,6 +468,10 @@ function _boundingRadius(mesh: Mesh): number {
 
 // ─── Dispose ─────────────────────────────────────────────────────────
 
+/**
+ * Removes and releases all bodies, then releases the native world. Call once when tearing down physics.
+ * @param world - The physics world to dispose.
+ */
 export function disposePhysics(world: PhysicsWorld): void {
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
 

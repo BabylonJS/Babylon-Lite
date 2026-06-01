@@ -8,7 +8,7 @@
  *
  * Lifecycle:
  *   1. createFrameGraph(engine, scene)      → empty graph
- *   2. addTask{,AtStart,Before}             → register tasks
+ *   2. `addTask{,AtStart,Before}`           → register tasks
  *      (createSceneContext registers a default scene-render task)
  *   3. fg.build()                           → record every task
  *      (allocate render-target textures, build pass descriptors)

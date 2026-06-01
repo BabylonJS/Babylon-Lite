@@ -30,6 +30,8 @@ export interface RenderTargetSignature {
 /** Description of a render target — what to create, not the GPU objects themselves. */
 export const REVERSE_DEPTH_COMPARE = "greater-equal" as GPUCompareFunction;
 
+/** Describes a render target — what attachments to create, not the GPU objects
+ *  themselves. GPU textures are allocated later by `buildRenderTarget`. */
 export interface RenderTargetDescriptor {
     label?: string;
     colorFormat?: GPUTextureFormat;
@@ -42,7 +44,7 @@ export interface RenderTargetDescriptor {
     /** 'canvas' means match the canvas pixel size. Otherwise explicit pixels. */
     size: "canvas" | { width: number; height: number };
     /** If true, the color attachment resolves to the swapchain texture. The RT still
-     *  owns the MSAA texture (when sampleCount > 1) and the depth texture; only the
+     *  owns the MSAA texture (when sampleCount \> 1) and the depth texture; only the
      *  final color is the swapchain view, acquired per frame and patched in at execute
      *  time. With sampleCount === 1 the RT owns no color texture (the swap view is the
      *  color attachment directly). */
@@ -86,7 +88,7 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
 
 /** Allocate GPU textures for the render target. Idempotent for eager targets.
  *  For swapchain-resolved targets the color texture is only allocated when
- *  sampleCount > 1 (MSAA texture used as color attachment, swap view used as
+ *  sampleCount \> 1 (MSAA texture used as color attachment, swap view used as
  *  resolve target); with sampleCount === 1 the swap view is the color attachment
  *  directly so no color texture is owned. Depth is always owned by the RT. */
 export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInternal): void {

@@ -822,7 +822,6 @@
         "maxMad": 0.4,
         "maxRawKB": 110,
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
-        "note": "Frame-graph transmission renders through a linear half-float target before final image processing; residual background blending variance stays within 5 RGB levels.",
         "tags": ["pbr", "gltf", "env", "basis", "transmission"],
         "skipPerf": true
     },

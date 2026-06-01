@@ -71,7 +71,7 @@ export interface StandardMaterialProps extends Material {
     opacityLevel: number;
     /** When true, derive opacity from RGB luminance instead of .a channel. Default false. */
     opacityFromRGB: boolean;
-    /** Alpha test cutoff. Fragments with alpha < alphaCutOff are discarded. Default 0 (no alpha test). */
+    /** Alpha test cutoff. Fragments with `alpha < alphaCutOff` are discarded. Default 0 (no alpha test). */
     alphaCutOff: number;
     /** Optional reflection texture (2D spherical map). Null = no reflection. */
     reflectionTexture: Texture2D | null;

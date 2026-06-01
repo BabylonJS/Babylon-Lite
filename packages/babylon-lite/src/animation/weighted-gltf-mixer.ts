@@ -47,6 +47,7 @@ interface WeightedGltfScratch {
 
 let scratchByManager: WeakMap<AnimationManager, WeightedGltfScratch> | undefined;
 
+/** Options for {@link setAnimationAdditive}, selecting the reference pose subtracted from an additive animation. */
 export interface AnimationAdditiveOptions {
     readonly referenceFrame?: number;
     readonly referenceTime?: number;

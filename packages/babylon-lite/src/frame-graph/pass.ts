@@ -30,6 +30,7 @@ import type { Task } from "./task.js";
  *  the number of draws issued. */
 export type RenderPassExecuteFunc = (pass: GPURenderPassEncoder) => number;
 
+/** Base interface every frame-graph pass implements: a named unit of GPU work with `_initialize` / `_execute` / `_dispose` lifecycle hooks. */
 export interface Pass {
     readonly name: string;
 

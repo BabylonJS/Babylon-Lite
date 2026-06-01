@@ -12,6 +12,7 @@ declare const csg2SolidBrand: unique symbol;
 
 const MATERIAL_ID_RESERVE_COUNT = 65536;
 
+/** A manifold-3d backed CSG solid for high-precision boolean mesh operations. */
 export interface Csg2Solid {
     readonly [csg2SolidBrand]: true;
 }
@@ -37,10 +38,12 @@ interface GeometryBuffers {
 let csg2Runtime: Csg2Runtime | null = null;
 let csg2RuntimePromise: Promise<Csg2Runtime> | null = null;
 
+/** Returns whether the manifold-3d runtime has finished loading and CSG2 is usable. */
 export function isCsg2Ready(): boolean {
     return csg2Runtime !== null;
 }
 
+/** Loads the manifold-3d WASM runtime. Must be awaited once before any CSG2 operation. */
 export async function initializeCsg2Async(): Promise<void> {
     await getRuntimeAsync();
 }
@@ -124,6 +127,12 @@ function requireCpuGeometry(mesh: Mesh): GeometryBuffers {
     };
 }
 
+/**
+ * Builds a {@link Csg2Solid} from a mesh's CPU geometry, baking its world transform.
+ * @param mesh - Source mesh; must retain CPU positions, normals, and indices.
+ * @param materialSlot - Material slot index (0 to 65535) tagged onto the solid's triangles.
+ * @returns A CSG2 solid; call {@link disposeCsg2} when finished to free WASM memory.
+ */
 export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     const runtime = requireRuntime();
     if (materialSlot < 0 || materialSlot >= MATERIAL_ID_RESERVE_COUNT || !Number.isInteger(materialSlot)) {
@@ -186,18 +195,22 @@ function runBooleanOperation(operation: "difference" | "intersection" | "union",
     return solidFromManifold(runtime.Manifold[operation](requireSolidManifold(a, `csg2 ${operation}`), requireSolidManifold(b, `csg2 ${operation}`)), ai._numProp);
 }
 
+/** Returns the boolean difference (`a` − `b`) of two solids as a new solid. */
 export function csg2Subtract(a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     return runBooleanOperation("difference", a, b);
 }
 
+/** Returns the boolean intersection (`a` ∩ `b`) of two solids as a new solid. */
 export function csg2Intersect(a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     return runBooleanOperation("intersection", a, b);
 }
 
+/** Returns the boolean union (`a` ∪ `b`) of two solids as a new solid. */
 export function csg2Add(a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     return runBooleanOperation("union", a, b);
 }
 
+/** Frees the WASM memory backing a solid. The solid must not be used afterwards. */
 export function disposeCsg2(solid: Csg2Solid): void {
     const internal = internalSolid(solid);
     if (internal._manifold) {
@@ -246,6 +259,10 @@ function createMeshFromOutput(engine: EngineContext, name: string, output: { pos
     );
 }
 
+/**
+ * Triangulates a {@link Csg2Solid} into a single renderable mesh.
+ * @param name - Name for the created mesh.
+ */
 export function createMeshFromCsg2(engine: EngineContext, solid: Csg2Solid, name = "csg2"): Mesh {
     requireRuntime();
     const internal = internalSolid(solid);
@@ -257,6 +274,12 @@ export function createMeshFromCsg2(engine: EngineContext, solid: Csg2Solid, name
     return createMeshFromOutput(engine, name, output);
 }
 
+/**
+ * Triangulates a {@link Csg2Solid} into one mesh per material slot.
+ * @param materials - Materials indexed by the material slots assigned during construction.
+ * @param name - Base name; each sub-mesh is suffixed with its slot index.
+ * @returns One mesh per distinct material slot, each assigned its corresponding material.
+ */
 export function createMeshesFromCsg2(engine: EngineContext, solid: Csg2Solid, materials: readonly Material[], name = "csg2"): Mesh[] {
     const runtime = requireRuntime();
     const internal = internalSolid(solid);

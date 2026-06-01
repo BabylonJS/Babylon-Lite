@@ -47,7 +47,7 @@ export interface AnimationChannel {
     readonly pointerQuaternion?: boolean;
 }
 
-/** One glTF animation clip (may animate many nodes). */
+/** One animation clip (may animate many nodes). */
 export interface AnimationClip {
     readonly name: string;
     readonly channels: readonly AnimationChannel[];

@@ -63,8 +63,8 @@ export interface GltfFeature {
     applyMaterial?(mat: GltfMaterialData, ctx: GltfMatExtCtx): Promise<Partial<PbrMaterialProps> | null>;
     /** Texture-wrap hook: given a textureInfo and an already-uploaded Texture2D,
      *  returns either the same Texture2D or a fresh wrapper carrying extra
-     *  per-texture state (e.g. KHR_texture_transform patches `uScale/vScale/
-     *  uOffset/vOffset/uAng` via `cloneTexture2D`). Called eagerly during
+     *  per-texture state (e.g. KHR_texture_transform patches
+     *  `uScale/vScale/uOffset/vOffset/uAng` via `cloneTexture2D`). Called eagerly during
      *  material assembly. Unknown textureInfos must return `tex` unchanged. */
     wrapTexture?(tex: Texture2D, texInfo: unknown): Texture2D;
     /** Per-mesh hook: mutates a freshly-uploaded `MeshInternal`

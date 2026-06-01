@@ -35,6 +35,15 @@ export interface HdrLoadOptions {
     skyboxSize?: number;
 }
 
+/**
+ * Loads a Radiance `.hdr` (RGBE) equirectangular panorama and builds GPU-ready IBL textures
+ * (prefiltered specular cubemap, BRDF LUT, and irradiance spherical harmonics), then attaches
+ * them to the scene and queues optional skybox/ground background renderables.
+ * @param scene - The scene to receive the environment textures and background renderables.
+ * @param url - URL of the `.hdr` file to fetch.
+ * @param options - Optional face size, skybox, and ground settings.
+ * @returns The assembled environment textures (also stored on the scene).
+ */
 export async function loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures> {
     const engine = scene.engine as EngineContextInternal;
     const faceSize = options?.faceSize ?? 256;

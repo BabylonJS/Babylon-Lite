@@ -2,7 +2,7 @@
  *
  *  Matches Babylon.js' NME ImageProcessingBlock for the image-processing state
  *  currently exposed by Lite's canonical scene UBO (sceneU.vImageInfos):
- *  optional input gamma->linear conversion, exposure, standard exponential
+ *  optional input `gamma->linear` conversion, exposure, standard exponential
  *  tone mapping, gamma encode, clamp, and contrast. Color grading/vignette/
  *  dither are intentionally absent because Lite does not expose those scene
  *  states yet.

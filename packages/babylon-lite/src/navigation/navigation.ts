@@ -6,6 +6,7 @@
  * that do not use navigation pay zero bundle cost.
  *
  * Usage:
+ * ```ts
  *   const nav = await createNavigationPluginAsync();
  *   createNavMesh(nav, [ground, sphere, box], params);
  *   const debug = createDebugNavMeshGeometry(nav);
@@ -13,18 +14,25 @@
  *   const crowd = createNavCrowd(nav, 10, 0.1);
  *   const idx = addAgent(crowd, spawnPos, agentParams);
  *   updateNavCrowd(crowd, 1 / 60);
+ * ```
  *
  * For obstacles (tile-cache navmesh):
+ * ```ts
  *   createNavMesh(nav, [...], { ..., maxObstacles: 32, tileSize: 32 });
  *   const ref = addBoxObstacle(nav, { x, y, z }, { x: 1, y: 1, z: 1 }, angle);
  *   removeObstacle(nav, ref);
+ * ```
  *
  * For off-mesh connections:
+ * ```ts
  *   createNavMesh(nav, [...], { ..., offMeshConnections: [...] });
+ * ```
  *
  * For raycast:
+ * ```ts
  *   const r = raycast(nav, start, end);
  *   if (r.hit) console.log(r.hitPoint);
+ * ```
  */
 
 import type { Vec3 } from "../math/types.js";
@@ -53,7 +61,7 @@ export interface NavMeshParameters {
     /** Tile size for tiled / tile-cache navmesh. Recommended 32-64 for tile cache. */
     tileSize?: number;
     /**
-     * Maximum number of obstacles. If > 0 the navmesh is built with a tile cache
+     * Maximum number of obstacles. If `> 0` the navmesh is built with a tile cache
      * so obstacles can be added/removed dynamically.
      */
     maxObstacles?: number;
@@ -71,9 +79,9 @@ export interface OffMeshConnection {
     endPosition: Vec3;
     radius: number;
     bidirectional: boolean;
-    /** @default 0 */
+    /** @defaultValue 0 */
     area?: number;
-    /** @default 1 */
+    /** @defaultValue 1 */
     flags?: number;
     userId?: number;
 }
@@ -156,7 +164,9 @@ async function _ensureRecast(locateFile?: (url: string) => string): Promise<{ co
  * it inline — same pattern as `HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" })`.
  *
  * @example
+ * ```ts
  *   const nav = await createNavigationPluginAsync({ locateFile: () => "/recast-navigation.wasm" });
+ * ```
  */
 export async function createNavigationPluginAsync(options?: { locateFile?: (url: string) => string }): Promise<NavigationPlugin> {
     const { core, gens } = await _ensureRecast(options?.locateFile);
@@ -588,8 +598,8 @@ export function raycast(plugin: NavigationPlugin, start: Vec3, end: Vec3): { hit
  * built with `maxObstacles > 0`. The tile cache is fully updated before
  * returning (matching BJS Addons default behavior).
  *
- * @param halfExtents box half-size on each axis
- * @param angle rotation around the Y axis, in radians
+ * @param halfExtents - box half-size on each axis
+ * @param angle - rotation around the Y axis, in radians
  */
 export function addBoxObstacle(plugin: NavigationPlugin, position: Vec3, halfExtents: Vec3, angle: number): ObstacleHandle | null {
     _assertTileCache(plugin);
@@ -604,8 +614,8 @@ export function addBoxObstacle(plugin: NavigationPlugin, position: Vec3, halfExt
 /**
  * Add a cylinder obstacle to a tile-cache navmesh.
  *
- * @param radius cylinder radius
- * @param height cylinder height
+ * @param radius - cylinder radius
+ * @param height - cylinder height
  */
 export function addCylinderObstacle(plugin: NavigationPlugin, position: Vec3, radius: number, height: number): ObstacleHandle | null {
     _assertTileCache(plugin);

@@ -88,9 +88,9 @@ const STAGE_FRAGMENT = 0x2;
 
 /**
  * Create a subsurface translucency fragment.
- * @param hasThicknessMap Whether the material has a thickness texture.
- * @param hasIbl Whether the scene has IBL.
- * @param useGltfThicknessChannel Sample the thickness texture's G channel
+ * @param hasThicknessMap - Whether the material has a thickness texture.
+ * @param hasIbl - Whether the scene has IBL.
+ * @param useGltfThicknessChannel - Sample the thickness texture's G channel
  *        (KHR_materials_volume) instead of R (BJS default).
  */
 export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boolean, useGltfThicknessChannel: boolean): ShaderFragment {

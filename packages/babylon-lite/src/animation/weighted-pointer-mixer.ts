@@ -42,17 +42,20 @@ interface AnimationWeightFade {
     elapsedMs: number;
 }
 
+/** Options for {@link fadeAnimationWeight}. */
 export interface FadeAnimationWeightOptions {
     readonly to: number;
     readonly durationMs: number;
     readonly from?: number;
 }
 
+/** Options for {@link crossFadeAnimationGroups}. */
 export interface CrossFadeAnimationGroupsOptions {
     readonly durationMs: number;
     readonly toWeight?: number;
 }
 
+/** Enables weighted property-animation blending on `manager` by registering its category handler. */
 export function enablePropertyAnimationBlending(manager: AnimationManager): void {
     setAnimationTaskCategoryHandler(manager, ANIMATION_GROUP_TASK_CATEGORY, updateWeightedPointerAnimations);
 }
@@ -71,6 +74,8 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
     return scratch;
 }
 
+/** Animates `group`'s blend weight toward `options.to` over `options.durationMs`, enabling blending on `manager`.
+ *  @throws If `to`/`from` are outside `[0, 1]` or the duration is not a finite positive number. */
 export function fadeAnimationWeight(manager: AnimationManager, group: AnimationGroup, options: FadeAnimationWeightOptions): void {
     const to = validateWeight(options.to);
     const from = options.from === undefined ? group.weight : validateWeight(options.from);
@@ -89,6 +94,7 @@ export function fadeAnimationWeight(manager: AnimationManager, group: AnimationG
     scratch.fades.push({ group, from, to, durationMs: options.durationMs, elapsedMs: 0 });
 }
 
+/** Cross-fades from `fromGroup` to `toGroup`, fading the first to weight 0 and the second to `options.toWeight` (default 1). */
 export function crossFadeAnimationGroups(manager: AnimationManager, fromGroup: AnimationGroup, toGroup: AnimationGroup, options: CrossFadeAnimationGroupsOptions): void {
     const toWeight = validateWeight(options.toWeight ?? 1);
     fadeAnimationWeight(manager, fromGroup, { to: 0, durationMs: options.durationMs });

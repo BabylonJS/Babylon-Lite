@@ -11,6 +11,9 @@ import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 
+/** A loaded 2D texture: the GPU texture, its default view and sampler, pixel
+ *  dimensions, and an optional per-texture UV transform. This is the public
+ *  texture handle returned by `loadTexture2D()`, `createSolidTexture2D()`, etc. */
 export interface Texture2D {
     texture: GPUTexture;
     view: GPUTextureView;
@@ -59,6 +62,7 @@ export function cloneTexture2D(
     return { ...base, ...transform } as Texture2D;
 }
 
+/** Sampler, format, and decode options for `loadTexture2D()`. */
 export interface Texture2DOptions {
     /** Generate mipmaps. Default true. */
     mipMaps?: boolean;
@@ -92,6 +96,13 @@ export function clearTexture2DCache(engine: EngineContextInternal): void {
     _tex2dCache?.delete(device);
 }
 
+/** Load an image from `url` into a GPU `Texture2D`, generating mipmaps by default.
+ *  Results are cached per device by URL + options, so repeated calls with the
+ *  same arguments share one texture promise.
+ *  @param engine - Engine context.
+ *  @param url - Image URL to fetch and decode.
+ *  @param opts - Sampler, format, and decode overrides.
+ *  @returns A promise resolving to the uploaded `Texture2D`. */
 export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
     const device = (engine as EngineContextInternal).device;
     if (!_tex2dCache) {

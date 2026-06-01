@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { spawn } from "child_process";
 
 function hasBuildableRootScripts(htmlFile: string): boolean {
     const html = readFileSync(resolve(__dirname, htmlFile), "utf-8");
@@ -102,8 +103,241 @@ function serveReferenceImages(): Plugin {
     };
 }
 
+/**
+ * Dev-server endpoints backing the lab's "API Docs" tab.
+ *  - `GET  /lab-api/docs-status`   → whether the TypeDoc site has been generated.
+ *  - `POST /lab-api/generate-docs` → runs TypeDoc (repo-root `typedoc.json`) on demand
+ *    and reports success + tail of the log. Output lands in `lab/public/api-docs/`,
+ *    which Vite serves statically at `/api-docs/`.
+ */
+function apiDocsPlugin(): Plugin {
+    const repoRoot = resolve(__dirname, "..");
+    const docsIndex = resolve(__dirname, "public/api-docs/index.html");
+    let generating = false;
+
+    return {
+        name: "lab-api-docs",
+        configureServer(server) {
+            server.middlewares.use((req, res, next) => {
+                const url = (req.url ?? "").split("?")[0];
+
+                if (url === "/lab-api/docs-status") {
+                    const generated = existsSync(docsIndex);
+                    res.setHeader("Content-Type", "application/json");
+                    res.setHeader("Cache-Control", "no-store");
+                    res.end(
+                        JSON.stringify({
+                            generated,
+                            generating,
+                            mtime: generated ? statSync(docsIndex).mtimeMs : null,
+                        })
+                    );
+                    return;
+                }
+
+                if (url === "/lab-api/generate-docs") {
+                    if (req.method !== "POST") {
+                        res.statusCode = 405;
+                        res.end("Method Not Allowed");
+                        return;
+                    }
+                    if (generating) {
+                        res.statusCode = 409;
+                        res.setHeader("Content-Type", "application/json");
+                        res.end(JSON.stringify({ ok: false, error: "Documentation generation already in progress." }));
+                        return;
+                    }
+                    generating = true;
+                    const typedocCli = resolve(repoRoot, "node_modules/typedoc/dist/lib/cli.js");
+                    const child = spawn(process.execPath, [typedocCli], { cwd: repoRoot });
+                    let log = "";
+                    const collect = (d: Buffer) => {
+                        log += d.toString();
+                    };
+                    child.stdout.on("data", collect);
+                    child.stderr.on("data", collect);
+                    child.on("error", (err) => {
+                        generating = false;
+                        res.statusCode = 500;
+                        res.setHeader("Content-Type", "application/json");
+                        res.end(JSON.stringify({ ok: false, error: String(err), log: log.slice(-4000) }));
+                    });
+                    child.on("close", (code) => {
+                        generating = false;
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-store");
+                        res.end(JSON.stringify({ ok: code === 0, code, log: log.slice(-4000) }));
+                    });
+                    return;
+                }
+
+                next();
+            });
+        },
+    };
+}
+
+/**
+ * Dev-server endpoints that let the lab dashboard generate a tab's underlying
+ * data on demand when it is missing (Parity, Bundle, Perf, Perf Regression).
+ *
+ *  - `GET  /lab-api/gen-status?target=X` → `{ generated, generating, mtime, present, total, done, ok, error, log }`.
+ *  - `POST /lab-api/generate?target=X`   → starts the matching pnpm command as a
+ *    background job and returns immediately (`{ started: true }`). The client then
+ *    polls `gen-status` for live log output and completion. A single global lock
+ *    means only one generation runs at a time (these are CPU/GPU heavy).
+ *
+ * Job state lives in-memory on the dev server so it survives full page reloads
+ * (e.g. when a bundle build writes into `lab/public` and Vite reloads the page).
+ */
+function tabContentPlugin(): Plugin {
+    const repoRoot = resolve(__dirname, "..");
+    const publicDir = resolve(__dirname, "public");
+
+    type TargetDef = { command: string; detect: () => { generated: boolean; mtime: number | null; present?: number; total?: number } };
+
+    const mtimeOf = (p: string): number | null => {
+        try {
+            return existsSync(p) ? statSync(p).mtimeMs : null;
+        } catch {
+            return null;
+        }
+    };
+    const fileTarget = (p: string) => () => ({ generated: existsSync(p), mtime: mtimeOf(p) });
+    const detectParity = () => {
+        let present = 0;
+        let total = 0;
+        let mtime: number | null = null;
+        try {
+            const cfgPath = resolve(repoRoot, "scene-config.json");
+            if (existsSync(cfgPath)) {
+                const cfg = JSON.parse(readFileSync(cfgPath, "utf-8")) as Array<{ slug: string; skipParity?: boolean }>;
+                for (const s of cfg) {
+                    if (s.skipParity) continue;
+                    total++;
+                    const m = mtimeOf(resolve(repoRoot, "reference", s.slug, "test-actual.png"));
+                    if (m != null) {
+                        present++;
+                        mtime = mtime == null ? m : Math.max(mtime, m);
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
+        return { generated: present > 0, mtime, present, total };
+    };
+
+    const TARGETS: Record<string, TargetDef> = {
+        parity: { command: "pnpm test:parity", detect: detectParity },
+        bundle: { command: "pnpm build:bundle-scenes", detect: fileTarget(resolve(publicDir, "bundle/manifest.json")) },
+        perf: { command: "pnpm test:perf", detect: fileTarget(resolve(publicDir, "perf-manifest.json")) },
+        perfreg: {
+            // The regression test needs current + baseline bundles; build them first
+            // so a fresh checkout actually produces perf-regression-manifest.json.
+            command: "pnpm build:bundle-scenes && pnpm build:perf-baseline && pnpm test:perf-regression",
+            detect: fileTarget(resolve(publicDir, "perf-regression-manifest.json")),
+        },
+    };
+
+    type Job = { running: boolean; log: string; done: boolean; ok: boolean; code: number | null; error?: string };
+    const jobs: Record<string, Job> = {};
+    let busy: string | null = null;
+
+    const json = (res: import("http").ServerResponse, body: unknown, status = 200) => {
+        res.statusCode = status;
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Cache-Control", "no-store");
+        res.end(JSON.stringify(body));
+    };
+
+    return {
+        name: "lab-tab-content",
+        configureServer(server) {
+            server.middlewares.use((req, res, next) => {
+                const [path, qs] = (req.url ?? "").split("?");
+                const target = new URLSearchParams(qs ?? "").get("target") ?? "";
+
+                if (path === "/lab-api/gen-status") {
+                    const def = TARGETS[target];
+                    if (!def) {
+                        json(res, { error: "Unknown target" }, 400);
+                        return;
+                    }
+                    const det = def.detect();
+                    const job = jobs[target];
+                    json(res, {
+                        generated: det.generated,
+                        generating: !!(job && job.running),
+                        mtime: det.mtime,
+                        present: det.present,
+                        total: det.total,
+                        done: !!(job && job.done),
+                        ok: job ? job.ok : undefined,
+                        error: job ? job.error : undefined,
+                        log: job ? job.log.slice(-6000) : "",
+                    });
+                    return;
+                }
+
+                if (path === "/lab-api/generate") {
+                    if (req.method !== "POST") {
+                        json(res, { error: "Method Not Allowed" }, 405);
+                        return;
+                    }
+                    const def = TARGETS[target];
+                    if (!def) {
+                        json(res, { error: "Unknown target" }, 400);
+                        return;
+                    }
+                    if (busy) {
+                        json(res, { started: false, error: "A generation is already in progress (" + busy + ")." }, 409);
+                        return;
+                    }
+                    busy = target;
+                    const job: Job = { running: true, log: "", done: false, ok: false, code: null };
+                    jobs[target] = job;
+                    const shellCmd = process.platform === "win32" ? "cmd" : "sh";
+                    const shellArgs = process.platform === "win32" ? ["/c", def.command] : ["-c", def.command];
+                    const child = spawn(shellCmd, shellArgs, { cwd: repoRoot });
+                    job.log += "$ " + def.command + "\n\n";
+                    const collect = (d: Buffer) => {
+                        job.log += d.toString();
+                    };
+                    child.stdout.on("data", collect);
+                    child.stderr.on("data", collect);
+                    child.on("error", (err) => {
+                        job.running = false;
+                        job.done = true;
+                        job.ok = false;
+                        job.error = String(err);
+                        busy = null;
+                    });
+                    child.on("close", (code) => {
+                        job.running = false;
+                        job.done = true;
+                        job.code = code;
+                        const det = def.detect();
+                        job.ok = code === 0 && det.generated;
+                        if (code === 0 && !det.generated) {
+                            job.error = "Command finished but the expected artifact is still missing.";
+                        } else if (code !== 0) {
+                            job.error = "Command exited with code " + code + ".";
+                        }
+                        busy = null;
+                    });
+                    json(res, { started: true });
+                    return;
+                }
+
+                next();
+            });
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [serveReferenceImages()],
+    plugins: [serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.
@@ -123,6 +357,25 @@ export default defineConfig({
     },
     server: {
         port: 5174,
+        watch: {
+            // On-demand tab generation writes many files under the Vite root that
+            // would otherwise churn the single-threaded dev server (stalling the
+            // live generation-log polling) or trigger disruptive full page reloads.
+            // All of these are build artifacts — the lab re-fetches them over HTTP
+            // via each tab's reload() callback, never via HMR — so exclude them:
+            //   • bundle build / API docs  → hundreds of files
+            //   • perf-baseline (perfreg)  → bundle-baseline/ + bundle-baseline-scene*.html
+            //   • perf manifests           → single-file writes that force a reload
+            ignored: [
+                "**/public/bundle/**",
+                "**/public/bundle-baseline/**",
+                "**/public/api-docs/**",
+                "**/public/perf-manifest.json",
+                "**/public/perf-regression-manifest.json",
+                "**/bundle-baseline-scene*.html",
+                "**/.perf-baseline-worktree/**",
+            ],
+        },
     },
     build: {
         rollupOptions: {

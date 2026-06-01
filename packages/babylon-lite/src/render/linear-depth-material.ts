@@ -42,6 +42,7 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 `;
 
+/** Options for `createLinearDepthMaterial()`. */
 export interface LinearDepthMaterialOptions {
     /** Camera near plane (defaults to 0.03 to match the source playground). */
     near?: number;

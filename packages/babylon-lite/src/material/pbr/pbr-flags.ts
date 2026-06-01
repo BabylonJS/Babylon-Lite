@@ -52,7 +52,7 @@ export interface _PbrBindCtx {
 export interface PbrExt {
     readonly id: string;
     readonly phase: PbrExtPhase;
-    /** Contribute feature bits for a given material. Returns {f,f2} to OR in. */
+    /** Contribute feature bits for a given material. Returns `{f,f2}` to OR in. */
     detect?(mat: unknown): { f: number; f2: number };
     /** Contribute a ShaderFragment (null if gated off for this variant). */
     frag?(ctx: _PbrFragCtx): ShaderFragment | null;

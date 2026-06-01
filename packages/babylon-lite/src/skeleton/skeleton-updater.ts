@@ -48,6 +48,7 @@ function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int
     return order;
 }
 
+/** Drives playback of a skeletal/morph animation clip, advancing time and uploading bone matrices each tick. */
 export interface AnimationController {
     /** Advance animation by deltaMs and update bone textures. */
     tick(deltaMs: number, engine?: EngineContext): void;

@@ -17,6 +17,29 @@
                 color: #e6edf3;
                 min-height: 100vh;
             }
+            /* ── Global scrollbar styling ──────────────────────── */
+            * {
+                scrollbar-width: thin;
+                scrollbar-color: #30363d transparent;
+            }
+            ::-webkit-scrollbar {
+                width: 10px;
+                height: 10px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #30363d;
+                border-radius: 6px;
+                border: 2px solid #0d1117;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: #484f58;
+            }
+            ::-webkit-scrollbar-corner {
+                background: transparent;
+            }
             header {
                 padding: 2rem 2rem 1rem;
             }
@@ -98,6 +121,38 @@
             }
             .tab-hint code {
                 color: #e6edf3;
+            }
+            .tab-hint.has-regen {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+            }
+            .tab-hint.has-regen .tab-hint-text {
+                flex: 1 1 auto;
+                min-width: 0;
+            }
+            .tab-hint-regen {
+                flex: 0 0 auto;
+                padding: 0 8px;
+                font-size: 0.75rem;
+                line-height: 1.35;
+                font-weight: 600;
+                font-family: inherit;
+                color: #e6edf3;
+                background: #21262d;
+                border: 1px solid #30363d;
+                border-radius: 5px;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: all 0.15s;
+            }
+            .tab-hint-regen:hover {
+                background: #30363d;
+                border-color: #58a6ff;
+            }
+            .tab-hint-regen:disabled {
+                opacity: 0.6;
+                cursor: default;
             }
             .tab-panel {
                 display: none;
@@ -1144,16 +1199,162 @@
                 border-color: #1f6feb;
             }
 
+            /* ── Hamburger / "More tools" menu ──────────────────── */
+            .hamburger-menu {
+                position: relative;
+                display: inline-block;
+            }
+            .hamburger-dropdown {
+                position: absolute;
+                top: calc(100% + 0.4rem);
+                left: 0;
+                z-index: 60;
+                display: flex;
+                flex-direction: column;
+                gap: 0.3rem;
+                min-width: 250px;
+                padding: 0.45rem;
+                background: #161b22;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+            }
+            .hamburger-dropdown[hidden] {
+                display: none;
+            }
+            .hamburger-menu .hamburger-item:not(.active) {
+                background: transparent;
+                border-color: transparent;
+            }
+            .hamburger-menu .hamburger-item {
+                margin: 0;
+                width: 100%;
+                justify-content: flex-start;
+            }
+            .hamburger-menu .hamburger-item:hover {
+                background: #30363d;
+                border-color: #58a6ff;
+            }
+
+            /* ── On-demand tab content generation ──────────────── */
+            .gen-block {
+                display: none;
+                padding: 16px;
+                margin: 10px 0 6px;
+                background: #0d1117;
+                border: 1px solid #21262d;
+                border-radius: 8px;
+            }
+            .gen-block.show {
+                display: block;
+            }
+            .gen-block-msg {
+                color: #c9d1d9;
+                font-size: 13px;
+                margin-bottom: 10px;
+            }
+            .gen-block-msg code {
+                color: #6cb6ff;
+            }
+            .gen-log-bar {
+                display: none;
+                align-items: center;
+                justify-content: space-between;
+                margin-top: 10px;
+                margin-bottom: 4px;
+            }
+            .gen-log {
+                display: none;
+                max-height: 240px;
+                overflow: auto;
+                background: #010409;
+                border: 1px solid #21262d;
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 12px;
+                color: #c9d1d9;
+                white-space: pre-wrap;
+            }
+
             .docs-panel {
                 display: none;
+                position: relative;
                 border-bottom: 1px solid #21262d;
-                padding: 1.5rem 2rem 2rem;
+                padding: 0 2rem 2rem;
                 max-height: 82vh;
                 overflow-y: auto;
                 scrollbar-color: #30363d #0d1117;
             }
             .docs-panel.open {
                 display: block;
+                position: fixed;
+                inset: 0;
+                z-index: 100;
+                max-height: none;
+                border-bottom: none;
+                background: #0d1117;
+            }
+            /* While an overlay tool is open, lock the host page so only the overlay (or its iframe) scrolls. */
+            body.overlay-open {
+                overflow: hidden;
+            }
+            /* API Docs overlay: fill height as a flex column so only the iframe scrolls (no host/panel scroll). */
+            #apidocs-panel.open {
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+            #apidocs-panel .docs-close-row,
+            #apidocs-panel .tab-hint {
+                flex: 0 0 auto;
+            }
+            #apidocs-panel #apidocs-frame {
+                flex: 1 1 auto;
+                min-height: 0;
+                height: auto;
+            }
+            /* Sticky header bar shown at the top of each overlay panel. */
+            .docs-close-row {
+                position: sticky;
+                top: 0;
+                z-index: 6;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+                margin: 0 -2rem 0.6rem;
+                padding: 0.55rem 2rem;
+                background: #0d1117;
+                border-bottom: 1px solid #21262d;
+            }
+            .docs-close-row .docs-section-title {
+                margin: 0;
+                padding: 0;
+                border-bottom: none;
+            }
+            .docs-close-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                padding: 0.4rem 0.95rem;
+                border-radius: 6px;
+                border: 1px solid #30363d;
+                background: #21262d;
+                color: #e6edf3;
+                font-size: 0.8rem;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.15s;
+                font-family: inherit;
+            }
+            .docs-close-btn:hover {
+                background: #da3633;
+                border-color: #f85149;
+                color: #fff;
+            }
+            .docs-close-btn:focus-visible {
+                outline: 2px solid #58a6ff;
+                outline-offset: 1px;
             }
             .docs-section-title {
                 font-size: 1.05rem;
@@ -1972,8 +2173,14 @@
         <header>
             <h1>Babylon <span>Lite</span> — Scene Gallery</h1>
             <p>WebGPU rendering engine · pixel-perfect parity with Babylon.js</p>
-            <button class="docs-toggle" id="docs-toggle" onclick="toggleDocs()">📖 Architecture &amp; Features</button>
-            <button class="docs-toggle" id="pitch-toggle" onclick="togglePitch()" style="margin-left: 0.5rem">📊 Performance Summary</button>
+            <div class="hamburger-menu" id="hamburger-menu">
+                <button class="docs-toggle" id="hamburger-btn" onclick="toggleHamburgerMenu(event)" aria-haspopup="true" aria-expanded="false" title="More tools">☰ Tools</button>
+                <div class="hamburger-dropdown" id="hamburger-dropdown" hidden>
+                    <button class="docs-toggle hamburger-item" id="docs-toggle" onclick="toggleDocs(); closeHamburgerMenu()">📖 Architecture &amp; Features</button>
+                    <button class="docs-toggle hamburger-item" id="pitch-toggle" onclick="togglePitch(); closeHamburgerMenu()">📊 Performance Summary</button>
+                    <button class="docs-toggle hamburger-item" id="apidocs-menu-item" onclick="openApiDocsFromMenu()">📘 API Docs</button>
+                </div>
+            </div>
             <button class="docs-toggle" id="compact-toggle" onclick="toggleCompact()" style="margin-left: 0.5rem" title="Toggle small card layout">🔳 Compact</button>
             <button class="docs-toggle" id="show-hidden-toggle" onclick="toggleShowHidden()" style="margin-left: 0.5rem" title="Show hidden cards so you can restore them">
                 👁 Show Hidden <span id="hidden-count" style="font-size: 0.65rem; opacity: 0.7"></span>
@@ -1985,7 +2192,10 @@
         </header>
 
         <div id="docs-panel" class="docs-panel">
-            <h3 class="docs-section-title">🏗️ <span>Architecture Overview</span></h3>
+            <div class="docs-close-row">
+                <h3 class="docs-section-title">🏗️ <span>Architecture Overview</span></h3>
+                <button class="docs-close-btn" type="button" onclick="toggleDocs()" aria-label="Close Architecture overview">✕ Close</button>
+            </div>
             <div class="arch-diagram">
                 <div class="arch-layer arch-layer-app">
                     <div class="arch-layer-label">Application Layer</div>
@@ -3440,7 +3650,10 @@
         </div>
 
         <div id="pitch-panel" class="docs-panel">
-            <h3 class="docs-section-title">📊 <span>Babylon Lite vs Babylon.js — At a Glance</span></h3>
+            <div class="docs-close-row">
+                <h3 class="docs-section-title">📊 <span>Babylon Lite vs Babylon.js — At a Glance</span></h3>
+                <button class="docs-close-btn" type="button" onclick="togglePitch()" aria-label="Close Performance Summary">✕ Close</button>
+            </div>
             <p style="color: #8b949e; font-size: 0.8rem; margin-bottom: 1.5rem">
                 Averages computed from live benchmarks across all test scenes. Data from <code>bundle/manifest.json</code> and <code>perf-manifest.json</code>.
             </p>
@@ -3499,9 +3712,12 @@
         </div>
 
         <div id="panel-parity" class="tab-panel">
-            <div class="tab-hint">
-                💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>; exceeding
-                shown in <span style="color: #f85149">red</span>.
+            <div class="tab-hint has-regen">
+                <span class="tab-hint-text">
+                    💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>; exceeding
+                    shown in <span style="color: #f85149">red</span>.
+                </span>
+                <button class="tab-hint-regen" id="parity-regen-btn" onclick="generateTabContent('parity')" title="Regenerate parity diffs (pnpm test:parity)">⚙ Regenerate</button>
             </div>
             <div class="parity-toolbar">
                 <input id="parity-search" class="scene-search" type="search" placeholder="Filter parity scenes…" aria-label="Filter parity scenes" oninput="setSceneSearch('parity', this.value)" />
@@ -3510,6 +3726,15 @@
                 <button class="btn parity-sort-btn" onclick="sortParityGrid('asc')" data-sort="asc" title="Sort by MAD ascending">MAD ↑</button>
                 <button class="btn parity-sort-btn" onclick="sortParityGrid('desc')" data-sort="desc" title="Sort by MAD descending">MAD ↓</button>
                 <button class="btn" id="parity-filter-btn" onclick="toggleParityFilter()" title="Show only scenes exceeding their MAD threshold">🔴 Diffs Only</button>
+            </div>
+            <div class="gen-block" id="gen-parity">
+                <div class="gen-block-msg" id="gen-parity-msg"></div>
+                <span class="perf-status" id="gen-parity-spinner"></span>
+                <div class="gen-log-bar" id="gen-parity-logbar">
+                    <span style="font-size: 12px; color: #8b949e">Output</span>
+                    <button class="btn" id="gen-parity-logclose" onclick="closeTabGenLog('parity')">✕ Close logs</button>
+                </div>
+                <pre class="gen-log" id="gen-parity-log"></pre>
             </div>
             <div class="parity-build-progress" id="parity-build-progress" hidden role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <div class="parity-build-progress-row">
@@ -3524,9 +3749,12 @@
         </div>
 
         <div id="panel-bundle" class="tab-panel">
-            <div class="tab-hint">
-                💡 Bundle sizes shown below come from <code>manifest.json</code>. Deltas compare against master via <code>master-manifest.json</code>. To regenerate:
-                <code>pnpm build:bundle-scenes</code><span id="bundle-master-status" class="bundle-master-status"></span>
+            <div class="tab-hint has-regen">
+                <span class="tab-hint-text">
+                    💡 Bundle sizes shown below come from <code>manifest.json</code>. Deltas compare against master via <code>master-manifest.json</code>. To regenerate:
+                    <code>pnpm build:bundle-scenes</code><span id="bundle-master-status" class="bundle-master-status"></span>
+                </span>
+                <button class="tab-hint-regen" id="bundle-regen-btn" onclick="generateTabContent('bundle')" title="Regenerate bundle sizes (pnpm build:bundle-scenes)">⚙ Regenerate</button>
             </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="bundle-filter-pills"></div>
@@ -3537,6 +3765,15 @@
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('desc')" data-sort="desc" title="Sort by Lite min size descending">Size ↓</button>
                 <button class="btn" id="bundle-summary-btn" onclick="toggleBundleSummary()" title="Show bundle delta summary">📋 Summary</button>
                 <button class="btn" id="bundle-filter-btn" onclick="toggleBundleOverFilter()" title="Show only scenes over their size ceiling">🔴 Over Only</button>
+            </div>
+            <div class="gen-block" id="gen-bundle">
+                <div class="gen-block-msg" id="gen-bundle-msg"></div>
+                <span class="perf-status" id="gen-bundle-spinner"></span>
+                <div class="gen-log-bar" id="gen-bundle-logbar">
+                    <span style="font-size: 12px; color: #8b949e">Output</span>
+                    <button class="btn" id="gen-bundle-logclose" onclick="closeTabGenLog('bundle')">✕ Close logs</button>
+                </div>
+                <pre class="gen-log" id="gen-bundle-log"></pre>
             </div>
             <div class="bundle-summary-panel" id="bundle-summary-panel" hidden>
                 <div class="bundle-summary-header">
@@ -3580,9 +3817,12 @@
         </div>
 
         <div id="panel-perf" class="tab-panel">
-            <div class="tab-hint">
-                💡 RAF callback CPU time per scene, measured via Playwright. Run <code>pnpm test:perf</code> to refresh.
-                <span id="perf-manifest-status" style="color: #3fb950"></span>
+            <div class="tab-hint has-regen">
+                <span class="tab-hint-text">
+                    💡 RAF callback CPU time per scene, measured via Playwright. Run <code>pnpm test:perf</code> to refresh.
+                    <span id="perf-manifest-status" style="color: #3fb950"></span>
+                </span>
+                <button class="tab-hint-regen" id="perf-regen-btn" onclick="generateTabContent('perf')" title="Regenerate perf benchmarks (pnpm test:perf)">⚙ Regenerate</button>
             </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="perf-filter-pills"></div>
@@ -3590,6 +3830,15 @@
                 <div style="flex: 1"></div>
                 <button class="btn" id="perf-filter-btn" onclick="togglePerfFilter()" title="Show only scenes where BJS beats Lite on any metric">⚠ Regressions Only</button>
                 <span id="perf-status" class="perf-status"></span>
+            </div>
+            <div class="gen-block" id="gen-perf">
+                <div class="gen-block-msg" id="gen-perf-msg"></div>
+                <span class="perf-status" id="gen-perf-spinner"></span>
+                <div class="gen-log-bar" id="gen-perf-logbar">
+                    <span style="font-size: 12px; color: #8b949e">Output</span>
+                    <button class="btn" id="gen-perf-logclose" onclick="closeTabGenLog('perf')">✕ Close logs</button>
+                </div>
+                <pre class="gen-log" id="gen-perf-log"></pre>
             </div>
             <div class="perf-legend">
                 <span><span class="legend-dot legend-lite"></span>Babylon Lite</span>
@@ -3601,9 +3850,12 @@
         </div>
 
         <div id="panel-perfreg" class="tab-panel">
-            <div class="tab-hint">
-                💡 Current Babylon-Lite vs upstream-Lite baseline (per-scene RAF frame time). Run <code>pnpm test:perf-regression</code> to refresh.
-                <span id="perfreg-manifest-status" style="color: #3fb950"></span>
+            <div class="tab-hint has-regen">
+                <span class="tab-hint-text">
+                    💡 Current Babylon-Lite vs upstream-Lite baseline (per-scene RAF frame time). Run <code>pnpm test:perf-regression</code> to refresh.
+                    <span id="perfreg-manifest-status" style="color: #3fb950"></span>
+                </span>
+                <button class="tab-hint-regen" id="perfreg-regen-btn" onclick="generateTabContent('perfreg')" title="Regenerate perf regression data (pnpm test:perf-regression)">⚙ Regenerate</button>
             </div>
             <div class="perf-toolbar">
                 <input id="perfreg-search" class="scene-search" type="search" placeholder="Filter regression scenes…" aria-label="Filter regression scenes" oninput="setSceneSearch('perfreg', this.value)" />
@@ -3614,6 +3866,15 @@
                 <button class="btn" id="perfreg-filter-btn" onclick="togglePerfRegFilter()" title="Show only scenes regressed beyond limit">⚠ Regressions Only</button>
                 <span id="perfreg-status" class="perf-status"></span>
             </div>
+            <div class="gen-block" id="gen-perfreg">
+                <div class="gen-block-msg" id="gen-perfreg-msg"></div>
+                <span class="perf-status" id="gen-perfreg-spinner"></span>
+                <div class="gen-log-bar" id="gen-perfreg-logbar">
+                    <span style="font-size: 12px; color: #8b949e">Output</span>
+                    <button class="btn" id="gen-perfreg-logclose" onclick="closeTabGenLog('perfreg')">✕ Close logs</button>
+                </div>
+                <pre class="gen-log" id="gen-perfreg-log"></pre>
+            </div>
             <div class="perf-legend">
                 <span style="color: #f85149">● regression &gt; limit</span>
                 <span style="color: #d29922">● slower (within limit)</span>
@@ -3621,6 +3882,188 @@
             </div>
             <div class="perf-grid" id="perfreg-grid"></div>
         </div>
+
+        <div id="apidocs-panel" class="docs-panel">
+            <div class="docs-close-row">
+                <h3 class="docs-section-title">📘 <span>Babylon Lite — API Reference</span></h3>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap">
+                    <button class="btn" id="apidocs-generate-btn" onclick="generateApiDocs()">⚙ Generate API Docs</button>
+                    <button class="btn" id="apidocs-open-btn" onclick="window.open('/api-docs/index.html', '_blank')" style="display: none">↗ Open in new tab</button>
+                    <span id="apidocs-spinner" class="perf-status"></span>
+                    <button class="docs-close-btn" type="button" onclick="toggleApiDocs()" aria-label="Close API Docs">✕ Close</button>
+                </div>
+            </div>
+            <div class="tab-hint">
+                💡 TypeDoc-generated API reference for the public <code>babylon-lite</code> surface (every symbol exported from <code>index.ts</code>). Enforced by
+                <code>pnpm docs:check</code>; generate locally with <code>pnpm docs</code>.
+                <span id="apidocs-status" style="color: #6cb6ff"></span>
+            </div>
+            <div id="apidocs-empty" style="padding: 32px; text-align: center; color: #8b949e; display: none">
+                <p style="font-size: 15px; margin-bottom: 8px">No API documentation has been generated yet.</p>
+                <p style="font-size: 13px">
+                    Click <strong>Generate API Docs</strong> above — the lab dev server will run TypeDoc and render the result here. (Requires the Vite dev server, i.e.
+                    <code>pnpm dev</code>.)
+                </p>
+            </div>
+            <div id="apidocs-log-bar" style="display: none; align-items: center; justify-content: space-between; margin-top: 8px; margin-bottom: 4px">
+                <span style="font-size: 12px; color: #8b949e">TypeDoc output</span>
+                <button class="btn" id="apidocs-log-close" onclick="closeApiDocsLog()">✕ Close logs</button>
+            </div>
+            <pre
+                id="apidocs-log"
+                style="display: none; max-height: 220px; overflow: auto; background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px; font-size: 12px; color: #c9d1d9; white-space: pre-wrap"
+            ></pre>
+            <iframe id="apidocs-frame" title="Babylon Lite API documentation" style="display: none; width: 100%; height: 78vh; border: 1px solid #21262d; border-radius: 6px; background: #0d1117"></iframe>
+        </div>
+
+        <script>
+            // ── API Docs tab ──────────────────────────────────────────
+            var _apiDocsInitialized = false;
+
+            function _setApiDocsView(state, opts) {
+                opts = opts || {};
+                var frame = document.getElementById("apidocs-frame");
+                var empty = document.getElementById("apidocs-empty");
+                var openBtn = document.getElementById("apidocs-open-btn");
+                var genBtn = document.getElementById("apidocs-generate-btn");
+                var status = document.getElementById("apidocs-status");
+                var spinner = document.getElementById("apidocs-spinner");
+                frame.style.display = state === "ready" ? "block" : "none";
+                empty.style.display = state === "empty" ? "block" : "none";
+                openBtn.style.display = state === "ready" ? "inline-block" : "none";
+                genBtn.disabled = state === "generating";
+                genBtn.textContent = state === "ready" ? "↻ Regenerate API Docs" : "⚙ Generate API Docs";
+                spinner.textContent = state === "generating" ? "⏳ Running TypeDoc…" : "";
+                if (status && opts.statusText !== undefined) status.textContent = opts.statusText;
+                if (state === "ready") {
+                    // Cache-bust so a regenerate reloads fresh output.
+                    frame.onload = _applyApiDocsTheme;
+                    frame.src = "/api-docs/index.html?t=" + Date.now();
+                }
+            }
+
+            // Inject lab-matching dark theme into the TypeDoc iframe (same-origin).
+            function _applyApiDocsTheme() {
+                var frame = document.getElementById("apidocs-frame");
+                if (!frame) return;
+                var doc;
+                try {
+                    doc = frame.contentDocument || (frame.contentWindow && frame.contentWindow.document);
+                } catch (e) {
+                    return;
+                }
+                if (!doc || !doc.documentElement) return;
+                doc.documentElement.setAttribute("data-theme", "dark");
+                var STYLE_ID = "lab-apidocs-theme";
+                if (doc.getElementById(STYLE_ID)) return;
+                var style = doc.createElement("style");
+                style.id = STYLE_ID;
+                style.textContent =
+                    ":root, :root[data-theme=dark], :root[data-theme=light] {" +
+                    "--color-background:#0d1117;" +
+                    "--color-background-secondary:#161b22;" +
+                    "--color-background-active:#161b22;" +
+                    "--color-background-warning:#3a2d00;" +
+                    "--color-warning-text:#e6edf3;" +
+                    "--color-icon-background:#0d1117;" +
+                    "--color-accent:#30363d;" +
+                    "--color-active-menu-item:#21262d;" +
+                    "--color-text:#e6edf3;" +
+                    "--color-text-aside:#8b949e;" +
+                    "--color-link:#58a6ff;" +
+                    "--color-focus-outline:#58a6ff;" +
+                    "--color-ts-keyword:#ff7b72;" +
+                    "--color-ts-project:#6cb6ff;" +
+                    "--color-ts-module:#6cb6ff;" +
+                    "--color-ts-namespace:#6cb6ff;" +
+                    "--color-ts-enum:#f2cc60;" +
+                    "--color-ts-enum-member:#f2cc60;" +
+                    "--color-ts-variable:#79c0ff;" +
+                    "--color-ts-function:#d2a8ff;" +
+                    "--color-ts-class:#f2cc60;" +
+                    "--color-ts-interface:#56d364;" +
+                    "--color-ts-type-alias:#56d364;" +
+                    "--color-ts-property:#79c0ff;" +
+                    "--color-ts-method:#d2a8ff;" +
+                    "}" +
+                    "html{background:#0d1117;}" +
+                    "body{background:#0d1117;color:#e6edf3;}" +
+                    "pre,code,.tsd-typography pre{background:#161b22 !important;border:1px solid #21262d;}" +
+                    ".tsd-page-toolbar,.tsd-navigation a,.tsd-navigation a.current{background:transparent;}" +
+                    "::-webkit-scrollbar{width:10px;height:10px;}" +
+                    "::-webkit-scrollbar-track{background:transparent;}" +
+                    "::-webkit-scrollbar-thumb{background:#30363d;border-radius:6px;border:2px solid #0d1117;}" +
+                    "::-webkit-scrollbar-thumb:hover{background:#484f58;}";
+                (doc.head || doc.documentElement).appendChild(style);
+            }
+
+            function refreshApiDocsStatus() {
+                return fetch("/lab-api/docs-status", { cache: "no-store" })
+                    .then(function (r) {
+                        return r.ok ? r.json() : null;
+                    })
+                    .then(function (s) {
+                        if (!s) {
+                            _setApiDocsView("empty", { statusText: "(dev server endpoint unavailable)" });
+                            return;
+                        }
+                        if (s.generating) {
+                            _setApiDocsView("generating");
+                        } else if (s.generated) {
+                            var when = s.mtime ? new Date(s.mtime).toLocaleString() : "";
+                            _setApiDocsView("ready", { statusText: when ? "· generated " + when : "" });
+                        } else {
+                            _setApiDocsView("empty", { statusText: "" });
+                        }
+                    })
+                    .catch(function () {
+                        _setApiDocsView("empty", { statusText: "(dev server endpoint unavailable)" });
+                    });
+            }
+
+            function generateApiDocs() {
+                var log = document.getElementById("apidocs-log");
+                var logBar = document.getElementById("apidocs-log-bar");
+                log.style.display = "block";
+                if (logBar) logBar.style.display = "none";
+                log.textContent = "Running TypeDoc… this can take a minute on the first run.";
+                _setApiDocsView("generating");
+                fetch("/lab-api/generate-docs", { method: "POST" })
+                    .then(function (r) {
+                        return r.json().catch(function () {
+                            return { ok: false, error: "HTTP " + r.status };
+                        });
+                    })
+                    .then(function (res) {
+                        if (res && res.log) log.textContent = res.log;
+                        if (res && res.error) log.textContent = res.error + "\n\n" + (res.log || "");
+                        if (logBar) logBar.style.display = "flex";
+                        if (res && res.ok) {
+                            log.textContent = (res.log || "") + "\n\n✓ Documentation generated.";
+                            return refreshApiDocsStatus();
+                        }
+                        _setApiDocsView("empty", { statusText: "✗ generation failed (see log)" });
+                    })
+                    .catch(function (err) {
+                        log.textContent = "Request failed: " + err;
+                        if (logBar) logBar.style.display = "flex";
+                        _setApiDocsView("empty", { statusText: "✗ generation failed" });
+                    });
+            }
+
+            function closeApiDocsLog() {
+                var log = document.getElementById("apidocs-log");
+                var logBar = document.getElementById("apidocs-log-bar");
+                if (log) log.style.display = "none";
+                if (logBar) logBar.style.display = "none";
+            }
+
+            function ensureApiDocsInitialized() {
+                if (_apiDocsInitialized) return;
+                _apiDocsInitialized = true;
+                refreshApiDocsStatus();
+            }
+        </script>
 
         <script>
             // ── Tag labels for badge rendering and filter pills ──
@@ -4797,6 +5240,9 @@
                 if (restoreScroll !== false) {
                     queueTabScrollRestore(tabName);
                 }
+                if (typeof TAB_GEN_CONFIG !== "undefined" && TAB_GEN_CONFIG[tabName] && typeof refreshTabGenStatus === "function") {
+                    refreshTabGenStatus(tabName);
+                }
             }
 
             // Persist scroll and filter/sort state on navigating away
@@ -4812,7 +5258,7 @@
             });
 
             var saved = localStorage.getItem("lab-tab");
-            if (saved && document.querySelector('.tab[data-tab="' + saved + '"]')) {
+            if (saved && saved !== "apidocs" && document.querySelector('.tab[data-tab="' + saved + '"]')) {
                 activateTab(saved, false);
             }
 
@@ -5473,6 +5919,266 @@
                     });
             }
 
+            // ── On-demand tab content generation (Parity / Bundle / Perf / Perf Regression) ──
+            function reloadParityContent() {
+                if (typeof parityGridInitialized !== "undefined" && !parityGridInitialized) {
+                    ensureParityGridInitialized();
+                    return;
+                }
+                (window.__PARITY_SCENES__ || []).forEach(function (s) {
+                    var card = document.getElementById("diff-card-" + s.n);
+                    if (card) {
+                        card.dataset.diffStale = "1";
+                        card.dataset.diffLoaded = "0";
+                    }
+                });
+                if (typeof queueVisibleParityDiffs === "function") requestAnimationFrame(queueVisibleParityDiffs);
+            }
+
+            var TAB_GEN_CONFIG = {
+                parity: { label: "Parity diffs", command: "pnpm test:parity", reload: reloadParityContent },
+                bundle: { label: "Bundle sizes", command: "pnpm build:bundle-scenes", reload: loadBundleManifest },
+                perf: { label: "Perf benchmarks", command: "pnpm test:perf", reload: loadPerfManifest },
+                perfreg: { label: "Perf regression data", command: "pnpm test:perf-regression", reload: loadPerfRegManifest },
+            };
+            var _genPolling = {};
+            var _genActive = {};
+            var _genHeartbeat = {};
+            var _genStart = {};
+
+            function _fmtElapsed(ms) {
+                var total = Math.floor(ms / 1000);
+                var mm = Math.floor(total / 60);
+                var ss = total % 60;
+                return mm + ":" + (ss < 10 ? "0" : "") + ss;
+            }
+
+            // Client-side liveness indicator: a long build (e.g. 138 scenes) can go
+            // many seconds between log lines, which looks frozen. Tick an elapsed
+            // timer in the spinner every second, independent of log polling.
+            function _startGenHeartbeat(target) {
+                if (_genHeartbeat[target]) return;
+                _genStart[target] = Date.now();
+                var paint = function () {
+                    var sp = _genEl(target, "spinner");
+                    if (sp) sp.textContent = "⏳ Running… " + _fmtElapsed(Date.now() - _genStart[target]);
+                };
+                paint();
+                _genHeartbeat[target] = setInterval(paint, 1000);
+            }
+
+            function _stopGenHeartbeat(target) {
+                if (_genHeartbeat[target]) {
+                    clearInterval(_genHeartbeat[target]);
+                    _genHeartbeat[target] = null;
+                }
+            }
+
+            function _genEl(target, suffix) {
+                return document.getElementById("gen-" + target + (suffix ? "-" + suffix : ""));
+            }
+
+            function _genToolbarBtn(target) {
+                return document.getElementById(target + "-regen-btn");
+            }
+
+            function _showGenBlock(target, show) {
+                var b = _genEl(target);
+                if (b) b.classList.toggle("show", !!show);
+            }
+
+            function _setGenLog(target, text) {
+                var log = _genEl(target, "log");
+                if (!log || !text) return;
+                log.style.display = "block";
+                log.textContent = text;
+                log.scrollTop = log.scrollHeight;
+            }
+
+            function _applyGenStatus(target, s) {
+                var cfg = TAB_GEN_CONFIG[target];
+                if (!cfg) return;
+                var msg = _genEl(target, "msg");
+                var btn = _genEl(target, "btn");
+                var regenBtn = _genToolbarBtn(target);
+                var spinner = _genEl(target, "spinner");
+                var logbar = _genEl(target, "logbar");
+
+                if (!s) {
+                    // Endpoint unavailable (e.g. static build) — don't nag the user.
+                    if (!_genActive[target]) _showGenBlock(target, false);
+                    return;
+                }
+
+                if (s.generating) {
+                    _genActive[target] = true;
+                    _showGenBlock(target, true);
+                    if (msg) msg.innerHTML = "Generating " + cfg.label + " — running <code>" + cfg.command + "</code>…";
+                    if (btn) btn.disabled = true;
+                    if (regenBtn) regenBtn.disabled = true;
+                    if (logbar) logbar.style.display = "none";
+                    _setGenLog(target, s.log);
+                    _startGenHeartbeat(target);
+                    _startGenPolling(target);
+                    return;
+                }
+
+                _stopGenHeartbeat(target);
+                if (btn) btn.disabled = false;
+                if (regenBtn) regenBtn.disabled = false;
+                if (spinner) spinner.textContent = "";
+
+                if (_genActive[target] && s.done) {
+                    // A generation we initiated just finished — keep the block visible so the
+                    // log and "Close logs" button stay usable until the user dismisses them.
+                    _showGenBlock(target, true);
+                    _setGenLog(target, s.log);
+                    if (logbar) logbar.style.display = "flex";
+                    if (msg) {
+                        msg.innerHTML = s.ok
+                            ? "✓ " + cfg.label + " generated. You can close this log."
+                            : "✗ " + (s.error || "Generation failed") + " — see log below.";
+                    }
+                    return;
+                }
+
+                if (s.generated) {
+                    _showGenBlock(target, false);
+                    return;
+                }
+
+                _showGenBlock(target, true);
+                if (logbar) logbar.style.display = "none";
+                if (msg) {
+                    var counts = target === "parity" && s.total ? " (" + (s.present || 0) + "/" + s.total + " scenes have reference images)" : "";
+                    msg.innerHTML =
+                        "No " + cfg.label + " found yet" + counts + ". Click <strong>⚙ Regenerate</strong> above to run <code>" + cfg.command + "</code> on the dev server.";
+                }
+            }
+
+            function refreshTabGenStatus(target) {
+                if (!TAB_GEN_CONFIG[target]) return Promise.resolve(null);
+                return fetch("/lab-api/gen-status?target=" + target, { cache: "no-store" })
+                    .then(function (r) {
+                        return r.ok ? r.json() : null;
+                    })
+                    .then(function (s) {
+                        _applyGenStatus(target, s);
+                        return s;
+                    })
+                    .catch(function () {
+                        _applyGenStatus(target, null);
+                        return null;
+                    });
+            }
+
+            function _startGenPolling(target) {
+                if (_genPolling[target]) return;
+                _genPolling[target] = true;
+                _startGenHeartbeat(target);
+                var fails = 0;
+                var tick = function () {
+                    fetch("/lab-api/gen-status?target=" + target, { cache: "no-store" })
+                        .then(function (r) {
+                            return r.ok ? r.json() : null;
+                        })
+                        .then(function (s) {
+                            if (!s) {
+                                // Transient failure (dev server busy under load during a long
+                                // build). Keep polling instead of freezing the live log.
+                                if (++fails < 40) {
+                                    setTimeout(tick, 1500);
+                                    return;
+                                }
+                                _genPolling[target] = false;
+                                _stopGenHeartbeat(target);
+                                return;
+                            }
+                            fails = 0;
+                            if (s.log) _setGenLog(target, s.log);
+                            if (s.generating) {
+                                setTimeout(tick, 1500);
+                                return;
+                            }
+                            _genPolling[target] = false;
+                            _applyGenStatus(target, s);
+                            if (s.ok && TAB_GEN_CONFIG[target] && typeof TAB_GEN_CONFIG[target].reload === "function") {
+                                TAB_GEN_CONFIG[target].reload();
+                            }
+                        })
+                        .catch(function () {
+                            // Transient network/server error under load — keep polling.
+                            if (++fails < 40) {
+                                setTimeout(tick, 1500);
+                                return;
+                            }
+                            _genPolling[target] = false;
+                            _stopGenHeartbeat(target);
+                        });
+                };
+                setTimeout(tick, 1200);
+            }
+
+            function generateTabContent(target) {
+                var cfg = TAB_GEN_CONFIG[target];
+                if (!cfg) return;
+                var btn = _genEl(target, "btn");
+                var msg = _genEl(target, "msg");
+                var regenBtn = _genToolbarBtn(target);
+                var spinner = _genEl(target, "spinner");
+                var logbar = _genEl(target, "logbar");
+                _genActive[target] = true;
+                _showGenBlock(target, true);
+                if (btn) btn.disabled = true;
+                if (regenBtn) regenBtn.disabled = true;
+                if (msg) msg.innerHTML = "Generating " + cfg.label + " — running <code>" + cfg.command + "</code>…";
+                if (spinner) spinner.textContent = "⏳ Starting…";
+                if (logbar) logbar.style.display = "none";
+                _setGenLog(target, "Starting " + cfg.command + "…");
+                fetch("/lab-api/generate?target=" + target, { method: "POST" })
+                    .then(function (r) {
+                        return r.json().catch(function () {
+                            return { started: false, error: "HTTP " + r.status };
+                        });
+                    })
+                    .then(function (res) {
+                        if (!res || !res.started) {
+                            _stopGenHeartbeat(target);
+                            if (btn) btn.disabled = false;
+                            if (regenBtn) regenBtn.disabled = false;
+                            if (spinner) spinner.textContent = "";
+                            if (logbar) logbar.style.display = "flex";
+                            _setGenLog(target, (res && res.error) || "Could not start generation.");
+                            return;
+                        }
+                        _startGenPolling(target);
+                    })
+                    .catch(function (err) {
+                        _stopGenHeartbeat(target);
+                        if (btn) btn.disabled = false;
+                        if (regenBtn) regenBtn.disabled = false;
+                        if (spinner) spinner.textContent = "";
+                        if (logbar) logbar.style.display = "flex";
+                        _setGenLog(target, "Request failed: " + err);
+                    });
+            }
+
+            function closeTabGenLog(target) {
+                _genActive[target] = false;
+                _stopGenHeartbeat(target);
+                var log = _genEl(target, "log");
+                var logbar = _genEl(target, "logbar");
+                if (log) log.style.display = "none";
+                if (logbar) logbar.style.display = "none";
+                refreshTabGenStatus(target);
+            }
+
+            function refreshAllTabGenStatus() {
+                Object.keys(TAB_GEN_CONFIG).forEach(function (t) {
+                    refreshTabGenStatus(t);
+                });
+            }
+
             fetch("/scene-config.json?t=" + Date.now())
                 .then(function (r) {
                     return r.json();
@@ -5494,6 +6200,7 @@
                     loadBundleManifest();
                     loadPerfManifest();
                     loadPerfRegManifest();
+                    refreshAllTabGenStatus();
                     queueTabScrollRestore(_currentTab);
                     startAutoRefresh();
                 })
@@ -6060,9 +6767,9 @@
                 var activePanel = document.querySelector(".tab-panel.active");
                 var isOpen = panel.classList.toggle("open");
                 btn.classList.toggle("active", isOpen);
-                btn.textContent = isOpen ? "\u2715 Close Docs" : "\ud83d\udcd6 Architecture & Features";
                 tabs.style.display = isOpen ? "none" : "";
                 if (activePanel) activePanel.style.display = isOpen ? "none" : "";
+                _applyOverlayChrome();
             }
 
             function filterFeatures(mode) {
@@ -6116,30 +6823,134 @@
                 if (docsPanel.classList.contains("open")) {
                     docsPanel.classList.remove("open");
                     docsBtn.classList.remove("active");
-                    docsBtn.textContent = "\ud83d\udcd6 Architecture & Features";
                 }
+                _closeApiDocsOverlay();
                 var isOpen = panel.classList.toggle("open");
                 btn.classList.toggle("active", isOpen);
-                btn.textContent = isOpen ? "\u2715 Close Summary" : "\ud83d\udcca Performance Summary";
                 tabs.style.display = isOpen ? "none" : "";
                 if (activePanel) activePanel.style.display = isOpen ? "none" : "";
                 if (isOpen && !panel.dataset.loaded) {
                     loadPitchData();
                     panel.dataset.loaded = "1";
                 }
+                _applyOverlayChrome();
             }
 
             var _origToggleDocs = toggleDocs;
             toggleDocs = function () {
-                var pitchPanel = document.getElementById("pitch-panel");
-                var pitchBtn = document.getElementById("pitch-toggle");
-                if (pitchPanel.classList.contains("open")) {
-                    pitchPanel.classList.remove("open");
-                    pitchBtn.classList.remove("active");
-                    pitchBtn.textContent = "\ud83d\udcca Performance Summary";
-                }
+                _closeOverlayPanel("pitch-panel", "pitch-toggle");
+                _closeApiDocsOverlay();
                 _origToggleDocs();
             };
+
+            // ── API Docs overlay (same approach as Architecture / Perf Summary) ──
+            function _closeApiDocsOverlay() {
+                var panel = document.getElementById("apidocs-panel");
+                var item = document.getElementById("apidocs-menu-item");
+                if (panel && panel.classList.contains("open")) {
+                    panel.classList.remove("open");
+                    if (item) item.classList.remove("active");
+                }
+            }
+
+            // Helper: close one of the other docs-style overlays.
+            function _closeOverlayPanel(panelId, btnId) {
+                var p = document.getElementById(panelId);
+                var b = document.getElementById(btnId);
+                if (p && p.classList.contains("open")) {
+                    p.classList.remove("open");
+                    if (b) b.classList.remove("active");
+                }
+            }
+
+            // Lock the host page while any overlay is open and size open panels to fit the
+            // viewport, so only the overlay (API Docs: its iframe) scrolls — never the host.
+            function _applyOverlayChrome() {
+                var open = document.querySelectorAll(".docs-panel.open");
+                document.body.classList.toggle("overlay-open", open.length > 0);
+                if (open.length > 0) window.scrollTo(0, 0);
+                document.querySelectorAll(".docs-panel").forEach(function (panel) {
+                    panel.style.maxHeight = "";
+                });
+            }
+            window.addEventListener("resize", _applyOverlayChrome);
+
+            function toggleApiDocs() {
+                var panel = document.getElementById("apidocs-panel");
+                var item = document.getElementById("apidocs-menu-item");
+                var tabs = document.querySelector(".tabs");
+                var activePanel = document.querySelector(".tab-panel.active");
+                // Close the other overlays so only one is visible at a time.
+                _closeOverlayPanel("docs-panel", "docs-toggle");
+                _closeOverlayPanel("pitch-panel", "pitch-toggle");
+                var isOpen = panel.classList.toggle("open");
+                if (item) item.classList.toggle("active", isOpen);
+                tabs.style.display = isOpen ? "none" : "";
+                if (activePanel) activePanel.style.display = isOpen ? "none" : "";
+                if (isOpen) ensureApiDocsInitialized();
+                _applyOverlayChrome();
+            }
+
+            // ── Hamburger "Tools" menu (API Docs / Architecture / Perf Summary) ──
+            function toggleHamburgerMenu(event) {
+                if (event) event.stopPropagation();
+                var dropdown = document.getElementById("hamburger-dropdown");
+                var btn = document.getElementById("hamburger-btn");
+                if (!dropdown) return;
+                var open = dropdown.hasAttribute("hidden");
+                if (open) {
+                    dropdown.removeAttribute("hidden");
+                } else {
+                    dropdown.setAttribute("hidden", "");
+                }
+                if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+            }
+
+            function closeHamburgerMenu() {
+                var dropdown = document.getElementById("hamburger-dropdown");
+                var btn = document.getElementById("hamburger-btn");
+                if (dropdown && !dropdown.hasAttribute("hidden")) {
+                    dropdown.setAttribute("hidden", "");
+                }
+                if (btn) btn.setAttribute("aria-expanded", "false");
+            }
+
+            // Close any open overlay panels (Architecture / Perf Summary) and restore the tab view.
+            function closeToolsOverlays() {
+                var docsPanel = document.getElementById("docs-panel");
+                var pitchPanel = document.getElementById("pitch-panel");
+                var docsBtn = document.getElementById("docs-toggle");
+                var pitchBtn = document.getElementById("pitch-toggle");
+                var tabs = document.querySelector(".tabs");
+                if (docsPanel && docsPanel.classList.contains("open")) {
+                    docsPanel.classList.remove("open");
+                    if (docsBtn) docsBtn.classList.remove("active");
+                }
+                if (pitchPanel && pitchPanel.classList.contains("open")) {
+                    pitchPanel.classList.remove("open");
+                    if (pitchBtn) pitchBtn.classList.remove("active");
+                }
+                if (tabs) tabs.style.display = "";
+                document.querySelectorAll(".tab-panel").forEach(function (p) {
+                    p.style.display = "";
+                });
+                _closeApiDocsOverlay();
+                _applyOverlayChrome();
+            }
+
+            function openApiDocsFromMenu() {
+                closeHamburgerMenu();
+                toggleApiDocs();
+            }
+
+            // Close the menu when clicking outside it or pressing Escape.
+            document.addEventListener("click", function (e) {
+                var menu = document.getElementById("hamburger-menu");
+                if (menu && !menu.contains(e.target)) closeHamburgerMenu();
+            });
+            document.addEventListener("keydown", function (e) {
+                if (e.key === "Escape") closeHamburgerMenu();
+            });
 
             var pitchRowData = [];
             var pitchSortKey = "sceneNum";

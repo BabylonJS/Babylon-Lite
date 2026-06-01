@@ -37,6 +37,12 @@ function getSpriteAnimationTask(manager: SpriteAnimationManager): AnimationTask 
     return managerInternal._animationTask;
 }
 
+/**
+ * Attaches a sprite animation manager to a shared animation manager so it ticks with it.
+ * @param manager - Animation manager that will drive the sprite manager.
+ * @param spriteManager - Sprite animation manager to attach.
+ * @throws If the sprite manager is already running or attached elsewhere.
+ */
 export function addSpriteAnimationManager(manager: AnimationManager, spriteManager: SpriteAnimationManager): void {
     const spriteManagerInternal = asSpriteAnimationTaskManagerInternal(spriteManager);
     if (spriteManagerInternal._animationManager === manager) {
@@ -47,6 +53,11 @@ export function addSpriteAnimationManager(manager: AnimationManager, spriteManag
     spriteManagerInternal._animationManager = manager;
 }
 
+/**
+ * Detaches a sprite animation manager previously attached with {@link addSpriteAnimationManager}.
+ * @param manager - Animation manager the sprite manager was attached to.
+ * @param spriteManager - Sprite animation manager to detach.
+ */
 export function removeSpriteAnimationManager(manager: AnimationManager, spriteManager: SpriteAnimationManager): void {
     const task = asSpriteAnimationTaskManagerInternal(spriteManager)._animationTask;
     if (task) {
@@ -54,6 +65,11 @@ export function removeSpriteAnimationManager(manager: AnimationManager, spriteMa
     }
 }
 
+/**
+ * Starts a sprite animation manager on its own autonomous animation loop.
+ * @param manager - Sprite animation manager to start.
+ * @throws If the manager is already attached to a render loop or another manager.
+ */
 export function startSpriteAnimationManager(manager: SpriteAnimationManager): void {
     if (manager.running) {
         return;
@@ -74,6 +90,10 @@ export function startSpriteAnimationManager(manager: SpriteAnimationManager): vo
     manager.running = loopManager.running;
 }
 
+/**
+ * Stops a sprite animation manager started with {@link startSpriteAnimationManager}.
+ * @param manager - Sprite animation manager to stop.
+ */
 export function stopSpriteAnimationManager(manager: SpriteAnimationManager): void {
     const managerInternal = asSpriteAnimationTaskManagerInternal(manager);
     const loopManager = managerInternal._loopManager;

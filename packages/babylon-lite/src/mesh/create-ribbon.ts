@@ -21,6 +21,7 @@ export interface RibbonData {
     indices: Uint32Array;
 }
 
+/** Options for `createRibbonData`: a set of parallel paths joined into a strip. */
 export interface RibbonOptions {
     pathArray: Vec3[][];
     closeArray?: boolean;

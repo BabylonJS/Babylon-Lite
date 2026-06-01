@@ -4,7 +4,7 @@
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
 
-/** Binary search: find index i such that input[i] <= t < input[i+1]. */
+/** Binary search: find index i such that `input[i] <= t < input[i+1]`. */
 function findKeyframe(input: Float32Array, t: number): number {
     let lo = 0;
     let hi = input.length - 1;
@@ -76,8 +76,8 @@ function quatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: nu
 
 /**
  * Evaluate a sampler at time `t` and write the result into `dst` at `dstOffset`.
- * @param stride  Number of components per value (3 for vec3, 4 for quat).
- * @param isQuat  True for rotation channels (uses slerp instead of lerp).
+ * @param stride - Number of components per value (3 for vec3, 4 for quat).
+ * @param isQuat - True for rotation channels (uses slerp instead of lerp).
  */
 export function evaluateSampler(sampler: AnimationSampler, t: number, stride: number, isQuat: boolean, dst: Float32Array, dstOffset: number): void {
     const { input, output, interpolation } = sampler;

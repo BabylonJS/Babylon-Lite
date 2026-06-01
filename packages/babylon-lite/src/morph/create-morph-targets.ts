@@ -11,10 +11,10 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 
 /** Create morph target GPU data from parsed glTF targets.
- *  @param engine       Engine context (provides GPU device)
- *  @param targets      Array of {positions, normals} deltas per target
- *  @param vertexCount  Number of vertices in the base mesh
- *  @param morphWeights Initial morph weights (one per target, may be null)
+ *  @param engine       - Engine context (provides GPU device)
+ *  @param targets      - Array of `{positions, normals}` deltas per target
+ *  @param vertexCount  - Number of vertices in the base mesh
+ *  @param morphWeights - Initial morph weights (one per target, may be null)
  */
 export function createMorphTargets(
     engine: EngineContextInternal,

@@ -40,7 +40,7 @@ influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[3])) *
 
 /**
  * Create a skeleton fragment.
- * @param has8Bones Whether to use 8-bone skinning (joints1/weights1).
+ * @param has8Bones - Whether to use 8-bone skinning (joints1/weights1).
  */
 export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
     return {

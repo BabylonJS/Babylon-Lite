@@ -141,7 +141,7 @@ export interface NodeBuildState {
      *  spare base scene-UBO scalars (no extra bindings / no per-graph UBO size change). */
     usesScreenSize: boolean;
     /** Set by FragDepthBlock. The pipeline switches the fragment return type
-     *  from a bare color to a color+@builtin(frag_depth) output struct. */
+     *  from a bare color to a `color+@builtin(frag_depth)` output struct. */
     usesFragDepth: boolean;
     usesClipPlanes: boolean;
     usesMeshAttributeExists: boolean;

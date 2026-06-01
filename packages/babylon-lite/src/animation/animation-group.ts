@@ -23,9 +23,9 @@ export interface AnimationAdditiveMixer {
     readonly referenceTime: number;
 }
 
-/** User-facing animation group — one per glTF animation clip. Pure state. */
+/** User-facing animation group — one per animation clip. Pure state. */
 export interface AnimationGroup {
-    /** Name of this animation (from glTF). */
+    /** Name of this animation. */
     readonly name: string;
     /** Duration in seconds. */
     readonly duration: number;

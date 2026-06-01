@@ -1,6 +1,7 @@
 import type { Camera, NormalizedViewport } from "./camera.js";
 export { getEffectiveAspectRatio } from "./camera.js";
 
+/** A viewport expressed in integer render-target pixels, with `y` measured from the top (WebGPU convention). */
 export interface PixelViewport {
     x: number;
     y: number;

@@ -7,6 +7,7 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js"
 import { createBlurPostProcessTask, type BlurPostProcessTask } from "./blur.js";
 import { createExtractHighlightsPostProcessTask, type ExtractHighlightsPostProcessTask } from "./extract-highlights.js";
 
+/** Configuration for `createBloomPostProcessTask`: highlight `threshold`/`exposure`, blur `kernel`, merge `weight`, and `bloomScale`. */
 export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     weight?: number;
     kernel?: number;
@@ -15,6 +16,7 @@ export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     bloomScale?: number;
 }
 
+/** A composite post-process task that extracts highlights, blurs them, and merges the glow back over the source image. */
 export interface BloomPostProcessTask extends Task, PostProcessTaskSettings {
     readonly name: string;
     sourceTexture: RenderTarget;
@@ -25,6 +27,7 @@ export interface BloomPostProcessTask extends Task, PostProcessTaskSettings {
     threshold: number;
     exposure: number;
     readonly bloomScale: number;
+    /** Recompute and upload the uniforms of all sub-passes (extract, blur X/Y, merge) from current settings. */
     updateUniforms(): void;
 }
 
@@ -47,6 +50,13 @@ const BLOOM_MERGE_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->v
 
 const scaledKernel = (kernel: number, scale: number): number => kernel * scale;
 
+/**
+ * Create a bloom post-process task by chaining highlight extraction, separable blur, and a merge pass.
+ * @param config - Bloom parameters and source/target settings.
+ * @param engine - The owning engine.
+ * @param scene - The owning scene.
+ * @returns The bloom post-process task.
+ */
 export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BloomPostProcessTask {
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;

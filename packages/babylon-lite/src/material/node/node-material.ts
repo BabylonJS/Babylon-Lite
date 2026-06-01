@@ -23,16 +23,23 @@ import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js"
 
 // ─── Public API types ───────────────────────────────────────────────
 
+/** A compiled Node Material (Babylon NME graph). Exposes an `inputs` map of
+ *  named handles for live uniform/texture updates, and dispatches rendering
+ *  through the inherited `_buildGroup` hook. */
 export interface NodeMaterial extends Material {
     readonly inputs: Record<string, NodeInputHandle>;
 }
 
+/** A live handle to one named Node Material input (uniform or texture). Set
+ *  `value` for scalar/vector inputs or `texture` for `texture2d` inputs; writes
+ *  flag the material UBO dirty so the change is uploaded next frame. */
 export interface NodeInputHandle {
     readonly type: "f32" | "vec2f" | "vec3f" | "vec4f" | "texture2d";
     value?: number | number[];
     texture?: Texture2D | null;
 }
 
+/** Options for `parseNodeMaterialFromSnippet()`. */
 export interface ParseNodeMaterialOptions {
     readonly snippetServer?: string;
     /** Pre-resolved JSON (object or string). When provided, bypasses the network. */
@@ -88,6 +95,12 @@ interface UniformSlot {
 
 // ─── Parse entry point ──────────────────────────────────────────────
 
+/** Parse a Babylon NME graph (by snippet ID or inline JSON), emit WGSL, compile
+ *  the GPU pipeline, and return a ready-to-render `NodeMaterial`.
+ *  @param engine - Engine context.
+ *  @param snippetId - Snippet server ID; ignored when `options.json` is supplied.
+ *  @param options - Inline JSON, texture overrides, shadow generators, and graph flags.
+ *  @returns A promise resolving to the compiled `NodeMaterial`. */
 export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippetId: string, options: ParseNodeMaterialOptions = {}): Promise<NodeMaterial> {
     const source =
         options.json !== undefined

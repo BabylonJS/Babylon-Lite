@@ -22,6 +22,7 @@ import type { ShadowGenerator } from "./shadow-generator.js";
 import { buildLightViewMatrix, createSharedShadowUBO, createShadowParamsUBO, multiply4x4 } from "./shadow-base.js";
 import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap, type PcfLightMatrix, type PcfTaskState } from "./pcf-shadow-task-hooks.js";
 
+/** Configuration for a spot-light PCF shadow generator: map size, depth bias, darkness, and projection near/far planes. */
 export interface PcfSpotlightShadowGeneratorConfig {
     mapSize?: number;
     bias?: number;
@@ -48,6 +49,14 @@ export function _computeSpotLightMatrix(light: SpotLight, near: number, far: num
     return { _view: view, _viewProj: multiply4x4(proj, view), _near: near, _far: far };
 }
 
+/**
+ * Creates a PCF (percentage-closer filtering) shadow generator for a spot light, using a
+ * perspective projection derived from the light's cone angle.
+ * @param engine - The engine providing the GPU device.
+ * @param _light - The spot light that casts the shadows.
+ * @param cfg - Optional shadow-map and projection configuration.
+ * @returns A `ShadowGenerator` wired to the spot-light PCF render path.
+ */
 export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light: SpotLight, cfg: PcfSpotlightShadowGeneratorConfig = {}): ShadowGenerator {
     const eng = engine as EngineContextInternal;
     const device = eng.device;

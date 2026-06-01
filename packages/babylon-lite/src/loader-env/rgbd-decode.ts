@@ -50,7 +50,7 @@ function encodeDispatch(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline
     pass.end();
 }
 
-/** Decode a single RGBD PNG (e.g. BRDF LUT) -> rgba16float 2D texture. No Y-flip. */
+/** Decode a single RGBD PNG (e.g. BRDF LUT) `->` rgba16float 2D texture. No Y-flip. */
 export function decodeBrdfPng(engine: EngineContextInternal, image: ImageBitmap): GPUTexture {
     const device = engine.device;
     const pipeline = getPipeline(device, false);

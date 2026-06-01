@@ -1,6 +1,7 @@
 /** Node Material parser — BJS snippet JSON → internal NodeGraph.
  *
  *  BJS serializes node materials as a flat block list:
+ * ```
  *    {
  *      blocks: [
  *        {
@@ -16,9 +17,12 @@
  *      outputNodes: [id, id, ...],   // FragmentOutputBlock + VertexOutputBlock ids
  *      editorData: { ... }           // UI locations; irrelevant to rendering
  *    }
+ * ```
  *
  *  Snippet server wraps this JSON once more:
+ * ```
  *    { id, version, jsonPayload: "<stringified { nodeMaterial: "<stringified JSON above>" }>" }
+ * ```
  *
  *  This parser is network-agnostic; snippet fetching lives in node-snippet.ts.
  */

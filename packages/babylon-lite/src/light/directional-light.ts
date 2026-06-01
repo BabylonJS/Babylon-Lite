@@ -16,6 +16,12 @@ export interface DirectionalLight extends LightBase {
     intensity: number;
 }
 
+/**
+ * Creates a directional light shining along `direction` (a parallel light source, like the sun).
+ * @param direction - World-space direction the light travels along.
+ * @param intensity - Scalar multiplier applied to the light's diffuse and specular contribution.
+ * @returns Plain `DirectionalLight` data to be added to a scene via `addToScene`.
+ */
 export function createDirectionalLight(direction: [number, number, number], intensity = 1): DirectionalLight {
     const _localMatrix = new Float32Array(16) as Mat4;
     const { wm, onDirty, lvs } = createLightBase(() =>

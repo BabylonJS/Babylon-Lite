@@ -38,6 +38,10 @@ export const pbrGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
 
 pbrGroupBuilder._materialFamily = "pbr";
 
+/** User-facing properties for a physically based (metallic-roughness) material.
+ *  Create one manually via `createPbrMaterial()` or let `loadGltf()` build it.
+ *  Optional sub-feature objects (clearcoat, sheen, anisotropy, subsurface) are
+ *  only bundled when referenced. */
 export interface PbrMaterialProps extends Material {
     baseColorTexture?: Texture2D;
     normalTexture?: Texture2D;

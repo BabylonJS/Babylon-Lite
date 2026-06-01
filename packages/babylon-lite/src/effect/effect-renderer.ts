@@ -9,8 +9,10 @@ import type { Task } from "../frame-graph/task.js";
 const DEFAULT_VERTEX_WGSL = `struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
 @vertex fn effectFullscreenVertex(@builtin(vertex_index) vertexIndex:u32)->EffectVertexOutput{var positions=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));let p=positions[vertexIndex];var out:EffectVertexOutput;out.position=vec4<f32>(p,0.0,1.0);out.uv=p*0.5+vec2<f32>(0.5,0.5);return out;}`;
 
+/** Kind of GPU binding an effect exposes: a uniform buffer, a sampled texture, or a sampler. */
 export type EffectBindingKind = "uniform" | "texture" | "sampler";
 
+/** Describes a single bind-group entry (binding slot, kind, and type details) for an effect wrapper. */
 export interface EffectBindingLayout {
     name?: string;
     binding: number;
@@ -22,6 +24,7 @@ export interface EffectBindingLayout {
     textureBinding?: string | number;
 }
 
+/** Configuration for `createEffectWrapper`: the fullscreen fragment shader plus optional vertex shader, bindings, and blend state. */
 export interface EffectWrapperOptions {
     name?: string;
     fragmentWGSL: string;
@@ -41,6 +44,7 @@ interface EffectTextureSlot {
     texture: Texture2D | null;
 }
 
+/** A reusable fullscreen effect: owns its shader module, bind-group layout, pipelines, and uniform/texture slots. */
 export interface EffectWrapper {
     readonly name: string;
     readonly options: EffectWrapperOptions;
@@ -58,6 +62,7 @@ interface EffectWrapperInternal extends EffectWrapper {
     _textures: EffectTextureSlot[];
 }
 
+/** Configuration for `createEffectRenderTask`: the effect to draw, its render target, and optional clear state. */
 export interface EffectRenderTaskConfig {
     name: string;
     effect: EffectWrapper;
@@ -66,6 +71,7 @@ export interface EffectRenderTaskConfig {
     clearColor?: GPUColorDict;
 }
 
+/** A frame-graph task that renders an `EffectWrapper` as a fullscreen pass into an offscreen `RenderTarget`. */
 export interface EffectRenderTask extends Task {
     readonly name: string;
     readonly _config: EffectRenderTaskConfig;
@@ -125,6 +131,13 @@ interface EffectRendererInternal extends EffectRenderer {
     _disposed: boolean;
 }
 
+/**
+ * Create an `EffectWrapper` for the given engine, allocating uniform buffers and
+ * texture slots from `options.bindings`.
+ * @param engine - The engine that owns the GPU resources.
+ * @param options - Shader source and binding layout for the effect.
+ * @returns The new effect wrapper.
+ */
 export function createEffectWrapper(engine: EngineContext, options: EffectWrapperOptions): EffectWrapper {
     const eng = engine as EngineContextInternal;
     const wrapper: EffectWrapperInternal = {
@@ -144,6 +157,12 @@ export function createEffectWrapper(engine: EngineContext, options: EffectWrappe
     return wrapper;
 }
 
+/**
+ * Write data into the effect's uniform buffer(s). Pass a single buffer to write the
+ * wrapper's only uniform slot, or a record keyed by binding name/index to write specific slots.
+ * @param wrapper - The effect wrapper to update.
+ * @param data - The uniform bytes, or a map of binding key to uniform bytes.
+ */
 export function setEffectUniforms(wrapper: EffectWrapper, data: ArrayBuffer | ArrayBufferView | Record<string | number, ArrayBuffer | ArrayBufferView>): void {
     const internal = wrapper as EffectWrapperInternal;
     if (isBufferData(data)) {
@@ -163,6 +182,12 @@ export function setEffectUniforms(wrapper: EffectWrapper, data: ArrayBuffer | Ar
     }
 }
 
+/**
+ * Bind a texture to one of the effect's texture slots, marking the bind group dirty so it is rebuilt.
+ * @param wrapper - The effect wrapper to update.
+ * @param bindingNameOrIndex - The texture binding's name or numeric index.
+ * @param texture - The texture to bind.
+ */
 export function setEffectTexture(wrapper: EffectWrapper, bindingNameOrIndex: string | number, texture: Texture2D): void {
     const internal = wrapper as EffectWrapperInternal;
     const slot = findTextureSlot(internal, bindingNameOrIndex);
@@ -173,6 +198,13 @@ export function setEffectTexture(wrapper: EffectWrapper, bindingNameOrIndex: str
     internal._bindGroupDirty = true;
 }
 
+/**
+ * Create a frame-graph task that draws an effect as a fullscreen pass into `config.target`.
+ * @param config - The effect, target, and clear settings.
+ * @param engine - The owning engine.
+ * @param scene - The owning scene.
+ * @returns The render task to add to the scene's frame graph.
+ */
 export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: EngineContext, scene: SceneContext): EffectRenderTask {
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;
@@ -228,6 +260,7 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
     return task;
 }
 
+/** Destroy the uniform buffers and clear the cached pipelines, bind groups, and slots owned by the effect wrapper. */
 export function disposeEffectWrapper(wrapper: EffectWrapper): void {
     const internal = wrapper as EffectWrapperInternal;
     for (const slot of internal._uniforms) {

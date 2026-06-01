@@ -102,6 +102,7 @@ export function getCameraPosition(camera: Camera): Vec3 {
     return { x: w[12]!, y: w[13]!, z: w[14]! };
 }
 
+/** Returns the render-target aspect ratio adjusted for the camera's normalized viewport, or the raw ratio if none. */
 export function getEffectiveAspectRatio(camera: Camera | null | undefined, targetWidth: number, targetHeight: number): number {
     const v = camera?.viewport;
     return (targetWidth / targetHeight) * (v ? v.width / v.height : 1);

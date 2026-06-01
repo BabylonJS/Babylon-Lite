@@ -76,6 +76,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: r
     return { _view: view, _viewProj: multiply4x4(proj, view), _near: near, _far: far };
 }
 
+/** Configuration for a directional-light PCF shadow generator: map size, depth bias, darkness, and ortho projection bounds. */
 export interface PcfDirectionalShadowGeneratorConfig {
     mapSize?: number;
     bias?: number;
@@ -89,6 +90,14 @@ export interface PcfDirectionalShadowGeneratorConfig {
     forceRefreshEveryFrame?: boolean;
 }
 
+/**
+ * Creates a PCF (percentage-closer filtering) shadow generator for a directional light,
+ * using an orthographic projection auto-fit to the caster meshes' world AABBs.
+ * @param engine - The engine providing the GPU device.
+ * @param _light - The directional light that casts the shadows.
+ * @param cfg - Optional shadow-map and projection configuration.
+ * @returns A `ShadowGenerator` wired to the directional PCF render path.
+ */
 export function createPcfDirectionalShadowGenerator(engine: EngineContext, _light: DirectionalLight, cfg: PcfDirectionalShadowGeneratorConfig = {}): ShadowGenerator {
     const eng = engine as EngineContextInternal;
     const device = eng.device;

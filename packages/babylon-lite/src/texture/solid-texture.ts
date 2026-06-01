@@ -6,6 +6,13 @@ import type { EngineContext } from "../engine/engine.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
+/** Create a 1×1 solid-color `Texture2D` from straight RGBA components in [0, 1].
+ *  @param engine - Engine context.
+ *  @param r - Red channel (0–1).
+ *  @param g - Green channel (0–1).
+ *  @param b - Blue channel (0–1).
+ *  @param a - Alpha channel (0–1). Default 1.0.
+ *  @returns A bilinear-sampled `Texture2D` backed by a tiny GPU texture. */
 export function createSolidTexture2D(engine: EngineContext, r: number, g: number, b: number, a: number = 1.0): Texture2D {
     const eng = engine as EngineContextInternal;
     const device = eng.device;

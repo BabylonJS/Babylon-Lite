@@ -6,6 +6,7 @@
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
 
+/** CPU-side data backing a thin-instanced mesh: world matrices, optional colors, and GPU sync state. */
 export interface ThinInstanceData {
     /** CPU-side instance world matrices (16 floats per instance). */
     matrices: Float32Array;

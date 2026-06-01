@@ -12,6 +12,7 @@ import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { Task } from "./task.js";
 import { _getShadowTaskCasterMeshes, _setShadowTaskInputPreloader } from "./shadow-inputs.js";
 
+/** Scene-owned frame-graph task that schedules shadow-map generation across the scene's shadow generators. */
 export interface ShadowTask extends Task {
     readonly name: "shadow";
 }

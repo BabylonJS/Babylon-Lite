@@ -16,6 +16,7 @@ export interface GroundData {
     indices: Uint32Array;
 }
 
+/** Options for `createFlatGroundData` and {@link createGroundFromHeightMap}. */
 export interface GroundOptions {
     width?: number;
     height?: number;

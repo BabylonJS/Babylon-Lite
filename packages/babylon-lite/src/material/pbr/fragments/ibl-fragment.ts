@@ -71,9 +71,9 @@ color = finalIrradiance + finalRadianceScaled + finalSpecularScaled + directDiff
 
 /**
  * Create an IBL/environment fragment.
- * @param hasNormalMap Whether the material uses a normal map (enables horizon occlusion).
- * @param anisoBentNormalCode WGSL code for anisotropic bent normal (empty string = standard reflection).
- * @param skyboxCalculation Pre-baked skybox-mode WGSL from ibl-skybox-wgsl.ts (empty string = normal PBR).
+ * @param hasNormalMap - Whether the material uses a normal map (enables horizon occlusion).
+ * @param anisoBentNormalCode - WGSL code for anisotropic bent normal (empty string = standard reflection).
+ * @param skyboxCalculation - Pre-baked skybox-mode WGSL from ibl-skybox-wgsl.ts (empty string = normal PBR).
  */
 export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: string = "", skyboxCalculation: string = ""): ShaderFragment {
     return {

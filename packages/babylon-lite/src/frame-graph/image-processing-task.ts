@@ -4,8 +4,10 @@ import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js"
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "./task.js";
 
+/** Source of the color image to post-process: a texture, a render target, or a getter returning one (resolved each record). */
 export type ImageProcessingSource = Texture2D | RenderTarget | (() => Texture2D | RenderTarget | null | undefined);
 
+/** Configuration for `createImageProcessingTask`: the color source to apply exposure/contrast/tone-mapping to. */
 export interface ImageProcessingTaskConfig {
     name?: string;
     source: ImageProcessingSource;
@@ -17,6 +19,14 @@ interface ImageProcessingState {
     params: GPUBuffer;
 }
 
+/**
+ * Create a frame-graph task that applies the scene's image-processing settings
+ * (exposure, contrast, tone mapping) to a color source and draws it to the swapchain.
+ * @param config - The color source to process.
+ * @param engine - The owning engine.
+ * @param scene - The scene whose `imageProcessing` settings drive the effect.
+ * @returns The task to add to the frame graph.
+ */
 export function createImageProcessingTask(config: ImageProcessingTaskConfig, engine: EngineContext, scene: SceneContext): Task {
     const eng = engine as EngineContextInternal;
     const sc = scene as SceneContextInternal;

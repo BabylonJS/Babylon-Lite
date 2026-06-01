@@ -135,15 +135,19 @@ export interface Sprite2DProps {
 
 /**
  * Pure-2D per-instance vertex layout (13 floats = 52 bytes, `depth: "none"`):
+ * ```
  *   [0..1]  positionPx.xy   (float32x2 @ offset  0)
  *   [2..3]  sizePx.xy       (float32x2 @ offset  8)
  *   [4..5]  uvMin.xy        (float32x2 @ offset 16)
  *   [6..7]  uvMax.xy        (float32x2 @ offset 24)
  *   [8]     rotation        (float32   @ offset 32)
  *   [9..12] colorRGBA       (float32x4 @ offset 36)
+ * ```
  *
  * Depth-hosted layers (`depth: "test" | "test-write"`) extend this to 14 floats = 56 bytes:
+ * ```
  *   [13]    z (NDC depth)   (float32   @ offset 52, consumed only by depth-hosted pipelines)
+ * ```
  *
  * Visibility (`visible: false`) is implemented by zeroing slots [2..3]; the sprite's true
  * size lives in `layer._savedSize` so a later `visible: true` (without re-supplying

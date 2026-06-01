@@ -36,9 +36,9 @@ export function writeReflectanceUBO(data: Float32Array, material: PbrMaterialPro
 
 /**
  * Create a metallic reflectance fragment.
- * @param hasMetallicReflectanceMap Whether the material has a metallicReflectanceTexture.
- * @param hasReflectanceMap Whether the material has a reflectanceTexture.
- * @param useAlphaOnlyMR Whether to use only the alpha channel from the metallic reflectance map.
+ * @param hasMetallicReflectanceMap - Whether the material has a metallicReflectanceTexture.
+ * @param hasReflectanceMap - Whether the material has a reflectanceTexture.
+ * @param useAlphaOnlyMR - Whether to use only the alpha channel from the metallic reflectance map.
  */
 export function createReflectanceFragment(
     hasMetallicReflectanceMap: boolean,

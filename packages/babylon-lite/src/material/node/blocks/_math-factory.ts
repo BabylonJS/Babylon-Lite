@@ -20,7 +20,7 @@ const RANK: Record<NodeValueType, Rank | 0> = {
 };
 const RANK_TYPE: Record<Rank, NodeValueType> = { 1: "f32", 2: "vec2f", 3: "vec3f", 4: "vec4f" };
 
-/** Pick the wider of two numeric NME types (f32 < vec2 < vec3 < vec4). */
+/** Pick the wider of two numeric NME types (`f32 < vec2 < vec3 < vec4`). */
 export function widerType(a: NodeValueType, b: NodeValueType): NodeValueType {
     const ra = RANK[a] || 0;
     const rb = RANK[b] || 0;

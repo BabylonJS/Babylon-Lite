@@ -24,6 +24,7 @@ export interface EulerProxy {
 
 // ─── SceneNode ───────────────────────────────────────────────────────
 
+/** Common base for all scene entities: TRS transform, parent/children hierarchy, and a cached world matrix. */
 export interface SceneNode {
     name: string;
     children: SceneNode[];

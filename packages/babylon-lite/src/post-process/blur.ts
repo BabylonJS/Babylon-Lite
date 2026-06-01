@@ -7,11 +7,13 @@ export interface PostProcessVec2 {
     y: number;
 }
 
+/** Configuration for `createBlurPostProcessTask`; `direction` is the blur axis and `kernel` the sample-window size in pixels. */
 export interface BlurPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     direction?: PostProcessVec2;
     kernel?: number;
 }
 
+/** A separable Gaussian blur post-process pass along a single `direction`. */
 export interface BlurPostProcessTask extends PostProcessTask {
     direction: PostProcessVec2;
     kernel: number;
@@ -106,6 +108,13 @@ function updateBlurShader(shader: PostProcessShaderConfig, kernel: number): void
     shader.fragmentWrapperWGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
 }
 
+/**
+ * Create a separable Gaussian blur post-process task. Apply twice (horizontal then vertical) for a full 2D blur.
+ * @param config - Blur direction, kernel size, and source/target settings.
+ * @param engine - The owning engine.
+ * @param scene - The owning scene.
+ * @returns The blur post-process task.
+ */
 export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BlurPostProcessTask {
     const params = { direction: config.direction ?? { x: 1, y: 0 }, kernel: config.kernel ?? 9 };
     const shader: PostProcessShaderConfig = {

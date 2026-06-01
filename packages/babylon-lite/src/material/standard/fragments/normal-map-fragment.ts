@@ -17,7 +17,7 @@ const STAGE_FRAGMENT = 0x2;
 
 /**
  * Create a bump/normal map fragment for Standard material.
- * @param bumpLevel The bump level (1.0 = default). bumpScale = 1/bumpLevel.
+ * @param bumpLevel - The bump level (1.0 = default). bumpScale = 1/bumpLevel.
  */
 export function createNormalMapFragment(): ShaderFragment {
     return {

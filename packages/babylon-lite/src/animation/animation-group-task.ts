@@ -24,6 +24,7 @@ function getMutableAnimationGroups(manager: AnimationManager): AnimationGroup[] 
     return groups;
 }
 
+/** Returns the animation groups currently attached to `manager`, or an empty array if none. */
 export function getAnimationGroups(manager: AnimationManager): readonly AnimationGroup[] {
     return (manager as AnimationGroupTaskManager)._animationGroups ?? [];
 }
@@ -32,6 +33,10 @@ export function getAnimationGroupOwner(group: AnimationGroup): AnimationManager 
     return (group as AnimationGroupTaskGroup)._animationManager;
 }
 
+/** Attaches `group` to `manager` so it is ticked each update, creating its backing animation task on first use.
+ *  @param manager - Animation manager that will own and drive the group.
+ *  @param group - Animation group to attach.
+ *  @throws If the group is already attached to a different manager. */
 export function addAnimationGroup(manager: AnimationManager, group: AnimationGroup): void {
     const groupInternal = group as AnimationGroupTaskGroup;
     const owner = groupInternal._animationManager;
@@ -67,12 +72,14 @@ export function addAnimationGroup(manager: AnimationManager, group: AnimationGro
     addAnimationTask(manager, task);
 }
 
+/** Attaches each group in `groups` to `manager` via {@link addAnimationGroup}. */
 export function addAnimationGroups(manager: AnimationManager, groups: readonly AnimationGroup[]): void {
     for (const group of groups) {
         addAnimationGroup(manager, group);
     }
 }
 
+/** Detaches `group` from `manager`, removing its animation task so it is no longer ticked. */
 export function removeAnimationGroup(manager: AnimationManager, group: AnimationGroup): void {
     const groupInternal = group as AnimationGroupTaskGroup;
     const task = groupInternal._animationTask;

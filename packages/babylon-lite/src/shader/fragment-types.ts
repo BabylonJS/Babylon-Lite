@@ -123,7 +123,7 @@ export interface ShaderFragment {
     /** Extra vertex→fragment varyings */
     readonly _varyings?: readonly Varying[];
 
-    /** Extra @group(1) bindings used in the vertex shader (skeleton bone tex, morph tex+uniforms) */
+    /** Extra `@group(1)` bindings used in the vertex shader (skeleton bone tex, morph tex+uniforms) */
     readonly _vertexBindings?: readonly BindingDecl[];
 
     /** WGSL code injected at named vertex slots */
@@ -133,10 +133,10 @@ export interface ShaderFragment {
      *  Called with next available shader location. Returns layouts + next location. */
     readonly _pipelineVertexBuffers?: (nextLoc: number) => { _buffers: GPUVertexBufferLayout[]; _nextLoc: number };
 
-    /** @builtin declarations for vertex function params (e.g. vertex_index for morph targets) */
+    /** `@builtin` declarations for vertex function params (e.g. vertex_index for morph targets) */
     readonly _vertexBuiltins?: readonly { readonly _name: string; readonly _builtin: string; readonly _type: string }[];
 
-    /** WGSL helper functions / struct definitions injected before @vertex fn main */
+    /** WGSL helper functions / struct definitions injected before `@vertex` fn main */
     readonly _vertexHelperFunctions?: string;
 
     // ── Fragment stage ──
@@ -147,7 +147,7 @@ export interface ShaderFragment {
     /** Extra bindings (textures, samplers) in the fragment shader */
     readonly _bindings?: readonly BindingDecl[];
 
-    /** WGSL helper functions injected before @fragment fn main */
+    /** WGSL helper functions injected before `@fragment` fn main */
     readonly _helperFunctions?: string;
 
     /** Code injected at named fragment slots */

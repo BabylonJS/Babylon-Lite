@@ -4,6 +4,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import eslintPluginPrettier from "eslint-plugin-prettier";
 import eslintConfigPrettier from "eslint-config-prettier";
+import tsdoc from "eslint-plugin-tsdoc";
 
 export default tseslint.config(
     // ===========================================
@@ -72,7 +73,13 @@ export default tseslint.config(
                 projectService: true,
             },
         },
+        plugins: {
+            tsdoc,
+        },
         rules: {
+            // TSDoc syntax correctness — any TSDoc comment that IS written must be valid.
+            "tsdoc/syntax": "error",
+
             // Console
             "no-console": ["error", { allow: ["warn", "error", "time", "timeEnd", "trace"] }],
 

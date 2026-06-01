@@ -8,17 +8,24 @@ interface SpriteAnimationRendererInternal extends SpriteRenderer {
     _disposeCallbacks: (() => void)[];
 }
 
+/** Abstracts the sprite a frame animation drives, decoupling the animation core from each sprite family. */
 export interface SpriteAnimationTarget {
+    /** Sets the target's current atlas frame. */
     readonly setFrame: (frame: number) => void;
+    /** Optional. Removes the target from its system, used when `removeWhenFinished` is set. */
     readonly remove?: () => void;
+    /** Optional. Returns `false` when the target no longer exists, stopping the animation. */
     readonly isAlive?: () => boolean;
 }
 
+/** Optional callbacks and behaviour applied when starting a sprite frame animation. */
 export interface PlaySpriteAnimationOptions {
+    /** Optional. Called once when a non-looping animation reaches its last frame. */
     readonly onEnd?: () => void;
     readonly removeWhenFinished?: boolean;
 }
 
+/** A single frame-range animation playing on a {@link SpriteAnimationTarget}. */
 export interface SpriteFrameAnimation {
     readonly _entityType: "sprite-frame-animation";
     readonly target: SpriteAnimationTarget;
@@ -29,15 +36,19 @@ export interface SpriteFrameAnimation {
     delayMs: number;
     accumulatedMs: number;
     animationStarted: boolean;
+    /** Optional. Called once when a non-looping animation reaches its last frame. */
     onEnd?: () => void;
     removeWhenFinished: boolean;
 }
 
+/** Optional configuration for a sprite animation manager. */
 export interface SpriteAnimationManagerOptions {
     readonly fixedDeltaMs?: number;
+    /** Optional. Called each tick of the manager's autonomous loop with the elapsed milliseconds. */
     readonly onUpdate?: (deltaMs: number) => void;
 }
 
+/** Owns a set of sprite frame animations and advances them in lockstep. */
 export interface SpriteAnimationManager {
     readonly _entityType: "sprite-animation-manager";
     animations: SpriteFrameAnimation[];
@@ -45,6 +56,7 @@ export interface SpriteAnimationManager {
     running: boolean;
 }
 
+/** Handle to a sprite animation manager attached to a scene or renderer; dispose it to detach. */
 export interface SpriteAnimationBinding {
     readonly _entityType: "sprite-animation-binding";
     active: boolean;
@@ -90,6 +102,11 @@ function normalizeDelay(delayMs: number): number {
     return Number.isFinite(delayMs) && delayMs > 1 ? delayMs : 1;
 }
 
+/**
+ * Creates an empty sprite animation manager.
+ * @param options - Optional fixed time step and per-tick update callback.
+ * @returns The new manager.
+ */
 export function createSpriteAnimationManager(options?: SpriteAnimationManagerOptions): SpriteAnimationManager {
     const manager: SpriteAnimationManagerInternal = {
         _entityType: "sprite-animation-manager",
@@ -101,6 +118,17 @@ export function createSpriteAnimationManager(options?: SpriteAnimationManagerOpt
     return manager;
 }
 
+/**
+ * Creates a sprite frame animation and immediately shows its first frame.
+ * @param target - Sprite the animation drives.
+ * @param from - First frame index of the range.
+ * @param to - Last frame index of the range; may be less than `from` to play in reverse.
+ * @param loop - When `true`, the animation restarts after reaching `to`.
+ * @param delayMs - Delay in milliseconds between frame steps.
+ * @param options - Optional end callback and removal behaviour.
+ * @returns The new animation, not yet attached to any manager.
+ * @throws If `from` or `to` is not finite.
+ */
 export function createSpriteFrameAnimation(
     target: SpriteAnimationTarget,
     from: number,
@@ -158,6 +186,11 @@ export function playSpriteTargetAnimation(
     return animation;
 }
 
+/**
+ * Removes an animation from a manager and clears its ownership if the manager owns it.
+ * @param manager - Manager to remove the animation from.
+ * @param animation - Animation to remove.
+ */
 export function removeSpriteAnimation(manager: SpriteAnimationManager, animation: SpriteFrameAnimation): void {
     const index = manager.animations.indexOf(animation);
     if (index !== -1) {
@@ -168,6 +201,10 @@ export function removeSpriteAnimation(manager: SpriteAnimationManager, animation
     }
 }
 
+/**
+ * Removes every animation owned by the manager, leaving it empty.
+ * @param manager - Manager to clear.
+ */
 export function clearSpriteAnimations(manager: SpriteAnimationManager): void {
     for (const animation of manager.animations) {
         if (getSpriteAnimationOwner(animation) === manager) {
@@ -205,10 +242,20 @@ export function playSpriteFrameAnimation(
     animation.target.setFrame(fromFrame);
 }
 
+/**
+ * Pauses an animation without removing it; it can be resumed with `playSpriteFrameAnimation`.
+ * @param animation - Animation to stop.
+ */
 export function stopSpriteAnimation(animation: SpriteFrameAnimation): void {
     animation.animationStarted = false;
 }
 
+/**
+ * Advances every animation in the manager by one time step, removing those that have finished.
+ * Uses the manager's `fixedDeltaMs` when set, otherwise `deltaMs`.
+ * @param manager - Manager to update.
+ * @param deltaMs - Elapsed time in milliseconds since the last update.
+ */
 export function updateSpriteAnimationManager(manager: SpriteAnimationManager, deltaMs: number): void {
     const stepMs = manager.fixedDeltaMs > 0 ? manager.fixedDeltaMs : deltaMs;
     if (!Number.isFinite(stepMs) || stepMs < 0) {
@@ -267,6 +314,13 @@ function advanceSpriteAnimation(animation: SpriteFrameAnimation, deltaMs: number
     return false;
 }
 
+/**
+ * Attaches a manager to a scene's before-render hooks so its animations advance each frame.
+ * @param scene - Scene whose render loop drives the manager.
+ * @param manager - Sprite animation manager to attach.
+ * @returns A binding that detaches the manager when disposed.
+ * @throws If the manager is already running or attached elsewhere.
+ */
 export function attachSpriteAnimationsToScene(scene: SceneContext, manager: SpriteAnimationManager): SpriteAnimationBinding {
     assertCanAttachToRenderLoop(manager);
     const managerInternal = asSpriteAnimationManagerInternal(manager);
@@ -295,6 +349,13 @@ export function attachSpriteAnimationsToScene(scene: SceneContext, manager: Spri
     return binding;
 }
 
+/**
+ * Attaches a manager to a sprite renderer's update hooks so its animations advance each frame.
+ * @param renderer - Sprite renderer whose update loop drives the manager.
+ * @param manager - Sprite animation manager to attach.
+ * @returns A binding that detaches the manager when disposed.
+ * @throws If the manager is already running or attached elsewhere.
+ */
 export function attachSpriteAnimationsToRenderer(renderer: SpriteRenderer, manager: SpriteAnimationManager): SpriteAnimationBinding {
     assertCanAttachToRenderLoop(manager);
     const managerInternal = asSpriteAnimationManagerInternal(manager);
@@ -329,6 +390,11 @@ export function attachSpriteAnimationsToRenderer(renderer: SpriteRenderer, manag
     return binding;
 }
 
+/**
+ * Detaches a binding created by {@link attachSpriteAnimationsToScene} or
+ * {@link attachSpriteAnimationsToRenderer}. Safe to call more than once.
+ * @param binding - Binding to dispose.
+ */
 export function disposeSpriteAnimationBinding(binding: SpriteAnimationBinding): void {
     if (!binding.active) {
         return;

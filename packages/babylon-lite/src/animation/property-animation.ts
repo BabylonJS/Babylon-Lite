@@ -9,16 +9,20 @@ import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
+/** A keyframe value: a single scalar or a fixed-length tuple of components (e.g. a vector or quaternion). */
 export type AnimationKeyframeValue = number | readonly number[];
 
+/** A single keyframe on a property animation track. Supply exactly one of `time` (seconds) or `frame`. */
 export interface AnimationKeyframe {
     readonly time?: number;
     readonly frame?: number;
     readonly value: AnimationKeyframeValue;
 }
 
+/** Interpolation mode between keyframes: smooth `"linear"` or hold-previous `"step"`. */
 export type PropertyAnimationInterpolation = "linear" | "step";
 
+/** Options describing one animated property track passed to {@link createPropertyAnimationClip}. */
 export interface PropertyAnimationTrackOptions {
     readonly path: string;
     readonly keys: readonly AnimationKeyframe[];
@@ -27,10 +31,12 @@ export interface PropertyAnimationTrackOptions {
     readonly quaternion?: boolean;
 }
 
+/** Options for {@link createPropertyAnimationClip}. */
 export interface PropertyAnimationClipOptions {
     readonly frameRate?: number;
 }
 
+/** A compiled animation track: a sampler plus the metadata needed to evaluate and write its property. */
 export interface PropertyAnimationTrack {
     readonly path: string;
     readonly sampler: AnimationSampler;
@@ -38,6 +44,7 @@ export interface PropertyAnimationTrack {
     readonly quaternion: boolean;
 }
 
+/** A reusable, target-independent set of compiled property tracks with a total duration. */
 export interface PropertyAnimationClip {
     readonly name: string;
     readonly tracks: readonly PropertyAnimationTrack[];
@@ -45,6 +52,7 @@ export interface PropertyAnimationClip {
     readonly frameRate: number;
 }
 
+/** Options for {@link createPropertyAnimationGroup}, controlling looping, speed, and play range. */
 export interface CreatePropertyAnimationGroupOptions {
     readonly loop?: boolean;
     readonly speedRatio?: number;
@@ -66,6 +74,12 @@ interface PathSettable {
     set: (...values: number[]) => void;
 }
 
+/** Compiles a set of track definitions into a reusable {@link PropertyAnimationClip}.
+ *  @param name - Clip name.
+ *  @param tracks - One or more track definitions; their keyframes are sorted and baked into samplers.
+ *  @param options - Optional default frame rate.
+ *  @returns The compiled clip, with its duration set to the longest track.
+ *  @throws If no tracks are provided. */
 export function createPropertyAnimationClip(name: string, tracks: readonly PropertyAnimationTrackOptions[], options?: PropertyAnimationClipOptions): PropertyAnimationClip {
     if (tracks.length === 0) {
         throw new Error("createPropertyAnimationClip requires at least one track");
@@ -89,6 +103,13 @@ export function createPropertyAnimationClip(name: string, tracks: readonly Prope
     return { name, tracks: builtTracks, duration, frameRate };
 }
 
+/** Binds `clip` to `target`'s properties, creates a playing animation group, and attaches it to `manager`.
+ *  @param manager - Animation manager that drives the resulting group.
+ *  @param target - Object whose properties (resolved by each track's dotted path) are animated.
+ *  @param clip - Compiled clip to play.
+ *  @param options - Optional looping, speed, and play-range overrides.
+ *  @returns The started animation group.
+ *  @throws If the resolved play range does not have `toTime` greater than `fromTime`. */
 export function createPropertyAnimationGroup(
     manager: AnimationManager,
     target: object,

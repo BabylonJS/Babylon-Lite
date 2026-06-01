@@ -14,7 +14,7 @@ import { PBR_HAS_EMISSIVE_COLOR, PBR_HAS_EMISSIVE } from "../pbr-flag-bits.js";
 
 /**
  * Create an emissive-color fragment.
- * @param hasEmissiveTexture Whether the material also has an emissive texture.
+ * @param hasEmissiveTexture - Whether the material also has an emissive texture.
  */
 export function createEmissiveColorFragment(hasEmissiveTexture: boolean): ShaderFragment {
     return {

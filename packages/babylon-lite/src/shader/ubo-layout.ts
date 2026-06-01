@@ -4,6 +4,7 @@
  * Computes byte offsets and generates WGSL struct bodies from UboField arrays,
  * respecting WGSL uniform buffer alignment rules (std140-like):
  *
+ * ```
  *   f32          → align 4,  size 4
  *   u32 / i32    → align 4,  size 4
  *   vec2<f32>    → align 8,  size 8
@@ -12,6 +13,7 @@
  *   vec4<u32>    → align 16, size 16
  *   mat4x4<f32>  → align 16, size 64
  *   array<vec4<u32>, N> → align 16, size 16 × N
+ * ```
  *
  * The total struct size is rounded up to a multiple of 16 bytes.
  */

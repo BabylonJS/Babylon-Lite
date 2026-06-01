@@ -8,8 +8,10 @@ import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { SpriteBlendMode } from "./sprite-2d.js";
 
+/** Blend modes available to billboard sprite systems: standard `alpha`, `premultiplied` alpha, or alpha-test `cutout`. */
 export type BillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
 
+/** Optional configuration for a billboard sprite system. */
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
     blendMode?: BillboardBlendMode;
@@ -19,7 +21,9 @@ export interface BillboardSpriteSystemOptions {
     order?: number;
 }
 
+/** How a billboard orients itself: `facing` always faces the camera, `axis-locked` rotates only around a fixed axis. */
 export type BillboardOrientation = "facing" | "axis-locked";
+/** Depth/blend pipeline path used by a billboard system: alpha-blended `transparent` or alpha-tested `cutout`. */
 export type BillboardDepthMode = "transparent" | "cutout";
 
 export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation = BillboardOrientation> {
@@ -64,9 +68,12 @@ export interface BillboardIndexHandleHooks {
     readonly clear: () => void;
 }
 
+/** A camera-facing billboard sprite system. */
 export type FacingBillboardSpriteSystem = BillboardSpriteSystem<"facing">;
+/** A billboard sprite system that rotates only around a fixed world axis. */
 export type AxisLockedBillboardSpriteSystem = BillboardSpriteSystem<"axis-locked">;
 
+/** Initial properties for a single billboard sprite. */
 export interface BillboardSpriteInit {
     position: [number, number, number];
     sizeWorld: [number, number];
@@ -109,10 +116,24 @@ function resolveBillboardDepthMode(blendMode: BillboardBlendMode): BillboardDept
     return blendMode === "cutout" ? "cutout" : "transparent";
 }
 
+/**
+ * Creates a camera-facing billboard sprite system backed by the given atlas.
+ * @param atlas - Sprite atlas supplying frames.
+ * @param opts - Optional capacity, blend, and appearance settings.
+ * @returns The new facing billboard system.
+ */
 export function createFacingBillboardSystem(atlas: SpriteAtlas, opts: BillboardSpriteSystemOptions = {}): FacingBillboardSpriteSystem {
     return createBillboardSystem(atlas, "facing", [0, 0, 0], opts);
 }
 
+/**
+ * Creates a billboard sprite system whose quads rotate only around a fixed world axis.
+ * @param atlas - Sprite atlas supplying frames.
+ * @param axis - Lock axis; normalized internally and must be non-zero and finite.
+ * @param opts - Optional capacity, blend, and appearance settings.
+ * @returns The new axis-locked billboard system.
+ * @throws If `axis` has non-finite components or is the zero vector.
+ */
 export function createAxisLockedBillboardSystem(
     atlas: SpriteAtlas,
     axis: readonly [number, number, number],
@@ -289,6 +310,13 @@ function markDirty(system: BillboardSpriteSystem, dirtyMin: number, dirtyMax: nu
     system._version = (system._version + 1) | 0;
 }
 
+/**
+ * Appends a billboard sprite to the system and returns its instance index.
+ * @param system - Billboard system to add to.
+ * @param props - Sprite properties; `position` and `sizeWorld` are required.
+ * @returns The new sprite's instance index.
+ * @throws If `position` or `sizeWorld` is missing.
+ */
 export function addBillboardSpriteIndex(system: BillboardSpriteSystem, props: BillboardSpriteInit): number {
     if (props.position === undefined) {
         throw new Error("addBillboardSpriteIndex: props.position is required.");
@@ -306,6 +334,13 @@ export function addBillboardSpriteIndex(system: BillboardSpriteSystem, props: Bi
     return index;
 }
 
+/**
+ * Updates the billboard sprite at the given instance index.
+ * @param system - Billboard system that owns the sprite.
+ * @param index - Instance index to update.
+ * @param patch - Partial set of properties to overwrite.
+ * @throws If `index` is out of range.
+ */
 export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index: number, patch: Partial<BillboardSpriteInit>): void {
     if (index < 0 || index >= system.count) {
         throw new Error(`updateBillboardSpriteIndex: index ${index} out of range [0, ${system.count})`);
@@ -316,6 +351,12 @@ export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index:
     markDirty(system, index, index + 1);
 }
 
+/**
+ * Removes the billboard sprite at the given instance index using swap-remove with the last sprite.
+ * @param system - Billboard system that owns the sprite.
+ * @param index - Instance index to remove.
+ * @throws If `index` is out of range.
+ */
 export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index: number): void {
     if (index < 0 || index >= system.count) {
         throw new Error(`removeBillboardSpriteIndex: index ${index} out of range [0, ${system.count})`);
@@ -340,6 +381,10 @@ export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index:
     markDirty(system, index, index + 1);
 }
 
+/**
+ * Removes every sprite from the system, resetting its count to zero.
+ * @param system - Billboard system to clear.
+ */
 export function clearBillboardSprites(system: BillboardSpriteSystem): void {
     const count = system.count;
     system._dirtyMin = 0;

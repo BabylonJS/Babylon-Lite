@@ -5,7 +5,7 @@
  *    • `element chunk K`     — K records of 12 floats:
  *        min_x..z, max_x..z, min_scale_*, max_scale_*, min_r..b, max_r..b
  *    • `element vertex N`    — N rows of `packed_position`/`_rotation`/`_scale`/
- *      `_color` (uint32 each); chunkIndex = vertexIndex >> 8.
+ *      `_color` (uint32 each); chunkIndex = `vertexIndex >> 8`.
  *    • `element sh M`        — properties define SH bytes laid out in a
  *      *trailing* block (absolute offset `chunkBytes + vertexBytes`).
  *

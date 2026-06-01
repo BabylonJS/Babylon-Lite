@@ -6,6 +6,10 @@
  *  materials through a common path. */
 import type { MeshGroupBuilder } from "../render/renderable.js";
 
+/** Base material interface — the polymorphic anchor shared by every concrete
+ *  material kind (Standard, PBR, Shader, Node). Concrete materials add their own
+ *  user-facing properties while the shared `_buildGroup` hook lets the renderer
+ *  dispatch every material through a common path. */
 export interface Material {
     readonly _buildGroup: MeshGroupBuilder;
     /** Material-owned render feature bits. Mesh-owned bits are computed per renderable. */

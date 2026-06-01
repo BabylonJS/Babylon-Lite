@@ -8,6 +8,7 @@ export interface Vec3 {
     z: number;
 }
 
+/** 3-component vector as a fixed-length `[x, y, z]` tuple. */
 export type Vec3Tuple = [number, number, number];
 
 /** 4-component vector (homogeneous coords, quaternion, tangent) */
