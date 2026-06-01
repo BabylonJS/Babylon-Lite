@@ -7,23 +7,18 @@ import type { DrawBinding, DrawUpdateContext, Renderable } from "../../packages/
 import { createSceneContext, registerScene } from "../../packages/babylon-lite/src/scene/scene";
 import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget } from "../../packages/babylon-lite/src/engine/render-target";
-import { createRenderTask } from "../../packages/babylon-lite/src/frame-graph/render-task";
+import { createRenderTask, type RenderTask } from "../../packages/babylon-lite/src/frame-graph/render-task";
 import { enableRenderTaskTransmission, enableSceneTransmission } from "../../packages/babylon-lite/src/frame-graph/transmission";
 
-const gpuGlobals = globalThis as typeof globalThis & {
+const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
     GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number; COPY_SRC: number; COPY_DST: number };
 };
 
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage & { UNIFORM: number; COPY_DST: number };
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage & { VERTEX: number; FRAGMENT: number };
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 } as unknown as GPUTextureUsage & {
-    RENDER_ATTACHMENT: number;
-    TEXTURE_BINDING: number;
-    COPY_SRC: number;
-    COPY_DST: number;
-};
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 };
+gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 };
+gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 };
 
 function makeIdentityMatrix(z = 0): Mat4 {
     const matrix = new Float32Array(16);
@@ -267,7 +262,7 @@ describe("RenderPassTask transparent sorting", () => {
         const everyScene = createSceneContext(everyEngine) as SceneContextInternal;
         everyScene.camera = makeCamera();
         const everyOrder: string[] = [];
-        (everyScene._frameGraph._tasks[0]! as unknown as { _config: { transmission?: { copyCount: number } } })._config.transmission = { copyCount: 0 };
+        (everyScene._frameGraph._tasks[0]! as RenderTask)._config.transmission = { copyCount: 0 };
         everyScene._renderables.push(
             makeDrawOrderRenderable("opaque", { order: 100 }, everyOrder),
             makeDrawOrderRenderable("glass-a", { order: 150, _transmissive: true }, everyOrder),
@@ -321,7 +316,7 @@ describe("RenderPassTask transparent sorting", () => {
         const engine = makeMockEngine({ textures });
         const scene = createSceneContext(engine) as SceneContextInternal;
         scene.camera = makeCamera();
-        (scene._frameGraph._tasks[0]! as unknown as { _config: { transmission?: { generateMipmaps: false } } })._config.transmission = { generateMipmaps: false };
+        (scene._frameGraph._tasks[0]! as RenderTask)._config.transmission = { generateMipmaps: false };
         scene._renderables.push(makeDrawOrderRenderable("glass", { _transmissive: true }, []));
 
         enableSceneTransmission(scene, engine);

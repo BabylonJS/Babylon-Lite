@@ -13,15 +13,15 @@ import type { Task } from "../../packages/babylon-lite/src/frame-graph/task";
 import { createSceneContext, disposeScene, registerScene, unregisterScene } from "../../packages/babylon-lite/src/scene/scene";
 import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
 
-const gpuGlobals = globalThis as typeof globalThis & {
+const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
     GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number };
 };
 
-gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage & { VERTEX: number; FRAGMENT: number };
-gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage & { UNIFORM: number; COPY_DST: number };
-gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4 } as unknown as GPUTextureUsage & { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number };
+gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 };
+gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 };
+gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4 };
 
 function makeMockEngine(): EngineContext {
     const device = {
@@ -43,6 +43,7 @@ function makeMockEngine(): EngineContext {
         canvas: {} as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         device,
         context: {} as GPUCanvasContext,
         format: "bgra8unorm",
@@ -54,7 +55,7 @@ function makeMockEngine(): EngineContext {
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 0,
         _cbs: [],
-    } as unknown as EngineContextInternal;
+    } as EngineContextInternal;
 }
 
 function makeRenderingContext(): RenderingContext {

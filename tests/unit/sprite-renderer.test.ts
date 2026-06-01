@@ -95,21 +95,19 @@ function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounte
         canvas: {} as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         device,
         context: {} as GPUCanvasContext,
         format: "bgra8unorm",
-        _targets: {
-            msaaTexture: {} as GPUTexture,
-            msaaView: {} as GPUTextureView,
-            depthTexture: {} as GPUTexture,
-            depthView: {} as GPUTextureView,
-            width: 800,
-            height: 600,
-        },
+        alphaMode: "opaque",
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
-    } as unknown as EngineContextInternal;
+        _currentEncoder: {} as GPUCommandEncoder,
+        _swapchainView: {} as GPUTextureView,
+        _currentDelta: 0,
+        _cbs: [],
+    } as EngineContextInternal;
 
     return { engine: eng, counters };
 }

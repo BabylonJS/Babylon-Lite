@@ -19,7 +19,7 @@ import { createPbrShadowFragment } from "../../packages/babylon-lite/src/materia
 import { createNormalMapFragment } from "../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
 import type { PbrTemplateConfig } from "../../packages/babylon-lite/src/material/pbr/pbr-template";
 
-const defaultPbrConfig = {
+const defaultPbrConfig: PbrTemplateConfig = {
     _normalMode: "none",
     _hasEmissiveTexture: false,
     _hasSpecGloss: false,
@@ -33,9 +33,7 @@ const defaultPbrConfig = {
     _hasEmissiveColor: false,
     _hasReflectanceExt: false,
     _hasIbl: false,
-    _hasClearcoat: false,
-    _hasSheen: false,
-} as unknown as PbrTemplateConfig & { _hasClearcoat: boolean; _hasSheen: boolean };
+};
 
 // ── PBR Template Integration ────────────────────────────────────
 
@@ -67,8 +65,7 @@ describe("PBR template + fragments integration", () => {
             _normalMode: "tangent",
             _hasEmissiveTexture: true,
             _hasTonemap: true,
-            _hasClearcoat: true,
-        } as unknown as PbrTemplateConfig);
+        });
         const result = composeShader(template, [createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, false, false, false)!]);
         expect(result._fragmentWGSL).toContain("visibility_Kelemen");
         expect(result._fragmentWGSL).toContain("getR0RemappedForClearCoat");
@@ -82,8 +79,7 @@ describe("PBR template + fragments integration", () => {
             _normalMode: "tangent",
             _hasEmissiveTexture: true,
             _hasTonemap: true,
-            _hasSheen: true,
-        } as unknown as PbrTemplateConfig);
+        });
         const result = composeShader(template, [createSheenFragment(false, false)]);
         expect(result._fragmentWGSL).toContain("normalDistributionFunction_CharlieSheen");
         expect(result._fragmentWGSL).toContain("visibility_Ashikhmin");
@@ -178,9 +174,7 @@ describe("PBR template + fragments integration", () => {
             _hasSpecularAA: true,
             _hasEmissiveColor: true,
             _hasIbl: true,
-            _hasClearcoat: true,
-            _hasSheen: true,
-        } as unknown as PbrTemplateConfig);
+        });
         const fragments: ShaderFragment[] = [
             createIblFragment(true),
             createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, true, false, true)!,

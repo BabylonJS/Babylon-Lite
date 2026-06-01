@@ -64,18 +64,11 @@ function makeMockEngine(): EngineContextInternal {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         device,
         context: {} as GPUCanvasContext,
         format: "bgra8unorm",
         alphaMode: "opaque",
-        _targets: {
-            msaaTexture: {} as GPUTexture,
-            msaaView: {} as GPUTextureView,
-            depthTexture: {} as GPUTexture,
-            depthView: {} as GPUTextureView,
-            width: 800,
-            height: 600,
-        },
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
@@ -83,7 +76,7 @@ function makeMockEngine(): EngineContextInternal {
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 0,
         _cbs: [],
-    } as unknown as EngineContextInternal;
+    } as EngineContextInternal;
 }
 
 function makeMockAtlas(): SpriteAtlas {
