@@ -34,7 +34,15 @@ import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle
  * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
  * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
  */
-export function wgslMinifyPlugin(): Plugin {
+export function wgslMinifyPlugin(opts: { mangle?: boolean } = {}): Plugin {
+    // Identifier mangling shortens scene WGSL to satisfy bundle-size ceilings, but it
+    // rewrites bare tokens (e.g. worldPos -> wp) PER CHUNK. That is only safe when a
+    // shader's struct declaration and all its usages land in the same chunk. The demo
+    // bundler splits code far more aggressively, so the declaration and usage can end up
+    // in different chunks (and esbuild may turn no-substitution templates into plain
+    // strings the mangler skips), producing inconsistent names like "struct member wp
+    // not found". Demos have no size ceilings, so they opt out of mangling entirely.
+    const mangle = opts.mangle !== false;
     return {
         name: "wgsl-minify",
         enforce: "pre",
@@ -59,9 +67,9 @@ export function wgslMinifyPlugin(): Plugin {
             return { code: `export default ${JSON.stringify(compact)}`, map: null };
         },
         renderChunk(code: string, chunk) {
-            const minified = minifyTemplateWgsl(code);
+            const minified = minifyTemplateWgsl(code, mangle);
             const isPbrChunk = chunk.fileName?.includes("pbr-metallic-roughness-block") || chunk.name?.includes("pbr-metallic-roughness-block");
-            return { code: isPbrChunk ? mangleInlineWgsl(minified) : minified, map: null };
+            return { code: mangle && isPbrChunk ? mangleInlineWgsl(minified) : minified, map: null };
         },
     };
 }
@@ -203,8 +211,9 @@ function mangleInlineWgsl(code: string): string {
         .replace(/\b0\.0005\b/g, "5e-4");
 }
 
-/** Strip spaces around WGSL operators inside template literal content. */
-function minifyTemplateWgsl(code: string): string {
+/** Strip spaces around WGSL operators inside template literal content.
+ *  When `mangle` is true, also shorten known WGSL identifiers (scene size optimization). */
+function minifyTemplateWgsl(code: string, mangle = true): string {
     const out: string[] = [];
     let i = 0;
     const len = code.length;
@@ -238,7 +247,7 @@ function minifyTemplateWgsl(code: string): string {
         if (ch === "`") {
             out.push("`");
             i++;
-            i = processTemplateLiteral(code, i, len, out);
+            i = processTemplateLiteral(code, i, len, out, mangle);
             continue;
         }
 
@@ -248,11 +257,12 @@ function minifyTemplateWgsl(code: string): string {
     return out.join("");
 }
 
-function processTemplateLiteral(code: string, i: number, len: number, out: string[]): number {
+function processTemplateLiteral(code: string, i: number, len: number, out: string[], mangle = true): number {
     const wgsl: string[] = [];
     const flushWgsl = (): void => {
         if (wgsl.length > 0) {
-            out.push(mangleWgslIdentifiers(wgsl.join("")));
+            const joined = wgsl.join("");
+            out.push(mangle ? mangleWgslIdentifiers(joined) : joined);
             wgsl.length = 0;
         }
     };
@@ -287,7 +297,7 @@ function processTemplateLiteral(code: string, i: number, len: number, out: strin
                 } else if (ec === "`") {
                     out.push("`");
                     i++;
-                    i = processTemplateLiteral(code, i, len, out);
+                    i = processTemplateLiteral(code, i, len, out, mangle);
                     continue;
                 } else if (ec === '"' || ec === "'") {
                     const q = ec;
@@ -554,6 +564,22 @@ interface BundleManifestEntry {
 
 type BundleManifest = Record<string, BundleManifestEntry>;
 
+const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
+const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
+const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
+
+function orderBundleManifest(manifest: BundleManifest): BundleManifest {
+    const ordered: BundleManifest = {};
+    for (const scene of ALL_SCENES) {
+        const entry = manifest[scene];
+        if (entry) ordered[scene] = entry;
+    }
+    for (const [scene, entry] of Object.entries(manifest)) {
+        if (!ordered[scene]) ordered[scene] = entry;
+    }
+    return ordered;
+}
+
 function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
     const errors: string[] = [];
     for (const ref of refs) {
@@ -577,7 +603,7 @@ export function writeMasterBundleManifest(refs?: string[]): void {
         return;
     }
 
-    writeFileSync(masterManifestPath, JSON.stringify(baseline.manifest, null, 2));
+    writeFileSync(masterManifestPath, JSON.stringify(orderBundleManifest(baseline.manifest), null, 2));
     console.log(`✓ Bundle master baseline manifest (${baseline.ref}) written to ${masterManifestPath}`);
 }
 
@@ -876,9 +902,6 @@ export function writeBundleInfo(scene: string, result: unknown): void {
     writeBundleInfoToDir(scene, result, bundleInfoDir, ROOT);
 }
 
-const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
-const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
-const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") : ALL_SCENES;
 const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.map((s) => `bjs-${s}`);
 
@@ -1346,7 +1369,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
     }
 
     function flush(): void {
-        writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+        writeFileSync(manifestPath, JSON.stringify(orderBundleManifest(manifest), null, 2));
     }
 
     try {

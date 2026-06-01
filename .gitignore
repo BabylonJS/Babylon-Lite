@@ -31,6 +31,17 @@ lab/public/bundle/*
 lab/public/bundle-baseline/
 lab/bundle-baseline-scene*.html
 lab/public/vendor/
+lab/public/doom/*.wad
+lab/public/doom/COPYING.txt
+lab/public/doom/CREDITS.txt
+.freedoom-cache/
+lab/public/librequake/
+.librequake-cache/
+lab/public/minecraft/voxelpack/*.png
+lab/public/minecraft/voxelpack/License.txt
+.voxelpack-cache/
+lab/public/freeciv/
+.freeciv-cache/
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
 test-results/
@@ -52,3 +63,5 @@ _bjs_diag.mjs
 _pix.mjs
 _bjs67_defines.txt
 .DS_Store
+# Generated public Pages site
+pages-dist/

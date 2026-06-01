@@ -434,7 +434,13 @@ export function clearSprite2DLayer(layer: Sprite2DLayer): void {
     layer._version = (layer._version + 1) | 0;
 }
 
-/** Update only the frame UVs for one sprite. */
+/**
+ * Update only the frame UVs for one sprite.
+ *
+ * The sprite keeps its explicit `sizePx`/saved size. For atlas-driven size
+ * changes, call `updateSprite2DIndex(layer, index, { frame, sizePx })`.
+ * Existing flip state is preserved for non-degenerate UV ranges.
+ */
 export function setSprite2DFrameIndex(layer: Sprite2DLayer, index: number, frame: number): void {
     if (index < 0 || index >= layer.count) {
         throw new Error(`setSprite2DFrameIndex: index ${index} out of range [0, ${layer.count})`);
@@ -442,9 +448,11 @@ export function setSprite2DFrameIndex(layer: Sprite2DLayer, index: number, frame
     const frameIdx = resolveSpriteFrame(layer.atlas, frame);
     const f = layer.atlas.frames[frameIdx]!;
     const base = index * layer._instanceFloatsPerSprite;
-    layer._instanceData[base + 4] = f.uvMin[0];
-    layer._instanceData[base + 5] = f.uvMin[1];
-    layer._instanceData[base + 6] = f.uvMax[0];
-    layer._instanceData[base + 7] = f.uvMax[1];
+    const flipX = layer._instanceData[base + 4]! > layer._instanceData[base + 6]!;
+    const flipY = layer._instanceData[base + 5]! > layer._instanceData[base + 7]!;
+    layer._instanceData[base + 4] = flipX ? f.uvMax[0] : f.uvMin[0];
+    layer._instanceData[base + 5] = flipY ? f.uvMax[1] : f.uvMin[1];
+    layer._instanceData[base + 6] = flipX ? f.uvMin[0] : f.uvMax[0];
+    layer._instanceData[base + 7] = flipY ? f.uvMin[1] : f.uvMax[1];
     markDirty(layer, index, index + 1);
 }

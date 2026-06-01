@@ -35,6 +35,7 @@ import {
     LITE_BUNDLE_TARGET,
     NAME_POLYFILL,
 } from "./bundle-scenes-core";
+import { fetchDemoAssets } from "./demo-fetchers";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -43,6 +44,8 @@ interface DemoConfigEntry {
     name: string;
     description: string;
     tags?: string[];
+    /** Optional id of the asset fetcher for this demo (see scripts/demo-fetchers.ts). */
+    fetch?: string;
 }
 
 interface DemoManifestEntry {
@@ -75,7 +78,7 @@ function loadDemosConfig(): DemoConfigEntry[] {
     return JSON.parse(readFileSync(resolve(ROOT, "demos-config.json"), "utf-8")) as DemoConfigEntry[];
 }
 
-async function buildDemo(slug: string): Promise<void> {
+export async function buildDemo(slug: string): Promise<void> {
     const demoOutDir = resolve(demosDir, slug);
     rmSync(demoOutDir, { recursive: true, force: true });
 
@@ -85,7 +88,7 @@ async function buildDemo(slug: string): Promise<void> {
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
             alias: { "babylon-lite": srcDir },
             dedupe: ["@babylonjs/core"],
@@ -104,6 +107,24 @@ async function buildDemo(slug: string): Promise<void> {
                     format: "es",
                     entryFileNames: "[name].js",
                     chunkFileNames: `${slug}-[name]-[hash].js`,
+                    banner: NAME_POLYFILL,
+                },
+            },
+        },
+        // Demos may spawn a module Web Worker via `new Worker(new URL("./x.ts", import.meta.url), { type: "module" })`
+        // (see the offscreen demo). Build the worker with the same WGSL/property-mangle
+        // pipeline and emit its chunks prefixed with the slug so the copy + stale-cleanup
+        // logic below picks them up alongside the main entry. WGSL identifier mangling is
+        // disabled (mangle: false) because the worker's aggressive code-splitting can place
+        // a shader struct declaration and its usages in different chunks, which per-chunk
+        // mangling would rename inconsistently (e.g. "struct member wp not found").
+        worker: {
+            format: "es",
+            plugins: () => [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin()],
+            rollupOptions: {
+                output: {
+                    entryFileNames: `${slug}-worker-[hash].js`,
+                    chunkFileNames: `${slug}-worker-[name]-[hash].js`,
                     banner: NAME_POLYFILL,
                 },
             },
@@ -137,6 +158,11 @@ export async function buildDemoBundles(): Promise<void> {
         console.log("No demos configured; skipping demo bundle build.");
         return;
     }
+
+    // Make sure every demo's runtime assets (IWAD, textures, tilesets, …) are
+    // present locally before bundling. Each fetcher is idempotent.
+    await fetchDemoAssets(demos);
+
     mkdirSync(demosDir, { recursive: true });
 
     for (const demo of demos) {

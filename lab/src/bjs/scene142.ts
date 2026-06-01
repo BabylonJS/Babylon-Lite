@@ -13,6 +13,7 @@ import { AnaglyphPostProcess } from "@babylonjs/core/PostProcesses/anaglyphPostP
 import { BlackAndWhitePostProcess } from "@babylonjs/core/PostProcesses/blackAndWhitePostProcess";
 import { BlurPostProcess } from "@babylonjs/core/PostProcesses/blurPostProcess";
 import { ChromaticAberrationPostProcess } from "@babylonjs/core/PostProcesses/chromaticAberrationPostProcess";
+import type { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { PassPostProcess } from "@babylonjs/core/PostProcesses/passPostProcess";
 import { Scene } from "@babylonjs/core/scene";
 
@@ -108,7 +109,7 @@ function createSourceTarget(name: string, scene: Scene, camera: ArcRotateCamera,
     const anaglyph = new AnaglyphPostProcess("scene142-anaglyph", 1, [leftCamera, sourceCamera], Texture.BILINEAR_SAMPLINGMODE, engine);
     anaglyph.inputTexture = sourceWrapper;
 
-    const quadrants: readonly [Viewport, readonly (typeof blackAndWhite)[]][] = [
+    const quadrants: readonly [Viewport, PostProcess[]][] = [
         [new Viewport(0, 0.5, 0.5, 0.5), [blackAndWhite]],
         [new Viewport(0.5, 0.5, 0.5, 0.5), [anaglyph]],
         [new Viewport(0, 0, 0.5, 0.5), [blurPass, blur]],
@@ -143,7 +144,7 @@ function createSourceTarget(name: string, scene: Scene, camera: ArcRotateCamera,
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
     for (let i = 0; i < 10; i++) {
-        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+        await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     }
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";

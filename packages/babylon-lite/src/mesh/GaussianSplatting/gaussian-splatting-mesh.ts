@@ -15,7 +15,7 @@ import type { Mat4 } from "../../math/types.js";
 import { mat4Identity, mat4Compose } from "../../math/mat4.js";
 import { ObservableVec3 } from "../../math/observable-vec3.js";
 import { ObservableQuat } from "../../math/observable-quat.js";
-import { createWorldMatrixState } from "../../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "../../scene/world-matrix-state.js";
 import { eulerToQuat, createEulerProxy } from "../../scene/scene-node.js";
 import { buildSplatGeometry, type SplatGeometry, type ParsedSplat } from "../../loader-splat/splat-data.js";
 
@@ -323,4 +323,6 @@ function initSplatTransform(node: GaussianSplattingMesh): void {
         configurable: true,
         enumerable: false,
     });
+    // Tag so children parented to this splat mesh get push invalidation.
+    attachWorldMatrixState(node, wm);
 }

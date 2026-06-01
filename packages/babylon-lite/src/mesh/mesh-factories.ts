@@ -36,7 +36,7 @@ import type { ExtrudeShapeOptions } from "./create-extrude.js";
 /** Create a Mesh from raw geometry data + GPU device.
  *  No material is assigned — the caller must set mesh.material before adding to scene. */
 export function createMeshFromData(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     name: string,
     positions: Float32Array,
     normals: Float32Array,
@@ -54,7 +54,7 @@ export function createMeshFromData(
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _materialDirty: false,
-        _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
+        _gpu: uploadMeshToGPU(engine as EngineContextInternal, positions, normals, indices, uvs, uvs2, tangents, colors),
     } as unknown as MeshInternal;
     initMeshTransform(mesh);
 
@@ -66,6 +66,22 @@ export function createMeshFromData(
     (engine as EngineContextInternal)._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
 
     return mesh as Mesh;
+}
+
+/** Update a mesh's GPU vertex positions in place (e.g. CPU vertex animation).
+ *  `positions` must hold tightly-packed XYZ floats matching the mesh's vertex count.
+ *  `vertexOffset` is the first vertex to overwrite (defaults to 0).
+ *  The mesh must have been created via createMeshFromData / a mesh factory.
+ *  Zero-allocation GPU upload only — CPU-side picking geometry is not refreshed. */
+export function updateMeshPositions(engine: EngineContext, mesh: Mesh, positions: Float32Array, vertexOffset = 0): void {
+    const gpu = (mesh as MeshInternal)._gpu;
+    (engine as EngineContextInternal).device.queue.writeBuffer(
+        gpu.positionBuffer,
+        vertexOffset * 3 * 4,
+        positions.buffer as ArrayBuffer,
+        positions.byteOffset,
+        positions.byteLength
+    );
 }
 
 /** Create a sphere mesh. Caller must assign material. */

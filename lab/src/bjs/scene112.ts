@@ -60,7 +60,7 @@ const ASSET_ROOT = "https://raw.githubusercontent.com/BabylonJS/Assets/master/me
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     const cam = scene.activeCamera as ArcRotateCamera;
     canvas.dataset.camAlpha = String(cam.alpha);
     canvas.dataset.camBeta = String(cam.beta);

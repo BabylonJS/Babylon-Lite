@@ -44,9 +44,10 @@ import { Scene } from "@babylonjs/core/scene";
     }
 
     const materialPlane = new StandardMaterial("texturePlane", scene);
-    materialPlane.diffuseTexture = new Texture(texUrl, scene);
-    materialPlane.diffuseTexture.uScale = 2.0;
-    materialPlane.diffuseTexture.vScale = 2.0;
+    const planeTexture = new Texture(texUrl, scene);
+    planeTexture.uScale = 2.0;
+    planeTexture.vScale = 2.0;
+    materialPlane.diffuseTexture = planeTexture;
 
     ground.material = materialPlane;
 
@@ -62,7 +63,7 @@ import { Scene } from "@babylonjs/core/scene";
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

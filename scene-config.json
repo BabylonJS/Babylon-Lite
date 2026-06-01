@@ -461,6 +461,26 @@
         "skipPerf": true
     },
     {
+        "id": 58,
+        "slug": "scene58-sprite-animation",
+        "name": "Scene 58 — Sprite2D Animation",
+        "maxMad": 0.02,
+        "maxRawKB": 25,
+        "description": "Pure-2D player sprite sheet animation using the optional Sprite2D handle animation API. The scene exercises forward looping, reverse looping, and removeWhenFinished on a frozen seek frame.",
+        "tags": ["sprites", "2d", "anim"],
+        "skipPerf": true
+    },
+    {
+        "id": 59,
+        "slug": "scene59-billboard-animation",
+        "name": "Scene 59 — Billboard Sprite Animation",
+        "maxMad": 0.02,
+        "maxRawKB": 70,
+        "description": "World-space character billboard sprite sheet animation using the optional billboard handle animation API, including forward looping, reverse looping, and removeWhenFinished.",
+        "tags": ["sprites", "billboards", "anim"],
+        "skipPerf": true
+    },
+    {
         "id": 60,
         "slug": "scene60-nme-flat",
         "name": "Scene 60 — NME Flat Colour",

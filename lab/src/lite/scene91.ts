@@ -23,6 +23,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import type { Csg2Solid, EngineContext, Mesh, StandardMaterialProps } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 const GRASS_URL = "https://playground.babylonjs.com/textures/grass.png";
 const CRATE_URL = "https://playground.babylonjs.com/textures/crate.png";
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-1.5, 1.6, 18, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1));
 

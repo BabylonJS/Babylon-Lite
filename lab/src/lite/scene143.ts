@@ -5,7 +5,6 @@ import {
     attachControl,
     createArcRotateCamera,
     createBlurPostProcessTask,
-    createChromaticAberrationPostProcessTask,
     createEngine,
     createRenderTarget,
     createRenderTask,
@@ -14,6 +13,7 @@ import {
     registerScene,
     startEngine,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const initStart = performance.now();
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(0, Math.PI / 2.2, 0.01, { x: 5.0855, y: 2.492, z: 0.1654 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const outputTarget = createRenderTarget({
         label: "scene143-postprocess-output",

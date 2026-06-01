@@ -30,9 +30,9 @@ type TextureOwnerBlock = {
 
     const material = NodeMaterial.Parse(SCENE81_NME_JSON, scene);
     const atlas = new Texture(SCENE81_TEXTURE_URL, scene, true, true, Texture.NEAREST_SAMPLINGMODE);
-    (material.getBlockByName("AtlasUV") as TextureOwnerBlock).texture = atlas;
-    (material.getBlockByName("TriAtlas") as TextureOwnerBlock).texture = atlas;
-    (material.getBlockByName("BiAtlas") as TextureOwnerBlock).texture = atlas;
+    (material.getBlockByName("AtlasUV") as unknown as TextureOwnerBlock).texture = atlas;
+    (material.getBlockByName("TriAtlas") as unknown as TextureOwnerBlock).texture = atlas;
+    (material.getBlockByName("BiAtlas") as unknown as TextureOwnerBlock).texture = atlas;
     material.build(false);
 
     const sphere = MeshBuilder.CreateSphere("sphere", { segments: 48, diameter: 2.6 }, scene);
@@ -48,7 +48,7 @@ type TextureOwnerBlock = {
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
 })().catch((err) => {

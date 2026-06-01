@@ -111,7 +111,7 @@ const SPRITE_SPACING = 200;
         engine.resize();
         layoutProjectedSprites(projectedSprites, canvas, cam);
     });
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 })().catch((err) => {

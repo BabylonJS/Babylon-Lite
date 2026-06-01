@@ -110,6 +110,10 @@ interface SpriteRendererInternal extends SpriteRenderer {
     _indexBuffer: GPUBuffer;
     _pipelineCache: SpritePipelineCache;
     _layerGpu: Map<Sprite2DLayer, LayerGpu>;
+    /** Hooks run at the start of `_update`, before layer uploads. */
+    _beforeUpdate: ((deltaMs: number) => void)[];
+    /** Cleanup callbacks run by `disposeSpriteRenderer`; optional integrations register here. */
+    _disposeCallbacks: (() => void)[];
     layers: Sprite2DLayer[];
     _visibleBundles: GPURenderBundle[];
     /** Captured each `_update`, read in `_record`. */
@@ -219,6 +223,8 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
         _targetHeight: targetSize.height,
         _disposed: false,
         _clear: opts.clear ?? true,
+        _beforeUpdate: [],
+        _disposeCallbacks: [],
         layers: opts.layers.slice(),
         clearColor: opts.clearValue ?? { r: 0, g: 0, b: 0, a: 1 },
         _drawCallsPre: 0,
@@ -260,6 +266,10 @@ function assertSpriteRendererLayer(layer: Sprite2DLayer): void {
 function spriteRendererUpdate(rr: SpriteRendererInternal): void {
     if (rr._disposed) {
         return;
+    }
+    const deltaMs = rr._engine._currentDelta ?? 0;
+    for (const hook of rr._beforeUpdate) {
+        hook(deltaMs);
     }
     assertSpriteRendererLayers(rr.layers);
     const targetSize = getRenderTargetSize(rr._engine);
@@ -414,11 +424,17 @@ export function disposeSpriteRenderer(sr: SpriteRenderer): void {
     }
     unregisterSpriteRenderer(rr);
     rr._disposed = true;
+    const disposeCallbacks = rr._disposeCallbacks.slice();
+    rr._disposeCallbacks.length = 0;
+    for (const dispose of disposeCallbacks) {
+        dispose();
+    }
     for (const lg of rr._layerGpu.values()) {
         disposeLayerGpu(lg);
     }
     rr._layerGpu.clear();
     rr._visibleBundles.length = 0;
+    rr._beforeUpdate.length = 0;
     rr._indexBuffer.destroy();
     resetSpritePipelineCache(rr._pipelineCache);
     rr.layers.length = 0;

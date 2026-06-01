@@ -266,6 +266,50 @@
                 background: #2e2a45;
                 color: #c8b6ff;
             }
+            .badge-worker {
+                background: #11333a;
+                color: #36c2cf;
+            }
+            .badge-offscreen {
+                background: #3a1f2b;
+                color: #ff7eb6;
+            }
+            .badge-showcase {
+                background: #2d2238;
+                color: #c792ea;
+            }
+            .badge-effect {
+                background: #321a3a;
+                color: #d07cff;
+            }
+            .badge-shader {
+                background: #1a2c3d;
+                color: #6cb6ff;
+            }
+            .badge-game {
+                background: #3a2410;
+                color: #f0a85c;
+            }
+            .badge-fps {
+                background: #3d1622;
+                color: #ff6b81;
+            }
+            .badge-bsp {
+                background: #20302a;
+                color: #5fd1a0;
+            }
+            .badge-voxel {
+                background: #243314;
+                color: #9bd644;
+            }
+            .badge-sandbox {
+                background: #33260f;
+                color: #e0b14a;
+            }
+            .badge-strategy {
+                background: #1c2a3f;
+                color: #6c9eff;
+            }
             .badge-bjs {
                 background: #3d2200;
                 color: #d29922;
@@ -3367,6 +3411,12 @@
                             <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
                         </tr>
                         <tr>
+                            <td>OffscreenCanvas / Worker Rendering</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)</td>
+                        </tr>
+                        <tr>
                             <td>Scene Optimizer</td>
                             <td>—</td>
                             <td>✅</td>
@@ -3442,6 +3492,7 @@
                 real shipped size is advertised. Regenerate sizes with <code>pnpm build:bundle-demos</code>.
             </div>
             <div class="perf-toolbar">
+                <div class="perf-filter-pills" id="demos-filter-pills"></div>
                 <input id="demos-search" class="scene-search" type="search" placeholder="Filter demos…" aria-label="Filter demos" oninput="setSceneSearch('demos', this.value)" />
             </div>
             <div class="grid" id="demos-grid"></div>
@@ -3588,13 +3639,34 @@
                 premultiplied: { label: "Premult", cls: "badge-premultiplied" },
             };
 
-            function renderBadges(tags) {
+            // ── Demo-specific tag labels (Demos tab badges + filter pills) ──
+            // Demos use a richer/different tag vocabulary than scenes, so they get
+            // their own map. Every tag a demo can carry MUST appear here, otherwise
+            // renderBadges would silently drop it.
+            var DEMO_TAG_LABELS = {
+                worker: { label: "Worker", cls: "badge-worker" },
+                offscreen: { label: "OffscreenCanvas", cls: "badge-offscreen" },
+                showcase: { label: "Showcase", cls: "badge-showcase" },
+                effect: { label: "Effect", cls: "badge-effect" },
+                shader: { label: "Shader", cls: "badge-shader" },
+                procedural: { label: "Procedural", cls: "badge-procedural" },
+                game: { label: "Game", cls: "badge-game" },
+                fps: { label: "FPS", cls: "badge-fps" },
+                bsp: { label: "BSP", cls: "badge-bsp" },
+                voxel: { label: "Voxel", cls: "badge-voxel" },
+                sandbox: { label: "Sandbox", cls: "badge-sandbox" },
+                strategy: { label: "Strategy", cls: "badge-strategy" },
+                "2d": { label: "2D", cls: "badge-2d" },
+            };
+
+            function renderBadges(tags, labels) {
+                var map = labels || TAG_LABELS;
                 return tags
                     .filter(function (t) {
-                        return TAG_LABELS[t];
+                        return map[t];
                     })
                     .map(function (t) {
-                        return '<span class="badge ' + TAG_LABELS[t].cls + '">' + TAG_LABELS[t].label + "</span>";
+                        return '<span class="badge ' + map[t].cls + '">' + map[t].label + "</span>";
                     })
                     .join("");
             }
@@ -3961,7 +4033,7 @@
                             "<p>" +
                             escapeAttr(d.description) +
                             "</p>" +
-                            renderBadges(tags) +
+                            renderBadges(tags, DEMO_TAG_LABELS) +
                             '<div class="size-info" data-demo-size="' +
                             d.slug +
                             '"></div>' +
@@ -3969,6 +4041,28 @@
                         );
                     })
                     .join("");
+                renderDemoFilterPills(demos);
+            }
+
+            // Build the Demos-tab filter pills from the union of tags actually
+            // present across the demos (only tags known to DEMO_TAG_LABELS).
+            function renderDemoFilterPills(demos) {
+                var el = document.getElementById("demos-filter-pills");
+                if (!el) return;
+                var seen = {};
+                (demos || []).forEach(function (d) {
+                    (d.tags || []).forEach(function (t) {
+                        if (DEMO_TAG_LABELS[t]) seen[t] = true;
+                    });
+                });
+                var ordered = Object.keys(DEMO_TAG_LABELS).filter(function (t) {
+                    return seen[t];
+                });
+                var pills = ordered.map(function (tag) {
+                    var t = DEMO_TAG_LABELS[tag];
+                    return '<span class="pill-toggle ' + t.cls + (activeDemosTags[tag] ? " active" : "") + '" data-filter="' + tag + '" onclick="toggleDemosTag(this)">' + t.label + "</span>";
+                });
+                el.innerHTML = '<span class="filter-label">Filter:</span>' + pills.join("");
             }
 
             function loadDemosManifest() {
@@ -4449,6 +4543,7 @@
                     sourceFilters: activeSourceTags,
                     bundleFilters: activeBundleTags,
                     perfFilters: activePerfTags,
+                    demosFilters: activeDemosTags,
                     paritySort: null,
                     bundleSort: null,
                     perfRegSort: null,
@@ -4514,6 +4609,14 @@
                 // Restore perf filter toggle
                 perfFilterActive = !!state.perfFilterActive;
                 applyPerfFilters();
+                // Restore demos tag filters
+                if (state.demosFilters) {
+                    activeDemosTags = state.demosFilters;
+                    document.querySelectorAll("#demos-filter-pills .pill-toggle").forEach(function (el) {
+                        el.classList.toggle("active", !!activeDemosTags[el.dataset.filter]);
+                    });
+                }
+                applyDemosFilters();
                 // Restore parity sort
                 if (state.paritySort) {
                     sortParityGrid(state.paritySort, true);
@@ -5405,6 +5508,7 @@
                     initDemosGrid(demos);
                     applyHiddenState();
                     loadDemosManifest();
+                    applyDemosFilters();
                 });
 
             // ── Auto-refresh: poll /lab-api/signature every ~1s and reload
@@ -5801,11 +5905,31 @@
                 });
             }
 
+            var activeDemosTags = {};
+
             function applyDemosFilters() {
                 var cards = document.querySelectorAll("#demos-grid .card");
-                cards.forEach(function (c) {
-                    c.classList.toggle("filter-hidden", !cardMatchesSearch(c, "demos"));
+                var activeList = Object.keys(activeDemosTags).filter(function (k) {
+                    return activeDemosTags[k];
                 });
+                cards.forEach(function (c) {
+                    var show = cardMatchesSearch(c, "demos");
+                    if (show && activeList.length > 0) {
+                        var tags = (c.dataset.tags || "").split(" ");
+                        show = activeList.every(function (t) {
+                            return tags.indexOf(t) >= 0;
+                        });
+                    }
+                    c.classList.toggle("filter-hidden", !show);
+                });
+            }
+
+            function toggleDemosTag(el) {
+                var tag = el.dataset.filter;
+                activeDemosTags[tag] = !activeDemosTags[tag];
+                el.classList.toggle("active", activeDemosTags[tag]);
+                applyDemosFilters();
+                saveLabState();
             }
 
             function toggleSourceTag(el) {

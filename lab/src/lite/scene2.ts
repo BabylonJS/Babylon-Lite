@@ -12,6 +12,7 @@ import {
     attachControl,
     registerScene,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -22,7 +23,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     const light = createDirectionalLight([0, -1, 0]);
     light.diffuse = [1, 0, 0];

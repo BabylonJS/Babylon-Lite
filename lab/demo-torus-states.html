@@ -6,6 +6,24 @@
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
     canvas { width: 100%; height: 100%; display: block; }
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0b0809; color: #f4ece9;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      transition: opacity 0.5s ease;
+    }
+    .loading-overlay.is-hidden { opacity: 0; pointer-events: none; }
+    .loading-box { display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; padding: 0 1rem; }
+    .loading-spinner {
+      width: 54px; height: 54px; border-radius: 50%;
+      border: 4px solid rgba(224, 104, 75, 0.25); border-top-color: #e0684b;
+      animation: lite-spin 0.9s linear infinite;
+    }
+    .loading-label { font-size: 1.05rem; font-weight: 600; }
+    .loading-sub { font-size: 0.8rem; color: #b8a9a4; }
+    @keyframes lite-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .loading-spinner { animation-duration: 2.4s; } }
   </style>
 </head>
 <body>
@@ -16,6 +34,37 @@
     `pnpm dev:lab`) to (re)generate the bundle that this page references.
   -->
   <canvas id="renderCanvas"></canvas>
+  <div id="loadingOverlay" class="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-box">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-label">Loading Torus States…</div>
+      <div class="loading-sub">Preparing assets — this can take a moment.</div>
+    </div>
+  </div>
+  <script>
+    // Loading screen: hide once the demo signals ready (or errors) via the canvas
+    // data attributes it sets when its assets are loaded and the engine starts.
+    (function () {
+      var overlay = document.getElementById("loadingOverlay");
+      var canvas = document.getElementById("renderCanvas");
+      if (!overlay || !canvas) return;
+      var done = false;
+      function hide() {
+        if (done) return;
+        done = true;
+        overlay.classList.add("is-hidden");
+        setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
+      }
+      function check() {
+        if (canvas.dataset.ready === "true" || canvas.dataset.error) { hide(); return true; }
+        return false;
+      }
+      if (!check()) {
+        new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
+        setTimeout(hide, 45000);
+      }
+    })();
+  </script>
   <script type="module" src="/bundle/demos/torus-states.js"></script>
 </body>
 </html>

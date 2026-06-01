@@ -174,7 +174,10 @@ babylon-lite/
 │   │   │   ├── create-skeleton.ts   # Skeleton data creation from glTF
 │   │   │   └── skeleton-updater.ts  # Joint matrix computation for skinned meshes
 │   │   ├── animation/
-│   │   │   ├── animation-group.ts    # AnimationGroup creation from glTF data
+│   │   │   ├── animation-manager.ts   # Generic AnimationTask scheduler
+│   │   │   ├── animation-group.ts     # AnimationGroup state and playback helpers
+│   │   │   ├── animation-group-task.ts # AnimationGroup → AnimationTask adapter
+│   │   │   ├── property-animation.ts  # User-authored property animation clips
 │   │   │   ├── evaluate.ts           # Keyframe interpolation (step, linear, cubic)
 │   │   │   └── types.ts              # Animation type definitions
 │   │   ├── morph/
@@ -1039,7 +1042,7 @@ Optional glTF capabilities are dynamic feature modules (`gltf-ext-*.ts` / `gltf-
 
 **Texture caching**: Textures are cached per bitmap identity + sRGB flag to avoid duplicate GPU uploads. The hot path uses a numeric key (`bitmapId * 2 + +srgb`); feature modules can keep their own extension-source caches.
 
-**Animation extraction**: Creates `AnimationGroup[]` from glTF animations via `createAnimationGroups()`, registers `_beforeRender` callbacks on the scene for playback.
+**Animation extraction**: Creates `AnimationGroup[]` from glTF animations via `createAnimationGroups()`. `addToScene()` registers scene tick callbacks for playback; standalone flows can register the same groups with an `AnimationManager` through `addAnimationGroups()`.
 
 **GLB container format**:
 
@@ -1446,7 +1449,10 @@ For production builds, switch to `"./dist/index.js"`.
 | `src/mesh/thin-instance-gpu.ts` | Thin instance GPU sync | — |
 | `src/skeleton/create-skeleton.ts` | Skeleton data creation from glTF | — |
 | `src/skeleton/skeleton-updater.ts` | Joint matrix computation | — |
-| `src/animation/animation-group.ts` | AnimationGroup creation | — |
+| `src/animation/animation-manager.ts` | Generic AnimationTask scheduler | — |
+| `src/animation/animation-group.ts` | AnimationGroup state and playback helpers | — |
+| `src/animation/animation-group-task.ts` | AnimationGroup task adapter | — |
+| `src/animation/property-animation.ts` | User-authored property clips | — |
 | `src/animation/evaluate.ts` | Keyframe interpolation | — |
 | `src/animation/types.ts` | Animation type definitions | — |
 | `src/morph/create-morph-targets.ts` | Morph target data + GPU texture | — |

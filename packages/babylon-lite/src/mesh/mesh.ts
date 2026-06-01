@@ -10,7 +10,7 @@ import type { SkeletonData, MorphTargetData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
 
@@ -121,6 +121,7 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         configurable: true,
         enumerable: false,
     });
+    attachWorldMatrixState(mesh, wm);
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────

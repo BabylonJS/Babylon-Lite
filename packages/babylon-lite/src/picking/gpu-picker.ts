@@ -127,8 +127,8 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
 
     const backingWidth = canvas.width;
     const backingHeight = canvas.height;
-    const clientWidth = canvas.clientWidth || backingWidth;
-    const clientHeight = canvas.clientHeight || backingHeight;
+    const clientWidth = ("clientWidth" in canvas ? canvas.clientWidth : 0) || backingWidth;
+    const clientHeight = ("clientHeight" in canvas ? canvas.clientHeight : 0) || backingHeight;
     const scaleX = backingWidth / clientWidth;
     const scaleY = backingHeight / clientHeight;
     const pickX = x * scaleX;

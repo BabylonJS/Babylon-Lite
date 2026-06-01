@@ -81,7 +81,7 @@ async function configureScene(scene: Scene): Promise<void> {
         right.render();
     });
     window.addEventListener("resize", () => engine.resize());
-    await new Promise<void>((resolve) => right.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => right.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
 })().catch((err) => {

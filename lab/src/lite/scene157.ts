@@ -19,6 +19,7 @@ import {
     stopAnimation,
     updateAnimationManager,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 const XBOT_URL = "https://playground.babylonjs.com/scenes/Xbot.glb";
 const WALK_WEIGHT = 0.5;
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 4, 3, { x: 0, y: 1, z: 0 });
     scene.camera.nearPlane = 0.1;
     scene.camera.farPlane = 1000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.6));
     addToScene(scene, createDirectionalLight([0, -0.5, -1], 0.8));

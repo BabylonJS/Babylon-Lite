@@ -46,7 +46,7 @@ void main(void) {
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
-    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(resolve));
+    await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

@@ -142,11 +142,11 @@ function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenera
         for (const e of result.entities) addToScene(scene, e); // recurse into individual entities
         if (result.clearColor) ctx.clearColor = result.clearColor;
         if (result.animationGroups?.length) {
-            const device = (ctx.engine as EngineContextInternal).device;
+            const engine = ctx.engine as EngineContextInternal;
             const groups = result.animationGroups;
             ctx.animationGroups.push(...groups);
             ctx._beforeRender.push((dt) => {
-                for (const g of groups) g._tick(dt, device);
+                for (const g of groups) tickAnimation(g, dt, engine);
             });
         }
         return;
@@ -243,7 +243,7 @@ Algorithm:
 
 ## Dependencies
 
-- **Imports**: `Engine` from `../engine/engine.js`, `ArcRotateCamera` + `createArcRotateCamera` from `../camera/arc-rotate.js`, `vec3` from `../math/vec3.js`, `Renderable`/`PrePassRenderable`/`SceneUniformUpdater`/`MeshGroupBuilder` from `../render/renderable.js`, `Mesh` from `../mesh/mesh.js` (type-only), `AnimationGroup` from `../animation/animation-group.js` (type-only).
+- **Imports**: `Engine` from `../engine/engine.js`, `ArcRotateCamera` + `createArcRotateCamera` from `../camera/arc-rotate.js`, `vec3` from `../math/vec3.js`, `Renderable`/`PrePassRenderable`/`SceneUniformUpdater`/`MeshGroupBuilder` from `../render/renderable.js`, `Mesh` from `../mesh/mesh.js` (type-only), `AnimationGroup` and `tickAnimation` from `../animation/animation-group.js`.
 - **Depended on by**: `engine.ts`, all material renderables, all loaders.
 
 ## Test Specification

@@ -353,6 +353,14 @@ export function clearBillboardSprites(system: BillboardSpriteSystem): void {
     system._version = (system._version + 1) | 0;
 }
 
+/**
+ * Update only the frame UVs for one billboard sprite.
+ *
+ * The sprite keeps its explicit `sizeWorld`/saved size. Pixel frame dimensions
+ * do not imply a world-space resize; call `updateBillboardSpriteIndex` with
+ * both `frame` and `sizeWorld` when that is desired. Existing flip state is
+ * preserved for non-degenerate UV ranges.
+ */
 export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: number): void {
     if (index < 0 || index >= system.count) {
         throw new Error(`setBillboardSpriteFrameIndex: index ${index} out of range [0, ${system.count})`);

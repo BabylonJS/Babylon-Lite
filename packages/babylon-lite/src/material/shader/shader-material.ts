@@ -21,6 +21,10 @@ export interface ShaderMaterialOptions {
     readonly samplers?: readonly ShaderSamplerOption[];
     readonly defines?: ShaderDefineMap;
     readonly needAlphaBlending?: boolean;
+    /** Blend equation used when `needAlphaBlending` is set. "alpha" (default) is
+     *  standard src-over; "additive" adds the fragment's premultiplied-by-alpha
+     *  color to the framebuffer, which is the right choice for glows/light FX. */
+    readonly blendMode?: "alpha" | "additive";
     readonly needAlphaTesting?: boolean;
     readonly backFaceCulling?: boolean;
     readonly depthWrite?: boolean;
@@ -62,6 +66,7 @@ export interface ShaderMaterial extends Material {
     readonly samplerDecls: readonly ShaderSamplerDecl[];
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
+    readonly blendMode: "alpha" | "additive";
     readonly needAlphaTesting: boolean;
     readonly backFaceCulling: boolean;
     readonly depthWrite: boolean;
@@ -178,6 +183,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         samplerDecls,
         defines,
         needAlphaBlending: options.needAlphaBlending ?? false,
+        blendMode: options.blendMode ?? "alpha",
         needAlphaTesting: options.needAlphaTesting ?? false,
         backFaceCulling: options.backFaceCulling ?? true,
         depthWrite: options.depthWrite ?? true,

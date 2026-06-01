@@ -11,6 +11,7 @@ import {
     createPropertyAnimationGroup,
     createSceneContext,
     createStandardMaterial,
+    enablePropertyAnimationBlending,
     pauseAnimation,
     registerScene,
     setAnimationWeight,
@@ -18,6 +19,7 @@ import {
     startEngine,
     updateAnimationManager,
 } from "babylon-lite";
+import type { ArcRotateCamera } from "babylon-lite";
 
 const FRAME_RATE = 10;
 const END_FRAME = 2 * FRAME_RATE;
@@ -34,7 +36,7 @@ async function main(): Promise<void> {
     scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 4, 10, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 1;
     scene.camera.farPlane = 10000;
-    attachControl(scene.camera, canvas, scene);
+    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
     addToScene(scene, createDirectionalLight([0, -1, 1], 0.75));
     addToScene(scene, createHemisphericLight([0, 1, 0], 0.5));
@@ -75,6 +77,7 @@ async function main(): Promise<void> {
 
     const positiveGroup = createPropertyAnimationGroup(manager, box, positiveSlide, { fromFrame: 0, toFrame: END_FRAME, loop: true });
     const negativeGroup = createPropertyAnimationGroup(manager, box, negativeSlide, { fromFrame: 0, toFrame: END_FRAME, loop: true });
+    enablePropertyAnimationBlending(manager);
     setAnimationWeight(positiveGroup, POSITIVE_WEIGHT);
     setAnimationWeight(negativeGroup, NEGATIVE_WEIGHT);
 

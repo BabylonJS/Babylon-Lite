@@ -165,7 +165,7 @@ function vector3(name: string, xy: number, xyOutput: string, z: number): number 
 const position = inputBlock("position", TYPE_VECTOR3, null, 1);
 const normal = inputBlock("normal", TYPE_VECTOR3, null, 1);
 const uv = inputBlock("uv", TYPE_VECTOR2, null, 1);
-const positionFrag = inputBlock("position", TYPE_VECTOR3, null, 1);
+inputBlock("position", TYPE_VECTOR3, null, 1);
 const world = inputBlock("world", TYPE_MATRIX, null, 0, 1, TARGET_VERTEX);
 const wvp = inputBlock("worldViewProjection", TYPE_MATRIX, null, 0, 6, TARGET_VERTEX);
 const cameraPosition = inputBlock("cameraPosition", TYPE_VECTOR3, null, 0, 7, TARGET_FRAGMENT);
@@ -173,15 +173,15 @@ const cameraPosition = inputBlock("cameraPosition", TYPE_VECTOR3, null, 0, 7, TA
 const clipPos = transform("TransformWVP", position, wvp, 1);
 const worldPos = transform("TransformWorldPos", position, world, 1);
 const worldNormal = transform("TransformWorldNormal", normal, world, 0);
-const worldPosSplit = split("SplitWorldPos", worldPos, "output", "xyzw");
-const worldNormalSplit = split("SplitWorldNormal", worldNormal, "output", "xyzw");
+split("SplitWorldPos", worldPos, "output", "xyzw");
+split("SplitWorldNormal", worldNormal, "output", "xyzw");
 const vertexOutput = addBlock("VertexOutputBlock", "VertexOutput", TARGET_VERTEX, [input("vector", { id: clipPos, output: "output" })], []);
 
 const uvSplit = split("SplitUV", uv, "output", "xy");
 const zero = inputBlock("zero", TYPE_FLOAT, 0.0);
 const uvPosition = vector3("UvWorldPosition", uv, "output", zero);
-const uvPositionSplit = split("SplitUvWorldPosition", uvPosition, "xyzw", "xyzw");
-const positionSample = addBlock(
+split("SplitUvWorldPosition", uvPosition, "xyzw", "xyzw");
+addBlock(
     "TextureBlock",
     "PositionSample",
     TARGET_VERTEX_AND_FRAGMENT,
