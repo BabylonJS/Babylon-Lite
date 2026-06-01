@@ -102,6 +102,7 @@ async function run(): Promise<void> {
     );
 
     await startEngine(engine);
+    canvas.dataset.ready = "true";
 }
 
 void run();

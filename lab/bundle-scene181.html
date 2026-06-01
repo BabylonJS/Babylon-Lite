@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Babylon Lite - Scene 181: Live Text Editor (Bundle)</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #0d1117;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            textarea {
+                position: absolute;
+                top: 16px;
+                left: 16px;
+                width: 320px;
+                height: 120px;
+                z-index: 10;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <textarea id="textInput" spellcheck="false">Type here...</textarea>
+        <script src="/loader.js"></script>
+        <script type="module" src="/bundle/scene181.js"></script>
+    </body>
+</html>

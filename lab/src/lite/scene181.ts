@@ -45,6 +45,7 @@ async function run(): Promise<void> {
 
     await registerScene(engine, scene);
     await startEngine(engine);
+    canvas.dataset.ready = "true";
 }
 
 void run();

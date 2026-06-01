@@ -860,7 +860,10 @@ const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "s
 const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
 const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") : ALL_SCENES;
-const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.map((s) => `bjs-${s}`);
+// Only scenes with a Babylon.js reference source (lab/src/bjs/<scene>.ts) get a `bjs-` variant.
+// Lite-only demos (e.g. the text-renderer scenes 180/181, marked skipParity) have no BJS
+// counterpart, so skip them rather than failing to resolve a non-existent entry module.
+const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.filter((s) => existsSync(resolve(labDir, `src/bjs/${s}.ts`))).map((s) => `bjs-${s}`);
 
 function getAllBundleFiles(dir: string): string[] {
     const results: string[] = [];
