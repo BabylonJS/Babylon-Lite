@@ -30,7 +30,11 @@ import { createPicker } from "./freeciv/pick.js";
 import { createMinimap } from "./freeciv/minimap.js";
 import { DIR8, DIR_DELTA, TILE_H, TILE_W, isoCentre, worldToTile } from "./freeciv/iso.js";
 
-const BASE_URL = "/freeciv";
+// Relative (no leading slash) so the tileset resolves against the page URL —
+// works both on the dev server (root) and when the demo is published under a
+// sub-path (e.g. GitHub Pages project page). An absolute "/freeciv" would 404
+// on a sub-path deployment. Mirrors the minecraft/doom demos.
+const BASE_URL = "freeciv";
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
