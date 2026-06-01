@@ -86,8 +86,10 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         loadPlatformerSheet(engine, `${ASSET_BASE}/players`),
         loadPlatformerSheet(engine, `${ASSET_BASE}/enemies`),
         loadPlatformerSheet(engine, `${ASSET_BASE}/items`),
-        loadPlatformerSheet(engine, `${ASSET_BASE}/tiles`),
-        loadPlatformerSheet(engine, `${ASSET_BASE}/ground`),
+        // Tile + ground sheets tessellate edge-to-edge, so use nearest filtering:
+        // linear bleeds a dark fringe at frame edges → thin black seams.
+        loadPlatformerSheet(engine, `${ASSET_BASE}/tiles`, { filter: "nearest" }),
+        loadPlatformerSheet(engine, `${ASSET_BASE}/ground`, { filter: "nearest" }),
         loadTexture2D(engine, `${ASSET_BASE}/backgrounds/colored_grass.png`, {
             invertY: false,
             addressModeU: "clamp-to-edge",
@@ -101,7 +103,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // ── Layers (back → front) ─────────────────────────────────────────────────
     // Frame indices are atlas-specific, so each sheet needs its own layer(s).
     const bgAtlas = createGridSpriteAtlas(bgTex, { cellWidthPx: bgTex.width, cellHeightPx: bgTex.height });
-    const bgLayer = createSprite2DLayer(bgAtlas, { capacity: 4, order: 0, pivot: [0, 0] });
+    const bgLayer = createSprite2DLayer(bgAtlas, { capacity: 12, order: 0, pivot: [0, 0] });
     const terrainLayer = createSprite2DLayer(ground.atlas, { capacity: level.terrain.length + 4, order: 1, pivot: [0, 0] });
     const blockLayer = createSprite2DLayer(tiles.atlas, { capacity: level.blocks.length + 32, order: 2, pivot: [0, 0] });
     const itemLayer = createSprite2DLayer(items.atlas, { capacity: level.coins.length + 40, order: 3, pivot: [0.5, 0.5] });
@@ -116,8 +118,10 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     });
     registerSpriteRenderer(renderer);
 
-    // ── Background: two tiled copies for horizontal parallax wrap ──────────────
-    const bgSlots = [addSprite2DIndex(bgLayer, { positionPx: [0, 0], sizePx: [10, 10] }), addSprite2DIndex(bgLayer, { positionPx: [0, 0], sizePx: [10, 10] })];
+    // ── Background: horizontally tiled copies for parallax wrap (filled in
+    //    `project` so they always cover the full canvas width) ────────────────
+    const bgSlots: number[] = [];
+    for (let i = 0; i < 12; i++) bgSlots.push(addSprite2DIndex(bgLayer, { positionPx: [0, 0], sizePx: [10, 10], visible: false }));
 
     // ── Static terrain sprites (frame fixed; position re-projected each frame) ─
     const terrainSlots = level.terrain.map((t) =>
@@ -633,29 +637,51 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         const sx = (wx: number): number => (wx - cam.x) * scale;
         const sy = (wy: number): number => (wy - cam.y) * scale;
         const ss = (w: number): number => w * scale;
+        // Snap a whole tile to the integer device-pixel grid so adjacent tiles
+        // tessellate exactly (no sub-pixel gap, no dark seam). Right/bottom edges
+        // are derived from the *next* tile's snapped origin, not a rounded size.
+        const snapTile = (cx: number, cy: number, yOffsetPx = 0): { pos: [number, number]; size: [number, number] } => {
+            const x0 = Math.round(sx(cx * TILE));
+            const x1 = Math.round(sx((cx + 1) * TILE));
+            const y0 = Math.round(sy(cy * TILE) - yOffsetPx);
+            const y1 = Math.round(sy((cy + 1) * TILE) - yOffsetPx);
+            return { pos: [x0, y0], size: [x1 - x0, y1 - y0] };
+        };
 
-        // Background parallax (two wrapping copies).
+        // Background parallax: tile enough copies to span the whole canvas.
         const bgW = ch * (bgTex.width / bgTex.height);
-        const bgScroll = -(cam.x * 0.35) % bgW;
-        updateSprite2DIndex(bgLayer, bgSlots[0]!, { positionPx: [bgScroll, 0], sizePx: [bgW, ch] });
-        updateSprite2DIndex(bgLayer, bgSlots[1]!, { positionPx: [bgScroll + bgW, 0], sizePx: [bgW, ch] });
+        const scroll = cam.x * 0.35;
+        const first = Math.floor(scroll / bgW);
+        const needed = Math.ceil(cw / bgW) + 2;
+        for (let i = 0; i < bgSlots.length; i++) {
+            if (i < needed) {
+                const x = (first + i) * bgW - scroll;
+                // +1px width overlap hides any sub-pixel seam between copies.
+                updateSprite2DIndex(bgLayer, bgSlots[i]!, { positionPx: [x, 0], sizePx: [bgW + 1, ch], visible: true });
+            } else {
+                updateSprite2DIndex(bgLayer, bgSlots[i]!, { visible: false });
+            }
+        }
 
         // Terrain
         for (let i = 0; i < terrainSlots.length; i++) {
             const t = level.terrain[i]!;
-            updateSprite2DIndex(terrainLayer, terrainSlots[i]!, { positionPx: [sx(t.cx * TILE), sy(t.cy * TILE)], sizePx: [ss(TILE), ss(TILE)] });
+            const s = snapTile(t.cx, t.cy);
+            updateSprite2DIndex(terrainLayer, terrainSlots[i]!, { positionPx: s.pos, sizePx: s.size });
         }
 
         // Blocks (with bump offset)
         for (const b of blocks) {
             if (b.broken) continue;
             if (b.bump > 0) b.bump = Math.max(0, b.bump - 1.4);
-            updateSprite2DIndex(blockLayer, b.slot, { positionPx: [sx(b.cx * TILE), sy(b.cy * TILE) - b.bump], sizePx: [ss(TILE), ss(TILE)] });
+            const s = snapTile(b.cx, b.cy, b.bump * scale);
+            updateSprite2DIndex(blockLayer, b.slot, { positionPx: s.pos, sizePx: s.size });
         }
         // Flag pole
         for (let i = 0; i < poleSlots.length; i++) {
             const cy = level.flag.cy + 1 + i;
-            updateSprite2DIndex(blockLayer, poleSlots[i]!, { positionPx: [sx(flagX * TILE), sy(cy * TILE)], sizePx: [ss(TILE), ss(TILE)] });
+            const s = snapTile(flagX, cy);
+            updateSprite2DIndex(blockLayer, poleSlots[i]!, { positionPx: s.pos, sizePx: s.size });
         }
 
         // Coins (bob)
@@ -664,10 +690,12 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             if (c.collected) continue;
             updateSprite2DIndex(itemLayer, c.slot, { positionPx: [sx(c.x), sy(c.y + bob)], sizePx: [ss(TILE * 0.6), ss(TILE * 0.6)], visible: true });
         }
-        // Flag wave
+        // Flag wave. The flag sprite's pole runs up its far-left edge (centre at
+        // ~0.07 of the sprite width), so with a centre pivot we shift right by
+        // ~0.43·TILE to sit the pole over the centred chain column.
         const flagName = Math.floor(game.flagAnimT * 6) % 2 === 0 ? "flagGreen1" : "flagGreen2";
         updateSprite2DIndex(itemLayer, flagSlot, {
-            positionPx: [sx(flagX * TILE + TILE * 0.5), sy(level.flag.cy * TILE + TILE * 0.5)],
+            positionPx: [sx(flagX * TILE + TILE * 0.93), sy(level.flag.cy * TILE + TILE * 0.5)],
             sizePx: [ss(TILE), ss(TILE)],
             frame: items.frameOf(flagName),
         });
@@ -698,7 +726,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         }
 
         // Player
-        let pf = PLAYER_FRAMES.stand;
+        let pf: string = PLAYER_FRAMES.stand;
         if (!player.alive) pf = PLAYER_FRAMES.hit;
         else if (player.ducking) pf = PLAYER_FRAMES.duck;
         else if (!player.onGround) pf = PLAYER_FRAMES.jump;

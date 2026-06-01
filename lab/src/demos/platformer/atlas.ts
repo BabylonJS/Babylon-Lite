@@ -77,12 +77,24 @@ async function fetchText(url: string): Promise<string> {
     return res.text();
 }
 
+/** Options for {@link loadPlatformerSheet}. */
+export interface LoadSheetOptions {
+    /**
+     * Texture filtering. Defaults to `"linear"` (smooth for isolated sprites).
+     * Tile sheets that tessellate edge-to-edge should use `"nearest"`: linear
+     * filtering on this straight-alpha art bleeds a dark fringe at frame edges,
+     * which shows up as thin black seams between adjacent tiles.
+     */
+    filter?: "linear" | "nearest";
+}
+
 /**
  * Load one Kenney spritesheet by its base URL (without extension), e.g.
  * `loadPlatformerSheet(engine, "/platformer/players")` reads `players.png` +
  * `players.xml`.
  */
-export async function loadPlatformerSheet(engine: EngineContext, baseUrl: string): Promise<PlatformerSheet> {
+export async function loadPlatformerSheet(engine: EngineContext, baseUrl: string, options: LoadSheetOptions = {}): Promise<PlatformerSheet> {
+    const filter = options.filter ?? "linear";
     const [xml, texture] = await Promise.all([
         fetchText(`${baseUrl}.xml`),
         loadTexture2D(engine, `${baseUrl}.png`, {
@@ -90,9 +102,8 @@ export async function loadPlatformerSheet(engine: EngineContext, baseUrl: string
             addressModeU: "clamp-to-edge",
             addressModeV: "clamp-to-edge",
             mipMaps: false,
-            // High-res vector-derived art; linear keeps scaled sprites smooth.
-            minFilter: "linear",
-            magFilter: "linear",
+            minFilter: filter,
+            magFilter: filter,
         }),
     ]);
 
@@ -108,9 +119,15 @@ export async function loadPlatformerSheet(engine: EngineContext, baseUrl: string
     for (const s of subs) {
         index.set(s.name, frames.length);
         sizes.set(s.name, [s.width, s.height]);
+        // Inset the UV rect by half a texel. These sheets are tightly packed, so
+        // at a frame's edge the bilinear (linear-filter) kernel would otherwise
+        // sample the neighbouring sprite and bleed a thin dark seam (e.g. the line
+        // beside the flag). The inset keeps sampling inside the frame's own pixels.
+        const ix = 0.5 / tw;
+        const iy = 0.5 / th;
         frames.push({
-            uvMin: [s.x / tw, s.y / th],
-            uvMax: [(s.x + s.width) / tw, (s.y + s.height) / th],
+            uvMin: [s.x / tw + ix, s.y / th + iy],
+            uvMax: [(s.x + s.width) / tw - ix, (s.y + s.height) / th - iy],
             sourceSizePx: [s.width, s.height],
             pivot: [0.5, 0.5],
         });
