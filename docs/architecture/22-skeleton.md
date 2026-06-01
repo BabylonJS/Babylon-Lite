@@ -179,7 +179,7 @@ createAnimationController() ──► AnimationController
 createAnimationGroups() ──► AnimationGroup[]
   │                          (one per clip, wraps controller)
   ▼
-Per frame: AnimationGroup._tick(deltaMs, device)
+Per frame: tickAnimation(group, deltaMs, engine)
   └──► controller.tick() → evaluate → compute matrices → GPU upload
 ```
 

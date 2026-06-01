@@ -163,22 +163,25 @@ export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
-export { crossFadeAnimationGroups, fadeAnimationWeight, setAnimationWeight } from "./animation/animation-weight.js";
+export { setAnimationWeight } from "./animation/animation-weight.js";
+export { crossFadeAnimationGroups, enablePropertyAnimationBlending, fadeAnimationWeight } from "./animation/weighted-pointer-mixer.js";
 export { enableAnimationBlending, setAnimationAdditive } from "./animation/weighted-gltf-mixer.js";
-export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/animation-weight.js";
+export type { CrossFadeAnimationGroupsOptions, FadeAnimationWeightOptions } from "./animation/weighted-pointer-mixer.js";
 export type { AnimationAdditiveOptions } from "./animation/weighted-gltf-mixer.js";
 export {
-    addAnimationGroup,
-    addAnimationGroups,
+    addAnimationTask,
     clearAnimationManager,
     createAnimationManager,
-    createPropertyAnimationClip,
-    createPropertyAnimationGroup,
-    removeAnimationGroup,
+    createAnimationTask,
+    removeAnimationTask,
+    setAnimationTaskCategoryHandler,
     startAnimationManager,
     stopAnimationManager,
     updateAnimationManager,
 } from "./animation/animation-manager.js";
+export { addAnimationGroup, addAnimationGroups, getAnimationGroups, removeAnimationGroup } from "./animation/animation-group-task.js";
+export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./animation/property-animation.js";
+export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
 
@@ -243,18 +246,17 @@ export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-s
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup } from "./animation/animation-group.js";
+export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";
 export type {
     AnimationKeyframe,
     AnimationKeyframeValue,
-    AnimationManager,
-    AnimationManagerOptions,
     CreatePropertyAnimationGroupOptions,
     PropertyAnimationClip,
     PropertyAnimationClipOptions,
     PropertyAnimationInterpolation,
     PropertyAnimationTrack,
     PropertyAnimationTrackOptions,
-} from "./animation/animation-manager.js";
+} from "./animation/property-animation.js";
 export type { AnimationClip, GltfAnimationData } from "./animation/types.js";
 export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
@@ -317,6 +319,33 @@ export {
     isBillboardSpriteHandleAlive,
 } from "./sprite/billboard-sprite-handle.js";
 export { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "./sprite/billboard-scene.js";
+// ─── Sprite Animation (Optional) ─────────────────────────────────────
+export type {
+    SpriteAnimationBinding,
+    SpriteAnimationManager,
+    SpriteAnimationManagerOptions,
+    SpriteAnimationTarget,
+    SpriteFrameAnimation,
+    PlaySpriteAnimationOptions,
+} from "./sprite/sprite-animation.js";
+export {
+    createSpriteAnimationManager,
+    createSpriteFrameAnimation,
+    addSpriteAnimation,
+    removeSpriteAnimation,
+    clearSpriteAnimations,
+    updateSpriteAnimationManager,
+    playSpriteFrameAnimation,
+    stopSpriteAnimation,
+    attachSpriteAnimationsToScene,
+    attachSpriteAnimationsToRenderer,
+    disposeSpriteAnimationBinding,
+} from "./sprite/sprite-animation.js";
+export { addSpriteAnimationManager, removeSpriteAnimationManager, startSpriteAnimationManager, stopSpriteAnimationManager } from "./sprite/sprite-animation-task.js";
+export { playSprite2DIndexAnimation } from "./sprite/sprite-2d-index-animation.js";
+export { playSprite2DAnimation } from "./sprite/sprite-2d-handle-animation.js";
+export { playBillboardSpriteIndexAnimation } from "./sprite/billboard-sprite-index-animation.js";
+export { playBillboardSpriteAnimation } from "./sprite/billboard-sprite-handle-animation.js";
 export type { SpriteRenderer, SpriteRendererOptions } from "./sprite/sprite-renderer.js";
 export {
     createSpriteRenderer,

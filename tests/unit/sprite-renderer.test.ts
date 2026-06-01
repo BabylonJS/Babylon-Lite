@@ -301,6 +301,20 @@ describe("disposeSpriteRenderer", () => {
         expect(list).not.toContain(sr);
     });
 
+    it("runs internal disposal callbacks once", () => {
+        const { engine } = makeMockEngine();
+        const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
+        const internal = sr as unknown as { _disposeCallbacks: Array<() => void> };
+        const callback = vi.fn();
+
+        internal._disposeCallbacks.push(callback);
+        disposeSpriteRenderer(sr);
+        disposeSpriteRenderer(sr);
+
+        expect(callback).toHaveBeenCalledTimes(1);
+        expect(internal._disposeCallbacks).toEqual([]);
+    });
+
     it("clears layers and destroys internal GPU buffers", () => {
         const { engine, counters } = makeMockEngine();
         const layer = createSprite2DLayer(makeMockAtlas());

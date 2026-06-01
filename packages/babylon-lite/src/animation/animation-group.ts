@@ -2,12 +2,22 @@
 // Stored on scene.animationGroups[]. Pure state interface.
 
 import type { EngineContext } from "../engine/engine.js";
-import type { AnimationChannel, AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
+import type { AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
 import { PATH_POINTER } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
-export type AnimationPropertyMixer = readonly [readonly AnimationChannel[], readonly AnimationSampler[], number, number, number];
+const DEFAULT_FRAME_RATE = 60;
+
+export interface AnimationPropertyRuntimeTrack {
+    readonly sampler: AnimationSampler;
+    readonly stride: number;
+    readonly quaternion: boolean;
+    readonly writer: (output: Float32Array, offset: number) => void;
+    readonly mixTarget: object;
+    readonly mixProperty: string;
+}
+export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number];
 export type AnimationGltfMixer = readonly [AnimationClip, readonly NodeRest[], readonly SkeletonBinding[]];
 export interface AnimationAdditiveMixer {
     readonly referenceTime: number;
@@ -22,7 +32,7 @@ export interface AnimationGroup {
     /** Frame rate used by goToFrame(). */
     readonly frameRate?: number;
     /** True if currently playing. */
-    readonly isPlaying: boolean;
+    isPlaying: boolean;
     /** Current playback time in seconds. */
     currentFrame: number;
     /** Playback speed multiplier (default 1). */
@@ -34,47 +44,43 @@ export interface AnimationGroup {
     /** Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
-    _pm?: AnimationPropertyMixer;
+    _propertyMixer?: AnimationPropertyMixer;
     /** @internal glTF skeleton metadata used by the optional weighted mixer. */
-    _gm?: AnimationGltfMixer;
+    _gltfMixer?: AnimationGltfMixer;
     /** @internal Additive animation metadata used by the optional blending mixer. */
-    _am?: AnimationAdditiveMixer;
-    /** @internal Whether stop() was called (suppresses _tick). */
+    _additive?: AnimationAdditiveMixer;
+    /** @internal Whether stop() was called (suppresses tickAnimation). */
     _stopped: boolean;
 }
 
 /** Start playing an animation group. */
 export function playAnimation(group: AnimationGroup): void {
-    if (group._ctrl) {
-        group._ctrl.playing = true;
-    }
+    group.isPlaying = true;
     group._stopped = false;
 }
 
 /** Pause playback of an animation group. */
 export function pauseAnimation(group: AnimationGroup): void {
-    if (group._ctrl) {
-        group._ctrl.playing = false;
-    }
+    group.isPlaying = false;
 }
 
 /** Stop playback and reset to frame 0. */
 export function stopAnimation(group: AnimationGroup): void {
-    if (group._ctrl) {
-        group._ctrl.playing = false;
-        group._ctrl.time = 0;
-    }
+    group.isPlaying = false;
+    group.currentFrame = 0;
     group._stopped = true;
 }
 
 /** Seek to a specific frame, apply the pose, and pause. */
 export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineContext): void {
     const ctrl = group._ctrl;
+    group.currentFrame = frame / (group.frameRate || DEFAULT_FRAME_RATE);
+    group.isPlaying = false;
     if (ctrl) {
-        ctrl.time = frame / (group.frameRate || 60);
-        ctrl.playing = false;
-        if (engine || !group._stopped || !group._gm) {
+        syncControllerFromGroup(group, ctrl);
+        if (engine || !group._stopped || !group._gltfMixer) {
             ctrl.tick(0, engine);
+            group.currentFrame = ctrl.time;
         }
     }
 }
@@ -82,8 +88,17 @@ export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineC
 /** @internal Advance animation by deltaMs. Called by the engine each frame. */
 export function tickAnimation(group: AnimationGroup, deltaMs: number, engine?: EngineContext): void {
     if (!group._stopped && group._ctrl) {
+        syncControllerFromGroup(group, group._ctrl);
         group._ctrl.tick(deltaMs, engine);
+        group.currentFrame = group._ctrl.time;
     }
+}
+
+function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationController): void {
+    ctrl.time = group.currentFrame;
+    ctrl.playing = group.isPlaying;
+    ctrl.speedRatio = group.speedRatio;
+    ctrl.loop = group.loopAnimation;
 }
 
 /** Create AnimationGroup(s) from parsed glTF animation data.
@@ -97,44 +112,20 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
 
     return clips.map((clip, clipIndex) => {
         const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings);
-        // Auto-play by default (matches Babylon.js behavior)
-        ctrl.playing = true;
-
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,
-
-            get isPlaying(): boolean {
-                return ctrl.playing;
-            },
-
-            get currentFrame(): number {
-                return ctrl.time;
-            },
-            set currentFrame(v: number) {
-                ctrl.time = v;
-            },
-
-            get speedRatio(): number {
-                return ctrl.speedRatio;
-            },
-            set speedRatio(v: number) {
-                ctrl.speedRatio = v;
-            },
-
-            get loopAnimation(): boolean {
-                return ctrl.loop;
-            },
-            set loopAnimation(v: boolean) {
-                ctrl.loop = v;
-            },
-
+            frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
+            isPlaying: true,
+            currentFrame: 0,
+            speedRatio: 1,
+            loopAnimation: true,
             weight: 1,
             _ctrl: ctrl,
             _stopped: false,
         };
         if (skeletons[0]) {
-            group._gm = [clip, nodes, skeletons];
+            group._gltfMixer = [clip, nodes, skeletons];
         }
         return group;
     });

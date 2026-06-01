@@ -843,9 +843,23 @@ export function addAxisLockedBillboardSystem(scene: SceneContext, system: AxisLo
 it when the scene helper builds GPU resources during `registerScene`. Create a
 new system when the render order must change after registration.
 
-`setBillboardSpriteFrameIndex` updates UVs only and preserves the sprite's
-current pivot. Callers that want atlas-driven pivot changes during animation
-should use `updateBillboardSpriteIndex(system, index, { frame, pivot })`.
+`setSprite2DFrameIndex` and `setBillboardSpriteFrameIndex` are UV-only
+helpers. They preserve the sprite's explicit `sizePx`/`sizeWorld` even when
+the target atlas frame has a different `sourceSizePx`. Callers that want
+atlas-driven size changes should use `updateSprite2DIndex(layer, index,
+{ frame, sizePx })` or `updateBillboardSpriteIndex(system, index,
+{ frame, sizeWorld })` with an explicit size policy. For billboards, pixel
+frame size never implies a world-space size. `setBillboardSpriteFrameIndex`
+also preserves the sprite's current pivot; callers that want atlas-driven
+pivot changes during animation should use
+`updateBillboardSpriteIndex(system, index, { frame, pivot })`.
+
+Flip state is encoded by swapping UV min/max endpoints, so frame setters
+preserve flip state for non-degenerate atlas frames (`uvMin.x !== uvMax.x`
+and `uvMin.y !== uvMax.y`). Zero-area atlas frames cannot encode flipped and
+unflipped states distinctly; callers should avoid authoring collapsed UV
+ranges or pass explicit `flipX`/`flipY` through the full update helpers when
+recovering from such data.
 
 `addFacingBillboardSystem(scene, system)` and
 `addAxisLockedBillboardSystem(scene, system)` are the scene integration
@@ -1723,7 +1737,7 @@ ThinInstance vs. Mesh split for 3D geometry).
 | Tier           | Functions                                                                                                                                                           | Returns                                    | Use for                                                                                                                                                |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Index API**  | `addSprite2DIndex`, `updateSprite2DIndex`, `removeSprite2DIndex`, `clearSprite2DLayer`, `setSprite2DFrameIndex` (and `addBillboardSpriteIndex` etc. for billboards) | `number` (slot index)                      | Tile maps, scenery, particles, large fixed-layout HUDs. Maximum throughput, zero per-sprite GC. Indices are _not_ stable — `removeXIndex` swap-removes |
-| **Handle API** | `addSprite2D`, `removeSprite2D`, `addBillboardSprite`, `removeBillboardSprite` and matching update helpers                                                         | `Sprite2DHandle` / `BillboardSpriteHandle` | Player characters, enemies, UI elements that move or will later be parented. Stable id, remove-safe update helpers                                      |
+| **Handle API** | `addSprite2D`, `removeSprite2D`, `addBillboardSprite`, `removeBillboardSprite` and matching update helpers                                                          | `Sprite2DHandle` / `BillboardSpriteHandle` | Player characters, enemies, UI elements that move or will later be parented. Stable id, remove-safe update helpers                                     |
 
 Mario analogy: `Index` is a scenario tile (set once, never updated, can
 spawn 10 000 of them); `Handle` is Mario himself (moves every frame,
@@ -2035,8 +2049,201 @@ packages/babylon-lite/src/
     billboard-renderable.ts                      # Scene Renderable wrapper, transparent CPU sort, world-center maintenance, GPU resource lifetime
     billboard-pipeline.ts                        # Billboard WGSL composer, pipeline cache, UBO and instance upload helpers
 
-    # Roadmap modules: sprite animation, handles, anchors, and sprite picking.
+    sprite-animation.ts                          # Optional sprite frame animation core manager + scene/renderer attachment helpers
+    sprite-2d-index-animation.ts                 # Optional Sprite2D raw-index frame animation helper
+    sprite-2d-handle-animation.ts                # Optional Sprite2D stable-handle frame animation helper
+    billboard-sprite-index-animation.ts          # Optional Billboard raw-index frame animation helper
+    billboard-sprite-handle-animation.ts         # Optional Billboard stable-handle frame animation helper
+
+    # Roadmap modules: anchors, and sprite picking.
 ```
+
+---
+
+## Sprite Frame Animation (Optional)
+
+**Modules:** `sprite-animation.ts` for side-effect-free sprite frame state/update logic, `sprite-animation-task.ts` for generic `AnimationManager` integration, plus one tiny family binding module per target kind. Static sprites import none of them and pay zero animation bytes.
+
+Provides Babylon.js-style per-sprite frame animation for both Sprite2D (index/handle) and BillboardSprite (index/handle) families. Animations are collected by a `SpriteAnimationManager`, which can be:
+
+- Manually driven via `updateSpriteAnimationManager(manager, deltaMs)`
+- Registered with the generic `AnimationManager` via `addSpriteAnimationManager(animationManager, spriteManager)`
+- Attached to a `SceneContext` via `attachSpriteAnimationsToScene(scene, manager)` to update in `scene._beforeRender`
+- Attached to a `SpriteRenderer` via `attachSpriteAnimationsToRenderer(sr, manager)` to update before layer uploads
+
+### Core Principles
+
+- **Zero module-level side effects.** No allocations at import time.
+- **Optional attachment helpers.** Base sprite families never import animation code. The core module has no sprite-family runtime imports; family binding modules import only the specific index or handle helpers they need.
+- **Babylon.js timing semantics:**
+  - Starts immediately at `from` frame
+  - Advances one frame when accumulated time **strictly exceeds** delay (not `>=`)
+  - Large delta (> delay) advances only one frame per update (clamps frame step)
+  - Loop resets to `from`; non-loop lands on `to` and fires callback once
+  - Reverse direction (`from > to`) supported; non-loop reverse ends at `to`
+  - Delay clamped to minimum 1ms
+- **Index vs handle separation.** Index-only callers pay zero bytes for handle tracking code. Handle-based animations survive swap-remove via stable identity.
+- **Raw-index animations are slot animations.** `playSprite2DIndexAnimation` and `playBillboardSpriteIndexAnimation` intentionally bind to the numeric slot for structurally stable layers/systems. If a caller swap-removes that slot, the animation follows the new occupant. Use the handle helpers for stable sprite identity.
+- **Manager ownership is explicit.** Adding an animation tracks it with the owning manager. Re-adding the same animation to the same manager is an O(1) no-op; adding it to another manager detaches it from the previous owner first. Finish, removal, and clear paths unset the owner internally.
+- **Replay options are explicit.** `playSpriteFrameAnimation` preserves existing callback/removal options when its `options` argument is omitted, and replaces them when an options object is provided.
+- **`removeWhenFinished` option** (equivalent to Babylon.js disposing after an animation finishes):
+  - For handles: calls `removeSprite2D(handle)` or `removeBillboardSprite(handle)`
+  - For raw indices: calls `removeSprite2DIndex(layer, index)` or `removeBillboardSpriteIndex(system, index)` on the current occupant of that slot (swap-remove semantics apply)
+
+### API
+
+```typescript
+export interface SpriteFrameAnimation {
+  readonly _entityType: "sprite-frame-animation";
+    readonly target: SpriteAnimationTarget;
+    from: number;
+    to: number;
+    current: number;
+    loop: boolean;
+    delayMs: number;
+    accumulatedMs: number;
+  animationStarted: boolean;
+    onEnd?: () => void;
+  removeWhenFinished: boolean;
+}
+
+export interface SpriteAnimationTarget {
+  readonly setFrame: (frame: number) => void;
+  readonly remove?: () => void;
+  readonly isAlive?: () => boolean;
+}
+
+export interface SpriteAnimationManager {
+  readonly _entityType: "sprite-animation-manager";
+    animations: SpriteFrameAnimation[];
+  fixedDeltaMs: number;
+  running: boolean;
+}
+
+export interface SpriteAnimationBinding {
+  readonly _entityType: "sprite-animation-binding";
+  active: boolean;
+}
+
+export interface SpriteAnimationManagerOptions {
+    fixedDeltaMs?: number;
+    onUpdate?: (deltaMs: number) => void;
+}
+
+export interface PlaySpriteAnimationOptions {
+    onEnd?: () => void;
+    removeWhenFinished?: boolean;
+}
+
+// Core manager (no sprite family imports at module level)
+export function createSpriteAnimationManager(options?: SpriteAnimationManagerOptions): SpriteAnimationManager;
+export function createSpriteFrameAnimation(target: SpriteAnimationTarget, from: number, to: number, loop: boolean, delayMs: number, options?: PlaySpriteAnimationOptions): SpriteFrameAnimation;
+export function addSpriteAnimation(manager: SpriteAnimationManager, anim: SpriteFrameAnimation): void;
+export function removeSpriteAnimation(manager: SpriteAnimationManager, anim: SpriteFrameAnimation): void;
+export function clearSpriteAnimations(manager: SpriteAnimationManager): void;
+export function updateSpriteAnimationManager(manager: SpriteAnimationManager, deltaMs: number): void;
+export function playSpriteFrameAnimation(anim: SpriteFrameAnimation, from?: number, to?: number, loop?: boolean, delayMs?: number, options?: PlaySpriteAnimationOptions): void;
+export function stopSpriteAnimation(anim: SpriteFrameAnimation): void;
+
+// Generic AnimationManager task adapter
+export function addSpriteAnimationManager(manager: AnimationManager, spriteManager: SpriteAnimationManager): void;
+export function removeSpriteAnimationManager(manager: AnimationManager, spriteManager: SpriteAnimationManager): void;
+export function startSpriteAnimationManager(manager: SpriteAnimationManager): void;
+export function stopSpriteAnimationManager(manager: SpriteAnimationManager): void;
+
+// Family helpers (import sprite families on first call)
+export function playSprite2DIndexAnimation(
+    manager: SpriteAnimationManager,
+    layer: Sprite2DLayer,
+    index: number,
+    from: number,
+    to: number,
+    loop: boolean,
+    delayMs: number,
+    options?: PlaySpriteAnimationOptions
+): SpriteFrameAnimation;
+
+export function playSprite2DAnimation(
+    manager: SpriteAnimationManager,
+    handle: Sprite2DHandle,
+    from: number,
+    to: number,
+    loop: boolean,
+    delayMs: number,
+    options?: PlaySpriteAnimationOptions
+): SpriteFrameAnimation;
+
+export function playBillboardSpriteIndexAnimation(
+    manager: SpriteAnimationManager,
+    system: BillboardSpriteSystem,
+    index: number,
+    from: number,
+    to: number,
+    loop: boolean,
+    delayMs: number,
+    options?: PlaySpriteAnimationOptions
+): SpriteFrameAnimation;
+
+export function playBillboardSpriteAnimation(
+    manager: SpriteAnimationManager,
+    handle: BillboardSpriteHandle,
+    from: number,
+    to: number,
+    loop: boolean,
+    delayMs: number,
+    options?: PlaySpriteAnimationOptions
+): SpriteFrameAnimation;
+
+// Attachment helpers (optional scene/renderer integration)
+export function attachSpriteAnimationsToScene(
+    scene: SceneContext,
+    manager: SpriteAnimationManager
+): SpriteAnimationBinding;
+
+export function attachSpriteAnimationsToRenderer(
+    sr: SpriteRenderer,
+    manager: SpriteAnimationManager
+): SpriteAnimationBinding;
+
+export function disposeSpriteAnimationBinding(binding: SpriteAnimationBinding): void;
+```
+
+Underscore-prefixed runtime bookkeeping such as RAF handles, active render-loop bindings, and animation ownership/direction tracking is intentionally kept behind non-exported internal types. The only underscored fields in the public API block are discriminator tags.
+
+### Usage Example
+
+```typescript
+// Scene-based with attachment
+const scene = createSceneContext(engine);
+const atlas = await loadSpriteAtlas(engine, "sprites.png", { gridSize: [32, 32] });
+const layer = createSprite2DLayer(atlas, { depth: "test" });
+addDepthHostedSpriteLayer(scene, layer);
+
+const animMgr = createSpriteAnimationManager();
+attachSpriteAnimationsToScene(scene, animMgr);
+
+const handle = addSprite2D(layer, { positionPx: [100, 200], sizePx: [64, 64], frame: 0 });
+playSprite2DAnimation(animMgr, handle, 0, 7, true, 100); // 8-frame loop at 100ms/frame
+
+// Pure-2D with manual update
+const sr = createSpriteRenderer(engine, { layers: [layer] });
+const binding = attachSpriteAnimationsToRenderer(sr, animMgr);
+// Animation now updates before sprite uploads
+```
+
+### Implementation Notes
+
+- `updateSpriteAnimationManager` iterates `manager.animations`, accumulates time, advances frame when `accumulatedMs > delayMs` (not `>=`), and removes finished non-loop animations after the callback/removal path has run.
+- `sprite-animation-task.ts` creates the sprite-side `AnimationTask` adapter and registers it with the generic `AnimationManager`. This lets one manager advance glTF/property animation groups and sprite frame animations in the same loop without the animation core importing sprite code.
+- `startSpriteAnimationManager` / `stopSpriteAnimationManager` keep the existing standalone sprite API, but internally schedule the sprite manager through a private generic `AnimationManager` in `sprite-animation-task.ts`. Sprite-specific scene/renderer attachments remain in `sprite-animation.ts`.
+- Attachment helpers:
+  - `attachSpriteAnimationsToScene` unshifts a `_beforeRender` hook that receives scene delta and calls `updateSpriteAnimationManager`. Dispose via `disposeSpriteAnimationBinding`; disposal splices the hook and clears the manager's internal binding state. Scene-attached bindings also register the same cleanup with scene disposal, so `disposeScene(scene)` releases that binding state.
+  - `attachSpriteAnimationsToRenderer` pushes a callback into the renderer's internal before-update hook list; `SpriteRenderer._update` passes the engine's current delta to these hooks before layer upload. Dispose splices only that callback via `disposeSpriteAnimationBinding` and clears the manager's internal binding state. Renderer-attached bindings register the same cleanup with `disposeSpriteRenderer`, so renderer disposal also releases that binding state.
+- Family helpers live in separate modules. `sprite-2d-index-animation.ts` imports no handle code; `sprite-2d-handle-animation.ts` imports the stable-handle helpers. Billboard index/handle helpers follow the same split.
+- Index target tracking uses raw slot indices. If the index is swap-removed by non-animation code, the animation follows raw-index semantics and continues targeting the same numeric slot. Callers should use handles for animated sprites that may be removed externally, or manually stop animations before remove.
+- Handle target tracking uses stable `Sprite2DHandle` or `BillboardSpriteHandle`. Swap-remove is safe; the handle stays valid until the animation removes it via `removeWhenFinished`.
+
+---
 
 ### Public-API additions to `packages/babylon-lite/src/index.ts`
 

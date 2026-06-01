@@ -564,6 +564,22 @@ interface BundleManifestEntry {
 
 type BundleManifest = Record<string, BundleManifestEntry>;
 
+const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
+const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
+const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
+
+function orderBundleManifest(manifest: BundleManifest): BundleManifest {
+    const ordered: BundleManifest = {};
+    for (const scene of ALL_SCENES) {
+        const entry = manifest[scene];
+        if (entry) ordered[scene] = entry;
+    }
+    for (const [scene, entry] of Object.entries(manifest)) {
+        if (!ordered[scene]) ordered[scene] = entry;
+    }
+    return ordered;
+}
+
 function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
     const errors: string[] = [];
     for (const ref of refs) {
@@ -587,7 +603,7 @@ export function writeMasterBundleManifest(refs?: string[]): void {
         return;
     }
 
-    writeFileSync(masterManifestPath, JSON.stringify(baseline.manifest, null, 2));
+    writeFileSync(masterManifestPath, JSON.stringify(orderBundleManifest(baseline.manifest), null, 2));
     console.log(`✓ Bundle master baseline manifest (${baseline.ref}) written to ${masterManifestPath}`);
 }
 
@@ -886,9 +902,6 @@ export function writeBundleInfo(scene: string, result: unknown): void {
     writeBundleInfoToDir(scene, result, bundleInfoDir, ROOT);
 }
 
-const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
-const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
-const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 const SCENES = process.env.BUNDLE_SCENES ? process.env.BUNDLE_SCENES.split(",") : ALL_SCENES;
 const BJS_SCENES = process.env.SKIP_BJS ? [] : SCENES.map((s) => `bjs-${s}`);
 
@@ -1356,7 +1369,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
     }
 
     function flush(): void {
-        writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+        writeFileSync(manifestPath, JSON.stringify(orderBundleManifest(manifest), null, 2));
     }
 
     try {

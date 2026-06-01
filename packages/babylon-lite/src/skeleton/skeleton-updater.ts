@@ -9,12 +9,12 @@ import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 
+// Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
+const _boneTmp = new Float32Array(16);
+
 // RH→LH root transform (same as load-gltf.ts): diag(-1, 1, 1, 1)
 // prettier-ignore
 const RH_TO_LH = new Float32Array([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
-
-// Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
-const _boneTmp = new Float32Array(16);
 
 /** TRS layout per node in the scratch buffer: 12 floats.
  *  [0..2] = translation, [3..6] = rotation (xyzw), [7..9] = scale, [10..11] = padding */
@@ -88,12 +88,13 @@ export function createAnimationController(
     const boneScratch = skeletons.map((s) => s.boneMatrices);
 
     // Per-morph-binding scratch for weight evaluation
-    const morphNodeMap = new Map<number, MorphBinding[]>();
-    for (const mb of morphBindings) {
-        let arr = morphNodeMap.get(mb.nodeIdx);
+    const morphBindingsByNode: (MorphBinding[] | undefined)[] = [];
+    for (let morphIndex = 0; morphIndex < morphBindings.length; morphIndex++) {
+        const mb = morphBindings[morphIndex]!;
+        let arr = morphBindingsByNode[mb.nodeIdx];
         if (!arr) {
             arr = [];
-            morphNodeMap.set(mb.nodeIdx, arr);
+            morphBindingsByNode[mb.nodeIdx] = arr;
         }
         arr.push(mb);
     }
@@ -112,146 +113,152 @@ export function createAnimationController(
         loop: true,
         _debugWorldMat: worldMat,
 
-        tick(deltaMs: number, engine?: EngineContext): void {
-            if (clip.duration <= 0) {
-                return;
-            }
-            if (engine) {
-                cachedEngine = engine;
-            }
-            const activeEngine = engine ?? cachedEngine;
-            if (requiresEngine && !activeEngine) {
-                throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
-            }
-            const device = requiresEngine ? (activeEngine as EngineContextInternal).device : null;
+        tick:
+            clip.duration <= 0
+                ? noopAnimationTick
+                : (deltaMs: number, engine?: EngineContext): void => {
+                      if (engine) {
+                          cachedEngine = engine;
+                      }
+                      const activeEngine = engine ?? cachedEngine;
+                      if (requiresEngine && !activeEngine) {
+                          throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
+                      }
+                      const device = requiresEngine ? (activeEngine as EngineContextInternal).device : null;
 
-            if (ctrl.playing) {
-                ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
-            }
+                      if (ctrl.playing) {
+                          ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
+                      }
 
-            // Always wrap/clamp — ensures externally-set time (goToFrame) is valid
-            if (ctrl.loop) {
-                ctrl.time %= clip.duration;
-                if (ctrl.time < 0) {
-                    ctrl.time += clip.duration;
-                }
-            } else {
-                ctrl.time = Math.min(Math.max(ctrl.time, 0), clip.duration);
-            }
-            const t = ctrl.time;
+                      // Always wrap/clamp — ensures externally-set time (goToFrame) is valid
+                      if (ctrl.loop) {
+                          ctrl.time %= clip.duration;
+                          if (ctrl.time < 0) {
+                              ctrl.time += clip.duration;
+                          }
+                      } else {
+                          ctrl.time = Math.min(Math.max(ctrl.time, 0), clip.duration);
+                      }
+                      const t = ctrl.time;
 
-            // 1. Reset to rest-pose TRS
-            for (let i = 0; i < numNodes; i++) {
-                const n = nodes[i]!;
-                const off = i * TRS_STRIDE;
-                currentTRS[off + T_OFF] = n.tx;
-                currentTRS[off + T_OFF + 1] = n.ty;
-                currentTRS[off + T_OFF + 2] = n.tz;
-                currentTRS[off + R_OFF] = n.rx;
-                currentTRS[off + R_OFF + 1] = n.ry;
-                currentTRS[off + R_OFF + 2] = n.rz;
-                currentTRS[off + R_OFF + 3] = n.rw;
-                currentTRS[off + S_OFF] = n.sx;
-                currentTRS[off + S_OFF + 1] = n.sy;
-                currentTRS[off + S_OFF + 2] = n.sz;
-            }
+                      // 1. Reset to rest-pose TRS
+                      for (let i = 0; i < numNodes; i++) {
+                          const n = nodes[i]!;
+                          const off = i * TRS_STRIDE;
+                          currentTRS[off + T_OFF] = n.tx;
+                          currentTRS[off + T_OFF + 1] = n.ty;
+                          currentTRS[off + T_OFF + 2] = n.tz;
+                          currentTRS[off + R_OFF] = n.rx;
+                          currentTRS[off + R_OFF + 1] = n.ry;
+                          currentTRS[off + R_OFF + 2] = n.rz;
+                          currentTRS[off + R_OFF + 3] = n.rw;
+                          currentTRS[off + S_OFF] = n.sx;
+                          currentTRS[off + S_OFF + 1] = n.sy;
+                          currentTRS[off + S_OFF + 2] = n.sz;
+                      }
 
-            // 2. Evaluate animation channels → override TRS
-            for (const ch of clip.channels) {
-                const sampler = clip.samplers[ch.samplerIdx]!;
-                const base = ch.nodeIdx * TRS_STRIDE;
-                switch (ch.path) {
-                    case PATH_TRANSLATION:
-                        evaluateSampler(sampler, t, 3, false, currentTRS, base + T_OFF);
-                        break;
-                    case PATH_ROTATION:
-                        evaluateSampler(sampler, t, 4, true, currentTRS, base + R_OFF);
-                        break;
-                    case PATH_SCALE:
-                        evaluateSampler(sampler, t, 3, false, currentTRS, base + S_OFF);
-                        break;
-                    case PATH_WEIGHTS: {
-                        // Evaluate morph weights and upload to all bindings for this node
-                        const bindings = morphNodeMap.get(ch.nodeIdx);
-                        if (bindings) {
-                            const tc = bindings[0]!.targetCount;
-                            morphUploadF32.fill(0);
-                            evaluateSampler(sampler, t, tc, false, morphUploadF32, 0);
-                            for (const mb of bindings) {
-                                mb.weights.set(morphUploadF32);
-                                // Write only the weights vec4 (first 16 bytes); count/texWidth/rowsPerBand are immutable
-                                device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 0, morphUploadF32.buffer, 0, 16);
-                            }
-                        }
-                        break;
-                    }
-                    case PATH_POINTER: {
-                        if (ch.pointerArity && ch.pointerWriter) {
-                            evaluateSampler(sampler, t, ch.pointerArity, ch.pointerQuaternion === true, pointerScratch, 0);
-                            ch.pointerWriter(pointerScratch, 0);
-                        }
-                        break;
-                    }
-                }
-            }
+                      // 2. Evaluate animation channels → override TRS
+                      for (let channelIndex = 0; channelIndex < clip.channels.length; channelIndex++) {
+                          const ch = clip.channels[channelIndex]!;
+                          const sampler = clip.samplers[ch.samplerIdx]!;
+                          const base = ch.nodeIdx * TRS_STRIDE;
+                          switch (ch.path) {
+                              case PATH_TRANSLATION:
+                                  evaluateSampler(sampler, t, 3, false, currentTRS, base + T_OFF);
+                                  break;
+                              case PATH_ROTATION:
+                                  evaluateSampler(sampler, t, 4, true, currentTRS, base + R_OFF);
+                                  break;
+                              case PATH_SCALE:
+                                  evaluateSampler(sampler, t, 3, false, currentTRS, base + S_OFF);
+                                  break;
+                              case PATH_WEIGHTS: {
+                                  // Evaluate morph weights and upload to all bindings for this node
+                                  const bindings = morphBindingsByNode[ch.nodeIdx];
+                                  if (bindings) {
+                                      const tc = bindings[0]!.targetCount;
+                                      morphUploadF32.fill(0);
+                                      evaluateSampler(sampler, t, tc, false, morphUploadF32, 0);
+                                      for (let bindingIndex = 0; bindingIndex < bindings.length; bindingIndex++) {
+                                          const mb = bindings[bindingIndex]!;
+                                          mb.weights.set(morphUploadF32);
+                                          // Write only the weights vec4 (first 16 bytes); count/texWidth/rowsPerBand are immutable
+                                          device!.queue.writeBuffer(mb.runtimeMorphTargets?.weightsBuffer ?? mb.weightsBuffer, 0, morphUploadF32.buffer, 0, 16);
+                                      }
+                                  }
+                                  break;
+                              }
+                              case PATH_POINTER: {
+                                  if (ch.pointerArity && ch.pointerWriter) {
+                                      evaluateSampler(sampler, t, ch.pointerArity, ch.pointerQuaternion === true, pointerScratch, 0);
+                                      ch.pointerWriter(pointerScratch, 0);
+                                  }
+                                  break;
+                              }
+                          }
+                      }
 
-            // 3. Compute local → world matrices in topological order
-            for (let idx = 0; idx < numNodes; idx++) {
-                const nodeIdx = topoOrder[idx]!;
-                const node = nodes[nodeIdx]!;
-                const off = nodeIdx * TRS_STRIDE;
-                if (node._matrix) {
-                    localMat.set(node._matrix, nodeIdx * 16);
-                } else {
-                    mat4ComposeInto(
-                        localMat,
-                        nodeIdx * 16,
-                        currentTRS[off + T_OFF]!,
-                        currentTRS[off + T_OFF + 1]!,
-                        currentTRS[off + T_OFF + 2]!,
-                        currentTRS[off + R_OFF]!,
-                        currentTRS[off + R_OFF + 1]!,
-                        currentTRS[off + R_OFF + 2]!,
-                        currentTRS[off + R_OFF + 3]!,
-                        currentTRS[off + S_OFF]!,
-                        currentTRS[off + S_OFF + 1]!,
-                        currentTRS[off + S_OFF + 2]!
-                    );
-                }
+                      // 3. Compute local → world matrices in topological order
+                      for (let idx = 0; idx < numNodes; idx++) {
+                          const nodeIdx = topoOrder[idx]!;
+                          const node = nodes[nodeIdx]!;
+                          const off = nodeIdx * TRS_STRIDE;
+                          if (node._matrix) {
+                              localMat.set(node._matrix, nodeIdx * 16);
+                          } else {
+                              mat4ComposeInto(
+                                  localMat,
+                                  nodeIdx * 16,
+                                  currentTRS[off + T_OFF]!,
+                                  currentTRS[off + T_OFF + 1]!,
+                                  currentTRS[off + T_OFF + 2]!,
+                                  currentTRS[off + R_OFF]!,
+                                  currentTRS[off + R_OFF + 1]!,
+                                  currentTRS[off + R_OFF + 2]!,
+                                  currentTRS[off + R_OFF + 3]!,
+                                  currentTRS[off + S_OFF]!,
+                                  currentTRS[off + S_OFF + 1]!,
+                                  currentTRS[off + S_OFF + 2]!
+                              );
+                          }
 
-                const parentIdx = node.parentIdx;
-                if (parentIdx >= 0) {
-                    mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
-                } else {
-                    // Root node: pre-multiply RH→LH
-                    mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
-                }
-            }
+                          const parentIdx = node.parentIdx;
+                          if (parentIdx >= 0) {
+                              mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
+                          } else {
+                              // Root node: pre-multiply RH→LH
+                              mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+                          }
+                      }
 
-            // 4. Compute bone matrices and upload to GPU
-            for (let si = 0; si < skeletons.length; si++) {
-                const skel = skeletons[si]!;
-                const boneData = boneScratch[si]!;
+                      // 4. Compute bone matrices and upload to GPU
+                      for (let si = 0; si < skeletons.length; si++) {
+                          const skel = skeletons[si]!;
+                          const boneData = boneScratch[si]!;
 
-                for (let bi = 0; bi < skel.boneCount; bi++) {
-                    const jointIdx = skel.jointNodes[bi]!;
-                    const ibmOff = bi * 16;
-                    // boneMatrix = invMeshWorld * jointWorld * IBM
-                    mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
-                    mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
-                }
+                          for (let bi = 0; bi < skel.boneCount; bi++) {
+                              const jointIdx = skel.jointNodes[bi]!;
+                              const ibmOff = bi * 16;
+                              // boneMatrix = invMeshWorld * jointWorld * IBM
+                              mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld, 0, worldMat, jointIdx * 16);
+                              mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
+                          }
 
-                // Upload to GPU
-                const texWidth = skel.boneCount * 4;
-                device!.queue.writeTexture(
-                    { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
-                    boneData.buffer,
-                    { bytesPerRow: texWidth * 16 },
-                    { width: texWidth, height: 1 }
-                );
-            }
-        },
+                          // Upload to GPU
+                          const texWidth = skel.boneCount * 4;
+                          device!.queue.writeTexture(
+                              { texture: skel.runtimeSkeleton?.boneTexture ?? skel.boneTexture },
+                              boneData.buffer,
+                              { bytesPerRow: texWidth * 16 },
+                              { width: texWidth, height: 1 }
+                          );
+                      }
+                  },
     };
 
     return ctrl;
+}
+
+function noopAnimationTick(): void {
+    // Empty controller for zero-duration clips.
 }

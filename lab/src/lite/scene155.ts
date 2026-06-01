@@ -11,6 +11,7 @@ import {
     createPropertyAnimationGroup,
     createSceneContext,
     createStandardMaterial,
+    enablePropertyAnimationBlending,
     pauseAnimation,
     registerScene,
     setAnimationWeight,
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
 
     const positiveGroup = createPropertyAnimationGroup(manager, box, positiveSlide, { fromFrame: 0, toFrame: END_FRAME, loop: true });
     const negativeGroup = createPropertyAnimationGroup(manager, box, negativeSlide, { fromFrame: 0, toFrame: END_FRAME, loop: true });
+    enablePropertyAnimationBlending(manager);
     setAnimationWeight(positiveGroup, POSITIVE_WEIGHT);
     setAnimationWeight(negativeGroup, NEGATIVE_WEIGHT);
 

@@ -45,8 +45,6 @@ export interface AnimationChannel {
     readonly pointerArity?: number;
     /** PATH_POINTER only: true when LINEAR interpolation should use quaternion slerp. */
     readonly pointerQuaternion?: boolean;
-    /** @internal PATH_POINTER stable identity used by optional weighted manual-property mixing. */
-    readonly _mk?: object;
 }
 
 /** One glTF animation clip (may animate many nodes). */

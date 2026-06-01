@@ -26,10 +26,10 @@ function findKeyframe(input: Float32Array, t: number): number {
 }
 
 // Reusable scratch for quaternion slerp (avoids per-call allocation)
-const _quat = [0, 0, 0, 1];
+const _quat = new Float32Array([0, 0, 0, 1]);
 
 /** Normalise 4 consecutive components (quaternion) in-place. No-op on zero length. */
-function normalizeQuat4(buf: number[] | Float32Array, o: number): void {
+function normalizeQuat4(buf: Float32Array, o: number): void {
     const x = buf[o]!;
     const y = buf[o + 1]!;
     const z = buf[o + 2]!;
@@ -46,7 +46,7 @@ function normalizeQuat4(buf: number[] | Float32Array, o: number): void {
 
 /** Spherical linear interpolation between two quaternions. Writes to out[].
  *  Lives here (not in math/mat4.ts) so non-animated scenes don't pay for it. */
-function quatSlerp(out: number[], ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number, t: number): void {
+function quatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number, t: number): void {
     let dot = ax * bx + ay * by + az * bz + aw * bw;
     if (dot < 0) {
         bx = -bx;

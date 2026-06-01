@@ -86,7 +86,7 @@ function makeMockAtlas(): SpriteAtlas {
         textureSizePx: [128, 128],
         frames: [
             { uvMin: [0, 0], uvMax: [0.25, 0.25], sourceSizePx: [32, 32], pivot: [0.5, 0.5] },
-            { uvMin: [0.25, 0], uvMax: [0.5, 0.25], sourceSizePx: [32, 32], pivot: [0.25, 0.75] },
+            { uvMin: [0.25, 0], uvMax: [0.5, 0.25], sourceSizePx: [64, 16], pivot: [0.25, 0.75] },
         ],
         premultipliedAlpha: false,
     };
@@ -166,7 +166,7 @@ describe("FacingBillboardSpriteSystem index API", () => {
         expect(system._instanceData[4]).toBe(3);
     });
 
-    it("setBillboardSpriteFrameIndex updates UVs while preserving the current pivot", () => {
+    it("setBillboardSpriteFrameIndex updates UVs while preserving size and current pivot", () => {
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1 });
         addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [2, 3], pivot: [0.1, 0.2], frame: 0 });
 
@@ -175,6 +175,8 @@ describe("FacingBillboardSpriteSystem index API", () => {
         expect(Array.from(system._instanceData.slice(5, 9))).toEqual([0.25, 0, 0.5, 0.25]);
         expect(system._instanceData[3]).toBe(2);
         expect(system._instanceData[4]).toBe(3);
+        expect(system._savedSize[0]).toBe(2);
+        expect(system._savedSize[1]).toBe(3);
         expect(system._instanceData[10]).toBeCloseTo(0.1);
         expect(system._instanceData[11]).toBeCloseTo(0.2);
 
@@ -196,6 +198,26 @@ describe("FacingBillboardSpriteSystem index API", () => {
 
         updateBillboardSpriteIndex(system, 0, { flipY: false });
         expect(Array.from(system._instanceData.slice(5, 9))).toEqual([0, 0, 0.25, 0.25]);
+    });
+
+    it("preserves billboard flip state for narrow non-degenerate frames", () => {
+        const atlas = makeMockAtlas();
+        const narrowAtlas: SpriteAtlas = {
+            ...atlas,
+            textureSizePx: [256, 32],
+            frames: [
+                { uvMin: [0, 0], uvMax: [1 / 256, 1], sourceSizePx: [1, 32], pivot: [0.5, 0.5] },
+                { uvMin: [1 / 256, 0], uvMax: [2 / 256, 1], sourceSizePx: [1, 32], pivot: [0.5, 0.5] },
+            ],
+        };
+        const system = createFacingBillboardSystem(narrowAtlas, { capacity: 1 });
+        addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [2, 3], frame: 0, flipX: true });
+
+        setBillboardSpriteFrameIndex(system, 0, 1);
+
+        expect(system._instanceData[5]).toBeGreaterThan(system._instanceData[7]!);
+        expect(system._instanceData[5]).toBeCloseTo(2 / 256);
+        expect(system._instanceData[7]).toBeCloseTo(1 / 256);
     });
 
     it("swap-removes sprites and carries saved size with the moved instance", () => {
