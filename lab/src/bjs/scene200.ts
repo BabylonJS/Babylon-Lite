@@ -1,16 +1,17 @@
-// BJS reference for scene 200 / 201 — High-Precision Matrix Jitter.
+// BJS reference for scene 200 — High-Precision Matrix Jitter (baseline).
 //
 // Renders the same geometry as the Lite HPM jitter scenes (5×5 grid of
-// unit boxes + central tall orange pillar at world OFFSET = 5e6) so the
-// lab gallery can show a side-by-side BJS vs Lite comparison. BJS has
-// no equivalent useHighPrecisionMatrix option, so the BJS render is a
-// single Float32-only baseline used for visual reference only — the
-// Lite parity specs do NOT compare against this output (they self-capture;
-// see tests/parity/scenes/scene20{0,1}-...spec.ts).
+// unit boxes + central tall orange pillar at world OFFSET = 5e6) with
+// the BJS engine in its default precision mode (F32, no LWR). This
+// pairs with scene201 — which constructs the same scene but with
+// `useLargeWorldRendering: true` — to validate Lite's HPM+FO substrate
+// against the BJS equivalent.
 //
-// IMPORTANT: every parameter below MUST mirror lab/src/_shared/hpm-jitter-scene.ts
-// so the golden capture stays in sync with the Lite scenes after geometry
-// edits. The Lite shared builder is the source of truth.
+// IMPORTANT: every geometry/material/camera parameter below MUST stay
+// in sync with lab/src/bjs/scene201.ts AND lab/src/_shared/hpm-jitter-scene.ts
+// — the ONLY intended difference across all three is the engine option
+// (`useLargeWorldRendering` here vs scene201) so the parity tests can
+// isolate the precision-mode effect.
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
@@ -22,7 +23,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 
-/** Mirrors `OFFSET` in lab/src/_shared/hpm-jitter-scene.ts. */
+/** Mirrors `OFFSET` in lab/src/_shared/hpm-jitter-scene.ts and lab/src/bjs/scene201.ts. */
 const OFFSET = 5_000_000;
 
 (async function () {
@@ -34,7 +35,6 @@ const OFFSET = 5_000_000;
     const scene = new Scene(engine);
     scene.clearColor = new Color4(0.05, 0.05, 0.08, 1);
 
-    // ArcRotate camera ~25m back from the grid centre — matches the Lite scene.
     const cam = new ArcRotateCamera("cam", Math.PI / 4, Math.PI / 3, 25, new Vector3(OFFSET, 1, OFFSET), scene);
     cam.minZ = 0.5;
     cam.maxZ = 500;

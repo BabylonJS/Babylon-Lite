@@ -146,11 +146,19 @@
     "bjsGzipKB": 410.4
   },
   "scene9": {
-    "rawKB": 35.4,
-    "gzipKB": 13.4,
+    "rawKB": 56.3,
+    "gzipKB": 22.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene9-generate-mipmaps-BADAHSqV.js",
+      "scene9-normal-map-fragment-BP7duUVm.js",
+      "scene9-point-light-JLZSkC71.js",
+      "scene9-standard-renderable-DesbkRtb.js",
+      "scene9-std-ambient-fragment-Cxekaaad.js",
+      "scene9-std-opacity-fragment-DvrCnTul.js",
+      "scene9-std-reflection-fragment-c89r6al4.js",
+      "scene9-std-specular-fragment-Dv-34Xf7.js",
+      "scene9-wgsl-helpers-WTsokIfK.js",
       "scene9.js"
     ],
     "bjsRawKB": 2982.8,
@@ -756,11 +764,11 @@
     "bjsGzipKB": 368.8
   },
   "scene54": {
-    "rawKB": 57.7,
-    "gzipKB": 23.2,
+    "rawKB": 57.2,
+    "gzipKB": 23,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene54-billboard-renderable-D3ai6v5l.js",
+      "scene54-billboard-renderable-Dl1m3icY.js",
       "scene54-scene-uniforms-FTYH6Ct0.js",
       "scene54-standard-renderable-BQvBBwLb.js",
       "scene54-wgsl-helpers-WTsokIfK.js",
@@ -770,22 +778,22 @@
     "bjsGzipKB": 368.7
   },
   "scene55": {
-    "rawKB": 30.8,
-    "gzipKB": 12.6,
+    "rawKB": 30.3,
+    "gzipKB": 12.4,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene55-billboard-renderable-D6th7kKj.js",
+      "scene55-billboard-renderable-CnU18_h9.js",
       "scene55.js"
     ],
     "bjsRawKB": 1000.2,
     "bjsGzipKB": 240.4
   },
   "scene56": {
-    "rawKB": 58,
-    "gzipKB": 23.3,
+    "rawKB": 57.4,
+    "gzipKB": 23.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene56-billboard-renderable-DfMdmO6k.js",
+      "scene56-billboard-renderable-eopMgEU6.js",
       "scene56-scene-uniforms-FTYH6Ct0.js",
       "scene56-standard-renderable-CjSSBB8Q.js",
       "scene56-wgsl-helpers-WTsokIfK.js",
@@ -795,11 +803,11 @@
     "bjsGzipKB": 359.7
   },
   "scene57": {
-    "rawKB": 57.8,
-    "gzipKB": 23.2,
+    "rawKB": 57.3,
+    "gzipKB": 23,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene57-billboard-renderable-DBZAmCBH.js",
+      "scene57-billboard-renderable-Dxek6anp.js",
       "scene57-scene-uniforms-FTYH6Ct0.js",
       "scene57-standard-renderable-DKJkBJN5.js",
       "scene57-wgsl-helpers-WTsokIfK.js",
@@ -819,11 +827,11 @@
     "bjsGzipKB": 195.2
   },
   "scene59": {
-    "rawKB": 60.9,
-    "gzipKB": 24.3,
+    "rawKB": 60.4,
+    "gzipKB": 24.1,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene59-billboard-renderable-Bkqj3mOs.js",
+      "scene59-billboard-renderable-4MYd9yGR.js",
       "scene59-scene-uniforms-FTYH6Ct0.js",
       "scene59-standard-renderable-CUHVAJ6J.js",
       "scene59-wgsl-helpers-WTsokIfK.js",

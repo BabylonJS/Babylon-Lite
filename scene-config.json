@@ -1233,7 +1233,9 @@
         "maxRawKB": 50,
         "description": "5×5 grid of boxes + pillar at world (~5e6, *, ~5e6) with useHighPrecisionMatrix=false. F32 view-proj chain visibly jitters at this magnitude — stair-stepped silhouettes, mis-aligned cube faces. Compare to scene 201 (FO on) for the precision win.",
         "tags": ["hpm", "lwr", "precision", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "skipParity": true,
+        "_skipParityReason": "F32 jitter divergence: both Lite and BJS default-precision stacks jitter at 5e6 coords but in different ways (matrix mult is not associative; view×world rounds differently across implementations). Measured MAD against BJS ~2.6. The scene exists as a visible jitter demo (lab gallery side-by-side with scene 201), not as a parity target. The real parity test is scene 201 (HPM+FO ↔ BJS useLargeWorldRendering), which matches at MAD=0.000."
     },
     {
         "id": 201,
