@@ -60,15 +60,6 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _dirtyMax: number;
     /** @internal Optional hooks installed by the opt-in handle module. */
     _handleHooks?: BillboardIndexHandleHooks;
-    /** @internal Last camera worldMatrixVersion at which the unsorted
-     *  instance buffer was uploaded under floating-origin. Forces a full
-     *  re-upload (with the new offset baked into each sprite position)
-     *  when the camera moves. -1 = never uploaded under FO. */
-    _lastFoCamVersion?: number;
-    /** @internal Lazy F32 scratch for FO-offset uploads. Allocated only
-     *  when `engine.useFloatingOrigin` is on AND this system uploads via
-     *  the unsorted path. Sized in floats = `_capacity * _instanceFloatsPerSprite`. */
-    _uploadFOScratch?: Float32Array;
 }
 
 /** @internal Lazy hooks used by the opt-in Handle API to track swap-removes. */

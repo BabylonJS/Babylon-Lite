@@ -168,12 +168,6 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
         renderable._uploadedSorted = false;
     }
     const camera = context._camera;
-    // FO offset (camera world position) when engine.useFloatingOrigin is on.
-    // Passed to both upload paths so per-sprite anchor positions are offset
-    // before reaching the eye-relative vertex shader. BJS parity:
-    // spriteRenderer.ts subtracts scene.floatingOriginOffset per sprite.
-    const foOffset = renderable._engine.useFloatingOrigin && camera ? (camera.worldMatrix as Float32Array | Float64Array) : null;
-    const foVersion = foOffset && camera ? camera.worldMatrixVersion : 0;
     if (renderable._system._depthMode === "transparent" && camera) {
         const cameraViewMatrix = getViewMatrix(camera);
         if (
@@ -182,7 +176,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
             renderable._uploadedCamera !== camera ||
             renderable._uploadedCameraViewVersion !== camera.worldMatrixVersion
         ) {
-            uploadSortedBillboardInstances(renderable._engine.device, renderable._system, renderable._instanceBuffer, renderable._instanceSortScratch, cameraViewMatrix, foOffset);
+            uploadSortedBillboardInstances(renderable._engine.device, renderable._system, renderable._instanceBuffer, renderable._instanceSortScratch, cameraViewMatrix);
             renderable._uploadedVersion = renderable._system._version;
             renderable._uploadedCamera = camera;
             renderable._uploadedCameraViewVersion = camera.worldMatrixVersion;
@@ -190,7 +184,7 @@ function uploadSystem(renderable: BillboardRenderableInternal, context: DrawUpda
         }
     } else {
         const uploadedVersion = renderable._uploadedSorted ? -1 : renderable._uploadedVersion;
-        renderable._uploadedVersion = uploadBillboardInstances(renderable._engine.device, renderable._system, renderable._instanceBuffer, uploadedVersion, foOffset, foVersion);
+        renderable._uploadedVersion = uploadBillboardInstances(renderable._engine.device, renderable._system, renderable._instanceBuffer, uploadedVersion);
         renderable._uploadedCamera = null;
         renderable._uploadedCameraViewVersion = -1;
         renderable._uploadedSorted = false;

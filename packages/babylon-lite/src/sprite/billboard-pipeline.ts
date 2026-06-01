@@ -212,8 +212,7 @@ export function uploadSortedBillboardInstances(
     system: BillboardSpriteSystem,
     instanceBuffer: GPUBuffer,
     scratch: BillboardInstanceSortScratch,
-    cameraViewMatrix: Mat4,
-    foOffset: Float32Array | Float64Array | null
+    cameraViewMatrix: Mat4
 ): void {
     const count = system.count;
     if (count === 0) {
@@ -235,22 +234,10 @@ export function uploadSortedBillboardInstances(
         depths[index] = cameraViewMatrix[2]! * anchorX + cameraViewMatrix[6]! * anchorY + cameraViewMatrix[10]! * anchorZ + cameraViewMatrix[14]!;
     }
     indices.subarray(0, count).sort((left, right) => depths[right]! - depths[left]! || left - right);
-    // FO offset (camera world position) subtracted from anchor position
-    // columns when engine.useFloatingOrigin is on so the eye-relative
-    // vertex shader produces correct screen coords. Sorted-path upload
-    // is already keyed on camera version in billboard-renderable.ts, so
-    // a camera move re-runs this loop with the fresh offset. BJS parity:
-    // spriteRenderer.ts subtracts scene.floatingOriginOffset per sprite.
-    const ox = foOffset ? foOffset[12]! : 0;
-    const oy = foOffset ? foOffset[13]! : 0;
-    const oz = foOffset ? foOffset[14]! : 0;
     for (let outIndex = 0; outIndex < count; outIndex++) {
         const sourceBase = indices[outIndex]! * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
         const destBase = outIndex * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-        sortedData[destBase] = sourceData[sourceBase]! - ox;
-        sortedData[destBase + 1] = sourceData[sourceBase + 1]! - oy;
-        sortedData[destBase + 2] = sourceData[sourceBase + 2]! - oz;
-        for (let field = 3; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
+        for (let field = 0; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
             sortedData[destBase + field] = sourceData[sourceBase + field]!;
         }
     }
@@ -273,31 +260,18 @@ export function ensureBillboardInstanceBuffer(
     return { buffer: createBillboardInstanceBuffer(device, system, label), capacity: system._capacity, reallocated: true };
 }
 
-export function uploadBillboardInstances(
-    device: GPUDevice,
-    system: BillboardSpriteSystem,
-    instanceBuffer: GPUBuffer,
-    uploadedVersion: number,
-    foOffset: Float32Array | Float64Array | null,
-    foVersion: number
-): number {
-    const foChanged = foOffset !== null && system._lastFoCamVersion !== foVersion;
-    if (uploadedVersion === system._version && !foChanged) {
+export function uploadBillboardInstances(device: GPUDevice, system: BillboardSpriteSystem, instanceBuffer: GPUBuffer, uploadedVersion: number): number {
+    if (uploadedVersion === system._version) {
         return uploadedVersion;
     }
     if (system.count === 0) {
         system._dirtyMin = 0;
         system._dirtyMax = 0;
-        if (foOffset !== null) {
-            system._lastFoCamVersion = foVersion;
-        }
         return system._version;
     }
     let lowIndex: number;
     let highIndex: number;
-    // FO offset change requires re-uploading every sprite (each anchor
-    // position needs the new offset baked in), so widen to full range.
-    if (uploadedVersion === -1 || foChanged) {
+    if (uploadedVersion === -1) {
         lowIndex = 0;
         highIndex = system.count;
     } else {
@@ -307,40 +281,10 @@ export function uploadBillboardInstances(
     if (highIndex > lowIndex) {
         const offsetBytes = lowIndex * BILLBOARD_INSTANCE_STRIDE_BYTES;
         const byteLength = (highIndex - lowIndex) * BILLBOARD_INSTANCE_STRIDE_BYTES;
-        if (foOffset === null) {
-            // Fast path: direct byte copy from system instance data.
-            device.queue.writeBuffer(instanceBuffer, offsetBytes, system._instanceData.buffer, system._instanceData.byteOffset + offsetBytes, byteLength);
-        } else {
-            // FO on: per-sprite repack with anchor-position subtraction
-            // into a lazy upload scratch. BJS parity: spriteRenderer.ts
-            // subtracts scene.floatingOriginOffset before each upload.
-            const floats = BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-            const neededFloats = system._capacity * floats;
-            if (!system._uploadFOScratch || system._uploadFOScratch.length < neededFloats) {
-                system._uploadFOScratch = new Float32Array(neededFloats);
-            }
-            const scratch = system._uploadFOScratch;
-            const src = system._instanceData;
-            const ox = foOffset[12]!;
-            const oy = foOffset[13]!;
-            const oz = foOffset[14]!;
-            for (let i = lowIndex; i < highIndex; i++) {
-                const base = i * floats;
-                scratch[base] = src[base]! - ox;
-                scratch[base + 1] = src[base + 1]! - oy;
-                scratch[base + 2] = src[base + 2]! - oz;
-                for (let f = 3; f < floats; f++) {
-                    scratch[base + f] = src[base + f]!;
-                }
-            }
-            device.queue.writeBuffer(instanceBuffer, offsetBytes, scratch.buffer, scratch.byteOffset + offsetBytes, byteLength);
-        }
+        device.queue.writeBuffer(instanceBuffer, offsetBytes, system._instanceData.buffer, system._instanceData.byteOffset + offsetBytes, byteLength);
     }
     system._dirtyMin = 0;
     system._dirtyMax = 0;
-    if (foOffset !== null) {
-        system._lastFoCamVersion = foVersion;
-    }
     return system._version;
 }
 
