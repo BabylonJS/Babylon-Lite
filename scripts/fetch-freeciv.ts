@@ -104,6 +104,27 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "lab", "public", "freeciv");
 const CACHE_DIR = join(ROOT, ".freeciv-cache");
 
+/**
+ * Decorative background: Gerardus Mercator's 1569 world map, used as a subdued
+ * "old atlas" backdrop behind the iso map. Published 1569 (author d. 1594), so
+ * it is in the public domain worldwide. Fetched from Wikimedia Commons at the
+ * pinned original resolution (1158×737, ~0.8 MB) — never committed to git.
+ */
+const MERCATOR_URL = "https://upload.wikimedia.org/wikipedia/commons/b/b2/Mercator_1569.png";
+const MERCATOR_DEST = join(OUT_DIR, "mercator-1569.png");
+const MERCATOR_LICENSE = join(OUT_DIR, "mercator-1569.LICENSE.txt");
+const MERCATOR_LICENSE_TEXT = `Gerardus Mercator — World Map (Nova et Aucta Orbis Terrae Descriptio), 1569.
+
+Public domain. Published 1569; author Gerardus Mercator died 1594, so the work
+is in the public domain in its country of origin and in the United States.
+
+Source: https://commons.wikimedia.org/wiki/File:Mercator_1569.png
+File:   ${MERCATOR_URL}
+
+Fetched at build time as a decorative backdrop for the Freeciv demo; not
+committed to this repository.
+`;
+
 /** Build the full download list: tileset folder files + the extra top-level files. */
 function buildFileList(): RemoteFile[] {
     const tileset = TILESET_FILES.map((name) => ({
@@ -136,6 +157,7 @@ export async function fetchFreeciv(): Promise<void> {
     const allPresent = files.every((f) => existsSync(join(OUT_DIR, f.dest)));
     if (allPresent) {
         console.log(`Freeciv ${TILESET} tileset (${FREECIV_TAG}) already present in lab/public/freeciv/ — nothing to do.`);
+        await fetchMercator();
         return;
     }
 
@@ -173,6 +195,22 @@ export async function fetchFreeciv(): Promise<void> {
 
     console.log(`Done. Extracted ${files.length} files (${(totalBytes / 1048576).toFixed(1)} MB) into lab/public/freeciv/.`);
     console.log("Freeciv assets are gitignored; re-run this script to restore them.");
+    await fetchMercator();
+}
+
+/** Fetch the public-domain Mercator 1569 backdrop (idempotent). */
+async function fetchMercator(): Promise<void> {
+    if (existsSync(MERCATOR_DEST) && existsSync(MERCATOR_LICENSE)) return;
+    console.log("Fetching Mercator 1569 backdrop (public domain) from Wikimedia Commons …");
+    const res = await fetch(MERCATOR_URL);
+    if (!res.ok) {
+        throw new Error(`Download failed for Mercator backdrop: HTTP ${res.status} ${res.statusText}`);
+    }
+    const bytes = Buffer.from(await res.arrayBuffer());
+    mkdirSync(OUT_DIR, { recursive: true });
+    writeFileSync(MERCATOR_DEST, bytes);
+    writeFileSync(MERCATOR_LICENSE, MERCATOR_LICENSE_TEXT);
+    console.log(`Done. Mercator backdrop (${(bytes.length / 1048576).toFixed(1)} MB) → lab/public/freeciv/mercator-1569.png`);
 }
 
 // Run only when invoked directly (e.g. `pnpm fetch:freeciv`), not when imported

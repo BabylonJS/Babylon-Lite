@@ -59,7 +59,6 @@ export interface City {
 const CITY_NAMES = [
     "Rome",
     "Athens",
-    "Carthage",
     "Madrid",
     "Memphis",
     "Thebes",
@@ -378,6 +377,32 @@ function placeCities(map: GameMap, seed: number): City[] {
         const size = 1 + Math.floor(hash2(c.x, c.y, seed + 53) * 15); // fake population 1‒15
         const name = CITY_NAMES[nameIndex++ % CITY_NAMES.length]!;
         cities.push({ x: c.x, y: c.y, size, name });
+    }
+
+    // Three iconic cities pinned to specific tiles. Snap each requested `(x, y)`
+    // to the nearest hospitable, well-spaced tile (spiralling out) so they always
+    // land on settle-able ground even if the exact tile is sea or too crowded.
+    const pins: { name: string; x: number; y: number }[] = [
+        { name: "Carthage", x: 72, y: 40 },
+        { name: "Paris", x: 65, y: 61 },
+        { name: "Kyoto", x: 53, y: 77 },
+    ];
+    for (const pin of pins) {
+        spiral: for (let r = 0; r < Math.max(width, height); r++) {
+            for (let dy = -r; dy <= r; dy++) {
+                for (let dx = -r; dx <= r; dx++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+                    const x = pin.x + dx;
+                    const y = pin.y + dy;
+                    if (x < 2 || y < 2 || x >= width - 2 || y >= height - 2) continue;
+                    if (!hospitable(x, y)) continue;
+                    if (cities.some((p) => Math.abs(p.x - x) + Math.abs(p.y - y) < spacing)) continue;
+                    const size = 1 + Math.floor(hash2(x, y, seed + 53) * 15);
+                    cities.push({ x, y, size, name: pin.name });
+                    break spiral;
+                }
+            }
+        }
     }
     return cities;
 }

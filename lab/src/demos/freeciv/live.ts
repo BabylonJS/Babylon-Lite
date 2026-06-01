@@ -22,7 +22,7 @@ const CITY_SIGHT = 2;
 const SCOUT_SIGHT = 3;
 /** Fog opacity for tiles never seen vs. seen-but-not-currently-visible. */
 const UNEXPLORED_ALPHA = 0.92;
-const EXPLORED_ALPHA = 0.45;
+const EXPLORED_ALPHA = 0.55;
 /** Wildlife species drawn from the animals sheet. */
 const ANIMAL_TAGS = ["u.wolf", "u.bear", "u.leopard", "u.tiger", "u.crocodile", "u.gorilla", "u.snake"] as const;
 const ANIMAL_COUNT = 6;
@@ -175,7 +175,11 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
     }
 
     // --- Fog of war ------------------------------------------------------
-    const explored = new Uint8Array(width * height);
+    // The whole map starts charted (like an old surveyor's map / the minimap):
+    // every tile reads as the soft "seen but not currently watched" haze, and
+    // only lifts to fully clear under a city's or the scout's live sight. This
+    // avoids the near-black "unexplored void" that swallowed the parchment look.
+    const explored = new Uint8Array(width * height).fill(1);
     const visible = new Uint8Array(width * height);
     const fogFrame = sheets.terrain.grid("grid_main").frameOf("t.unknown1") ?? 0;
 

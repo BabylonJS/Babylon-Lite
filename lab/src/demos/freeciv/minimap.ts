@@ -58,6 +58,44 @@ const CITY_COLOR: [number, number, number, number] = [1, 1, 1, 1];
 const VIEWPORT_COLOR: [number, number, number, number] = [1, 1, 1, 0.9];
 const BORDER_COLOR: [number, number, number, number] = [0.59, 0.74, 0.9, 0.55];
 
+/**
+ * Clip segment `(ax, ay)→(bx, by)` to the axis-aligned rect `[xmin,xmax]×[ymin,ymax]`
+ * (Liang–Barsky). Returns the trimmed endpoints, or `null` when the segment lies
+ * wholly outside. Used to keep the viewport box from spilling past the minimap edge.
+ */
+function clipToRect(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    xmin: number,
+    ymin: number,
+    xmax: number,
+    ymax: number,
+): [number, number, number, number] | null {
+    const dx = bx - ax;
+    const dy = by - ay;
+    let t0 = 0;
+    let t1 = 1;
+    const p = [-dx, dx, -dy, dy];
+    const q = [ax - xmin, xmax - ax, ay - ymin, ymax - ay];
+    for (let i = 0; i < 4; i++) {
+        if (p[i] === 0) {
+            if (q[i]! < 0) return null; // parallel and outside this edge
+        } else {
+            const r = q[i]! / p[i]!;
+            if (p[i]! < 0) {
+                if (r > t1) return null;
+                if (r > t0) t0 = r;
+            } else {
+                if (r < t0) return null;
+                if (r < t1) t1 = r;
+            }
+        }
+    }
+    return [ax + t0 * dx, ay + t0 * dy, ax + t1 * dx, ay + t1 * dy];
+}
+
 export interface MinimapHooks {
     /** Current main-view rectangle as four tile-space corners (TL, TR, BR, BL). */
     viewportCorners: () => ReadonlyArray<readonly [number, number]>;
@@ -162,6 +200,9 @@ export function createMinimap(engine: EngineContext, sr: SpriteRenderer, world: 
         }
 
         // Current viewport outline (a rotated quad, since the main view is iso).
+        // Zoomed out, the viewport can be larger than the world, so its corners fall
+        // outside the minimap; clip every edge to the minimap rect (Liang–Barsky) so
+        // the box is trimmed at the border instead of spilling onto the canvas.
         const corners = hooks.viewportCorners();
         if (corners.length === 4) {
             const lt = Math.max(1, Math.round(1.5 * dpr));
@@ -169,7 +210,9 @@ export function createMinimap(engine: EngineContext, sr: SpriteRenderer, world: 
             for (let i = 0; i < 4; i++) {
                 const a = pts[i]!;
                 const b = pts[(i + 1) % 4]!;
-                setEdge(viewportEdges[i]!, a[0], a[1], b[0], b[1], lt);
+                const seg = clipToRect(a[0], a[1], b[0], b[1], x0, y0, x0 + w, y0 + h);
+                if (seg) setEdge(viewportEdges[i]!, seg[0], seg[1], seg[2], seg[3], lt);
+                else updateSprite2DIndex(overlayLayer, viewportEdges[i]!, { visible: false });
             }
         } else {
             for (const idx of viewportEdges) updateSprite2DIndex(overlayLayer, idx, { visible: false });

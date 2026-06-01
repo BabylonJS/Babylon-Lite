@@ -27,6 +27,15 @@ const CITY_STYLE = "european";
 /** Pixel height of a mountains sprite (taller than the 48px base diamond). */
 const MOUNTAIN_H = 66;
 
+/**
+ * Multiply-tint for the coastline foam cells. Amplio2 only ships near-white surf
+ * cells (they read as glacial/ice), so we recolour them into a soft, sandy beach
+ * shore. Because the source is near-white and {@link addSprite2DIndex}'s `color`
+ * multiplies, this tint *is* the resulting coast hue while the foam's internal
+ * light/dark shading is preserved. Alpha < 1 softens the surf a touch.
+ */
+const COAST_TINT: [number, number, number, number] = [0.85, 0.74, 0.5, 0.9];
+
 export interface Bounds {
     minX: number;
     minY: number;
@@ -138,6 +147,7 @@ function buildCoast(world: GameMap, sheets: TileSheets, layers: TileLayers): voi
                 positionPx: [px + corner.offset[0], py + corner.offset[1]],
                 sizePx: [TILE_W / 2, TILE_H / 2],
                 frame,
+                color: COAST_TINT,
             });
         }
     });
