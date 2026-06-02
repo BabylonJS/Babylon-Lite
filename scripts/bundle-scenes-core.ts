@@ -578,6 +578,23 @@ const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "s
 const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
 const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
 
+function firstExistingPath(paths: string[]): string {
+    return paths.find((p) => existsSync(p)) ?? paths[0]!;
+}
+
+function liteSceneEntry(scene: string, sourceLabDir = labDir): string {
+    return firstExistingPath([resolve(sourceLabDir, `lite/src/lite/${scene}.ts`), resolve(sourceLabDir, `src/lite/${scene}.ts`)]);
+}
+
+function bjsSceneEntry(scene: string, sourceLabDir = labDir): string {
+    const liteScene = scene.startsWith("bjs-") ? scene.slice(4) : scene;
+    return firstExistingPath([resolve(sourceLabDir, `lite/src/bjs/${liteScene}.ts`), resolve(sourceLabDir, `src/bjs/${liteScene}.ts`)]);
+}
+
+function liteHtmlPath(file: string): string {
+    return firstExistingPath([resolve(liteLabDir, file), resolve(labDir, file)]);
+}
+
 function orderBundleManifest(manifest: BundleManifest): BundleManifest {
     const ordered: BundleManifest = {};
     for (const scene of ALL_SCENES) {
@@ -1065,7 +1082,7 @@ export function isLiteBundleExternal(id: string): boolean {
 
 function readLiteSceneSource(scene: string): string {
     try {
-        return readFileSync(resolve(liteLabDir, `src/lite/${scene}.ts`), "utf-8");
+        return readFileSync(liteSceneEntry(scene), "utf-8");
     } catch {
         return "";
     }
@@ -1081,7 +1098,7 @@ function getLiteSceneVendorRuntimes(scene: string): VendorRuntime[] {
 function ensureBundleHtmlImportMap(scene: string): void {
     const runtimes = getLiteSceneVendorRuntimes(scene);
     if (runtimes.length === 0) return;
-    const htmlPath = resolve(liteLabDir, `bundle-${scene}.html`);
+    const htmlPath = liteHtmlPath(`bundle-${scene}.html`);
     if (!existsSync(htmlPath)) return;
 
     const imports = Object.assign({}, ...runtimes.map((runtime) => runtime.imports)) as Record<string, string>;
@@ -1112,8 +1129,6 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
     const sourceSrcDir = resolve(sourceRoot, "packages/babylon-lite/src");
     const sceneOutDir = resolve(ROOT, ".bundle-size-tmp/master-bundle-info-build", scene);
     rmSync(sceneOutDir, { recursive: true, force: true });
-    const sceneEntry = resolve(sourceLabDir, `lite/src/lite/${scene}.ts`);
-    const legacySceneEntry = resolve(sourceLabDir, `src/lite/${scene}.ts`);
 
     const buildResult = await build({
         root: sourceLabDir,
@@ -1136,7 +1151,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
             sourcemap: "hidden",
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
             rollupOptions: {
-                input: { [scene]: existsSync(sceneEntry) ? sceneEntry : legacySceneEntry },
+                input: { [scene]: liteSceneEntry(scene, sourceLabDir) },
                 external: isLiteBundleExternal,
                 output: {
                     format: "es",
@@ -1239,7 +1254,7 @@ export async function buildBundleScenes(): Promise<void> {
                 sourcemap: "hidden",
                 modulePreload: { polyfill: false, resolveDependencies: () => [] },
                 rollupOptions: {
-                    input: { [scene]: resolve(liteLabDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
+                    input: { [scene]: isBjs ? bjsSceneEntry(scene) : liteSceneEntry(scene) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
                     ...(!isBjs && { external: isLiteBundleExternal }),
@@ -1303,7 +1318,7 @@ export async function buildBundleScenes(): Promise<void> {
         if (cached?.bjsRawKB == null) {
             return true;
         }
-        const sourcePath = resolve(liteLabDir, `src/bjs/${liteScene}.ts`);
+        const sourcePath = bjsSceneEntry(liteScene);
         const bundlePath = resolve(outDir, `${bjsScene}.js`);
         if (!existsSync(bundlePath)) {
             return true;
