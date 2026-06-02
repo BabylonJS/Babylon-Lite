@@ -18,7 +18,7 @@ export default defineConfig({
     retries: 4,
     workers: 1,
     fullyParallel: false,
-    outputDir: "../test-results",
+    outputDir: "../test-results/perf-artifacts",
     reporter: [["html", { outputFolder: "../test-results/perf-report", open: "never" }], ["junit", { outputFile: "../test-results/perf-junit.xml" }], ["list"]],
     use: {
         channel: "chrome",

@@ -31,7 +31,7 @@ export default defineConfig({
     timeout: 120_000,
     retries: 1,
     workers: 1,
-    outputDir: "../test-results",
+    outputDir: "../test-results/parity-artifacts",
     reporter: [["html", { outputFolder: "../test-results/parity-report", open: "never" }], ["junit", { outputFile: "../test-results/parity-junit.xml" }], ["list"]],
     use: {
         // When run via `browserstack-node-sdk`, the SDK patches browser launch
