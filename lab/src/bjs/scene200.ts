@@ -31,6 +31,8 @@ const OFFSET = 5_000_000;
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
+    // Lite always uses reverse-Z; match it on the BJS reference so the depth-precision profile aligns.
+    engine.useReverseDepthBuffer = true;
 
     const scene = new Scene(engine);
     scene.clearColor = new Color4(0.05, 0.05, 0.08, 1);
