@@ -91,7 +91,7 @@ const labDir = resolve(repoRoot, "lab");
 const labPublicDir = resolve(labDir, "public");
 const bundleDir = resolve(labPublicDir, "bundle");
 const liteSrcDir = resolve(repoRoot, "packages", "babylon-lite", "src");
-const labLiteSrcDir = resolve(labDir, "src", "lite");
+const labLiteSrcDir = resolve(labDir, "lite", "src", "lite");
 const require = createRequire(import.meta.url);
 
 function parseArgs(argv: string[]): CliOptions {

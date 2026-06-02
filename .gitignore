@@ -30,6 +30,7 @@ lab/public/bundle/*
 !lab/public/bundle/demos-manifest.json
 lab/public/bundle-baseline/
 lab/bundle-baseline-scene*.html
+lab/lite/bundle-baseline-scene*.html
 lab/public/vendor/
 lab/public/doom/*.wad
 lab/public/doom/COPYING.txt
@@ -67,4 +68,4 @@ _bjs67_defines.txt
 pages-dist/
 
 # Generated TypeDoc API documentation (regenerated on demand)
-lab/public/api-docs/
+lab/public/lite/api-docs/

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Memory Leak Test Harness</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <script src="/loader.js"></script>
+  <script type="module">
+    /**
+     * Memory leak test harness.
+     *
+     * Usage: /leak-test.html?scene=2&cycles=5
+     *
+     * For each cycle: dynamically imports the scene module, creates the engine,
+     * renders a few frames, then disposes everything. Exposes lifecycle hooks
+     * on window so Playwright can drive the cadence and measure heap between cycles.
+     */
+    import { createEngine, startEngine, stopEngine, disposeEngine, registerScene,
+             createSceneContext, createDefaultCamera, addToScene, disposeScene,
+             createSphere, createArcRotateCamera, createDirectionalLight,
+             createHemisphericLight, createPointLight, loadGltf, loadEnvironment,
+             loadHdrEnvironment, createPbrMaterial, createSolidTexture2D,
+             attachControl } from 'babylon-lite';
+
+    const canvas = document.getElementById('renderCanvas');
+    const params = new URLSearchParams(window.location.search);
+    const sceneNum = parseInt(params.get('scene') || '2', 10);
+    const RENDER_FRAMES = 10;
+
+    // Expose API for Playwright to drive cycles
+    window.__leakTest = {
+      cycleCount: 0,
+      ready: false,
+      error: null,
+
+      /** Run one create → render → dispose cycle. Returns when fully disposed. */
+      async runCycle() {
+        let engine, scene, detach;
+        try {
+          engine = await createEngine(canvas);
+          scene = createSceneContext(engine);
+
+          await setupScene(engine, scene, sceneNum);
+
+          await registerScene(engine, scene);
+          await startEngine(engine);
+
+          // Render a few extra frames
+          for (let i = 0; i < RENDER_FRAMES; i++) {
+            await new Promise(r => requestAnimationFrame(r));
+          }
+
+          stopEngine(engine);
+          await new Promise(r => setTimeout(r, 100));
+
+          disposeScene(scene);
+          disposeEngine(engine);
+
+          window.__leakTest.cycleCount++;
+        } catch (e) {
+          window.__leakTest.error = e.message;
+          // Best-effort cleanup
+          try { if (engine) { stopEngine(engine); } } catch (_) {}
+          try { if (scene) { disposeScene(scene); } } catch (_) {}
+          try { if (engine) { disposeEngine(engine); } } catch (_) {}
+        }
+      }
+    };
+
+    /** Build a scene matching the given scene number (simplified versions) */
+    async function setupScene(engine, scene, num) {
+      switch (num) {
+        case 1: {
+          addToScene(scene, await loadGltf(engine, 'https://playground.babylonjs.com/scenes/BoomBox.glb'));
+          await loadEnvironment(scene, 'https://assets.babylonjs.com/core/environments/environmentSpecular.env', {
+            groundTextureUrl: 'https://assets.babylonjs.com/core/environments/backgroundGround.png',
+            brdfUrl: '/brdf-lut.png',
+          });
+          createDefaultCamera(scene);
+          addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+          break;
+        }
+        case 2: {
+          scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+          addToScene(scene, createDirectionalLight([0, -1, 0]));
+          addToScene(scene, createSphere(engine));
+          break;
+        }
+        case 9: {
+          scene.camera = createArcRotateCamera(0, Math.PI / 3, 100, { x: 0, y: 0, z: 0 });
+          addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+          const { loadBabylon } = await import('babylon-lite');
+          addToScene(scene, await loadBabylon(engine, 'https://www.babylonjs.com/scenes/Sponza/Sponza.babylon'));
+          break;
+        }
+        default: {
+          // Generic simple scene for any scene number
+          scene.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+          addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+          addToScene(scene, createSphere(engine));
+          break;
+        }
+      }
+    }
+
+    window.__leakTest.ready = true;
+    canvas.dataset.ready = 'true';
+  </script>
+</body>
+</html>

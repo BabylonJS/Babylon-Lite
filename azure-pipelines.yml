@@ -58,15 +58,17 @@ stages:
 
                 - script: npx vitest run --project unit
                   displayName: "Run vitest unit tests"
+                  env:
+                      CI: "true"
 
                 - script: npx vitest run --project build
                   displayName: "Run vitest build-output tests"
 
                 - script: |
-                      npx playwright test tests/plumbing/dispose.spec.ts
-                      npx playwright test tests/plumbing/material-swap.spec.ts
-                      npx playwright test tests/plumbing/memory-leak.spec.ts
-                      npx playwright test tests/plumbing/picking.spec.ts
+                      npx playwright test tests/lite/plumbing/dispose.spec.ts
+                      npx playwright test tests/lite/plumbing/material-swap.spec.ts
+                      npx playwright test tests/lite/plumbing/memory-leak.spec.ts
+                      npx playwright test tests/lite/plumbing/picking.spec.ts
                   displayName: "Run plumbing tests"
                   env:
                       HEADLESS: "true"
@@ -123,7 +125,7 @@ stages:
                       SKIP_BJS: "true"
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
-                - script: npx playwright test tests/parity/bundle-size.spec.ts --reporter=junit
+                - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
                   env:
                       HEADLESS: "true"
@@ -224,9 +226,11 @@ stages:
                       const fs = require('fs');
                       const path = require('path');
                       const scenes = JSON.parse(fs.readFileSync('scene-config.json','utf8'));
+                      const outDir = path.join('lab','lite');
+                      fs.mkdirSync(outDir, { recursive: true });
                       for (const s of scenes) {
                         const html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style></head><body><canvas id=\"renderCanvas\"></canvas><script src=\"/loader.js\"></script><script type=\"module\" src=\"/bundle-baseline/scene'+s.id+'.js\"></script></body></html>';
-                        fs.writeFileSync(path.join('lab','bundle-baseline-scene'+s.id+'.html'), html);
+                        fs.writeFileSync(path.join(outDir,'bundle-baseline-scene'+s.id+'.html'), html);
                       }
                       console.log('Generated ' + scenes.length + ' baseline HTML pages');
                       "
@@ -269,6 +273,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
+            timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -350,3 +355,7 @@ stages:
                 - script: |
                       npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check"
+
+                - script: |
+                      npx tsc -p lab/tsconfig.typecheck.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "Lab TypeScript type-check"

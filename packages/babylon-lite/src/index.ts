@@ -182,7 +182,7 @@ export {
 export { addAnimationGroup, addAnimationGroups, getAnimationGroups, removeAnimationGroup } from "./animation/animation-group-task.js";
 export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./animation/property-animation.js";
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
-export { createMorphTargets } from "./morph/create-morph-targets.js";
+export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
 
 // ─── Math ────────────────────────────────────────────────────────────

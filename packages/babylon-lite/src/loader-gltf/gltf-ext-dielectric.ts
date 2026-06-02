@@ -68,6 +68,7 @@ const ext: GltfFeature = {
             // default IOR. Only write when the factor meaningfully differs.
             if (ior !== 1.5) {
                 out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
+                out.specularWeight = 1.0;
                 (out as { _hasReflExt?: boolean })._hasReflExt = true;
             }
             subsurface.refraction = { indexOfRefraction: ior };
@@ -79,9 +80,11 @@ const ext: GltfFeature = {
             if (typeof eSp.specularFactor === "number") {
                 if (Math.abs(eSp.specularFactor - 1) > 1e-6) {
                     out.metallicF0Factor = eSp.specularFactor;
+                    out.specularWeight = eSp.specularFactor;
                     (out as { _hasReflExt?: boolean })._hasReflExt = true;
                 } else {
                     delete out.metallicF0Factor;
+                    delete out.specularWeight;
                 }
             }
             if (Array.isArray(eSp.specularColorFactor) && eSp.specularColorFactor.length === 3) {
@@ -116,6 +119,13 @@ const ext: GltfFeature = {
                     ...(color ? { color } : undefined),
                     ...(atDistance !== undefined ? { atDistance } : undefined),
                 };
+            } else if (subsurface.thickness) {
+                // KHR_materials_volume without attenuation: spec defaults to white at
+                // infinite distance (no absorption), but the thickness is a real local
+                // depth that must engage the volume path so it is world-scaled (else it
+                // overshoots on non-unit-scaled models, e.g. MosquitoInAmber). White tint
+                // gives volumeParams = log(1)/dist = 0 → ab = exp(0) = 1 (no tint).
+                subsurface.tint = { color: [1, 1, 1], atDistance: 1 };
             }
         }
 

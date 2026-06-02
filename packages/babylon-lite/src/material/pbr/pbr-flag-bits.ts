@@ -49,6 +49,8 @@ export const PBR2_HAS_UV_TRANSFORM = 1 << 9;
 export const PBR2_HAS_REFLECTANCE_FACTORS = 1 << 10;
 /** Material samples occlusion from TEXCOORD_1 when the mesh provides UV2. */
 export const PBR2_HAS_UV2 = 1 << 11;
+/** Material multiplies textured albedo by a non-default glTF baseColorFactor. */
+export const PBR2_HAS_BASE_COLOR_FACTOR = 1 << 12;
 /** Material has a sheen texture with a KHR_texture_transform. Sheen owns its
  *  own `sheenUVm`/`sheenUVt` UBO fields and applies txfUV locally. */
 export const PBR2_HAS_SHEEN_UV_TX = 1 << 13;

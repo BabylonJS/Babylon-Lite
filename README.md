@@ -2,7 +2,7 @@
 
 A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output to Babylon.js — in a fraction of the bundle size.
 
-📖 **[Porting Guide](docs/porting-guide.md)** — How to translate a Babylon.js scene to Babylon Lite
+📖 **[Porting Guide](docs/lite/porting-guide.md)** — How to translate a Babylon.js scene to Babylon Lite
 🤝 **[Contributing](CONTRIBUTING.md)** — How to add scenes, tests, and contribute code
 
 ## Prerequisites
@@ -44,13 +44,13 @@ Open **http://localhost:5174** to browse the scene gallery.
 ```
 packages/babylon-lite/   # The engine library
 lab/         # Scene gallery & dev playground (Vite)
-tests/unit/              # Vitest unit tests (pure Node.js, no GPU)
-tests/plumbing/          # Playwright GPU integration tests (dispose, material-swap)
-tests/parity/scenes/     # Playwright visual parity tests (pixel-diff)
-tests/perf/              # Playwright performance benchmarks
-reference/               # Golden reference screenshots (immutable)
+tests/lite/unit/              # Vitest unit tests (pure Node.js, no GPU)
+tests/lite/plumbing/          # Playwright GPU integration tests (dispose, material-swap)
+tests/lite/parity/scenes/     # Playwright visual parity tests (pixel-diff)
+tests/lite/perf/              # Playwright performance benchmarks
+reference/lite/               # Golden reference screenshots (immutable)
 scripts/                 # Build & bundling utilities
-docs/architecture/       # One-shot architecture docs
+docs/lite/architecture/       # One-shot architecture docs
 ```
 
 ## Adding Tests
@@ -58,7 +58,7 @@ docs/architecture/       # One-shot architecture docs
 ### Test Structure
 
 ```
-tests/
+tests/lite/
   unit/              # Vitest — pure Node.js shader/math tests (no GPU)
   plumbing/          # Playwright — dispose, material-swap (requires WebGPU)
   parity/
@@ -71,7 +71,7 @@ tests/
 
 For pure logic tests (shaders, math, composition) that don't need a browser or GPU:
 
-1. Create `tests/unit/my-feature.test.ts`
+1. Create `tests/lite/unit/my-feature.test.ts`
 2. Use vitest APIs (`describe`, `it`, `expect`)
 3. Run: `npx vitest run`
 
@@ -79,10 +79,10 @@ For pure logic tests (shaders, math, composition) that don't need a browser or G
 
 For GPU integration tests (dispose, material-swap, lifecycle):
 
-1. Create a test page: `lab/my-test.html` + `lab/src/my-test.ts`
+1. Create a test page: `lab/lite/my-test.html` + `lab/lite/src/my-test.ts`
 2. Add the HTML entry to `lab/vite.config.ts` (auto-detected if in root)
-3. Create `tests/plumbing/my-test.spec.ts`
-4. Run: `npx playwright test tests/plumbing/my-test.spec.ts`
+3. Create `tests/lite/plumbing/my-test.spec.ts`
+4. Run: `npx playwright test tests/lite/plumbing/my-test.spec.ts`
 
 > CI uses Chrome's SwiftShader Vulkan backend — WebGPU works without a real GPU.
 
@@ -90,15 +90,15 @@ For GPU integration tests (dispose, material-swap, lifecycle):
 
 For pixel-diff visual regression tests against Babylon.js golden references:
 
-1. Create the Lite scene: `lab/sceneN.html` + `lab/src/lite/sceneN.ts`
-2. Create the BJS reference: `lab/babylon-ref-sceneN.html` + `lab/src/bjs/sceneN.ts`
+1. Create the Lite scene: `lab/lite/sceneN.html` + `lab/lite/src/lite/sceneN.ts`
+2. Create the BJS reference: `lab/lite/babylon-ref-sceneN.html` + `lab/lite/src/bjs/sceneN.ts`
 3. Add entries to `lab/vite.config.ts` rollup inputs
-4. Capture a golden reference and save to `reference/sceneN-<slug>/babylon-ref-golden.png`
+4. Capture a golden reference and save to `reference/lite/sceneN-<slug>/babylon-ref-golden.png`
 5. Copy golden to `lab/public/thumbnails/sceneN.png`
 6. Add scene config to `scene-config.json` with `id`, `slug`, `name`, `maxMad`
-7. Create `tests/parity/scenes/sceneN-<slug>.spec.ts` using `compare-utils.ts` helpers
-8. Add a bundle-size ceiling in `tests/parity/bundle-size.spec.ts` (never raise without approval)
-9. Run: `npx playwright test tests/parity/scenes/sceneN-<slug>.spec.ts`
+7. Create `tests/lite/parity/scenes/sceneN-<slug>.spec.ts` using `compare-utils.ts` helpers
+8. Add a bundle-size ceiling in `tests/lite/parity/bundle-size.spec.ts` (never raise without approval)
+9. Run: `npx playwright test tests/lite/parity/scenes/sceneN-<slug>.spec.ts`
 
 ### CI Workflows
 

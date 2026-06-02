@@ -19,13 +19,7 @@ const isCI = !!process.env.CI;
 
 // SwiftShader flags — only in CI (locally we use the real GPU)
 const swiftShaderArgs = isCI
-    ? [
-          "--enable-features=Vulkan",
-          "--use-vulkan=swiftshader",
-          "--use-angle=swiftshader",
-          "--disable-vulkan-fallback-to-gl-for-testing",
-          "--ignore-gpu-blocklist",
-      ]
+    ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
     : [];
 
 export default defineConfig({
@@ -39,16 +33,11 @@ export default defineConfig({
         headless,
         viewport: { width: 1280, height: 720 },
         launchOptions: {
-            args: [
-                "--force-color-profile=srgb",
-                "--enable-unsafe-webgpu",
-                ...swiftShaderArgs,
-                ...(screenX ? [`--window-position=${screenX},0`] : []),
-            ],
+            args: ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs, ...(screenX ? [`--window-position=${screenX},0`] : [])],
         },
     },
     webServer: {
-        command: "pnpm --filter lab dev",
+        command: "pnpm --filter @babylon-lite/lab dev",
         port: 5174,
         reuseExistingServer: true,
         timeout: 15_000,

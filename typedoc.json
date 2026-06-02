@@ -2,7 +2,7 @@
     "$schema": "https://typedoc.org/schema.json",
     "entryPoints": ["packages/babylon-lite/src/index.ts"],
     "tsconfig": "packages/babylon-lite/tsconfig.json",
-    "out": "lab/public/api-docs",
+    "out": "lab/public/lite/api-docs",
     "name": "Babylon Lite API",
     "readme": "none",
     "githubPages": false,

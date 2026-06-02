@@ -511,6 +511,15 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
     data[1] = material.directIntensity ?? 1.0;
     data[2] = material.reflectance ?? 0.04;
     data[3] = material.alpha ?? 1.0;
+    const baseColorFactorOffset = spec._offsets.get("baseColorFactor");
+    if (baseColorFactorOffset !== undefined) {
+        const off = baseColorFactorOffset / 4;
+        const factor = material.baseColorFactor;
+        data[off] = factor ? factor[0]! : 1.0;
+        data[off + 1] = factor ? factor[1]! : 1.0;
+        data[off + 2] = factor ? factor[2]! : 1.0;
+        data[off + 3] = factor ? factor[3]! : 1.0;
+    }
     if (spec._offsets.has("metallicFactor")) {
         const off = spec._offsets.get("metallicFactor")! / 4;
         data[off] = material.metallicFactor ?? 1.0;

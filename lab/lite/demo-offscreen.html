@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Babylon Lite — Demo: Offscreen (Worker)</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0809; }
+    #root {
+      position: fixed; inset: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 2px;
+      background: #2a2342;
+    }
+    canvas { width: 100%; height: 100%; display: block; background: #141021; touch-action: none; }
+    .pane { position: relative; min-width: 0; min-height: 0; }
+    .pane-label {
+      position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+      z-index: 3; padding: 6px 12px; border-radius: 6px;
+      background: rgba(0, 0, 0, 0.5); color: #f4ece9;
+      font: 600 13px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      text-shadow: 0 1px 2px #000; white-space: nowrap;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .pane-label .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .pane.left .pane-label { border: 1px solid rgba(224, 104, 75, 0.6); }
+    .pane.left .dot { background: #e0684b; }
+    .pane.right .pane-label { border: 1px solid rgba(108, 196, 178, 0.6); }
+    .pane.right .dot { background: #6cc4b2; }
+    .pane-sub { font-weight: 400; font-size: 11px; color: #cfc4c0; }
+
+    #slowButton {
+      position: fixed; left: 50%; top: 16px; transform: translateX(-50%);
+      z-index: 6; min-height: 38px; padding: 9px 18px;
+      border: 1px solid rgba(187, 70, 75, 0.65); border-radius: 8px;
+      background: linear-gradient(180deg, #c75055, #9e3a3f); color: #fff;
+      font: 600 14px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      cursor: pointer; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      transition: background 0.15s ease, transform 0.05s ease;
+    }
+    #slowButton:hover { background: linear-gradient(180deg, #d35e63, #ad4146); }
+    #slowButton:active { transform: translateX(-50%) translateY(1px); }
+    #slowButton[data-active="true"] {
+      background: linear-gradient(180deg, #bb464b, #7e2c30); border-color: #e07b80;
+      box-shadow: 0 0 0 1px rgba(224, 123, 128, 0.5), 0 4px 18px rgba(187, 70, 75, 0.5);
+    }
+    #workerStatus {
+      position: fixed; right: 12px; top: 18px; z-index: 6;
+      color: #f0a48c; font: 600 12px system-ui, sans-serif; text-shadow: 0 1px 2px #000;
+    }
+
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0b0809; color: #f4ece9;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      transition: opacity 0.5s ease;
+    }
+    .loading-overlay.is-hidden { opacity: 0; pointer-events: none; }
+    .loading-box { display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; padding: 0 1rem; }
+    .loading-spinner {
+      width: 54px; height: 54px; border-radius: 50%;
+      border: 4px solid rgba(224, 104, 75, 0.25); border-top-color: #e0684b;
+      animation: lite-spin 0.9s linear infinite;
+    }
+    .loading-label { font-size: 1.05rem; font-weight: 600; }
+    .loading-sub { font-size: 0.8rem; color: #b8a9a4; }
+    @keyframes lite-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .loading-spinner { animation-duration: 2.4s; } }
+
+    @media (max-width: 760px) {
+      #root { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <!--
+    This page loads the production-BUNDLED demo (tree-shaken + minified) from
+    /bundle/demos/, NOT the raw TypeScript source. The demo also bundles a Web
+    Worker chunk (offscreen-worker-*.js) loaded at runtime via import.meta.url.
+    Run `pnpm build:bundle-demos` (also part of `pnpm dev:lab`) to (re)generate.
+  -->
+  <div id="root">
+    <div class="pane left">
+      <canvas id="renderCanvas"></canvas>
+      <div class="pane-label"><span class="dot"></span>Main thread <span class="pane-sub">· Canvas</span></div>
+    </div>
+    <div class="pane right">
+      <canvas id="workerRenderCanvas"></canvas>
+      <div class="pane-label"><span class="dot"></span>Web Worker <span class="pane-sub">· OffscreenCanvas</span></div>
+    </div>
+  </div>
+
+  <button id="slowButton" type="button" data-active="false">🐌 Block the main thread</button>
+  <div id="workerStatus" aria-live="polite"></div>
+
+  <div id="loadingOverlay" class="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-box">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-label">Loading Offscreen demo…</div>
+      <div class="loading-sub">Starting two Lite engines — main thread &amp; worker.</div>
+    </div>
+  </div>
+
+  <script>
+    // Hide the loading overlay once the demo signals ready (or errors) on the
+    // LEFT canvas, which the demo sets only after BOTH engines have started.
+    (function () {
+      var overlay = document.getElementById("loadingOverlay");
+      var canvas = document.getElementById("renderCanvas");
+      if (!overlay || !canvas) return;
+      var done = false;
+      function hide() {
+        if (done) return;
+        done = true;
+        overlay.classList.add("is-hidden");
+        setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
+      }
+      function check() {
+        if (canvas.dataset.ready === "true" || canvas.dataset.error) { hide(); return true; }
+        return false;
+      }
+      if (!check()) {
+        new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
+        setTimeout(hide, 45000);
+      }
+    })();
+  </script>
+  <script type="module" src="/lite/bundle/demos/offscreen.js"></script>
+</body>
+</html>

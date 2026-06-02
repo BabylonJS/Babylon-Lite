@@ -101,7 +101,7 @@ export async function buildDemo(slug: string): Promise<void> {
             sourcemap: "hidden",
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
             rollupOptions: {
-                input: { [slug]: resolve(labDir, `src/demos/${slug}.ts`) },
+                input: { [slug]: resolve(labDir, `lite/src/demos/${slug}.ts`) },
                 external: isLiteBundleExternal,
                 output: {
                     format: "es",
@@ -180,7 +180,7 @@ export async function buildDemoBundles(): Promise<void> {
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         try {
             for (const demo of demos) {
-                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${demo.slug}`, `demo-${demo.slug}.html`, "/bundle/demos/");
+                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${demo.slug}`, `lite/demo-${demo.slug}.html`, "/bundle/demos/");
                 manifest[demo.slug] = { rawKB, gzipKB };
                 writeFileSync(DEMOS_MANIFEST_FILE, JSON.stringify(manifest, null, 2));
                 console.log(`  measured ${demo.slug}: ${rawKB} KB raw, ${gzipKB} KB gzip`);

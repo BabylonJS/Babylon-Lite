@@ -76,3 +76,18 @@ export function createMorphTargets(
 
     return { texture, count: targetCount, weightsBuffer, targets: targets.slice(0, targetCount), weights };
 }
+
+/** Update morph target weights on CPU and GPU.
+ *  Only the first four weights are used, matching the current morph target limit.
+ *  @param engine - Engine context that owns the morph target GPU buffer.
+ *  @param morphTargets - Morph target data returned by `createMorphTargets()`.
+ *  @param weights - New morph weights; missing slots are reset to 0.
+ */
+export function setMorphTargetWeights(engine: EngineContext, morphTargets: MorphTargetData, weights: ArrayLike<number>): void {
+    const count = Math.min(morphTargets.count, 4, weights.length);
+    morphTargets.weights.fill(0);
+    for (let i = 0; i < count; i++) {
+        morphTargets.weights[i] = weights[i] ?? 0;
+    }
+    (engine as EngineContextInternal).device.queue.writeBuffer(morphTargets.weightsBuffer, 0, morphTargets.weights);
+}

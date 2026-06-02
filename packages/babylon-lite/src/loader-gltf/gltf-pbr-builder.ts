@@ -9,7 +9,7 @@ import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { mipLevelCount } from "../texture/mip-count.js";
-import { linearToSrgbByte } from "../color/color.js";
+import { linearToSrgbByte } from "../math/color.js";
 
 /** Texture post-processor composed from every active feature's `wrapTexture`
  *  hook. Identity when no feature contributes one (common case). Kept simple
@@ -73,6 +73,7 @@ export function assemblePbrProps(
         normalTexture,
         ormTexture,
         emissiveTexture,
+        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
@@ -85,6 +86,10 @@ export function assemblePbrProps(
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
     } as PbrMaterialPropsInternal;
+}
+
+function isDefaultBaseColorFactor(f: readonly number[]): boolean {
+    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }
 
 /** Build the always-present default textures (base color + ORM) from a parsed glTF material.

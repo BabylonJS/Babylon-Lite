@@ -26,7 +26,7 @@ jobs on every PR targeting `master`.
 ## 1. Unit Tests
 
 **Runner:** Vitest  
-**Location:** `tests/unit/`  
+**Location:** `tests/lite/unit/`  
 **Config:** `vitest.config.ts`
 
 Standard unit tests for core logic (shader composer, shader integration, etc.).
@@ -41,7 +41,7 @@ npx vitest run     # single run
 ## 2. Plumbing Tests
 
 **Runner:** Playwright  
-**Location:** `tests/plumbing/`
+**Location:** `tests/lite/plumbing/`
 
 Browser-based integration tests that exercise engine lifecycle:
 
@@ -51,7 +51,7 @@ Browser-based integration tests that exercise engine lifecycle:
 - `picking.spec.ts` — GPU picking
 
 ```sh
-npx playwright test tests/plumbing/
+npx playwright test tests/lite/plumbing/
 ```
 
 ---
@@ -59,14 +59,14 @@ npx playwright test tests/plumbing/
 ## 3. Parity Tests (Pixel Comparison)
 
 **Runner:** Playwright  
-**Location:** `tests/parity/scenes/` (25 scene spec files)  
+**Location:** `tests/lite/parity/scenes/` (25 scene spec files)  
 **Configs:**
 
 - Local: `playwright.config.ts`
 - Cloud: `config/playwright.parity-cloud.config.ts`
 
 Compares screenshots of Babylon Lite rendering against golden reference images
-(BJS screenshots stored in `reference/`). Uses Mean Absolute Difference (MAD)
+(BJS screenshots stored in `reference/lite/`). Uses Mean Absolute Difference (MAD)
 as the error metric; thresholds are defined per-scene in `scene-config.json`.
 
 ### How it works
@@ -97,7 +97,7 @@ pnpm test:parity-cloud
 
 ### Golden References
 
-Golden images are committed in `reference/` and compared against Lite renders.
+Golden images are committed in `reference/lite/` and compared against Lite renders.
 `captureGolden()` skips BJS page capture when the golden file already exists
 on disk, which significantly speeds up test runs.
 
@@ -125,7 +125,7 @@ tunnel.
 ## 4. Performance Regression Tests
 
 **Runner:** Playwright  
-**Location:** `tests/perf/perf-regression.spec.ts`  
+**Location:** `tests/lite/perf/perf-regression.spec.ts`  
 **Configs:**
 
 - Local: `playwright.perf.config.ts`
@@ -205,7 +205,7 @@ PERF_WARMUP=120 PERF_FRAMES=500 pnpm test:perf-cloud
 ## 5. Bundle Size Checks
 
 **Runner:** Playwright  
-**Location:** `tests/parity/bundle-size.spec.ts`
+**Location:** `tests/lite/parity/bundle-size.spec.ts`
 
 Each scene bundle must stay under `maxRawKB` defined in `scene-config.json`
 (gzip size is shown for reference but not enforced).

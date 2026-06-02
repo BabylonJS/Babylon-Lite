@@ -1235,6 +1235,24 @@
                 background: #30363d;
                 border-color: #58a6ff;
             }
+            .hamburger-section-title {
+                padding: 0.2rem 0.45rem 0.05rem;
+                color: #8b949e;
+                font-size: 0.7rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
+            .hamburger-divider {
+                height: 1px;
+                margin: 0.25rem 0.1rem;
+                background: #30363d;
+            }
+            .hamburger-menu .experience-item.active {
+                background: #1f6feb;
+                border-color: #1f6feb;
+                color: #fff;
+            }
 
             /* ── On-demand tab content generation ──────────────── */
             .gen-block {
@@ -2171,13 +2189,35 @@
     </head>
     <body>
         <header>
-            <h1>Babylon <span>Lite</span> — Scene Gallery</h1>
-            <p>WebGPU rendering engine · pixel-perfect parity with Babylon.js</p>
+            <h1>Babylon <span id="experience-title">Lite</span> — Scene Gallery</h1>
+            <p id="experience-subtitle">WebGPU rendering engine · pixel-perfect parity with Babylon.js</p>
             <div class="hamburger-menu" id="hamburger-menu">
                 <button class="docs-toggle" id="hamburger-btn" onclick="toggleHamburgerMenu(event)" aria-haspopup="true" aria-expanded="false" title="More tools">☰ Tools</button>
                 <div class="hamburger-dropdown" id="hamburger-dropdown" hidden>
-                    <button class="docs-toggle hamburger-item" id="docs-toggle" onclick="toggleDocs(); closeHamburgerMenu()">📖 Architecture &amp; Features</button>
-                    <button class="docs-toggle hamburger-item" id="pitch-toggle" onclick="togglePitch(); closeHamburgerMenu()">📊 Performance Summary</button>
+                    <div class="hamburger-section-title">Experience</div>
+                    <button class="docs-toggle hamburger-item experience-item" id="experience-webgpu" onclick="setLabExperience('webgpu')">⚡ WebGPU (Lite)</button>
+                    <button class="docs-toggle hamburger-item experience-item" id="experience-webgl" onclick="setLabExperience('webgl')">🧪 WebGL (Lite GL)</button>
+                    <div class="hamburger-divider"></div>
+                    <button
+                        class="docs-toggle hamburger-item"
+                        id="docs-toggle"
+                        onclick="
+                            toggleDocs();
+                            closeHamburgerMenu();
+                        "
+                    >
+                        📖 Architecture &amp; Features
+                    </button>
+                    <button
+                        class="docs-toggle hamburger-item"
+                        id="pitch-toggle"
+                        onclick="
+                            togglePitch();
+                            closeHamburgerMenu();
+                        "
+                    >
+                        📊 Performance Summary
+                    </button>
                     <button class="docs-toggle hamburger-item" id="apidocs-menu-item" onclick="openApiDocsFromMenu()">📘 API Docs</button>
                 </div>
             </div>
@@ -2196,1488 +2236,44 @@
                 <h3 class="docs-section-title">🏗️ <span>Architecture Overview</span></h3>
                 <button class="docs-close-btn" type="button" onclick="toggleDocs()" aria-label="Close Architecture overview">✕ Close</button>
             </div>
-            <div class="arch-diagram">
-                <div class="arch-layer arch-layer-app">
-                    <div class="arch-layer-label">Application Layer</div>
-                    <div class="arch-layer-desc">import { createEngine, loadGltf, createPbrMaterial, ... } from 'babylon-lite'</div>
-                </div>
-                <div class="arch-arrow">▼</div>
-                <div class="arch-layer">
-                    <div class="arch-layer-label">Core Modules</div>
-                    <div class="arch-modules">
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Engine</div>
-                            <div class="arch-mod-sub">WebGPU device · swapchain · 4× MSAA · depth/stencil · frame loop · resize</div>
-                        </div>
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Scene</div>
-                            <div class="arch-mod-sub">Context · graph owner · hierarchy · parent-child world matrix · material swap queue · disposal</div>
-                        </div>
-                        <div class="arch-mod arch-mod-cam">
-                            <div class="arch-mod-name">Camera</div>
-                            <div class="arch-mod-sub">ArcRotate · Free · orbit / zoom / pan · inertia · IWorldMatrixProvider · parentable</div>
-                        </div>
-                        <div class="arch-mod arch-mod-light">
-                            <div class="arch-mod-name">Lights</div>
-                            <div class="arch-mod-sub">Hemispheric · Directional · Point · Spot · multi-light UBO · parentable</div>
-                        </div>
-                    </div>
-                    <div class="arch-modules">
-                        <div class="arch-mod arch-mod-mat">
-                            <div class="arch-mod-name">Materials</div>
-                            <div class="arch-mod-sub">
-                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · NodeMaterial · ShaderMaterial · background/ground
-                            </div>
-                        </div>
-                        <div class="arch-mod arch-mod-mesh">
-                            <div class="arch-mod-name">Meshes</div>
-                            <div class="arch-mod-sub">
-                                Sphere · box · torus · ground · heightmap · cylinder · plane · disc · polyhedron · ribbon · tube · extrude · thin instances · GPU upload
-                            </div>
-                        </div>
-                        <div class="arch-mod arch-mod-loader">
-                            <div class="arch-mod-name">Loaders</div>
-                            <div class="arch-mod-sub">
-                                glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KTX2 · Draco · Gaussian splats (.ply/.splat/.sog/.spz) · KHR_materials_variants ·
-                                _clearcoat · _sheen · _anisotropy · _ior · _specular · _volume · _transmission · _texture_transform · _texture_basisu
-                            </div>
-                        </div>
-                        <div class="arch-mod arch-mod-anim">
-                            <div class="arch-mod-name">Animation</div>
-                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights · blending · cross-fade · additive clips</div>
-                        </div>
-                    </div>
-                    <div class="arch-modules">
-                        <div class="arch-mod arch-mod-shadow">
-                            <div class="arch-mod-name">Shadows</div>
-                            <div class="arch-mod-sub">ESM directional · PCF spot · depth pass · Gaussian blur · configurable bias/darkness</div>
-                        </div>
-                        <div class="arch-mod arch-mod-tex">
-                            <div class="arch-mod-name">Textures</div>
-                            <div class="arch-mod-sub">2D · cube · solid color · KTX1 compressed · Basis Universal (.basis) · GPU mipmap gen · sRGB · sampler config</div>
-                        </div>
-                        <div class="arch-mod arch-mod-math">
-                            <div class="arch-mod-name">Math</div>
-                            <div class="arch-mod-sub">Vec3/4 · Mat4 · Quat slerp · Color3/4 · ObservableVec3 · ObservableQuat · LH column-major</div>
-                        </div>
-                        <div class="arch-mod arch-mod-render">
-                            <div class="arch-mod-name">Render Pipeline</div>
-                            <div class="arch-mod-sub">Renderable · pre-pass · scene uniforms · opaque/transparent ordering</div>
-                        </div>
-                        <div class="arch-mod arch-mod-render">
-                            <div class="arch-mod-name">Effects</div>
-                            <div class="arch-mod-sub">EffectWrapper · fullscreen triangle · RenderTarget output · uniforms · texture/sampler bindings</div>
-                        </div>
-                    </div>
-                    <div class="arch-modules">
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Picking</div>
-                            <div class="arch-mod-sub">GPU ID pass · CPU ray/triangle · thin-instance support · normal/UV detail</div>
-                        </div>
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Skeleton</div>
-                            <div class="arch-mod-sub">4/8-bone skinning · GPU bone textures · morph target blending</div>
-                        </div>
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Shader Composer</div>
-                            <div class="arch-mod-sub">Fragment-based composition · topological ordering · slot injection · WGSL generation</div>
-                        </div>
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Resource Pool</div>
-                            <div class="arch-mod-sub">GPU buffer/texture pooling · automatic cleanup · device lifecycle</div>
-                        </div>
-                        <div class="arch-mod arch-mod-core">
-                            <div class="arch-mod-name">Navigation</div>
-                            <div class="arch-mod-sub">Recast V2 navmesh · crowd agents · obstacles · off-mesh links · raycast</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="arch-arrow">▼</div>
-                <div class="arch-layer arch-layer-gpu">
-                    <div class="arch-layer-label">GPU Pipeline</div>
-                    <div class="arch-layer-desc">WGSL Shaders · GPURenderPipeline · GPUBindGroup · GPUBuffer · GPUTexture · GPUCommandEncoder</div>
-                </div>
-                <div class="arch-arrow">▼</div>
-                <div class="arch-layer arch-layer-webgpu">
-                    <div class="arch-layer-label">WebGPU</div>
-                    <div class="arch-layer-desc">GPUDevice · GPUAdapter · GPURenderPassEncoder · GPUComputePassEncoder · navigator.gpu</div>
-                </div>
-            </div>
-
-            <div class="arch-pillars">
-                <div class="arch-pillar">
-                    <div class="arch-pillar-icon">🌳</div>
-                    <div class="arch-pillar-name">100% Tree-Shakable</div>
-                    <div class="arch-pillar-desc">Zero module-level side effects. Import only what you use — unused features are stripped from the bundle.</div>
-                </div>
-                <div class="arch-pillar">
-                    <div class="arch-pillar-icon">⚡</div>
-                    <div class="arch-pillar-name">WebGPU Exclusive</div>
-                    <div class="arch-pillar-desc">No WebGL fallback. Built entirely around modern GPU paradigms: render pipelines, compute shaders, bind groups.</div>
-                </div>
-                <div class="arch-pillar">
-                    <div class="arch-pillar-icon">🎯</div>
-                    <div class="arch-pillar-name">Pixel-Perfect Parity</div>
-                    <div class="arch-pillar-desc">Rendering output is mathematically identical to Babylon.js. Validated via automated pixel diff testing.</div>
-                </div>
-                <div class="arch-pillar">
-                    <div class="arch-pillar-icon">📦</div>
-                    <div class="arch-pillar-name">Minimal Footprint</div>
-                    <div class="arch-pillar-desc">Dramatically smaller bundles than Babylon.js. Data-oriented design, flat arrays for GPU transfers.</div>
-                </div>
-                <div class="arch-pillar">
-                    <div class="arch-pillar-icon">🔌</div>
-                    <div class="arch-pillar-name">One-Way Data Ownership</div>
-                    <div class="arch-pillar-desc">Scene owns everything. Meshes, lights, cameras are plain data — zero circular deps, trivial serialization.</div>
-                </div>
-            </div>
-
-            <h3 class="docs-section-title" style="margin-top: 1.75rem">📊 <span>Feature Comparison</span> — Babylon Lite vs Babylon.js</h3>
-            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap">
-                <button class="feat-filter-btn active" data-filter="all" onclick="filterFeatures('all')">All</button>
-                <button class="feat-filter-btn" data-filter="implemented" onclick="filterFeatures('implemented')">✅ Implemented</button>
-                <button class="feat-filter-btn" data-filter="missing" onclick="filterFeatures('missing')">— Missing</button>
-                <button class="feat-filter-btn" data-filter="wont-support" onclick="filterFeatures('wont-support')">🚫 Won't support</button>
-            </div>
-            <div style="margin-bottom: 0.75rem; font-size: 0.7rem; color: #8b949e; display: flex; gap: 1.2rem; flex-wrap: wrap">
-                <span>✅ Supported</span>
-                <span>⚡ Partial</span>
-                <span>— Not available</span>
-                <span>🚫 Won't support</span>
-                <span style="color: #3fb950">● Green row = Lite advantage</span>
-            </div>
-            <div class="feature-table-wrap">
-                <table class="feature-table">
-                    <thead>
-                        <tr>
-                            <th>Feature</th>
-                            <th>Lite</th>
-                            <th>BJS</th>
-                            <th>Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Rendering API -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Rendering API</td>
-                        </tr>
-                        <tr class="feat-highlight">
-                            <td>WebGPU</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Lite is WebGPU-exclusive — zero abstraction overhead</td>
-                        </tr>
-                        <tr>
-                            <td>WebGL 2.0</td>
-                            <td>🚫</td>
-                            <td>✅</td>
-                            <td>Not planned — WebGPU only by design</td>
-                        </tr>
-                        <tr>
-                            <td>WebGL 1.0</td>
-                            <td>🚫</td>
-                            <td>✅</td>
-                            <td>Not planned — WebGPU only by design</td>
-                        </tr>
-                        <tr>
-                            <td>4× MSAA</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Depth / Stencil Buffer</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>depth24plus-stencil8</td>
-                        </tr>
-                        <tr>
-                            <td>HDR Rendering</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Tone Mapping</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Image processing pipeline</td>
-                        </tr>
-                        <tr>
-                            <td>Exposure / Contrast</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Via ImageProcessingConfig</td>
-                        </tr>
-                        <tr>
-                            <td>Canvas Resize Handling</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Automatic per-frame</td>
-                        </tr>
-                        <tr>
-                            <td>Draw Call Counting</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>EffectRenderer / EffectWrapper</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scenes 74-76 — direct swapchain renderer plus RTT task path</td>
-                        </tr>
-                        <tr>
-                            <td>Fullscreen Effect Passes</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Single fullscreen triangle, no vertex/index buffers</td>
-                        </tr>
-                        <tr>
-                            <td>Effect RenderTarget Output</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 75 — render effect into texture, then use it in a material</td>
-                        </tr>
-                        <tr>
-                            <td>Effect Texture Bindings</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 76 — Texture2D + sampler binding via setEffectTexture()</td>
-                        </tr>
-                        <tr>
-                            <td>Frame-Graph RTT Material Override</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 110 — offscreen pass renders selected meshes with an override material and camera, then samples the RTT in the main pass</td>
-                        </tr>
-
-                        <!-- Materials -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Materials</td>
-                        </tr>
-                        <tr>
-                            <td>PBR Metallic-Roughness</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Full GGX / Smith / Schlick BRDF</td>
-                        </tr>
-                        <tr>
-                            <td>PBR Specular-Glossiness</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>KHR_materials_pbrSpecularGlossiness</td>
-                        </tr>
-                        <tr>
-                            <td>Standard Material (Blinn-Phong)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Diffuse, specular, ambient, emissive</td>
-                        </tr>
-                        <tr>
-                            <td>Background Material</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Ground plane + skybox rendering</td>
-                        </tr>
-                        <tr>
-                            <td>Normal Mapping</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Cotangent frame, invertNormalMapX</td>
-                        </tr>
-                        <tr>
-                            <td>Emissive Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Occlusion (AO) Maps</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>ORM texture packing</td>
-                        </tr>
-                        <tr>
-                            <td>Metallic Reflectance Map</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>metallicReflectanceTexture support</td>
-                        </tr>
-                        <tr>
-                            <td>Specular Anti-Aliasing</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>getAARoughnessFactors when normal map present</td>
-                        </tr>
-                        <tr>
-                            <td>Alpha Blend / Alpha Test</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>OPAQUE, BLEND, MASK modes</td>
-                        </tr>
-                        <tr>
-                            <td>Double-Sided Rendering</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Opacity Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>With depth-write disabled for transparent</td>
-                        </tr>
-                        <tr>
-                            <td>Bump / Height Mapping</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Lightmap Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Standard material UV2</td>
-                        </tr>
-                        <tr>
-                            <td>Ambient Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Reflection Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Spherical + planar coord modes</td>
-                        </tr>
-                        <tr>
-                            <td>UV Scaling / Offset</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>UV2 Channel</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>For lightmaps and AO</td>
-                        </tr>
-                        <tr>
-                            <td>Node Material</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>NME snippet parser with lab-proven core, compatibility, PBR, math/modes, color, UV/texture/procedural, normal/screen/depth/matrix/scene-state, loop, and storage blocks (Scenes 60-89)</td>
-                        </tr>
-                        <tr>
-                            <td>Shader Material</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>WGSL-only ShaderMaterial with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163)</td>
-                        </tr>
-                        <tr>
-                            <td>Material Plugins</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>PBR Clear Coat</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 19</td>
-                        </tr>
-                        <tr>
-                            <td>PBR Sheen</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 21</td>
-                        </tr>
-                        <tr>
-                            <td>PBR Anisotropy</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 23</td>
-                        </tr>
-                        <tr>
-                            <td>PBR Subsurface / Translucency</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 26 — thickness map, translucency, tint</td>
-                        </tr>
-                        <tr>
-                            <td>Material Variants (KHR_materials_variants)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 27 — runtime variant selection</td>
-                        </tr>
-                        <tr>
-                            <td>PBR Iridescence</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Native PBR material/glTF iridescence pending</td>
-                        </tr>
-
-                        <!-- Lights -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Lights</td>
-                        </tr>
-                        <tr>
-                            <td>Hemispheric Light</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Directional Light</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Point Light</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Spot Light</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>With cone angle + exponent falloff</td>
-                        </tr>
-                        <tr>
-                            <td>Multi-Light (N lights)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Dynamic UBO packing</td>
-                        </tr>
-                        <tr>
-                            <td>Per-Mesh Light Inclusion</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 111 — includedOnlyMeshIds-style light selection across Standard, PBR, NME, and supported shadow generators</td>
-                        </tr>
-                        <tr>
-                            <td>Light Intensity / Color</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Diffuse + specular per light</td>
-                        </tr>
-                        <tr>
-                            <td>Area Lights</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-
-                        <!-- Cameras -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Cameras</td>
-                        </tr>
-                        <tr>
-                            <td>Arc Rotate Camera</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Orbit / zoom / pan / inertia</td>
-                        </tr>
-                        <tr>
-                            <td>Auto-Framing (fitToScene)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Default camera for loaded models</td>
-                        </tr>
-                        <tr>
-                            <td>Free Camera</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 18, 24, 25 — WASD/arrow controls</td>
-                        </tr>
-                        <tr>
-                            <td>Follow Camera</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Universal Camera</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>VR / XR Camera</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Device Orientation Camera</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-
-                        <!-- Mesh & Geometry -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Mesh &amp; Geometry</td>
-                        </tr>
-                        <tr>
-                            <td>Sphere</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Configurable segments</td>
-                        </tr>
-                        <tr>
-                            <td>Box</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Torus</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Configurable thickness/tessellation</td>
-                        </tr>
-                        <tr>
-                            <td>Ground Plane</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Ground from Heightmap</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>GPU texture → vertex displacement</td>
-                        </tr>
-                        <tr>
-                            <td>Thin Instances</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>add / remove / set / flush API</td>
-                        </tr>
-                        <tr>
-                            <td>Observable Transforms</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>ObservableVec3 auto-dirty on mutation</td>
-                        </tr>
-                        <tr>
-                            <td>Transform Hierarchy</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Version-based lazy world matrix, IWorldMatrixProvider on all entities</td>
-                        </tr>
-                        <tr>
-                            <td>Clone Transform Node</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Cylinder</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Cylinder / cone / prism via diameterTop/Bottom</td>
-                        </tr>
-                        <tr>
-                            <td>Plane</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>size or width/height</td>
-                        </tr>
-                        <tr>
-                            <td>Disc / Ring</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Configurable arc &amp; tessellation</td>
-                        </tr>
-                        <tr>
-                            <td>Polyhedra</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>15 BJS presets, flat &amp; smooth normals</td>
-                        </tr>
-                        <tr>
-                            <td>Ribbon / Tube / Extrude</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Path3D parallel-transport frames, closePath/closeArray, cap modes</td>
-                        </tr>
-                        <tr>
-                            <td>CSG / CSG2 (Boolean Ops)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scenes 90/91 — legacy mesh CSG plus Manifold-backed CSG2 subtract, intersect, and union/add operations</td>
-                        </tr>
-                        <tr>
-                            <td>Instanced Meshes</td>
-                            <td>🚫</td>
-                            <td>✅</td>
-                            <td>Won't support BJS InstancedMesh API; use thin instances instead</td>
-                        </tr>
-
-                        <!-- Skeleton & Animation -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Skeleton &amp; Animation</td>
-                        </tr>
-                        <tr>
-                            <td>Skeletal Animation</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>GPU bone textures (rgba32float)</td>
-                        </tr>
-                        <tr>
-                            <td>4-Bone Skinning</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>JOINTS_0 / WEIGHTS_0</td>
-                        </tr>
-                        <tr>
-                            <td>8-Bone Skinning</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>JOINTS_1 / WEIGHTS_1</td>
-                        </tr>
-                        <tr>
-                            <td>Morph Targets</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Up to 4 targets, position + normal deltas</td>
-                        </tr>
-                        <tr>
-                            <td>Animation Groups</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>play / pause / stop / seek / loop / speed</td>
-                        </tr>
-                        <tr>
-                            <td>Linear Interpolation</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Step Interpolation</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Cubic Spline</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Deterministic Seek</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Fixed-timestep for parity testing</td>
-                        </tr>
-                        <tr>
-                            <td>Animation Blending</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Weighted blend, cross-fade, and additive animation groups (Scenes 155-158)</td>
-                        </tr>
-                        <tr>
-                            <td>Animation Events</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Animation Weights</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>AnimationGroup weight control through AnimationManager</td>
-                        </tr>
-
-                        <!-- Environment & IBL -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Environment &amp; IBL</td>
-                        </tr>
-                        <tr>
-                            <td>Babylon .env Files</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>RGBD cubemap decode</td>
-                        </tr>
-                        <tr>
-                            <td>HDR Panoramas (.hdr)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Equirect → cubemap → prefiltered IBL</td>
-                        </tr>
-                        <tr>
-                            <td>Image-Based Lighting</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Split-sum approximation</td>
-                        </tr>
-                        <tr>
-                            <td>BRDF Lookup Table</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Pre-baked PNG, RGBD compute decode</td>
-                        </tr>
-                        <tr>
-                            <td>Spherical Harmonics</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Irradiance from environment</td>
-                        </tr>
-                        <tr>
-                            <td>DDS Cube Skybox</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Cubemap Skybox</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>6-face cube texture</td>
-                        </tr>
-                        <tr>
-                            <td>HDR Skybox</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Ground + Skybox Background</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Fresnel ground opacity, premultiplied alpha</td>
-                        </tr>
-                        <tr>
-                            <td>Fog (Linear / Exp / Exp²)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Environment Rotation</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Reflection Probes</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-
-                        <!-- Shadows -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Shadows</td>
-                        </tr>
-                        <tr>
-                            <td>ESM Shadows (Directional)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Depth + Gaussian blur passes</td>
-                        </tr>
-                        <tr>
-                            <td>Shadow Map Size Config</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Shadow Bias / Darkness</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Frustum Edge Falloff</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>PCF Shadows</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Spot + directional PCF (Scenes 18, 111)</td>
-                        </tr>
-                        <tr>
-                            <td>Cascaded Shadow Maps</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Point Light Shadows</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Spot Light Shadows</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 18 (PCF)</td>
-                        </tr>
-                        <tr>
-                            <td>Material-Aware Shadow Depth</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Shadow material views and alpha-discard casters for Standard, PBR, and NodeMaterial (Scenes 116, 140, 141)</td>
-                        </tr>
-                        <tr>
-                            <td>Contact Hardening Shadows</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-
-                        <!-- Loaders -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Loaders</td>
-                        </tr>
-                        <tr>
-                            <td>glTF 2.0 / GLB</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Meshes, materials, skins, morphs, animations</td>
-                        </tr>
-                        <tr>
-                            <td>.babylon Format</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Meshes, standard materials, lights</td>
-                        </tr>
-                        <tr>
-                            <td>Environment .env</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>HDR Panorama .hdr</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Skybox Cube Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>2D Texture Loading</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>With mipmap generation</td>
-                        </tr>
-                        <tr>
-                            <td>OBJ / MTL</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>STL</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>FBX</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>KTX1 Compressed Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 25 — ASTC / BC / ETC2 auto-format + PNG fallback</td>
-                        </tr>
-                        <tr>
-                            <td>KTX2 Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 112 — KHR_texture_basisu glTF texture sources</td>
-                        </tr>
-                        <tr>
-                            <td>Basis Universal (.basis)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 36 — transcoder fetched from BJS CDN; BC7 / ASTC / ETC2 / BC3 auto-select + RGBA32 fallback</td>
-                        </tr>
-
-                        <!-- glTF 2.0 Extensions -->
-                        <tr class="feat-cat">
-                            <td colspan="4">glTF 2.0 Extensions (Khronos + vendor)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_pbrSpecularGlossiness</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Archived ext — mapped to metallic-roughness (Scene 6)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_variants</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 27 — runtime variant selection</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_unlit</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 32 — base color output, no lighting</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_clearcoat</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 28 — glTF loader auto-wires clearcoat + roughness + normal textures</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_sheen</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 29 — glTF loader with BJS-spec albedo scaling</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_anisotropy</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>glTF loader auto-wires strength + rotation (manual API: Scene 23)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_volume</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>glTF loader auto-wires attenuation + thickness (Scene 30); manual API Scene 26</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_transmission</td>
-                            <td>⚡</td>
-                            <td>✅</td>
-                            <td>Frame-graph scene-texture transmission (Scenes 30/33/112)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_ior</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Index of refraction override (Scene 30)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_specular</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Dielectric specular intensity/color (Scene 30)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_iridescence</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Thin-film interference</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_emissive_strength</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>HDR emissive multiplier (Scene 31)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_materials_dispersion</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Wavelength-dependent refraction</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_lights_punctual</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 33 — point / spot / directional lights from glTF</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_texture_transform</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Material-wide UV offset / scale / rotate resolved at load (Scene 29)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_texture_basisu</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 112 — FlightHelmetKTX from BabylonJS/Assets</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_draco_mesh_compression</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Draco-compressed mesh geometry (Scene 30)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_mesh_quantization</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>8/16-bit quantized vertex attributes</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_animation_pointer</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 34 — animate arbitrary JSON pointers (e.g. node visibility)</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_node_visibility</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 34 — per-node visibility flag</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_audio / KHR_audio_emitter</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Positional / ambient audio</td>
-                        </tr>
-                        <tr>
-                            <td>KHR_xmp_json_ld</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>XMP metadata</td>
-                        </tr>
-                        <tr>
-                            <td>EXT_mesh_gpu_instancing</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 35 — per-node instance transforms (TRS accessors → thin instances)</td>
-                        </tr>
-                        <tr>
-                            <td>EXT_meshopt_compression</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>meshoptimizer bitstream compression</td>
-                        </tr>
-                        <tr>
-                            <td>EXT_texture_webp</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Scene 37 — EXT_texture_webp source selection with browser-native decode</td>
-                        </tr>
-                        <tr>
-                            <td>EXT_texture_avif</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>AVIF texture source</td>
-                        </tr>
-                        <tr>
-                            <td>EXT_lights_image_based</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>IBL specified in glTF asset</td>
-                        </tr>
-                        <tr>
-                            <td>MSFT_lod</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Discrete level-of-detail</td>
-                        </tr>
-                        <tr>
-                            <td>MSFT_minecraftMesh</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Minecraft-style voxel meshes</td>
-                        </tr>
-                        <tr>
-                            <td>MSFT_audio_emitter</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Legacy positional audio</td>
-                        </tr>
-                        <tr>
-                            <td>ExtrasAsMetadata</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>Promote glTF `extras` to runtime metadata</td>
-                        </tr>
-
-                        <!-- Textures -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Textures</td>
-                        </tr>
-                        <tr>
-                            <td>2D Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Cube Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Solid Color Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Procedural 1×1 fill</td>
-                        </tr>
-                        <tr>
-                            <td>GPU Mipmap Generation</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Compute shader mipmaps</td>
-                        </tr>
-                        <tr>
-                            <td>sRGB Handling</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Format-based gamma correction</td>
-                        </tr>
-                        <tr>
-                            <td>Sampler Configuration</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Filter, address mode, anisotropy</td>
-                        </tr>
-                        <tr>
-                            <td>InvertY Control</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Procedural Textures</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Video Textures</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Dynamic Textures</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Render Target Textures</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Frame-graph RTT + sampled Texture2D, including pass-local material override (Scenes 75, 110)</td>
-                        </tr>
-                        <tr>
-                            <td>Multi-Render Targets</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-
-                        <!-- Math -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Math Utilities</td>
-                        </tr>
-                        <tr>
-                            <td>Vec3 / Vec4</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>add, sub, scale, dot, cross, normalize, lerp</td>
-                        </tr>
-                        <tr>
-                            <td>Mat4 (4×4 Matrix)</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Multiply, inverse, lookAt, perspective, compose</td>
-                        </tr>
-                        <tr>
-                            <td>Quaternion</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Slerp, toMatrix, from Euler</td>
-                        </tr>
-                        <tr>
-                            <td>Color3 / Color4</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>ObservableVec3</td>
-                            <td>✅</td>
-                            <td>—</td>
-                            <td>Auto-dirty on mutation (Lite-specific)</td>
-                        </tr>
-                        <tr>
-                            <td>LH Column-Major Layout</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Aligned with WGSL/WebGPU conventions</td>
-                        </tr>
-
-                        <!-- Architecture / DX -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Architecture &amp; Developer Experience</td>
-                        </tr>
-                        <tr class="feat-highlight">
-                            <td>100% Tree-Shakable</td>
-                            <td>✅</td>
-                            <td>⚡</td>
-                            <td>Zero module-level side effects in Lite</td>
-                        </tr>
-                        <tr class="feat-highlight">
-                            <td>Minimal Bundle Size</td>
-                            <td>✅</td>
-                            <td>—</td>
-                            <td>Dramatically smaller than BJS for same scene</td>
-                        </tr>
-                        <tr class="feat-highlight">
-                            <td>Zero Side Effects</td>
-                            <td>✅</td>
-                            <td>—</td>
-                            <td>No register*() at import time, no globalThis</td>
-                        </tr>
-                        <tr class="feat-highlight">
-                            <td>One-Way Data Ownership</td>
-                            <td>✅</td>
-                            <td>—</td>
-                            <td>Components are plain data; scene is sole owner</td>
-                        </tr>
-                        <tr class="feat-highlight">
-                            <td>Materials Own Shaders</td>
-                            <td>✅</td>
-                            <td>—</td>
-                            <td>Self-contained material + pipeline units</td>
-                        </tr>
-                        <tr>
-                            <td>TypeScript</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Strict typing throughout</td>
-                        </tr>
-                        <tr>
-                            <td>Vite Native</td>
-                            <td>✅</td>
-                            <td>⚡</td>
-                            <td>First-class Vite integration</td>
-                        </tr>
-                        <tr>
-                            <td>Familiar BJS-like API</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Easy migration for BJS developers</td>
-                        </tr>
-                        <tr>
-                            <td>Hot Material Swap</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Object.defineProperty setter + rebuild queue</td>
-                        </tr>
-                        <tr>
-                            <td>Dispose / Cleanup</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Full GPU resource cleanup on dispose</td>
-                        </tr>
-
-                        <!-- Advanced Features (BJS only) -->
-                        <tr class="feat-cat">
-                            <td colspan="4">Advanced Features</td>
-                        </tr>
-                        <tr>
-                            <td>Physics Engine</td>
-                            <td>⚡</td>
-                            <td>✅</td>
-                            <td>Havok Physics V2 subset (Scene 40); no Ammo.js/Cannon.js/Oimo compatibility layer</td>
-                        </tr>
-                        <tr>
-                            <td>Particle System</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td>CPU + GPU particles</td>
-                        </tr>
-                        <tr>
-                            <td>Post-Processing Pipeline</td>
-                            <td>⚡</td>
-                            <td>✅</td>
-                            <td>Low-level EffectWrapper passes are supported; no built-in Bloom/DOF/SSAO stack yet</td>
-                        </tr>
-                        <tr>
-                            <td>GUI (2D / 3D UI)</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Sprites / SpriteManager</td>
-                            <td>⚡</td>
-                            <td>✅</td>
-                            <td>2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards (Scenes 50-57); not the full BJS SpriteManager API</td>
-                        </tr>
-                        <tr>
-                            <td>Gaussian Splatting</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>.ply / .splat / .sog / .spz loaders, transform baking, and material plugin fragments (Scenes 120-126)</td>
-                        </tr>
-                        <tr>
-                            <td>Octree / Frustum Culling</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Level of Detail (LOD)</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Ray Casting / Picking</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>GPU ID pass + CPU ray/triangle details, normal/UV helpers, thin-instance and deformed mesh coverage (Scenes 113-115)</td>
-                        </tr>
-                        <tr>
-                            <td>WebXR / VR / AR</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Glow / Highlight Layer</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Screen-Space Reflections</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>SSAO</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Lens Flare</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Volumetric Light Scattering</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Decals</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Solid Particle System</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Fluid Rendering</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Bones IK</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Navigation Mesh</td>
-                            <td>⚡</td>
-                            <td>✅</td>
-                            <td>Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)</td>
-                        </tr>
-                        <tr>
-                            <td>Device Lost Recovery</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
-                        </tr>
-                        <tr>
-                            <td>OffscreenCanvas / Worker Rendering</td>
-                            <td>✅</td>
-                            <td>✅</td>
-                            <td>Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)</td>
-                        </tr>
-                        <tr>
-                            <td>Scene Optimizer</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Asset Manager</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                        <tr>
-                            <td>Scene Serialization</td>
-                            <td>—</td>
-                            <td>✅</td>
-                            <td></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <div id="docs-content" class="docs-content-placeholder" style="min-height: 220px; color: #8b949e">Loading documentation…</div>
         </div>
 
         <div id="pitch-panel" class="docs-panel">
             <div class="docs-close-row">
-                <h3 class="docs-section-title">📊 <span>Babylon Lite vs Babylon.js — At a Glance</span></h3>
+                <h3 class="docs-section-title">📊 <span id="pitch-title">Babylon Lite vs Babylon.js — At a Glance</span></h3>
                 <button class="docs-close-btn" type="button" onclick="togglePitch()" aria-label="Close Performance Summary">✕ Close</button>
             </div>
-            <p style="color: #8b949e; font-size: 0.8rem; margin-bottom: 1.5rem">
+            <p id="pitch-hint" style="color: #8b949e; font-size: 0.8rem; margin-bottom: 1.5rem">
                 Averages computed from live benchmarks across all test scenes. Data from <code>bundle/manifest.json</code> and <code>perf-manifest.json</code>.
             </p>
-            <div id="pitch-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem"></div>
-            <h3 class="docs-section-title" style="margin-top: 1.5rem">📋 <span>Per-Scene Breakdown</span></h3>
-            <div style="overflow-x: auto">
-                <table class="feature-table" id="pitch-table">
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th data-sort-key="sceneNum">Scene</th>
-                            <th data-sort-key="liteKB">Bundle (Lite)</th>
-                            <th data-sort-key="bjsKB">Bundle (BJS)</th>
-                            <th data-sort-key="ratio">Ratio</th>
-                            <th data-sort-key="liteRaf">RAF ms (Lite)</th>
-                            <th data-sort-key="bjsRaf">RAF ms (BJS)</th>
-                            <th data-sort-key="speedup">Speedup</th>
-                            <th data-sort-key="liteMem">Memory (Lite)</th>
-                            <th data-sort-key="bjsMem">Memory (BJS)</th>
-                            <th data-sort-key="memSave">Savings</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pitch-table-body"></tbody>
-                </table>
+            <div id="pitch-empty" class="empty-state" style="display: none; padding: 32px; text-align: center; color: #8b949e">
+                <p style="font-size: 15px; margin-bottom: 8px">Lite GL performance summary is not available yet.</p>
+                <p style="font-size: 13px">The WebGL experience is prepared but has no scenes, demos, or benchmark manifests yet.</p>
+            </div>
+            <div id="pitch-content">
+                <div id="pitch-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem"></div>
+                <h3 class="docs-section-title" style="margin-top: 1.5rem">📋 <span>Per-Scene Breakdown</span></h3>
+                <div style="overflow-x: auto">
+                    <table class="feature-table" id="pitch-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th data-sort-key="sceneNum">Scene</th>
+                                <th data-sort-key="liteKB">Bundle (Lite)</th>
+                                <th data-sort-key="bjsKB">Bundle (BJS)</th>
+                                <th data-sort-key="ratio">Ratio</th>
+                                <th data-sort-key="liteRaf">RAF ms (Lite)</th>
+                                <th data-sort-key="bjsRaf">RAF ms (BJS)</th>
+                                <th data-sort-key="speedup">Speedup</th>
+                                <th data-sort-key="liteMem">Memory (Lite)</th>
+                                <th data-sort-key="bjsMem">Memory (BJS)</th>
+                                <th data-sort-key="memSave">Savings</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pitch-table-body"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -3694,7 +2290,14 @@
             <div class="tab-hint">💡 Live scenes served from Vite dev server. Start with: <code>pnpm dev</code></div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="source-filter-pills"></div>
-                <input id="source-search" class="scene-search" type="search" placeholder="Filter source scenes…" aria-label="Filter source scenes" oninput="setSceneSearch('source', this.value)" />
+                <input
+                    id="source-search"
+                    class="scene-search"
+                    type="search"
+                    placeholder="Filter source scenes…"
+                    aria-label="Filter source scenes"
+                    oninput="setSceneSearch('source', this.value)"
+                />
             </div>
             <div class="grid" id="source-grid"></div>
         </div>
@@ -3702,10 +2305,12 @@
         <div id="panel-demos" class="tab-panel">
             <div class="tab-hint has-regen">
                 <span class="tab-hint-text">
-                    💡 Standalone showcase demos built on Babylon Lite — pure Lite, no Babylon.js comparison. Each is production-bundled so its
-                    real shipped size is advertised. Regenerate sizes with <code>pnpm build:bundle-demos</code>.
+                    💡 Standalone showcase demos built on Babylon Lite — pure Lite, no Babylon.js comparison. Each is production-bundled so its real shipped size is advertised.
+                    Regenerate sizes with <code>pnpm build:bundle-demos</code>.
                 </span>
-                <button class="tab-hint-regen" id="demos-regen-btn" onclick="generateTabContent('demos')" title="Regenerate demo bundle sizes (pnpm build:bundle-demos)">⚙ Regenerate</button>
+                <button class="tab-hint-regen" id="demos-regen-btn" onclick="generateTabContent('demos')" title="Regenerate demo bundle sizes (pnpm build:bundle-demos)">
+                    ⚙ Regenerate
+                </button>
             </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="demos-filter-pills"></div>
@@ -3726,13 +2331,20 @@
         <div id="panel-parity" class="tab-panel">
             <div class="tab-hint has-regen">
                 <span class="tab-hint-text">
-                    💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>; exceeding
-                    shown in <span style="color: #f85149">red</span>.
+                    💡 Compares golden reference (Babylon.js) vs Lite render from last <code>pnpm test:parity</code> run. MAD thresholds from <code>scene-config.json</code>;
+                    exceeding shown in <span style="color: #f85149">red</span>.
                 </span>
                 <button class="tab-hint-regen" id="parity-regen-btn" onclick="generateTabContent('parity')" title="Regenerate parity diffs (pnpm test:parity)">⚙ Regenerate</button>
             </div>
             <div class="parity-toolbar">
-                <input id="parity-search" class="scene-search" type="search" placeholder="Filter parity scenes…" aria-label="Filter parity scenes" oninput="setSceneSearch('parity', this.value)" />
+                <input
+                    id="parity-search"
+                    class="scene-search"
+                    type="search"
+                    placeholder="Filter parity scenes…"
+                    aria-label="Filter parity scenes"
+                    oninput="setSceneSearch('parity', this.value)"
+                />
                 <div style="flex: 1"></div>
                 <button class="btn parity-sort-btn active" onclick="sortParityGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
                 <button class="btn parity-sort-btn" onclick="sortParityGrid('asc')" data-sort="asc" title="Sort by MAD ascending">MAD ↑</button>
@@ -3766,11 +2378,20 @@
                     💡 Bundle sizes shown below come from <code>manifest.json</code>. Deltas compare against master via <code>master-manifest.json</code>. To regenerate:
                     <code>pnpm build:bundle-scenes</code><span id="bundle-master-status" class="bundle-master-status"></span>
                 </span>
-                <button class="tab-hint-regen" id="bundle-regen-btn" onclick="generateTabContent('bundle')" title="Regenerate bundle sizes (pnpm build:bundle-scenes)">⚙ Regenerate</button>
+                <button class="tab-hint-regen" id="bundle-regen-btn" onclick="generateTabContent('bundle')" title="Regenerate bundle sizes (pnpm build:bundle-scenes)">
+                    ⚙ Regenerate
+                </button>
             </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="bundle-filter-pills"></div>
-                <input id="bundle-search" class="scene-search" type="search" placeholder="Filter bundle scenes…" aria-label="Filter bundle scenes" oninput="setSceneSearch('bundle', this.value)" />
+                <input
+                    id="bundle-search"
+                    class="scene-search"
+                    type="search"
+                    placeholder="Filter bundle scenes…"
+                    aria-label="Filter bundle scenes"
+                    oninput="setSceneSearch('bundle', this.value)"
+                />
                 <div style="flex: 1"></div>
                 <button class="btn bundle-sort-btn active" onclick="sortBundleGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
                 <button class="btn bundle-sort-btn" onclick="sortBundleGrid('asc')" data-sort="asc" title="Sort by Lite min size ascending">Size ↑</button>
@@ -3838,8 +2459,16 @@
             </div>
             <div class="perf-toolbar">
                 <div class="perf-filter-pills" id="perf-filter-pills"></div>
-                <input id="perf-search" class="scene-search" type="search" placeholder="Filter perf scenes…" aria-label="Filter perf scenes" oninput="setSceneSearch('perf', this.value)" />
+                <input
+                    id="perf-search"
+                    class="scene-search"
+                    type="search"
+                    placeholder="Filter perf scenes…"
+                    aria-label="Filter perf scenes"
+                    oninput="setSceneSearch('perf', this.value)"
+                />
                 <div style="flex: 1"></div>
+                <button class="btn" id="perf-data-filter-btn" onclick="togglePerfDataFilter()" title="Show only scenes that have perf-manifest data">📈 Data Only</button>
                 <button class="btn" id="perf-filter-btn" onclick="togglePerfFilter()" title="Show only scenes where BJS beats Lite on any metric">⚠ Regressions Only</button>
                 <span id="perf-status" class="perf-status"></span>
             </div>
@@ -3867,10 +2496,19 @@
                     💡 Current Babylon-Lite vs upstream-Lite baseline (per-scene RAF frame time). Run <code>pnpm test:perf-regression</code> to refresh.
                     <span id="perfreg-manifest-status" style="color: #3fb950"></span>
                 </span>
-                <button class="tab-hint-regen" id="perfreg-regen-btn" onclick="generateTabContent('perfreg')" title="Regenerate perf regression data (pnpm test:perf-regression)">⚙ Regenerate</button>
+                <button class="tab-hint-regen" id="perfreg-regen-btn" onclick="generateTabContent('perfreg')" title="Regenerate perf regression data (pnpm test:perf-regression)">
+                    ⚙ Regenerate
+                </button>
             </div>
             <div class="perf-toolbar">
-                <input id="perfreg-search" class="scene-search" type="search" placeholder="Filter regression scenes…" aria-label="Filter regression scenes" oninput="setSceneSearch('perfreg', this.value)" />
+                <input
+                    id="perfreg-search"
+                    class="scene-search"
+                    type="search"
+                    placeholder="Filter regression scenes…"
+                    aria-label="Filter regression scenes"
+                    oninput="setSceneSearch('perfreg', this.value)"
+                />
                 <div style="flex: 1"></div>
                 <button class="btn perfreg-sort-btn active" onclick="sortPerfRegGrid('num')" data-sort="num" title="Sort by scene number">Scene #</button>
                 <button class="btn perfreg-sort-btn" onclick="sortPerfRegGrid('worst')" data-sort="worst" title="Worst regressions first">Δ ↓</button>
@@ -3897,15 +2535,15 @@
 
         <div id="apidocs-panel" class="docs-panel">
             <div class="docs-close-row">
-                <h3 class="docs-section-title">📘 <span>Babylon Lite — API Reference</span></h3>
+                <h3 class="docs-section-title">📘 <span id="apidocs-title">Babylon Lite — API Reference</span></h3>
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap">
                     <button class="btn" id="apidocs-generate-btn" onclick="generateApiDocs()">⚙ Generate API Docs</button>
-                    <button class="btn" id="apidocs-open-btn" onclick="window.open('/api-docs/index.html', '_blank')" style="display: none">↗ Open in new tab</button>
+                    <button class="btn" id="apidocs-open-btn" onclick="openCurrentApiDocs()" style="display: none">↗ Open in new tab</button>
                     <span id="apidocs-spinner" class="perf-status"></span>
                     <button class="docs-close-btn" type="button" onclick="toggleApiDocs()" aria-label="Close API Docs">✕ Close</button>
                 </div>
             </div>
-            <div class="tab-hint">
+            <div class="tab-hint" id="apidocs-hint">
                 💡 TypeDoc-generated API reference for the public <code>babylon-lite</code> surface (every symbol exported from <code>index.ts</code>). Enforced by
                 <code>pnpm docs:check</code>; generate locally with <code>pnpm docs</code>.
                 <span id="apidocs-status" style="color: #6cb6ff"></span>
@@ -3923,34 +2561,79 @@
             </div>
             <pre
                 id="apidocs-log"
-                style="display: none; max-height: 220px; overflow: auto; background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 10px; font-size: 12px; color: #c9d1d9; white-space: pre-wrap"
+                style="
+                    display: none;
+                    max-height: 220px;
+                    overflow: auto;
+                    background: #0d1117;
+                    border: 1px solid #21262d;
+                    border-radius: 6px;
+                    padding: 10px;
+                    font-size: 12px;
+                    color: #c9d1d9;
+                    white-space: pre-wrap;
+                "
             ></pre>
-            <iframe id="apidocs-frame" title="Babylon Lite API documentation" style="display: none; width: 100%; height: 78vh; border: 1px solid #21262d; border-radius: 6px; background: #0d1117"></iframe>
+            <iframe
+                id="apidocs-frame"
+                title="Babylon Lite API documentation"
+                style="display: none; width: 100%; height: 78vh; border: 1px solid #21262d; border-radius: 6px; background: #0d1117"
+            ></iframe>
         </div>
 
         <script>
             // ── API Docs tab ──────────────────────────────────────────
             var _apiDocsInitialized = false;
 
+            function currentApiDocsConfig() {
+                var cfg = typeof currentExperienceConfig === "function" ? currentExperienceConfig() : null;
+                return (
+                    cfg || {
+                        apiDocsUrl: "/lite/api-docs/index.html",
+                        apiDocsStatusUrl: "/lab-api/docs-status?experience=lite",
+                        apiDocsGenerateUrl: "/lab-api/generate-docs?experience=lite",
+                        apiDocsCanGenerate: true,
+                        apiDocsTitle: "Babylon Lite — API Reference",
+                        apiDocsHint: "TypeDoc-generated API reference for the public <code>babylon-lite</code> surface.",
+                    }
+                );
+            }
+
+            function syncApiDocsChrome() {
+                var cfg = currentApiDocsConfig();
+                var title = document.getElementById("apidocs-title");
+                var hint = document.getElementById("apidocs-hint");
+                var genBtn = document.getElementById("apidocs-generate-btn");
+                if (title) title.textContent = cfg.apiDocsTitle || "API Reference";
+                if (hint) hint.innerHTML = "💡 " + (cfg.apiDocsHint || "") + ' <span id="apidocs-status" style="color: #6cb6ff"></span>';
+                if (genBtn) genBtn.style.display = cfg.apiDocsCanGenerate === false ? "none" : "";
+            }
+
+            function openCurrentApiDocs() {
+                window.open(currentApiDocsConfig().apiDocsUrl, "_blank");
+            }
+
             function _setApiDocsView(state, opts) {
                 opts = opts || {};
+                var cfg = currentApiDocsConfig();
                 var frame = document.getElementById("apidocs-frame");
                 var empty = document.getElementById("apidocs-empty");
                 var openBtn = document.getElementById("apidocs-open-btn");
                 var genBtn = document.getElementById("apidocs-generate-btn");
-                var status = document.getElementById("apidocs-status");
                 var spinner = document.getElementById("apidocs-spinner");
+                syncApiDocsChrome();
+                var status = document.getElementById("apidocs-status");
                 frame.style.display = state === "ready" ? "block" : "none";
                 empty.style.display = state === "empty" ? "block" : "none";
                 openBtn.style.display = state === "ready" ? "inline-block" : "none";
-                genBtn.disabled = state === "generating";
+                genBtn.disabled = state === "generating" || cfg.apiDocsCanGenerate === false;
                 genBtn.textContent = state === "ready" ? "↻ Regenerate API Docs" : "⚙ Generate API Docs";
                 spinner.textContent = state === "generating" ? "⏳ Running TypeDoc…" : "";
                 if (status && opts.statusText !== undefined) status.textContent = opts.statusText;
                 if (state === "ready") {
                     // Cache-bust so a regenerate reloads fresh output.
                     frame.onload = _applyApiDocsTheme;
-                    frame.src = "/api-docs/index.html?t=" + Date.now();
+                    frame.src = cfg.apiDocsUrl + "?t=" + Date.now();
                 }
             }
 
@@ -4010,7 +2693,7 @@
             }
 
             function refreshApiDocsStatus() {
-                return fetch("/lab-api/docs-status", { cache: "no-store" })
+                return fetch(currentApiDocsConfig().apiDocsStatusUrl, { cache: "no-store" })
                     .then(function (r) {
                         return r.ok ? r.json() : null;
                     })
@@ -4034,13 +2717,18 @@
             }
 
             function generateApiDocs() {
+                var cfg = currentApiDocsConfig();
+                if (cfg.apiDocsCanGenerate === false) {
+                    _setApiDocsView("ready", { statusText: "" });
+                    return;
+                }
                 var log = document.getElementById("apidocs-log");
                 var logBar = document.getElementById("apidocs-log-bar");
                 log.style.display = "block";
                 if (logBar) logBar.style.display = "none";
                 log.textContent = "Running TypeDoc… this can take a minute on the first run.";
                 _setApiDocsView("generating");
-                fetch("/lab-api/generate-docs", { method: "POST" })
+                fetch(cfg.apiDocsGenerateUrl, { method: "POST" })
                     .then(function (r) {
                         return r.json().catch(function () {
                             return { ok: false, error: "HTTP " + r.status };
@@ -4127,7 +2815,7 @@
             }
 
             function handleCardImageError(img) {
-                var fallbacks = ["/reference/" + img.dataset.refSlug + "/babylon-ref-golden.png", "/thumbnails/scene" + img.dataset.sceneId + ".png"];
+                var fallbacks = ["/lite/reference/" + img.dataset.refSlug + "/babylon-ref-golden.png", "/lite/thumbnails/scene" + img.dataset.sceneId + ".png"];
                 var fallbackIndex = Number(img.dataset.fallbackIndex || "0");
                 if (fallbackIndex >= fallbacks.length) {
                     img.onerror = null;
@@ -4139,7 +2827,7 @@
 
             function renderSceneCardImage(s, priorityAttrs) {
                 return (
-                    '<img src="/reference/' +
+                    '<img src="/lite/reference/' +
                     s.slug +
                     '/test-actual.png" data-ref-slug="' +
                     s.slug +
@@ -4177,16 +2865,7 @@
             }
 
             function buildSceneSearchText(s) {
-                return normalizeSearchText(
-                    [
-                        "scene" + s.id,
-                        "#" + s.id,
-                        s.name,
-                        s.description,
-                        s.note,
-                        (s.tags || []).join(" "),
-                    ].join(" ")
-                );
+                return normalizeSearchText(["scene" + s.id, "#" + s.id, s.name, s.description, s.note, (s.tags || []).join(" ")].join(" "));
             }
 
             function sceneSearchAttr(s) {
@@ -4258,7 +2937,7 @@
                         var sceneKey = "scene" + s.id;
                         var priorityAttrs = index < 6 ? ' loading="eager" fetchpriority="high"' : ' loading="lazy" fetchpriority="auto"';
                         return (
-                            '<a class="card" href="/scene' +
+                            '<a class="card" href="/lite/scene' +
                             s.id +
                             '.html" data-scene="' +
                             sceneKey +
@@ -4275,7 +2954,7 @@
                             '<div class="card-body">' +
                             "<h2>" +
                             s.name +
-                            ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/babylon-ref-scene' +
+                            ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/lite/babylon-ref-scene' +
                             s.id +
                             ".html','_blank');\">\u25b6 BJS Ref</span>" +
                             "</h2>" +
@@ -4460,11 +3139,9 @@
                     .map(function (d) {
                         var demoKey = "demo-" + d.slug;
                         var tags = d.tags || [];
-                        var searchAttr = escapeAttr(
-                            normalizeSearchText([demoKey, d.slug, d.name, d.description, tags.join(" ")].join(" "))
-                        );
+                        var searchAttr = escapeAttr(normalizeSearchText([demoKey, d.slug, d.name, d.description, tags.join(" ")].join(" ")));
                         return (
-                            '<a class="card" href="/demo-' +
+                            '<a class="card" href="/lite/demo-' +
                             d.slug +
                             '.html" data-scene="' +
                             demoKey +
@@ -4475,7 +3152,7 @@
                             '">' +
                             renderHideBtn(demoKey) +
                             '<div class="card-image">' +
-                            '<img src="/thumbnails/demo-' +
+                            '<img src="/lite/thumbnails/demo-' +
                             d.slug +
                             '.png" onerror="this.style.display=\'none\'" alt="' +
                             escapeAttr(d.name) +
@@ -4515,7 +3192,16 @@
                 });
                 var pills = ordered.map(function (tag) {
                     var t = DEMO_TAG_LABELS[tag];
-                    return '<span class="pill-toggle ' + t.cls + (activeDemosTags[tag] ? " active" : "") + '" data-filter="' + tag + '" onclick="toggleDemosTag(this)">' + t.label + "</span>";
+                    return (
+                        '<span class="pill-toggle ' +
+                        t.cls +
+                        (activeDemosTags[tag] ? " active" : "") +
+                        '" data-filter="' +
+                        tag +
+                        '" onclick="toggleDemosTag(this)">' +
+                        t.label +
+                        "</span>"
+                    );
                 });
                 el.innerHTML = '<span class="filter-label">Filter:</span>' + pills.join("");
             }
@@ -4545,7 +3231,7 @@
                     .map(function (s) {
                         var sceneKey = "scene" + s.id;
                         return (
-                            '<a class="card" href="/bundle-scene' +
+                            '<a class="card" href="/lite/bundle-scene' +
                             s.id +
                             '.html" data-scene="' +
                             sceneKey +
@@ -4561,9 +3247,9 @@
                             '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' +
                             s.id +
                             '\');" title="Show .ts files contributing to this bundle">\ud83d\udcc4 Files</span>' +
-                            '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/bundle-bjs-scene' +
+                            '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/lite/bundle-bjs-scene' +
                             s.id +
-                            ".html','_blank');\" title=\"Open Babylon.js reference\">\u25b6 BJS Ref</span>" +
+                            ".html','_blank');\" title=\"Open Babylon.js reference\lite\">\u25b6 BJS Ref</span>" +
                             "</div>" +
                             renderNote(s) +
                             "</div>" +
@@ -4591,7 +3277,7 @@
                         return (
                             '<div id="perf-scene' +
                             s.id +
-                            '" class="perf-scene-card" data-scene="' +
+                            '" class="perf-scene-card" data-has-perf="0" data-scene="' +
                             sceneKey +
                             '" data-tags="' +
                             s.tags.join(" ") +
@@ -4851,8 +3537,8 @@
                     tags: s.tags || [],
                     maxMad: s.maxMad,
                     skipParity: !!s.skipParity,
-                    golden: "/reference/" + s.slug + "/babylon-ref-golden.png",
-                    actual: "/reference/" + s.slug + "/test-actual.png",
+                    golden: "/lite/reference/" + s.slug + "/babylon-ref-golden.png",
+                    actual: "/lite/reference/" + s.slug + "/test-actual.png",
                 };
             }
 
@@ -5006,6 +3692,7 @@
                     parityFilterActive: parityFilterActive,
                     bundleOverFilterActive: bundleOverFilterActive,
                     perfFilterActive: perfFilterActive,
+                    perfDataFilterActive: perfDataFilterActive,
                     perfRegFilterActive: window._perfRegFilterRegressionsOnly,
                     pitchSortKey: pitchSortKey,
                     pitchSortAsc: pitchSortAsc,
@@ -5063,6 +3750,7 @@
                 }
                 // Restore perf filter toggle
                 perfFilterActive = !!state.perfFilterActive;
+                perfDataFilterActive = !!state.perfDataFilterActive;
                 applyPerfFilters();
                 // Restore demos tag filters
                 if (state.demosFilters) {
@@ -5377,14 +4065,16 @@
             }
 
             function updateBundleCardFileDelta(scene, card, sceneCard, sizes, masterSizes) {
-                Promise.all([fetchOptionalJson("/bundle/bundle-info/" + scene + ".json"), fetchOptionalJson("/bundle/master-bundle-info/" + scene + ".json")]).then(function (results) {
-                    var currentBytes = getBundleRuntimeBytes(results[0], sizes);
-                    var masterBytes = getBundleRuntimeBytes(results[1], masterSizes);
-                    if (currentBytes == null || masterBytes == null) return;
-                    var deltaEl = card.querySelector(".size-delta");
-                    if (deltaEl) deltaEl.outerHTML = renderBundleMasterByteDelta(currentBytes, masterBytes);
-                    sceneCard.dataset.bundleDeltaKb = ((currentBytes - masterBytes) / 1024).toFixed(1);
-                });
+                Promise.all([fetchOptionalJson("/bundle/bundle-info/" + scene + ".json"), fetchOptionalJson("/bundle/master-bundle-info/" + scene + ".json")]).then(
+                    function (results) {
+                        var currentBytes = getBundleRuntimeBytes(results[0], sizes);
+                        var masterBytes = getBundleRuntimeBytes(results[1], masterSizes);
+                        if (currentBytes == null || masterBytes == null) return;
+                        var deltaEl = card.querySelector(".size-delta");
+                        if (deltaEl) deltaEl.outerHTML = renderBundleMasterByteDelta(currentBytes, masterBytes);
+                        sceneCard.dataset.bundleDeltaKb = ((currentBytes - masterBytes) / 1024).toFixed(1);
+                    }
+                );
             }
 
             function formatBundleDeltaValue(delta) {
@@ -5567,7 +4257,7 @@
                 rowsEl.innerHTML = rows
                     .map(function (row) {
                         return (
-                            "<tr><td><span class=\"bundle-summary-scene\">" +
+                            '<tr><td><span class="bundle-summary-scene">' +
                             escapeBundleSummaryHtml(row.scene) +
                             '</span><span class="bundle-summary-name">' +
                             escapeBundleSummaryHtml(row.name || "") +
@@ -5626,14 +4316,17 @@
                     }, 1200);
                 };
                 if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(text).then(markCopied).catch(function () {
-                        if (textarea) {
-                            textarea.focus();
-                            textarea.select();
-                            document.execCommand("copy");
-                        }
-                        markCopied();
-                    });
+                    navigator.clipboard
+                        .writeText(text)
+                        .then(markCopied)
+                        .catch(function () {
+                            if (textarea) {
+                                textarea.focus();
+                                textarea.select();
+                                document.execCommand("copy");
+                            }
+                            markCopied();
+                        });
                 } else {
                     if (textarea) {
                         textarea.focus();
@@ -5741,9 +4434,16 @@
                     })
                     .then(function (manifest) {
                         if (!manifest) {
-                            document.getElementById("perf-status").textContent = "No data \u2014 run pnpm test:perf";
+                            document.getElementById("perf-status").textContent = "No perf data yet \u2014 run pnpm test:perf";
+                            document.querySelectorAll("#perf-grid .perf-scene-card").forEach(function (card) {
+                                card.dataset.hasPerf = "0";
+                            });
+                            applyPerfFilters();
                             return;
                         }
+                        document.querySelectorAll("#perf-grid .perf-scene-card").forEach(function (card) {
+                            card.dataset.hasPerf = "0";
+                        });
                         var count = 0;
                         for (var key in manifest) {
                             if (!manifest.hasOwnProperty(key)) continue;
@@ -5759,7 +4459,11 @@
                         if (el) el.textContent = "\ud83d\udcca " + count + " scenes (pnpm test:perf to refresh)";
                     })
                     .catch(function () {
-                        document.getElementById("perf-status").textContent = "Failed to load perf-manifest.json";
+                        document.getElementById("perf-status").textContent = "No perf data yet \u2014 run pnpm test:perf";
+                        document.querySelectorAll("#perf-grid .perf-scene-card").forEach(function (card) {
+                            card.dataset.hasPerf = "0";
+                        });
+                        applyPerfFilters();
                     });
             }
 
@@ -5927,7 +4631,7 @@
                         }
                     })
                     .catch(function () {
-                        document.getElementById("perfreg-status").textContent = "Failed to load perf-regression-manifest.json";
+                        document.getElementById("perfreg-status").textContent = "No perf regression data yet — run pnpm test:perf-regression";
                     });
             }
 
@@ -6057,9 +4761,7 @@
                     _setGenLog(target, s.log);
                     if (logbar) logbar.style.display = "flex";
                     if (msg) {
-                        msg.innerHTML = s.ok
-                            ? "✓ " + cfg.label + " generated. You can close this log."
-                            : "✗ " + (s.error || "Generation failed") + " — see log below.";
+                        msg.innerHTML = s.ok ? "✓ " + cfg.label + " generated. You can close this log." : "✗ " + (s.error || "Generation failed") + " — see log below.";
                     }
                     return;
                 }
@@ -6201,7 +4903,86 @@
                 });
             }
 
-            fetch("/scene-config.json?t=" + Date.now())
+            var LAB_EXPERIENCE_KEY = "lab-experience";
+            var LAB_EXPERIENCES = {
+                webgpu: {
+                    title: "Lite",
+                    subtitle: "WebGPU rendering engine · pixel-perfect parity with Babylon.js",
+                    sceneConfigUrl: "/scene-config.json",
+                    demosConfigUrl: "/demos-config.json",
+                    docsUrl: "/lite/docs/architecture-features.html",
+                    apiDocsUrl: "/lite/api-docs/index.html",
+                    apiDocsStatusUrl: "/lab-api/docs-status?experience=lite",
+                    apiDocsGenerateUrl: "/lab-api/generate-docs?experience=lite",
+                    apiDocsCanGenerate: true,
+                    apiDocsTitle: "Babylon Lite — API Reference",
+                    apiDocsHint:
+                        "TypeDoc-generated API reference for the public <code>babylon-lite</code> surface (every symbol exported from <code>index.ts</code>). Enforced by <code>pnpm docs:check</code>; generate locally with <code>pnpm docs</code>.",
+                    pitchTitle: "Babylon Lite vs Babylon.js — At a Glance",
+                    pitchHint: "Averages computed from live benchmarks across all test scenes. Data from <code>bundle/manifest.json</code> and <code>perf-manifest.json</code>.",
+                    pitchAvailable: true,
+                    runtimeData: true,
+                },
+                webgl: {
+                    title: "Lite GL",
+                    subtitle: "WebGL rendering engine · pixel-perfect parity with Babylon.js",
+                    sceneConfigUrl: "/scene-config-webgl.json",
+                    demosConfigUrl: "/demos-config-webgl.json",
+                    docsUrl: "/gl/docs/architecture-features.html",
+                    apiDocsUrl: "/gl/api-docs/index.html",
+                    apiDocsStatusUrl: "/lab-api/docs-status?experience=gl",
+                    apiDocsGenerateUrl: "/lab-api/generate-docs?experience=gl",
+                    apiDocsCanGenerate: false,
+                    apiDocsTitle: "Babylon Lite GL — API Reference",
+                    apiDocsHint:
+                        "Lite GL API docs will be generated from the future <code>babylon-lite-gl</code> package. This experience is prepared but has no public API surface yet.",
+                    pitchTitle: "Babylon Lite GL — Performance Summary",
+                    pitchHint: "Lite GL will have separate WebGL scenes, demos, benchmarks, and bundle manifests. No performance data exists yet.",
+                    pitchAvailable: false,
+                    runtimeData: false,
+                },
+            };
+            var LAB_EXPERIENCE = getLabExperience();
+
+            function getLabExperience() {
+                try {
+                    return localStorage.getItem(LAB_EXPERIENCE_KEY) === "webgl" ? "webgl" : "webgpu";
+                } catch (e) {
+                    return "webgpu";
+                }
+            }
+
+            function currentExperienceConfig() {
+                return LAB_EXPERIENCES[LAB_EXPERIENCE] || LAB_EXPERIENCES.webgpu;
+            }
+
+            function applyLabExperienceChrome() {
+                var cfg = currentExperienceConfig();
+                document.body.dataset.experience = LAB_EXPERIENCE;
+                var title = document.getElementById("experience-title");
+                var subtitle = document.getElementById("experience-subtitle");
+                if (title) title.textContent = cfg.title;
+                if (subtitle) subtitle.textContent = cfg.subtitle;
+                ["webgpu", "webgl"].forEach(function (name) {
+                    var item = document.getElementById("experience-" + name);
+                    if (item) item.classList.toggle("active", name === LAB_EXPERIENCE);
+                });
+            }
+
+            function setLabExperience(value) {
+                var next = value === "webgl" ? "webgl" : "webgpu";
+                if (next === LAB_EXPERIENCE) {
+                    closeHamburgerMenu();
+                    return;
+                }
+                localStorage.setItem(LAB_EXPERIENCE_KEY, next);
+                location.reload();
+            }
+
+            applyLabExperienceChrome();
+            var labExperienceConfig = currentExperienceConfig();
+
+            fetch(labExperienceConfig.sceneConfigUrl + "?t=" + Date.now())
                 .then(function (r) {
                     return r.json();
                 })
@@ -6219,26 +5000,31 @@
                             prioritizePanelImages(_currentTab);
                         });
                     }
-                    loadBundleManifest();
-                    loadPerfManifest();
-                    loadPerfRegManifest();
+                    if (labExperienceConfig.runtimeData) {
+                        loadBundleManifest();
+                        loadPerfManifest();
+                        loadPerfRegManifest();
+                    }
                     refreshAllTabGenStatus();
                     queueTabScrollRestore(_currentTab);
-                    startAutoRefresh();
+                    if (labExperienceConfig.runtimeData) {
+                        startAutoRefresh();
+                    }
                 })
                 .catch(function () {
-                    console.warn("Failed to load scene-config.json");
+                    console.warn("Failed to load " + labExperienceConfig.sceneConfigUrl);
                 });
 
-            fetchOptionalJson("/demos-config.json")
-                .then(function (demos) {
-                    if (!demos) return;
-                    window.DEMOS_CONFIG = demos;
-                    initDemosGrid(demos);
-                    applyHiddenState();
+            fetchOptionalJson(labExperienceConfig.demosConfigUrl).then(function (demos) {
+                if (!demos) return;
+                window.DEMOS_CONFIG = demos;
+                initDemosGrid(demos);
+                applyHiddenState();
+                if (labExperienceConfig.runtimeData) {
                     loadDemosManifest();
-                    applyDemosFilters();
-                });
+                }
+                applyDemosFilters();
+            });
 
             // ── Auto-refresh: poll /lab-api/signature every ~1s and reload
             //    bundle / perf / parity data when their source files change.
@@ -6570,7 +5356,10 @@
                 });
 
                 var card = document.getElementById("perf-scene" + sceneNum);
-                if (card) card.dataset.regressions = regressions;
+                if (card) {
+                    card.dataset.regressions = regressions;
+                    card.dataset.hasPerf = "1";
+                }
 
                 if (card) {
                     var header = card.querySelector(".perf-scene-header");
@@ -6670,17 +5459,25 @@
             }
 
             var perfFilterActive = false;
+            var perfDataFilterActive = false;
             var activePerfTags = {};
 
             function updatePerfFilterButton() {
                 var btn = document.getElementById("perf-filter-btn");
-                if (!btn) return;
-                if (perfFilterActive) {
+                if (btn && perfFilterActive) {
                     btn.style.background = "#3d1117";
                     btn.style.borderColor = "#f85149";
-                } else {
+                } else if (btn) {
                     btn.style.background = "";
                     btn.style.borderColor = "";
+                }
+                var dataBtn = document.getElementById("perf-data-filter-btn");
+                if (dataBtn && perfDataFilterActive) {
+                    dataBtn.style.background = "#123d22";
+                    dataBtn.style.borderColor = "#3fb950";
+                } else if (dataBtn) {
+                    dataBtn.style.background = "";
+                    dataBtn.style.borderColor = "";
                 }
             }
 
@@ -6701,6 +5498,9 @@
                     if (show && perfFilterActive) {
                         show = parseInt(c.dataset.regressions || "0", 10) > 0;
                     }
+                    if (show && perfDataFilterActive) {
+                        show = c.dataset.hasPerf === "1";
+                    }
                     c.classList.toggle("filter-hidden", !show);
                 });
             }
@@ -6715,6 +5515,12 @@
 
             function togglePerfFilter() {
                 perfFilterActive = !perfFilterActive;
+                applyPerfFilters();
+                saveLabState();
+            }
+
+            function togglePerfDataFilter() {
+                perfDataFilterActive = !perfDataFilterActive;
                 applyPerfFilters();
                 saveLabState();
             }
@@ -6782,6 +5588,33 @@
             }
 
             // ── Docs Panel Toggle ──
+            var _docsContentUrl = "";
+
+            function ensureDocsContentLoaded() {
+                var cfg = typeof currentExperienceConfig === "function" ? currentExperienceConfig() : null;
+                var url = (cfg && cfg.docsUrl) || "/lite/docs/architecture-features.html";
+                var host = document.getElementById("docs-content");
+                if (!host) return;
+                if (_docsContentUrl === url && host.dataset.loaded === "1") return;
+                _docsContentUrl = url;
+                host.dataset.loaded = "0";
+                host.innerHTML = "Loading documentation…";
+                fetch(url, { cache: "no-store" })
+                    .then(function (r) {
+                        if (!r.ok) throw new Error("HTTP " + r.status);
+                        return r.text();
+                    })
+                    .then(function (html) {
+                        host.innerHTML = html;
+                        host.dataset.loaded = "1";
+                        filterFeatures("all");
+                    })
+                    .catch(function (err) {
+                        host.innerHTML =
+                            '<div class="empty-state" style="padding: 32px; text-align: center; color: #8b949e">Documentation unavailable: ' + escapeAttr(String(err)) + "</div>";
+                    });
+            }
+
             function toggleDocs() {
                 var panel = document.getElementById("docs-panel");
                 var btn = document.getElementById("docs-toggle");
@@ -6791,6 +5624,7 @@
                 btn.classList.toggle("active", isOpen);
                 tabs.style.display = isOpen ? "none" : "";
                 if (activePanel) activePanel.style.display = isOpen ? "none" : "";
+                if (isOpen) ensureDocsContentLoaded();
                 _applyOverlayChrome();
             }
 
@@ -6851,7 +5685,10 @@
                 btn.classList.toggle("active", isOpen);
                 tabs.style.display = isOpen ? "none" : "";
                 if (activePanel) activePanel.style.display = isOpen ? "none" : "";
-                if (isOpen && !panel.dataset.loaded) {
+                if (isOpen) {
+                    syncPitchChrome();
+                }
+                if (isOpen && currentExperienceConfig().pitchAvailable !== false && !panel.dataset.loaded) {
                     loadPitchData();
                     panel.dataset.loaded = "1";
                 }
@@ -6978,10 +5815,23 @@
             var pitchSortKey = "sceneNum";
             var pitchSortAsc = true;
 
+            function syncPitchChrome() {
+                var cfg = typeof currentExperienceConfig === "function" ? currentExperienceConfig() : null;
+                cfg = cfg || {};
+                var title = document.getElementById("pitch-title");
+                var hint = document.getElementById("pitch-hint");
+                var content = document.getElementById("pitch-content");
+                var empty = document.getElementById("pitch-empty");
+                if (title) title.textContent = cfg.pitchTitle || "Performance Summary";
+                if (hint) hint.innerHTML = cfg.pitchHint || "";
+                if (content) content.style.display = cfg.pitchAvailable === false ? "none" : "";
+                if (empty) empty.style.display = cfg.pitchAvailable === false ? "block" : "none";
+            }
+
             function pitchThumbSrc(sceneNum) {
-                var img = document.querySelector('.card[href="/scene' + sceneNum + '.html"] img');
+                var img = document.querySelector('.card[href="/lite/scene' + sceneNum + '.html"] img');
                 if (img) return img.getAttribute("src");
-                return "/thumbnails/scene" + sceneNum + ".png";
+                return "/lite/thumbnails/scene" + sceneNum + ".png";
             }
 
             function renderPitchTable(data) {
@@ -7059,6 +5909,10 @@
             });
 
             function loadPitchData() {
+                if (currentExperienceConfig().pitchAvailable === false) {
+                    syncPitchChrome();
+                    return;
+                }
                 Promise.all([
                     fetch("/bundle/manifest.json").then(function (r) {
                         return r.json();
@@ -7602,8 +6456,22 @@
                     if (!local || !master) return null;
                     var localChunks = visibleChunksForSource(local);
                     var masterChunks = visibleChunksForSource(master);
-                    var chunkOrder = buildPartitionedOrder(localChunks, masterChunks, function (c) { return chunkSortKey(c.file); }, state.source);
-                    var moduleOrder = buildPartitionedOrder(buildModuleList(localChunks), buildModuleList(masterChunks), function (m) { return m.id; }, state.source);
+                    var chunkOrder = buildPartitionedOrder(
+                        localChunks,
+                        masterChunks,
+                        function (c) {
+                            return chunkSortKey(c.file);
+                        },
+                        state.source
+                    );
+                    var moduleOrder = buildPartitionedOrder(
+                        buildModuleList(localChunks),
+                        buildModuleList(masterChunks),
+                        function (m) {
+                            return m.id;
+                        },
+                        state.source
+                    );
                     return { chunkRanks: chunkOrder.ranks, moduleRanks: moduleOrder.ranks, chunkFallback: chunkOrder.fallback, moduleFallback: moduleOrder.fallback };
                 }
                 function partitionedRankFirst(cmp, rankMap, keyFn, fallback) {
@@ -7664,11 +6532,11 @@
                             badges += loaded ? '<span class="bf-chunk-badge bf-badge-runtime">loaded</span> ' : '<span class="bf-chunk-badge bf-badge-stripped">not loaded</span> ';
                         }
                         var modsHtml = visibleMods.length
-                              ? visibleMods
-                                   .map(function (m) {
+                            ? visibleMods
+                                  .map(function (m) {
                                       return "<li" + (m._missingLocal ? ' class="missing-local"' : "") + ">" + renderModuleLi(m, m._masterBytes) + "</li>";
-                                   })
-                                   .join("")
+                                  })
+                                  .join("")
                             : '<li class="bf-empty">(no module contributions recorded)</li>';
                         // Collapse chunks by default except the first visible one, unless filtering (then expand all).
                         var collapsed = !filter && idx > 0;
@@ -7705,12 +6573,30 @@
                 function makeChunkComparator() {
                     var cmp = baseChunkComparator();
                     var partitionedOrder = buildPartitionedOrderMaps();
-                    return partitionedOrder ? partitionedRankFirst(cmp, partitionedOrder.chunkRanks, function (c) { return chunkSortKey(c.file); }, partitionedOrder.chunkFallback) : cmp;
+                    return partitionedOrder
+                        ? partitionedRankFirst(
+                              cmp,
+                              partitionedOrder.chunkRanks,
+                              function (c) {
+                                  return chunkSortKey(c.file);
+                              },
+                              partitionedOrder.chunkFallback
+                          )
+                        : cmp;
                 }
                 function makeModuleComparator(partitionedOrder) {
                     var cmp = baseModuleComparator();
                     partitionedOrder = partitionedOrder || buildPartitionedOrderMaps();
-                    return partitionedOrder ? partitionedRankFirst(cmp, partitionedOrder.moduleRanks, function (m) { return m.id; }, partitionedOrder.moduleFallback) : cmp;
+                    return partitionedOrder
+                        ? partitionedRankFirst(
+                              cmp,
+                              partitionedOrder.moduleRanks,
+                              function (m) {
+                                  return m.id;
+                              },
+                              partitionedOrder.moduleFallback
+                          )
+                        : cmp;
                 }
 
                 function renderFlat(chunks, filter) {
@@ -7836,7 +6722,13 @@
                     var master = numericSize(masterSizes && masterSizes[key]);
                     if (local == null) return "";
                     if (master == null) {
-                        return '<div class="bf-master-compare-metric">' + label + '<strong>' + fmtKB(local) + '<span class="bf-master-compare-delta neutral">new vs master</span></strong></div>';
+                        return (
+                            '<div class="bf-master-compare-metric">' +
+                            label +
+                            "<strong>" +
+                            fmtKB(local) +
+                            '<span class="bf-master-compare-delta neutral">new vs master</span></strong></div>'
+                        );
                     }
                     var delta = Math.round((local - master) * 10) / 10;
                     var cls = delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral";
@@ -7844,7 +6736,7 @@
                     return (
                         '<div class="bf-master-compare-metric">' +
                         label +
-                        '<strong>' +
+                        "<strong>" +
                         fmtKB(local) +
                         '<span class="bf-master-compare-delta ' +
                         cls +
@@ -7859,7 +6751,13 @@
                 function renderSceneByteMetric(label, localBytes, masterBytes) {
                     if (localBytes == null) return "";
                     if (masterBytes == null) {
-                        return '<div class="bf-master-compare-metric">' + label + '<strong>' + fmtBytes(localBytes) + '<span class="bf-master-compare-delta neutral">new vs master</span></strong></div>';
+                        return (
+                            '<div class="bf-master-compare-metric">' +
+                            label +
+                            "<strong>" +
+                            fmtBytes(localBytes) +
+                            '<span class="bf-master-compare-delta neutral">new vs master</span></strong></div>'
+                        );
                     }
                     var delta = localBytes - masterBytes;
                     var cls = delta > 0 ? "increase" : delta < 0 ? "decrease" : "neutral";
@@ -7867,7 +6765,7 @@
                     return (
                         '<div class="bf-master-compare-metric">' +
                         label +
-                        '<strong>' +
+                        "<strong>" +
                         fmtBytes(localBytes) +
                         '<span class="bf-master-compare-delta ' +
                         cls +
@@ -7937,7 +6835,12 @@
                     body.innerHTML = '<div class="bf-empty">Loading…</div>';
                     document.getElementById("bf-overlay").classList.add("active");
 
-                    Promise.all([loadJson("/bundle/bundle-info/" + scene + ".json"), loadJson("/bundle/manifest.json"), loadJson("/bundle/master-bundle-info/" + scene + ".json"), loadJson("/bundle/master-manifest.json")]).then(function (results) {
+                    Promise.all([
+                        loadJson("/bundle/bundle-info/" + scene + ".json"),
+                        loadJson("/bundle/manifest.json"),
+                        loadJson("/bundle/master-bundle-info/" + scene + ".json"),
+                        loadJson("/bundle/master-manifest.json"),
+                    ]).then(function (results) {
                         var info = results[0];
                         var manifest = results[1] || {};
                         var masterInfo = results[2];
@@ -7993,7 +6896,9 @@
                             "</div>" +
                             renderSceneMasterComparison(scene, manifest, masterManifest, localData, masterData) +
                             '<div class="bf-note">Chunk sizes are post-minification bytes. Module sizes are the rendered contribution of each <code>.ts</code> / <code>.wgsl</code> file. Chips show the exported symbols that survived tree-shaking.</div>' +
-                            (masterData ? "" : '<div class="bf-note">Master file breakdown unavailable. Run <code>pnpm build:bundle-master-info</code> to generate <code>master-bundle-info</code>.</div>') +
+                            (masterData
+                                ? ""
+                                : '<div class="bf-note">Master file breakdown unavailable. Run <code>pnpm build:bundle-master-info</code> to generate <code>master-bundle-info</code>.</div>') +
                             '<div id="bf-list"></div>';
 
                         var filterEl = document.getElementById("bf-filter");

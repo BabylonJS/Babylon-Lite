@@ -10,7 +10,7 @@ import { cloneTexture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps, PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
 import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData } from "./gltf-material.js";
-import { linearToSrgbByte } from "../color/color.js";
+import { linearToSrgbByte } from "../math/color.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadTex } from "./gltf-pbr-builder.js";
 
@@ -104,6 +104,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         normalTexture: tex.normalTexture,
         ormTexture: tex.ormTexture,
         emissiveTexture: tex.emissiveTexture,
+        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._occlusionTexCoord ? { occlusionTexCoord: mat._occlusionTexCoord } : undefined),
@@ -119,4 +120,8 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
     } as PbrMaterialPropsInternal;
+}
+
+function isDefaultBaseColorFactor(f: readonly number[]): boolean {
+    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }

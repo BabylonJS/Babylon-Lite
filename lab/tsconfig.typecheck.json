@@ -7,5 +7,5 @@
       "babylon-lite/*": ["../packages/babylon-lite/src/*"]
     }
   },
-  "include": ["src", "../packages/babylon-lite/src/vite-env.d.ts"]
+  "include": ["lite/src", "../packages/babylon-lite/src/vite-env.d.ts"]
 }
