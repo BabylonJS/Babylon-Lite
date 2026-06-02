@@ -44,7 +44,7 @@ async function main(): Promise<void> {
         gridSize: [PLAYER_SPRITE_INFO.frameWidthPx, PLAYER_SPRITE_INFO.frameHeightPx],
         sampling: "linear",
     });
-    const billboards = createFacingBillboardSystem(atlas, { capacity: 4, blendMode: "alpha" });
+    const billboards = createFacingBillboardSystem(atlas, { capacity: 4 });
     const manager = createSpriteAnimationManager();
 
     const mainRunner = addBillboardSprite(billboards, {

@@ -11,9 +11,16 @@
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { Sprite2DCustomShader } from "./sprite-custom-shader.js";
+import { _getSpriteFxHook } from "./sprite-fx-hook.js";
+import type { SpriteBlendDescriptor } from "./sprite-blend.js";
+import { spriteBlendAlpha } from "./sprite-blend.js";
 
-/** Output blend mode for a sprite layer. Implemented: `"alpha"`, `"premultiplied"`, `"additive"`. */
-export type SpriteBlendMode = "alpha" | "premultiplied" | "additive" | "multiply" | "cutout";
+/**
+ * Output blend mode for a sprite layer — a pure-data descriptor value. Import one of
+ * `spriteBlendAlpha` (default), `spriteBlendPremultiplied`, or `spriteBlendAdditive` and pass
+ * it as `Sprite2DLayerOptions.blendMode`. (Type alias of {@link SpriteBlendDescriptor}.)
+ */
+export type SpriteBlendMode = SpriteBlendDescriptor;
 
 /** Depth participation. `"none"` uses `SpriteRenderer`; depth-enabled modes use `addToScene`. */
 export type Sprite2DDepthMode = "none" | "test" | "test-write";
@@ -78,10 +85,18 @@ export interface Sprite2DLayer {
     view: Sprite2DView;
     /** Layer-wide pivot in normalised sprite-local space; see `Sprite2DLayerOptions.pivot`. */
     pivot: [number, number];
-    /** Opt-in custom fragment shader for this layer, or `null`; see `Sprite2DLayerOptions.customShader`. */
-    readonly customShader: Sprite2DCustomShader | null;
-    /** User `fx.params` vec4 fed to a custom shader each frame; mutate via `setSprite2DShaderParams`. */
-    shaderParams: [number, number, number, number];
+    /**
+     * Opt-in custom fragment shader for this layer; see `Sprite2DLayerOptions.customShader`.
+     * **Absent** (not `null`) on plain layers — never default-initialized, so the always-loaded
+     * path carries zero custom-shader bytes (see `sprite-fx-hook.ts`). Present only when the
+     * layer was created with a `customShader`.
+     */
+    readonly customShader?: Sprite2DCustomShader;
+    /**
+     * User `fx.params` vec4 fed to a custom shader each frame; mutate via `setSprite2DShaderParams`.
+     * **Absent** on plain layers (only allocated for custom-shader layers, or lazily by the setter).
+     */
+    shaderParams?: [number, number, number, number];
     /** Default NDC depth for newly added sprites; see `Sprite2DLayerOptions.layerZ`. */
     layerZ: number;
     readonly count: number;
@@ -177,18 +192,10 @@ export const SAVED_SIZE_FLOATS_PER_SPRITE = 2;
 
 const DEFAULT_CAPACITY = 16;
 
-function assertBlendSupported(blendMode: SpriteBlendMode): void {
-    if (blendMode === "multiply" || blendMode === "cutout") {
-        throw new Error(`Sprite2DLayer: blendMode: "${blendMode}" lands in a later PR. Use "alpha", "premultiplied", or "additive".`);
-    }
-}
-
 /** Create a new (empty) `Sprite2DLayer` backed by `atlas`. */
 export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptions = {}): Sprite2DLayer {
     const depth = opts.depth ?? "none";
-    const blendMode = opts.blendMode ?? "alpha";
-    assertBlendSupported(blendMode);
-    const customShader = opts.customShader ?? null;
+    const blendMode = opts.blendMode ?? spriteBlendAlpha;
 
     const capacity = Math.max(1, opts.capacity ?? DEFAULT_CAPACITY);
     const view: Sprite2DView = {
@@ -200,7 +207,7 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
     const instanceFloatsPerSprite = depth === "none" ? PURE_2D_INSTANCE_FLOATS_PER_SPRITE : DEPTH_INSTANCE_FLOATS_PER_SPRITE;
     const instanceStrideBytes = instanceFloatsPerSprite * 4;
     const instanceData = new Float32Array(capacity * instanceFloatsPerSprite);
-    return {
+    const layer: Sprite2DLayer = {
         _entityType: "sprite-2d-layer",
         atlas,
         depth,
@@ -210,8 +217,6 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         order: opts.order ?? 0,
         view,
         pivot: [opts.pivot?.[0] ?? 0.5, opts.pivot?.[1] ?? 0.5],
-        customShader,
-        shaderParams: [0, 0, 0, 0],
         layerZ: opts.layerZ ?? 0.5,
         count: 0,
         _capacity: capacity,
@@ -223,6 +228,11 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         _dirtyMin: 0,
         _dirtyMax: 0,
     };
+    // Zero-default-init discipline: the base layer never names `customShader` / `shaderParams`.
+    // When (and only when) a custom shader was supplied, the registered hook copies it on — the
+    // impl lives in the tree-shaken `sprite-custom-shader` module, so plain scenes ship none of it.
+    _getSpriteFxHook()?.initLayer(layer, opts);
+    return layer;
 }
 
 /**
@@ -231,10 +241,11 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
  * as `fx.params`. Mutates in place; the renderer re-uploads the small FX UBO next frame.
  */
 export function setSprite2DShaderParams(layer: Sprite2DLayer, params: readonly [number, number, number, number]): void {
-    layer.shaderParams[0] = params[0];
-    layer.shaderParams[1] = params[1];
-    layer.shaderParams[2] = params[2];
-    layer.shaderParams[3] = params[3];
+    const target = (layer.shaderParams ??= [0, 0, 0, 0]);
+    target[0] = params[0];
+    target[1] = params[1];
+    target[2] = params[2];
+    target[3] = params[3];
 }
 
 function growCapacity(layer: Sprite2DLayer, minCapacity: number): void {

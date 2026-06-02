@@ -23,10 +23,21 @@
  *     body owns all alpha handling.
  */
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import type { BillboardDepthMode, BillboardOrientation } from "./billboard-sprite.js";
 import { makeBillboardBasisWgsl } from "./billboard-pipeline.js";
-import type { CustomShaderTexture } from "./custom-shader-core.js";
-import { makeExtraBindingsWgsl, makeFxStructWgsl, nextCustomShaderKey, validateExtraTextureNames } from "./custom-shader-core.js";
+import type { CustomShaderTexture, SpriteLayerFx } from "./custom-shader-core.js";
+import {
+    createSpriteLayerFx,
+    makeCustomShaderLayoutEntries,
+    makeExtraBindingsWgsl,
+    makeFxStructWgsl,
+    makeShaderModuleCache,
+    nextCustomShaderKey,
+    validateExtraTextureNames,
+} from "./custom-shader-core.js";
+import type { BillboardFxHook } from "./sprite-fx-hook.js";
+import { _registerBillboardFxHook } from "./sprite-fx-hook.js";
 
 /** One extra texture bound after the atlas (group 1, bindings 3, 5, 7, …). */
 export type BillboardCustomTexture = CustomShaderTexture;
@@ -48,6 +59,12 @@ export interface BillboardCustomShader {
     readonly _key: string;
     /** @internal Builds the full WGSL for the given orientation (depth mode is irrelevant — the body owns alpha). */
     readonly _composeWgsl: (orientation: BillboardOrientation, depthMode: BillboardDepthMode) => string;
+    /** @internal Compile + cache the `GPUShaderModule` for an orientation (owns its per-device cache). */
+    readonly _getShaderModule: (engine: EngineContextInternal, orientation: BillboardOrientation, depthMode: BillboardDepthMode) => GPUShaderModule;
+    /** @internal Extra-texture + fx UBO bind-group **layout** entries, starting at `startBinding` (3). */
+    readonly _layoutEntries: (startBinding: number) => GPUBindGroupLayoutEntry[];
+    /** @internal Build the opaque per-system fx attachment (owns the `SpriteFx` UBO, scratch, and elapsed time). */
+    readonly _createLayerFx: (engine: EngineContextInternal, label: string) => SpriteLayerFx;
 }
 
 function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {
@@ -104,20 +121,64 @@ ${fragment}
 }
 
 /**
+ * The billboard custom-shader hook implementation. Lives only in this (tree-shaken) module, so the
+ * always-loaded billboard path never names `_customShader` / `shaderParams`. Reads both off the
+ * opaque `system` and delegates to the descriptor's underscore-prefixed (mangled) methods.
+ */
+const BILLBOARD_FX_HOOK: BillboardFxHook = {
+    initSystem(system, opts) {
+        const customShader = opts.customShader;
+        if (customShader) {
+            (system as { _customShader?: BillboardCustomShader })._customShader = customShader;
+            system.shaderParams = [0, 0, 0, 0];
+        }
+    },
+    pipelineKeyPart(system) {
+        return system._customShader?._key ?? "";
+    },
+    shaderModule(engine, system) {
+        return system._customShader?._getShaderModule(engine, system._orientation, system._depthMode) ?? null;
+    },
+    layoutEntries(system, startBinding) {
+        return system._customShader?._layoutEntries(startBinding) ?? null;
+    },
+    createLayerFx(engine, label, system) {
+        return system._customShader?._createLayerFx(engine, label) ?? null;
+    },
+    updateFx(fx, system, deltaMs) {
+        fx.update(system.shaderParams ?? EMPTY_PARAMS, deltaMs);
+    },
+    bindEntries(fx, startBinding) {
+        return fx.bindEntries(startBinding);
+    },
+    disposeFx(fx) {
+        fx.destroy();
+    },
+};
+
+const EMPTY_PARAMS: readonly number[] = [0, 0, 0, 0];
+
+/**
  * Build a custom-shader descriptor to pass as `customShader` when creating a billboard system.
  * The descriptor is opaque; the pipeline consumes it lazily.
  */
 export function createBillboardCustomShader(options: BillboardCustomShaderOptions): BillboardCustomShader {
+    _registerBillboardFxHook(BILLBOARD_FX_HOOK);
     const fragment = options.fragment;
     if (typeof fragment !== "string" || fragment.trim().length === 0) {
         throw new Error("createBillboardCustomShader: `fragment` must be a non-empty WGSL string.");
     }
     const extraTextures = options.extraTextures ?? [];
     validateExtraTextureNames("createBillboardCustomShader", extraTextures);
+    const moduleCache = makeShaderModuleCache();
     return {
         _entityType: "billboard-custom-shader",
         _extraTextures: extraTextures,
         _key: nextCustomShaderKey("c"),
         _composeWgsl: (orientation) => makeCustomBillboardWgsl(orientation, extraTextures, fragment),
+        _getShaderModule: (engine, orientation, depthMode) =>
+            moduleCache(engine, `${orientation}:${depthMode}`, () => makeCustomBillboardWgsl(orientation, extraTextures, fragment)),
+        _layoutEntries: (startBinding) => makeCustomShaderLayoutEntries(extraTextures, startBinding),
+        _createLayerFx: (engine, label) => createSpriteLayerFx(engine, label, extraTextures),
     };
 }

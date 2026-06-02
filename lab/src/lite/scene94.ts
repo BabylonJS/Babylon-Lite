@@ -1,8 +1,19 @@
+// Scene 94 — Billboard Custom Shader (params-driven tint)
+//
+// The facing-billboard scene from scene 54, but the system is drawn with an
+// opt-in custom fragment shader that multiplies the atlas sample and per-sprite
+// tint by a constant `fx.params` vec4 set once before the first frame. No
+// `fx.time` term is referenced, so the rendered frame is fully deterministic.
+//
+// Parity oracle: BJS SpriteManager renders the same billboards with each
+// sprite's `color` pre-multiplied by `fx.params`.
+
 import {
     addBillboardSpriteIndex,
     addFacingBillboardSystem,
     addToScene,
     createArcRotateCamera,
+    createBillboardCustomShader,
     createBox,
     createEngine,
     createFacingBillboardSystem,
@@ -11,11 +22,13 @@ import {
     createStandardMaterial,
     loadSpriteAtlas,
     registerScene,
+    setBillboardShaderParams,
     startEngine,
 } from "babylon-lite";
 import { getSpriteAtlasDataUrl, SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-image";
 
 const CAMERA_ALPHA = -Math.PI / 3;
+export const SCENE94_PARAMS: [number, number, number, number] = [1.0, 0.78, 0.55, 1.0];
 
 async function main(): Promise<void> {
     const initStart = performance.now();
@@ -48,7 +61,13 @@ async function main(): Promise<void> {
         gridSize: [SPRITE_ATLAS_INFO.cellWidthPx, SPRITE_ATLAS_INFO.cellHeightPx],
         sampling: "linear",
     });
-    const billboards = createFacingBillboardSystem(atlas, { capacity: 6 });
+
+    const customShader = createBillboardCustomShader({
+        fragment: `return textureSample(atlasTex, atlasSamp, in.uv) * in.tint * fx.params;`,
+    });
+
+    const billboards = createFacingBillboardSystem(atlas, { capacity: 6, customShader });
+    setBillboardShaderParams(billboards, SCENE94_PARAMS);
 
     addBillboardSpriteIndex(billboards, {
         position: [-1.6, 0.7, -2.15],

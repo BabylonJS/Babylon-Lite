@@ -798,6 +798,46 @@
         "skipPerf": true
     },
     {
+        "id": 92,
+        "slug": "scene92-sprite-customshader-params",
+        "name": "Scene 92 — Sprite Custom Shader (params tint)",
+        "maxMad": 0.02,
+        "maxRawKB": 24,
+        "description": "25×10 pure-2D sprite grid drawn through an opt-in custom fragment shader that multiplies the atlas sample and per-sprite tint by a constant fx.params vec4 set once before the first frame (no fx.time, fully deterministic). BJS SpriteRenderer oracle pre-multiplies each sprite color by the same params.",
+        "tags": ["sprites", "2d", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 93,
+        "slug": "scene93-sprite-customshader-palette",
+        "name": "Scene 93 — Sprite Custom Shader (palette remap)",
+        "maxMad": 0.02,
+        "maxRawKB": 24,
+        "description": "25×10 pure-2D cutout-sprite grid recoloured through a 256×1 palette lookup texture (atlas red channel indexes the palette, source alpha preserved), nearest-filtered for bit-exact lookup. BJS SpriteRenderer oracle renders a pre-baked palette-remapped atlas.",
+        "tags": ["sprites", "2d", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 94,
+        "slug": "scene94-billboard-customshader-params",
+        "name": "Scene 94 — Billboard Custom Shader (params tint)",
+        "maxMad": 0.02,
+        "maxRawKB": 68,
+        "description": "World-space facing billboards drawn through an opt-in custom fragment shader that multiplies the atlas sample and per-sprite tint by a constant fx.params vec4 set once before the first frame (no fx.time, fully deterministic). BJS SpriteManager oracle pre-multiplies each sprite color by the same params.",
+        "tags": ["sprites", "billboards", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 95,
+        "slug": "scene95-billboard-customshader-palette",
+        "name": "Scene 95 — Billboard Custom Shader (palette remap)",
+        "maxMad": 0.02,
+        "maxRawKB": 68,
+        "description": "World-space facing billboards recoloured through a 256×1 palette lookup texture (cutout atlas red channel indexes the palette, source alpha preserved), nearest-filtered for bit-exact lookup. BJS SpriteManager oracle renders a pre-baked palette-remapped atlas.",
+        "tags": ["sprites", "billboards", "shader"],
+        "skipPerf": true
+    },
+    {
         "id": 110,
         "slug": "scene110-rtt-override",
         "name": "Scene 110 — RTT with material override",

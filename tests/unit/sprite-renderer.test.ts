@@ -37,6 +37,7 @@ import {
     _spriteRendererPipelineCacheSize,
 } from "../../packages/babylon-lite/src/sprite/sprite-renderer";
 import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../packages/babylon-lite/src/sprite/sprite-pipeline";
+import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied } from "../../packages/babylon-lite/src/sprite/sprite-blend";
 import { createSprite2DCustomShader } from "../../packages/babylon-lite/src/sprite/sprite-custom-shader";
 import type { SpriteAtlas } from "../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../packages/babylon-lite/src/texture/texture-2d";
@@ -189,7 +190,7 @@ describe("createSpriteRenderer", () => {
         const cache = createSpritePipelineCache();
         const sceneBGL = {} as GPUBindGroupLayout;
 
-        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, "alpha", true, false, "depth24plus-stencil8", sceneBGL);
+        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL);
 
         const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
@@ -202,7 +203,7 @@ describe("createSpriteRenderer", () => {
 describe("addSpriteRendererLayer / removeSpriteRendererLayer", () => {
     it("adds layers through the renderer lifecycle API and prewarms their pipeline", () => {
         const { engine } = makeMockEngine();
-        const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: "premultiplied" });
+        const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: spriteBlendPremultiplied });
         const sr = createSpriteRenderer(engine, { layers: [] });
 
         addSpriteRendererLayer(sr, layer);
@@ -342,8 +343,8 @@ describe("pipeline cache", () => {
     it("holds at most two entries when alpha + premultiplied layers are added", () => {
         const { engine } = makeMockEngine();
         const atlas = makeMockAtlas();
-        const a = createSprite2DLayer(atlas, { blendMode: "alpha" });
-        const b = createSprite2DLayer(atlas, { blendMode: "premultiplied" });
+        const a = createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha });
+        const b = createSprite2DLayer(atlas, { blendMode: spriteBlendPremultiplied });
         const sr = createSpriteRenderer(engine, { layers: [a, b] });
         expect(_spriteRendererPipelineCacheSize(sr)).toBeLessThanOrEqual(2);
         expect(_spriteRendererPipelineCacheSize(sr)).toBe(2);
@@ -352,8 +353,8 @@ describe("pipeline cache", () => {
     it("collapses identical-blendMode layers into a single pipeline-cache entry", () => {
         const { engine } = makeMockEngine();
         const atlas = makeMockAtlas();
-        const a = createSprite2DLayer(atlas, { blendMode: "alpha" });
-        const b = createSprite2DLayer(atlas, { blendMode: "alpha" });
+        const a = createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha });
+        const b = createSprite2DLayer(atlas, { blendMode: spriteBlendAlpha });
         const sr = createSpriteRenderer(engine, { layers: [a, b] });
         expect(_spriteRendererPipelineCacheSize(sr)).toBe(1);
     });
@@ -451,14 +452,15 @@ describe("Sprite2D custom shader", () => {
         const { engine, counters } = makeMockEngine();
         const eng = engine as EngineContextInternal;
         const cache = createSpritePipelineCache();
-        const plain = getOrCreateSpritePipeline(eng, cache, eng.format, 1, "alpha", false);
+        const plain = getOrCreateSpritePipeline(eng, cache, eng.format, 1, spriteBlendAlpha, false);
         const modulesAfterPlain = counters.shaderModules;
         const cs = createSprite2DCustomShader({ fragment: FX_FRAGMENT });
-        const custom = getOrCreateSpritePipeline(eng, cache, eng.format, 1, "alpha", false, false, undefined, undefined, cs);
+        const customLayer = createSprite2DLayer(makeMockAtlas(), { customShader: cs });
+        const custom = getOrCreateSpritePipeline(eng, cache, eng.format, 1, spriteBlendAlpha, false, false, undefined, undefined, customLayer);
         expect(custom).not.toBe(plain);
         expect(counters.shaderModules).toBeGreaterThan(modulesAfterPlain);
         // Re-requesting the same custom shader hits the cache (no new pipeline).
-        const again = getOrCreateSpritePipeline(eng, cache, eng.format, 1, "alpha", false, false, undefined, undefined, cs);
+        const again = getOrCreateSpritePipeline(eng, cache, eng.format, 1, spriteBlendAlpha, false, false, undefined, undefined, customLayer);
         expect(again).toBe(custom);
     });
 
@@ -498,13 +500,8 @@ describe("createSprite2DLayer guards", () => {
     });
 
     it("accepts additive blend mode and stores it", () => {
-        const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: "additive" });
-        expect(layer.blendMode).toBe("additive");
-    });
-
-    it("throws on multiply / cutout blend modes (later PR)", () => {
-        expect(() => createSprite2DLayer(makeMockAtlas(), { blendMode: "multiply" })).toThrow();
-        expect(() => createSprite2DLayer(makeMockAtlas(), { blendMode: "cutout" })).toThrow();
+        const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: spriteBlendAdditive });
+        expect(layer.blendMode).toBe(spriteBlendAdditive);
     });
 });
 

@@ -21,12 +21,12 @@ import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
+import type { SpriteLayerFx } from "./custom-shader-core.js";
+import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
 import {
     LAYER_UBO_BYTES,
     SHARED_SPRITE_INDEX_DATA,
-    SPRITE_FX_UBO_BYTES,
-    SPRITE_FX_UBO_FLOATS,
     buildSpriteLayerUbo,
     createSpriteInstanceBuffer,
     createSpriteLayerBindGroup,
@@ -35,7 +35,6 @@ import {
     getOrCreateSpritePipeline,
     resetSpritePipelineCache,
     uploadSpriteInstances,
-    writeSpriteFxUbo,
     writeSpriteLayerUboIfDirty,
 } from "./sprite-pipeline.js";
 import type { SpritePipelineCache } from "./sprite-pipeline.js";
@@ -80,9 +79,7 @@ interface SpriteRenderableInternal extends Renderable {
     _uboUploaded: boolean;
     _lastUbo: Float32Array;
     _scratchUbo: Float32Array;
-    _fxBuffer: GPUBuffer | null;
-    _scratchFx: Float32Array | null;
-    _elapsedMs: number;
+    _fx: SpriteLayerFx | null;
     _disposed: boolean;
 }
 
@@ -107,7 +104,7 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
     const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES, "sprite-depth-hosted-ubo");
     const cap = layer._capacity;
     const instanceBuffer = createSpriteInstanceBuffer(engine.device, layer, "sprite-depth-hosted-instances");
-    const fxBuffer = layer.customShader ? createEmptyUniformBuffer(engine, SPRITE_FX_UBO_BYTES, "sprite-depth-hosted-fx-ubo") : null;
+    const fx = _getSpriteFxHook()?.createLayerFx(engine, "sprite-depth-hosted-fx-ubo", layer) ?? null;
 
     const isTransparent = layer.depth === "test";
     const isDirect = layer.depth === "test-write";
@@ -129,9 +126,7 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
         _uboUploaded: false,
         _lastUbo: new Float32Array(LAYER_UBO_BYTES / 4),
         _scratchUbo: new Float32Array(LAYER_UBO_BYTES / 4),
-        _fxBuffer: fxBuffer,
-        _scratchFx: layer.customShader ? new Float32Array(SPRITE_FX_UBO_FLOATS) : null,
-        _elapsedMs: 0,
+        _fx: fx,
         _disposed: false,
         bind(engine, target) {
             return bindLayer(renderable, engine as EngineContextInternal, target);
@@ -163,11 +158,11 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContextInternal, t
         depthWrite,
         target._depthStencilFormat,
         getSceneBindGroupLayout(engine),
-        r._layer.customShader ?? undefined
+        r._layer
     );
     let bindGroup = r._bindGroups.get(pipeline);
     if (!bindGroup) {
-        bindGroup = createSpriteLayerBindGroup(engine, pipeline, 1, r._layer, r._uniformBuffer, r._fxBuffer);
+        bindGroup = createSpriteLayerBindGroup(engine, pipeline, 1, r._layer, r._uniformBuffer, r._fx);
         r._bindGroups.set(pipeline, bindGroup);
     }
     return {
@@ -187,9 +182,8 @@ function uploadLayer(r: SpriteRenderableInternal, target: DrawUpdateContext): vo
     if (r._disposed) {
         return;
     }
-    if (r._fxBuffer && r._scratchFx) {
-        r._elapsedMs += r._engine._currentDelta;
-        writeSpriteFxUbo(r._engine.device, r._fxBuffer, r._elapsedMs / 1000, r._layer.shaderParams, r._scratchFx);
+    if (r._fx) {
+        _getSpriteFxHook()!.updateFx(r._fx, r._layer, r._engine._currentDelta);
     }
     if (!r._layer.visible || r._layer.count === 0) {
         return;
@@ -225,7 +219,9 @@ function disposeRenderable(r: SpriteRenderableInternal): void {
     r._instanceBuffer.destroy();
     r._uniformBuffer.destroy();
     r._indexBuffer.destroy();
-    r._fxBuffer?.destroy();
+    if (r._fx) {
+        _getSpriteFxHook()!.disposeFx(r._fx);
+    }
     r._bindGroups.clear();
     // Drop the layer back-reference so a disposed renderable doesn't keep the
     // user's Sprite2DLayer (and its CPU instance/savedSize buffers) alive.

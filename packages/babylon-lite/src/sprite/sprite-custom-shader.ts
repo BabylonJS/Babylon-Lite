@@ -23,9 +23,20 @@
  *   - Must `return vec4<f32>(...)` (and may `discard`). The body owns all alpha handling; no
  *     per-layer opacity is applied automatically.
  */
-import type { CustomShaderTexture } from "./custom-shader-core.js";
-import { makeExtraBindingsWgsl, makeFxStructWgsl, nextCustomShaderKey, validateExtraTextureNames } from "./custom-shader-core.js";
+import type { CustomShaderTexture, SpriteLayerFx } from "./custom-shader-core.js";
+import {
+    createSpriteLayerFx,
+    makeCustomShaderLayoutEntries,
+    makeExtraBindingsWgsl,
+    makeFxStructWgsl,
+    makeShaderModuleCache,
+    nextCustomShaderKey,
+    validateExtraTextureNames,
+} from "./custom-shader-core.js";
+import type { EngineContextInternal } from "../engine/engine.js";
 import { makeSpritePrologueWgsl } from "./sprite-pipeline.js";
+import type { SpriteFxHook } from "./sprite-fx-hook.js";
+import { _registerSpriteFxHook } from "./sprite-fx-hook.js";
 
 /** One extra texture bound after the atlas. In WGSL it becomes `<name>Tex` + `<name>Samp`. */
 export type Sprite2DCustomTexture = CustomShaderTexture;
@@ -47,6 +58,12 @@ export interface Sprite2DCustomShader {
     readonly _key: string;
     /** @internal Compose the full WGSL module for a given layout (`hasDepth` → group index). */
     readonly _composeWgsl: (hasDepth: boolean, spriteGroupIndex: 0 | 1) => string;
+    /** @internal Compile + cache the `GPUShaderModule` for a layout (owns its per-device cache). */
+    readonly _getShaderModule: (engine: EngineContextInternal, hasDepth: boolean) => GPUShaderModule;
+    /** @internal Extra-texture + fx UBO bind-group **layout** entries, starting at `startBinding` (3). */
+    readonly _layoutEntries: (startBinding: number) => GPUBindGroupLayoutEntry[];
+    /** @internal Build the opaque per-layer fx attachment (owns the `SpriteFx` UBO, scratch, and elapsed time). */
+    readonly _createLayerFx: (engine: EngineContextInternal, label: string) => SpriteLayerFx;
 }
 
 function makeCustomSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, extraTextures: readonly Sprite2DCustomTexture[], fragment: string): string {
@@ -60,20 +77,63 @@ ${fragment}
 }
 
 /**
+ * The 2D-sprite custom-shader hook implementation. Lives only in this (tree-shaken) module, so the
+ * always-loaded sprite path never names `customShader` / `shaderParams`. Reads both off the opaque
+ * `layer` and delegates to the descriptor's underscore-prefixed (mangled) methods.
+ */
+const SPRITE_FX_HOOK: SpriteFxHook = {
+    initLayer(layer, opts) {
+        const customShader = opts.customShader;
+        if (customShader) {
+            (layer as { customShader?: Sprite2DCustomShader }).customShader = customShader;
+            layer.shaderParams = [0, 0, 0, 0];
+        }
+    },
+    pipelineKeyPart(layer) {
+        return layer.customShader?._key ?? "";
+    },
+    shaderModule(engine, hasDepth, layer) {
+        return layer.customShader?._getShaderModule(engine, hasDepth) ?? null;
+    },
+    layoutEntries(layer, startBinding) {
+        return layer.customShader?._layoutEntries(startBinding) ?? null;
+    },
+    createLayerFx(engine, label, layer) {
+        return layer.customShader?._createLayerFx(engine, label) ?? null;
+    },
+    updateFx(fx, layer, deltaMs) {
+        fx.update(layer.shaderParams ?? EMPTY_PARAMS, deltaMs);
+    },
+    bindEntries(fx, startBinding) {
+        return fx.bindEntries(startBinding);
+    },
+    disposeFx(fx) {
+        fx.destroy();
+    },
+};
+
+const EMPTY_PARAMS: readonly number[] = [0, 0, 0, 0];
+
+/**
  * Create a custom fragment shader for a sprite layer. Pass the result as the `customShader`
  * option of `createSprite2DLayer`. See the module-level docs for the WGSL contract.
  */
 export function createSprite2DCustomShader(options: Sprite2DCustomShaderOptions): Sprite2DCustomShader {
+    _registerSpriteFxHook(SPRITE_FX_HOOK);
     const fragment = options.fragment;
     if (typeof fragment !== "string" || fragment.trim().length === 0) {
         throw new Error("createSprite2DCustomShader: `fragment` must be a non-empty WGSL string.");
     }
     const extraTextures = options.extraTextures ?? [];
     validateExtraTextureNames("createSprite2DCustomShader", extraTextures);
+    const moduleCache = makeShaderModuleCache();
     return {
         _entityType: "sprite-2d-custom-shader",
         _extraTextures: extraTextures,
         _key: nextCustomShaderKey("s"),
         _composeWgsl: (hasDepth, spriteGroupIndex) => makeCustomSpriteWgsl(hasDepth, spriteGroupIndex, extraTextures, fragment),
+        _getShaderModule: (engine, hasDepth) => moduleCache(engine, hasDepth ? "1" : "0", () => makeCustomSpriteWgsl(hasDepth, hasDepth ? 1 : 0, extraTextures, fragment)),
+        _layoutEntries: (startBinding) => makeCustomShaderLayoutEntries(extraTextures, startBinding),
+        _createLayerFx: (engine, label) => createSpriteLayerFx(engine, label, extraTextures),
     };
 }

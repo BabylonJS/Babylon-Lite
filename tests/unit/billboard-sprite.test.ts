@@ -19,13 +19,10 @@ import {
     updateBillboardSpriteIndex,
 } from "../../packages/babylon-lite/src/sprite/billboard-sprite";
 import { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "../../packages/babylon-lite/src/sprite/billboard-scene";
-import {
-    BILLBOARD_SYSTEM_UBO_BYTES,
-    SPRITE_FX_UBO_BYTES,
-    createBillboardPipelineCache,
-    getOrCreateBillboardPipeline,
-} from "../../packages/babylon-lite/src/sprite/billboard-pipeline";
+import { billboardBlendCutout, billboardBlendPremultiplied } from "../../packages/babylon-lite/src/sprite/billboard-blend";
+import { BILLBOARD_SYSTEM_UBO_BYTES, createBillboardPipelineCache, getOrCreateBillboardPipeline } from "../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createBillboardCustomShader } from "../../packages/babylon-lite/src/sprite/billboard-custom-shader";
+import { SPRITE_FX_UBO_BYTES } from "../../packages/babylon-lite/src/sprite/custom-shader-core";
 import { createSceneContext, disposeScene } from "../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../packages/babylon-lite/src/scene/scene-core";
 import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
@@ -263,21 +260,21 @@ describe("FacingBillboardSpriteSystem index API", () => {
     });
 
     it("supports cutout as a depth-write billboard mode with cutoff defaults", () => {
-        const cutout = createFacingBillboardSystem(makeMockAtlas(), { blendMode: "cutout" });
-        expect(cutout.blendMode).toBe("cutout");
+        const cutout = createFacingBillboardSystem(makeMockAtlas(), { blendMode: billboardBlendCutout });
+        expect(cutout.blendMode).toBe(billboardBlendCutout);
         expect(cutout._depthMode).toBe("cutout");
         expect(cutout.alphaCutoff).toBe(0.5);
         expect(cutout.order).toBe(100);
 
-        const explicit = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0], { blendMode: "cutout", alphaCutoff: 0.35, order: 177 });
+        const explicit = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0], { blendMode: billboardBlendCutout, alphaCutoff: 0.35, order: 177 });
         expect(explicit._depthMode).toBe("cutout");
         expect(explicit.alphaCutoff).toBe(0.35);
         expect(explicit.order).toBe(177);
     });
 
     it("rejects non-finite alpha cutoff values", () => {
-        expect(() => createFacingBillboardSystem(makeMockAtlas(), { blendMode: "cutout", alphaCutoff: NaN })).toThrow(/finite/);
-        expect(() => createFacingBillboardSystem(makeMockAtlas(), { blendMode: "cutout", alphaCutoff: Infinity })).toThrow(/finite/);
+        expect(() => createFacingBillboardSystem(makeMockAtlas(), { blendMode: billboardBlendCutout, alphaCutoff: NaN })).toThrow(/finite/);
+        expect(() => createFacingBillboardSystem(makeMockAtlas(), { blendMode: billboardBlendCutout, alphaCutoff: Infinity })).toThrow(/finite/);
     });
 
     it("rejects non-finite opacity values", () => {
@@ -316,7 +313,7 @@ describe("addFacingBillboardSystem", () => {
     it("routes cutout billboards into the direct depth-write bucket", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;
-        const system = createFacingBillboardSystem(makeMockAtlas(), { blendMode: "cutout", order: 120 });
+        const system = createFacingBillboardSystem(makeMockAtlas(), { blendMode: billboardBlendCutout, order: 120 });
         addFacingBillboardSystem(scene, system);
 
         await registerScene(engine, scene);
@@ -331,7 +328,7 @@ describe("addFacingBillboardSystem", () => {
     it("builds a scene-UBO billboard pipeline with depth test and no depth write", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;
-        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: "premultiplied" });
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: billboardBlendPremultiplied });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addFacingBillboardSystem(scene, system);
         await registerScene(engine, scene);
@@ -370,7 +367,7 @@ describe("addFacingBillboardSystem", () => {
     it("builds a cutout billboard pipeline with alpha discard and depth write", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;
-        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: "cutout", alphaCutoff: 0.42 });
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: billboardBlendCutout, alphaCutoff: 0.42 });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addFacingBillboardSystem(scene, system);
         await registerScene(engine, scene);
@@ -492,7 +489,7 @@ describe("addFacingBillboardSystem", () => {
     it("uploads cutout billboards in logical order without transparent sorting", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContextInternal;
-        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 3, blendMode: "cutout" });
+        const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 3, blendMode: billboardBlendCutout });
         addBillboardSpriteIndex(system, { position: [10, 0, 1], sizeWorld: [1, 1], frame: 0 });
         addBillboardSpriteIndex(system, { position: [20, 0, 2], sizeWorld: [1, 1], frame: 0 });
         addBillboardSpriteIndex(system, { position: [30, 0, 3], sizeWorld: [1, 1], frame: 0 });

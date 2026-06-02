@@ -17,7 +17,7 @@
 // ALPHA_PREMULTIPLIED` to reach the same end-state. Both renderers see
 // premultiplied bits and use the matching blend factors.
 
-import { createEngine, createSprite2DLayer, createSpriteRenderer, loadSpriteAtlas, registerSpriteRenderer, startEngine } from "babylon-lite";
+import { createEngine, createSprite2DLayer, createSpriteRenderer, loadSpriteAtlas, registerSpriteRenderer, spriteBlendPremultiplied, startEngine } from "babylon-lite";
 import { getSoftSpriteAtlasDataUrl, SOFT_SPRITE_ATLAS_INFO } from "../_shared/sprite-atlas-soft";
 import { addDeterministicSpriteGrid } from "../_shared/sprite-grid";
 
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
         premultiplyOnLoad: true,
     });
 
-    const layer = createSprite2DLayer(atlas, { capacity: 256, blendMode: "premultiplied", depth: "none" });
+    const layer = createSprite2DLayer(atlas, { capacity: 256, blendMode: spriteBlendPremultiplied, depth: "none" });
     addDeterministicSpriteGrid(layer, canvas, { frameForIndex: (index) => index % 32 });
 
     const sr = createSpriteRenderer(engine, {

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
         gridSize: [SPRITE_ATLAS_INFO.cellWidthPx, SPRITE_ATLAS_INFO.cellHeightPx],
         sampling: "linear",
     });
-    const billboards = createAxisLockedBillboardSystem(atlas, [0.35, 1, 0.2], { capacity: 6, blendMode: "alpha" });
+    const billboards = createAxisLockedBillboardSystem(atlas, [0.35, 1, 0.2], { capacity: 6 });
 
     addBillboardSpriteIndex(billboards, {
         position: [-2.5, 2.2, 0],

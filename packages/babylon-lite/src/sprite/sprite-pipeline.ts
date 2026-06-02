@@ -1,14 +1,13 @@
 /** Internal sprite pipeline helpers: owns WGSL, bind-group schema, pipeline construction, and bind-group creation. */
 import type { EngineContextInternal } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
-import type { Sprite2DCustomShader } from "./sprite-custom-shader.js";
+import type { SpriteLayerFx } from "./custom-shader-core.js";
+import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 
 export interface SpritePipelineDeviceCache {
     _shaderModule: GPUShaderModule | null;
     _sceneShaderModule: GPUShaderModule | null;
-    /** Custom-shader modules keyed by `Sprite2DCustomShader._key` + layout (`key:hasDepth`). */
-    _customShaderModules: Map<string, GPUShaderModule>;
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
@@ -98,42 +97,6 @@ return out;
 }`;
 }
 
-type SupportedSpriteBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "additive">;
-
-const BLEND_MODE_TABLE: Readonly<Record<SupportedSpriteBlendMode, { index: number; descriptor: GPUBlendState }>> = {
-    alpha: {
-        index: 0,
-        descriptor: {
-            color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-        },
-    },
-    premultiplied: {
-        index: 1,
-        descriptor: {
-            color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-        },
-    },
-    // Straight-alpha additive: the sprite's RGB, scaled by its own alpha, is added to the
-    // framebuffer. Alpha never reaches 0 below the source, so glows/light shafts stack and
-    // brighten the way you'd expect for stars, sparks, sun shafts, and fireflies.
-    additive: {
-        index: 2,
-        descriptor: {
-            color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-            alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
-        },
-    },
-};
-
-function getBlendModeEntry(blendMode: SpriteBlendMode): (typeof BLEND_MODE_TABLE)[SupportedSpriteBlendMode] {
-    if (blendMode === "alpha" || blendMode === "premultiplied" || blendMode === "additive") {
-        return BLEND_MODE_TABLE[blendMode];
-    }
-    throw new Error(`Sprite pipeline: blendMode: "${blendMode}" is not supported yet.`);
-}
-
 export function createSpritePipelineCache(): SpritePipelineCache {
     return {
         _devices: new WeakMap(),
@@ -158,17 +121,17 @@ export function getOrCreateSpritePipeline(
     depthWrite = false,
     depthStencilFormat?: GPUTextureFormat,
     sceneBindGroupLayout?: GPUBindGroupLayout,
-    customShader?: Sprite2DCustomShader
+    layer?: Sprite2DLayer
 ): GPURenderPipeline {
     const deviceCache = getSpritePipelineDeviceCache(engine, cache);
     const resolvedDepthStencilFormat = normalizeDepthStencilFormat(hasDepth, depthStencilFormat);
-    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, customShader);
+    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, layer);
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
     }
 
-    const pipeline = buildSpritePipeline(engine, deviceCache, format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, sceneBindGroupLayout, customShader);
+    const pipeline = buildSpritePipeline(engine, deviceCache, format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, sceneBindGroupLayout, layer);
     deviceCache._pipelines.set(key, pipeline);
     return pipeline;
 }
@@ -179,7 +142,7 @@ export function createSpriteLayerBindGroup(
     spriteBindGroupIndex: 0 | 1,
     layer: Sprite2DLayer,
     uniformBuffer: GPUBuffer,
-    fxBuffer?: GPUBuffer | null
+    fx?: SpriteLayerFx | null
 ): GPUBindGroup {
     const tex = layer.atlas.texture;
     const entries: GPUBindGroupEntry[] = [
@@ -187,18 +150,10 @@ export function createSpriteLayerBindGroup(
         { binding: 1, resource: tex.view },
         { binding: 2, resource: tex.sampler },
     ];
-    const extraTextures = layer.customShader?._extraTextures;
-    let nextBinding = 3;
-    if (extraTextures) {
-        for (let i = 0; i < extraTextures.length; i++) {
-            const extraTexture = extraTextures[i]!.texture;
-            entries.push({ binding: nextBinding, resource: extraTexture.view });
-            entries.push({ binding: nextBinding + 1, resource: extraTexture.sampler });
-            nextBinding += 2;
+    if (fx) {
+        for (const entry of _getSpriteFxHook()!.bindEntries(fx, 3)) {
+            entries.push(entry);
         }
-    }
-    if (fxBuffer) {
-        entries.push({ binding: nextBinding, resource: { buffer: fxBuffer } });
     }
     return engine.device.createBindGroup({
         layout: pipeline.getBindGroupLayout(spriteBindGroupIndex),
@@ -212,7 +167,6 @@ function getSpritePipelineDeviceCache(engine: EngineContextInternal, cache: Spri
         deviceCache = {
             _shaderModule: null,
             _sceneShaderModule: null,
-            _customShaderModules: new Map(),
             _pipelines: new Map(),
         };
         cache._devices.set(engine.device, deviceCache);
@@ -237,20 +191,16 @@ function spritePipelineKey(
     hasDepth: boolean,
     depthWrite: boolean,
     depthStencilFormat: GPUTextureFormat | null,
-    customShader?: Sprite2DCustomShader
+    layer?: Sprite2DLayer
 ): string {
-    return `${format}:${sampleCount}:${getBlendModeEntry(blendMode).index}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customShader?._key ?? ""}`;
+    const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}`;
 }
 
-function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDeviceCache, hasDepth: boolean, customShader?: Sprite2DCustomShader): GPUShaderModule {
-    if (customShader) {
-        const key = `${customShader._key}:${hasDepth ? 1 : 0}`;
-        let mod = cache._customShaderModules.get(key);
-        if (!mod) {
-            mod = engine.device.createShaderModule({ code: customShader._composeWgsl(hasDepth, hasDepth ? 1 : 0) });
-            cache._customShaderModules.set(key, mod);
-        }
-        return mod;
+function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
+    const customModule = layer ? _getSpriteFxHook()?.shaderModule(engine, hasDepth, layer) : null;
+    if (customModule) {
+        return customModule;
     }
     if (hasDepth) {
         cache._sceneShaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1) });
@@ -270,7 +220,7 @@ function buildSpritePipeline(
     depthWrite: boolean,
     depthStencilFormat: GPUTextureFormat | null,
     sceneBindGroupLayout?: GPUBindGroupLayout,
-    customShader?: Sprite2DCustomShader
+    layer?: Sprite2DLayer
 ): GPURenderPipeline {
     const device = engine.device;
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
@@ -278,18 +228,14 @@ function buildSpritePipeline(
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
     ];
-    if (customShader) {
-        const extraTextures = customShader._extraTextures;
-        let nextBinding = 3;
-        for (let i = 0; i < extraTextures.length; i++) {
-            layoutEntries.push({ binding: nextBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } });
-            layoutEntries.push({ binding: nextBinding + 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } });
-            nextBinding += 2;
+    const extraLayoutEntries = layer ? _getSpriteFxHook()?.layoutEntries(layer, 3) : null;
+    if (extraLayoutEntries) {
+        for (const entry of extraLayoutEntries) {
+            layoutEntries.push(entry);
         }
-        layoutEntries.push({ binding: nextBinding, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } });
     }
     const bindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
-    const module = getShaderModule(engine, cache, hasDepth, customShader);
+    const module = getShaderModule(engine, cache, hasDepth, layer);
     if (hasDepth && !sceneBindGroupLayout) {
         throw new Error("Sprite pipeline: depth-enabled pipelines require a scene bind-group layout.");
     }
@@ -321,7 +267,7 @@ function buildSpritePipeline(
         fragment: {
             module,
             entryPoint: "fs",
-            targets: [{ format, blend: getBlendModeEntry(blendMode).descriptor, writeMask: GPUColorWrite.ALL }],
+            targets: [{ format, blend: blendMode._descriptor, writeMask: GPUColorWrite.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         multisample: { count: sampleCount },
@@ -348,31 +294,6 @@ function buildSpritePipeline(
 export const LAYER_UBO_BYTES = 48;
 /** Number of floats in the per-layer UBO scratch / lastUbo arrays. */
 export const LAYER_UBO_FLOATS = LAYER_UBO_BYTES / 4;
-
-/**
- * Per-layer custom-shader `SpriteFx` UBO size in bytes (present only on layers created with
- * `customShader`; bound at `@binding(3 + 2 * extraTextures.length)`). Layout matches the WGSL
- * `SpriteFx` struct:
- *   [0]    time (seconds since first frame)
- *   [1..3] padding (vec4 alignment)
- *   [4..7] params.xyzw (user-set via `setSprite2DShaderParams`)
- */
-export const SPRITE_FX_UBO_BYTES = 32;
-/** Number of floats in the `SpriteFx` UBO scratch array. */
-export const SPRITE_FX_UBO_FLOATS = SPRITE_FX_UBO_BYTES / 4;
-
-/** Write the `SpriteFx` UBO (time + user params) for a custom-shader layer. */
-export function writeSpriteFxUbo(device: GPUDevice, fxBuffer: GPUBuffer, timeSeconds: number, params: readonly number[], scratch: Float32Array): void {
-    scratch[0] = timeSeconds;
-    scratch[1] = 0;
-    scratch[2] = 0;
-    scratch[3] = 0;
-    scratch[4] = params[0] ?? 0;
-    scratch[5] = params[1] ?? 0;
-    scratch[6] = params[2] ?? 0;
-    scratch[7] = params[3] ?? 0;
-    device.queue.writeBuffer(fxBuffer, 0, scratch.buffer, scratch.byteOffset, SPRITE_FX_UBO_BYTES);
-}
 
 /** Shared two-triangle quad index buffer source (4 corners → 6 indices). */
 export const SHARED_SPRITE_INDEX_DATA: Readonly<Uint16Array> = new Uint16Array([0, 1, 2, 0, 2, 3]);
@@ -468,7 +389,7 @@ export function buildSpriteLayerUbo(layer: Sprite2DLayer, screenWidth: number, s
     ubo[6] = layer.pivot[0];
     ubo[7] = layer.pivot[1];
     const op = layer.opacity;
-    if (layer.blendMode === "premultiplied") {
+    if (layer.blendMode._premultipliedOpacity) {
         ubo[8] = op;
         ubo[9] = op;
         ubo[10] = op;

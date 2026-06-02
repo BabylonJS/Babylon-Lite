@@ -286,6 +286,8 @@ export type { RenderTargetSignature } from "./engine/render-target.js";
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
 export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
+export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
+export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,
@@ -311,6 +313,8 @@ export type {
     BillboardDepthMode,
     BillboardBlendMode,
 } from "./sprite/billboard-sprite.js";
+export type { BillboardBlendDescriptor } from "./sprite/billboard-blend.js";
+export { billboardBlendAlpha, billboardBlendPremultiplied, billboardBlendCutout } from "./sprite/billboard-blend.js";
 export {
     createFacingBillboardSystem,
     createAxisLockedBillboardSystem,

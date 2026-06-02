@@ -23,7 +23,7 @@ async function main(): Promise<void> {
         sampling: "linear",
     });
 
-    const layer = createSprite2DLayer(atlas, { capacity: 256, blendMode: "alpha", depth: "none" });
+    const layer = createSprite2DLayer(atlas, { capacity: 256, depth: "none" });
     addDeterministicSpriteGrid(layer, canvas, { frameForIndex: (index) => 8 + (index % 16) });
 
     const sr = createSpriteRenderer(engine, {
