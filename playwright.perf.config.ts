@@ -22,7 +22,7 @@ const swiftShaderArgs = isCI
     : [];
 
 export default defineConfig({
-    testDir: "./tests/perf",
+    testDir: "./tests/lite/perf",
     timeout: 600_000,
     retries: 4,
     use: {
@@ -40,7 +40,7 @@ export default defineConfig({
         },
     },
     webServer: {
-        command: "pnpm --filter lab dev",
+        command: "pnpm --filter @babylon-lite/lab dev",
         port: 5174,
         reuseExistingServer: true,
         timeout: 15_000,

@@ -548,6 +548,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
 export const labDir = resolve(ROOT, "lab");
+export const liteLabDir = resolve(labDir, "lite");
 export const outDir = resolve(labDir, "public/bundle");
 export const bundleInfoDir = resolve(outDir, "bundle-info");
 export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
@@ -576,6 +577,23 @@ type BundleManifest = Record<string, BundleManifestEntry>;
 const sceneConfig: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8"));
 const sceneConfigByName = new Map(sceneConfig.map((s) => [`scene${s.id}`, s]));
 const ALL_SCENES = sceneConfig.map((s) => `scene${s.id}`);
+
+function firstExistingPath(paths: string[]): string {
+    return paths.find((p) => existsSync(p)) ?? paths[0]!;
+}
+
+function liteSceneEntry(scene: string, sourceLabDir = labDir): string {
+    return firstExistingPath([resolve(sourceLabDir, `lite/src/lite/${scene}.ts`), resolve(sourceLabDir, `src/lite/${scene}.ts`)]);
+}
+
+function bjsSceneEntry(scene: string, sourceLabDir = labDir): string {
+    const liteScene = scene.startsWith("bjs-") ? scene.slice(4) : scene;
+    return firstExistingPath([resolve(sourceLabDir, `lite/src/bjs/${liteScene}.ts`), resolve(sourceLabDir, `src/bjs/${liteScene}.ts`)]);
+}
+
+function liteHtmlPath(file: string): string {
+    return firstExistingPath([resolve(liteLabDir, file), resolve(labDir, file)]);
+}
 
 function orderBundleManifest(manifest: BundleManifest): BundleManifest {
     const ordered: BundleManifest = {};
@@ -940,7 +958,13 @@ export function startStaticServer(root: string): Promise<{ server: Server; port:
             const url = (req.url ?? "/").split("?")[0]!;
             // Try root first (HTML pages), then public/ (bundle JS, assets)
             let filePath = join(root, url === "/" ? "index.html" : url);
-            if (!existsSync(filePath)) filePath = join(publicDir, url);
+            if (!existsSync(filePath)) {
+                const publicUrl = url.startsWith("/lite/bundle/") || url.startsWith("/lite/thumbnails/") ? url.slice("/lite".length) : url;
+                filePath = join(publicDir, publicUrl);
+            }
+            if (!existsSync(filePath) && url.startsWith("/lite/reference/lite/")) {
+                filePath = resolve(root, "..", url.slice("/lite/".length));
+            }
             if (existsSync(filePath) && !filePath.includes("..")) {
                 resp.writeHead(200, { "Content-Type": MIME[extname(filePath)] ?? "application/octet-stream" });
                 resp.end(readFileSync(filePath));
@@ -1058,7 +1082,7 @@ export function isLiteBundleExternal(id: string): boolean {
 
 function readLiteSceneSource(scene: string): string {
     try {
-        return readFileSync(resolve(labDir, `src/lite/${scene}.ts`), "utf-8");
+        return readFileSync(liteSceneEntry(scene), "utf-8");
     } catch {
         return "";
     }
@@ -1074,7 +1098,7 @@ function getLiteSceneVendorRuntimes(scene: string): VendorRuntime[] {
 function ensureBundleHtmlImportMap(scene: string): void {
     const runtimes = getLiteSceneVendorRuntimes(scene);
     if (runtimes.length === 0) return;
-    const htmlPath = resolve(labDir, `bundle-${scene}.html`);
+    const htmlPath = liteHtmlPath(`bundle-${scene}.html`);
     if (!existsSync(htmlPath)) return;
 
     const imports = Object.assign({}, ...runtimes.map((runtime) => runtime.imports)) as Record<string, string>;
@@ -1127,7 +1151,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
             sourcemap: "hidden",
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
             rollupOptions: {
-                input: { [scene]: resolve(sourceLabDir, `src/lite/${scene}.ts`) },
+                input: { [scene]: liteSceneEntry(scene, sourceLabDir) },
                 external: isLiteBundleExternal,
                 output: {
                     format: "es",
@@ -1230,7 +1254,7 @@ export async function buildBundleScenes(): Promise<void> {
                 sourcemap: "hidden",
                 modulePreload: { polyfill: false, resolveDependencies: () => [] },
                 rollupOptions: {
-                    input: { [scene]: resolve(labDir, isBjs ? `src/bjs/${scene.slice(4)}.ts` : `src/lite/${scene}.ts`) },
+                    input: { [scene]: isBjs ? bjsSceneEntry(scene) : liteSceneEntry(scene) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
                     ...(!isBjs && { external: isLiteBundleExternal }),
@@ -1294,7 +1318,7 @@ export async function buildBundleScenes(): Promise<void> {
         if (cached?.bjsRawKB == null) {
             return true;
         }
-        const sourcePath = resolve(labDir, `src/bjs/${liteScene}.ts`);
+        const sourcePath = bjsSceneEntry(liteScene);
         const bundlePath = resolve(outDir, `${bjsScene}.js`);
         if (!existsSync(bundlePath)) {
             return true;
@@ -1391,7 +1415,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         for (const scene of SCENES) {
             const tPage = performance.now();
             const masterIgnoredRawKB = masterManifest[scene]?.ignoredRawKB;
-            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `bundle-${scene}.html`, "/bundle/", masterIgnoredRawKB);
+            const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/", masterIgnoredRawKB);
             manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
             flush();
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
@@ -1409,7 +1433,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
             let rawKB: number;
             let gzipKB: number;
             try {
-                ({ rawKB, gzipKB } = await measurePage(browser, port, bjsScene, `bundle-${bjsScene}.html`, "/bundle/"));
+                ({ rawKB, gzipKB } = await measurePage(browser, port, bjsScene, `lite/bundle-${bjsScene}.html`, "/bundle/"));
             } catch (err) {
                 console.warn(`  ${bjsScene}: skipped BJS measurement (${err instanceof Error ? err.message : String(err)})`);
                 break;

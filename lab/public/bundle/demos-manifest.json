@@ -16,11 +16,15 @@
     "gzipKB": 36.6
   },
   "offscreen": {
-    "rawKB": 169,
-    "gzipKB": 68.9
+    "rawKB": 169.9,
+    "gzipKB": 69.3
   },
   "freeciv": {
-    "rawKB": 50.7,
-    "gzipKB": 19.9
+    "rawKB": 49.1,
+    "gzipKB": 19
+  },
+  "mosquito-amber": {
+    "rawKB": 94.7,
+    "gzipKB": 36.7
   }
 }

@@ -1,22 +1,22 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "dev-server",
-      "type": "shell",
-      "command": "pnpm --filter lab dev",
-      "isBackground": true,
-      "problemMatcher": {
-        "pattern": { "regexp": "^$" },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "VITE",
-          "endsPattern": "ready in"
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "dev-server",
+            "type": "shell",
+            "command": "pnpm --filter @babylon-lite/lab dev",
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": { "regexp": "^$" },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "VITE",
+                    "endsPattern": "ready in"
+                }
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
         }
-      },
-      "options": {
-        "cwd": "${workspaceFolder}"
-      }
-    }
-  ]
+    ]
 }

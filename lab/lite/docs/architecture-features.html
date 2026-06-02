@@ -1,0 +1,1451 @@
+            <div class="arch-diagram">
+                <div class="arch-layer arch-layer-app">
+                    <div class="arch-layer-label">Application Layer</div>
+                    <div class="arch-layer-desc">import { createEngine, loadGltf, createPbrMaterial, ... } from 'babylon-lite'</div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer">
+                    <div class="arch-layer-label">Core Modules</div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Engine</div>
+                            <div class="arch-mod-sub">WebGPU device · swapchain · 4× MSAA · depth/stencil · frame loop · resize</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Scene</div>
+                            <div class="arch-mod-sub">Context · graph owner · hierarchy · parent-child world matrix · material swap queue · disposal</div>
+                        </div>
+                        <div class="arch-mod arch-mod-cam">
+                            <div class="arch-mod-name">Camera</div>
+                            <div class="arch-mod-sub">ArcRotate · Free · orbit / zoom / pan · inertia · IWorldMatrixProvider · parentable</div>
+                        </div>
+                        <div class="arch-mod arch-mod-light">
+                            <div class="arch-mod-name">Lights</div>
+                            <div class="arch-mod-sub">Hemispheric · Directional · Point · Spot · multi-light UBO · parentable</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-mat">
+                            <div class="arch-mod-name">Materials</div>
+                            <div class="arch-mod-sub">
+                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · NodeMaterial · ShaderMaterial · background/ground
+                            </div>
+                        </div>
+                        <div class="arch-mod arch-mod-mesh">
+                            <div class="arch-mod-name">Meshes</div>
+                            <div class="arch-mod-sub">
+                                Sphere · box · torus · ground · heightmap · cylinder · plane · disc · polyhedron · ribbon · tube · extrude · thin instances · GPU upload
+                            </div>
+                        </div>
+                        <div class="arch-mod arch-mod-loader">
+                            <div class="arch-mod-name">Loaders</div>
+                            <div class="arch-mod-sub">
+                                glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KTX2 · Draco · Gaussian splats (.ply/.splat/.sog/.spz) · KHR_materials_variants ·
+                                _clearcoat · _sheen · _anisotropy · _ior · _specular · _volume · _transmission · _texture_transform · _texture_basisu
+                            </div>
+                        </div>
+                        <div class="arch-mod arch-mod-anim">
+                            <div class="arch-mod-name">Animation</div>
+                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights · blending · cross-fade · additive clips</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-shadow">
+                            <div class="arch-mod-name">Shadows</div>
+                            <div class="arch-mod-sub">ESM directional · PCF spot · depth pass · Gaussian blur · configurable bias/darkness</div>
+                        </div>
+                        <div class="arch-mod arch-mod-tex">
+                            <div class="arch-mod-name">Textures</div>
+                            <div class="arch-mod-sub">2D · cube · solid color · KTX1 compressed · Basis Universal (.basis) · GPU mipmap gen · sRGB · sampler config</div>
+                        </div>
+                        <div class="arch-mod arch-mod-math">
+                            <div class="arch-mod-name">Math</div>
+                            <div class="arch-mod-sub">Vec3/4 · Mat4 · Quat slerp · Color3/4 · ObservableVec3 · ObservableQuat · LH column-major</div>
+                        </div>
+                        <div class="arch-mod arch-mod-render">
+                            <div class="arch-mod-name">Render Pipeline</div>
+                            <div class="arch-mod-sub">Renderable · pre-pass · scene uniforms · opaque/transparent ordering</div>
+                        </div>
+                        <div class="arch-mod arch-mod-render">
+                            <div class="arch-mod-name">Effects</div>
+                            <div class="arch-mod-sub">EffectWrapper · fullscreen triangle · RenderTarget output · uniforms · texture/sampler bindings</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Picking</div>
+                            <div class="arch-mod-sub">GPU ID pass · CPU ray/triangle · thin-instance support · normal/UV detail</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Skeleton</div>
+                            <div class="arch-mod-sub">4/8-bone skinning · GPU bone textures · morph target blending</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Shader Composer</div>
+                            <div class="arch-mod-sub">Fragment-based composition · topological ordering · slot injection · WGSL generation</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Resource Pool</div>
+                            <div class="arch-mod-sub">GPU buffer/texture pooling · automatic cleanup · device lifecycle</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Navigation</div>
+                            <div class="arch-mod-sub">Recast V2 navmesh · crowd agents · obstacles · off-mesh links · raycast</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer arch-layer-gpu">
+                    <div class="arch-layer-label">GPU Pipeline</div>
+                    <div class="arch-layer-desc">WGSL Shaders · GPURenderPipeline · GPUBindGroup · GPUBuffer · GPUTexture · GPUCommandEncoder</div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer arch-layer-webgpu">
+                    <div class="arch-layer-label">WebGPU</div>
+                    <div class="arch-layer-desc">GPUDevice · GPUAdapter · GPURenderPassEncoder · GPUComputePassEncoder · navigator.gpu</div>
+                </div>
+            </div>
+
+            <div class="arch-pillars">
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">🌳</div>
+                    <div class="arch-pillar-name">100% Tree-Shakable</div>
+                    <div class="arch-pillar-desc">Zero module-level side effects. Import only what you use — unused features are stripped from the bundle.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">⚡</div>
+                    <div class="arch-pillar-name">WebGPU Exclusive</div>
+                    <div class="arch-pillar-desc">No WebGL fallback. Built entirely around modern GPU paradigms: render pipelines, compute shaders, bind groups.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">🎯</div>
+                    <div class="arch-pillar-name">Pixel-Perfect Parity</div>
+                    <div class="arch-pillar-desc">Rendering output is mathematically identical to Babylon.js. Validated via automated pixel diff testing.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">📦</div>
+                    <div class="arch-pillar-name">Minimal Footprint</div>
+                    <div class="arch-pillar-desc">Dramatically smaller bundles than Babylon.js. Data-oriented design, flat arrays for GPU transfers.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">🔌</div>
+                    <div class="arch-pillar-name">One-Way Data Ownership</div>
+                    <div class="arch-pillar-desc">Scene owns everything. Meshes, lights, cameras are plain data — zero circular deps, trivial serialization.</div>
+                </div>
+            </div>
+
+            <h3 class="docs-section-title" style="margin-top: 1.75rem">📊 <span>Feature Comparison</span> — Babylon Lite vs Babylon.js</h3>
+            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap">
+                <button class="feat-filter-btn active" data-filter="all" onclick="filterFeatures('all')">All</button>
+                <button class="feat-filter-btn" data-filter="implemented" onclick="filterFeatures('implemented')">✅ Implemented</button>
+                <button class="feat-filter-btn" data-filter="missing" onclick="filterFeatures('missing')">— Missing</button>
+                <button class="feat-filter-btn" data-filter="wont-support" onclick="filterFeatures('wont-support')">🚫 Won't support</button>
+            </div>
+            <div style="margin-bottom: 0.75rem; font-size: 0.7rem; color: #8b949e; display: flex; gap: 1.2rem; flex-wrap: wrap">
+                <span>✅ Supported</span>
+                <span>⚡ Partial</span>
+                <span>— Not available</span>
+                <span>🚫 Won't support</span>
+                <span style="color: #3fb950">● Green row = Lite advantage</span>
+            </div>
+            <div class="feature-table-wrap">
+                <table class="feature-table">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Lite</th>
+                            <th>BJS</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Rendering API -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Rendering API</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>WebGPU</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Lite is WebGPU-exclusive — zero abstraction overhead</td>
+                        </tr>
+                        <tr>
+                            <td>WebGL 2.0</td>
+                            <td>🚫</td>
+                            <td>✅</td>
+                            <td>Not planned — WebGPU only by design</td>
+                        </tr>
+                        <tr>
+                            <td>WebGL 1.0</td>
+                            <td>🚫</td>
+                            <td>✅</td>
+                            <td>Not planned — WebGPU only by design</td>
+                        </tr>
+                        <tr>
+                            <td>4× MSAA</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Depth / Stencil Buffer</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>depth24plus-stencil8</td>
+                        </tr>
+                        <tr>
+                            <td>HDR Rendering</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Tone Mapping</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Image processing pipeline</td>
+                        </tr>
+                        <tr>
+                            <td>Exposure / Contrast</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Via ImageProcessingConfig</td>
+                        </tr>
+                        <tr>
+                            <td>Canvas Resize Handling</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Automatic per-frame</td>
+                        </tr>
+                        <tr>
+                            <td>Draw Call Counting</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>EffectRenderer / EffectWrapper</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scenes 74-76 — direct swapchain renderer plus RTT task path</td>
+                        </tr>
+                        <tr>
+                            <td>Fullscreen Effect Passes</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Single fullscreen triangle, no vertex/index buffers</td>
+                        </tr>
+                        <tr>
+                            <td>Effect RenderTarget Output</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 75 — render effect into texture, then use it in a material</td>
+                        </tr>
+                        <tr>
+                            <td>Effect Texture Bindings</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 76 — Texture2D + sampler binding via setEffectTexture()</td>
+                        </tr>
+                        <tr>
+                            <td>Frame-Graph RTT Material Override</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 110 — offscreen pass renders selected meshes with an override material and camera, then samples the RTT in the main pass</td>
+                        </tr>
+
+                        <!-- Materials -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Materials</td>
+                        </tr>
+                        <tr>
+                            <td>PBR Metallic-Roughness</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Full GGX / Smith / Schlick BRDF</td>
+                        </tr>
+                        <tr>
+                            <td>PBR Specular-Glossiness</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>KHR_materials_pbrSpecularGlossiness</td>
+                        </tr>
+                        <tr>
+                            <td>Standard Material (Blinn-Phong)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Diffuse, specular, ambient, emissive</td>
+                        </tr>
+                        <tr>
+                            <td>Background Material</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Ground plane + skybox rendering</td>
+                        </tr>
+                        <tr>
+                            <td>Normal Mapping</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Cotangent frame, invertNormalMapX</td>
+                        </tr>
+                        <tr>
+                            <td>Emissive Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Occlusion (AO) Maps</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>ORM texture packing</td>
+                        </tr>
+                        <tr>
+                            <td>Metallic Reflectance Map</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>metallicReflectanceTexture support</td>
+                        </tr>
+                        <tr>
+                            <td>Specular Anti-Aliasing</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>getAARoughnessFactors when normal map present</td>
+                        </tr>
+                        <tr>
+                            <td>Alpha Blend / Alpha Test</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>OPAQUE, BLEND, MASK modes</td>
+                        </tr>
+                        <tr>
+                            <td>Double-Sided Rendering</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Opacity Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>With depth-write disabled for transparent</td>
+                        </tr>
+                        <tr>
+                            <td>Bump / Height Mapping</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Lightmap Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Standard material UV2</td>
+                        </tr>
+                        <tr>
+                            <td>Ambient Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Reflection Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Spherical + planar coord modes</td>
+                        </tr>
+                        <tr>
+                            <td>UV Scaling / Offset</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>UV2 Channel</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>For lightmaps and AO</td>
+                        </tr>
+                        <tr>
+                            <td>Node Material</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>NME snippet parser with lab-proven core, compatibility, PBR, math/modes, color, UV/texture/procedural, normal/screen/depth/matrix/scene-state, loop, and storage blocks (Scenes 60-89)</td>
+                        </tr>
+                        <tr>
+                            <td>Shader Material</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>WGSL-only ShaderMaterial with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163)</td>
+                        </tr>
+                        <tr>
+                            <td>Material Plugins</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>PBR Clear Coat</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 19</td>
+                        </tr>
+                        <tr>
+                            <td>PBR Sheen</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 21</td>
+                        </tr>
+                        <tr>
+                            <td>PBR Anisotropy</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 23</td>
+                        </tr>
+                        <tr>
+                            <td>PBR Subsurface / Translucency</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 26 — thickness map, translucency, tint</td>
+                        </tr>
+                        <tr>
+                            <td>Material Variants (KHR_materials_variants)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 27 — runtime variant selection</td>
+                        </tr>
+                        <tr>
+                            <td>PBR Iridescence</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Native PBR material/glTF iridescence pending</td>
+                        </tr>
+
+                        <!-- Lights -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Lights</td>
+                        </tr>
+                        <tr>
+                            <td>Hemispheric Light</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Directional Light</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Point Light</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Spot Light</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>With cone angle + exponent falloff</td>
+                        </tr>
+                        <tr>
+                            <td>Multi-Light (N lights)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Dynamic UBO packing</td>
+                        </tr>
+                        <tr>
+                            <td>Per-Mesh Light Inclusion</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 111 — includedOnlyMeshIds-style light selection across Standard, PBR, NME, and supported shadow generators</td>
+                        </tr>
+                        <tr>
+                            <td>Light Intensity / Color</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Diffuse + specular per light</td>
+                        </tr>
+                        <tr>
+                            <td>Area Lights</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+
+                        <!-- Cameras -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Cameras</td>
+                        </tr>
+                        <tr>
+                            <td>Arc Rotate Camera</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Orbit / zoom / pan / inertia</td>
+                        </tr>
+                        <tr>
+                            <td>Auto-Framing (fitToScene)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Default camera for loaded models</td>
+                        </tr>
+                        <tr>
+                            <td>Free Camera</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 18, 24, 25 — WASD/arrow controls</td>
+                        </tr>
+                        <tr>
+                            <td>Follow Camera</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Universal Camera</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>VR / XR Camera</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Device Orientation Camera</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+
+                        <!-- Mesh & Geometry -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Mesh &amp; Geometry</td>
+                        </tr>
+                        <tr>
+                            <td>Sphere</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Configurable segments</td>
+                        </tr>
+                        <tr>
+                            <td>Box</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Torus</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Configurable thickness/tessellation</td>
+                        </tr>
+                        <tr>
+                            <td>Ground Plane</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Ground from Heightmap</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>GPU texture → vertex displacement</td>
+                        </tr>
+                        <tr>
+                            <td>Thin Instances</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>add / remove / set / flush API</td>
+                        </tr>
+                        <tr>
+                            <td>Observable Transforms</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>ObservableVec3 auto-dirty on mutation</td>
+                        </tr>
+                        <tr>
+                            <td>Transform Hierarchy</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Version-based lazy world matrix, IWorldMatrixProvider on all entities</td>
+                        </tr>
+                        <tr>
+                            <td>Clone Transform Node</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Cylinder</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Cylinder / cone / prism via diameterTop/Bottom</td>
+                        </tr>
+                        <tr>
+                            <td>Plane</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>size or width/height</td>
+                        </tr>
+                        <tr>
+                            <td>Disc / Ring</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Configurable arc &amp; tessellation</td>
+                        </tr>
+                        <tr>
+                            <td>Polyhedra</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>15 BJS presets, flat &amp; smooth normals</td>
+                        </tr>
+                        <tr>
+                            <td>Ribbon / Tube / Extrude</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Path3D parallel-transport frames, closePath/closeArray, cap modes</td>
+                        </tr>
+                        <tr>
+                            <td>CSG / CSG2 (Boolean Ops)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scenes 90/91 — legacy mesh CSG plus Manifold-backed CSG2 subtract, intersect, and union/add operations</td>
+                        </tr>
+                        <tr>
+                            <td>Instanced Meshes</td>
+                            <td>🚫</td>
+                            <td>✅</td>
+                            <td>Won't support BJS InstancedMesh API; use thin instances instead</td>
+                        </tr>
+
+                        <!-- Skeleton & Animation -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Skeleton &amp; Animation</td>
+                        </tr>
+                        <tr>
+                            <td>Skeletal Animation</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>GPU bone textures (rgba32float)</td>
+                        </tr>
+                        <tr>
+                            <td>4-Bone Skinning</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>JOINTS_0 / WEIGHTS_0</td>
+                        </tr>
+                        <tr>
+                            <td>8-Bone Skinning</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>JOINTS_1 / WEIGHTS_1</td>
+                        </tr>
+                        <tr>
+                            <td>Morph Targets</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Up to 4 targets, position + normal deltas</td>
+                        </tr>
+                        <tr>
+                            <td>Animation Groups</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>play / pause / stop / seek / loop / speed</td>
+                        </tr>
+                        <tr>
+                            <td>Linear Interpolation</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Step Interpolation</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Cubic Spline</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Deterministic Seek</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Fixed-timestep for parity testing</td>
+                        </tr>
+                        <tr>
+                            <td>Animation Blending</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Weighted blend, cross-fade, and additive animation groups (Scenes 155-158)</td>
+                        </tr>
+                        <tr>
+                            <td>Animation Events</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Animation Weights</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>AnimationGroup weight control through AnimationManager</td>
+                        </tr>
+
+                        <!-- Environment & IBL -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Environment &amp; IBL</td>
+                        </tr>
+                        <tr>
+                            <td>Babylon .env Files</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>RGBD cubemap decode</td>
+                        </tr>
+                        <tr>
+                            <td>HDR Panoramas (.hdr)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Equirect → cubemap → prefiltered IBL</td>
+                        </tr>
+                        <tr>
+                            <td>Image-Based Lighting</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Split-sum approximation</td>
+                        </tr>
+                        <tr>
+                            <td>BRDF Lookup Table</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Pre-baked PNG, RGBD compute decode</td>
+                        </tr>
+                        <tr>
+                            <td>Spherical Harmonics</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Irradiance from environment</td>
+                        </tr>
+                        <tr>
+                            <td>DDS Cube Skybox</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Cubemap Skybox</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>6-face cube texture</td>
+                        </tr>
+                        <tr>
+                            <td>HDR Skybox</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Ground + Skybox Background</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Fresnel ground opacity, premultiplied alpha</td>
+                        </tr>
+                        <tr>
+                            <td>Fog (Linear / Exp / Exp²)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Environment Rotation</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Reflection Probes</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+
+                        <!-- Shadows -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Shadows</td>
+                        </tr>
+                        <tr>
+                            <td>ESM Shadows (Directional)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Depth + Gaussian blur passes</td>
+                        </tr>
+                        <tr>
+                            <td>Shadow Map Size Config</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Shadow Bias / Darkness</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Frustum Edge Falloff</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>PCF Shadows</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Spot + directional PCF (Scenes 18, 111)</td>
+                        </tr>
+                        <tr>
+                            <td>Cascaded Shadow Maps</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Point Light Shadows</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Spot Light Shadows</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 18 (PCF)</td>
+                        </tr>
+                        <tr>
+                            <td>Material-Aware Shadow Depth</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Shadow material views and alpha-discard casters for Standard, PBR, and NodeMaterial (Scenes 116, 140, 141)</td>
+                        </tr>
+                        <tr>
+                            <td>Contact Hardening Shadows</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+
+                        <!-- Loaders -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Loaders</td>
+                        </tr>
+                        <tr>
+                            <td>glTF 2.0 / GLB</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Meshes, materials, skins, morphs, animations</td>
+                        </tr>
+                        <tr>
+                            <td>.babylon Format</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Meshes, standard materials, lights</td>
+                        </tr>
+                        <tr>
+                            <td>Environment .env</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>HDR Panorama .hdr</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Skybox Cube Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>2D Texture Loading</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>With mipmap generation</td>
+                        </tr>
+                        <tr>
+                            <td>OBJ / MTL</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>STL</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>FBX</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>KTX1 Compressed Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 25 — ASTC / BC / ETC2 auto-format + PNG fallback</td>
+                        </tr>
+                        <tr>
+                            <td>KTX2 Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 112 — KHR_texture_basisu glTF texture sources</td>
+                        </tr>
+                        <tr>
+                            <td>Basis Universal (.basis)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 36 — transcoder fetched from BJS CDN; BC7 / ASTC / ETC2 / BC3 auto-select + RGBA32 fallback</td>
+                        </tr>
+
+                        <!-- glTF 2.0 Extensions -->
+                        <tr class="feat-cat">
+                            <td colspan="4">glTF 2.0 Extensions (Khronos + vendor)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_pbrSpecularGlossiness</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Archived ext — mapped to metallic-roughness (Scene 6)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_variants</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 27 — runtime variant selection</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_unlit</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 32 — base color output, no lighting</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_clearcoat</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 28 — glTF loader auto-wires clearcoat + roughness + normal textures</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_sheen</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 29 — glTF loader with BJS-spec albedo scaling</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_anisotropy</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>glTF loader auto-wires strength + rotation (manual API: Scene 23)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_volume</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>glTF loader auto-wires attenuation + thickness (Scene 30); manual API Scene 26</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_transmission</td>
+                            <td>⚡</td>
+                            <td>✅</td>
+                            <td>Frame-graph scene-texture transmission (Scenes 30/33/112)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_ior</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Index of refraction override (Scene 30)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_specular</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Dielectric specular intensity/color (Scene 30)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_iridescence</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Thin-film interference</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_emissive_strength</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>HDR emissive multiplier (Scene 31)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_materials_dispersion</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Wavelength-dependent refraction</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_lights_punctual</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 33 — point / spot / directional lights from glTF</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_texture_transform</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Material-wide UV offset / scale / rotate resolved at load (Scene 29)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_texture_basisu</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 112 — FlightHelmetKTX from BabylonJS/Assets</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_draco_mesh_compression</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Draco-compressed mesh geometry (Scene 30)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_mesh_quantization</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>8/16-bit quantized vertex attributes</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_animation_pointer</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 34 — animate arbitrary JSON pointers (e.g. node visibility)</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_node_visibility</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 34 — per-node visibility flag</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_audio / KHR_audio_emitter</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Positional / ambient audio</td>
+                        </tr>
+                        <tr>
+                            <td>KHR_xmp_json_ld</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>XMP metadata</td>
+                        </tr>
+                        <tr>
+                            <td>EXT_mesh_gpu_instancing</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 35 — per-node instance transforms (TRS accessors → thin instances)</td>
+                        </tr>
+                        <tr>
+                            <td>EXT_meshopt_compression</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>meshoptimizer bitstream compression</td>
+                        </tr>
+                        <tr>
+                            <td>EXT_texture_webp</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Scene 37 — EXT_texture_webp source selection with browser-native decode</td>
+                        </tr>
+                        <tr>
+                            <td>EXT_texture_avif</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>AVIF texture source</td>
+                        </tr>
+                        <tr>
+                            <td>EXT_lights_image_based</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>IBL specified in glTF asset</td>
+                        </tr>
+                        <tr>
+                            <td>MSFT_lod</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Discrete level-of-detail</td>
+                        </tr>
+                        <tr>
+                            <td>MSFT_minecraftMesh</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Minecraft-style voxel meshes</td>
+                        </tr>
+                        <tr>
+                            <td>MSFT_audio_emitter</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Legacy positional audio</td>
+                        </tr>
+                        <tr>
+                            <td>ExtrasAsMetadata</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>Promote glTF `extras` to runtime metadata</td>
+                        </tr>
+
+                        <!-- Textures -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Textures</td>
+                        </tr>
+                        <tr>
+                            <td>2D Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Cube Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Solid Color Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Procedural 1×1 fill</td>
+                        </tr>
+                        <tr>
+                            <td>GPU Mipmap Generation</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Compute shader mipmaps</td>
+                        </tr>
+                        <tr>
+                            <td>sRGB Handling</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Format-based gamma correction</td>
+                        </tr>
+                        <tr>
+                            <td>Sampler Configuration</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Filter, address mode, anisotropy</td>
+                        </tr>
+                        <tr>
+                            <td>InvertY Control</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Procedural Textures</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Video Textures</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Dynamic Textures</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Render Target Textures</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Frame-graph RTT + sampled Texture2D, including pass-local material override (Scenes 75, 110)</td>
+                        </tr>
+                        <tr>
+                            <td>Multi-Render Targets</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+
+                        <!-- Math -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Math Utilities</td>
+                        </tr>
+                        <tr>
+                            <td>Vec3 / Vec4</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>add, sub, scale, dot, cross, normalize, lerp</td>
+                        </tr>
+                        <tr>
+                            <td>Mat4 (4×4 Matrix)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Multiply, inverse, lookAt, perspective, compose</td>
+                        </tr>
+                        <tr>
+                            <td>Quaternion</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Slerp, toMatrix, from Euler</td>
+                        </tr>
+                        <tr>
+                            <td>Color3 / Color4</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>ObservableVec3</td>
+                            <td>✅</td>
+                            <td>—</td>
+                            <td>Auto-dirty on mutation (Lite-specific)</td>
+                        </tr>
+                        <tr>
+                            <td>LH Column-Major Layout</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Aligned with WGSL/WebGPU conventions</td>
+                        </tr>
+
+                        <!-- Architecture / DX -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Architecture &amp; Developer Experience</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>100% Tree-Shakable</td>
+                            <td>✅</td>
+                            <td>⚡</td>
+                            <td>Zero module-level side effects in Lite</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>Minimal Bundle Size</td>
+                            <td>✅</td>
+                            <td>—</td>
+                            <td>Dramatically smaller than BJS for same scene</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>Zero Side Effects</td>
+                            <td>✅</td>
+                            <td>—</td>
+                            <td>No register*() at import time, no globalThis</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>One-Way Data Ownership</td>
+                            <td>✅</td>
+                            <td>—</td>
+                            <td>Components are plain data; scene is sole owner</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>Materials Own Shaders</td>
+                            <td>✅</td>
+                            <td>—</td>
+                            <td>Self-contained material + pipeline units</td>
+                        </tr>
+                        <tr>
+                            <td>TypeScript</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Strict typing throughout</td>
+                        </tr>
+                        <tr>
+                            <td>Vite Native</td>
+                            <td>✅</td>
+                            <td>⚡</td>
+                            <td>First-class Vite integration</td>
+                        </tr>
+                        <tr>
+                            <td>Familiar BJS-like API</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Easy migration for BJS developers</td>
+                        </tr>
+                        <tr>
+                            <td>Hot Material Swap</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Object.defineProperty setter + rebuild queue</td>
+                        </tr>
+                        <tr>
+                            <td>Dispose / Cleanup</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Full GPU resource cleanup on dispose</td>
+                        </tr>
+
+                        <!-- Advanced Features (BJS only) -->
+                        <tr class="feat-cat">
+                            <td colspan="4">Advanced Features</td>
+                        </tr>
+                        <tr>
+                            <td>Physics Engine</td>
+                            <td>⚡</td>
+                            <td>✅</td>
+                            <td>Havok Physics V2 subset (Scene 40); no Ammo.js/Cannon.js/Oimo compatibility layer</td>
+                        </tr>
+                        <tr>
+                            <td>Particle System</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td>CPU + GPU particles</td>
+                        </tr>
+                        <tr>
+                            <td>Post-Processing Pipeline</td>
+                            <td>⚡</td>
+                            <td>✅</td>
+                            <td>Low-level EffectWrapper passes are supported; no built-in Bloom/DOF/SSAO stack yet</td>
+                        </tr>
+                        <tr>
+                            <td>GUI (2D / 3D UI)</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Sprites / SpriteManager</td>
+                            <td>⚡</td>
+                            <td>✅</td>
+                            <td>2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards (Scenes 50-57); not the full BJS SpriteManager API</td>
+                        </tr>
+                        <tr>
+                            <td>Gaussian Splatting</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>.ply / .splat / .sog / .spz loaders, transform baking, and material plugin fragments (Scenes 120-126)</td>
+                        </tr>
+                        <tr>
+                            <td>Octree / Frustum Culling</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Level of Detail (LOD)</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Ray Casting / Picking</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>GPU ID pass + CPU ray/triangle details, normal/UV helpers, thin-instance and deformed mesh coverage (Scenes 113-115)</td>
+                        </tr>
+                        <tr>
+                            <td>WebXR / VR / AR</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Glow / Highlight Layer</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Screen-Space Reflections</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>SSAO</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Lens Flare</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Volumetric Light Scattering</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Decals</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Solid Particle System</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Fluid Rendering</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Bones IK</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Navigation Mesh</td>
+                            <td>⚡</td>
+                            <td>✅</td>
+                            <td>Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)</td>
+                        </tr>
+                        <tr>
+                            <td>Device Lost Recovery</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Opt-in automatic WebGPU device-loss recovery (Scene 164)</td>
+                        </tr>
+                        <tr>
+                            <td>OffscreenCanvas / Worker Rendering</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)</td>
+                        </tr>
+                        <tr>
+                            <td>Scene Optimizer</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Asset Manager</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>Scene Serialization</td>
+                            <td>—</td>
+                            <td>✅</td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>

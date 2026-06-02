@@ -231,7 +231,7 @@ async function main(): Promise<void> {
 
     // 6. Demo HTML pages (rewritten to relative bundle paths).
     for (const demo of demos) {
-        const src = resolve(LAB, `demo-${demo.slug}.html`);
+        const src = resolve(LAB, "lite", `demo-${demo.slug}.html`);
         if (!existsSync(src)) {
             throw new Error(`Missing demo page: ${src}`);
         }

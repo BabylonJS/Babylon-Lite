@@ -10,16 +10,16 @@
  * Output: prints a per-chunk, per-module size table sorted by size.
  * Also writes /tmp/<scene>-bundle-stats.html (interactive treemap).
  */
-import { build } from 'vite';
-import { resolve, dirname } from 'path';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { build } from "vite";
+import { resolve, dirname } from "path";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
-const labDir = resolve(ROOT, 'lab');
+const ROOT = resolve(__dirname, "..");
+const labDir = resolve(ROOT, "lab");
 
-const scene = process.argv[2] || process.env.BUNDLE_SCENES || 'scene7';
+const scene = process.argv[2] || process.env.BUNDLE_SCENES || "scene7";
 
 interface TreeNode {
     name: string;
@@ -64,7 +64,7 @@ function collectLeaves(node: TreeNode, leaves: { uid: string; path: string[] }[]
 
 async function main(): Promise<void> {
     // Dynamic import — rollup-plugin-visualizer is ESM-only
-    const { visualizer } = await import('rollup-plugin-visualizer');
+    const { visualizer } = await import("rollup-plugin-visualizer");
 
     const jsonPath = `/tmp/${scene}-bundle-stats.json`;
     const htmlPath = `/tmp/${scene}-bundle-stats.html`;
@@ -74,30 +74,30 @@ async function main(): Promise<void> {
         root: labDir,
         configFile: false,
         publicDir: false,
-        logLevel: 'warn',
+        logLevel: "warn",
         plugins: [
             visualizer({
                 filename: jsonPath,
-                template: 'raw-data',
+                template: "raw-data",
                 gzipSize: true,
             }),
             visualizer({
                 filename: htmlPath,
-                template: 'treemap',
+                template: "treemap",
                 gzipSize: true,
             }),
         ],
         build: {
             outDir: `/tmp/${scene}-analyze`,
             emptyOutDir: true,
-            minify: 'esbuild',
+            minify: "esbuild",
             sourcemap: false,
             modulePreload: false,
             rollupOptions: {
-                input: { [scene]: resolve(labDir, `src/lite/${scene}.ts`) },
+                input: { [scene]: resolve(labDir, `lite/src/lite/${scene}.ts`) },
                 output: {
-                    format: 'es',
-                    entryFileNames: '[name].js',
+                    format: "es",
+                    entryFileNames: "[name].js",
                     chunkFileNames: `${scene}-[name]-[hash].js`,
                 },
             },
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     });
 
     // Parse and print summary
-    const data: StatsData = JSON.parse(readFileSync(jsonPath, 'utf-8'));
+    const data: StatsData = JSON.parse(readFileSync(jsonPath, "utf-8"));
     const { tree, nodeParts, nodeMetas } = data;
 
     // Group modules by chunk (depth-1 children of root)
@@ -119,7 +119,7 @@ async function main(): Promise<void> {
             const part = nodeParts[leaf.uid];
             if (!part) continue;
             const meta = nodeMetas[part.metaUid];
-            const id = meta?.id || leaf.path.join('/');
+            const id = meta?.id || leaf.path.join("/");
             modules.push({ id, size: part.renderedLength, gzip: part.gzipLength });
         }
         modules.sort((a, b) => b.size - a.size);
@@ -130,9 +130,9 @@ async function main(): Promise<void> {
         console.log(`\n=== ${chunkNode.name} (${(totalSize / 1024).toFixed(1)} KB rendered, ${(totalGzip / 1024).toFixed(1)} KB gzip) ===`);
         for (const m of modules.slice(0, 40)) {
             const shortPath = m.id
-                .replace(/.*packages\/babylon-lite\/src\//, 'src/')
-                .replace(/.*node_modules\//, 'nm:')
-                .replace(/.*lab\//, 'lab/');
+                .replace(/.*packages\/babylon-lite\/src\//, "src/")
+                .replace(/.*node_modules\//, "nm:")
+                .replace(/.*lab\//, "lab/");
             console.log(`  ${String(m.size).padStart(6)} B  ${String(m.gzip).padStart(5)} gz  ${shortPath}`);
         }
         if (modules.length > 40) {

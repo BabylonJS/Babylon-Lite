@@ -12,14 +12,14 @@ export default defineConfig({
                 extends: true,
                 test: {
                     name: "unit",
-                    include: ["tests/unit/**/*.test.ts"],
+                    include: ["tests/lite/unit/**/*.test.ts"],
                 },
             },
             {
                 extends: true,
                 test: {
                     name: "build",
-                    include: ["tests/build/**/*.test.ts"],
+                    include: ["tests/lite/build/**/*.test.ts"],
                     testTimeout: 300_000,
                 },
             },

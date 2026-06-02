@@ -44,5 +44,12 @@
         "tags": ["game", "strategy", "2d", "showcase"],
         "fetch": "freeciv",
         "mobile": false
+    },
+    {
+        "slug": "mosquito-amber",
+        "name": "Mosquito in Amber",
+        "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume) framed with the same static camera and studio HDR environment as Scene 176. Frame-graph scene-texture transmission renders the refractive amber. Pure Lite — no BJS.",
+        "tags": ["gltf", "pbr", "transmission", "env", "showcase"],
+        "mobile": true
     }
 ]

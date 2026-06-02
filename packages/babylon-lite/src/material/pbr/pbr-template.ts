@@ -72,6 +72,8 @@ export interface PbrTemplateConfig {
     readonly _hasSpecularAA?: boolean;
     /** Has gamma albedo (sRGB base color decode) */
     readonly _hasGammaAlbedo?: boolean;
+    /** Has a non-default base-color factor multiplied over the base-color texture. */
+    readonly _hasBaseColorFactor?: boolean;
     /** Has morph targets (changes position/normal variable names in vertex shader) */
     readonly _hasMorph?: boolean;
     /** Has occlusion in ORM texture (simple path, no reflectance ext) */
@@ -121,6 +123,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _hasAlphaBlend = false,
         _hasSpecularAA = false,
         _hasGammaAlbedo = false,
+        _hasBaseColorFactor = false,
         _hasMorph = false,
         _hasOcclusion = false,
         _hasEmissiveColor = false,
@@ -175,6 +178,7 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         { _name: "directIntensity", _type: "f32" },
         { _name: "reflectance", _type: "f32" },
         { _name: "materialAlpha", _type: "f32" },
+        ...(_hasBaseColorFactor ? [{ _name: "baseColorFactor", _type: "vec4<f32>" as const }] : []),
         // glTF metallicFactor / roughnessFactor (default 1.0) — applied over MR texture channels.
         { _name: "metallicFactor", _type: "f32" },
         { _name: "roughnessFactor", _type: "f32" },
@@ -291,11 +295,13 @@ var N=N_geom;`;
 
     // Base color decoding
     const vertexColorMod = _ext?.baseColorMod ?? "";
+    const baseColorFactorRgb = _hasBaseColorFactor ? "*material.baseColorFactor.rgb" : "";
+    const baseColorFactorAlpha = _hasBaseColorFactor ? "*material.baseColorFactor.a" : "";
     const baseColorDecode = _hasGammaAlbedo
-        ? `var baseColor=pow(baseColorSample.rgb,vec3<f32>(2.2));
-var alpha=baseColorSample.a;${vertexColorMod}`
-        : `var baseColor=baseColorSample.rgb;
-var alpha=baseColorSample.a;${vertexColorMod}`;
+        ? `var baseColor=pow(baseColorSample.rgb,vec3<f32>(2.2))${baseColorFactorRgb};
+var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`
+        : `var baseColor=baseColorSample.rgb${baseColorFactorRgb};
+var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
 
     // Roughness / metallic
     const specGlossUV = _ext?.uvForSpecGloss ?? "input.uv";

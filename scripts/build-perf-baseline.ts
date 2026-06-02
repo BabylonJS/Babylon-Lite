@@ -10,18 +10,23 @@
  */
 import { execSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync, rmSync } from "fs";
-import { resolve } from "path";
+import { basename, parse, resolve } from "path";
 
 const ROOT = resolve(__dirname, "..");
-const WORKTREE_DIR = resolve(ROOT, ".perf-baseline-worktree");
+const WORKTREE_DIR = process.env.PERF_BASELINE_WORKTREE
+    ? resolve(ROOT, process.env.PERF_BASELINE_WORKTREE)
+    : process.platform === "win32"
+      ? resolve(parse(ROOT).root, `.bl-perf-${basename(ROOT)}`)
+      : resolve(ROOT, ".perf-baseline-worktree");
 const BASELINE_OUT = resolve(ROOT, "lab/public/bundle-baseline");
-const BASELINE_HTML_DIR = resolve(ROOT, "lab");
+const BASELINE_HTML_DIR = resolve(ROOT, "lab/lite");
 
-function run(cmd: string, opts?: { cwd?: string; env?: Record<string, string> }): string {
+function run(cmd: string, opts?: { cwd?: string; env?: Record<string, string>; quiet?: boolean }): string {
     return execSync(cmd, {
         encoding: "utf-8",
         cwd: opts?.cwd ?? ROOT,
         env: opts?.env ? { ...process.env, ...opts.env } : undefined,
+        stdio: opts?.quiet ? ["ignore", "pipe", "ignore"] : undefined,
     }).trim();
 }
 
@@ -36,7 +41,7 @@ function getBaselineRef(): string {
 
     // Find the latest semver tag reachable from HEAD
     try {
-        const tag = run("git describe --tags --abbrev=0 --match 'v*'");
+        const tag = run("git describe --tags --abbrev=0 --match 'v*'", { quiet: true });
         if (tag) {
             console.log(`Found latest release tag: ${tag}`);
             return tag;
@@ -51,7 +56,7 @@ function getBaselineRef(): string {
     // BabylonJS master, so prefer `upstream/*` when that remote exists.
     for (const ref of ["upstream/master", "upstream/main", "origin/master", "origin/main"]) {
         try {
-            run(`git rev-parse ${ref}`);
+            run(`git rev-parse --verify --quiet ${ref}`, { quiet: true });
             console.log(`Using fallback ref: ${ref}`);
             return ref;
         } catch {
@@ -70,7 +75,7 @@ const baselineRef = getBaselineRef();
 const currentSha = run("git rev-parse HEAD");
 let baselineSha: string;
 try {
-    baselineSha = run(`git rev-parse ${baselineRef}`);
+    baselineSha = run(`git rev-parse --verify --quiet ${baselineRef}`, { quiet: true });
 } catch {
     console.error(`Error: could not resolve ref '${baselineRef}'. Make sure the tag or branch exists.`);
     process.exit(1);
@@ -88,11 +93,11 @@ console.log(`\nChecking out ${baselineRef} (${baselineSha.slice(0, 8)}) into wor
 // Clean up any previous worktree
 if (existsSync(WORKTREE_DIR)) {
     try {
-        run(`git worktree remove --force "${WORKTREE_DIR}"`);
+        run(`git worktree remove --force "${WORKTREE_DIR}"`, { quiet: true });
     } catch {
         rmSync(WORKTREE_DIR, { recursive: true, force: true });
         try {
-            run("git worktree prune");
+            run("git worktree prune", { quiet: true });
         } catch {
             /* ignore */
         }
@@ -105,10 +110,10 @@ run(`git worktree add --detach "${WORKTREE_DIR}" ${baselineRef}`);
 
 console.log("\nInstalling dependencies in worktree...");
 try {
-    run("pnpm install --frozen-lockfile", { cwd: WORKTREE_DIR });
+    run("pnpm install --frozen-lockfile --virtual-store-dir .p", { cwd: WORKTREE_DIR });
 } catch {
     // lockfile might differ between versions — allow unfrozen
-    run("pnpm install", { cwd: WORKTREE_DIR });
+    run("pnpm install --virtual-store-dir .p", { cwd: WORKTREE_DIR });
 }
 
 // Use the current bundle builder for baseline generation. This keeps perf
@@ -172,15 +177,15 @@ for (const scene of scenes) {
 
 console.log("\nCleaning up worktree...");
 try {
-    run(`git worktree remove --force "${WORKTREE_DIR}"`);
+    run(`git worktree remove --force "${WORKTREE_DIR}"`, { quiet: true });
 } catch {
     rmSync(WORKTREE_DIR, { recursive: true, force: true });
     try {
-        run("git worktree prune");
+        run("git worktree prune", { quiet: true });
     } catch {
         /* ignore */
     }
 }
 
 console.log(`\n✓ Baseline bundles from ${baselineRef} (${baselineSha.slice(0, 8)}) ready at ${BASELINE_OUT}`);
-console.log(`✓ HTML pages: lab/bundle-baseline-scene{1..${scenes.length}}.html`);
+console.log(`✓ HTML pages: lab/lite/bundle-baseline-scene{1..${scenes.length}}.html`);

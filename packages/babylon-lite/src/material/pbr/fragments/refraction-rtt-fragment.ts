@@ -37,10 +37,11 @@ let rd=refract(-V,N,material.refractionParams.y);
 let ra=mix(alphaG,0.0,clamp(material.refractionParams.w*3.0-2.0,0.0,1.0));
 let lv=clamp(log2(f32(textureDimensions(refractionTexture).x)*ra)-4.0,0.0,f32(textureNumLevels(refractionTexture)-1));
 let cp=scene.viewProjection*vec4<f32>(input.worldPos+rd*th,1.0);
-let er=textureSampleLevel(refractionTexture,refractionSampler_,(cp.xy/cp.w)*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5,0.5),lv).rgb*material.environmentIntensity;
+let ruv=(cp.xy/cp.w)*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5,0.5);
+let er=textureSampleLevel(refractionTexture,refractionSampler_,ruv,lv).rgb*material.environmentIntensity;
 ${absorptionLine}
 ${refractionLine}
-color=finalIrradiance*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro+fr+emissive;
+color=finalIrradiance*ro*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro*ro+fr+emissive;
 }`;
 }
 

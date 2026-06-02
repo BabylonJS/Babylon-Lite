@@ -287,7 +287,7 @@
         "slug": "scene30-volume-testing",
         "name": "Scene 30 — KHR_materials_volume_testing",
         "maxMad": 0.15,
-        "maxRawKB": 94,
+        "maxRawKB": 97.4,
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment with frame-graph scene-texture transmission. Matches PG #YG3BBF#16.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume"],
         "skipPerf": true
@@ -820,7 +820,7 @@
         "slug": "scene112-khr-texture-basisu",
         "name": "Scene 112 — KHR_texture_basisu Flight Helmet",
         "maxMad": 0.4,
-        "maxRawKB": 110,
+        "maxRawKB": 113.6,
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "env", "basis", "transmission"],
         "skipPerf": true
@@ -1222,6 +1222,17 @@
         "maxRawKB": 100,
         "description": "Navmesh raycast between two far-separated points on nav_test.glb. Spheres mark start/end/hit, a yellow tube traces the ray (port of playground #DPDNVH#7).",
         "tags": ["navigation", "recast", "wasm", "raycast"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 176,
+        "slug": "scene176-mosquito-amber",
+        "name": "Scene 176 - MosquitoInAmber",
+        "maxMad": 0.5,
+        "maxRawKB": 95,
+        "description": "KhronosGroup MosquitoInAmber.gltf (KHR_materials_transmission + ior + volume) against the studio.env HDR environment used as IBL and a blurred HDR skybox, with frame-graph scene-texture transmission.",
+        "tags": ["pbr", "gltf", "env", "transmission", "volume", "skybox"],
         "skipPerf": true,
         "bundleTimeoutMs": 120000
     }
