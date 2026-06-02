@@ -1,76 +1,44 @@
-// Scene 177 — Clustered Sponza Lights — Babylon.js reference.
-// Mirrors https://playground.babylonjs.com/#CSCJO2#89 with deterministic light
-// generation so golden capture and Lite render use the same point-light field.
+// Scene 177 — PBR Iridescence Sphere — Babylon.js reference
+// Port of https://playground.babylonjs.com/#2FDQT5#1505.
 
-import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
+import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
-import { ClusteredLightContainer } from "@babylonjs/core/Lights/Clustered/clusteredLightContainer";
-import { PointLight } from "@babylonjs/core/Lights/pointLight";
-import "@babylonjs/core/Lights/Clustered/clusteredLightingSceneComponent";
+import "@babylonjs/core/Helpers/sceneHelpers";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
-import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
-import "@babylonjs/core/Loading/loadingScreen";
-import "@babylonjs/loaders/glTF";
 
-const MODEL_ROOT = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Sponza/glTF/";
-const MODEL_FILE = "Sponza.gltf";
-
-function seededRandom(seed: number): () => number {
-    let s = seed >>> 0;
-    return () => {
-        s = (1664525 * s + 1013904223) >>> 0;
-        return s / 0x100000000;
-    };
-}
-
-function waitForLoadingScreenHidden(): Promise<void> {
-    return new Promise((resolve) => {
-        const check = () => {
-            const loadingDiv = document.getElementById("babylonjsLoadingDiv");
-            if (!loadingDiv || getComputedStyle(loadingDiv).display === "none" || loadingDiv.style.opacity === "0") {
-                resolve();
-                return;
-            }
-            requestAnimationFrame(check);
-        };
-        requestAnimationFrame(check);
-    });
-}
+const ENV_URL = "https://playground.babylonjs.com/textures/environment.env";
 
 (async function () {
-    const __initStart = performance.now();
+    const initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
 
     const scene = new Scene(engine);
-    const camera = new FreeCamera("camera", new Vector3(-5, 2, 0), scene);
-    camera.setTarget(new Vector3(0, 3, 0));
-    camera.speed = 0.2;
+    const camera = new ArcRotateCamera("camera1", 0, Math.PI / 2, 5, Vector3.Zero(), scene);
+    camera.lowerRadiusLimit = 2;
+    camera.upperRadiusLimit = 10;
     camera.attachControl(canvas, true);
     scene.activeCamera = camera;
 
-    await SceneLoader.AppendAsync(MODEL_ROOT, MODEL_FILE, scene);
-    for (const material of scene.materials) {
-        if (material instanceof PBRMaterial) {
-            material.useGLTFLightFalloff = true;
-        }
-    }
+    const environmentTexture = CubeTexture.CreateFromPrefilteredData(ENV_URL, scene);
+    scene.createDefaultSkybox(environmentTexture, true, undefined, 0.3, true);
 
-    const lights: PointLight[] = [];
-    const rnd = seededRandom(0x5eed177);
-    for (let i = 0; i < 1000; i++) {
-        const light = new PointLight(`light${i}`, new Vector3(rnd() * 20 - 10, rnd() * 10, rnd() * 10 - 5), scene, true);
-        light.diffuse = new Color3(rnd(), rnd(), rnd());
-        light.range = 1;
-        lights.push(light);
-    }
-    new ClusteredLightContainer("clusteredLights", lights, scene);
+    const sphere = Mesh.CreateSphere("sphere1", 16, 2, scene);
+    const pbr = new PBRMaterial("pbr", scene);
+    sphere.material = pbr;
+    pbr.albedoColor = new Color3(0.1, 0.1, 0.1);
+    pbr.metallic = 1.0;
+    pbr.roughness = 0.0;
+    pbr.iridescence.isEnabled = true;
 
-    const eng = engine as unknown as { _drawCalls?: { fetchNewFrame(): void; current: number } };
+    const eng = engine as unknown as { _drawCalls?: { current: number; fetchNewFrame(): void } };
     scene.onBeforeRenderObservable.add(() => {
         eng._drawCalls?.fetchNewFrame();
     });
@@ -80,11 +48,7 @@ function waitForLoadingScreenHidden(): Promise<void> {
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
-
     await new Promise<void>((resolve) => scene.onAfterRenderObservable.addOnce(() => resolve()));
-    engine.hideLoadingUI();
-    await waitForLoadingScreenHidden();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    canvas.dataset.initMs = String(performance.now() - __initStart);
+    canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";
 })().catch(console.error);

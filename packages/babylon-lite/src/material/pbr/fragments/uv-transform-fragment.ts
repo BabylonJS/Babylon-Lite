@@ -39,7 +39,7 @@ function writeOne(data: Float32Array, offsets: ReadonlyMap<string, number>, texN
     data[ti + 3] = 0;
 }
 
-export const uvTransformExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "uv-transform",
     phase: "fragment",
     writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {

@@ -32,6 +32,7 @@ import {
     PBR_HAS_TONEMAP,
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
+import type { PbrExt } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -89,6 +90,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasMetallicReflectance = false;
     let hasClearcoat = false;
     let hasSheen = false;
+    let hasIridescence = false;
     let hasAnyAnisotropy = false;
     let hasAnySubsurface = false;
     let hasAlphaTest = false;
@@ -110,6 +112,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
         hasClearcoat ||= !!mat.clearCoat?.isEnabled;
         hasSheen ||= !!mat.sheen?.isEnabled;
+        hasIridescence ||= !!mat.iridescence?.isEnabled;
         hasAnyAnisotropy ||= !!mat.anisotropy?.isEnabled;
         hasAnySubsurface ||= !!mat.subsurface?.translucency;
         hasAlphaTest ||= mat.alphaCutOff! > 0;
@@ -131,7 +134,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let _iblSkyboxCalc = "";
     if (hasEnv) {
         const mod = await import("./fragments/ibl-fragment.js");
-        _registerPbrExt(mod.iblExt);
+        _registerPbrExt(mod.pbrExt);
         if (hasSkybox) {
             // Skybox-mode WGSL is only loaded when at least one mesh in the scene needs it.
             const sky = await import("./fragments/ibl-skybox-wgsl.js");
@@ -165,55 +168,41 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     }
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
-    // Inline `if` blocks (rather than a descriptor array) keep the awaited `import()`
-    // sites literal AND let terser shorten each block independently, saving ~1 KB
-    // in scene1's pbr-renderable chunk. Registration runs sequentially in source
-    // order, which is the iteration order consumed by `_getPbrExts().values()` on
-    // the hot paths (composePbr, writeMaterialData, collectPbrBoundTextures).
-    if (hasAlphaTest) {
-        const mod = await import("./fragments/alpha-test-fragment.js");
-        _registerPbrExt(mod.alphaTestExt);
-    }
-    if (hasMetallicReflectance) {
-        const mod = await import("./fragments/reflectance-fragment.js");
-        _registerPbrExt(mod.reflectanceExt);
-    }
-    if (hasClearcoat) {
-        const mod = await import("./fragments/clearcoat-fragment.js");
-        _registerPbrExt(mod.clearcoatExt);
-    }
-    if (hasSheen) {
-        const mod = await import("./fragments/sheen-fragment.js");
-        _registerPbrExt(mod.sheenExt);
-    }
-    if (hasAnySubsurface) {
-        const mod = await import("./fragments/subsurface-fragment.js");
-        _registerPbrExt(mod.subsurfaceExt);
-    }
+    // Each optional PBR fragment module exports a uniform `pbrExt`, so registration
+    // collapses to a single data-driven loop over [flag, loader] pairs. The `import()`
+    // specifiers stay literal (required for Vite code-splitting) and the shared
+    // `_registerPbrExt((await load()).pbrExt)` glue is emitted once instead of per
+    // feature, keeping this management layer small as features are added.
+    // Registration order is the iteration order consumed by `_getPbrExts().values()`
+    // on the hot paths (composePbr, writeMaterialData, collectPbrBoundTextures).
+    type PbrExtLoad = () => Promise<{ pbrExt: PbrExt }>;
+    const _drainPbrExts = async (loaders: Array<readonly [boolean, PbrExtLoad]>) => {
+        for (const [flag, load] of loaders) {
+            if (flag) {
+                _registerPbrExt((await load()).pbrExt);
+            }
+        }
+    };
+
+    await _drainPbrExts([
+        [hasAlphaTest, () => import("./fragments/alpha-test-fragment.js")],
+        [hasMetallicReflectance, () => import("./fragments/reflectance-fragment.js")],
+        [hasClearcoat, () => import("./fragments/clearcoat-fragment.js")],
+        [hasSheen, () => import("./fragments/sheen-fragment.js")],
+        [hasIridescence, () => import("./fragments/iridescence-fragment.js")],
+        [hasAnySubsurface, () => import("./fragments/subsurface-fragment.js")],
+    ]);
     if (hasTransmissionRefraction) {
         const mod = await import("./pbr-refraction.js");
         await mod.registerPbrRefraction(scene as SceneContextInternal, engine, _registerPbrExt);
     }
-    if (needsEmissiveColor) {
-        const mod = await import("./fragments/emissive-fragment.js");
-        _registerPbrExt(mod.emissiveColorExt);
-    }
-    if (hasAnyUnlit) {
-        const mod = await import("./fragments/unlit-fragment.js");
-        _registerPbrExt(mod.unlitExt);
-    }
-    if (hasSomeSkeletons) {
-        const mod = await import("./fragments/skeleton-fragment.js");
-        _registerPbrExt(mod.skeletonExt);
-    }
-    if (hasSomeMorphs) {
-        const mod = await import("./fragments/morph-fragment.js");
-        _registerPbrExt(mod.morphExt);
-    }
-    if (hasAnyUvTransform) {
-        const mod = await import("./fragments/uv-transform-fragment.js");
-        _registerPbrExt(mod.uvTransformExt);
-    }
+    await _drainPbrExts([
+        [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
+        [hasAnyUnlit, () => import("./fragments/unlit-fragment.js")],
+        [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
+        [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
+        [hasAnyUvTransform, () => import("./fragments/uv-transform-fragment.js")],
+    ]);
 
     // Anisotropy needs its module reference retained (for ANISO_BRDF_FUNCTIONS /
     // makeAnisotropyTBBlock / ANISO_DIRECT_DG / ANISO_BENT_NORMAL strings consumed
@@ -221,7 +210,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
     if (hasAnyAnisotropy) {
         _anisoExt = await import("./fragments/anisotropy-fragment.js");
-        _registerPbrExt(_anisoExt.anisotropyExt);
+        _registerPbrExt(_anisoExt.pbrExt);
     }
 
     // Lazy-load pbr-template-ext when any advanced features are present.

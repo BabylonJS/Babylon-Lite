@@ -2200,13 +2200,23 @@
                     <div class="hamburger-divider"></div>
                     <button
                         class="docs-toggle hamburger-item"
-                        id="docs-toggle"
+                        id="architecture-toggle"
                         onclick="
-                            toggleDocs();
+                            toggleDocs('architecture');
                             closeHamburgerMenu();
                         "
                     >
-                        📖 Architecture &amp; Features
+                        🏗️ Architecture Overview
+                    </button>
+                    <button
+                        class="docs-toggle hamburger-item"
+                        id="features-toggle"
+                        onclick="
+                            toggleDocs('features');
+                            closeHamburgerMenu();
+                        "
+                    >
+                        📊 Feature Comparison
                     </button>
                     <button
                         class="docs-toggle hamburger-item"
@@ -2234,8 +2244,8 @@
 
         <div id="docs-panel" class="docs-panel">
             <div class="docs-close-row">
-                <h3 class="docs-section-title">🏗️ <span>Architecture Overview</span></h3>
-                <button class="docs-close-btn" type="button" onclick="toggleDocs()" aria-label="Close Architecture overview">✕ Close</button>
+                <h3 class="docs-section-title"><span id="docs-title-icon">🏗️</span> <span id="docs-title">Architecture Overview</span></h3>
+                <button class="docs-close-btn" type="button" onclick="toggleDocs()" aria-label="Close documentation">✕ Close</button>
             </div>
             <div id="docs-content" class="docs-content-placeholder" style="min-height: 220px; color: #8b949e">Loading documentation…</div>
         </div>
@@ -4931,7 +4941,8 @@
                     subtitle: "WebGPU rendering engine · pixel-perfect parity with Babylon.js",
                     sceneConfigUrl: "/scene-config.json",
                     demosConfigUrl: "/demos-config.json",
-                    docsUrl: "/lite/docs/architecture-features.html",
+                    architectureUrl: "/lite/docs/architecture-overview.html",
+                    featuresUrl: "/lite/docs/feature-comparison.html",
                     apiDocsUrl: "/lite/api-docs/index.html",
                     apiDocsStatusUrl: "/lab-api/docs-status?experience=lite",
                     apiDocsGenerateUrl: "/lab-api/generate-docs?experience=lite",
@@ -4949,7 +4960,8 @@
                     subtitle: "WebGL rendering engine · pixel-perfect parity with Babylon.js",
                     sceneConfigUrl: "/scene-config-webgl.json",
                     demosConfigUrl: "/demos-config-webgl.json",
-                    docsUrl: "/gl/docs/architecture-features.html",
+                    architectureUrl: "/gl/docs/architecture-overview.html",
+                    featuresUrl: "/gl/docs/feature-comparison.html",
                     apiDocsUrl: "/gl/api-docs/index.html",
                     apiDocsStatusUrl: "/lab-api/docs-status?experience=gl",
                     apiDocsGenerateUrl: "/lab-api/generate-docs?experience=gl",
@@ -5610,12 +5622,46 @@
 
             // ── Docs Panel Toggle ──
             var _docsContentUrl = "";
+            var _docsKind = "architecture";
+            var DOCS_CONFIG = {
+                architecture: {
+                    title: "Architecture Overview",
+                    icon: "🏗️",
+                    buttonId: "architecture-toggle",
+                    urlKey: "architectureUrl",
+                    fallbackUrl: "/lite/docs/architecture-overview.html",
+                },
+                features: {
+                    title: "Feature Comparison",
+                    icon: "📊",
+                    buttonId: "features-toggle",
+                    urlKey: "featuresUrl",
+                    fallbackUrl: "/lite/docs/feature-comparison.html",
+                },
+            };
+
+            function setDocsActive(isOpen) {
+                Object.keys(DOCS_CONFIG).forEach(function (kind) {
+                    var btn = document.getElementById(DOCS_CONFIG[kind].buttonId);
+                    if (btn) btn.classList.toggle("active", isOpen && kind === _docsKind);
+                });
+            }
+
+            function syncDocsChrome() {
+                var docs = DOCS_CONFIG[_docsKind] || DOCS_CONFIG.architecture;
+                var icon = document.getElementById("docs-title-icon");
+                var title = document.getElementById("docs-title");
+                if (icon) icon.textContent = docs.icon;
+                if (title) title.textContent = docs.title;
+            }
 
             function ensureDocsContentLoaded() {
                 var cfg = typeof currentExperienceConfig === "function" ? currentExperienceConfig() : null;
-                var url = (cfg && cfg.docsUrl) || "/lite/docs/architecture-features.html";
+                var docs = DOCS_CONFIG[_docsKind] || DOCS_CONFIG.architecture;
+                var url = (cfg && cfg[docs.urlKey]) || docs.fallbackUrl;
                 var host = document.getElementById("docs-content");
                 if (!host) return;
+                syncDocsChrome();
                 if (_docsContentUrl === url && host.dataset.loaded === "1") return;
                 _docsContentUrl = url;
                 host.dataset.loaded = "0";
@@ -5636,13 +5682,18 @@
                     });
             }
 
-            function toggleDocs() {
+            function toggleDocs(kind) {
                 var panel = document.getElementById("docs-panel");
-                var btn = document.getElementById("docs-toggle");
                 var tabs = document.querySelector(".tabs");
                 var activePanel = document.querySelector(".tab-panel.active");
-                var isOpen = panel.classList.toggle("open");
-                btn.classList.toggle("active", isOpen);
+                var switching = kind && kind !== _docsKind;
+                if (kind) _docsKind = kind;
+                _closeOverlayPanel("pitch-panel", "pitch-toggle");
+                _closeApiDocsOverlay();
+                syncDocsChrome();
+                var isOpen = switching && panel.classList.contains("open") ? true : panel.classList.toggle("open");
+                if (isOpen) panel.classList.add("open");
+                setDocsActive(isOpen);
                 tabs.style.display = isOpen ? "none" : "";
                 if (activePanel) activePanel.style.display = isOpen ? "none" : "";
                 if (isOpen) ensureDocsContentLoaded();
@@ -5693,14 +5744,9 @@
             function togglePitch() {
                 var panel = document.getElementById("pitch-panel");
                 var btn = document.getElementById("pitch-toggle");
-                var docsPanel = document.getElementById("docs-panel");
-                var docsBtn = document.getElementById("docs-toggle");
                 var tabs = document.querySelector(".tabs");
                 var activePanel = document.querySelector(".tab-panel.active");
-                if (docsPanel.classList.contains("open")) {
-                    docsPanel.classList.remove("open");
-                    docsBtn.classList.remove("active");
-                }
+                _closeDocsPanel();
                 _closeApiDocsOverlay();
                 var isOpen = panel.classList.toggle("open");
                 btn.classList.toggle("active", isOpen);
@@ -5715,13 +5761,6 @@
                 }
                 _applyOverlayChrome();
             }
-
-            var _origToggleDocs = toggleDocs;
-            toggleDocs = function () {
-                _closeOverlayPanel("pitch-panel", "pitch-toggle");
-                _closeApiDocsOverlay();
-                _origToggleDocs();
-            };
 
             // ── API Docs overlay (same approach as Architecture / Perf Summary) ──
             function _closeApiDocsOverlay() {
@@ -5743,6 +5782,14 @@
                 }
             }
 
+            function _closeDocsPanel() {
+                var panel = document.getElementById("docs-panel");
+                if (panel && panel.classList.contains("open")) {
+                    panel.classList.remove("open");
+                }
+                setDocsActive(false);
+            }
+
             // Lock the host page while any overlay is open and size open panels to fit the
             // viewport, so only the overlay (API Docs: its iframe) scrolls — never the host.
             function _applyOverlayChrome() {
@@ -5761,7 +5808,7 @@
                 var tabs = document.querySelector(".tabs");
                 var activePanel = document.querySelector(".tab-panel.active");
                 // Close the other overlays so only one is visible at a time.
-                _closeOverlayPanel("docs-panel", "docs-toggle");
+                _closeDocsPanel();
                 _closeOverlayPanel("pitch-panel", "pitch-toggle");
                 var isOpen = panel.classList.toggle("open");
                 if (item) item.classList.toggle("active", isOpen);
@@ -5799,12 +5846,11 @@
             function closeToolsOverlays() {
                 var docsPanel = document.getElementById("docs-panel");
                 var pitchPanel = document.getElementById("pitch-panel");
-                var docsBtn = document.getElementById("docs-toggle");
                 var pitchBtn = document.getElementById("pitch-toggle");
                 var tabs = document.querySelector(".tabs");
                 if (docsPanel && docsPanel.classList.contains("open")) {
                     docsPanel.classList.remove("open");
-                    if (docsBtn) docsBtn.classList.remove("active");
+                    setDocsActive(false);
                 }
                 if (pitchPanel && pitchPanel.classList.contains("open")) {
                     pitchPanel.classList.remove("open");

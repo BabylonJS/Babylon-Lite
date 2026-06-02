@@ -5,11 +5,23 @@
 // Static camera (no auto-rotation) for a deterministic golden.
 
 import {
-    addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial,
-    createSceneContext, createSolidTexture2D, getFrameGraph, loadEnvironment, loadGltf,
-    onBeforeRender, registerScene, startEngine,
+    addToScene,
+    attachControl,
+    createArcRotateCamera,
+    createBox,
+    createEngine,
+    createPbrMaterial,
+    createSceneContext,
+    createSolidTexture2D,
+    getFrameGraph,
+    loadEnvironment,
+    loadGltf,
+    onBeforeRender,
+    registerScene,
+    startEngine,
     type RenderTask,
 } from "babylon-lite";
+import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
 
 const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
@@ -42,6 +54,8 @@ async function main(): Promise<void> {
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
+    await configureDemoDracoBase(import.meta.url);
+
     await Promise.all([
         loadGltf(engine, MODEL_URL).then((asset) => addToScene(scene, asset)),
         loadEnvironment(scene, ENV_URL, {
@@ -49,7 +63,7 @@ async function main(): Promise<void> {
             // (mirrors BJS createDefaultSkybox(env, true, scale, 0.3) = microSurface 0.7).
             skipSkybox: true,
             skipGround: true,
-            brdfUrl: "/brdf-lut.png",
+            brdfUrl: demoAssetUrl("./brdf-lut.png", import.meta.url),
         }),
     ]);
 

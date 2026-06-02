@@ -1,7 +1,8 @@
 /**
- * Build Bundle Demos — builds each lab "demo" as a standalone, tree-shaken,
- * minified production bundle into lab/public/bundle/demos/, then measures the
- * runtime-fetched JS size with a headless browser.
+ * Build Bundle Demos — builds each lab "demo" plus required demo support
+ * bundles as standalone, tree-shaken, minified production bundles into
+ * lab/public/bundle/demos/, writes the demo HTML needed to serve those bundles,
+ * then measures each configured demo's runtime JS size with a headless browser.
  *
  * Demos are showcase-only pages (pure Lite, no BJS comparison, no parity/golden
  * obligations) that exist to advertise how thin a Lite-powered page can be.
@@ -20,7 +21,7 @@
 import { build, type Plugin } from "vite";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync } from "fs";
+import { cpSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync } from "fs";
 import {
     labDir,
     srcDir,
@@ -38,12 +39,21 @@ import {
 import { fetchDemoAssets } from "./demo-fetchers";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const PAGES_SRC = resolve(ROOT, "pages");
+const THUMBS_SRC = resolve(labDir, "public/thumbnails");
+const DOOM_SRC = resolve(labDir, "public/doom");
+const LIBREQUAKE_SRC = resolve(labDir, "public/librequake");
+const MINECRAFT_SRC = resolve(labDir, "public/minecraft");
+const FREECIV_SRC = resolve(labDir, "public/freeciv");
+const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 interface DemoConfigEntry {
     slug: string;
     name: string;
     description: string;
     tags?: string[];
+    /** When false, the demo is hidden on mobile-oriented demo listings. */
+    mobile?: boolean;
     /** Optional id of the asset fetcher for this demo (see scripts/demo-fetchers.ts). */
     fetch?: string;
 }
@@ -55,6 +65,7 @@ interface DemoManifestEntry {
 
 const demosDir = resolve(outDir, "demos");
 const DEMOS_MANIFEST_FILE = resolve(outDir, "demos-manifest.json");
+const DEMO_SUPPORT_BUNDLES = ["landing-bg"] as const;
 
 /** Stub Vite's preload helper so it doesn't add bytes to measured bundles. */
 function minimalVitePreloadPlugin(): Plugin {
@@ -76,6 +87,125 @@ function minimalVitePreloadPlugin(): Plugin {
 
 function loadDemosConfig(): DemoConfigEntry[] {
     return JSON.parse(readFileSync(resolve(ROOT, "demos-config.json"), "utf-8")) as DemoConfigEntry[];
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function rewriteDemoHtmlForBundle(html: string): string {
+    return html.replace(/(["'])\/(?:lite\/)?bundle\/demos\//g, "$1./");
+}
+
+function renderCard(demo: DemoConfigEntry, size: DemoManifestEntry | undefined): string {
+    const tagList = demo.tags ?? [];
+    const tags = tagList.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+    const sizeRow = size
+        ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
+        : "";
+    return [
+        `<a class="card" href="./demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<div class="card-image">`,
+        `<img src="thumbnails/demo-${demo.slug}.png" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `</div>`,
+        `<div class="card-body">`,
+        `<h2>${escapeHtml(demo.name)}</h2>`,
+        `<p>${escapeHtml(demo.description)}</p>`,
+        tags ? `<div class="tags">${tags}</div>` : "",
+        sizeRow,
+        `<span class="card-disabled-badge">Requires WebGPU</span>`,
+        `</div></a>`,
+    ].join("");
+}
+
+function renderFilters(demos: DemoConfigEntry[]): string {
+    const tags = Array.from(new Set(demos.flatMap((demo) => demo.tags ?? []))).sort();
+    if (tags.length === 0) {
+        return "";
+    }
+    const pills = [
+        `<button type="button" class="filter-pill is-active" data-filter="all" aria-pressed="true">All</button>`,
+        ...tags.map((tag) => `<button type="button" class="filter-pill" data-filter="${escapeHtml(tag)}" aria-pressed="false">${escapeHtml(tag)}</button>`),
+    ].join("");
+    return `<nav class="filters" aria-label="Filter demos by tag">${pills}</nav>`;
+}
+
+function renderDemoIndex(demos: DemoConfigEntry[], manifest: Record<string, DemoManifestEntry>): string {
+    const template = readFileSync(resolve(PAGES_SRC, "index.template.html"), "utf-8");
+    const cards = demos.map((demo) => renderCard(demo, manifest[demo.slug])).join("\n                ");
+    return template
+        .replace("<!--FILTERS-->", renderFilters(demos))
+        .replace("<!--CARDS-->", cards)
+        .replace(/(["'])bundle\/demos\/landing-bg\.js\1/g, "$1./landing-bg.js$1");
+}
+
+function copyDemoIndexAssets(demos: DemoConfigEntry[]): void {
+    cpSync(resolve(PAGES_SRC, "babylon-logo.svg"), resolve(demosDir, "babylon-logo.svg"));
+
+    const thumbsOut = resolve(demosDir, "thumbnails");
+    rmSync(thumbsOut, { recursive: true, force: true });
+    mkdirSync(thumbsOut, { recursive: true });
+    for (const demo of demos) {
+        const thumb = resolve(THUMBS_SRC, `demo-${demo.slug}.png`);
+        if (existsSync(thumb)) {
+            cpSync(thumb, resolve(thumbsOut, `demo-${demo.slug}.png`));
+        }
+    }
+}
+
+function copyRequiredDir(source: string, target: string, label: string): void {
+    if (!existsSync(source)) {
+        throw new Error(`Missing ${label} assets at ${source}`);
+    }
+    rmSync(target, { recursive: true, force: true });
+    cpSync(source, target, { recursive: true });
+}
+
+function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
+    if (demos.some((demo) => demo.slug === "doom")) {
+        if (!existsSync(DOOM_SRC)) {
+            throw new Error(`Missing DOOM assets at ${DOOM_SRC}`);
+        }
+        const doomOut = resolve(demosDir, "doom");
+        rmSync(doomOut, { recursive: true, force: true });
+        mkdirSync(doomOut, { recursive: true });
+        for (const file of readdirSync(DOOM_SRC)) {
+            if (file === "freedoom2.wad") continue;
+            cpSync(resolve(DOOM_SRC, file), resolve(doomOut, file));
+        }
+    }
+
+    if (demos.some((demo) => demo.slug === "quake")) {
+        copyRequiredDir(LIBREQUAKE_SRC, resolve(demosDir, "librequake"), "LibreQuake");
+    }
+
+    if (demos.some((demo) => demo.slug === "minecraft")) {
+        copyRequiredDir(MINECRAFT_SRC, resolve(demosDir, "minecraft"), "Minecraft voxel pack");
+    }
+
+    if (demos.some((demo) => demo.slug === "freeciv")) {
+        copyRequiredDir(FREECIV_SRC, resolve(demosDir, "freeciv"), "Freeciv");
+    }
+
+    for (const file of [...DRACO_FILES, "brdf-lut.png"]) {
+        const src = resolve(labDir, "public", file);
+        if (existsSync(src)) {
+            cpSync(src, resolve(demosDir, file));
+        }
+    }
+}
+
+function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoManifestEntry>): void {
+    for (const demo of demos) {
+        const source = resolve(labDir, "lite", `demo-${demo.slug}.html`);
+        if (!existsSync(source)) {
+            throw new Error(`Missing demo HTML: ${source}`);
+        }
+        writeFileSync(resolve(demosDir, `demo-${demo.slug}.html`), rewriteDemoHtmlForBundle(readFileSync(source, "utf-8")));
+    }
+    copyDemoIndexAssets(demos);
+    copyDemoRuntimeAssets(demos);
+    writeFileSync(resolve(demosDir, "index.html"), renderDemoIndex(demos, manifest));
 }
 
 export async function buildDemo(slug: string): Promise<void> {
@@ -152,6 +282,13 @@ export async function buildDemo(slug: string): Promise<void> {
     rmSync(demoOutDir, { recursive: true, force: true });
 }
 
+export async function buildDemoSupportBundles(): Promise<void> {
+    for (const slug of DEMO_SUPPORT_BUNDLES) {
+        console.log(`Building demo support bundle ${slug}...`);
+        await buildDemo(slug);
+    }
+}
+
 export async function buildDemoBundles(): Promise<void> {
     const demos = loadDemosConfig();
     if (demos.length === 0) {
@@ -169,6 +306,8 @@ export async function buildDemoBundles(): Promise<void> {
         console.log(`Building demo ${demo.slug}...`);
         await buildDemo(demo.slug);
     }
+
+    await buildDemoSupportBundles();
 
     // Measure runtime-fetched JS size for each demo.
     const { chromium } = await import("@playwright/test");
@@ -205,5 +344,7 @@ export async function buildDemoBundles(): Promise<void> {
         writeFileSync(DEMOS_MANIFEST_FILE, JSON.stringify(manifest, null, 2));
     }
 
-    console.log(`✓ Demo bundles + manifest built to ${demosDir}`);
+    writeDemoHtml(demos, manifest);
+
+    console.log(`✓ Demo bundles, manifest, and HTML built to ${demosDir}`);
 }

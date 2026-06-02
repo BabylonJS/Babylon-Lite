@@ -7,9 +7,11 @@
 // distance and panned left/right relative to the listener's facing, mirroring
 // Quake's ATTN_NORM falloff without copying any game code.
 
+import { demoAssetUrl } from "../../demo-asset-url.js";
+
 type V3 = [number, number, number];
 
-const SND_BASE = "/librequake/sound/";
+const SND_BASE = demoAssetUrl("./librequake/sound/", import.meta.url);
 /** Distance (Quake units) past which a positional sound is inaudible. */
 const ATTN_RANGE = 1400;
 /** Minimum gap between two plays of the same sound, in seconds. */

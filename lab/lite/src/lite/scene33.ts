@@ -6,7 +6,6 @@
 import { addToScene, startEngine, createEngine, createSceneContext, createDefaultCamera, loadEnvironment, loadGltf, attachControl, registerScene, getFrameGraph, type RenderTask } from "babylon-lite";
 
 async function main(): Promise<void> {
-    const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
     const engine = await createEngine(canvas);
@@ -28,13 +27,6 @@ async function main(): Promise<void> {
 
     await registerScene(engine, scene);
     await startEngine(engine);
-    canvas.dataset.drawCalls = String(engine.drawCallCount);
-    canvas.dataset.camAlpha = String(cam.alpha);
-    canvas.dataset.camBeta = String(cam.beta);
-    canvas.dataset.camRadius = String(cam.radius);
-    canvas.dataset.camTarget = `${cam.target.x},${cam.target.y},${cam.target.z}`;
-    canvas.dataset.camFov = String(cam.fov);
-    canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }
 

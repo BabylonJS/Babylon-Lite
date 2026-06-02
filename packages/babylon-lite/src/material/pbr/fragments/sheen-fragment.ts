@@ -207,7 +207,7 @@ export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, of
     data[ti + 3] = 0;
 }
 
-export const sheenExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "sheen",
     phase: "base-tex",
     detect(mat) {

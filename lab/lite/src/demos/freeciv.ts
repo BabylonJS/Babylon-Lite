@@ -13,15 +13,7 @@
  * and no tileset bytes are committed to this repo.
  */
 
-import {
-    createEngine,
-    createSprite2DLayer,
-    createSpriteRenderer,
-    registerSpriteRenderer,
-    startEngine,
-    type EngineContext,
-    type Sprite2DLayer,
-} from "babylon-lite";
+import { createEngine, createSprite2DLayer, createSpriteRenderer, registerSpriteRenderer, startEngine, type EngineContext, type Sprite2DLayer } from "babylon-lite";
 import { loadFreecivSheet } from "./freeciv/atlas.js";
 import { createAtmosphere } from "./freeciv/atmosphere.js";
 import { createBackdrop } from "./freeciv/backdrop.js";
@@ -33,12 +25,9 @@ import { createLiveSim } from "./freeciv/live.js";
 import { createPicker } from "./freeciv/pick.js";
 import { createMinimap } from "./freeciv/minimap.js";
 import { DIR8, DIR_DELTA, TILE_H, TILE_W, isoCentre, worldToTile } from "./freeciv/iso.js";
+import { demoAssetUrl } from "./demo-asset-url.js";
 
-// Relative (no leading slash) so the tileset resolves against the page URL —
-// works both on the dev server (root) and when the demo is published under a
-// sub-path (e.g. GitHub Pages project page). An absolute "/freeciv" would 404
-// on a sub-path deployment. Mirrors the minecraft/doom demos.
-const BASE_URL = "freeciv";
+const BASE_URL = demoAssetUrl("./freeciv", import.meta.url);
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -282,14 +271,13 @@ function createCityLabels(cities: readonly { x: number; y: number; name: string;
             const vx = Math.round(view.x * z) / z;
             const vy = Math.round(view.y * z) / z;
             for (const a of anchors) {
-                const sx = (a.wx - vx) * z / dpr;
-                const sy = (a.wy - vy) * z / dpr;
+                const sx = ((a.wx - vx) * z) / dpr;
+                const sy = ((a.wy - vy) * z) / dpr;
                 a.el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -100%)`;
             }
         },
     };
 }
-
 
 interface View {
     x: number;
@@ -488,13 +476,7 @@ function findPath(world: GameMap, sx: number, sy: number, gx: number, gy: number
 /** Callback fired as the cursor moves over the map; `tileX = null` clears hover. */
 type HoverFn = (tileX: number | null, tileY: number | null, cssX: number, cssY: number) => void;
 
-function installControls(
-    engine: EngineContext,
-    view: View,
-    layers: readonly Sprite2DLayer[],
-    onHover?: HoverFn,
-    onClick?: (tileX: number, tileY: number) => void,
-): void {
+function installControls(engine: EngineContext, view: View, layers: readonly Sprite2DLayer[], onHover?: HoverFn, onClick?: (tileX: number, tileY: number) => void): void {
     const canvas = engine.canvas as HTMLCanvasElement;
     const dpr = (): number => (canvas.width || 1) / (canvas.clientWidth || 1);
     let dragging = false;
@@ -585,7 +567,7 @@ function installControls(
             view.userMoved = true;
             applyView(view, layers);
         },
-        { passive: false },
+        { passive: false }
     );
 }
 

@@ -18,10 +18,7 @@ import { BRDF_ASSET, startOffscreenScene } from "./offscreen-scene";
 
 const DPR = (): number => globalThis.devicePixelRatio || 1;
 
-// Resolve the local BRDF LUT to an absolute URL against the document base so it
-// loads identically on the main thread and inside the worker (a worker would
-// otherwise resolve a relative path against its own /bundle/demos/ script URL).
-const BRDF_URL = new URL(BRDF_ASSET, document.baseURI).href;
+const BRDF_URL = BRDF_ASSET;
 
 function deviceSize(canvas: HTMLCanvasElement): { w: number; h: number } {
     const dpr = DPR();

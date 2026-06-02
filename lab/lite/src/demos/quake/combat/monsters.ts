@@ -7,20 +7,12 @@
 // Vertex animation is done by streaming each keyframe's positions into the mesh's
 // GPU vertex buffer (the Quake world material is unlit, so normals are ignored).
 
-import {
-    addToScene,
-    createMeshFromData,
-    createTexture2DFromPixels,
-    updateMeshPositions,
-    type EngineContext,
-    type Mesh,
-    type SceneContext,
-    type Texture2D,
-} from "babylon-lite";
+import { addToScene, createMeshFromData, createTexture2DFromPixels, updateMeshPositions, type EngineContext, type Mesh, type SceneContext, type Texture2D } from "babylon-lite";
 
 import { parseMdl, expandFrame, type MdlModel } from "../render/mdl.js";
 import { createQuakeMaterial } from "../render/quake-material.js";
 import { quakeToEngine } from "../geometry/build-geometry.js";
+import { demoAssetUrl } from "../../demo-asset-url.js";
 import type { QuakePhysics } from "../physics/collision.js";
 import type { Palette } from "../palette.js";
 
@@ -53,8 +45,50 @@ interface MonsterDef {
 //   soldier: stand 0-7, deathc 18-28, run 73-80, shoot 81-89 (flash ~85)
 //   dog:     attack 0-7, death 8-16, run 48-59, stand 69-77
 const DEFS: Record<string, MonsterDef> = {
-    monster_army: { classname: "monster_army", url: "/librequake/progs/soldier.mdl", health: 30, speed: 70, sightRange: 1200, attackRange: 600, attackDamage: 5, attackInterval: 1.0, stand: [0, 7], run: [73, 80], attack: [81, 89], death: [18, 28], standFps: 5, runFps: 10, attackFps: 10, deathFps: 8, sightSnd: "soldier/sight1.wav", attackSnd: "soldier/sattck1.wav", painSnds: ["soldier/pain1.wav", "soldier/pain2.wav"], deathSnd: "soldier/death1.wav" },
-    monster_dog: { classname: "monster_dog", url: "/librequake/progs/dog.mdl", health: 25, speed: 150, sightRange: 1000, attackRange: 80, attackDamage: 6, attackInterval: 0.6, stand: [69, 77], run: [48, 59], attack: [0, 7], death: [8, 16], standFps: 6, runFps: 14, attackFps: 12, deathFps: 10, sightSnd: "dog/dsight.wav", attackSnd: "dog/dattack1.wav", painSnds: ["dog/dpain1.wav"], deathSnd: "dog/ddeath.wav" },
+    monster_army: {
+        classname: "monster_army",
+        url: demoAssetUrl("./librequake/progs/soldier.mdl", import.meta.url),
+        health: 30,
+        speed: 70,
+        sightRange: 1200,
+        attackRange: 600,
+        attackDamage: 5,
+        attackInterval: 1.0,
+        stand: [0, 7],
+        run: [73, 80],
+        attack: [81, 89],
+        death: [18, 28],
+        standFps: 5,
+        runFps: 10,
+        attackFps: 10,
+        deathFps: 8,
+        sightSnd: "soldier/sight1.wav",
+        attackSnd: "soldier/sattck1.wav",
+        painSnds: ["soldier/pain1.wav", "soldier/pain2.wav"],
+        deathSnd: "soldier/death1.wav",
+    },
+    monster_dog: {
+        classname: "monster_dog",
+        url: demoAssetUrl("./librequake/progs/dog.mdl", import.meta.url),
+        health: 25,
+        speed: 150,
+        sightRange: 1000,
+        attackRange: 80,
+        attackDamage: 6,
+        attackInterval: 0.6,
+        stand: [69, 77],
+        run: [48, 59],
+        attack: [0, 7],
+        death: [8, 16],
+        standFps: 6,
+        runFps: 14,
+        attackFps: 12,
+        deathFps: 10,
+        sightSnd: "dog/dsight.wav",
+        attackSnd: "dog/dattack1.wav",
+        painSnds: ["dog/dpain1.wav"],
+        deathSnd: "dog/ddeath.wav",
+    },
 };
 
 const MON_MINS: V3 = [-16, -16, -24];
@@ -103,8 +137,7 @@ export class MonsterSystem {
         private readonly whiteUV: [number, number],
         private readonly palette: Palette,
         private readonly hooks: MonsterHooks
-    ) {
-    }
+    ) {}
 
     /** Fetch + parse the MDL models needed for the given entity classes. */
     async load(classes: Iterable<string>): Promise<void> {
@@ -161,7 +194,15 @@ export class MonsterSystem {
             uv2[i * 2] = this.whiteUV[0];
             uv2[i * 2 + 1] = this.whiteUV[1];
         }
-        const mesh = createMeshFromData(this.engine, `mon_${def.classname}_${this.total}`, scratch.slice(), new Float32Array(corners * 3), model.indices.slice(), model.uvs.slice(), uv2);
+        const mesh = createMeshFromData(
+            this.engine,
+            `mon_${def.classname}_${this.total}`,
+            scratch.slice(),
+            new Float32Array(corners * 3),
+            model.indices.slice(),
+            model.uvs.slice(),
+            uv2
+        );
         const skinTex = createTexture2DFromPixels(this.engine, model.skinRgba, model.skinWidth, model.skinHeight, {
             addressModeU: "clamp-to-edge",
             addressModeV: "clamp-to-edge",
@@ -171,7 +212,21 @@ export class MonsterSystem {
         mesh.material = createQuakeMaterial(`monMat_${def.classname}_${this.total}`, skinTex, this.lightTex);
         addToScene(this.scene, mesh);
 
-        const m: Monster = { def, model, mesh, scratch, origin: [origin[0], origin[1], origin[2]], yaw, health: def.health, state: "idle", anim: "stand", frame: def.stand[0], animTime: Math.random() * 2, attackTimer: 0, deathDone: false };
+        const m: Monster = {
+            def,
+            model,
+            mesh,
+            scratch,
+            origin: [origin[0], origin[1], origin[2]],
+            yaw,
+            health: def.health,
+            state: "idle",
+            anim: "stand",
+            frame: def.stand[0],
+            animTime: Math.random() * 2,
+            attackTimer: 0,
+            deathDone: false,
+        };
         this.dropToFloor(m);
         this.placeMesh(m);
         return m;
@@ -307,7 +362,12 @@ export class MonsterSystem {
         let bestT = range;
         for (const m of this.monsters) {
             if (m.state === "dead") continue;
-            const t = rayAabb(origin, dir, [m.origin[0] + MON_MINS[0], m.origin[1] + MON_MINS[1], m.origin[2] + MON_MINS[2]], [m.origin[0] + MON_MAXS[0], m.origin[1] + MON_MAXS[1], m.origin[2] + MON_MAXS[2]]);
+            const t = rayAabb(
+                origin,
+                dir,
+                [m.origin[0] + MON_MINS[0], m.origin[1] + MON_MINS[1], m.origin[2] + MON_MINS[2]],
+                [m.origin[0] + MON_MAXS[0], m.origin[1] + MON_MAXS[1], m.origin[2] + MON_MAXS[2]]
+            );
             if (t !== null && t < bestT) {
                 const hit: V3 = [origin[0] + dir[0] * t, origin[1] + dir[1] * t, origin[2] + dir[2] * t];
                 if (this.physics.visible(origin, hit)) {

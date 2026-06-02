@@ -49,7 +49,7 @@ export function createMorphFragment(): ShaderFragment {
 import type { PbrExt } from "../pbr-flags.js";
 import { MSH_HAS_MORPH_TARGETS } from "../../mesh-features.js";
 
-export const morphExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "morph",
     phase: "vertex",
     frag(ctx) {

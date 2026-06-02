@@ -48,9 +48,10 @@ import { WEAPONS, WEAPON_ORDER, WEAPON_PICKUPS, type WeaponId, type AmmoType } f
 import { spawnItemModels, type SpawnedItem } from "./quake/render/items.js";
 import { QuakeSound } from "./quake/audio/sound.js";
 import { SbarHud } from "./quake/hud/sbar.js";
+import { demoAssetUrl } from "./demo-asset-url.js";
 
-const BSP_URL = "/librequake/lq_e1m1.bsp";
-const PALETTE_URL = "/librequake/palette.lmp";
+const BSP_URL = demoAssetUrl("./librequake/lq_e1m1.bsp", import.meta.url);
+const PALETTE_URL = demoAssetUrl("./librequake/palette.lmp", import.meta.url);
 const MOVE_SPEED = 320; // Quake units / second
 const LOOK_SENS = 0.0022;
 const MAX_FRAME = 0.05;
@@ -72,8 +73,7 @@ const MOVER_KINDS = new Set(["door", "secret", "button", "plat"]);
 // All offsets are a couple of units at most — sub-pixel at gameplay distances and
 // well inside the door's own thickness, so collision (BSP hulls) is unaffected.
 const BRUSH_BASE_NUDGE = 0.4;
-const brushNudge = (modelIndex: number): number =>
-    BRUSH_BASE_NUDGE + ((modelIndex * 7) % 16) * 0.04;
+const brushNudge = (modelIndex: number): number => BRUSH_BASE_NUDGE + ((modelIndex * 7) % 16) * 0.04;
 
 // Movers render solid (zero geometry nudge) and instead win coplanar depth ties
 // via a per-model depth pull toward the camera. Unlike the geometric brushNudge,
@@ -87,8 +87,7 @@ const brushNudge = (modelIndex: number): number =>
 // recess depth of inset buttons/torches so those stay correctly behind the wall.
 const MOVER_CAMERA_NEAR = 1; // matches cam.nearPlane; pull(world) = bias / near.
 const MOVER_PULL_BASE = 1.1; // world units of toward-camera pull for a closed leaf.
-const moverDepthBias = (modelIndex: number): number =>
-    (MOVER_PULL_BASE + ((modelIndex * 7) % 16) * 0.02) * MOVER_CAMERA_NEAR;
+const moverDepthBias = (modelIndex: number): number => (MOVER_PULL_BASE + ((modelIndex * 7) % 16) * 0.02) * MOVER_CAMERA_NEAR;
 
 const START_SHELLS = 25;
 const START_NAILS = 0;
@@ -192,7 +191,20 @@ async function main(): Promise<void> {
 
     const hud = await createHud(palette);
     const sound = new QuakeSound();
-    sound.preload(["weapons/guncock.wav", "weapons/shotgn2.wav", "weapons/grenade.wav", "weapons/bounce.wav", "weapons/r_exp3.wav", "weapons/lock4.wav", "weapons/pkup.wav", "items/health1.wav", "items/armor1.wav", "player/pain1.wav", "player/pain2.wav", "soldier/sight1.wav"]);
+    sound.preload([
+        "weapons/guncock.wav",
+        "weapons/shotgn2.wav",
+        "weapons/grenade.wav",
+        "weapons/bounce.wav",
+        "weapons/r_exp3.wav",
+        "weapons/lock4.wav",
+        "weapons/pkup.wav",
+        "items/health1.wav",
+        "items/armor1.wav",
+        "player/pain1.wav",
+        "player/pain2.wav",
+        "soldier/sight1.wav",
+    ]);
     // Brush entities removed via killtarget (forcefields, hidden walls) must be
     // hideable, so collect every killtarget name up-front and render those brush
     // models as their own meshes instead of baking them into the static world.
@@ -296,7 +308,18 @@ async function main(): Promise<void> {
 
     // Enemies + combat.
     const godmode = params.get("godmode") !== null && params.get("godmode") !== "0";
-    const player: Player = { health: START_HEALTH, armor: 0, shells: START_SHELLS, nails: START_NAILS, rockets: START_ROCKETS, weapon: "shotgun", owned: new Set<WeaponId>(["shotgun"]), dead: false, godmode, suitTime: 0 };
+    const player: Player = {
+        health: START_HEALTH,
+        armor: 0,
+        shells: START_SHELLS,
+        nails: START_NAILS,
+        rockets: START_ROCKETS,
+        weapon: "shotgun",
+        owned: new Set<WeaponId>(["shotgun"]),
+        dead: false,
+        godmode,
+        suitTime: 0,
+    };
     const monsters = new MonsterSystem(engine, scene, physics, lightTex, atlas.whiteUV, palette, {
         damage: (amount) => {
             hurtPlayer(player, amount, hud, sound);
@@ -593,14 +616,14 @@ function installPlayerControls(
             e.preventDefault();
             cycleWeapon(e.deltaY > 0 ? 1 : -1);
         },
-        { passive: false },
+        { passive: false }
     );
     // Fire on the rising edge of the left button; grab/release the mouse (pointer
     // lock) on the rising/falling edge of the right button so look is free-cursor.
     const handleButtons = (buttons: number): void => {
-        if ((buttons & LEFT_BUTTON) && !(prevButtons & LEFT_BUTTON)) fire();
-        if ((buttons & RIGHT_BUTTON) && !(prevButtons & RIGHT_BUTTON)) requestLock();
-        if (!(buttons & RIGHT_BUTTON) && (prevButtons & RIGHT_BUTTON)) exitLock();
+        if (buttons & LEFT_BUTTON && !(prevButtons & LEFT_BUTTON)) fire();
+        if (buttons & RIGHT_BUTTON && !(prevButtons & RIGHT_BUTTON)) requestLock();
+        if (!(buttons & RIGHT_BUTTON) && prevButtons & RIGHT_BUTTON) exitLock();
         prevButtons = buttons;
     };
     canvas.addEventListener("pointerdown", (e) => {
@@ -954,8 +977,12 @@ class Particles {
             m.scaling.set(0, 0, 0);
             addToScene(scene, m);
             this.mesh.push(m);
-            this.px.push(0); this.py.push(0); this.pz.push(0);
-            this.vx.push(0); this.vy.push(0); this.vz.push(0);
+            this.px.push(0);
+            this.py.push(0);
+            this.pz.push(0);
+            this.vx.push(0);
+            this.vy.push(0);
+            this.vz.push(0);
             this.life.push(-1);
         }
     }
@@ -970,7 +997,9 @@ class Particles {
             const cosP = 2 * Math.random() - 1;
             const sinP = Math.sqrt(1 - cosP * cosP);
             const spd = this.speedBase + Math.random() * this.speedRand;
-            this.px[i] = x; this.py[i] = y; this.pz[i] = z;
+            this.px[i] = x;
+            this.py[i] = y;
+            this.pz[i] = z;
             this.vx[i] = Math.cos(theta) * sinP * spd;
             this.vy[i] = cosP * spd * 0.6 + this.upBias;
             this.vz[i] = Math.sin(theta) * sinP * spd;
@@ -1126,7 +1155,7 @@ async function createHud(palette: Palette): Promise<Hud> {
                 requestAnimationFrame(() => {
                     damage.style.transition = "opacity .5s ease-out";
                     damage.style.opacity = "0";
-                }),
+                })
             );
         },
         underwater(contents: number) {

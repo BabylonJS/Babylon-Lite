@@ -1,0 +1,135 @@
+            <div class="arch-diagram">
+                <div class="arch-layer arch-layer-app">
+                    <div class="arch-layer-label">Application Layer</div>
+                    <div class="arch-layer-desc">import { createEngine, loadGltf, createPbrMaterial, ... } from 'babylon-lite'</div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer">
+                    <div class="arch-layer-label">Core Modules</div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Engine</div>
+                            <div class="arch-mod-sub">WebGPU device · swapchain · 4× MSAA · depth/stencil · frame loop · resize</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Scene</div>
+                            <div class="arch-mod-sub">Context · graph owner · hierarchy · parent-child world matrix · material swap queue · disposal</div>
+                        </div>
+                        <div class="arch-mod arch-mod-cam">
+                            <div class="arch-mod-name">Camera</div>
+                            <div class="arch-mod-sub">ArcRotate · Free · orbit / zoom / pan · inertia · IWorldMatrixProvider · parentable</div>
+                        </div>
+                        <div class="arch-mod arch-mod-light">
+                            <div class="arch-mod-name">Lights</div>
+                            <div class="arch-mod-sub">Hemispheric · Directional · Point · Spot · multi-light UBO · parentable</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-mat">
+                            <div class="arch-mod-name">Materials</div>
+                            <div class="arch-mod-sub">
+                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · NodeMaterial · ShaderMaterial · background/ground
+                            </div>
+                        </div>
+                        <div class="arch-mod arch-mod-mesh">
+                            <div class="arch-mod-name">Meshes</div>
+                            <div class="arch-mod-sub">
+                                Sphere · box · torus · ground · heightmap · cylinder · plane · disc · polyhedron · ribbon · tube · extrude · thin instances · GPU upload
+                            </div>
+                        </div>
+                        <div class="arch-mod arch-mod-loader">
+                            <div class="arch-mod-name">Loaders</div>
+                            <div class="arch-mod-sub">
+                                glTF / GLB · .babylon · .env · .hdr panorama · cube skybox · KTX1 · KTX2 · Draco · Gaussian splats (.ply/.splat/.sog/.spz) · KHR_materials_variants ·
+                                _clearcoat · _sheen · _anisotropy · _ior · _specular · _volume · _transmission · _texture_transform · _texture_basisu
+                            </div>
+                        </div>
+                        <div class="arch-mod arch-mod-anim">
+                            <div class="arch-mod-name">Animation</div>
+                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights · blending · cross-fade · additive clips</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-shadow">
+                            <div class="arch-mod-name">Shadows</div>
+                            <div class="arch-mod-sub">ESM directional · PCF spot · depth pass · Gaussian blur · configurable bias/darkness</div>
+                        </div>
+                        <div class="arch-mod arch-mod-tex">
+                            <div class="arch-mod-name">Textures</div>
+                            <div class="arch-mod-sub">2D · cube · solid color · KTX1 compressed · Basis Universal (.basis) · GPU mipmap gen · sRGB · sampler config</div>
+                        </div>
+                        <div class="arch-mod arch-mod-math">
+                            <div class="arch-mod-name">Math</div>
+                            <div class="arch-mod-sub">Vec3/4 · Mat4 · Quat slerp · Color3/4 · ObservableVec3 · ObservableQuat · LH column-major</div>
+                        </div>
+                        <div class="arch-mod arch-mod-render">
+                            <div class="arch-mod-name">Render Pipeline</div>
+                            <div class="arch-mod-sub">Renderable · pre-pass · scene uniforms · opaque/transparent ordering</div>
+                        </div>
+                        <div class="arch-mod arch-mod-render">
+                            <div class="arch-mod-name">Effects</div>
+                            <div class="arch-mod-sub">EffectWrapper · fullscreen triangle · RenderTarget output · uniforms · texture/sampler bindings</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Picking</div>
+                            <div class="arch-mod-sub">GPU ID pass · CPU ray/triangle · thin-instance support · normal/UV detail</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Skeleton</div>
+                            <div class="arch-mod-sub">4/8-bone skinning · GPU bone textures · morph target blending</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Shader Composer</div>
+                            <div class="arch-mod-sub">Fragment-based composition · topological ordering · slot injection · WGSL generation</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Resource Pool</div>
+                            <div class="arch-mod-sub">GPU buffer/texture pooling · automatic cleanup · device lifecycle</div>
+                        </div>
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Navigation</div>
+                            <div class="arch-mod-sub">Recast V2 navmesh · crowd agents · obstacles · off-mesh links · raycast</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer arch-layer-gpu">
+                    <div class="arch-layer-label">GPU Pipeline</div>
+                    <div class="arch-layer-desc">WGSL Shaders · GPURenderPipeline · GPUBindGroup · GPUBuffer · GPUTexture · GPUCommandEncoder</div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer arch-layer-webgpu">
+                    <div class="arch-layer-label">WebGPU</div>
+                    <div class="arch-layer-desc">GPUDevice · GPUAdapter · GPURenderPassEncoder · GPUComputePassEncoder · navigator.gpu</div>
+                </div>
+            </div>
+
+            <div class="arch-pillars">
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">🌳</div>
+                    <div class="arch-pillar-name">100% Tree-Shakable</div>
+                    <div class="arch-pillar-desc">Zero module-level side effects. Import only what you use — unused features are stripped from the bundle.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">⚡</div>
+                    <div class="arch-pillar-name">WebGPU Exclusive</div>
+                    <div class="arch-pillar-desc">No WebGL fallback. Built entirely around modern GPU paradigms: render pipelines, compute shaders, bind groups.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">🎯</div>
+                    <div class="arch-pillar-name">Pixel-Perfect Parity</div>
+                    <div class="arch-pillar-desc">Rendering output is mathematically identical to Babylon.js. Validated via automated pixel diff testing.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">📦</div>
+                    <div class="arch-pillar-name">Minimal Footprint</div>
+                    <div class="arch-pillar-desc">Dramatically smaller bundles than Babylon.js. Data-oriented design, flat arrays for GPU transfers.</div>
+                </div>
+                <div class="arch-pillar">
+                    <div class="arch-pillar-icon">🔌</div>
+                    <div class="arch-pillar-name">One-Way Data Ownership</div>
+                    <div class="arch-pillar-desc">Scene owns everything. Meshes, lights, cameras are plain data — zero circular deps, trivial serialization.</div>
+                </div>
+            </div>

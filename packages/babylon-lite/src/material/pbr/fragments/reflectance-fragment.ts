@@ -117,7 +117,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 }
 
 /** Create the reflectance PBR extension (group 1, fragment phase). */
-export const reflectanceExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "reflectance",
     phase: "fragment",
     detect(mat) {

@@ -156,7 +156,7 @@ export function writeSubsurfaceUBO(data: Float32Array, ss: SubSurfaceProps, offs
     data[off3 + 2] = tc[2]!;
 }
 
-export const subsurfaceExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "subsurface",
     phase: "fragment",
     detect(mat) {
