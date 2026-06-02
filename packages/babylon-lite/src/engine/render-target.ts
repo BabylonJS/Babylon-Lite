@@ -10,7 +10,7 @@
  * view to be wired as a sampled texture before the frame graph is built.
  */
 
-import type { EngineContextInternal } from "./engine.js";
+import type { EngineContext } from "./engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 
 /** Signature of a render target's attachment set — enough to key a GPURenderPipeline. */
@@ -91,7 +91,7 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
  *  sampleCount \> 1 (MSAA texture used as color attachment, swap view used as
  *  resolve target); with sampleCount === 1 the swap view is the color attachment
  *  directly so no color texture is owned. Depth is always owned by the RT. */
-export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInternal): void {
+export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void {
     if (rt._eager) {
         return;
     }
@@ -144,7 +144,7 @@ export function disposeRenderTarget(rt: RenderTarget): void {
     rt._height = 0;
 }
 
-function resolveSize(desc: RenderTargetDescriptor, engine: EngineContextInternal): { width: number; height: number } {
+function resolveSize(desc: RenderTargetDescriptor, engine: EngineContext): { width: number; height: number } {
     if (desc.size === "canvas") {
         return { width: engine.canvas.width, height: engine.canvas.height };
     }

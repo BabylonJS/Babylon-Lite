@@ -14,8 +14,8 @@
  */
 
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { SceneContext } from "../scene/scene.js";
+import type { EngineContext } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "../loader-env/env-helpers.js";
 import { parseRGBE, computeSHFromEquirect } from "./hdr-parser.js";
@@ -45,7 +45,7 @@ export interface HdrLoadOptions {
  * @returns The assembled environment textures (also stored on the scene).
  */
 export async function loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures> {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine as EngineContext;
     const faceSize = options?.faceSize ?? 256;
 
     // 1. Fetch and parse RGBE
@@ -68,12 +68,11 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     // 6. Assemble
     const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 1.0, engine);
 
-    (scene as SceneContextInternal)._envTextures = textures;
+    scene._envTextures = textures;
 
     acquireGPUTexture(specularCube);
     acquireGPUTexture(brdfLut);
-    const s = scene as SceneContextInternal;
-    s._disposables.push(() => {
+    scene._disposables.push(() => {
         releaseGPUTexture(specularCube);
         releaseGPUTexture(brdfLut);
     });
@@ -87,13 +86,13 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     // exposure/contrast at build time into their per-mesh UBO).
     const useHdr = !!options?.useCubemapSkybox;
     const skipGround = !!options?.skipGround;
-    s._deferredBuilders.push(async () => {
+    scene._deferredBuilders.push(async () => {
         if (useHdr && textures.specularCubeView) {
             const { computeSceneSize } = await import("../material/pbr/scene-size.js");
             const { skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
             const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
-            s._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+            scene._renderables.push(buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
         }
         if (!useHdr || !skipGround) {
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
@@ -101,11 +100,11 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
             const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
             if (!useHdr) {
                 const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
-                s._renderables.push(buildSolidSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
+                scene._renderables.push(buildSolidSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
             }
             if (!skipGround) {
                 const { buildGroundRenderable } = await import("../material/pbr/background-ground.js");
-                s._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
+                scene._renderables.push(await buildGroundRenderable(engine, groundSize, rootPosition, primaryColor));
             }
         }
     });

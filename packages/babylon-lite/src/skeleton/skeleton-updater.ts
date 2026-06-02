@@ -1,7 +1,7 @@
 // Per-frame skeleton animation — evaluates clips and uploads bone matrices.
 // Zero per-frame allocation: all scratch buffers pre-allocated at init.
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { AnimationClip, NodeRest, SkeletonBinding } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
@@ -125,7 +125,7 @@ export function createAnimationController(
                       if (requiresEngine && !activeEngine) {
                           throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
                       }
-                      const device = requiresEngine ? (activeEngine as EngineContextInternal).device : null;
+                      const device = requiresEngine ? activeEngine!.device : null;
 
                       if (ctrl.playing) {
                           ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;

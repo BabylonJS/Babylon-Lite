@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 
 /** Round `n` up to the nearest multiple of `to` (must be a positive integer). */
 export function align(n: number, to: number): number {
@@ -6,7 +6,7 @@ export function align(n: number, to: number): number {
 }
 
 /** Create a UNIFORM + COPY_DST buffer and write initial data. Size is aligned to 16 bytes. */
-export function createUniformBuffer(engine: EngineContextInternal, data: ArrayBufferView, label?: string): GPUBuffer {
+export function createUniformBuffer(engine: EngineContext, data: ArrayBufferView, label?: string): GPUBuffer {
     const device = engine.device;
     const buf = device.createBuffer({
         label,
@@ -18,7 +18,7 @@ export function createUniformBuffer(engine: EngineContextInternal, data: ArrayBu
 }
 
 /** Create an empty UNIFORM + COPY_DST buffer. `byteLength` is aligned to 16 bytes. */
-export function createEmptyUniformBuffer(engine: EngineContextInternal, byteLength: number, label?: string): GPUBuffer {
+export function createEmptyUniformBuffer(engine: EngineContext, byteLength: number, label?: string): GPUBuffer {
     return engine.device.createBuffer({
         label,
         size: align(byteLength, 16),
@@ -27,7 +27,7 @@ export function createEmptyUniformBuffer(engine: EngineContextInternal, byteLeng
 }
 
 /** Create a mapped-at-creation buffer (for VERTEX/INDEX/STORAGE uploads). Size is padded to ≥4 and 4-byte aligned. */
-export function createMappedBuffer(engine: EngineContextInternal, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
+export function createMappedBuffer(engine: EngineContext, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
     const size = align(Math.max(data.byteLength, 4), 4);
     const buf = engine.device.createBuffer({
         size,

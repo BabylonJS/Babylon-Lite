@@ -5,7 +5,7 @@
 
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
-import type { SceneContextInternal } from "../../scene/scene.js";
+import type { SceneContext } from "../../scene/scene.js";
 import type { Material } from "../material.js";
 import {
     _getPbrExts,
@@ -28,7 +28,7 @@ import {
 /** Lazy-imports the PBR renderable builder and builds the pipeline.
  *  Thin instances are handled by the fragment composer automatically. */
 export const pbrGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
-    const envTex = (scene as SceneContextInternal)._envTextures;
+    const envTex = (scene as SceneContext)._envTextures;
     const renderableMod = await import("./pbr-renderable.js");
     const result = await renderableMod.buildPbrRenderables(scene, meshes, envTex);
     // Wire the per-mesh rebuild closure used by material swap + per-pass override.
@@ -131,10 +131,6 @@ export interface PbrMaterialProps extends Material {
      *  `baseColorFactor`). When omitted or [1,1,1], no tint is applied.
      *  Only bundled/bound when the unlit extension is active. */
     unlitColor?: [number, number, number];
-}
-
-/** @internal Extended PbrMaterialProps with internal build group. */
-export interface PbrMaterialPropsInternal extends PbrMaterialProps {
     /** @internal True when any of the material's textures carries `_hasTx=true`
      *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
      *  so the renderer doesn't re-scan 5 textures per mesh. */
@@ -320,7 +316,7 @@ export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMateria
         ...props,
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
-    } as PbrMaterialPropsInternal;
+    } as PbrMaterialProps;
     return mat;
 }
 

@@ -2,9 +2,9 @@
  *  Used by both the core loader (`load-gltf.ts`) and the variants loader
  *  (`gltf-variants.ts`) so they can't drift. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { PbrMaterialProps, PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import type { GltfFeature } from "./gltf-feature.js";
@@ -17,10 +17,10 @@ import { linearToSrgbByte } from "../color/color.js";
 export type TextureWrapFn = (tex: Texture2D, texInfo: unknown) => Texture2D;
 export const identityTexWrap: TextureWrapFn = (tex) => tex;
 
-export type GenerateMipmapsFn = (engine: EngineContextInternal, texture: GPUTexture, face?: number) => void;
+export type GenerateMipmapsFn = (engine: EngineContext, texture: GPUTexture, face?: number) => void;
 
 export function uploadTex(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     bitmap: ImageBitmap | null,
     srgb: boolean,
     sampler: GPUSampler,
@@ -55,7 +55,7 @@ export function uploadTex(
     return result;
 }
 
-/** Assemble a PbrMaterialPropsInternal from parsed glTF material data + already-uploaded
+/** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
  *  textures + per-ext fragment overrides. Fast-path: no wrapTex, no occlusionOnUv2,
  *  no occlusionTexture. Slow-path additions live in gltf-pbr-builder-ext.ts. */
 export function assemblePbrProps(
@@ -65,7 +65,7 @@ export function assemblePbrProps(
     normalTexture: Texture2D | undefined,
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
-): PbrMaterialPropsInternal {
+): PbrMaterialProps {
     const ef = mat._emissiveFactor;
     const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
     return {
@@ -84,14 +84,14 @@ export function assemblePbrProps(
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
-    } as PbrMaterialPropsInternal;
+    } as PbrMaterialProps;
 }
 
 /** Build the always-present default textures (base color + ORM) from a parsed glTF material.
  *  Fast-path version: no wrapTex, no occlusion-on-uv2 handling. The slow path lives
  *  in gltf-pbr-builder-ext.ts and is lazy-loaded only when needed. */
 export function buildDefaultPbrTextures(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,

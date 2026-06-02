@@ -4,7 +4,7 @@
  * can be exposed as a sampled texture BEFORE the frame graph is built.
  */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
 import { createRenderTarget, buildRenderTarget } from "../engine/render-target.js";
@@ -21,9 +21,8 @@ export function createRenderTargetTexture(engine: EngineContext, descriptor: Ren
     if (descriptor.size === "canvas") {
         throw new Error("createRenderTargetTexture: descriptor.size must be a fixed { width, height }, not 'canvas'.");
     }
-    const eng = engine as EngineContextInternal;
     const rt = createRenderTarget(descriptor);
-    buildRenderTarget(rt, eng);
+    buildRenderTarget(rt, engine);
     rt._eager = true;
     if (!rt._colorTexture || !rt._colorView) {
         if (!rt._depthTexture) {
@@ -32,7 +31,7 @@ export function createRenderTargetTexture(engine: EngineContext, descriptor: Ren
         const texture: Texture2D = {
             texture: rt._depthTexture,
             view: rt._depthTexture.createView({ aspect: "depth-only" }),
-            sampler: getNearestSampler(eng),
+            sampler: getNearestSampler(engine),
             width: descriptor.size.width,
             height: descriptor.size.height,
             invertY: false,
@@ -43,7 +42,7 @@ export function createRenderTargetTexture(engine: EngineContext, descriptor: Ren
     const texture: Texture2D = {
         texture: rt._colorTexture,
         view: rt._colorView,
-        sampler: getBilinearSampler(eng),
+        sampler: getBilinearSampler(engine),
         width: descriptor.size.width,
         height: descriptor.size.height,
         invertY: false,

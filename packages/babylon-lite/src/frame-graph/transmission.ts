@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import { getTrilinearAnisotropicSampler } from "../resource/trilinear-anisotropic-sampler.js";
@@ -7,7 +7,7 @@ import { recordMipmaps } from "../texture/generate-mipmaps.js";
 import { biasedMipLevelCount } from "../texture/mip-count.js";
 import type { DrawBinding } from "../render/renderable.js";
 import type { RenderTask } from "./render-task.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { createImageProcessingTask } from "./image-processing-task.js";
 
 export interface RenderTaskTransmissionState {
@@ -37,7 +37,7 @@ let blitBgl: GPUBindGroupLayout | null = null;
 let blitMsaaBgl: GPUBindGroupLayout | null = null;
 let blitDevice: GPUDevice | null = null;
 
-export function enableSceneTransmission(scene: SceneContextInternal, engine: EngineContextInternal): void {
+export function enableSceneTransmission(scene: SceneContext, engine: EngineContext): void {
     markPbrMaterialsLinear(scene);
     let lastRenderTask: RenderTask | null = null;
     for (const task of scene._frameGraph._tasks) {
@@ -52,7 +52,7 @@ export function enableSceneTransmission(scene: SceneContextInternal, engine: Eng
     }
 }
 
-export function enableRenderTaskTransmission(task: RenderTask, engine: EngineContextInternal): void {
+export function enableRenderTaskTransmission(task: RenderTask, engine: EngineContext): void {
     if (task._executeWithTransmission) {
         return;
     }
@@ -69,7 +69,7 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
         configureTransmissionSource(state, task, engine);
     };
     if (execute) {
-        task.execute = () => executeRenderTaskLinear(task.scene as SceneContextInternal, execute);
+        task.execute = () => executeRenderTaskLinear(task.scene, execute);
     }
     task.dispose = () => {
         disposeRenderTaskTransmission(state);
@@ -79,7 +79,7 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
     task._executeWithTransmission = (sampleCount) => executePassWithTransmission(task, engine, state!, sampleCount);
 }
 
-function retargetRenderTaskToLinearOffscreen(task: RenderTask, engine: EngineContextInternal): void {
+function retargetRenderTaskToLinearOffscreen(task: RenderTask, engine: EngineContext): void {
     const desc = task._config.rt._descriptor;
     if (desc.resolveToSwapchain) {
         desc.resolveToSwapchain = false;
@@ -105,7 +105,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask, engine: EngineCon
     sig._flipY = desc.flipY ?? true;
 }
 
-function executeRenderTaskLinear(scene: SceneContextInternal, execute: () => number): number {
+function executeRenderTaskLinear(scene: SceneContext, execute: () => number): number {
     const imageProcessing = scene.imageProcessing as { exposure: number; contrast: number; toneMappingEnabled: boolean | number };
     const toneMappingEnabled = imageProcessing.toneMappingEnabled;
     const clearColor = scene.clearColor;
@@ -160,7 +160,7 @@ function clamp01(v: number): number {
     return Math.min(Math.max(v, 0), 1);
 }
 
-function markPbrMaterialsLinear(scene: SceneContextInternal): void {
+function markPbrMaterialsLinear(scene: SceneContext): void {
     for (const mesh of scene.meshes) {
         const mat = mesh.material as { _linearImageProcessing?: boolean; _renderFeatures?: unknown } | undefined;
         if (mat) {
@@ -170,7 +170,7 @@ function markPbrMaterialsLinear(scene: SceneContextInternal): void {
     }
 }
 
-function createRenderTaskTransmission(task: RenderTask, engine: EngineContextInternal): RenderTaskTransmissionState {
+function createRenderTaskTransmission(task: RenderTask, engine: EngineContext): RenderTaskTransmissionState {
     const rt = task._config.rt;
     const width = 1024;
     const height = 1024;
@@ -204,7 +204,7 @@ function createRenderTaskTransmission(task: RenderTask, engine: EngineContextInt
     };
 }
 
-function configureTransmissionSource(state: RenderTaskTransmissionState, task: RenderTask, engine: EngineContextInternal): void {
+function configureTransmissionSource(state: RenderTaskTransmissionState, task: RenderTask, engine: EngineContext): void {
     const rt = task._config.rt;
     state._sourceWidth = rt._width;
     state._sourceHeight = rt._height;
@@ -220,7 +220,7 @@ function disposeRenderTaskTransmission(state: RenderTaskTransmissionState | null
     state?.texture.texture.destroy();
 }
 
-export function executePassWithTransmission(task: RenderTask, engine: EngineContextInternal, state: RenderTaskTransmissionState, sampleCount: number): number {
+export function executePassWithTransmission(task: RenderTask, engine: EngineContext, state: RenderTaskTransmissionState, sampleCount: number): number {
     state._copies = 0;
     const transparent = task._transparentBindings;
     let pass = beginTaskPass(task, null, sampleCount, false);
@@ -250,7 +250,7 @@ export function executePassWithTransmission(task: RenderTask, engine: EngineCont
     return draws;
 }
 
-function updateTransmissionTexture(state: RenderTaskTransmissionState, engine: EngineContextInternal): void {
+function updateTransmissionTexture(state: RenderTaskTransmissionState, engine: EngineContext): void {
     if (!state._sourceTexture) {
         throw new Error("No transmission source");
     }
@@ -269,7 +269,7 @@ function updateTransmissionTexture(state: RenderTaskTransmissionState, engine: E
     state._copies++;
 }
 
-function getBlitPipeline(engine: EngineContextInternal, format: GPUTextureFormat, multisampled: boolean): GPURenderPipeline {
+function getBlitPipeline(engine: EngineContext, format: GPUTextureFormat, multisampled: boolean): GPURenderPipeline {
     const device = engine.device;
     if (device !== blitDevice) {
         blitPipelines?.clear();
@@ -315,7 +315,7 @@ function shouldBlitTransmission(state: RenderTaskTransmissionState, sampleCount:
     return sampleCount > 1 || state._sourceWidth !== state.texture.width || state._sourceHeight !== state.texture.height;
 }
 
-function createTransmissionBlit(state: RenderTaskTransmissionState, engine: EngineContextInternal, source: GPUTexture, multisampled: boolean): TransmissionBlitState {
+function createTransmissionBlit(state: RenderTaskTransmissionState, engine: EngineContext, source: GPUTexture, multisampled: boolean): TransmissionBlitState {
     const device = engine.device;
     const pipeline = getBlitPipeline(engine, state.texture.texture.format, multisampled);
     const bindGroup = device.createBindGroup({
@@ -330,7 +330,7 @@ function createTransmissionBlit(state: RenderTaskTransmissionState, engine: Engi
     return { _pipeline: pipeline, _bindGroup: bindGroup };
 }
 
-function blitToTransmission(state: RenderTaskTransmissionState, engine: EngineContextInternal): void {
+function blitToTransmission(state: RenderTaskTransmissionState, engine: EngineContext): void {
     const blit = state._blit!;
     const pass = engine._currentEncoder.beginRenderPass({
         colorAttachments: [{ view: state._baseView, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
@@ -363,7 +363,7 @@ function beginTaskPass(task: RenderTask, resolveTarget: GPUTextureView | null, s
     } else {
         att.resolveTarget = undefined;
     }
-    return (task.engine as EngineContextInternal)._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+    return task.engine._currentEncoder.beginRenderPass(task._renderPassDescriptor);
 }
 
 function setPassState(task: RenderTask, pass: GPURenderPassEncoder): void {
@@ -386,9 +386,9 @@ function setPassState(task: RenderTask, pass: GPURenderPassEncoder): void {
 }
 
 function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
-    const eng = task.engine as EngineContextInternal;
+    const eng = task.engine;
     const rt = task._config.rt;
-    const scene = task.scene as SceneContextInternal;
+    const scene = task.scene;
     const opaqueBindings = task._opaqueBindings;
     const opaqueBundles = task._opaqueBundles;
 
@@ -414,7 +414,7 @@ function drawBaseTask(task: RenderTask, pass: GPURenderPassEncoder): number {
     return draws;
 }
 
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContextInternal): number {
+function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of list) {

@@ -6,14 +6,14 @@
  */
 
 import type { HdrImage } from "./hdr-parser.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import { createUniformBuffer, createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?raw";
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";
 import brdfLutWGSL from "../../shaders/hdr-brdf-lut.compute.wgsl?raw";
 
-export function equirectToCubemapGPU(engine: EngineContextInternal, hdr: HdrImage, faceSize: number): GPUTexture {
+export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceSize: number): GPUTexture {
     const device = engine.device;
     // Upload equirect as a 2D texture
     const equirectTex = device.createTexture({
@@ -72,7 +72,7 @@ export function equirectToCubemapGPU(engine: EngineContextInternal, hdr: HdrImag
 
 // ─── Cubemap Prefiltering (GPU Compute, Importance-Sampled GGX) ─────────────
 
-export function prefilterCubemapGPU(engine: EngineContextInternal, srcCube: GPUTexture, faceSize: number, mipCount: number): GPUTexture {
+export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, faceSize: number, mipCount: number): GPUTexture {
     const device = engine.device;
     const dstCube = device.createTexture({
         size: { width: faceSize, height: faceSize, depthOrArrayLayers: 6 },
@@ -145,7 +145,7 @@ export function prefilterCubemapGPU(engine: EngineContextInternal, srcCube: GPUT
 let _brdfPipeline: GPUComputePipeline | null = null;
 let _brdfPipelineDevice: GPUDevice | null = null;
 
-export function generateBrdfLut(engine: EngineContextInternal): GPUTexture {
+export function generateBrdfLut(engine: EngineContext): GPUTexture {
     const device = engine.device;
     if (!_brdfPipeline || _brdfPipelineDevice !== device) {
         _brdfPipeline = device.createComputePipeline({

@@ -16,7 +16,7 @@
  *  depth-sorted splat-index buffer — wait on that promise before flagging the
  *  canvas as ready in your scene script. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { isPly, isPlyCompressedOrSH, convertPlyToSplat } from "./splat-ply-parser.js";
 import { buildSplatGeometry, type ParsedSplat } from "./splat-data.js";
@@ -31,7 +31,7 @@ import SplatSortWorker from "./splat-sort-worker.ts?worker&inline";
 export async function attachParsedSplat(scene: SceneContext, name: string, parsed: ParsedSplat, fragments?: readonly GsShaderFragment[]): Promise<GaussianSplattingMesh> {
     const geom = buildSplatGeometry(parsed.data);
     const worker = new SplatSortWorker({ name: "babylon-lite-splat-sort" });
-    const eng = scene.engine as EngineContextInternal;
+    const eng = scene.engine as EngineContext;
     const mesh = createGaussianSplattingMesh(eng, name, geom, worker, parsed);
 
     if (parsed.sh && parsed.shDegree && parsed.shDegree > 0) {

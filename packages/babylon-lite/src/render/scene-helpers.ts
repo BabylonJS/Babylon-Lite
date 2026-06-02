@@ -3,7 +3,7 @@
  *  Centralises patterns that PBR and Standard pipelines previously duplicated:
  *  scene BGL creation, mesh world-matrix updates, and pipeline descriptors. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
 
@@ -15,7 +15,7 @@ let _cachedDevice: GPUDevice | null = null;
 /** Shared scene bind group layout:
  *  binding 0: per-pass SceneUniforms UBO
  *  binding 1: scene-owned LightsUniforms UBO */
-export function getSceneBindGroupLayout(engine: EngineContextInternal): GPUBindGroupLayout {
+export function getSceneBindGroupLayout(engine: EngineContext): GPUBindGroupLayout {
     const device = engine.device;
     if (_cachedSceneBGL && _cachedDevice === device) {
         return _cachedSceneBGL;
@@ -47,7 +47,7 @@ export interface WorldMatrixPacket {
 }
 
 /** Write world matrices to UBOs for packets whose version has changed. */
-export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: WorldMatrixPacket[]): void {
+export function updateWorldMatrixUBOs(engine: EngineContext, packets: WorldMatrixPacket[]): void {
     const device = engine.device;
     for (const p of packets) {
         const wm = p.mesh.worldMatrix;
@@ -62,7 +62,7 @@ export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: Wo
 
 export interface PipelineDescriptorOpts {
     _label: string;
-    _engine: EngineContextInternal;
+    _engine: EngineContext;
     _bgls: GPUBindGroupLayout[];
     _vertModule: GPUShaderModule;
     _fragModule: GPUShaderModule;

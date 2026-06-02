@@ -31,7 +31,7 @@ export interface _PbrFragCtx {
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
-    readonly _engine: import("../../engine/engine.js").EngineContextInternal;
+    readonly _engine: import("../../engine/engine.js").EngineContext;
     readonly _features: number;
     readonly _features2: number;
     /** Mesh feature bits, separate from material feature bits. */

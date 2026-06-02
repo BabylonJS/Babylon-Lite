@@ -6,13 +6,13 @@
  *  that emits draws in the main pass.
  */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { Mesh, MeshInternal } from "../../mesh/mesh.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
 import type { MeshGroupBuildResult, Renderable } from "../../render/renderable.js";
 import type { Material } from "../material.js";
-import type { NodeMaterialInternal } from "./node-material.js";
+import type { NodeMaterial } from "./node-material.js";
 import { writeNodeUBO } from "./node-material.js";
 import { compileNodePipeline } from "./node-pipeline.js";
 import { NODE_ESM_SHADOW_OUTPUT, NODE_NO_COLOR_OUTPUT } from "./node-flags.js";
@@ -23,8 +23,8 @@ import { MAX_LIGHTS } from "../../light/types.js";
 // count=0 + sensible texWidth/rowsPerBand. Meshes without their own morph
 // targets reuse this so materials that contain a MorphTargetsBlock still work
 // (the WGSL loops over `count` and passes through when zero).
-const emptyMorphByEngine = new WeakMap<EngineContextInternal, { texture: GPUTexture; weightsBuffer: GPUBuffer }>();
-function getEmptyMorph(engine: EngineContextInternal): { texture: GPUTexture; weightsBuffer: GPUBuffer } {
+const emptyMorphByEngine = new WeakMap<EngineContext, { texture: GPUTexture; weightsBuffer: GPUBuffer }>();
+function getEmptyMorph(engine: EngineContext): { texture: GPUTexture; weightsBuffer: GPUBuffer } {
     const cached = emptyMorphByEngine.get(engine);
     if (cached) {
         return cached;
@@ -62,16 +62,16 @@ type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 /** Build NME renderables for a set of meshes that share a NodeMaterial. */
 export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], materialOverride?: Material): MeshGroupBuildResult {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const device = engine.device;
 
     // All meshes in this group use the same NodeMaterial (scene-core batches by ctor).
     // We deliberately do NOT re-group by material instance: each renderable loops
     // packets of the same pipeline. For phase 1 every mesh with an NME material
     // shares that one material instance.
-    const byMaterial = new Map<NodeMaterialInternal, Mesh[]>();
+    const byMaterial = new Map<NodeMaterial, Mesh[]>();
     for (const m of meshes) {
-        const mat = (materialOverride ?? m.material) as NodeMaterialInternal;
+        const mat = (materialOverride ?? m.material) as NodeMaterial;
         let list = byMaterial.get(mat);
         if (!list) {
             list = [];
@@ -97,7 +97,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                   _backFaceCulling: material._graph.backFaceCulling,
                   _noColorOutput: noColorOutput,
                   _esmShadowOutput: esmShadowOutput,
-                  _esmShadowDepthCode: esmShadowOutput ? (material as NodeMaterialInternal & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : undefined,
+                  _esmShadowDepthCode: esmShadowOutput ? material._esmShadowDepthCode : undefined,
                   _alphaMode: esmShadowOutput ? 0 : undefined,
               })
             : material._compile;
@@ -162,7 +162,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             if (compile._esmShadowParamsBinding !== null) {
                 entries.push({
                     binding: compile._esmShadowParamsBinding,
-                    resource: { buffer: (material as NodeMaterialInternal & { readonly _esmShadowParamsUBO: GPUBuffer })._esmShadowParamsUBO },
+                    resource: { buffer: material._esmShadowParamsUBO! },
                 });
             }
             const _meshBG = device.createBindGroup({ label: "node-mesh-bg", layout: meshBGL, entries });
@@ -209,7 +209,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
         };
 
         const drawPacket = (pass: NodeRenderPass, pkt: NodePacket): void => {
-            const g = (pkt._mesh as MeshInternal)._gpu;
+            const g = pkt._mesh._gpu;
             for (let i = 0; i < attrNames.length; i++) {
                 const buf = getAttrBuffer(engine, g, attrNames[i]!);
                 pass.setVertexBuffer(i, buf);
@@ -293,7 +293,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
 // color on meshes that don't use VERTEXCOLOR). We allocate one zero buffer
 // lazily per gpu object, sized to its position vertex count × stride.
 const zeroAttrCache = new WeakMap<object, Map<string, GPUBuffer>>();
-function getZeroAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: string): GPUBuffer {
+function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
     let cache = zeroAttrCache.get(gpu as unknown as object);
     if (!cache) {
         cache = new Map();
@@ -312,7 +312,7 @@ function getZeroAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: st
     return buf;
 }
 
-function getAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: string): GPUBuffer {
+function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
     switch (name) {
         case "position":
             return gpu.positionBuffer;
@@ -332,7 +332,7 @@ function getAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: string
 }
 
 function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
-    const gpu = (mesh as MeshInternal)._gpu;
+    const gpu = mesh._gpu;
     scratch[17] = gpu.hasUv === false ? 0 : 1;
     scratch[18] = gpu.hasTangent ? 1 : 0;
     scratch[19] = gpu.hasColor ? 1 : 0;

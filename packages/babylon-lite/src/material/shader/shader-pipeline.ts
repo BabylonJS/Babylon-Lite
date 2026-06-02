@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -27,7 +27,7 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
 
 const SHADER_STAGE_ALL = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
 
-export function getOrCreateShaderPipelineBindings(engine: EngineContextInternal, material: ShaderMaterial): ShaderPipelineBindings {
+export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
     const state = material as ShaderMaterialPipelineState;
     if (state._shaderBindings && state._shaderDevice === engine.device) {
         return state._shaderBindings;
@@ -58,7 +58,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContextInternal,
 }
 
 export function getOrCreateShaderPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     sig: RenderTargetSignature,
     material: ShaderMaterial,
     bindings: ShaderPipelineBindings

@@ -12,7 +12,7 @@
  *  leaves block emitters free of cross-cutting knowledge about the pipeline.
  */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
@@ -44,6 +44,7 @@ const SENTINEL_SCREEN_SIZE = "_NME_SCREEN_SIZE_";
 
 // ─── Compile result ─────────────────────────────────────────────────
 
+/** @internal */
 export interface NodeCompileResult {
     readonly _wgsl: string;
     readonly _pipeline: GPURenderPipeline;
@@ -75,7 +76,7 @@ export interface NodeCompileResult {
 let _cache: Map<string, NodeCompileResult> | null = null;
 let _cachedDevice: GPUDevice | null = null;
 
-function getCache(engine: EngineContextInternal): Map<string, NodeCompileResult> {
+function getCache(engine: EngineContext): Map<string, NodeCompileResult> {
     if (!_cache || _cachedDevice !== engine.device) {
         _cache = new Map();
         _cachedDevice = engine.device;
@@ -128,7 +129,7 @@ function indent(body: string): string {
 // ─── Pipeline creation ──────────────────────────────────────────────
 
 export interface CompileOpts {
-    readonly _engine: EngineContextInternal;
+    readonly _engine: EngineContext;
     readonly _format: GPUTextureFormat;
     readonly _depthStencilFormat?: GPUTextureFormat;
     readonly _depthCompare?: GPUCompareFunction;

@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
 import type { BillboardBlendMode, BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
@@ -169,7 +169,7 @@ export function resetBillboardPipelineCache(cache: BillboardPipelineCache): void
 }
 
 export function getOrCreateBillboardPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: BillboardPipelineCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
@@ -333,7 +333,7 @@ export function writeBillboardSystemUboIfDirty(device: GPUDevice, uniformBuffer:
     }
 }
 
-export function createBillboardSystemBindGroup(engine: EngineContextInternal, pipeline: GPURenderPipeline, system: BillboardSpriteSystem, uniformBuffer: GPUBuffer): GPUBindGroup {
+export function createBillboardSystemBindGroup(engine: EngineContext, pipeline: GPURenderPipeline, system: BillboardSpriteSystem, uniformBuffer: GPUBuffer): GPUBindGroup {
     const texture = system.atlas.texture;
     return engine.device.createBindGroup({
         layout: pipeline.getBindGroupLayout(1),
@@ -345,7 +345,7 @@ export function createBillboardSystemBindGroup(engine: EngineContextInternal, pi
     });
 }
 
-function getBillboardPipelineDeviceCache(engine: EngineContextInternal, cache: BillboardPipelineCache): BillboardPipelineDeviceCache {
+function getBillboardPipelineDeviceCache(engine: EngineContext, cache: BillboardPipelineCache): BillboardPipelineDeviceCache {
     let deviceCache = cache._devices.get(engine.device);
     if (!deviceCache) {
         deviceCache = { _shaderModules: new Map(), _pipelines: new Map() };
@@ -354,7 +354,7 @@ function getBillboardPipelineDeviceCache(engine: EngineContextInternal, cache: B
     return deviceCache;
 }
 
-function getShaderModule(engine: EngineContextInternal, cache: BillboardPipelineDeviceCache, orientation: BillboardOrientation, depthMode: BillboardDepthMode): GPUShaderModule {
+function getShaderModule(engine: EngineContext, cache: BillboardPipelineDeviceCache, orientation: BillboardOrientation, depthMode: BillboardDepthMode): GPUShaderModule {
     const key = `${orientation}:${getDepthModeEntry(depthMode).index}`;
     let module = cache._shaderModules.get(key);
     if (!module) {
@@ -365,7 +365,7 @@ function getShaderModule(engine: EngineContextInternal, cache: BillboardPipeline
 }
 
 function buildBillboardPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: BillboardPipelineDeviceCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,

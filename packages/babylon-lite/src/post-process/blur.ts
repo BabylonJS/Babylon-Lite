@@ -29,10 +29,6 @@ interface BlurSample {
     weight: number;
 }
 
-interface BlurPostProcessTaskInternal extends BlurPostProcessTask {
-    readonly _shader: PostProcessShaderConfig;
-}
-
 function nearestBestKernel(kernel: number): number {
     const value = Math.max(1, Math.round(kernel));
     for (const k of [value, value - 1, value + 1, value - 2, value + 2]) {
@@ -142,7 +138,7 @@ export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, eng
         },
         engine,
         scene
-    ) as BlurPostProcessTaskInternal;
+    ) as BlurPostProcessTask;
     const baseUpdateUniforms = task.updateUniforms;
     let shaderKernel = params.kernel;
     task.updateUniforms = () => {

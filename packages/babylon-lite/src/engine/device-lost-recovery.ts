@@ -1,8 +1,8 @@
-import type { EngineContext, EngineContextInternal } from "./engine.js";
+import type { EngineContext } from "./engine.js";
 import { startEngine, stopEngine, resizeEngine } from "./engine.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { isRenderingContextRegistered } from "./engine.js";
-import type { MeshInternal, MeshGPU } from "../mesh/mesh.js";
+import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
 import { clearSceneBGLCache, getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { ensureSceneLightState } from "../render/lights-ubo.js";
@@ -57,16 +57,16 @@ interface RecoveryState {
     options: DeviceLostRecoveryOptions;
 }
 
-let _states: WeakMap<EngineContextInternal, RecoveryState> | null = null;
+let _states: WeakMap<EngineContext, RecoveryState> | null = null;
 
-function states(): WeakMap<EngineContextInternal, RecoveryState> {
+function states(): WeakMap<EngineContext, RecoveryState> {
     if (!_states) {
         _states = new WeakMap();
     }
     return _states;
 }
 
-function getState(engine: EngineContextInternal): RecoveryState {
+function getState(engine: EngineContext): RecoveryState {
     let state = states().get(engine);
     if (!state) {
         state = {
@@ -83,23 +83,22 @@ function getState(engine: EngineContextInternal): RecoveryState {
 }
 
 export function enableDeviceLostRecovery(engine: EngineContext, options: DeviceLostRecoveryOptions = {}): DeviceLostRecoveryHandle {
-    const eng = engine as EngineContextInternal;
-    const state = getState(eng);
+    const state = getState(engine);
     state.enabled = true;
     state.options = options;
-    state.requiredFeatures = Array.from(eng.device.features) as GPUFeatureName[];
-    attachRecoveryCapture(eng);
+    state.requiredFeatures = Array.from(engine.device.features) as GPUFeatureName[];
+    attachRecoveryCapture(engine);
 
-    arm(eng, state);
+    arm(engine, state);
     return {
         disable(): void {
             state.enabled = false;
-            detachRecoveryCapture(eng);
+            detachRecoveryCapture(engine);
         },
     };
 }
 
-function attachRecoveryCapture(engine: EngineContextInternal): void {
+function attachRecoveryCapture(engine: EngineContext): void {
     engine._dlr = {
         u(tex, url, opts) {
             tex._recoverySource = { kind: "url", url, opts: { ...opts } };
@@ -127,12 +126,12 @@ function attachRecoveryCapture(engine: EngineContextInternal): void {
     };
 }
 
-function detachRecoveryCapture(engine: EngineContextInternal): void {
+function detachRecoveryCapture(engine: EngineContext): void {
     engine._dlr = undefined;
 }
 
 export function markNextDeviceLossForRecovery(engine: EngineContext): boolean {
-    const state = _states?.get(engine as EngineContextInternal);
+    const state = _states?.get(engine as EngineContext);
     if (!state?.enabled) {
         return false;
     }
@@ -140,7 +139,7 @@ export function markNextDeviceLossForRecovery(engine: EngineContext): boolean {
     return true;
 }
 
-function arm(engine: EngineContextInternal, state: RecoveryState): void {
+function arm(engine: EngineContext, state: RecoveryState): void {
     const device = engine.device;
     if (state.armedDevice === device) {
         return;
@@ -168,7 +167,7 @@ function arm(engine: EngineContextInternal, state: RecoveryState): void {
     });
 }
 
-async function recoverDevice(engine: EngineContextInternal, state: RecoveryState): Promise<void> {
+async function recoverDevice(engine: EngineContext, state: RecoveryState): Promise<void> {
     if (state.recovering) {
         return;
     }
@@ -200,9 +199,9 @@ async function recoverDevice(engine: EngineContextInternal, state: RecoveryState
     }
 }
 
-async function rebuildRegisteredScenes(engine: EngineContextInternal): Promise<void> {
+async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
     for (const ctx of engine._renderingContexts) {
-        const scene = ctx as SceneContextInternal;
+        const scene = ctx as SceneContext;
         if (!isRenderingContextRegistered(engine, scene)) {
             continue;
         }
@@ -210,7 +209,7 @@ async function rebuildRegisteredScenes(engine: EngineContextInternal): Promise<v
     }
 }
 
-async function rebuildSceneGpu(engine: EngineContextInternal, scene: SceneContextInternal): Promise<void> {
+async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Promise<void> {
     await rebuildSceneTextures(engine, scene);
     await rebuildMeshes(engine, scene);
 
@@ -234,7 +233,7 @@ async function rebuildSceneGpu(engine: EngineContextInternal, scene: SceneContex
     scene._frameGraph.build();
 }
 
-function resetFrameGraphTasks(engine: EngineContextInternal, scene: SceneContextInternal): void {
+function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void {
     for (const task of scene._frameGraph._tasks) {
         if (!("_sceneUBO" in task && "_sceneBG" in task && "_opaqueBindings" in task)) {
             continue;
@@ -258,14 +257,13 @@ function resetFrameGraphTasks(engine: EngineContextInternal, scene: SceneContext
     }
 }
 
-async function rebuildMeshes(engine: EngineContextInternal, scene: SceneContextInternal): Promise<void> {
+async function rebuildMeshes(engine: EngineContext, scene: SceneContext): Promise<void> {
     let skeletonFactory: typeof createSkeleton | null = null;
     let morphFactory: typeof createMorphTargets | null = null;
 
     for (const mesh of scene.meshes) {
-        const mi = mesh as MeshInternal;
-        if (mi._cpuPositions && mi._cpuNormals && mi._cpuIndices) {
-            mi._gpu = uploadRetainedMesh(engine, mi);
+        if (mesh._cpuPositions && mesh._cpuNormals && mesh._cpuIndices) {
+            mesh._gpu = uploadRetainedMesh(engine, mesh);
         }
         if (mesh.skeleton) {
             skeletonFactory ??= (await import("../skeleton/create-skeleton.js")).createSkeleton;
@@ -279,7 +277,7 @@ async function rebuildMeshes(engine: EngineContextInternal, scene: SceneContextI
             const rebuilt = morphFactory(
                 engine,
                 old.targets.map((t) => ({ positions: t.positions, normals: t.normals })),
-                mi._cpuPositions ? mi._cpuPositions.length / 3 : 0,
+                mesh._cpuPositions ? mesh._cpuPositions.length / 3 : 0,
                 Array.from(old.weights)
             );
             Object.assign(old as MutableMorphTargets, rebuilt);
@@ -287,7 +285,7 @@ async function rebuildMeshes(engine: EngineContextInternal, scene: SceneContextI
     }
 }
 
-function uploadRetainedMesh(engine: EngineContextInternal, mesh: MeshInternal): MeshGPU {
+function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
     const positions = mesh._cpuPositions!;
     const normals = mesh._cpuNormals!;
     const uvs = mesh._cpuUvs;
@@ -317,7 +315,7 @@ function uploadRetainedMesh(engine: EngineContextInternal, mesh: MeshInternal): 
     };
 }
 
-async function rebuildTexture2D(engine: EngineContextInternal, tex: Texture2D): Promise<void> {
+async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): Promise<void> {
     const source = tex._recoverySource;
     if (!source) {
         return;
@@ -374,7 +372,7 @@ async function rebuildTexture2D(engine: EngineContextInternal, tex: Texture2D): 
     tex.height = height;
 }
 
-async function rebuildUrlTexture2D(engine: EngineContextInternal, url: string, opts: Texture2DOptions): Promise<Texture2D> {
+async function rebuildUrlTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions): Promise<Texture2D> {
     const mipMaps = opts.mipMaps ?? true;
     const addressModeU = opts.addressModeU ?? "repeat";
     const addressModeV = opts.addressModeV ?? "repeat";
@@ -423,7 +421,7 @@ async function rebuildUrlTexture2D(engine: EngineContextInternal, url: string, o
     return { texture, view: texture.createView(), sampler, width, height };
 }
 
-async function rebuildSceneTextures(engine: EngineContextInternal, scene: SceneContextInternal): Promise<void> {
+async function rebuildSceneTextures(engine: EngineContext, scene: SceneContext): Promise<void> {
     const seen = new Set<Texture2D>();
     const visited = new WeakSet<object>();
     const promises: Promise<void>[] = [];

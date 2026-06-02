@@ -89,9 +89,6 @@ export interface StandardMaterialProps extends Material {
     disableLighting: boolean;
 }
 
-/** @internal Extended StandardMaterialProps with internal build group. */
-export interface StandardMaterialPropsInternal extends StandardMaterialProps {}
-
 /** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable. */
 export function _computeStandardMaterialFeatures(m: StandardMaterialProps): number {
     let f = 0;

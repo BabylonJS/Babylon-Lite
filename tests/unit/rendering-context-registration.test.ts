@@ -5,13 +5,12 @@ import {
     registerRenderingContext,
     unregisterRenderingContext,
     type EngineContext,
-    type EngineContextInternal,
     type RenderingContext,
 } from "../../packages/babylon-lite/src/engine/engine";
 import { addTaskAtStart } from "../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import type { Task } from "../../packages/babylon-lite/src/frame-graph/task";
 import { createSceneContext, disposeScene, registerScene, unregisterScene } from "../../packages/babylon-lite/src/scene/scene";
-import type { SceneContextInternal } from "../../packages/babylon-lite/src/scene/scene-core";
+import type { SceneContext } from "../../packages/babylon-lite/src/scene/scene-core";
 
 const gpuGlobals = globalThis as typeof globalThis & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -54,7 +53,7 @@ function makeMockEngine(): EngineContext {
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 0,
         _cbs: [],
-    } as EngineContextInternal;
+    } as unknown as EngineContext;
 }
 
 function makeRenderingContext(): RenderingContext {
@@ -74,7 +73,7 @@ describe("rendering context registration helpers", () => {
     it("registers and unregisters idempotently", () => {
         const engine = makeMockEngine();
         const context = makeRenderingContext();
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = (engine as EngineContext)._renderingContexts;
 
         expect(isRenderingContextRegistered(engine, context)).toBe(false);
         expect(registerRenderingContext(engine, context)).toBe(true);
@@ -93,7 +92,7 @@ describe("registerScene / unregisterScene", () => {
     it("does not duplicate a scene rendering context", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = (engine as EngineContext)._renderingContexts;
 
         await registerScene(engine, scene);
         await registerScene(engine, scene);
@@ -108,7 +107,7 @@ describe("registerScene / unregisterScene", () => {
     it("unregisters the scene when disposing", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = (engine as EngineContext)._renderingContexts;
 
         await registerScene(engine, scene);
         disposeScene(scene);
@@ -117,8 +116,8 @@ describe("registerScene / unregisterScene", () => {
     });
 
     it("records frame-graph tasks added before scene registration", async () => {
-        const engine = makeMockEngine() as EngineContextInternal;
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const engine = makeMockEngine() as EngineContext;
+        const scene = createSceneContext(engine) as SceneContext;
         let recorded = false;
         const task: Task = {
             name: "pre-scene-task",

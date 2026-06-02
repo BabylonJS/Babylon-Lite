@@ -1,7 +1,7 @@
 /** High-level Mesh — position/rotation/scaling + material + GPU geometry.
  *  Plain data (no scene reference). The scene collects meshes via addToScene(). */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Identity } from "../math/mat4-identity.js";
@@ -57,20 +57,28 @@ export interface Mesh extends SceneNode {
     thinInstances?: ThinInstanceData | null;
     // name, children, position, rotation, rotationQuaternion, scaling,
     // parent, worldMatrix, worldMatrixVersion — all inherited from SceneNode
-}
 
-/** @internal Mesh with internal GPU fields — for engine/renderable code only. Not re-exported from index.ts. */
-export interface MeshInternal extends Mesh {
+    /** @internal */
     _materialDirty: boolean;
+    /** @internal */
     _gpu: MeshGPU;
+    /** @internal */
     _cpuPositions?: Float32Array;
+    /** @internal */
     _cpuNormals?: Float32Array;
+    /** @internal */
     _cpuUvs?: Float32Array;
+    /** @internal */
     _cpuUv2s?: Float32Array | null;
+    /** @internal */
     _cpuTangents?: Float32Array | null;
+    /** @internal */
     _cpuColors?: Float32Array | null;
+    /** @internal */
     _cpuIndices?: Uint32Array;
+    /** @internal */
     _cpuGpuIndices?: Uint16Array | Uint32Array;
+    /** @internal */
     _cpuIndexFormat?: GPUIndexFormat;
 }
 
@@ -128,7 +136,7 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
 
 /** Upload typed arrays to GPU buffers and return a MeshGPU handle. */
 export function uploadMeshToGPU(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     positions: Float32Array,
     normals: Float32Array,
     indices: Uint32Array,

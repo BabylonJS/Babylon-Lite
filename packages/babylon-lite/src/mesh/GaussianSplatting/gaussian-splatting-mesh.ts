@@ -10,7 +10,7 @@
  *  scenes never pull in this pipeline. */
 
 import type { SceneNode } from "../../scene/scene-node.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { Mat4 } from "../../math/types.js";
 import { mat4Identity, mat4Compose } from "../../math/mat4.js";
 import { ObservableVec3 } from "../../math/observable-vec3.js";
@@ -110,7 +110,7 @@ export interface GaussianSplattingMesh extends SceneNode {
  *  `parsed.data` is retained on the mesh as `splatsData` so callers can mutate
  *  the row data and round-trip it via `mesh.updateData(buffer)` — matches
  *  `keepInRam:true` semantics on BJS `GaussianSplattingMesh`. */
-export function createGaussianSplattingMesh(engine: EngineContextInternal, name: string, geom: SplatGeometry, worker: Worker, parsed: ParsedSplat): GaussianSplattingMesh {
+export function createGaussianSplattingMesh(engine: EngineContext, name: string, geom: SplatGeometry, worker: Worker, parsed: ParsedSplat): GaussianSplattingMesh {
     const device = engine.device;
     const queue = device.queue;
     const { textureWidth, textureHeight, vertexCount } = geom;

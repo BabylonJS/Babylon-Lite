@@ -4,10 +4,9 @@
  *  per-mesh work to `buildSingleStandardRenderable`. The same single-mesh
  *  function is reused by the material-swap path. */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
-import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshInternal } from "../../mesh/mesh.js";
 import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -27,7 +26,7 @@ import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, M
 const _stdMatScratch = new Float32Array(24);
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
-type ThinInstanceSync = (engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
+type ThinInstanceSync = (engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
 
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
@@ -40,7 +39,7 @@ export interface StdFragmentFactories {
  *  The `rebuildSingle` closure is reused later (via `_rebuildSingle` on the group
  *  builder) for material swaps + per-pass material overrides. */
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const device = engine.device;
     const { tiSync, tiFragment, shadowFragment } = factories;
 
@@ -142,7 +141,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        (s as SceneContextInternal)._meshDisposables.set(mesh, [
+        s._meshDisposables.set(mesh, [
             () => {
                 for (const t of boundTextures) {
                     releaseTexture(t);
@@ -180,7 +179,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             if (!isOverride && mesh.material !== mat) {
                 return 0;
             }
-            const g = (mesh as MeshInternal)._gpu;
+            const g = mesh._gpu;
             let slot = 0;
             pass.setVertexBuffer(slot++, g.positionBuffer);
             pass.setVertexBuffer(slot++, g.normalBuffer);
@@ -216,7 +215,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             bind(eng, sig) {
                 return {
                     renderable: r,
-                    pipeline: getOrCreateStandardPipeline(eng as EngineContextInternal, sig, bindings),
+                    pipeline: getOrCreateStandardPipeline(eng as EngineContext, sig, bindings),
                     update,
                     draw,
                 };
@@ -229,7 +228,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
-    (scene as SceneContextInternal)._disposables.push(
+    scene._disposables.push(
         () => clearStandardPipelineCache(),
         () => clearSamplerCache(engine)
     );

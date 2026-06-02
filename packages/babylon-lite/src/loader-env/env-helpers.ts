@@ -1,10 +1,10 @@
 import type { EnvironmentTextures } from "./load-env.js";
 import { polynomialToPreScaledHarmonics } from "./load-env.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js";
 
 /** Create the standard sampler pair used by all environment loaders */
-export function createEnvSamplers(engine: EngineContextInternal): { cubeSampler: GPUSampler; brdfSampler: GPUSampler } {
+export function createEnvSamplers(engine: EngineContext): { cubeSampler: GPUSampler; brdfSampler: GPUSampler } {
     return {
         cubeSampler: getTrilinearSampler(engine),
         brdfSampler: getBilinearSampler(engine),
@@ -17,7 +17,7 @@ export function assembleEnvironmentTextures(
     brdfLut: GPUTexture,
     irradianceSH: Float32Array,
     lodGenerationScale: number,
-    engine: EngineContextInternal
+    engine: EngineContext
 ): EnvironmentTextures {
     const { cubeSampler, brdfSampler } = createEnvSamplers(engine);
     return {

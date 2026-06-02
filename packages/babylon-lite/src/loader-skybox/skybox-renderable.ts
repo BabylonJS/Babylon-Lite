@@ -2,14 +2,14 @@
  *  Wraps the existing skybox-cubemap material into a Renderable. */
 
 import type { SceneContext } from "../scene/scene.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { SkyboxData } from "./load-skybox.js";
 import type { Renderable } from "../render/renderable.js";
 import { buildSkyboxCubeMapGPU } from "../material/standard/skybox-cubemap.js";
 
 /** Build a skybox Renderable from a SkyboxData (loaded via loadSkybox). */
 export function buildSkyboxRenderable(scene: SceneContext, skybox: SkyboxData): Renderable {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
 
     const gpu = buildSkyboxCubeMapGPU(engine, skybox.worldMatrix, skybox.cubeView, skybox.cubeSampler);
 
@@ -17,7 +17,7 @@ export function buildSkyboxRenderable(scene: SceneContext, skybox: SkyboxData): 
         order: 0, // skybox behind everything
         isTransparent: false,
         bind(eng, sig) {
-            const pipeline = gpu.getPipeline(eng as EngineContextInternal, sig);
+            const pipeline = gpu.getPipeline(eng as EngineContext, sig);
             return {
                 renderable: r,
                 pipeline,

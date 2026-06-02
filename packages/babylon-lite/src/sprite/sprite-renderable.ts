@@ -16,7 +16,7 @@
  * shared.
  */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -65,7 +65,7 @@ function releaseSharedPipelineCache(): void {
 }
 
 interface SpriteRenderableInternal extends Renderable {
-    _engine: EngineContextInternal;
+    _engine: EngineContext;
     _layer: Sprite2DLayer;
     _indexBuffer: GPUBuffer;
     _uniformBuffer: GPUBuffer;
@@ -93,7 +93,7 @@ interface SpriteRenderableInternal extends Renderable {
  * Caller is responsible for
  * pushing `renderable` into `_renderables` and `dispose` into `_disposables`.
  */
-export function buildSpriteRenderable(engine: EngineContextInternal, layer: Sprite2DLayer): { renderable: Renderable; dispose: () => void } {
+export function buildSpriteRenderable(engine: EngineContext, layer: Sprite2DLayer): { renderable: Renderable; dispose: () => void } {
     if (layer.depth === "none") {
         throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
     }
@@ -124,7 +124,7 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
         _scratchUbo: new Float32Array(LAYER_UBO_BYTES / 4),
         _disposed: false,
         bind(engine, target) {
-            return bindLayer(renderable, engine as EngineContextInternal, target);
+            return bindLayer(renderable, engine, target);
         },
     };
 
@@ -137,7 +137,7 @@ export function buildSpriteRenderable(engine: EngineContextInternal, layer: Spri
 }
 
 /** Resolve this sprite layer against a render-pass target and return the per-frame draw binding. */
-function bindLayer(r: SpriteRenderableInternal, engine: EngineContextInternal, target: RenderTargetSignature): DrawBinding {
+function bindLayer(r: SpriteRenderableInternal, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
     if (!target._depthStencilFormat) {
         throw new Error("Depth-hosted Sprite2DLayer requires a depth-stencil render target.");
     }

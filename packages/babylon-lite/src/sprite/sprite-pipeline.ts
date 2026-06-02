@@ -1,14 +1,16 @@
 /** Internal sprite pipeline helpers: owns WGSL, bind-group schema, pipeline construction, and bind-group creation. */
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 
+/** @internal */
 export interface SpritePipelineDeviceCache {
     _shaderModule: GPUShaderModule | null;
     _sceneShaderModule: GPUShaderModule | null;
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
+/** @internal */
 export interface SpritePipelineCache {
     _devices: WeakMap<GPUDevice, SpritePipelineDeviceCache>;
 }
@@ -124,7 +126,7 @@ export function getSpritePipelineCacheSize(cache: SpritePipelineCache, device: G
 }
 
 export function getOrCreateSpritePipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: SpritePipelineCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
@@ -148,7 +150,7 @@ export function getOrCreateSpritePipeline(
 }
 
 export function createSpriteLayerBindGroup(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     pipeline: GPURenderPipeline,
     spriteBindGroupIndex: 0 | 1,
     layer: Sprite2DLayer,
@@ -165,7 +167,7 @@ export function createSpriteLayerBindGroup(
     });
 }
 
-function getSpritePipelineDeviceCache(engine: EngineContextInternal, cache: SpritePipelineCache): SpritePipelineDeviceCache {
+function getSpritePipelineDeviceCache(engine: EngineContext, cache: SpritePipelineCache): SpritePipelineDeviceCache {
     let deviceCache = cache._devices.get(engine.device);
     if (!deviceCache) {
         deviceCache = {
@@ -199,7 +201,7 @@ function spritePipelineKey(
     return `${format}:${sampleCount}:${getBlendModeEntry(blendMode).index}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}`;
 }
 
-function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDeviceCache, hasDepth: boolean): GPUShaderModule {
+function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean): GPUShaderModule {
     if (hasDepth) {
         cache._sceneShaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1) });
         return cache._sceneShaderModule;
@@ -209,7 +211,7 @@ function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDev
 }
 
 function buildSpritePipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: SpritePipelineDeviceCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,

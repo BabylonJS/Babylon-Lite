@@ -5,7 +5,7 @@
  *  after an asset declares KHR_texture_basisu.
  */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { Texture2D } from "./texture-2d.js";
 import { getCompressedFormat } from "./compressed-formats.js";
@@ -167,7 +167,7 @@ function validateDecoded(decoded: Ktx2DecodedData): Ktx2DecodedMip[] {
     return decoded.mipmaps;
 }
 
-function makeSampler(engine: EngineContextInternal, mipCount: number): GPUSampler {
+function makeSampler(engine: EngineContext, mipCount: number): GPUSampler {
     return getOrCreateSampler(engine, {
         addressModeU: "repeat",
         addressModeV: "repeat",
@@ -178,7 +178,7 @@ function makeSampler(engine: EngineContextInternal, mipCount: number): GPUSample
     });
 }
 
-function uploadCompressed(engine: EngineContextInternal, mips: Ktx2DecodedMip[], format: CompressedFormatInfo, sRGB: boolean): Texture2D {
+function uploadCompressed(engine: EngineContext, mips: Ktx2DecodedMip[], format: CompressedFormatInfo, sRGB: boolean): Texture2D {
     if (!engine.device.features.has(format.feature as GPUFeatureName)) {
         throw new Error(`KTX2: device does not support ${format.feature}`);
     }
@@ -200,7 +200,7 @@ function uploadCompressed(engine: EngineContextInternal, mips: Ktx2DecodedMip[],
     return tex2d;
 }
 
-function uploadUncompressed(engine: EngineContextInternal, mips: Ktx2DecodedMip[], info: { format: GPUTextureFormat; bytesPerPixel: number }, sRGB: boolean): Texture2D {
+function uploadUncompressed(engine: EngineContext, mips: Ktx2DecodedMip[], info: { format: GPUTextureFormat; bytesPerPixel: number }, sRGB: boolean): Texture2D {
     const width = mips[0]!.width;
     const height = mips[0]!.height;
     const texture = engine.device.createTexture({
@@ -229,7 +229,7 @@ function uploadUncompressed(engine: EngineContextInternal, mips: Ktx2DecodedMip[
 
 /** Decode a KTX2 texture with the current WebGPU compression caps and upload the
  *  decoder-provided full mip chain directly to a Texture2D. */
-export async function uploadKtx2Texture2D(engine: EngineContextInternal, buffer: ArrayBuffer, sRGB: boolean): Promise<Texture2D> {
+export async function uploadKtx2Texture2D(engine: EngineContext, buffer: ArrayBuffer, sRGB: boolean): Promise<Texture2D> {
     const decoder = await loadKtx2Decoder();
     const decoded = await decoder.decode(new Uint8Array(buffer), RGBA_CAPS, { forceRGBA: true });
     const mips = validateDecoded(decoded);

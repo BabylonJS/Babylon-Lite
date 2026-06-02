@@ -3,7 +3,7 @@
  */
 
 import type { Camera } from "../camera/camera.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
@@ -73,7 +73,7 @@ export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
 }
 
 /** Create the shared shadow-params UBO (32 bytes) holding bias/depthScale/depth-range fields. */
-export function createShadowParamsUBO(engine: EngineContextInternal, bias: number, depthScale: number): GPUBuffer {
+export function createShadowParamsUBO(engine: EngineContext, bias: number, depthScale: number): GPUBuffer {
     const data = new Float32Array(8);
     data[0] = bias;
     data[2] = depthScale;
@@ -107,7 +107,7 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
 
 /** Create the shared receiver-side shadow UBO (96 bytes), initialised from state. */
 export function createSharedShadowUBO(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     _lightMatrix: Float32Array,
     _depthValues: Float32Array,
     _shadowsInfo: Float32Array

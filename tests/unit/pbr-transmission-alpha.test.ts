@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Texture2D } from "../../packages/babylon-lite/src/texture/texture-2d";
 import type { PbrMaterialProps } from "../../packages/babylon-lite/src/material/pbr/pbr-material";
-import type { EngineContextInternal } from "../../packages/babylon-lite/src/engine/engine";
+import type { EngineContext } from "../../packages/babylon-lite/src/engine/engine";
 import type { _PbrBindCtx } from "../../packages/babylon-lite/src/material/pbr/pbr-flags";
 import { _computePbrMaterialFeatures } from "../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ALPHA_TEST, PBR2_HAS_REFRACTION, PBR2_HAS_REFRACTION_MAP, PBR2_HAS_VOLUME } from "../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
@@ -61,7 +61,7 @@ describe("PBR transmission and alpha feature detection", () => {
                     return descriptor as unknown as GPUSampler;
                 },
             },
-        } as EngineContextInternal;
+        } as EngineContext;
         const entries: GPUBindGroupEntry[] = [];
 
         refractionRttExt.bind!(

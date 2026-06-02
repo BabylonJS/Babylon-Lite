@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
 import type { Camera } from "../camera/camera.js";
@@ -44,7 +44,7 @@ function releaseSharedPipelineCache(): void {
 }
 
 interface BillboardRenderableInternal extends Renderable {
-    _engine: EngineContextInternal;
+    _engine: EngineContext;
     _system: BillboardSpriteSystem;
     _indexBuffer: GPUBuffer;
     _uniformBuffer: GPUBuffer;
@@ -65,7 +65,7 @@ interface BillboardRenderableInternal extends Renderable {
     _disposed: boolean;
 }
 
-export function buildBillboardRenderable(engine: EngineContextInternal, system: BillboardSpriteSystem): { renderable: Renderable; dispose: () => void } {
+export function buildBillboardRenderable(engine: EngineContext, system: BillboardSpriteSystem): { renderable: Renderable; dispose: () => void } {
     const indexBuffer = createMappedBuffer(engine, BILLBOARD_INDEX_DATA, GPUBufferUsage.INDEX);
     const uniformBuffer = createEmptyUniformBuffer(engine, BILLBOARD_SYSTEM_UBO_BYTES, `${system._orientation}-billboard-system-ubo`);
     const instanceBuffer = createBillboardInstanceBuffer(engine.device, system, `${system._orientation}-billboard-instances`);
@@ -95,7 +95,7 @@ export function buildBillboardRenderable(engine: EngineContextInternal, system: 
         _disposed: false,
         _worldCenter: [0, 0, 0],
         bind(engine, target) {
-            return bindSystem(renderable, engine as EngineContextInternal, target);
+            return bindSystem(renderable, engine, target);
         },
     };
     refreshBillboardWorldCenter(renderable);
@@ -107,7 +107,7 @@ export function buildBillboardRenderable(engine: EngineContextInternal, system: 
     };
 }
 
-function bindSystem(renderable: BillboardRenderableInternal, engine: EngineContextInternal, target: RenderTargetSignature): DrawBinding {
+function bindSystem(renderable: BillboardRenderableInternal, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
     if (!target._depthStencilFormat) {
         throw new Error("BillboardSpriteSystem requires a depth-stencil render target.");
     }

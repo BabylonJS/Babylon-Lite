@@ -20,7 +20,7 @@
  *   4. `enc.end()`.
  */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { addPassDependencies, type Pass } from "./pass.js";
 import type { Task } from "./task.js";
@@ -125,7 +125,7 @@ export function createRenderPass(name: string, task: Task): RenderPass {
                 return 0;
             }
             pass._beforeExecute?.();
-            const eng = pass._parentTask.engine as EngineContextInternal;
+            const eng = pass._parentTask.engine as EngineContext;
             const att = pass._colorAttachment;
             if (att) {
                 att.clearValue = pass.clearColor;

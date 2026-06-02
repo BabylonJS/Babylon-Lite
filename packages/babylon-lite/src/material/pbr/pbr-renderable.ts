@@ -5,12 +5,9 @@
  *  work to `buildSinglePbrRenderable`. Both initial build and material-swap
  *  rebuilds go through the same single-mesh function. */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshInternal } from "../../mesh/mesh.js";
-import type { LightBaseInternal } from "../../light/types.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
@@ -50,7 +47,7 @@ interface SingleLightWgslModule {
 
 /** Build PBR Renderable(s) + a SceneUniformUpdater from PBR meshes. */
 export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined): Promise<MeshGroupBuildResult> {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const device = engine.device;
     // Per-size scratch buffers for material UBO re-writes (zero allocation per frame).
     const materialScratch = new Map<number, Float32Array>();
@@ -104,7 +101,6 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
-        const mi = m as MeshInternal;
         const refractionIntensity = mat.subsurface?.refraction?.intensity ?? 0;
         hasSkybox ||= !!mat.skyboxMode;
         hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
@@ -121,8 +117,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUnlit ||= !!mat.unlit;
         hasAnyUvTransform ||= !!mat._hasUvTx;
         // UV2 only counts when occlusion samples texcoord 1.
-        hasAnyUv2 ||= !!mi._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
-        hasAnyVertexColor ||= !!mi._gpu.colorBuffer;
+        hasAnyUv2 ||= !!m._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
+        hasAnyVertexColor ||= !!m._gpu.colorBuffer;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
@@ -192,7 +188,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     }
     if (hasTransmissionRefraction) {
         const mod = await import("./pbr-refraction.js");
-        await mod.registerPbrRefraction(scene as SceneContextInternal, engine, _registerPbrExt);
+        await mod.registerPbrRefraction(scene as SceneContext, engine, _registerPbrExt);
     }
     if (needsEmissiveColor) {
         const mod = await import("./fragments/emissive-fragment.js");
@@ -234,7 +230,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
-        | ((engine: EngineContextInternal, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
         | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
@@ -283,7 +279,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const mat = materialInput;
         const renderFeatures = (mat._renderFeatures ??= _computePbrMaterialFeatures(mat)) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const mi = mesh as MeshInternal;
+        const mi = mesh;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
         const lightCount = lr > 0 ? 1 : -lr;
@@ -338,7 +334,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        (s as SceneContextInternal)._meshDisposables.set(mesh, [
+        s._meshDisposables.set(mesh, [
             () => {
                 meshUBO.destroy();
                 materialUBO.destroy();
@@ -443,7 +439,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             _transmissive: needsTaskRefraction,
             mesh,
             bind(eng, sig) {
-                const pipeline = getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings);
+                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings);
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;
@@ -464,7 +460,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
-    (scene as SceneContextInternal)._disposables.push(
+    scene._disposables.push(
         () => clearPbrPipelineCache(),
         () => clearSamplerCache(engine)
     );
@@ -479,7 +475,7 @@ function toSingleLightType(type: string): SingleLightType {
 function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): SingleLightType {
     let packed = 0;
     for (const light of lights) {
-        if (!(light as LightBaseInternal)._writeLightUbo) {
+        if (!light._writeLightUbo) {
             continue;
         }
         if (packed === packedIndex) {

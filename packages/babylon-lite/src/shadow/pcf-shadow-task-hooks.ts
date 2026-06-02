@@ -1,10 +1,10 @@
 /** Internal PCF shadow task hooks owned by PCF shadow generators. */
 
 import type { Camera } from "../camera/camera.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { SpotLight } from "../light/spot-light.js";
 import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateShadowCameraBase, writeShadowUboFields } from "./shadow-base.js";
@@ -71,8 +71,8 @@ export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): 
 }
 
 export function ensurePcfShadowTaskState(
-    engine: EngineContextInternal,
-    scene: SceneContextInternal,
+    engine: EngineContext,
+    scene: SceneContext,
     sg: ShadowGenerator,
     casterMeshes: readonly Mesh[],
     existingState: ShadowTaskInternalState | null
@@ -118,7 +118,7 @@ export function ensurePcfShadowTaskState(
 }
 
 export function renderPcfShadowMap(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     sg: ShadowGenerator,
     state: PcfTaskState,
     computeLightMatrix: (casterMeshes: readonly Mesh[]) => PcfLightMatrix

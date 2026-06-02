@@ -25,11 +25,9 @@ export interface FreeCamera extends Camera, IWorldMatrixProvider, IParentable {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-}
-
-/** @internal FreeCamera with internal yaw/pitch state. Not re-exported from index.ts. */
-export interface FreeCameraInternal extends FreeCamera {
+    /** @internal */
     _yaw: number;
+    /** @internal */
     _pitch: number;
 }
 

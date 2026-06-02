@@ -18,7 +18,7 @@
  */
 
 import type { EngineContext } from "../engine/engine.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
 /** The frame graph — an ordered list of tasks. */
@@ -43,7 +43,7 @@ export interface FrameGraph {
 }
 
 /** Create an empty frame graph bound to the given engine and scene. */
-export function createFrameGraph(_engine: EngineContext, _scene: SceneContextInternal): FrameGraph {
+export function createFrameGraph(_engine: EngineContext, _scene: SceneContext): FrameGraph {
     const fg: FrameGraph = {
         _tasks: [],
         _currentProcessedTask: null,

@@ -7,7 +7,7 @@
  * Sampler pool: identical descriptors return the same GPUSampler.
  */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 
 // ── Texture ref counting ─────────────────────────────────────
@@ -72,7 +72,7 @@ function samplerKey(desc: GPUSamplerDescriptor): string {
 }
 
 /** Get or create a deduplicated sampler. Same config → same GPUSampler. */
-export function getOrCreateSampler(engine: EngineContextInternal, desc: GPUSamplerDescriptor = {}): GPUSampler {
+export function getOrCreateSampler(engine: EngineContext, desc: GPUSamplerDescriptor = {}): GPUSampler {
     const device = engine.device;
     if (!_samplerCache) {
         _samplerCache = new WeakMap();
@@ -92,7 +92,7 @@ export function getOrCreateSampler(engine: EngineContextInternal, desc: GPUSampl
 }
 
 /** Clear sampler cache for a device. */
-export function clearSamplerCache(engine: EngineContextInternal): void {
+export function clearSamplerCache(engine: EngineContext): void {
     const device = engine.device;
     _samplerCache?.delete(device);
 }

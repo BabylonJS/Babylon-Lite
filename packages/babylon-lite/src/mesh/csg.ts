@@ -1,6 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
-import type { Mesh, MeshInternal } from "./mesh.js";
+import type { Mesh } from "./mesh.js";
 import type { Mat4 } from "../math/types.js";
 import type { Material } from "../material/material.js";
 import { mat4Invert } from "../math/mat4-invert.js";
@@ -12,12 +11,11 @@ declare const csgSolidBrand: unique symbol;
 /** An immutable BSP-based CSG solid (set of polygons) for boolean mesh operations. */
 export interface CsgSolid {
     readonly [csgSolidBrand]: true;
-}
-
-interface CsgSolidInternal extends CsgSolid {
+    /** @internal */
     readonly _polygons: readonly CsgPolygon[];
 }
 
+/** @internal */
 interface CsgVertex {
     readonly x: number;
     readonly y: number;
@@ -29,6 +27,7 @@ interface CsgVertex {
     readonly v: number;
 }
 
+/** @internal */
 class CsgPlane {
     constructor(
         public nx: number,
@@ -49,6 +48,7 @@ class CsgPlane {
     }
 }
 
+/** @internal */
 class CsgPolygon {
     public plane: CsgPlane;
 
@@ -275,15 +275,11 @@ function splitPolygon(plane: CsgPlane, polygon: CsgPolygon, coplanarFront: CsgPo
 }
 
 function solidFromPolygons(polygons: CsgPolygon[]): CsgSolid {
-    return { _polygons: polygons } as unknown as CsgSolidInternal;
-}
-
-function internalSolid(solid: CsgSolid): CsgSolidInternal {
-    return solid as CsgSolidInternal;
+    return { _polygons: polygons } as unknown as CsgSolid;
 }
 
 function clonePolygons(solid: CsgSolid): CsgPolygon[] {
-    return internalSolid(solid)._polygons.map((p) => p.clone());
+    return solid._polygons.map((p) => p.clone());
 }
 
 function transformPoint(m: Mat4, x: number, y: number, z: number): [number, number, number] {
@@ -297,18 +293,17 @@ function transformNormal(m: Mat4, inv: Mat4 | null, x: number, y: number, z: num
     return normalizeVec3(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
 }
 
-function requireCpuGeometry(mesh: Mesh): MeshInternal {
-    const internal = mesh as MeshInternal;
-    if (!internal._cpuPositions) {
+function requireCpuGeometry(mesh: Mesh): Mesh {
+    if (!mesh._cpuPositions) {
         throw new Error(`createCsgFromMesh("${mesh.name}") requires CPU positions. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    if (!internal._cpuIndices) {
+    if (!mesh._cpuIndices) {
         throw new Error(`createCsgFromMesh("${mesh.name}") requires CPU indices. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    if (!internal._cpuNormals) {
+    if (!mesh._cpuNormals) {
         throw new Error(`createCsgFromMesh("${mesh.name}") requires CPU normals. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    return internal;
+    return mesh;
 }
 
 /**
@@ -415,7 +410,7 @@ function createMeshFromPolygons(engine: EngineContext, polygons: readonly CsgPol
         }
     }
 
-    return createMeshFromData(engine as EngineContextInternal, name, new Float32Array(positions), new Float32Array(normals), new Uint32Array(indices), new Float32Array(uvs));
+    return createMeshFromData(engine as EngineContext, name, new Float32Array(positions), new Float32Array(normals), new Uint32Array(indices), new Float32Array(uvs));
 }
 
 /**
@@ -423,11 +418,11 @@ function createMeshFromPolygons(engine: EngineContext, polygons: readonly CsgPol
  * @param name - Name for the created mesh.
  */
 export function createMeshFromCsg(engine: EngineContext, solid: CsgSolid, name = "csg"): Mesh {
-    return createMeshFromPolygons(engine, internalSolid(solid)._polygons, name);
+    return createMeshFromPolygons(engine, solid._polygons, name);
 }
 
 export function createMeshesFromCsg(engine: EngineContext, solid: CsgSolid, materials: readonly Material[], name = "csg"): Mesh[] {
-    const polygons = internalSolid(solid)._polygons;
+    const polygons = solid._polygons;
     const slots: number[] = [];
     for (const polygon of polygons) {
         if (!slots.includes(polygon.materialSlot)) {

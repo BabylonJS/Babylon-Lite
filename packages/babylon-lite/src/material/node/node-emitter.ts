@@ -107,12 +107,8 @@ export function castExpr(value: NodeExpr, target: NodeValueType): NodeExpr {
     throw new Error(`NodeMaterial: cannot cast ${value.type} to ${target} for expression \`${value.expr}\``);
 }
 
-interface EmitContextInternal extends NodeEmitContext {
-    readonly loadedEmitters: Map<string, BlockEmitter>;
-}
-
-function makeContext(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>): EmitContextInternal {
-    const ctx: EmitContextInternal = {
+function makeContext(graph: NodeGraph, loadedEmitters: Map<string, BlockEmitter>): NodeEmitContext {
+    const ctx: NodeEmitContext = {
         graph,
         loadedEmitters,
         temp: (state, prefix) => mintTemp(state, prefix),

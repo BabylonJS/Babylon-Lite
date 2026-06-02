@@ -10,7 +10,7 @@
  *  Pipelines are cached per (features, format, msaaSamples) tuple.
  *  Shared scene UBO layout is identical across all variants (176 bytes). */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { _standardFeatureKey } from "./standard-material.js";
@@ -88,7 +88,7 @@ function getComposedCache(): Map<string, ComposedShader> {
     return _composedCache;
 }
 
-function ensureDevice(engine: EngineContextInternal): void {
+function ensureDevice(engine: EngineContext): void {
     if (_cachedDevice !== engine.device) {
         _bindingsCache.clear();
         _composedCache?.clear();
@@ -109,7 +109,7 @@ export function clearStandardPipelineCache(): void {
  *  Used at renderable build time so per-mesh bind groups can be created BEFORE the
  *  first bind() call (when sig is known). */
 export function getOrCreateStandardBindings(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     features: number,
     meshFeatures: number,
     fragments: ShaderFragment[] = [],
@@ -151,7 +151,7 @@ export function getOrCreateStandardBindings(
 }
 
 /** Get-or-build a sig-specific pipeline on top of a shader bindings. Called at bind() time. */
-export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
+export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
     ensureDevice(engine);
     const key = targetSignatureKey(sig);
     const cached = bindings._pipelines.get(key);
@@ -213,7 +213,7 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
  *
  *  Mirrors `createPbrMeshBindGroup` in pbr-pipeline.ts. */
 export function createStandardMeshBindGroup(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     bindings: StandardShaderBindings,
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,

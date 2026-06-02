@@ -13,10 +13,10 @@
  */
 
 import type { Mat4 } from "../math/types.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
-import type { Mesh, MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
 import type { GltfMeshData } from "./load-gltf.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
@@ -25,7 +25,7 @@ import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
-    _engine: EngineContextInternal;
+    _engine: EngineContext;
     _json: any;
     _binChunk: DataView;
     _baseUrl: string;
@@ -67,10 +67,10 @@ export interface GltfFeature {
      *  `uScale/vScale/uOffset/vOffset/uAng` via `cloneTexture2D`). Called eagerly during
      *  material assembly. Unknown textureInfos must return `tex` unchanged. */
     wrapTexture?(tex: Texture2D, texInfo: unknown): Texture2D;
-    /** Per-mesh hook: mutates a freshly-uploaded `MeshInternal`
+    /** Per-mesh hook: mutates a freshly-uploaded `Mesh`
      *  (e.g. attaches `mesh.skeleton`, `mesh.morphTargets`). Runs in parallel
      *  for each mesh inside the loader's mesh-upload Promise.all. */
-    applyMesh?(meshData: GltfMeshData, mesh: MeshInternal, ctx: GltfLoadCtx): Promise<void>;
+    applyMesh?(meshData: GltfMeshData, mesh: Mesh, ctx: GltfLoadCtx): Promise<void>;
     /** Per-asset hook: contributes a fragment merged into the final `AssetContainer`
      *  (e.g. `animationGroups`, `materialVariants`). Runs once after the mesh
      *  hierarchy is built. */

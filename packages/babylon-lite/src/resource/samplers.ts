@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "./gpu-pool.js";
 
 // Static descriptors for the canned sampler helpers — declared once at module
@@ -8,16 +8,16 @@ const _bilinearDesc: GPUSamplerDescriptor = { magFilter: "linear", minFilter: "l
 const _trilinearDesc: GPUSamplerDescriptor = { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" };
 
 /** Nearest-neighbor sampler (mag/min: nearest, no mipmap). All other descriptor fields use WebGPU defaults. */
-export function getNearestSampler(engine: EngineContextInternal): GPUSampler {
+export function getNearestSampler(engine: EngineContext): GPUSampler {
     return getOrCreateSampler(engine, _nearestDesc);
 }
 
 /** Bilinear sampler (mag/min: linear, no mipmap). All other descriptor fields use WebGPU defaults. */
-export function getBilinearSampler(engine: EngineContextInternal): GPUSampler {
+export function getBilinearSampler(engine: EngineContext): GPUSampler {
     return getOrCreateSampler(engine, _bilinearDesc);
 }
 
 /** Trilinear sampler (mag/min/mipmap: linear). All other descriptor fields use WebGPU defaults. */
-export function getTrilinearSampler(engine: EngineContextInternal): GPUSampler {
+export function getTrilinearSampler(engine: EngineContext): GPUSampler {
     return getOrCreateSampler(engine, _trilinearDesc);
 }
