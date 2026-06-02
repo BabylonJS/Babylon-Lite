@@ -301,6 +301,26 @@ async function extractAllMeshes(
     const partials: Array<Omit<GltfMeshData, "_material">> = [];
     const matPromises: Promise<GltfMaterialData>[] = [];
 
+    // Convert a COLOR_0 accessor to a tightly packed RGB Float32Array. glTF
+    // allows vertex colors as float, normalized u8, or normalized u16, and as
+    // VEC3 or VEC4 (the pipeline only consumes RGB). Integer types are scaled
+    // to [0,1]; reinterpreting their raw bytes as float would yield garbage
+    // (often NaN), which the shader's `baseColor *= vColor` turns into black.
+    const toColorRgbF32 = (view: { _data: ArrayBufferView; _count: number; _componentCount: number }): Float32Array => {
+        const { _data, _count, _componentCount } = view;
+        const out = new Float32Array(_count * 3);
+        const scale = _data instanceof Uint8Array ? 1 / 255 : _data instanceof Uint16Array ? 1 / 65535 : 1;
+        const src = _data as Uint8Array | Uint16Array | Float32Array;
+        for (let i = 0; i < _count; i++) {
+            const o = i * 3;
+            const s = i * _componentCount;
+            out[o] = src[s]! * scale;
+            out[o + 1] = src[s + 1]! * scale;
+            out[o + 2] = src[s + 2]! * scale;
+        }
+        return out;
+    };
+
     for (let nodeIdx = 0; nodeIdx < json.nodes.length; nodeIdx++) {
         const node = json.nodes[nodeIdx];
         if (node.mesh === undefined) {
@@ -352,7 +372,7 @@ async function extractAllMeshes(
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
                 _uvs: uvData ? (uvData._data as Float32Array) : new Float32Array(posData._count * 2),
                 _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
-                _colors: colorData ? (colorData._data as Float32Array) : null,
+                _colors: colorData ? toColorRgbF32(colorData) : null,
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: idxData?._count ?? 0,

@@ -44,5 +44,12 @@
         "tags": ["game", "strategy", "2d", "showcase"],
         "fetch": "freeciv",
         "mobile": false
+    },
+    {
+        "slug": "dress-room-demo",
+        "name": "Dressing Room",
+        "description": "A legal, asset-free homage to the World of Warcraft dressing room. A rigged humanoid mannequin stands on a turntable pedestal under studio lighting while you swap equipment per slot (helmet, shoulders, chest, legs, weapon), switch the idle/walk/run animation with smooth weight blending, recolour any equipped piece with a tint picker, and roll random or themed loadouts. All gear is original procedural geometry built from Babylon Lite primitives — no third-party art. Mannequin is the Babylon.js sample Xbot model, loaded at runtime.",
+        "tags": ["showcase", "character", "animation"],
+        "mobile": false
     }
 ]
