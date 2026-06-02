@@ -22,7 +22,7 @@
  * Engine.ts uses `await import("..._mat4-storage-f64.js")` inside
  * `if (useHpm)` and installs the resulting `allocateF64Mat4` into the
  * process-global matrix allocator singleton (see
- * `docs/architecture/33-high-precision-matrix.md`).
+ * `docs/lite/architecture/33-high-precision-matrix.md`).
  * With `useHighPrecisionMatrix` left at its default `false`, the chunk is
  * built (because some HPM-on scene reaches it, OR because Vite always
  * emits dynamic-import targets) but is never *fetched* by HPM-off scenes.
@@ -37,7 +37,7 @@ import { join, resolve } from "node:path";
 
 const BUILD_TAG = "@@MAT4_STORAGE_F64@@";
 const F64_MODULE_HINT = /_mat4-storage-f64/;
-const BUNDLE_DIR = resolve(__dirname, "..", "lab", "public", "bundle");
+const BUNDLE_DIR = resolve(__dirname, "..", "..", "..", "lab", "public", "bundle");
 const MANIFEST_PATH = join(BUNDLE_DIR, "manifest.json");
 
 interface BundleManifestEntry {
