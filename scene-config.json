@@ -838,6 +838,36 @@
         "skipPerf": true
     },
     {
+        "id": 96,
+        "slug": "scene96-sprite-uvoffset-parallax",
+        "name": "Scene 96 — Sprite uvOffset Parallax",
+        "maxMad": 0.02,
+        "maxRawKB": 16,
+        "description": "20×9 pure-2D sprite grid sampling one tileable atlas tile (repeat wrap, nearest) where each horizontal band carries a different fixed per-sprite uvOffset (uvScroll), shifting the sampled UV in the vertex stage — the building block for parallax / infinite-scroll backgrounds. BJS SpriteRenderer oracle bakes the same effect into a per-offset rolled-tile atlas selected by cellIndex.",
+        "tags": ["sprites", "2d", "uvoffset"],
+        "skipPerf": true
+    },
+    {
+        "id": 97,
+        "slug": "scene97-sprite-multiply-blend",
+        "name": "Scene 97 — Sprite Multiply Blend",
+        "maxMad": 0.02,
+        "maxRawKB": 21,
+        "description": "25×10 pure-2D sprite grid drawn with the opt-in spriteBlendMultiply blend mode (result = src.rgb * dst.rgb) over a light, non-black clear colour so the opaque icon sprites darken / tint the background. Fully static / deterministic. BJS SpriteRenderer oracle draws the same atlas with ALPHA_MULTIPLY (DST_COLOR / ZERO), matching the multiply RGB math including anti-aliased sprite edges.",
+        "tags": ["sprites", "2d", "blend"],
+        "skipPerf": true
+    },
+    {
+        "id": 98,
+        "slug": "scene98-billboard-additive-blend",
+        "name": "Scene 98 — Billboard Additive Blend",
+        "maxMad": 0.02,
+        "maxRawKB": 62,
+        "description": "World-space facing billboards drawn with the opt-in billboardBlendAdditive blend mode (src-alpha, one); several large overlapping billboards in front of two boxes make the additive brightening obvious. Fully static / deterministic. BJS SpriteManager oracle uses ALPHA_ONEONE with each sprite's RGB pre-multiplied by its own alpha so one*(rgb*a) matches src-alpha*rgb for the opaque cells.",
+        "tags": ["sprites", "billboards", "blend"],
+        "skipPerf": true
+    },
+    {
         "id": 110,
         "slug": "scene110-rtt-override",
         "name": "Scene 110 — RTT with material override",

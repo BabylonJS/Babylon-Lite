@@ -287,7 +287,7 @@ export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAt
 export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
-export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive } from "./sprite/sprite-blend.js";
+export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
     createSprite2DLayer,
     addSprite2DIndex,
@@ -296,6 +296,7 @@ export {
     clearSprite2DLayer,
     setSprite2DFrameIndex,
     setSprite2DShaderParams,
+    setSprite2DUvOffset,
 } from "./sprite/sprite-2d.js";
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export type { Sprite2DCustomShader, Sprite2DCustomShaderOptions, Sprite2DCustomTexture } from "./sprite/sprite-custom-shader.js";
@@ -314,7 +315,7 @@ export type {
     BillboardBlendMode,
 } from "./sprite/billboard-sprite.js";
 export type { BillboardBlendDescriptor } from "./sprite/billboard-blend.js";
-export { billboardBlendAlpha, billboardBlendPremultiplied, billboardBlendCutout } from "./sprite/billboard-blend.js";
+export { billboardBlendAlpha, billboardBlendPremultiplied, billboardBlendCutout, billboardBlendAdditive } from "./sprite/billboard-blend.js";
 export {
     createFacingBillboardSystem,
     createAxisLockedBillboardSystem,

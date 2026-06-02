@@ -19,7 +19,7 @@ import {
     updateBillboardSpriteIndex,
 } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
 import { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "../../../packages/babylon-lite/src/sprite/billboard-scene";
-import { billboardBlendCutout, billboardBlendPremultiplied } from "../../../packages/babylon-lite/src/sprite/billboard-blend";
+import { billboardBlendAdditive, billboardBlendCutout, billboardBlendPremultiplied } from "../../../packages/babylon-lite/src/sprite/billboard-blend";
 import { BILLBOARD_SYSTEM_UBO_BYTES, createBillboardPipelineCache, getOrCreateBillboardPipeline } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createBillboardCustomShader } from "../../../packages/babylon-lite/src/sprite/billboard-custom-shader";
 import { SPRITE_FX_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/custom-shader-core";
@@ -270,6 +270,18 @@ describe("FacingBillboardSpriteSystem index API", () => {
         expect(explicit._depthMode).toBe("cutout");
         expect(explicit.alphaCutoff).toBe(0.35);
         expect(explicit.order).toBe(177);
+    });
+
+    it("exposes additive blend mode with src-alpha/one factors on the transparent depth path", () => {
+        expect(billboardBlendAdditive._key).toBe("additive");
+        expect(billboardBlendAdditive._depthMode).toBe("transparent");
+        expect(billboardBlendAdditive._descriptor).toEqual({
+            color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+            alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+        });
+        const additive = createFacingBillboardSystem(makeMockAtlas(), { blendMode: billboardBlendAdditive });
+        expect(additive.blendMode).toBe(billboardBlendAdditive);
+        expect(additive._depthMode).toBe("transparent");
     });
 
     it("rejects non-finite alpha cutoff values", () => {

@@ -53,3 +53,18 @@ export const spriteBlendAdditive: SpriteBlendDescriptor = {
         alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
     },
 };
+
+/**
+ * Multiply blending. The framebuffer is multiplied by the sprite's RGB (`result = src * dst`),
+ * so the sprite darkens / tints what is behind it — ideal for soft shadow blobs, dirt / grime
+ * decals, ambient-occlusion stamps, and coloured "gel" overlays that modulate the scene colour.
+ * Sprites should be opaque (or white where they must leave the background unchanged) since a pure
+ * multiply ignores source alpha for RGB.
+ */
+export const spriteBlendMultiply: SpriteBlendDescriptor = {
+    _key: "multiply",
+    _descriptor: {
+        color: { srcFactor: "dst", dstFactor: "zero", operation: "add" },
+        alpha: { srcFactor: "dst-alpha", dstFactor: "zero", operation: "add" },
+    },
+};

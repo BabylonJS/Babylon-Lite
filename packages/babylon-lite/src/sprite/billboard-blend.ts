@@ -47,3 +47,17 @@ export const billboardBlendCutout: BillboardBlendDescriptor = {
     _key: "cutout",
     _depthMode: "cutout",
 };
+
+/**
+ * Additive blending for world-space billboards. The billboard's RGB, scaled by its own alpha, is
+ * added to the framebuffer (no depth write, like the other transparent modes), so overlapping
+ * billboards stack and brighten — world-space embers, sparks, muzzle flashes, and light shafts.
+ */
+export const billboardBlendAdditive: BillboardBlendDescriptor = {
+    _key: "additive",
+    _descriptor: {
+        color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+    },
+    _depthMode: "transparent",
+};

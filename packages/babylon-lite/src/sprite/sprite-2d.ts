@@ -71,6 +71,21 @@ export interface Sprite2DLayerOptions {
      * depth-hosted sprite, call `updateSprite2DIndex(layer, idx, { z: … })`.
      */
     layerZ?: number;
+    /**
+     * Opt-in per-sprite UV scroll offset. When `true`, every sprite gains two extra instance
+     * floats (`uvOffset.xy`) added to its sampled UV in the vertex stage — enabling parallax /
+     * infinite-scroll backgrounds without re-uploading texture coordinates. Set the offset per
+     * sprite via `Sprite2DProps.uvOffset` (on add) or `setSprite2DUvOffset` (live).
+     *
+     * **Zero cross-scene cost:** layers created without `uvScroll` keep the narrow 13/14-float
+     * layout, the base vertex attributes, and the base WGSL — they ship none of the uvScroll
+     * widening. The wider stride, the extra `@location(7)` attribute, and the `+ iUvOffset` WGSL
+     * are gated directly on this per-layer flag. Defaults to `false`.
+     *
+     * Pairs naturally with a tileable atlas texture sampled in `repeat` wrap mode
+     * (`loadSpriteAtlas(..., { textureOptions: { addressModeU: "repeat", addressModeV: "repeat" } })`).
+     */
+    uvScroll?: boolean;
 }
 
 /** A `Sprite2DLayer` — pure data, no methods. */
@@ -97,6 +112,13 @@ export interface Sprite2DLayer {
      * **Absent** on plain layers (only allocated for custom-shader layers, or lazily by the setter).
      */
     shaderParams?: [number, number, number, number];
+    /**
+     * Opt-in per-sprite UV-scroll flag; see `Sprite2DLayerOptions.uvScroll`. **Absent** (not `false`)
+     * on plain layers — never default-initialized, so the always-loaded path and every non-scroll
+     * sprite scene keep the narrow layout and base shader. Present (`true`) only when the layer was
+     * created with `uvScroll: true`, which widens the instance stride by two floats (`uvOffset.xy`).
+     */
+    readonly _uvScroll?: boolean;
     /** Default NDC depth for newly added sprites; see `Sprite2DLayerOptions.layerZ`. */
     layerZ: number;
     readonly count: number;
@@ -159,6 +181,14 @@ export interface Sprite2DProps {
      * only the dirty range.
      */
     z?: number;
+    /**
+     * Per-sprite UV scroll offset added to the sampled UV in the vertex stage. Only stored and
+     * consumed by `uvScroll` layers (created with `Sprite2DLayerOptions.uvScroll: true`); non-scroll
+     * layers use the narrow 13/14-float layout and do not allocate a uvOffset slot. When omitted on
+     * add for a uvScroll layer, defaults to `[0, 0]`. When omitted on update, the sprite's existing
+     * offset is preserved. Live updates: `setSprite2DUvOffset`.
+     */
+    uvOffset?: [number, number];
 }
 
 /**
@@ -177,6 +207,15 @@ export interface Sprite2DProps {
  *   [13]    z (NDC depth)   (float32   @ offset 52, consumed only by depth-hosted pipelines)
  * ```
  *
+ * `uvScroll` layers (created with `Sprite2DLayerOptions.uvScroll: true`) append two more floats
+ * (`uvOffset.xy`) *after* the base layout, orthogonally to depth:
+ * ```
+ *   pure-2D + uvScroll  (15 floats = 60 bytes):  [13..14] uvOffset.xy (float32x2 @ offset 52)
+ *   depth   + uvScroll  (16 floats = 64 bytes):  [14..15] uvOffset.xy (float32x2 @ offset 56)
+ * ```
+ * The depth Z stays at slot [13]; uvOffset is appended after it. Non-scroll layers carry no
+ * uvOffset slot and ship none of the widening (see `Sprite2DLayerOptions.uvScroll`).
+ *
  * Visibility (`visible: false`) is implemented by zeroing slots [2..3]; the sprite's true
  * size lives in `layer._savedSize` so a later `visible: true` (without re-supplying
  * `sizePx`) can restore it. See `_savedSize` for the invariant.
@@ -187,6 +226,16 @@ export const DEPTH_INSTANCE_FLOATS_PER_SPRITE = 14;
 export const PURE_2D_INSTANCE_STRIDE_BYTES = PURE_2D_INSTANCE_FLOATS_PER_SPRITE * 4;
 /** @internal Depth-hosted per-sprite stride in bytes. */
 export const DEPTH_INSTANCE_STRIDE_BYTES = DEPTH_INSTANCE_FLOATS_PER_SPRITE * 4;
+/** @internal Extra floats appended per sprite when `uvScroll` is enabled: `uvOffset.xy`. */
+export const UVSCROLL_EXTRA_FLOATS_PER_SPRITE = 2;
+/** @internal Pure-2D + uvScroll per-sprite stride in floats (13 + 2). */
+export const PURE_2D_UVSCROLL_FLOATS_PER_SPRITE = PURE_2D_INSTANCE_FLOATS_PER_SPRITE + UVSCROLL_EXTRA_FLOATS_PER_SPRITE;
+/** @internal Depth-hosted + uvScroll per-sprite stride in floats (14 + 2). */
+export const DEPTH_UVSCROLL_FLOATS_PER_SPRITE = DEPTH_INSTANCE_FLOATS_PER_SPRITE + UVSCROLL_EXTRA_FLOATS_PER_SPRITE;
+/** @internal Pure-2D + uvScroll per-sprite stride in bytes (60). */
+export const PURE_2D_UVSCROLL_STRIDE_BYTES = PURE_2D_UVSCROLL_FLOATS_PER_SPRITE * 4;
+/** @internal Depth-hosted + uvScroll per-sprite stride in bytes (64). */
+export const DEPTH_UVSCROLL_STRIDE_BYTES = DEPTH_UVSCROLL_FLOATS_PER_SPRITE * 4;
 /** @internal Per-sprite stride (in floats) of the `_savedSize` shadow buffer: `[w, h]`. */
 export const SAVED_SIZE_FLOATS_PER_SPRITE = 2;
 
@@ -204,7 +253,9 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         rotation: opts.view?.rotation ?? 0,
     };
 
-    const instanceFloatsPerSprite = depth === "none" ? PURE_2D_INSTANCE_FLOATS_PER_SPRITE : DEPTH_INSTANCE_FLOATS_PER_SPRITE;
+    const uvScroll = opts.uvScroll === true;
+    const baseFloatsPerSprite = depth === "none" ? PURE_2D_INSTANCE_FLOATS_PER_SPRITE : DEPTH_INSTANCE_FLOATS_PER_SPRITE;
+    const instanceFloatsPerSprite = uvScroll ? baseFloatsPerSprite + UVSCROLL_EXTRA_FLOATS_PER_SPRITE : baseFloatsPerSprite;
     const instanceStrideBytes = instanceFloatsPerSprite * 4;
     const instanceData = new Float32Array(capacity * instanceFloatsPerSprite);
     const layer: Sprite2DLayer = {
@@ -228,6 +279,11 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         _dirtyMin: 0,
         _dirtyMax: 0,
     };
+    // Zero-default-init discipline: the base layer never names `_uvScroll`. Set it only when the
+    // caller opted in, so plain layers keep the field off the always-loaded path and read as narrow.
+    if (uvScroll) {
+        (layer as { _uvScroll?: boolean })._uvScroll = true;
+    }
     // Zero-default-init discipline: the base layer never names `customShader` / `shaderParams`.
     // When (and only when) a custom shader was supplied, the registered hook copies it on — the
     // impl lives in the tree-shaken `sprite-custom-shader` module, so plain scenes ship none of it.
@@ -248,6 +304,28 @@ export function setSprite2DShaderParams(layer: Sprite2DLayer, params: readonly [
     target[1] = params[1];
     target[2] = params[2];
     target[3] = params[3];
+}
+
+/**
+ * Set the per-sprite UV scroll offset for one sprite of a `uvScroll` layer (live). The two floats
+ * are added to the sprite's sampled UV in the vertex stage — driving parallax / infinite-scroll
+ * backgrounds without re-uploading texture coordinates. Marks only this sprite's range dirty.
+ *
+ * Throws if the layer was not created with `Sprite2DLayerOptions.uvScroll: true` (non-scroll layers
+ * carry no uvOffset slot) or if `index` is out of range.
+ */
+export function setSprite2DUvOffset(layer: Sprite2DLayer, index: number, uvOffset: readonly [number, number]): void {
+    if (!layer._uvScroll) {
+        throw new Error("setSprite2DUvOffset: layer was not created with uvScroll: true.");
+    }
+    if (index < 0 || index >= layer.count) {
+        throw new Error(`setSprite2DUvOffset: index ${index} out of range [0, ${layer.count})`);
+    }
+    const base = index * layer._instanceFloatsPerSprite;
+    const uvSlot = base + (layer.depth !== "none" ? 14 : 13);
+    layer._instanceData[uvSlot] = uvOffset[0];
+    layer._instanceData[uvSlot + 1] = uvOffset[1];
+    markDirty(layer, index, index + 1);
 }
 
 function growCapacity(layer: Sprite2DLayer, minCapacity: number): void {
@@ -402,6 +480,21 @@ function writeInstance(layer: Sprite2DLayer, slotIndex: number, props: Partial<S
     // ── Per-instance Z (slot [13], depth-hosted layout only) ───────────────────────────
     if (hasDepthSlot) {
         data[base + 13] = z;
+    }
+
+    // ── Per-sprite uvOffset (uvScroll layout only) ─────────────────────────────────────
+    // Appended after the base layout: slot [13] for pure-2D, slot [14] for depth-hosted
+    // (the depth Z keeps slot [13]). props → preserved → default [0,0] on add.
+    if (layer._uvScroll) {
+        const uvSlot = base + (hasDepthSlot ? 14 : 13);
+        if (props.uvOffset) {
+            data[uvSlot] = props.uvOffset[0];
+            data[uvSlot + 1] = props.uvOffset[1];
+        } else if (isAdd) {
+            data[uvSlot] = 0;
+            data[uvSlot + 1] = 0;
+        }
+        // else: previous uvOffset floats are already in place — nothing to write.
     }
 }
 

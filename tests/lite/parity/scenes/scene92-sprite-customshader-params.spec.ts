@@ -3,7 +3,7 @@ import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(92);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene92-sprite-customshader-params");
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene92-sprite-customshader-params");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
 test.skip(!!sceneConfig.skipParity, "Scene 92 skipped via skipParity in scene-config.json");

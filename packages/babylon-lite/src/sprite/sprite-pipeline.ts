@@ -3,11 +3,13 @@ import type { EngineContextInternal } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
-import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
+import { DEPTH_INSTANCE_STRIDE_BYTES, DEPTH_UVSCROLL_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES, PURE_2D_UVSCROLL_STRIDE_BYTES } from "./sprite-2d.js";
 
 export interface SpritePipelineDeviceCache {
     _shaderModule: GPUShaderModule | null;
     _sceneShaderModule: GPUShaderModule | null;
+    _shaderModuleUv: GPUShaderModule | null;
+    _sceneShaderModuleUv: GPUShaderModule | null;
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
@@ -22,9 +24,12 @@ const SPRITE_UV_MAX_OFFSET_BYTES = 24;
 const SPRITE_ROTATION_OFFSET_BYTES = 32;
 const SPRITE_COLOR_OFFSET_BYTES = 36;
 const SPRITE_DEPTH_OFFSET_BYTES = 52;
+/** uvOffset.xy byte offset: appended after the base layout (52 pure-2D, 56 depth-hosted). */
+const SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52;
+const SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56;
 
-function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1): string {
-    return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex)}
+function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
+    return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
@@ -40,9 +45,10 @@ return s * in.tint * L.opacityMul;
  * `@binding(3 + 2 * extraTextures.length)`, and the user's raw fragment body. Exposed so both
  * paths share one source of truth.
  */
-export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1): string {
+export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false): string {
     const group = `@group(${spriteGroupIndex})`;
     const zAttribute = hasDepth ? `,\n@location(6) iZ: f32` : "";
+    const uvOffsetAttribute = uvScroll ? `,\n@location(7) iUvOffset: vec2<f32>` : "";
     const zPosition = hasDepth ? "1.0 - in.iZ" : "0.0";
     return `struct Layer {
 viewPos: vec2<f32>,
@@ -66,7 +72,7 @@ struct VIn {
 @location(2) iUvMin: vec2<f32>,
 @location(3) iUvMax: vec2<f32>,
 @location(4) iRot: f32,
-@location(5) iColor: vec4<f32>${zAttribute}
+@location(5) iColor: vec4<f32>${zAttribute}${uvOffsetAttribute}
 };
 struct VOut {
 @builtin(position) pos: vec4<f32>,
@@ -88,7 +94,7 @@ let ls = sin(L.viewRot);
 let viewRot = vec2<f32>(centered.x * lc - centered.y * ls, centered.x * ls + centered.y * lc);
 let screenPx = viewRot * L.viewScale;
 let ndc = vec2<f32>(screenPx.x / L.screenSize.x * 2.0 - 1.0, 1.0 - screenPx.y / L.screenSize.y * 2.0);
-let uv = mix(in.iUvMin, in.iUvMax, c);
+let uv = mix(in.iUvMin, in.iUvMax, c)${uvScroll ? " + in.iUvOffset" : ""};
 var out: VOut;
 out.pos = vec4<f32>(ndc, ${zPosition}, 1.0);
 out.uv = uv;
@@ -167,6 +173,8 @@ function getSpritePipelineDeviceCache(engine: EngineContextInternal, cache: Spri
         deviceCache = {
             _shaderModule: null,
             _sceneShaderModule: null,
+            _shaderModuleUv: null,
+            _sceneShaderModuleUv: null,
             _pipelines: new Map(),
         };
         cache._devices.set(engine.device, deviceCache);
@@ -194,7 +202,8 @@ function spritePipelineKey(
     layer?: Sprite2DLayer
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
-    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}`;
+    const uvKey = layer?._uvScroll ? "1" : "0";
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}`;
 }
 
 function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
@@ -202,11 +211,20 @@ function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDev
     if (customModule) {
         return customModule;
     }
+    const uvScroll = layer?._uvScroll === true;
     if (hasDepth) {
-        cache._sceneShaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1) });
+        if (uvScroll) {
+            cache._sceneShaderModuleUv ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1, true) });
+            return cache._sceneShaderModuleUv;
+        }
+        cache._sceneShaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1, false) });
         return cache._sceneShaderModule;
     }
-    cache._shaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(false, 0) });
+    if (uvScroll) {
+        cache._shaderModuleUv ??= engine.device.createShaderModule({ code: makeSpriteWgsl(false, 0, true) });
+        return cache._shaderModuleUv;
+    }
+    cache._shaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(false, 0, false) });
     return cache._shaderModule;
 }
 
@@ -251,6 +269,21 @@ function buildSpritePipeline(
     if (hasDepth) {
         instanceAttributes.push({ shaderLocation: 6, offset: SPRITE_DEPTH_OFFSET_BYTES, format: "float32" });
     }
+    const uvScroll = layer?._uvScroll === true;
+    if (uvScroll) {
+        instanceAttributes.push({
+            shaderLocation: 7,
+            offset: hasDepth ? SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES : SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES,
+            format: "float32x2",
+        });
+    }
+    const arrayStride = uvScroll
+        ? hasDepth
+            ? DEPTH_UVSCROLL_STRIDE_BYTES
+            : PURE_2D_UVSCROLL_STRIDE_BYTES
+        : hasDepth
+          ? DEPTH_INSTANCE_STRIDE_BYTES
+          : PURE_2D_INSTANCE_STRIDE_BYTES;
     const descriptor: GPURenderPipelineDescriptor = {
         layout: device.createPipelineLayout({ bindGroupLayouts }),
         vertex: {
@@ -258,7 +291,7 @@ function buildSpritePipeline(
             entryPoint: "vs",
             buffers: [
                 {
-                    arrayStride: hasDepth ? DEPTH_INSTANCE_STRIDE_BYTES : PURE_2D_INSTANCE_STRIDE_BYTES,
+                    arrayStride: arrayStride,
                     stepMode: "instance",
                     attributes: instanceAttributes,
                 },

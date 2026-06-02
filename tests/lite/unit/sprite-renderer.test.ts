@@ -20,12 +20,18 @@ G.GPUColorWrite ??= { ALL: 0xf };
 import {
     DEPTH_INSTANCE_FLOATS_PER_SPRITE,
     DEPTH_INSTANCE_STRIDE_BYTES,
+    DEPTH_UVSCROLL_FLOATS_PER_SPRITE,
+    DEPTH_UVSCROLL_STRIDE_BYTES,
     PURE_2D_INSTANCE_FLOATS_PER_SPRITE,
     PURE_2D_INSTANCE_STRIDE_BYTES,
+    PURE_2D_UVSCROLL_FLOATS_PER_SPRITE,
+    PURE_2D_UVSCROLL_STRIDE_BYTES,
     addSprite2DIndex,
     clearSprite2DLayer,
     createSprite2DLayer,
     setSprite2DShaderParams,
+    setSprite2DUvOffset,
+    updateSprite2DIndex,
 } from "../../../packages/babylon-lite/src/sprite/sprite-2d";
 import {
     createSpriteRenderer,
@@ -37,7 +43,7 @@ import {
     _spriteRendererPipelineCacheSize,
 } from "../../../packages/babylon-lite/src/sprite/sprite-renderer";
 import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
-import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied } from "../../../packages/babylon-lite/src/sprite/sprite-blend";
+import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied, spriteBlendMultiply } from "../../../packages/babylon-lite/src/sprite/sprite-blend";
 import { createSprite2DCustomShader } from "../../../packages/babylon-lite/src/sprite/sprite-custom-shader";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
@@ -182,6 +188,7 @@ describe("createSpriteRenderer", () => {
 
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).not.toContain("iZ");
+        expect(shaderDescriptor.code).not.toContain("iUvOffset");
         expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 0.0, 1.0)");
     });
 
@@ -197,6 +204,118 @@ describe("createSpriteRenderer", () => {
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 1.0 - in.iZ, 1.0)");
         expect(descriptor.depthStencil?.depthCompare).toBe("greater-equal");
+    });
+});
+
+describe("uvScroll (per-sprite uvOffset)", () => {
+    it("widens the pure-2D layer to 15 floats / 60 bytes and never names _uvScroll when off", () => {
+        const off = createSprite2DLayer(makeMockAtlas());
+        expect(off._instanceFloatsPerSprite).toBe(PURE_2D_INSTANCE_FLOATS_PER_SPRITE);
+        expect(off._instanceStrideBytes).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
+        expect(Object.prototype.hasOwnProperty.call(off, "_uvScroll")).toBe(false);
+
+        const on = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
+        expect(on._uvScroll).toBe(true);
+        expect(on._instanceFloatsPerSprite).toBe(PURE_2D_UVSCROLL_FLOATS_PER_SPRITE);
+        expect(on._instanceStrideBytes).toBe(PURE_2D_UVSCROLL_STRIDE_BYTES);
+        expect(PURE_2D_UVSCROLL_STRIDE_BYTES).toBe(60);
+    });
+
+    it("widens the depth-hosted layer to 16 floats / 64 bytes (Z stays at slot 13)", () => {
+        const on = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true });
+        expect(on._instanceFloatsPerSprite).toBe(DEPTH_UVSCROLL_FLOATS_PER_SPRITE);
+        expect(on._instanceStrideBytes).toBe(DEPTH_UVSCROLL_STRIDE_BYTES);
+        expect(DEPTH_UVSCROLL_STRIDE_BYTES).toBe(64);
+    });
+
+    it("builds a pure-2D uvScroll pipeline with a 60-byte stride and a location-7 iUvOffset attribute", () => {
+        const { engine } = makeMockEngine();
+        const cache = createSpritePipelineCache();
+        const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
+
+        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, spriteBlendAlpha, false, false, undefined, undefined, layer);
+
+        const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
+        const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
+        const shaderLocations = vertexBuffer.attributes.map((attr) => attr.shaderLocation);
+
+        expect(vertexBuffer.arrayStride).toBe(PURE_2D_UVSCROLL_STRIDE_BYTES);
+        expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5, 7]);
+        const uvAttr = vertexBuffer.attributes.find((a) => a.shaderLocation === 7)!;
+        expect(uvAttr.offset).toBe(52);
+        expect(uvAttr.format).toBe("float32x2");
+
+        const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
+        expect(shaderDescriptor.code).toContain("@location(7) iUvOffset: vec2<f32>");
+        expect(shaderDescriptor.code).toContain("+ in.iUvOffset");
+    });
+
+    it("builds a depth-hosted uvScroll pipeline with a 64-byte stride and uvOffset at byte offset 56", () => {
+        const { engine } = makeMockEngine();
+        const cache = createSpritePipelineCache();
+        const sceneBGL = {} as GPUBindGroupLayout;
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true });
+
+        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL, layer);
+
+        const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
+        const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
+        const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
+        const shaderLocations = vertexBuffer.attributes.map((attr) => attr.shaderLocation);
+
+        expect(vertexBuffer.arrayStride).toBe(DEPTH_UVSCROLL_STRIDE_BYTES);
+        expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+        const uvAttr = vertexBuffer.attributes.find((a) => a.shaderLocation === 7)!;
+        expect(uvAttr.offset).toBe(56);
+    });
+
+    it("writes uvOffset into slot 13 on add (pure-2D), preserves on update, and defaults to [0,0]", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
+        const i0 = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0, uvOffset: [0.25, 0.5] });
+        const i1 = addSprite2DIndex(layer, { positionPx: [40, 50], sizePx: [32, 32], frame: 0 });
+
+        const stride = layer._instanceFloatsPerSprite;
+        expect(layer._instanceData[i0 * stride + 13]).toBeCloseTo(0.25);
+        expect(layer._instanceData[i0 * stride + 14]).toBeCloseTo(0.5);
+        // Omitted on add → cleared to [0,0].
+        expect(layer._instanceData[i1 * stride + 13]).toBe(0);
+        expect(layer._instanceData[i1 * stride + 14]).toBe(0);
+
+        // Update without uvOffset preserves it; position still moves.
+        updateSprite2DIndex(layer, i0, { positionPx: [11, 21] });
+        expect(layer._instanceData[i0 * stride + 13]).toBeCloseTo(0.25);
+        expect(layer._instanceData[i0 * stride + 14]).toBeCloseTo(0.5);
+    });
+
+    it("writes uvOffset into slot 14 on a depth-hosted layer and leaves Z at slot 13 intact", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true, layerZ: 0.3 });
+        const i = addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0, z: 0.7, uvOffset: [0.1, 0.2] });
+        const stride = layer._instanceFloatsPerSprite;
+        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.7); // Z
+        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.1);
+        expect(layer._instanceData[i * stride + 15]).toBeCloseTo(0.2);
+    });
+
+    it("setSprite2DUvOffset writes the live offset and throws on a non-uvScroll layer", () => {
+        const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
+        const i = addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        setSprite2DUvOffset(layer, i, [0.75, 0.125]);
+        const stride = layer._instanceFloatsPerSprite;
+        expect(layer._instanceData[i * stride + 13]).toBeCloseTo(0.75);
+        expect(layer._instanceData[i * stride + 14]).toBeCloseTo(0.125);
+
+        const plain = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(plain, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        expect(() => setSprite2DUvOffset(plain, 0, [0, 0])).toThrow(/uvScroll/);
+    });
+
+    it("keeps the non-uvScroll instance buffer byte-identical (no uvOffset slot)", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0 });
+        expect(layer._instanceData.length).toBe(layer._capacity * PURE_2D_INSTANCE_FLOATS_PER_SPRITE);
+        // The public uvOffset prop is silently ignored when the layer is not a uvScroll layer.
+        expect(() => addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0, uvOffset: [0.5, 0.5] })).not.toThrow();
     });
 });
 
@@ -507,6 +626,17 @@ describe("createSprite2DLayer guards", () => {
     it("accepts additive blend mode and stores it", () => {
         const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: spriteBlendAdditive });
         expect(layer.blendMode).toBe(spriteBlendAdditive);
+    });
+
+    it("exposes multiply blend mode with src*dst factors and no premultiplied opacity", () => {
+        expect(spriteBlendMultiply._key).toBe("multiply");
+        expect(spriteBlendMultiply._premultipliedOpacity).toBeUndefined();
+        expect(spriteBlendMultiply._descriptor).toEqual({
+            color: { srcFactor: "dst", dstFactor: "zero", operation: "add" },
+            alpha: { srcFactor: "dst-alpha", dstFactor: "zero", operation: "add" },
+        });
+        const layer = createSprite2DLayer(makeMockAtlas(), { blendMode: spriteBlendMultiply });
+        expect(layer.blendMode).toBe(spriteBlendMultiply);
     });
 });
 
