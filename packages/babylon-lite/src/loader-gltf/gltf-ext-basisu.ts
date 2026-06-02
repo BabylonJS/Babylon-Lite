@@ -37,6 +37,8 @@ interface BasisuMaterialData {
     normalTexture?: any;
     occlusionTexture?: any;
     emissiveTexture?: any;
+    specularTexture?: any;
+    specularColorTexture?: any;
     bitmaps?: Map<number, Promise<ImageBitmap>>;
     textures?: Map<string, Texture2D>;
 }
@@ -74,6 +76,11 @@ function prepareBasisuMaterials(json: any, binChunk: DataView, baseUrl: string):
         hasBasisu = stripBasisuTexture(json, mat, "normalTexture", data) || hasBasisu;
         hasBasisu = stripBasisuTexture(json, mat, "occlusionTexture", data) || hasBasisu;
         hasBasisu = stripBasisuTexture(json, mat, "emissiveTexture", data) || hasBasisu;
+        const spec = mat.extensions?.KHR_materials_specular;
+        if (spec) {
+            hasBasisu = stripBasisuTexture(json, spec, "specularTexture", data) || hasBasisu;
+            hasBasisu = stripBasisuTexture(json, spec, "specularColorTexture", data) || hasBasisu;
+        }
         if (hasBasisu) {
             Object.defineProperty(mat, BASISU_MATERIAL_DATA, { value: data });
         }
@@ -251,11 +258,13 @@ const ext: GltfFeature = {
         if (!data) {
             return null;
         }
-        const [baseColorTexture, ormTexture, normalTexture, emissiveTexture] = await Promise.all([
+        const [baseColorTexture, ormTexture, normalTexture, emissiveTexture, specularTexture, specularColorTexture] = await Promise.all([
             uploadBasisuTexture(data, ctx, data.baseColorTexture, true),
             uploadOrmTexture(data, ctx),
             uploadBasisuTexture(data, ctx, data.normalTexture, false),
             uploadBasisuTexture(data, ctx, data.emissiveTexture, true),
+            uploadBasisuTexture(data, ctx, data.specularTexture, false),
+            uploadBasisuTexture(data, ctx, data.specularColorTexture, true),
         ]);
         const out: Partial<PbrMaterialProps> = {
             ...(baseColorTexture ? { baseColorTexture } : undefined),
@@ -268,8 +277,10 @@ const ext: GltfFeature = {
                 : undefined),
             ...(normalTexture ? { normalTexture, normalTextureScale: data.normalTexture?.scale ?? 1 } : undefined),
             ...(emissiveTexture ? { emissiveTexture } : undefined),
+            ...(specularTexture ? { metallicReflectanceTexture: specularTexture, useOnlyMetallicFromMetallicReflectanceTexture: true } : undefined),
+            ...(specularColorTexture ? { reflectanceTexture: specularColorTexture } : undefined),
         };
-        if (!out.baseColorTexture && !out.ormTexture && !out.normalTexture && !out.emissiveTexture) {
+        if (!out.baseColorTexture && !out.ormTexture && !out.normalTexture && !out.emissiveTexture && !out.metallicReflectanceTexture && !out.reflectanceTexture) {
             return null;
         }
         return out;

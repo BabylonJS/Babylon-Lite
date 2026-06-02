@@ -147,6 +147,7 @@ async function main(): Promise<void> {
 
 - Use the **Spector.GPU** MCP tools (`spector-gpu-navigate`, `spector-gpu-capture`, `spector-gpu-get_resource`, etc.) to capture reference frames from Babylon.js (WebGPU mode).
 - Extract: buffer data, pipeline states, matrix math, shader outputs.
+- **All screenshots / visual captures shared in a request MUST be encoded as JPG at low-enough quality to stay well under the 5 MB per-request limit.** PNG captures routinely exceed it. Use quality ≤ 60 (e.g. `magick screenshot.png -quality 60 screenshot.jpg` or equivalent) and verify the file is under 1 MB before attaching. If it is still too large, reduce quality further (try 40, then 25) until it fits.
 - The parity harness runs Babylon.js (iframe oracle) side-by-side with Babylon Lite.
 - **Zero guesswork** — every rendering decision is validated against captured GPU state.
 - **ALWAYS capture and compare with Spector before making rendering changes.**
