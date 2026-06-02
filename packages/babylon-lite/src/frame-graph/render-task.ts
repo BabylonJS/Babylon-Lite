@@ -71,6 +71,8 @@ export interface RenderTaskConfig {
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */
 export interface RenderTask extends Task {
     readonly name: string;
+    /** Render tasks are scene-bound because they consume scene camera, lights, and renderables. */
+    readonly scene: SceneContext;
     /** Live task configuration. Mutating `clr` or `clrColor` affects subsequent frames. */
     readonly _config: RenderTaskConfig;
     _autoFromScene: boolean;

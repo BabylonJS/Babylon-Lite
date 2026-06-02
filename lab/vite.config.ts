@@ -3,6 +3,73 @@ import { resolve } from "path";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { spawn } from "child_process";
 
+interface DemoConfigEntry {
+    slug: string;
+    name: string;
+    description: string;
+    tags?: string[];
+    mobile?: boolean;
+}
+
+interface DemoSize {
+    rawKB: number;
+    gzipKB: number;
+}
+
+function readJson<T>(path: string, fallback: T): T {
+    if (!existsSync(path)) {
+        return fallback;
+    }
+    return JSON.parse(readFileSync(path, "utf-8")) as T;
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
+    const tagList = demo.tags ?? [];
+    const tags = tagList.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
+    const sizeRow = size ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>` : "";
+    return [
+        `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<div class="card-image">`,
+        `<img src="/thumbnails/demo-${demo.slug}.png" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `</div>`,
+        `<div class="card-body">`,
+        `<h2>${escapeHtml(demo.name)}</h2>`,
+        `<p>${escapeHtml(demo.description)}</p>`,
+        tags ? `<div class="tags">${tags}</div>` : "",
+        sizeRow,
+        `<span class="card-disabled-badge">Requires WebGPU</span>`,
+        `</div></a>`,
+    ].join("");
+}
+
+function renderPagesDemoFilters(demos: DemoConfigEntry[]): string {
+    const tags = Array.from(new Set(demos.flatMap((d) => d.tags ?? []))).sort();
+    if (tags.length === 0) {
+        return "";
+    }
+    const pills = [
+        `<button type="button" class="filter-pill is-active" data-filter="all" aria-pressed="true">All</button>`,
+        ...tags.map((t) => `<button type="button" class="filter-pill" data-filter="${escapeHtml(t)}" aria-pressed="false">${escapeHtml(t)}</button>`),
+    ].join("");
+    return `<nav class="filters" aria-label="Filter demos by tag">${pills}</nav>`;
+}
+
+function renderPagesDemoIndex(): string {
+    const repoRoot = resolve(__dirname, "..");
+    const demos = readJson<DemoConfigEntry[]>(resolve(repoRoot, "demos-config.json"), []);
+    const sizes = readJson<Record<string, DemoSize>>(resolve(__dirname, "public/bundle/demos-manifest.json"), {});
+    const template = readFileSync(resolve(repoRoot, "pages/index.template.html"), "utf-8");
+    return template
+        .replace("<!--FILTERS-->", renderPagesDemoFilters(demos))
+        .replace("<!--CARDS-->", demos.map((d) => renderPagesDemoCard(d, sizes[d.slug])).join("\n                "))
+        .replace('src="babylon-logo.svg"', 'src="/pages/babylon-logo.svg"')
+        .replace('src="bundle/demos/landing-bg.js"', 'src="/bundle/demos/landing-bg.js"');
+}
+
 function hasBuildableRootScripts(htmlFile: string): boolean {
     const html = readFileSync(resolve(__dirname, htmlFile), "utf-8");
     if (html.includes('src="/lite/bundle/')) {
@@ -32,6 +99,34 @@ function getHtmlInputs(): Record<string, string> {
             .map((f) => [f.replace(".html", ""), resolve(__dirname, f)]),
         ...liteHtml,
     ]);
+}
+
+/** Serve the standalone demo landing page source from repo-root pages/. */
+function pagesDemoPlugin(): Plugin {
+    return {
+        name: "lab-pages-demo",
+        configureServer(server) {
+            server.middlewares.use((req, res, next) => {
+                const url = (req.url ?? "").split("?")[0];
+                if (url === "/pages" || url === "/pages/" || url === "/pages/index.html") {
+                    res.setHeader("Content-Type", "text/html; charset=utf-8");
+                    res.setHeader("Cache-Control", "no-cache");
+                    res.end(renderPagesDemoIndex());
+                    return;
+                }
+                if (url === "/pages/babylon-logo.svg") {
+                    const filePath = resolve(__dirname, "../pages/babylon-logo.svg");
+                    if (existsSync(filePath)) {
+                        res.setHeader("Content-Type", "image/svg+xml");
+                        res.setHeader("Cache-Control", "no-cache");
+                        createReadStream(filePath).pipe(res);
+                        return;
+                    }
+                }
+                next();
+            });
+        },
+    };
 }
 
 /** Serve reference images from the repo-root reference/lite/ directory */
@@ -436,7 +531,7 @@ function tabContentPlugin(): Plugin {
 }
 
 export default defineConfig({
-    plugins: [serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
+    plugins: [pagesDemoPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.

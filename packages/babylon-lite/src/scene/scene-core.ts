@@ -231,7 +231,7 @@ export function createSceneContext(engine: EngineContext, options?: SceneContext
     // Eagerly attach the frame graph + a default swapchain render-pass task. The
     // graph drives all GPU work for this scene; user code can add more tasks
     // (offscreen RTTs, post-FX, UI overlays) before/after.
-    const fg = createFrameGraph(eng, ctx);
+    const fg = createFrameGraph(eng);
     ctx._frameGraph = fg;
     if (options?.defaultRenderTask !== false) {
         const swapRT = createRenderTarget({

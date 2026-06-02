@@ -21,10 +21,10 @@ const ANAGLYPH_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4
  * Create a post-process task that merges a left-eye texture with the source (right eye) into a red/cyan anaglyph.
  * @param config - Source/target settings and the left-eye `leftTexture`.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
  * @returns The anaglyph post-process task.
  */
-export function createAnaglyphPostProcessTask(config: AnaglyphPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): AnaglyphPostProcessTask {
+export function createAnaglyphPostProcessTask(config: AnaglyphPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): AnaglyphPostProcessTask {
     const task = createPostProcessTask(
         {
             name: config.name ?? "anaglyph",

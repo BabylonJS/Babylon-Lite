@@ -2219,6 +2219,7 @@
                         📊 Performance Summary
                     </button>
                     <button class="docs-toggle hamburger-item" id="apidocs-menu-item" onclick="openApiDocsFromMenu()">📘 API Docs</button>
+                    <button class="docs-toggle hamburger-item" onclick="openDemoPageFromMenu()">🎮 Demo Page</button>
                 </div>
             </div>
             <button class="docs-toggle" id="compact-toggle" onclick="toggleCompact()" style="margin-left: 0.5rem" title="Toggle small card layout">🔳 Compact</button>
@@ -2537,6 +2538,7 @@
             <div class="docs-close-row">
                 <h3 class="docs-section-title">📘 <span id="apidocs-title">Babylon Lite — API Reference</span></h3>
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap">
+                    <button class="btn" onclick="openDemoPage(event)">🎮 Open demo page</button>
                     <button class="btn" id="apidocs-generate-btn" onclick="generateApiDocs()">⚙ Generate API Docs</button>
                     <button class="btn" id="apidocs-open-btn" onclick="openCurrentApiDocs()" style="display: none">↗ Open in new tab</button>
                     <span id="apidocs-spinner" class="perf-status"></span>
@@ -2549,10 +2551,9 @@
                 <span id="apidocs-status" style="color: #6cb6ff"></span>
             </div>
             <div id="apidocs-empty" style="padding: 32px; text-align: center; color: #8b949e; display: none">
-                <p style="font-size: 15px; margin-bottom: 8px">No API documentation has been generated yet.</p>
+                <p style="font-size: 15px; margin-bottom: 8px">No API documentation is available yet.</p>
                 <p style="font-size: 13px">
-                    Click <strong>Generate API Docs</strong> above — the lab dev server will run TypeDoc and render the result here. (Requires the Vite dev server, i.e.
-                    <code>pnpm dev</code>.)
+                    Run <code>pnpm docs</code>, or click <strong>Generate API Docs</strong> above when using the Vite dev server (<code>pnpm dev</code>).
                 </p>
             </div>
             <div id="apidocs-log-bar" style="display: none; align-items: center; justify-content: space-between; margin-top: 8px; margin-bottom: 4px">
@@ -2584,6 +2585,11 @@
         <script>
             // ── API Docs tab ──────────────────────────────────────────
             var _apiDocsInitialized = false;
+            var DEMO_PAGE_URL = "/pages/";
+
+            function cacheBustUrl(url) {
+                return url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
+            }
 
             function currentApiDocsConfig() {
                 var cfg = typeof currentExperienceConfig === "function" ? currentExperienceConfig() : null;
@@ -2623,17 +2629,19 @@
                 var spinner = document.getElementById("apidocs-spinner");
                 syncApiDocsChrome();
                 var status = document.getElementById("apidocs-status");
+                var canGenerate = opts.canGenerate !== undefined ? !!opts.canGenerate : cfg.apiDocsCanGenerate !== false;
                 frame.style.display = state === "ready" ? "block" : "none";
                 empty.style.display = state === "empty" ? "block" : "none";
                 openBtn.style.display = state === "ready" ? "inline-block" : "none";
-                genBtn.disabled = state === "generating" || cfg.apiDocsCanGenerate === false;
+                genBtn.style.display = canGenerate ? "" : "none";
+                genBtn.disabled = state === "generating" || !canGenerate;
                 genBtn.textContent = state === "ready" ? "↻ Regenerate API Docs" : "⚙ Generate API Docs";
                 spinner.textContent = state === "generating" ? "⏳ Running TypeDoc…" : "";
                 if (status && opts.statusText !== undefined) status.textContent = opts.statusText;
                 if (state === "ready") {
                     // Cache-bust so a regenerate reloads fresh output.
                     frame.onload = _applyApiDocsTheme;
-                    frame.src = cfg.apiDocsUrl + "?t=" + Date.now();
+                    frame.src = cacheBustUrl(cfg.apiDocsUrl);
                 }
             }
 
@@ -2699,8 +2707,7 @@
                     })
                     .then(function (s) {
                         if (!s) {
-                            _setApiDocsView("empty", { statusText: "(dev server endpoint unavailable)" });
-                            return;
+                            return refreshStaticApiDocsStatus();
                         }
                         if (s.generating) {
                             _setApiDocsView("generating");
@@ -2712,7 +2719,21 @@
                         }
                     })
                     .catch(function () {
-                        _setApiDocsView("empty", { statusText: "(dev server endpoint unavailable)" });
+                        return refreshStaticApiDocsStatus();
+                    });
+            }
+
+            function refreshStaticApiDocsStatus() {
+                return fetch(cacheBustUrl(currentApiDocsConfig().apiDocsUrl), { cache: "no-store" })
+                    .then(function (r) {
+                        if (r.ok) {
+                            _setApiDocsView("ready", { statusText: "· static docs", canGenerate: false });
+                        } else {
+                            _setApiDocsView("empty", { statusText: "(static docs unavailable)", canGenerate: false });
+                        }
+                    })
+                    .catch(function () {
+                        _setApiDocsView("empty", { statusText: "(static docs unavailable)", canGenerate: false });
                     });
             }
 
@@ -5800,6 +5821,16 @@
             function openApiDocsFromMenu() {
                 closeHamburgerMenu();
                 toggleApiDocs();
+            }
+
+            function openDemoPage(event) {
+                if (event) event.preventDefault();
+                window.open(DEMO_PAGE_URL, "_blank", "noopener");
+            }
+
+            function openDemoPageFromMenu() {
+                closeHamburgerMenu();
+                openDemoPage();
             }
 
             // Close the menu when clicking outside it or pressing Escape.

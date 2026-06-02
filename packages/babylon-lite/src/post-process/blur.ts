@@ -112,10 +112,10 @@ function updateBlurShader(shader: PostProcessShaderConfig, kernel: number): void
  * Create a separable Gaussian blur post-process task. Apply twice (horizontal then vertical) for a full 2D blur.
  * @param config - Blur direction, kernel size, and source/target settings.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
  * @returns The blur post-process task.
  */
-export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BlurPostProcessTask {
+export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BlurPostProcessTask {
     const params = { direction: config.direction ?? { x: 1, y: 0 }, kernel: config.kernel ?? 9 };
     const shader: PostProcessShaderConfig = {
         uniformWGSL: BLUR_UNIFORM_WGSL,

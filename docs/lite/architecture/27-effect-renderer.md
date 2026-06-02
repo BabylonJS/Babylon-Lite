@@ -11,6 +11,7 @@ The effect renderer module provides a Lite-native equivalent of Babylon.js `Effe
 - fullscreen geometry is the standard single triangle generated from `@builtin(vertex_index)`;
 - swapchain-only effects register as a direct engine rendering context, so no `SceneContext` or default scene `RenderTask` is needed;
 - offscreen render-to-texture effects are scheduled as a `Task` in the existing scene `FrameGraph`;
+- uniform-only offscreen effects can use the smaller `UniformEffectWrapper` path when a fullscreen shader needs exactly one uniform buffer and no textures or samplers;
 - frame-graph task targets are existing `RenderTarget`s;
 - user-facing resources remain Lite handles (`Texture2D`, `RenderTarget`), never raw WebGPU handles.
 
@@ -83,6 +84,39 @@ export function setEffectUniforms(wrapper: EffectWrapper, data: ArrayBuffer | Ar
 export function setEffectTexture(wrapper: EffectWrapper, bindingNameOrIndex: string | number, texture: Texture2D): void;
 export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: EngineContext, scene: SceneContext): EffectRenderTask;
 export function disposeEffectWrapper(wrapper: EffectWrapper): void;
+
+// ─── Uniform-only frame-graph task (smaller bundle path) ─────────────
+
+export interface UniformEffectWrapperOptions {
+    name?: string;
+    fragmentWGSL: string;
+    vertexWGSL?: string;
+    uniformByteLength: number;
+}
+
+export interface UniformEffectWrapper {
+    readonly name: string;
+    readonly options: UniformEffectWrapperOptions;
+}
+
+export interface UniformEffectRenderTaskConfig {
+    name: string;
+    effect: UniformEffectWrapper;
+    target: RenderTarget;
+    clear?: boolean;
+    clearColor?: GPUColorDict;
+}
+
+export interface UniformEffectRenderTask extends Task {
+    readonly name: string;
+    readonly _config: UniformEffectRenderTaskConfig;
+    readonly _rt: RenderTarget;
+}
+
+export function createUniformEffectWrapper(engine: EngineContext, options: UniformEffectWrapperOptions): UniformEffectWrapper;
+export function setUniformEffectUniforms(wrapper: UniformEffectWrapper, data: ArrayBuffer | ArrayBufferView): void;
+export function createUniformEffectRenderTask(config: UniformEffectRenderTaskConfig, engine: EngineContext, scene?: SceneContext): UniformEffectRenderTask;
+export function disposeUniformEffectWrapper(wrapper: UniformEffectWrapper): void;
 ```
 
 ## Internal Architecture (data structures, memory layouts)
@@ -110,6 +144,8 @@ Uniform data is copied into wrapper-owned uniform buffers. `setEffectUniforms(wr
 2. the first texture slot, otherwise.
 
 This allows the common `texture + sampler` pair without exposing `GPUTextureView` or `GPUSampler` in the public API.
+
+`UniformEffectWrapper` is the same fullscreen-triangle effect shape specialized for the smallest uniform-only case: it creates one uniform buffer at group 0 / binding 0, one bind-group layout, one bind group, and one render task. It intentionally omits texture/sampler binding discovery, blend configuration, direct swapchain rendering, and multi-uniform lookup so simple procedural frame-graph demos do not pay for the generic `EffectWrapper` binding machinery.
 
 ## Pipeline Configuration (vertex/fragment stages, bind groups, depth/stencil)
 
@@ -179,6 +215,14 @@ If a custom `vertexWGSL` is supplied, it must provide an `@vertex` entry point n
 5. `registerScene` / `startEngine` as normal.
 6. `disposeEffectWrapper(wrapper)` when done.
 
+### Uniform-only frame-graph path (`createUniformEffectRenderTask`)
+
+1. `createUniformEffectWrapper(engine, { fragmentWGSL, uniformByteLength })` creates a smaller effect wrapper with one uniform buffer at binding 0.
+2. User code calls `setUniformEffectUniforms(wrapper, data)` before each draw that needs updated uniform data.
+3. `createUniformEffectRenderTask(config, engine, scene?)` creates a frame-graph `Task` for an explicit `RenderTarget`. It can be scheduled in a scene frame graph or a standalone `FrameGraphContext`.
+4. The task records a single fullscreen triangle pipeline and binds the wrapper's uniform bind group at group 0.
+5. `disposeUniformEffectWrapper(wrapper)` destroys the wrapper-owned uniform buffer.
+
 ## Babylon.js Equivalence Map
 
 | Babylon.js | Babylon Lite |
@@ -186,6 +230,7 @@ If a custom `vertexWGSL` is supplied, it must provide an `@vertex` entry point n
 | `EffectWrapper` | `EffectWrapper` pure-state handle |
 | `EffectRenderer.render(wrapper)` (swapchain) | `createEffectRenderer(engine, effect)` + `registerEffectRenderer` — no scene needed |
 | `EffectRenderer.render(wrapper, outputTexture)` (RTT) | `createEffectRenderTask({ effect, target: rt })` scheduled in `FrameGraph` |
+| uniform-only fullscreen pass | `createUniformEffectWrapper` + `createUniformEffectRenderTask` |
 | fullscreen quad/index buffer | vertex-index fullscreen triangle |
 | `onApplyObservable` | user calls `setEffectUniforms` / `setEffectTexture` before the pass executes |
 | current framebuffer / RTT | direct `EffectRenderer` / frame-graph `RenderTarget` task |
@@ -213,6 +258,7 @@ The API intentionally does not implement Babylon.js shader-store lookup, GLSL in
 ## File Manifest
 
 - `packages/babylon-lite/src/effect/effect-renderer.ts`
+- `packages/babylon-lite/src/effect/uniform-effect-renderer.ts`
 - `docs/lite/architecture/27-effect-renderer.md`
 - `lab/lite/src/bjs/scene74.ts`
 - `lab/lite/babylon-ref-scene74.html`

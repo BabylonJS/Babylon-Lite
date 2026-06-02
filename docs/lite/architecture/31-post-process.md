@@ -54,7 +54,7 @@ export interface PostProcessTask extends Task, PostProcessTaskSettings {
     updateUniforms(): void;
 }
 
-export function createPostProcessTask(config: PostProcessTaskConfig, engine: EngineContext, scene: SceneContext): PostProcessTask;
+export function createPostProcessTask(config: PostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): PostProcessTask;
 
 export interface BlackAndWhitePostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     degree?: number;
@@ -64,13 +64,13 @@ export interface BlackAndWhitePostProcessTask extends PostProcessTask {
     degree: number;
 }
 
-export function createBlackAndWhitePostProcessTask(config: BlackAndWhitePostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BlackAndWhitePostProcessTask;
+export function createBlackAndWhitePostProcessTask(config: BlackAndWhitePostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BlackAndWhitePostProcessTask;
 
 export interface AnaglyphPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     leftTexture: RenderTarget;
 }
 
-export function createAnaglyphPostProcessTask(config: AnaglyphPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): PostProcessTask;
+export function createAnaglyphPostProcessTask(config: AnaglyphPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): PostProcessTask;
 
 export interface BlurPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     direction?: { x: number; y: number };
@@ -82,7 +82,7 @@ export interface BlurPostProcessTask extends PostProcessTask {
     kernel: number;
 }
 
-export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BlurPostProcessTask;
+export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BlurPostProcessTask;
 
 export interface ExtractHighlightsPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     threshold?: number;
@@ -94,7 +94,7 @@ export interface ExtractHighlightsPostProcessTask extends PostProcessTask {
     exposure: number;
 }
 
-export function createExtractHighlightsPostProcessTask(config: ExtractHighlightsPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): ExtractHighlightsPostProcessTask;
+export function createExtractHighlightsPostProcessTask(config: ExtractHighlightsPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): ExtractHighlightsPostProcessTask;
 
 export interface ChromaticAberrationPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     aberrationAmount?: number;
@@ -110,7 +110,7 @@ export interface ChromaticAberrationPostProcessTask extends PostProcessTask {
     centerPosition: { x: number; y: number };
 }
 
-export function createChromaticAberrationPostProcessTask(config: ChromaticAberrationPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): ChromaticAberrationPostProcessTask;
+export function createChromaticAberrationPostProcessTask(config: ChromaticAberrationPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): ChromaticAberrationPostProcessTask;
 
 export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     weight?: number;
@@ -133,7 +133,25 @@ export interface BloomPostProcessTask extends Task, PostProcessTaskSettings {
     updateUniforms(): void;
 }
 
-export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BloomPostProcessTask;
+export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BloomPostProcessTask;
+
+export interface FrameGraphContextOptions {
+    name?: string;
+    clearColor?: GPUColorDict;
+    update?: (deltaMs: number) => void;
+}
+
+export interface FrameGraphContext extends RenderingContext {
+    readonly name: string;
+    readonly engine: EngineContext;
+    readonly frameGraph: FrameGraph;
+    clearColor: GPUColorDict;
+}
+
+export function createFrameGraphContext(engine: EngineContext, options?: FrameGraphContextOptions): FrameGraphContext;
+export function registerFrameGraphContext(ctx: FrameGraphContext): void;
+export function unregisterFrameGraphContext(ctx: FrameGraphContext): void;
+export function disposeFrameGraphContext(ctx: FrameGraphContext): void;
 ```
 
 `PostProcessShaderConfig` and `PostProcessTaskConfig` are implementation-facing types used by concrete post-process factories; `_shader` is intentionally internal and is omitted from public concrete post-process configs.
@@ -246,15 +264,16 @@ The current concrete post-processes mirror their Babylon.js thin post-process sh
 
 ## State Machine / Lifecycle
 
-1. Caller creates an offscreen scene `RenderTask` or other producer whose target owns a color texture.
-2. If the post-process chain owns the final swapchain write, caller creates the scene with `{ defaultRenderTask: false }` so the default `"scene"` swapchain render task does not draw the scene a second time.
-3. Caller creates the post-process task with `sourceTexture` set to that producer target. If `targetTexture` is omitted, the task creates an internal color-only target using the source descriptor's format, sample count, and size.
-4. Caller schedules tasks in order with `addTask(scene, producer)`, then `addTask(scene, postProcess)`, then any consumer/output task.
-5. `FrameGraph.build()` calls the producer `record()` first, allocating source texture resources.
-6. Post-process `record()` validates the source color texture, allocates/rebuilds the output target, creates the pipeline, bind group, and optional uniform buffer, initializes uniforms, and records no separate `Pass` because the task executes directly.
-7. If a caller mutates exposed post-process parameters after recording, they call `updateUniforms()` to rewrite the task UBO before the next draw.
-8. Each frame, `execute()` patches swapchain attachments if needed, applies viewport/scissor if requested, binds pipeline/group, and draws one full-screen triangle.
-9. `dispose()` destroys the optional uniform buffer and disposes only the internally-owned target. Caller-owned `sourceTexture` and `targetTexture` lifetimes remain with their owners.
+1. Caller creates a producer whose target owns a single-sample color texture. The producer can be a scene `RenderTask`, an `EffectRenderTask`, or any custom task.
+2. Scene pipelines use the scene's frame graph as before. Scene-less pipelines create `const ctx = createFrameGraphContext(engine, { update })`; the update callback runs once per frame before graph execution and is the right place to update effect uniforms.
+3. Caller creates the post-process task with `sourceTexture` set to the producer target. If `targetTexture` is omitted, the task creates an internal color-only target using the source descriptor's format, sample count, and size. If the post-process writes the canvas, use a target with `resolveToSwapchain: true`.
+4. Caller schedules tasks in order with `addTask(sceneOrFrameGraph, producer)`, then `addTask(sceneOrFrameGraph, postProcess)`, then any consumer/output task.
+5. Scene-less graphs are started with `registerFrameGraphContext(ctx)`, which builds `ctx.frameGraph` and registers the rendering context with the engine. Later canvas resizes rebuild the graph through the context `_resize` hook.
+6. `FrameGraph.build()` calls the producer `record()` first, allocating source texture resources.
+7. Post-process `record()` validates the source color texture, allocates/rebuilds the output target, creates the pipeline, bind group, and optional uniform buffer, initializes uniforms, and records no separate `Pass` because the task executes directly.
+8. If a caller mutates exposed post-process parameters after recording, they call `updateUniforms()` to rewrite the task UBO before the next draw.
+9. Each frame, `execute()` patches swapchain attachments if needed, applies viewport/scissor if requested, binds pipeline/group, and draws one full-screen triangle.
+10. `dispose()` destroys the optional uniform buffer and disposes only the internally-owned target. Caller-owned `sourceTexture` and `targetTexture` lifetimes remain with their owners. `disposeFrameGraphContext(ctx)` unregisters a scene-less graph and disposes all tasks in it; repeated disposal is a no-op.
 
 ## Babylon.js Equivalence Map
 
@@ -280,7 +299,7 @@ The current concrete post-processes mirror their Babylon.js thin post-process sh
 - `engine/engine.ts` for internal device/encoder/swapchain state;
 - `engine/render-target.ts` for source/output target allocation and disposal;
 - `resource/samplers.ts` for shared nearest/linear samplers;
-- `scene/scene-core.ts` for task ownership;
+- `scene/scene-core.ts` only for scene-owned frame graphs; standalone frame-graph contexts avoid runtime scene imports;
 - `camera/camera.ts` only for the public `NormalizedViewport` type.
 
 ## Test Specification

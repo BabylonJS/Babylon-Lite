@@ -9,8 +9,9 @@
  *     `_passes` per frame.
  *
  * Lifecycle:
- *   - Engine and scene are captured at task creation and exposed as
- *     `engine` / `scene`.
+ *   - Engine is captured at task creation and exposed as `engine`.
+ *     Scene-owned tasks also expose `scene`; scene-less effect/post-process
+ *     tasks leave it undefined so standalone frame graphs stay tree-shakable.
  *   - `record()` is called synchronously when the frame graph is built (via
  *     `FrameGraph.build()`). Tasks use this to allocate GPU resources, build
  *     their render-pass descriptor, and finalize anything that needs the
@@ -29,9 +30,10 @@ import type { Pass } from "./pass.js";
 export interface Task {
     readonly name: string;
 
-    /** Engine and scene captured at task creation. */
+    /** Engine captured at task creation. */
     readonly engine: EngineContext;
-    readonly scene: SceneContext;
+    /** Owning scene for scene-bound tasks. Undefined for scene-less standalone frame graphs. */
+    readonly scene?: SceneContext | undefined;
 
     /** Passes recorded by this task. Populated during `record()` by
      *  `createRenderPass(name, task)` / `addRenderPass(fg, name)`.

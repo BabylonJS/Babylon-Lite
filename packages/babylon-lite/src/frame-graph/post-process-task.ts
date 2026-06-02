@@ -3,7 +3,7 @@ import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
 import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
 /** Source sampling filter for a post-process pass. */
@@ -83,9 +83,8 @@ fn readPostProcessSource(uv:vec2f)->vec4f{let dims=vec2f(textureDimensions(sourc
 
 const FRAGMENT_WRAPPER_WGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{return applyPostProcess(samplePostProcessSource(input.uv),input.uv);}`;
 
-export function createPostProcessTask(config: PostProcessTaskConfig, engine: EngineContext, scene: SceneContext): PostProcessTask {
+export function createPostProcessTask(config: PostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): PostProcessTask {
     const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
     const source = config.sourceTexture;
     const internalTarget = config.targetTexture ? null : createInternalTarget(config.name ?? "post-process", source);
     const colorAttachment: GPURenderPassColorAttachment = {
@@ -96,7 +95,7 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
     const task: PostProcessTaskInternal = {
         name: config.name ?? "post-process",
         engine: eng,
-        scene: sc,
+        scene,
         _passes: [],
         sourceTexture: source,
         sourceSamplingMode: config.sourceSamplingMode ?? "linear",

@@ -7,7 +7,7 @@
  * `addTask`, `addTaskAtStart`, and `addTaskBefore`).
  *
  * Lifecycle:
- *   1. createFrameGraph(engine, scene)      → empty graph
+ *   1. createFrameGraph(engine)             → empty graph
  *   2. `addTask{,AtStart,Before}`           → register tasks
  *      (createSceneContext registers a default scene-render task)
  *   3. fg.build()                           → record every task
@@ -18,7 +18,6 @@
  */
 
 import type { EngineContext } from "../engine/engine.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
 /** The frame graph — an ordered list of tasks. */
@@ -42,8 +41,8 @@ export interface FrameGraph {
     dispose(): void;
 }
 
-/** Create an empty frame graph bound to the given engine and scene. */
-export function createFrameGraph(_engine: EngineContext, _scene: SceneContextInternal): FrameGraph {
+/** Create an empty frame graph bound to the given engine. */
+export function createFrameGraph(_engine: EngineContext): FrameGraph {
     const fg: FrameGraph = {
         _tasks: [],
         _currentProcessedTask: null,

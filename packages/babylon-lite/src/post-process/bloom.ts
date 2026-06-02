@@ -3,7 +3,7 @@ import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-targ
 import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskSettings } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { createBlurPostProcessTask, type BlurPostProcessTask } from "./blur.js";
 import { createExtractHighlightsPostProcessTask, type ExtractHighlightsPostProcessTask } from "./extract-highlights.js";
 
@@ -54,12 +54,11 @@ const scaledKernel = (kernel: number, scale: number): number => kernel * scale;
  * Create a bloom post-process task by chaining highlight extraction, separable blur, and a merge pass.
  * @param config - Bloom parameters and source/target settings.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
  * @returns The bloom post-process task.
  */
-export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BloomPostProcessTask {
+export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BloomPostProcessTask {
     const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
     const params = {
         sourceTexture: config.sourceTexture,
         targetTexture: config.targetTexture ?? null,
@@ -142,7 +141,7 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
     const task: BloomTaskInternal = {
         name,
         engine: eng,
-        scene: sc,
+        scene,
         _passes: [],
         sourceTexture: params.sourceTexture,
         sourceSamplingMode: params.sourceSamplingMode,

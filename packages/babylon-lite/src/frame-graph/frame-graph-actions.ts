@@ -1,13 +1,22 @@
 import type { SceneContext } from "../scene/scene-core.js";
-import { getFrameGraph } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { FrameGraph } from "./frame-graph.js";
 import { _appendTask } from "./frame-graph.js";
 import type { RenderPass } from "./render-pass.js";
 import { createRenderPass } from "./render-pass.js";
 
+function isFrameGraph(value: unknown): value is FrameGraph {
+    return typeof value === "object" && value !== null && "_tasks" in value;
+}
+
 function resolveFg(target: FrameGraph | SceneContext): FrameGraph {
-    return "_tasks" in (target as object) ? (target as FrameGraph) : getFrameGraph(target as SceneContext);
+    if (isFrameGraph(target)) {
+        return target;
+    }
+    if ("_frameGraph" in target && isFrameGraph(target._frameGraph)) {
+        return target._frameGraph;
+    }
+    throw new Error("FrameGraph target does not expose a frame graph.");
 }
 
 /** Add a task at the END of execute order. Accepts the scene's frame graph directly,

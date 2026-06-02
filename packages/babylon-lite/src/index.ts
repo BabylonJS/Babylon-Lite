@@ -30,6 +30,8 @@ export { setSubtreeVisible } from "./scene/visibility.js";
 export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export { addRenderPass, addTask, addTaskAtStart, addTaskBefore } from "./frame-graph/frame-graph-actions.js";
+export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
+export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
 export type { Task } from "./frame-graph/task.js";
 export type { Pass, RenderPassExecuteFunc } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
@@ -50,6 +52,8 @@ export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectR
 export type { EffectBindingKind, EffectBindingLayout, EffectWrapperOptions, EffectWrapper, EffectRenderTaskConfig, EffectRenderTask } from "./effect/effect-renderer.js";
 export { createEffectRenderer, registerEffectRenderer, unregisterEffectRenderer, disposeEffectRenderer } from "./effect/effect-renderer.js";
 export type { EffectRendererOptions, EffectRenderer } from "./effect/effect-renderer.js";
+export { createUniformEffectWrapper, setUniformEffectUniforms, createUniformEffectRenderTask, disposeUniformEffectWrapper } from "./effect/uniform-effect-renderer.js";
+export type { UniformEffectWrapperOptions, UniformEffectWrapper, UniformEffectRenderTaskConfig, UniformEffectRenderTask } from "./effect/uniform-effect-renderer.js";
 
 // ─── Post-processes ─────────────────────────────────────────────────
 export { createBlackAndWhitePostProcessTask } from "./post-process/black-and-white.js";

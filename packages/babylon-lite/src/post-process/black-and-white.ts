@@ -21,10 +21,10 @@ const BLACK_AND_WHITE_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f
  * Create a post-process task that blends the image toward grayscale.
  * @param config - Source/target settings and desaturation `degree`.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
  * @returns The black-and-white post-process task.
  */
-export function createBlackAndWhitePostProcessTask(config: BlackAndWhitePostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BlackAndWhitePostProcessTask {
+export function createBlackAndWhitePostProcessTask(config: BlackAndWhitePostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BlackAndWhitePostProcessTask {
     const params = { degree: config.degree ?? 1 };
     const task = createPostProcessTask(
         {

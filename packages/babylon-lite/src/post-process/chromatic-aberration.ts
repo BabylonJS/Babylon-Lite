@@ -32,13 +32,13 @@ const CHROMATIC_ABERRATION_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:
  * Create a post-process task that simulates chromatic aberration by shifting color channels outward from a center point.
  * @param config - Aberration parameters and source/target settings.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
  * @returns The chromatic-aberration post-process task.
  */
 export function createChromaticAberrationPostProcessTask(
     config: ChromaticAberrationPostProcessTaskConfig,
     engine: EngineContext,
-    scene: SceneContext
+    scene?: SceneContext
 ): ChromaticAberrationPostProcessTask {
     const params = {
         aberrationAmount: config.aberrationAmount ?? 30,

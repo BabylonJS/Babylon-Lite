@@ -25,13 +25,13 @@ const EXTRACT_HIGHLIGHTS_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:ve
  * Create a post-process task that isolates bright highlights above a luminance threshold (used as the first stage of bloom).
  * @param config - Threshold/exposure parameters and source/target settings.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
  * @returns The extract-highlights post-process task.
  */
 export function createExtractHighlightsPostProcessTask(
     config: ExtractHighlightsPostProcessTaskConfig,
     engine: EngineContext,
-    scene: SceneContext
+    scene?: SceneContext
 ): ExtractHighlightsPostProcessTask {
     const params = {
         threshold: config.threshold ?? 0.9,

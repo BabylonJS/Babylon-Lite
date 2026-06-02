@@ -318,6 +318,10 @@ unregisterEffectRenderer(renderer: EffectRenderer): void
 disposeEffectRenderer(renderer: EffectRenderer): void
 createEffectRenderTask(config: EffectRenderTaskConfig, engine: Engine, scene: SceneContext): EffectRenderTask
 disposeEffectWrapper(wrapper: EffectWrapper): void
+createUniformEffectWrapper(engine: Engine, options: UniformEffectWrapperOptions): UniformEffectWrapper
+setUniformEffectUniforms(wrapper: UniformEffectWrapper, data: ArrayBuffer | ArrayBufferView): void
+createUniformEffectRenderTask(config: UniformEffectRenderTaskConfig, engine: Engine, scene?: SceneContext): UniformEffectRenderTask
+disposeUniformEffectWrapper(wrapper: UniformEffectWrapper): void
 
 // Lights
 createHemisphericLight(direction?: [number,number,number], intensity?: number): HemisphericLight

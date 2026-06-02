@@ -18,12 +18,15 @@ const LAB_DIR = resolve(ROOT, "lab");
 const DIST_DIR = resolve(LAB_DIR, "dist");
 const SCENE_CONFIG = resolve(ROOT, "scene-config.json");
 const DEMOS_CONFIG = resolve(ROOT, "demos-config.json");
+const DEMOS_MANIFEST = resolve(LAB_DIR, "public/bundle/demos-manifest.json");
+const PAGES_SRC = resolve(ROOT, "pages");
 const SCENE_CONFIG_WEBGL = resolve(ROOT, "scene-config-webgl.json");
 const DEMOS_CONFIG_WEBGL = resolve(ROOT, "demos-config-webgl.json");
 const REFERENCE_DIR = resolve(ROOT, "reference");
 
 const ROOT_RELATIVE_PREFIXES = [
     "HavokPhysics.wasm",
+    "api-docs",
     "babylon-ref-scene",
     "brdf-lut.png",
     "bundle",
@@ -41,6 +44,7 @@ const ROOT_RELATIVE_PREFIXES = [
     "lite",
     "loader.js",
     "models",
+    "pages",
     "perf-manifest.json",
     "perf-regression-manifest.json",
     "reference",
@@ -51,6 +55,69 @@ const ROOT_RELATIVE_PREFIXES = [
     "thumbnails",
     "vendor",
 ];
+
+interface DemoConfigEntry {
+    slug: string;
+    name: string;
+    description: string;
+    tags?: string[];
+    mobile?: boolean;
+}
+
+interface DemoSize {
+    rawKB: number;
+    gzipKB: number;
+}
+
+function readJson<T>(path: string, fallback: T): T {
+    return existsSync(path) ? (JSON.parse(readFileSync(path, "utf-8")) as T) : fallback;
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
+    const tagList = demo.tags ?? [];
+    const tags = tagList.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
+    const sizeRow = size ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>` : "";
+    return [
+        `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<div class="card-image">`,
+        `<img src="/thumbnails/demo-${demo.slug}.png" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `</div>`,
+        `<div class="card-body">`,
+        `<h2>${escapeHtml(demo.name)}</h2>`,
+        `<p>${escapeHtml(demo.description)}</p>`,
+        tags ? `<div class="tags">${tags}</div>` : "",
+        sizeRow,
+        `<span class="card-disabled-badge">Requires WebGPU</span>`,
+        `</div></a>`,
+    ].join("");
+}
+
+function renderPagesDemoFilters(demos: DemoConfigEntry[]): string {
+    const tags = Array.from(new Set(demos.flatMap((d) => d.tags ?? []))).sort();
+    if (tags.length === 0) {
+        return "";
+    }
+    const pills = [
+        `<button type="button" class="filter-pill is-active" data-filter="all" aria-pressed="true">All</button>`,
+        ...tags.map((t) => `<button type="button" class="filter-pill" data-filter="${escapeHtml(t)}" aria-pressed="false">${escapeHtml(t)}</button>`),
+    ].join("");
+    return `<nav class="filters" aria-label="Filter demos by tag">${pills}</nav>`;
+}
+
+function renderPagesDemoIndex(): string {
+    const demos = readJson<DemoConfigEntry[]>(DEMOS_CONFIG, []);
+    const sizes = readJson<Record<string, DemoSize>>(DEMOS_MANIFEST, {});
+    const template = readFileSync(resolve(PAGES_SRC, "index.template.html"), "utf-8");
+    return template
+        .replace("<!--FILTERS-->", renderPagesDemoFilters(demos))
+        .replace("<!--CARDS-->", demos.map((d) => renderPagesDemoCard(d, sizes[d.slug])).join("\n                "))
+        .replace('src="babylon-logo.svg"', 'src="/pages/babylon-logo.svg"')
+        .replace('src="bundle/demos/landing-bg.js"', 'src="/bundle/demos/landing-bg.js"');
+}
 
 function normalizeBasePath(value: string | undefined): string {
     if (!value) {
@@ -78,6 +145,10 @@ function copyStaticRuntimeData(): void {
     if (existsSync(DEMOS_CONFIG)) {
         cpSync(DEMOS_CONFIG, resolve(DIST_DIR, "demos-config.json"));
     }
+    const pagesOut = resolve(DIST_DIR, "pages");
+    mkdirSync(pagesOut, { recursive: true });
+    writeFileSync(resolve(pagesOut, "index.html"), renderPagesDemoIndex());
+    cpSync(resolve(PAGES_SRC, "babylon-logo.svg"), resolve(pagesOut, "babylon-logo.svg"));
     if (existsSync(SCENE_CONFIG_WEBGL)) {
         cpSync(SCENE_CONFIG_WEBGL, resolve(DIST_DIR, "scene-config-webgl.json"));
     }

@@ -2,7 +2,7 @@ import { registerRenderingContext, unregisterRenderingContext } from "../engine/
 import type { EngineContext, EngineContextInternal, RenderingContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "../frame-graph/task.js";
 
@@ -202,12 +202,11 @@ export function setEffectTexture(wrapper: EffectWrapper, bindingNameOrIndex: str
  * Create a frame-graph task that draws an effect as a fullscreen pass into `config.target`.
  * @param config - The effect, target, and clear settings.
  * @param engine - The owning engine.
- * @param scene - The owning scene.
- * @returns The render task to add to the scene's frame graph.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
+ * @returns The render task to add to a frame graph.
  */
-export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: EngineContext, scene: SceneContext): EffectRenderTask {
+export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: EngineContext, scene?: SceneContext): EffectRenderTask {
     const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
     const effect = config.effect as EffectWrapperInternal;
     const rt = config.target;
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
@@ -221,7 +220,7 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
         name: config.name,
         _config: config,
         engine: eng,
-        scene: sc,
+        scene,
         _passes: [],
         _rt: rt,
         _targetSignature: targetSignature,

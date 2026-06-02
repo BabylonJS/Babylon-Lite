@@ -2,12 +2,23 @@
  * Demo — Torus States.
  *
  * A reproduction of Robert Penner's "Torus States" (https://robertpenner.com/demos/#/torus-states),
- * rendered with Babylon Lite's fullscreen-effect path — no scene, camera, or mesh.
+ * rendered with Babylon Lite's scene-less frame-graph path — no scene, camera, or mesh.
  * The entire image is a single raymarched WGSL fragment shader (twisted-torus SDF with
  * volumetric glow, sine-palette color, Blinn-Phong specular + Fresnel) that auto-cycles
  * through 7 morph states. Demonstrates how thin a Lite-powered shader page can be.
  */
-import { createEngine, startEngine, createEffectWrapper, createEffectRenderer, registerEffectRenderer, setEffectUniforms } from "babylon-lite";
+import {
+    addTask,
+    createBloomPostProcessTask,
+    createEngine,
+    createFrameGraphContext,
+    createRenderTarget,
+    createUniformEffectRenderTask,
+    createUniformEffectWrapper,
+    registerFrameGraphContext,
+    setUniformEffectUniforms,
+    startEngine,
+} from "babylon-lite";
 
 const FRAGMENT_WGSL = /* wgsl */ `
 struct U {
@@ -160,10 +171,10 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas, { maxDevicePixelRatio: 1 });
 
-    const effect = createEffectWrapper(engine, {
+    const effect = createUniformEffectWrapper(engine, {
         name: "torus-states",
         fragmentWGSL: FRAGMENT_WGSL,
-        bindings: [{ binding: 0, kind: "uniform", uniformByteLength: 80 }],
+        uniformByteLength: 80,
     });
     const u = new Float32Array(20);
     const start = performance.now();
@@ -173,7 +184,22 @@ async function main(): Promise<void> {
     let transStart = -DURATION_MS;
     let lastSwitch = 0;
 
-    const renderer = createEffectRenderer(engine, effect, {
+    const sourceTarget = createRenderTarget({
+        label: "torus-states-source",
+        colorFormat: engine.format,
+        sampleCount: 1,
+        size: "canvas",
+    });
+    const outputTarget = createRenderTarget({
+        label: "torus-states-bloom-output",
+        colorFormat: engine.format,
+        sampleCount: 1,
+        size: "canvas",
+        resolveToSwapchain: true,
+    });
+
+    const context = createFrameGraphContext(engine, {
+        name: "torus-states",
         update: () => {
             const now = performance.now();
             const elapsed = now - start;
@@ -207,11 +233,37 @@ async function main(): Promise<void> {
             u[17] = 1.0; // uSpecStrength
             u[18] = 32.0; // uSpecPower
             u[19] = 0.5; // uFresnelStrength
-            setEffectUniforms(effect, u);
+            setUniformEffectUniforms(effect, u);
         },
     });
+    addTask(
+        context.frameGraph,
+        createUniformEffectRenderTask(
+            {
+                name: "torus-states-source",
+                effect,
+                target: sourceTarget,
+            },
+            engine
+        )
+    );
+    addTask(
+        context.frameGraph,
+        createBloomPostProcessTask(
+            {
+                name: "torus-states-bloom",
+                sourceTexture: sourceTarget,
+                targetTexture: outputTarget,
+                threshold: 0.18,
+                weight: 0.85,
+                kernel: 32,
+                bloomScale: 0.5,
+            },
+            engine
+        )
+    );
 
-    registerEffectRenderer(renderer);
+    registerFrameGraphContext(context);
     await startEngine(engine);
     canvas.dataset.ready = "true";
 }
