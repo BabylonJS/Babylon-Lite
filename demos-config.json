@@ -46,6 +46,13 @@
         "mobile": false
     },
     {
+        "slug": "tetris",
+        "name": "3D Tetris",
+        "description": "A playable Tetris built on Babylon Lite. The 10×20 well is rendered with thin-instanced cubes — one mesh per piece color — so the whole playfield stays at a handful of draw calls. Standard 7-bag randomizer, ghost piece, soft/hard drop, wall kicks, line clears and level-based gravity. Pure Lite, no BJS, no external assets.",
+        "tags": ["game", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "mosquito-amber",
         "name": "Mosquito in Amber",
         "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume) framed with the same static camera and studio HDR environment as Scene 176. Frame-graph scene-texture transmission renders the refractive amber. Pure Lite — no BJS.",
