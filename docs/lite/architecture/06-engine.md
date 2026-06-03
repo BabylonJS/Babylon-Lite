@@ -168,7 +168,7 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 | Babylon Lite                                           | Babylon.js                                                                                                                                          |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createEngine(canvas)`                                 | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()`                                                                                           |
-| `engine.device`                                        | `engine._device`                                                                                                                                    |
+| `engine._device`                                       | `engine._device`                                                                                                                                    |
 | `engine.format`                                        | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
 | `engine.msaaSamples` (1 or 4)                          | `engine._samples`                                                                                                                                   |
 | `registerScene(engine, scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
