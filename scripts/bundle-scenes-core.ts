@@ -14,7 +14,7 @@ import { execFileSync } from "child_process";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "fs";
 import { initialize as initMiniray, minify as minifyWgslMiniray } from "miniray";
-import { minify as terserMinify } from "terser";
+import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
 import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
 
 /**
@@ -47,7 +47,7 @@ export function wgslMinifyPlugin(opts: { mangle?: boolean } = {}): Plugin {
         name: "wgsl-minify",
         enforce: "pre",
         async buildStart() {
-            await initMiniray();
+            await initMiniray({});
         },
         transform(code: string, id: string) {
             if (!id.includes(".wgsl")) return null;
@@ -483,12 +483,13 @@ export function terserPropertyManglePlugin(): Plugin {
                 const wasmReserved: string[] = [];
                 const wasmObjMatch = chunk.code.match(/\{(_abort_js:[^}]+)\}/);
                 if (wasmObjMatch) {
-                    const keys = wasmObjMatch[1].match(/\b(_\w+)\s*:/g);
+                    const keys = wasmObjMatch[1]!.match(/\b(_\w+)\s*:/g);
                     if (keys) wasmReserved.push(...keys.map((k) => k.replace(/\s*:/, "")));
                 }
 
                 const result = await terserMinify(chunk.code, {
-                    ecma: 2022,
+                    // terser's published ECMA union stops at 2020 but accepts 2022 at runtime
+                    ecma: 2022 as unknown as ECMA,
                     module: true,
                     compress: {
                         passes: 2,
@@ -526,7 +527,7 @@ export function terserPropertyManglePlugin(): Plugin {
                         },
                     },
                     nameCache,
-                    sourceMap: chunk.map ? { content: chunk.map as object, asObject: true } : false,
+                    sourceMap: chunk.map ? ({ content: chunk.map as object, asObject: true } as SourceMapOptions) : false,
                 });
 
                 if (result.code) {

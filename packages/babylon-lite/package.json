@@ -19,6 +19,10 @@
         "./loader-env/load-dds-env": {
             "import": "./src/loader-env/load-dds-env.ts"
         },
+        "./light/clustered": {
+            "import": "./src/light/clustered.ts",
+            "types": "./src/light/clustered.ts"
+        },
         "./engine/device-lost-recovery": {
             "import": "./src/engine/device-lost-recovery.ts",
             "types": "./src/engine/device-lost-recovery.ts"

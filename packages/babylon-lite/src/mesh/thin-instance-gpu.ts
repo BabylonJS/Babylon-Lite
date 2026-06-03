@@ -4,24 +4,26 @@
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { EngineContextInternal } from "../engine/engine.js";
 
-/** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */
-export function syncThinInstanceBuffers(
-    engine: EngineContextInternal,
-    ti: ThinInstanceData,
-    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
-    slot: number,
-    hasColor: boolean
-): number {
+/** Optional replacement buffers used by GPU culling after it compacts visible instances. */
+export interface ThinInstanceDrawBuffers {
+    readonly matrixBuffer: GPUBuffer;
+    readonly colorBuffer: GPUBuffer | null;
+}
+
+/** Sync CPU thin-instance data to GPU buffers, optionally with STORAGE usage for compute culling. */
+export function syncThinInstanceGpuData(engine: EngineContextInternal, ti: ThinInstanceData, hasColor: boolean): void {
     const device = engine.device;
-    if (ti._version !== ti._gpuVersion) {
+    const needsStorage = ti._gpuCullingEnabled;
+    if (ti._version !== ti._gpuVersion || ti._gpuBufferStorage !== needsStorage) {
         const byteSize = ti.count * 64;
         let bufferRecreated = false;
-        if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize) {
+        if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize || ti._gpuBufferStorage !== needsStorage) {
             ti._gpuBuffer?.destroy();
             ti._gpuBuffer = device.createBuffer({
-                size: ti._capacity * 64,
-                usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+                size: Math.max(ti._capacity * 64, 4),
+                usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | (needsStorage ? GPUBufferUsage.STORAGE : 0),
             });
+            ti._gpuBufferStorage = needsStorage;
             bufferRecreated = true;
         }
         // Upload only the dirty range (or full range if buffer was just created)
@@ -36,25 +38,43 @@ export function syncThinInstanceBuffers(
         ti._dirtyMax = 0;
         ti._gpuVersion = ti._version;
     }
-    if (ti._gpuBuffer) {
-        pass.setVertexBuffer(slot++, ti._gpuBuffer);
-    }
 
     if (hasColor && ti.colors) {
-        if (ti._colorVersion !== ti._colorGpuVersion) {
+        if (ti._colorVersion !== ti._colorGpuVersion || ti._colorGpuBufferStorage !== needsStorage) {
             const colorByteSize = ti.count * 16;
-            if (!ti._colorGpuBuffer || ti._colorGpuBuffer.size < colorByteSize) {
+            if (!ti._colorGpuBuffer || ti._colorGpuBuffer.size < colorByteSize || ti._colorGpuBufferStorage !== needsStorage) {
                 ti._colorGpuBuffer?.destroy();
                 ti._colorGpuBuffer = device.createBuffer({
-                    size: ti._capacity * 16,
-                    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+                    size: Math.max(ti._capacity * 16, 4),
+                    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | (needsStorage ? GPUBufferUsage.STORAGE : 0),
                 });
+                ti._colorGpuBufferStorage = needsStorage;
             }
             device.queue.writeBuffer(ti._colorGpuBuffer, 0, ti.colors.buffer, ti.colors.byteOffset, colorByteSize);
             ti._colorGpuVersion = ti._colorVersion;
         }
-        if (ti._colorGpuBuffer) {
-            pass.setVertexBuffer(slot++, ti._colorGpuBuffer);
+    }
+}
+
+/** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */
+export function syncThinInstanceBuffers(
+    engine: EngineContextInternal,
+    ti: ThinInstanceData,
+    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+    slot: number,
+    hasColor: boolean,
+    drawBuffers?: ThinInstanceDrawBuffers | null
+): number {
+    syncThinInstanceGpuData(engine, ti, hasColor);
+    const matrixBuffer = drawBuffers?.matrixBuffer ?? ti._gpuBuffer;
+    if (matrixBuffer) {
+        pass.setVertexBuffer(slot++, matrixBuffer);
+    }
+
+    if (hasColor) {
+        const colorBuffer = drawBuffers?.colorBuffer ?? ti._colorGpuBuffer;
+        if (colorBuffer) {
+            pass.setVertexBuffer(slot++, colorBuffer);
         }
     }
 

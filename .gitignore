@@ -67,5 +67,6 @@ _bjs67_defines.txt
 # Generated public Pages site
 pages-dist/
 
+build-timeline.json
 # Generated TypeDoc API documentation (regenerated on demand)
-lab/public/lite/api-docs/
+lab/public/api-docs/

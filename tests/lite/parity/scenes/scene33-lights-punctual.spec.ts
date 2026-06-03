@@ -4,10 +4,11 @@
  * LightsPunctualLamp.glb (KHR_lights_punctual + KHR_materials_transmission)
  * with default environment (IBL only). Matches Babylon playground #YG3BBF#54.
  *
- * NOTE: maxMad is relaxed to 0.5 because the glass lampshade has historically
- * exposed a KHR_materials_transmission parity gap. All opaque surfaces are
- * pixel-perfect and the KHR_lights_punctual extension itself renders correctly
- * (98.8% exact). Scene 30 covers the dedicated transmission setup.
+ * The glass lampshade exercises KHR_materials_transmission (screen-space
+ * scene-texture refraction). Parity is effectively pixel-perfect
+ * (within-5 = 100%); the maxMad ceiling in scene-config.json reflects the
+ * residual screen-space-approximation noise. Scene 30 covers the dedicated
+ * transmission + volume + IOR setup.
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";

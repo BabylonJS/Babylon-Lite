@@ -110,7 +110,7 @@ async function warmupCache(context: BrowserContext, url: string): Promise<void> 
 
 function computeStats(timings: number[], durationMs: number): Omit<SceneStats, "initTime" | "drawCalls"> {
     if (timings.length === 0) {
-        return { fps: 0, rafAvgMs: 0, rafMedianMs: 0, rafP95Ms: 0, rafP99Ms: 0, frames: 0 };
+        return { fps: 0, rafAvgMs: 0, rafMedianMs: 0, rafP95Ms: 0, rafP99Ms: 0, frames: 0, memoryMB: 0 };
     }
     const sorted = [...timings].sort((a, b) => a - b);
     const sum = sorted.reduce((s, v) => s + v, 0);
@@ -120,10 +120,11 @@ function computeStats(timings: number[], durationMs: number): Omit<SceneStats, "
     return {
         fps,
         rafAvgMs: round3(avg),
-        rafMedianMs: round3(sorted[Math.floor(sorted.length / 2)]),
-        rafP95Ms: round3(sorted[Math.floor(sorted.length * 0.95)]),
-        rafP99Ms: round3(sorted[Math.floor(sorted.length * 0.99)]),
+        rafMedianMs: round3(sorted[Math.floor(sorted.length / 2)]!),
+        rafP95Ms: round3(sorted[Math.floor(sorted.length * 0.95)]!),
+        rafP99Ms: round3(sorted[Math.floor(sorted.length * 0.99)]!),
         frames: sorted.length,
+        memoryMB: 0,
     };
 }
 

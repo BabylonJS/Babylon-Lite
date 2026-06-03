@@ -80,6 +80,7 @@ export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
+export type { ClusteredLightContainer, ClusteredLightContainerOptions, ClusteredPointLight, ClusteredPointLightOptions } from "./light/clustered.js";
 export type { LightBase } from "./light/types.js";
 export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 
@@ -198,7 +199,15 @@ export { mat4Compose } from "./math/mat4-compose.js";
 export type { Vec3, Vec3Tuple } from "./math/types.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────
-export { addThinInstance, removeThinInstance, setThinInstanceMatrix, setThinInstances, flushThinInstances, setThinInstanceColors } from "./mesh/thin-instance.js";
+export {
+    addThinInstance,
+    removeThinInstance,
+    setThinInstanceMatrix,
+    setThinInstances,
+    flushThinInstances,
+    setThinInstanceColors,
+    enableThinInstanceGpuCulling,
+} from "./mesh/thin-instance.js";
 export type { ThinInstanceData } from "./mesh/thin-instance.js";
 
 // ─── Types ───────────────────────────────────────────────────────────

@@ -105,10 +105,10 @@ test.describe("Memory Leak Detection", () => {
             // Calculate growth from cycle 2 onward (skip warmup cycle 1→2)
             if (heapSizes.length >= 3) {
                 const postWarmup = heapSizes.slice(1); // cycles 2, 3, 4, 5
-                const growthPerCycle = (postWarmup[postWarmup.length - 1] - postWarmup[0]) / (postWarmup.length - 1);
+                const growthPerCycle = (postWarmup[postWarmup.length - 1]! - postWarmup[0]!) / (postWarmup.length - 1);
 
                 const growthKB = (growthPerCycle / 1024).toFixed(1);
-                const totalGrowthKB = ((postWarmup[postWarmup.length - 1] - postWarmup[0]) / 1024).toFixed(1);
+                const totalGrowthKB = ((postWarmup[postWarmup.length - 1]! - postWarmup[0]!) / 1024).toFixed(1);
                 console.log(`    Post-warmup growth: ${totalGrowthKB} KB total, ${growthKB} KB/cycle`);
 
                 expect(

@@ -550,7 +550,13 @@ export default defineConfig({
         },
     },
     server: {
-        port: 5174,
+        // Default interactive port is 5174. Playwright test runs pass LAB_DEV_PORT
+        // to spin up an ISOLATED server on a dedicated port (so test traffic never
+        // competes with the interactive lab). strictPort is enabled only for that
+        // test server so the exact port Playwright waits on is guaranteed; the
+        // interactive dev server keeps Vite's default auto-increment behavior.
+        port: Number(process.env.LAB_DEV_PORT) || 5174,
+        strictPort: !!process.env.LAB_DEV_PORT,
         watch: {
             // On-demand tab generation writes many files under the Vite root that
             // would otherwise churn the single-threaded dev server (stalling the
