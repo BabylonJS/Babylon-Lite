@@ -352,6 +352,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     // extension raises MAX_LIGHTS after this task was first recorded).
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
+    sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
     writePassSceneUBO(task, eng, sc, camera, targetSignature._flipY);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
@@ -544,7 +545,6 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
         data[90] = scene.clipPlane[2];
         data[91] = scene.clipPlane[3];
     }
-
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 

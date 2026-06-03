@@ -17,6 +17,7 @@ import { createRenderTask } from "../frame-graph/render-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
+import type { ClusteredLightContainer } from "../light/clustered.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 
 /** Image processing configuration. */
@@ -113,6 +114,11 @@ export interface SceneContext extends RenderingContext {
      *  (offscreen RTTs, post-FX, UI overlays, etc.). */
     /** @internal */
     _frameGraph: FrameGraph;
+
+    /** @internal Optional clustered point-light container. Only populated by the clustered-light extension API. */
+    _clusteredLightContainer?: ClusteredLightContainer;
+    /** @internal Updates clustered light cells for the camera used by the current render pass. */
+    _clusteredLightUpdater?: (camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void;
 }
 
 /** Options passed to the scene-context factory. */

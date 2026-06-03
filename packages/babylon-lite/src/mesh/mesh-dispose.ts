@@ -9,6 +9,8 @@ export function disposeMeshGpu(mesh: Mesh): void {
     g.indexBuffer.destroy();
     g.tangentBuffer?.destroy();
     g.uv2Buffer?.destroy();
+    mesh.thinInstances?._gpuBuffer?.destroy();
+    mesh.thinInstances?._colorGpuBuffer?.destroy();
     const sk = mesh.skeleton;
     if (sk) {
         sk.boneTexture.destroy();
