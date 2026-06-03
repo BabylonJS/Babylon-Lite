@@ -11,8 +11,9 @@ import {
     PBR2_HAS_REFRACTION_MAP,
     PBR2_HAS_VOLUME,
 } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
-import { refractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
+import { makeRefractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
 
+const refractionRttExt = makeRefractionRttExt();
 const dummyTexture = {} as Texture2D;
 const refractionMapTexture = { view: { id: "map-view" } as unknown as GPUTextureView, sampler: { id: "map-sampler" } as unknown as GPUSampler } as Texture2D;
 
