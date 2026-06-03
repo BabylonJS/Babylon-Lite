@@ -1,14 +1,14 @@
 // Scene 86: NME scene/mesh state compatibility.
 
 import { addToScene, attachControl, createArcRotateCamera, createEngine, createSceneContext, parseNodeMaterialFromSnippet, registerScene, startEngine } from "babylon-lite";
-import type { EngineContextInternal } from "../../../packages/babylon-lite/src/engine/engine.js";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { computeAabb } from "../../../packages/babylon-lite/src/math/aabb.js";
-import type { Mesh, MeshInternal } from "../../../packages/babylon-lite/src/mesh/mesh.js";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import type { Scene86MeshData } from "../shared/scene86-nme.js";
 import { createScene86MeshData, SCENE86_CLIP_PLANE, SCENE86_NME_JSON } from "../shared/scene86-nme.js";
 
-function createScene86Mesh(engine: EngineContextInternal, data: Scene86MeshData): Mesh {
+function createScene86Mesh(engine: EngineContext, data: Scene86MeshData): Mesh {
     const [min, max] = computeAabb(data.positions);
     const mesh = {
         name: data.name,
@@ -18,7 +18,7 @@ function createScene86Mesh(engine: EngineContextInternal, data: Scene86MeshData)
         boundMax: isFinite(max[0]) ? max : undefined,
         _materialDirty: false,
         _gpu: uploadMeshToGPU(engine, data.positions, data.normals, data.indices, data.uvs, undefined, data.tangents, data.colors),
-    } as MeshInternal;
+    } as Mesh;
     initMeshTransform(mesh);
     mesh._cpuPositions = data.positions;
     mesh._cpuNormals = data.normals;
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
 
     const material = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE86_NME_JSON });
     for (const data of createScene86MeshData()) {
-        const mesh = createScene86Mesh(engine as EngineContextInternal, data);
+        const mesh = createScene86Mesh(engine, data);
         mesh.position.x = data.x;
         mesh.material = material;
         addToScene(scene, mesh);

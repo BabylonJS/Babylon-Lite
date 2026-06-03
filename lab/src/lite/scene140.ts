@@ -112,7 +112,7 @@ async function main(): Promise<void> {
         const w = new Float32Array([0]);
         const setMorphWeight = (value: number): void => {
             w[0] = value;
-            engineInternal.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
+            engineInternal._device.queue.writeBuffer(morph.weightsBuffer, 0, w);
         };
         (globalThis as { __scene140SetMorphWeight?: (value: number) => void }).__scene140SetMorphWeight = setMorphWeight;
         setMorphWeight(0);
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
                 const s = Math.sin(t * Math.PI * 2);
                 w[0] = s * s;
             }
-            engineInternal.device.queue.writeBuffer(morph.weightsBuffer, 0, w);
+            engineInternal._device.queue.writeBuffer(morph.weightsBuffer, 0, w);
         });
     }
 

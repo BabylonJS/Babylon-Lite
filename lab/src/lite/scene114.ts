@@ -3,7 +3,6 @@
 // from bind pose. Markers are derived from actual pick results.
 
 import type { EngineContext, Mesh, PickingInfo, SceneContext } from "babylon-lite";
-import type { EngineContextInternal } from "babylon-lite/engine/engine.js";
 import {
     addToScene,
     createArcRotateCamera,
@@ -68,7 +67,7 @@ function createQuadMesh(engine: EngineContext, name: string, color: ColorTuple):
     const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
     const uvs = new Float32Array([0, 1, 1, 1, 0, 0, 1, 0]);
     const indices = new Uint32Array([0, 1, 2, 1, 3, 2]);
-    const mesh = createMeshFromData(engine as EngineContextInternal, name, positions, normals, indices, uvs);
+    const mesh = createMeshFromData(engine, name, positions, normals, indices, uvs);
     mesh.name = name;
     mesh.material = createUnlitPbr(engine, color);
     return mesh;
@@ -80,7 +79,11 @@ function toLinearColor(color: ColorTuple): ColorTuple {
 
 function createMarkerBoxMesh(engine: EngineContext, name: string, color: ColorTuple): Mesh {
     const box = createBoxData(1);
-    const displayColor: ColorTuple = [Math.round(color[0] * MARKER_DISPLAY_BYTE) / 255, Math.round(color[1] * MARKER_DISPLAY_BYTE) / 255, Math.round(color[2] * MARKER_DISPLAY_BYTE) / 255];
+    const displayColor: ColorTuple = [
+        Math.round(color[0] * MARKER_DISPLAY_BYTE) / 255,
+        Math.round(color[1] * MARKER_DISPLAY_BYTE) / 255,
+        Math.round(color[2] * MARKER_DISPLAY_BYTE) / 255,
+    ];
     const bright = toLinearColor(displayColor);
     const dark = toLinearColor([displayColor[0] * MARKER_BOTTOM_SHADE, displayColor[1] * MARKER_BOTTOM_SHADE, displayColor[2] * MARKER_BOTTOM_SHADE]);
     const colors = new Float32Array(box.vertexCount * 3);
@@ -90,7 +93,7 @@ function createMarkerBoxMesh(engine: EngineContext, name: string, color: ColorTu
             colors.set(faceColor, (face * 4 + vertex) * 3);
         }
     }
-    return createMeshFromData(engine as EngineContextInternal, name, box.positions, box.normals, box.indices, box.uvs, undefined, undefined, colors);
+    return createMeshFromData(engine, name, box.positions, box.normals, box.indices, box.uvs, undefined, undefined, colors);
 }
 
 function createMorphedQuad(engine: EngineContext): Mesh {
@@ -101,7 +104,7 @@ function createMorphedQuad(engine: EngineContext): Mesh {
     for (let i = 0; i < 4; i++) {
         deltas[i * 3] = MORPH_DELTA_X;
     }
-    mesh.morphTargets = createMorphTargets(engine as EngineContextInternal, [{ positions: deltas, normals: null }], 4, [1]);
+    mesh.morphTargets = createMorphTargets(engine, [{ positions: deltas, normals: null }], 4, [1]);
     return mesh;
 }
 
@@ -114,7 +117,7 @@ function createSkinnedQuad(engine: EngineContext): Mesh {
     const boneData = new Float32Array(32);
     boneData.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 0);
     boneData.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, SKELETON_DELTA_X, 0, 0, 1], 16);
-    mesh.skeleton = createSkeleton(engine as EngineContextInternal, joints, weights, 2, boneData);
+    mesh.skeleton = createSkeleton(engine, joints, weights, 2, boneData);
     return mesh;
 }
 
