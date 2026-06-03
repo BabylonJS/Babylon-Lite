@@ -28,6 +28,7 @@
         "test:perf-regression": "npx playwright test --config playwright.perf.config.ts tests/lite/perf/perf-regression.spec.ts",
         "test:parity-cloud": "tsx scripts/run-browserstack.ts playwright test --config config/playwright.parity-cloud.config.ts",
         "test:perf-cloud": "tsx scripts/run-browserstack.ts playwright test --config config/playwright.perf-cloud.config.ts tests/lite/perf/perf-regression.spec.ts",
+        "validate:release-markers": "tsx scripts/validate-pr-release-markers.ts",
         "build:perf-baseline": "tsx scripts/build-perf-baseline.ts",
         "lint": "eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit && tsc -p lab/tsconfig.typecheck.json --noEmit",
         "lint:fix": "eslint . --fix",
@@ -42,6 +43,7 @@
     "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@playwright/test": "^1.58.2",
+        "@types/node": "^25.9.1",
         "@types/pngjs": "^6.0.5",
         "@webgpu/types": "^0.1.52",
         "browserstack-node-sdk": "^1.52.0",

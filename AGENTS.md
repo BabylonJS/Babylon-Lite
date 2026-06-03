@@ -13,10 +13,10 @@ architectural and workflow decisions.
 
 This repo uses two Copilot chat modes (`.github/chatmodes/`):
 
-| Mode | File | Role |
-|------|------|------|
-| **Gandalf** | `gandalf.chatmode.md` | Orchestrator & QA gatekeeper — receives tasks, delegates work, enforces guardrails |
-| **Einstein** | `einstein.chatmode.md` | Expert coder — implements features, fixes bugs, runs tests |
+| Mode         | File                   | Role                                                                               |
+| ------------ | ---------------------- | ---------------------------------------------------------------------------------- |
+| **Gandalf**  | `gandalf.chatmode.md`  | Orchestrator & QA gatekeeper — receives tasks, delegates work, enforces guardrails |
+| **Einstein** | `einstein.chatmode.md` | Expert coder — implements features, fixes bugs, runs tests                         |
 
 ### How It Works
 
@@ -25,13 +25,41 @@ This repo uses two Copilot chat modes (`.github/chatmodes/`):
 3. **Einstein → Gandalf**: Einstein reports completion with checklist status.
 4. **Gandalf verifies**: Runs **all** guardrail checks independently (does NOT trust Einstein's word).
    Gandalf **MUST** run the agent-allowed test suite before declaring success:
-   - `pnpm build:bundle-scenes` — bundle scenes build successfully
-   - `pnpm test:parity` — no MAD regression in visual parity AND bundle-size ceilings hold
-   - `git diff tests/lite/parity/bundle-size.spec.ts` — no ceiling changes
-   - `git diff reference/lite/` — no golden reference changes
-   These can be chained via `pnpm test` (build + parity). **Do NOT run `pnpm test:perf`** — perf tests are machine-sensitive and reserved for the user / CI. If perf validation is needed, ask the user to run it locally.
-   **Iteration tip:** During the edit/test loop on a specific scene, run only that scene's spec (`npx playwright test tests/lite/parity/scenes/<scene>.spec.ts`) to save time. Run the full `pnpm test` only as the final guardrail gate before declaring success.
+    - `pnpm build:bundle-scenes` — bundle scenes build successfully
+    - `pnpm test:parity` — no MAD regression in visual parity AND bundle-size ceilings hold
+    - `git diff tests/lite/parity/bundle-size.spec.ts` — no ceiling changes
+    - `git diff reference/lite/` — no golden reference changes
+      These can be chained via `pnpm test` (build + parity). **Do NOT run `pnpm test:perf`** — perf tests are machine-sensitive and reserved for the user / CI. If perf validation is needed, ask the user to run it locally.
+      **Iteration tip:** During the edit/test loop on a specific scene, run only that scene's spec (`npx playwright test tests/lite/parity/scenes/<scene>.spec.ts`) to save time. Run the full `pnpm test` only as the final guardrail gate before declaring success.
 5. **All pass** → Gandalf reports success. **Any fail** → Einstein sent back to fix.
+
+---
+
+## Release Commit Messages
+
+The npm publish pipeline's weekly `auto` mode decides between a minor and major
+release by scanning commit messages since the last `npm-lite-v*` tag.
+
+For normal changes, use Conventional Commit-style messages such as:
+
+- `fix: correct texture upload alignment`
+- `feat(loader): add KTX2 fallback handling`
+
+For breaking changes, the final commit that lands on `master` **MUST** contain
+one of these markers:
+
+- `feat!: remove deprecated loader option`
+- `feat(loader)!: change loadGltf return shape`
+- `BREAKING CHANGE: describe the migration path`
+
+Because GitHub squash merge usually builds the final commit from the PR title
+and body, agents must make sure breaking-change markers are present in the PR
+title/body or in the final squash message, not only in an intermediate local
+commit. If a PR is labeled `breaking`, `breaking change`, `major`, or
+`semver-major`, PR CI will require a marker in the PR title/body.
+
+Manual patch/minor/major releases are requested by editing `config/release.json`
+and incrementing its `nonce`; weekly scheduled releases remain `auto`.
 
 ### Guardrails (Non-Negotiable)
 

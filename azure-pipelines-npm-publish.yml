@@ -1,0 +1,122 @@
+# Azure Pipelines — Babylon Lite npm Publish
+#
+# Publishes the built @babylonjs/lite package to npm. Configure NPM_TOKEN as
+# a secret pipeline variable or variable-group value before enabling this run.
+#
+# Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
+# Pushes to master that change config/release.json read the release type from
+# that file, so repeated patch releases can be requested by bumping its nonce.
+
+trigger:
+    branches:
+        include:
+            - master
+    paths:
+        include:
+            - config/release.json
+
+pr: none
+
+schedules:
+    - cron: "0 8 * * 1"
+      displayName: "Weekly npm publish"
+      branches:
+          include:
+              - master
+      always: true
+
+parameters:
+    - name: releaseType
+      displayName: "Release type"
+      type: string
+      default: auto
+      values:
+          - auto
+          - patch
+          - minor
+          - major
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "9.15.4"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+
+stages:
+    - stage: PublishNpm
+      displayName: "Publish @babylonjs/lite to npm"
+      jobs:
+          - job: BuildTestAndPublish
+            displayName: "Build, Test, and Publish"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+                  persistCredentials: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm run lint
+                  displayName: "Lint and type-check"
+
+                - script: pnpm test:unit
+                  displayName: "Run unit tests"
+                  env:
+                      CI: "true"
+
+                - script: pnpm test:build
+                  displayName: "Run build-output tests"
+                  env:
+                      CI: "true"
+
+                - script: pnpm build
+                  displayName: "Build package"
+
+                - script: npx tsx scripts/prepare-npm-release.ts
+                  displayName: "Resolve npm package version"
+                  env:
+                      RELEASE_TYPE: ${{ parameters.releaseType }}
+                      RELEASE_CONFIG_PATH: config/release.json
+
+                - script: npm pack --dry-run ./packages/babylon-lite/dist
+                  displayName: "Validate npm package contents"
+
+                - script: |
+                      set -euo pipefail
+
+                      if [ -z "${NPM_TOKEN:-}" ]; then
+                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
+                        exit 1
+                      fi
+
+                      printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
+                      npm publish ./packages/babylon-lite/dist --access public --registry https://registry.npmjs.org/
+                  displayName: "Publish package to npm"
+                  env:
+                      NPM_TOKEN: $(NPM_TOKEN)
+
+                - script: |
+                      set -euo pipefail
+
+                      TAG="npm-lite-v$(PACKAGE_VERSION)"
+                      git config user.email "bjsplat@gmail.com"
+                      git config user.name "Babylon.js CI"
+                      git tag "$TAG" -m "Publish @babylonjs/lite $(PACKAGE_VERSION)"
+                      git push origin "refs/tags/$TAG"
+                  displayName: "Tag published npm version"
