@@ -337,7 +337,7 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | `KHR_materials_ior` | ✅ | Auto-detected; index of refraction for dielectrics (Scene 30) |
 | `KHR_materials_specular` | ✅ | Auto-detected; dielectric specular intensity + color (Scene 30) |
 | `KHR_materials_volume` | ✅ | Auto-detected; attenuation color/distance + thickness (Scene 30) |
-| `KHR_materials_transmission` | ⚡ | Frame-graph scene-texture transmission for transmissive glTF materials (Scenes 30/33/112). |
+| `KHR_materials_transmission` | ✅ | Frame-graph scene-texture transmission for transmissive glTF materials (Scenes 30/33/112). Screen-space scene-texture refraction; parity is within-5 = 100% of pixels. |
 | `KHR_texture_transform` | ✅ | Auto-resolved at load (material-wide UV transform) |
 | `KHR_texture_basisu` | ✅ | Auto-detected; dynamically loads KTX2 decoder/upload path only for glTF assets that declare the extension (Scene 112) |
 | `EXT_texture_webp` | ✅ | Auto-detected through texture source selection; image decode is browser-native (Scene 37) |

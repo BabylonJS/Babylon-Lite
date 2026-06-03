@@ -25,8 +25,8 @@ let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
     const textureLine = hasMap ? `let ri=material.refractionParams.x*textureSample(refractionMapTexture,refractionMapSampler,input.uv).r;` : `let ri=material.refractionParams.x;`;
     const absorptionLine = hasVolume ? `let ab=exp(material.volumeParams.rgb*th);` : ``;
     const refractionLine = hasVolume
-        ? `let fr=er*surfaceAlbedo*(ri*ab)*(1.0-max(colorSpecularEnvReflectance.r,max(colorSpecularEnvReflectance.g,colorSpecularEnvReflectance.b)));`
-        : `let fr=er*surfaceAlbedo*ri*(1.0-max(colorSpecularEnvReflectance.r,max(colorSpecularEnvReflectance.g,colorSpecularEnvReflectance.b)));`;
+        ? `let fr=er*surfaceAlbedo*(ri*ab)*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`
+        : `let fr=er*surfaceAlbedo*ri*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`;
 
     return `{
 ${thicknessScaleLine}
