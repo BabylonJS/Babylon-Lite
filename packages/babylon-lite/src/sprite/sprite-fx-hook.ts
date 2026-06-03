@@ -14,7 +14,7 @@
  * strings stay out of the always-loaded path. No module-level side effects: the two hook slots
  * are plain nullable `let`s, registration is explicit.
  */
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, Sprite2DLayerOptions } from "./sprite-2d.js";
 import type { BillboardSpriteSystem, BillboardSpriteSystemOptions } from "./billboard-sprite.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
@@ -26,11 +26,11 @@ export interface SpriteFxHook {
     /** Extra pipeline-cache key part for `layer` (`""` when it has no custom shader). */
     pipelineKeyPart(layer: Sprite2DLayer): string;
     /** Custom shader module for `layer`, or `null` to fall back to the default sprite shader. */
-    shaderModule(engine: EngineContextInternal, hasDepth: boolean, layer: Sprite2DLayer): GPUShaderModule | null;
+    shaderModule(engine: EngineContext, hasDepth: boolean, layer: Sprite2DLayer): GPUShaderModule | null;
     /** Extra bind-group-layout entries for `layer`, or `null` when it has no custom shader. */
     layoutEntries(layer: Sprite2DLayer, startBinding: number): GPUBindGroupLayoutEntry[] | null;
     /** Build the opaque fx attachment for `layer`, or `null` when it has no custom shader. */
-    createLayerFx(engine: EngineContextInternal, label: string, layer: Sprite2DLayer): SpriteLayerFx | null;
+    createLayerFx(engine: EngineContext, label: string, layer: Sprite2DLayer): SpriteLayerFx | null;
     /** Per-frame fx update (reads `layer.shaderParams`). */
     updateFx(fx: SpriteLayerFx, layer: Sprite2DLayer, deltaMs: number): void;
     /** Append the fx bind-group entries, starting at `startBinding` (always 3). */
@@ -46,11 +46,11 @@ export interface BillboardFxHook {
     /** Extra pipeline-cache key part for `system` (`""` when it has no custom shader). */
     pipelineKeyPart(system: BillboardSpriteSystem): string;
     /** Custom shader module for `system`, or `null` to fall back to the default billboard shader. */
-    shaderModule(engine: EngineContextInternal, system: BillboardSpriteSystem): GPUShaderModule | null;
+    shaderModule(engine: EngineContext, system: BillboardSpriteSystem): GPUShaderModule | null;
     /** Extra bind-group-layout entries for `system`, or `null` when it has no custom shader. */
     layoutEntries(system: BillboardSpriteSystem, startBinding: number): GPUBindGroupLayoutEntry[] | null;
     /** Build the opaque fx attachment for `system`, or `null` when it has no custom shader. */
-    createLayerFx(engine: EngineContextInternal, label: string, system: BillboardSpriteSystem): SpriteLayerFx | null;
+    createLayerFx(engine: EngineContext, label: string, system: BillboardSpriteSystem): SpriteLayerFx | null;
     /** Per-frame fx update (reads `system.shaderParams`). */
     updateFx(fx: SpriteLayerFx, system: BillboardSpriteSystem, deltaMs: number): void;
     /** Append the fx bind-group entries, starting at `startBinding` (always 3). */

@@ -694,7 +694,7 @@ return vec4<f32>(base.rgb * (0.5 + 0.5 * sin(fx.time + fx.params.x)), base.a);`;
         const engine = makeMockEngine();
         const cache = createBillboardPipelineCache();
         const sceneBGL = {} as GPUBindGroupLayout;
-        const device = engine.device as unknown as { createShaderModule: ReturnType<typeof vi.fn> };
+        const device = engine._device as unknown as { createShaderModule: ReturnType<typeof vi.fn> };
 
         const plain = getOrCreateBillboardPipeline(engine, cache, engine.format, 1, createFacingBillboardSystem(makeMockAtlas()), "depth32float", sceneBGL);
         const modulesAfterPlain = device.createShaderModule.mock.calls.length;
@@ -715,7 +715,7 @@ return vec4<f32>(base.rgb * (0.5 + 0.5 * sin(fx.time + fx.params.x)), base.a);`;
         const engine = makeMockEngine();
         const cache = createBillboardPipelineCache();
         const sceneBGL = {} as GPUBindGroupLayout;
-        const device = engine.device as unknown as { createBindGroupLayout: ReturnType<typeof vi.fn> };
+        const device = engine._device as unknown as { createBindGroupLayout: ReturnType<typeof vi.fn> };
 
         const cs = createBillboardCustomShader({ fragment: FX_FRAGMENT, extraTextures: [{ name: "palette", texture: makeTex() }] });
         const system = createFacingBillboardSystem(makeMockAtlas(), { customShader: cs });

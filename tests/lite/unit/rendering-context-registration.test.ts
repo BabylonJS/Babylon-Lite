@@ -11,7 +11,7 @@ import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/f
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { createSceneContext, disposeScene, registerScene, unregisterScene } from "../../../packages/babylon-lite/src/scene/scene";
 
-const gpuGlobals = globalThis as typeof globalThis & {
+const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
     GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number };

@@ -16,7 +16,7 @@
  * through a descriptor), so the always-loaded sprite/billboard pipeline + renderable modules
  * stay free of it.
  */
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 
@@ -174,8 +174,8 @@ export function makeCustomShaderBindEntries(extras: readonly CustomShaderTexture
  * `_createLayerFx` hook, so the always-loaded renderer/renderable modules never see the fx
  * machinery and the plain path pays nothing.
  */
-export function createSpriteLayerFx(engine: EngineContextInternal, label: string, extras: readonly CustomShaderTexture[]): SpriteLayerFx {
-    const device = engine.device;
+export function createSpriteLayerFx(engine: EngineContext, label: string, extras: readonly CustomShaderTexture[]): SpriteLayerFx {
+    const device = engine._device;
     const buffer = createEmptyUniformBuffer(engine, SPRITE_FX_UBO_BYTES, label);
     const scratch = new Float32Array(SPRITE_FX_UBO_FLOATS);
     let elapsedMs = 0;
@@ -199,18 +199,18 @@ export function createSpriteLayerFx(engine: EngineContextInternal, label: string
  * when the engine's device changes (a new `WeakMap` entry). Lives on the descriptor so the
  * always-loaded pipeline cache no longer needs a custom-module `Map`.
  */
-export function makeShaderModuleCache(): (engine: EngineContextInternal, key: string, makeCode: () => string) => GPUShaderModule {
+export function makeShaderModuleCache(): (engine: EngineContext, key: string, makeCode: () => string) => GPUShaderModule {
     let devices: WeakMap<GPUDevice, Map<string, GPUShaderModule>> | null = null;
     return (engine, key, makeCode) => {
         devices ??= new WeakMap();
-        let byKey = devices.get(engine.device);
+        let byKey = devices.get(engine._device);
         if (!byKey) {
             byKey = new Map();
-            devices.set(engine.device, byKey);
+            devices.set(engine._device, byKey);
         }
         let module = byKey.get(key);
         if (!module) {
-            module = engine.device.createShaderModule({ code: makeCode() });
+            module = engine._device.createShaderModule({ code: makeCode() });
             byKey.set(key, module);
         }
         return module;
