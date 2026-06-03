@@ -7,8 +7,11 @@
  * transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff
  * (antialias:false) pink box. Fully static — no seekTime.
  *
- * Golden is captured automatically from the BJS reference page on first run
- * (or when RECAPTURE_GOLDEN=1 is set).
+ * Golden is regenerated from the BJS reference page on every run (force:true)
+ * because GridMaterial relies on screen-space derivatives (dpdx/dpdy) for line
+ * anti-aliasing, which is subpixel-sensitive to the GPU/driver. Capturing the
+ * BJS oracle on the same machine as the Lite render keeps the comparison
+ * apples-to-apples across platforms (e.g. local Windows vs CI macOS).
  */
 import { test, expect } from "@playwright/test";
 import * as path from "path";
@@ -22,7 +25,7 @@ test.skip(!!sceneConfig.skipParity, "Scene 213 skipped via skipParity in scene-c
 
 test("Scene 213 — GridMaterial matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 213, settleMs: 500 });
+    await captureGolden(browser, { sceneId: 213, force: true, settleMs: 500 });
 
     await page.goto("/scene213.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });

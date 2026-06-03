@@ -1685,17 +1685,6 @@
     "bjsRawKB": 1557.4,
     "bjsGzipKB": 371.7
   },
-  "scene213": {
-    "rawKB": 41.3,
-    "gzipKB": 15.5,
-    "ignoredRawKB": 0,
-    "runtimeChunks": [
-      "scene213-shader-renderable-WGajgbQD.js",
-      "scene213.js"
-    ],
-    "bjsRawKB": 1108.9,
-    "bjsGzipKB": 266.7
-  },
   "scene110": {
     "rawKB": 47.2,
     "gzipKB": 18.4,
@@ -2402,5 +2391,16 @@
       "scene179-pbr-renderable-9LYrxqSb.js",
       "scene179.js"
     ]
+  },
+  "scene213": {
+    "rawKB": 41.3,
+    "gzipKB": 15.5,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene213-shader-renderable-WGajgbQD.js",
+      "scene213.js"
+    ],
+    "bjsRawKB": 1108.9,
+    "bjsGzipKB": 266.7
   }
 }
