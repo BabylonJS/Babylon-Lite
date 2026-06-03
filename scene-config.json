@@ -317,7 +317,8 @@
         "slug": "scene33-lights-punctual",
         "name": "Scene 33 — KHR_lights_punctual",
         "maxMad": 0.07,
-        "maxRawKB": 93.1,
+        "maxRawKB": 94,
+        "note": "Ceiling raised 93->94 (user-approved) when scene212 added KHR_materials_dispersion: scene33 shares the transmission + dielectric chunks and carries ~0.6 KB of unavoidable dispersion plumbing (the 3-ray WGSL itself ships only in scene212's bundle).",
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true
@@ -1338,5 +1339,17 @@
         "tags": ["pbr", "gltf", "clustered", "lights"],
         "skipPerf": true,
         "bundleTimeoutMs": 180000
+    },
+    {
+        "id": 212,
+        "slug": "scene212-gltf-dispersion",
+        "name": "Scene 212 - DispersionTest glTF",
+        "maxMad": 0.6,
+        "maxRawKB": 98,
+        "note": "Native-res floor ~0.44 locally; cloud (BrowserStack OSX/Chrome) parity measures ~0.59 due to GPU/driver differences in MSAA edge-resolve on chromatic refraction through a high-frequency checker (BJS bit-exact, optimally aligned, interiors pixel-identical). Ceiling 0.6 covers cloud variance. In-family with iridescence (0.4) / mosquito (0.5).",
+        "description": "KhronosGroup DispersionTest.glb using KHR_materials_dispersion (per-channel chromatic refraction) on a 5x5 grid of transmissive prisms (KHR_materials_transmission + volume + ior), rendered in studio.env with frame-graph scene-texture transmission.",
+        "tags": ["pbr", "gltf", "transmission", "volume", "dispersion", "env", "skybox"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
     }
 ]
