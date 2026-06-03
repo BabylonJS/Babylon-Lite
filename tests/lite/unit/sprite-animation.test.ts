@@ -477,7 +477,7 @@ describe("sprite animation render-loop attachments", () => {
             _engine: { _currentDelta: 51 } as EngineContext,
             _beforeUpdate: [] as Array<(deltaMs: number) => void>,
             _disposeCallbacks: [] as Array<() => void>,
-            _update(): void {
+            _update(this: { _beforeUpdate: Array<(d: number) => void>; _engine: EngineContextInternal }): void {
                 for (const hook of this._beforeUpdate) {
                     hook(this._engine._currentDelta);
                 }
@@ -533,7 +533,7 @@ describe("sprite animation render-loop attachments", () => {
             _engine: { _currentDelta: 51 } as EngineContext,
             _beforeUpdate: [] as Array<(deltaMs: number) => void>,
             _disposeCallbacks: [] as Array<() => void>,
-            _update(): void {
+            _update(this: { _beforeUpdate: Array<(d: number) => void>; _engine: EngineContextInternal }): void {
                 for (const hook of this._beforeUpdate) {
                     hook(this._engine._currentDelta);
                 }

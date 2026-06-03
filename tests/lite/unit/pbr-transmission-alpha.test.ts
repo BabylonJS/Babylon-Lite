@@ -14,7 +14,7 @@ import {
 import { refractionRttExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/refraction-rtt-fragment";
 
 const dummyTexture = {} as Texture2D;
-const refractionMapTexture = { view: { id: "map-view" } as GPUTextureView, sampler: { id: "map-sampler" } as GPUSampler } as Texture2D;
+const refractionMapTexture = { view: { id: "map-view" } as unknown as GPUTextureView, sampler: { id: "map-sampler" } as unknown as GPUSampler } as Texture2D;
 
 describe("PBR transmission and alpha feature detection", () => {
     it("marks glTF alpha MASK materials for alpha test without enabling blending", () => {

@@ -38,7 +38,7 @@ import {
 import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
-import type { EngineContext, EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 // ── Mock GPU device ───────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ function mockBuffer(counters: MockCounters): MockBuffer {
     return buf;
 }
 
-function makeMockEngine(): { engine: EngineContext; counters: MockCounters } {
+function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounters } {
     const counters: MockCounters = { buffersCreated: 0, buffersDestroyed: 0, pipelinesBuilt: 0, shaderModules: 0 };
     const queue = { writeBuffer: vi.fn() };
     const device = {
@@ -91,25 +91,23 @@ function makeMockEngine(): { engine: EngineContext; counters: MockCounters } {
         queue,
     } as unknown as GPUDevice;
 
-    const eng: EngineContext = {
+    const eng = {
         canvas: {} as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         _device: device,
         _context: {} as GPUCanvasContext,
         format: "bgra8unorm",
-        _targets: {
-            msaaTexture: {} as GPUTexture,
-            msaaView: {} as GPUTextureView,
-            depthTexture: {} as GPUTexture,
-            depthView: {} as GPUTextureView,
-            width: 800,
-            height: 600,
-        } as EngineContext["_targets"],
+        _alphaMode: "opaque",
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
-    };
+        _currentEncoder: {} as GPUCommandEncoder,
+        _swapchainView: {} as GPUTextureView,
+        _currentDelta: 0,
+        _cbs: [],
+    } as EngineContextInternal;
 
     return { engine: eng, counters };
 }
@@ -172,7 +170,7 @@ describe("createSpriteRenderer", () => {
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
-        const shaderLocations = vertexBuffer.attributes.map((attr) => attr.shaderLocation);
+        const shaderLocations = (vertexBuffer.attributes as unknown as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
 
         expect(vertexBuffer.arrayStride).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5]);
@@ -323,7 +321,7 @@ describe("disposeSpriteRenderer", () => {
 
         // Force layer GPU resources to be allocated by running an update.
         const fakeEncoder = {} as GPUCommandEncoder;
-        sr._update(fakeEncoder, 16);
+        (sr._update as (...args: unknown[]) => void)(fakeEncoder, 16);
         const createdBefore = counters.buffersCreated;
         expect(createdBefore).toBeGreaterThan(0);
 

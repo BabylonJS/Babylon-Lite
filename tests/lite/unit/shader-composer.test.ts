@@ -4,7 +4,6 @@ import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-
 import type { ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
 
 // WebGPU shader stage constants for testing (Node has no GPUShaderStage global)
-const _VERTEX = 0x1;
 const FRAGMENT = 0x2;
 
 // ── UBO Layout Tests ────────────────────────────────────────────
@@ -260,7 +259,7 @@ describe("composeShader", () => {
         const tiLayout = result._vertexBufferLayouts.find((l) => l.stepMode === "instance");
         expect(tiLayout).toBeDefined();
         expect(tiLayout!.arrayStride).toBe(64);
-        expect(tiLayout!.attributes.length).toBe(2);
+        expect((tiLayout!.attributes as unknown as GPUVertexAttribute[]).length).toBe(2);
     });
 
     it("adds fragment varyings to VertexOutput and FragmentInput", () => {
@@ -299,7 +298,7 @@ describe("composeShader", () => {
         expect(result._fragmentWGSL).toContain("@group(2)@binding(0) var shadowTex:texture_depth_2d");
         expect(result._fragmentWGSL).toContain("@group(2)@binding(1) var shadowSamp:sampler_comparison");
         expect(result._shadowBGLDescriptor).not.toBeNull();
-        expect(result._shadowBGLDescriptor!.entries.length).toBe(2);
+        expect((result._shadowBGLDescriptor!.entries as unknown as GPUBindGroupLayoutEntry[]).length).toBe(2);
     });
 
     it("throws on duplicate fragment IDs", () => {
@@ -345,8 +344,8 @@ describe("composeShader", () => {
         };
         const result = composeShader(makeTemplate(), [frag]);
         // mesh UBO + 2 fragment bindings = 3 entries
-        expect(result._meshBGLDescriptor.entries.length).toBe(3);
-        const firstEntry = result._meshBGLDescriptor.entries[0] as GPUBindGroupLayoutEntry;
+        expect((result._meshBGLDescriptor.entries as unknown as GPUBindGroupLayoutEntry[]).length).toBe(3);
+        const firstEntry = (result._meshBGLDescriptor.entries as unknown as GPUBindGroupLayoutEntry[])[0] as GPUBindGroupLayoutEntry;
         expect(firstEntry.binding).toBe(0);
         expect(firstEntry.buffer).toEqual({ type: "uniform" });
     });

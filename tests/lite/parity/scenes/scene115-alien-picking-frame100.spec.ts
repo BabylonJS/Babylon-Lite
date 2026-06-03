@@ -72,7 +72,7 @@ function parseVec(value: string | undefined, label: string): [number, number, nu
 
 function expectVecClose(actual: [number, number, number], expected: [number, number, number], tolerance: number, label: string): void {
     for (let i = 0; i < 3; i++) {
-        expect(Math.abs(actual[i] - expected[i]), `${label}[${i}]`).toBeLessThanOrEqual(tolerance);
+        expect(Math.abs(actual[i]! - expected[i]!), `${label}[${i}]`).toBeLessThanOrEqual(tolerance);
     }
 }
 

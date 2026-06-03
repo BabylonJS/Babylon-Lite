@@ -28,7 +28,7 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { LAYER_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
-import type { EngineContext, EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 interface MockBuffer {
     destroy: ReturnType<typeof vi.fn>;
@@ -44,7 +44,7 @@ function mockBuffer(): MockBuffer {
     };
 }
 
-function makeMockEngine(): EngineContext {
+function makeMockEngine(): EngineContextInternal {
     const queue = { writeBuffer: vi.fn() };
     const device = {
         createBuffer: vi.fn(() => mockBuffer()),
@@ -64,6 +64,7 @@ function makeMockEngine(): EngineContext {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         _device: device,
         _context: {} as GPUCanvasContext,
         format: "bgra8unorm",
@@ -176,7 +177,7 @@ describe("addDepthHostedSpriteLayer", () => {
         expect(descriptor.depthStencil?.format).toBe("depth32float");
         let vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
         expect(vertexBuffer.arrayStride).toBe(DEPTH_INSTANCE_STRIDE_BYTES);
-        expect(vertexBuffer.attributes.map((attr) => attr.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+        expect((vertexBuffer.attributes as unknown as GPUVertexAttribute[]).map((attr) => attr.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
         const second = renderable.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 });
         expect(second.pipeline).not.toBe(first.pipeline);
@@ -185,7 +186,7 @@ describe("addDepthHostedSpriteLayer", () => {
         expect(descriptor.depthStencil?.format).toBe("depth24plus-stencil8");
         vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
         expect(vertexBuffer.arrayStride).toBe(DEPTH_INSTANCE_STRIDE_BYTES);
-        expect(vertexBuffer.attributes.map((attr) => attr.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+        expect((vertexBuffer.attributes as unknown as GPUVertexAttribute[]).map((attr) => attr.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
     });
 
     it("allocates and uploads depth-hosted instances as 56 bytes per sprite", async () => {
