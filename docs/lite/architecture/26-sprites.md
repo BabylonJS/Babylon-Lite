@@ -562,8 +562,13 @@ additions and must land without adding bytes to numeric-index callers.
 ```typescript
 // src/sprite/sprite-2d.ts
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
+import type { SpriteBlendDescriptor } from "./sprite-blend.js";
+import type { Sprite2DCustomShader } from "./sprite-custom-shader.js";
 
-export type SpriteBlendMode = "alpha" | "premultiplied" | "additive" | "multiply" | "cutout";
+// Blend modes are importable, pure-data descriptor values (see `sprite-blend.ts`), not a
+// string union. `SpriteBlendMode` is a type alias of `SpriteBlendDescriptor`; pass one of the
+// exported `spriteBlend*` values as `Sprite2DLayerOptions.blendMode`.
+export type SpriteBlendMode = SpriteBlendDescriptor;
 export type Sprite2DDepthMode = "none" | "test" | "test-write";
 
 export interface Sprite2DView {
@@ -596,6 +601,15 @@ export interface Sprite2DLayerOptions {
      */
     depth?: Sprite2DDepthMode;
     /**
+     * Opt-in per-layer custom fragment shader (see `createSprite2DCustomShader`). Works on both
+     * pure-2D (`depth: "none"`) and depth-hosted (`depth: "test" | "test-write"`) layers. Drives
+     * procedural effects (animated sky, clouds, water/heat shimmer, twinkle, vignette) from a
+     * built-in `fx.time` clock plus an optional `fx.params` vec4 set via `setSprite2DShaderParams`.
+     * Absent on plain layers, so the always-loaded path carries zero custom-shader bytes (see
+     * `sprite-fx-hook.ts`).
+     */
+    customShader?: Sprite2DCustomShader;
+    /**
      * Default per-instance NDC depth (`0` = near, `1` = far) for sprites added to this
      * layer when their `Sprite2DProps.z` is omitted. Only stored and consumed by `depth: "test" |
      * "test-write"` layers; HUD/pure-2D layers use a 13-float layout and allocate no
@@ -604,6 +618,16 @@ export interface Sprite2DLayerOptions {
      * `updateSprite2DIndex(layer, idx, { z: … })` to move an existing sprite.
      */
     layerZ?: number;
+    /**
+     * Opt-in per-sprite UV scroll. When `true`, every sprite gains two extra instance floats
+     * (`uvOffset.xy`) added to its sampled UV in the vertex stage — enabling parallax /
+     * infinite-scroll backgrounds. Set the offset per sprite via `Sprite2DProps.uvOffset` (on add)
+     * or `setSprite2DUvOffset` (live). Layers created without `uvScroll` keep the narrow 13/14-float
+     * layout, the base vertex attributes, and the base WGSL — they ship none of the widening; the
+     * wider stride, the extra `@location(7)` attribute, and the `+ iUvOffset` WGSL are gated on this
+     * flag. Pairs naturally with a tileable atlas sampled in `repeat` wrap mode. Defaults to `false`.
+     */
+    uvScroll?: boolean;
 }
 
 export interface Sprite2DLayer {
@@ -616,6 +640,24 @@ export interface Sprite2DLayer {
     order: number;
     view: Sprite2DView;
     pivot: [number, number];
+    /**
+     * Opt-in custom fragment shader; see `Sprite2DLayerOptions.customShader`. **Absent** (not
+     * `null`) on plain layers — never default-initialized, so the always-loaded path carries zero
+     * custom-shader bytes (see `sprite-fx-hook.ts`).
+     */
+    readonly customShader?: Sprite2DCustomShader;
+    /**
+     * User `fx.params` vec4 fed to a custom shader each frame; mutate via `setSprite2DShaderParams`.
+     * **Absent** on plain layers (allocated only for custom-shader layers, or lazily by the setter).
+     */
+    shaderParams?: [number, number, number, number];
+    /**
+     * Opt-in per-sprite UV-scroll flag; see `Sprite2DLayerOptions.uvScroll`. **Absent** (not
+     * `false`) on plain layers, so non-scroll scenes keep the narrow layout and base shader. Present
+     * (`true`) only when the layer was created with `uvScroll: true`, which widens the instance
+     * stride by two floats (`uvOffset.xy`).
+     */
+    readonly _uvScroll?: boolean;
     /** Default per-instance Z applied to newly added sprites whose `Sprite2DProps.z` is omitted. */
     layerZ: number;
     readonly count: number;
@@ -642,6 +684,13 @@ export interface Sprite2DProps {
      * on update, the sprite's existing Z is preserved.
      */
     z?: number;
+    /**
+     * Per-sprite UV-scroll offset, added to the sampled UV in the vertex stage. Only consumed by
+     * `uvScroll` layers (created with `Sprite2DLayerOptions.uvScroll: true`); non-scroll layers use
+     * the narrow 13/14-float layout and allocate no uvOffset slot. Defaults to `[0, 0]` on add;
+     * preserved when omitted on update. Live updates: `setSprite2DUvOffset`.
+     */
+    uvOffset?: [number, number];
 }
 
 export function createSprite2DLayer(atlas: SpriteAtlas, opts?: Sprite2DLayerOptions): Sprite2DLayer;
@@ -652,6 +701,9 @@ export function updateSprite2DIndex(layer: Sprite2DLayer, index: number, patch: 
 export function removeSprite2DIndex(layer: Sprite2DLayer, index: number): void;
 export function clearSprite2DLayer(layer: Sprite2DLayer): void;
 export function setSprite2DFrameIndex(layer: Sprite2DLayer, index: number, frame: number): void;
+// Custom-shader + UV-scroll setters (no-ops / cheap on layers that did not opt in).
+export function setSprite2DShaderParams(layer: Sprite2DLayer, params: readonly [number, number, number, number]): void;
+export function setSprite2DUvOffset(layer: Sprite2DLayer, index: number, uvOffset: readonly [number, number]): void;
 ```
 
 The Handle API (`addSprite2D` / `removeSprite2D`, returning a
@@ -675,6 +727,123 @@ export function setSprite2DFrame(handle: Sprite2DHandle, frame: number): void;
 export function getSprite2DHandleIndex(handle: Sprite2DHandle): number;
 export function isSprite2DHandleAlive(handle: Sprite2DHandle): boolean;
 ```
+
+### Blend modes — tree-shakable descriptors
+
+Blend mode is **not** a string union backed by a static lookup table. Each mode is an
+importable, pure-data descriptor value, so a scene ships only the descriptor(s) it imports —
+a default (alpha) scene references `spriteBlendAlpha` and nothing else; importing
+`spriteBlendAdditive` does **not** drag in `spriteBlendPremultiplied`. Adding a future blend
+mode costs **zero bytes** to scenes that don't use it. The pipeline reads `_descriptor` / `_key`
+/ `_premultipliedOpacity` directly off the value, so there is no runtime string `switch` for the
+bundler to retain. The descriptors are byte-identical `GPUBlendState` to the old table, so
+visual parity is unchanged.
+
+```typescript
+// src/sprite/sprite-blend.ts
+export interface SpriteBlendDescriptor {
+    /** @internal Pipeline-cache discriminator (distinguishes blend variants of one pipeline). */
+    readonly _key: string;
+    /** @internal Color-target blend state; `undefined` means no color blend (opaque). */
+    readonly _descriptor?: GPUBlendState;
+    /** @internal When true, per-layer opacity scales RGB *and* A (premultiplied fade). */
+    readonly _premultipliedOpacity?: boolean;
+}
+
+export const spriteBlendAlpha: SpriteBlendDescriptor;          // straight-alpha "over" (default)
+export const spriteBlendPremultiplied: SpriteBlendDescriptor;  // premultiplied "over"
+export const spriteBlendAdditive: SpriteBlendDescriptor;       // glows/sparks: src*alpha + dst
+export const spriteBlendMultiply: SpriteBlendDescriptor;       // shadow/tint: result = src * dst
+
+// src/sprite/billboard-blend.ts — mirrors the above for world-space billboards.
+export interface BillboardBlendDescriptor extends SpriteBlendDescriptor {
+    /** @internal Depth/blend pipeline path this mode selects ("transparent" | "cutout"). */
+    readonly _depthMode: BillboardDepthMode;
+}
+
+export const billboardBlendAlpha: BillboardBlendDescriptor;
+export const billboardBlendPremultiplied: BillboardBlendDescriptor;
+export const billboardBlendCutout: BillboardBlendDescriptor;   // alpha-test, depth-writing
+export const billboardBlendAdditive: BillboardBlendDescriptor; // transparent, no depth write
+```
+
+Sprites support `alpha`, `premultiplied`, `additive`, and `multiply`. Billboards support
+`alpha`, `premultiplied`, `cutout`, and `additive` — `multiply` is intentionally not offered for
+billboards. The shared `blend-descriptors.ts` holds the two common states
+(`_ALPHA_BLEND_STATE`, `_PREMULTIPLIED_BLEND_STATE`) so alpha/premultiplied don't duplicate
+bytes.
+
+### Per-layer custom fragment shaders
+
+A layer/system may supply its own WGSL **fragment body** while the engine keeps ownership of the
+transform, instancing, sorting, and depth. The factory returns an opaque, compiled-on-demand
+descriptor passed as `customShader`:
+
+```typescript
+// src/sprite/sprite-custom-shader.ts
+export type Sprite2DCustomTexture = CustomShaderTexture; // becomes `<name>Tex` + `<name>Samp` in WGSL
+export interface Sprite2DCustomShaderOptions {
+    readonly fragment: string;                              // WGSL fragment body
+    readonly extraTextures?: readonly Sprite2DCustomTexture[];
+}
+export function createSprite2DCustomShader(options: Sprite2DCustomShaderOptions): Sprite2DCustomShader;
+
+// src/sprite/billboard-custom-shader.ts — parallel API for world-space billboards.
+export function createBillboardCustomShader(options: BillboardCustomShaderOptions): BillboardCustomShader;
+```
+
+The supplied `fragment` body has in scope: `in: VOut` (a 2D layer exposes `uv: vec2<f32>` and
+`tint: vec4<f32>`; a billboard additionally exposes `viewDist` / `worldPos`); the layer atlas as
+`atlasTex` / `atlasSamp` at bindings 1/2; each extra texture as `<name>Tex` / `<name>Samp`; the
+`fx` UBO (`fx.time`, `fx.params`); and the `L` layer UBO (e.g. `L.opacityMul`). It must
+`return vec4<f32>(...)` and may `discard`; the body owns all alpha handling (no per-layer opacity
+is applied automatically). The constant `fx.params` vec4 is fed each frame via
+`setSprite2DShaderParams(layer, params)` / `setBillboardShaderParams(system, params)`. Runtime
+WGSL identifier re-mangling keeps user fragment code working in minified bundles.
+
+**Tree-shaking via a lazy null registry (`sprite/sprite-fx-hook.ts`).** This is the architectural
+crux, and it mirrors the PBR extension registry (`pbr-flags.ts`). The module declares two hook
+interfaces (`SpriteFxHook`, `BillboardFxHook`) whose methods (`initLayer`, `pipelineKeyPart`,
+`shaderModule`, `layoutEntries`, `createLayerFx`, `updateFx`, `bindEntries`, `disposeFx`) each
+take the layer/system **opaquely**, so every `layer.customShader` / `layer.shaderParams` property
+read happens *inside* the tree-shaken impl. It holds two module-level slots
+(`let _spriteFxHook: SpriteFxHook | null = null`, `_billboardFxHook`) and the
+`_registerSpriteFxHook` / `_getSpriteFxHook` / `_registerBillboardFxHook` / `_getBillboardFxHook`
+functions — with no module-level side effects. The always-loaded sprite / billboard / pipeline /
+renderer modules only ever call `_getSpriteFxHook()?.method(...)`; the slot stays `null` until
+`createSprite2DCustomShader` / `createBillboardCustomShader` registers the impl. So a plain sprite
+scene ships **zero** custom-shader tokens — not even the public `customShader` / `shaderParams`
+field-name strings. `sprite-pipeline.ts`'s `spritePipelineKey` reaches the feature only through
+`_getSpriteFxHook()?.pipelineKeyPart(layer)` (the `cs${customKey}` segment). The 2D and billboard
+composers share their *mechanics* via `custom-shader-core.ts` (extra-texture bindings, name
+validation, the `SpriteFx` UBO, key allocation) but keep their own vertex stage and varying
+contract.
+
+### Opt-in per-sprite UV scroll (parallax)
+
+`uvScroll` is a **structural** opt-in, not a per-sprite value: enabling it changes the GPU data
+layout and the compiled shader, so it follows the same pay-for-use gate as `depth`. When a layer
+is created with `uvScroll: true`, every sprite gains two extra instance floats (`uvOffset.xy`)
+that are added to the sampled UV in the vertex stage — enabling parallax / infinite-scroll
+backgrounds without re-uploading texture coordinates. The offset is set per sprite via
+`Sprite2DProps.uvOffset` (on add) or `setSprite2DUvOffset(layer, index, uvOffset)` (live).
+
+Enabling the flag (1) widens the instance stride by two floats, (2) adds a
+`@location(7) iUvOffset: vec2<f32>` vertex attribute, (3) selects a distinct WGSL variant
+(`let uv = mix(...) + in.iUvOffset`), and (4) adds a `:uv${uvKey}` segment to the pipeline key so
+variants don't collide. The widening is orthogonal to depth and lands *after* the base layout:
+
+```text
+pure-2D + uvScroll  (15 floats = 60 bytes):  [13..14] uvOffset.xy (float32x2 @ byte offset 52)
+depth   + uvScroll  (16 floats = 64 bytes):  [14..15] uvOffset.xy (float32x2 @ byte offset 56)
+```
+
+(Source constants: `PURE_2D_UVSCROLL_STRIDE_BYTES`, `DEPTH_UVSCROLL_STRIDE_BYTES`,
+`SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52`, `SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56`.) Layers
+created without `uvScroll` keep the narrow 13/14-float layout, the base attributes, and the base
+WGSL — they ship none of the widening. The feature pairs naturally with a tileable atlas sampled
+in `repeat` wrap mode
+(`loadSpriteAtlas(..., { textureOptions: { addressModeU: "repeat", addressModeV: "repeat" } })`).
 
 ### Roadmap — `AnchorSource` opt-in 3D bridge for `Sprite2DLayer`
 
@@ -746,9 +915,11 @@ yaw-locked as a special case of axis-locked using [0, 1, 0]), with
 the low-level index API, explicit scene opt-in helpers, and CPU-side
 transparent sorting for the current compact vertex-buffer upload. It also
 ships the production cutout path: alpha-tested, depth-writing billboard
-systems selected via `blendMode: "cutout"`.
+systems selected via `billboardBlendCutout`, plus **additive** blending via
+`billboardBlendAdditive` and opt-in **per-system custom fragment shaders** via
+`createBillboardCustomShader` (see [Per-layer custom fragment shaders](#per-layer-custom-fragment-shaders)).
 Clip playback, observable handle fields, parenting, picking,
-storage-buffer sort indirection, and additive/multiply blend modes are
+storage-buffer sort indirection, and a billboard `multiply` blend mode are
 additive follow-up modules. Stable handle identity itself lives in
 `billboard-sprite-handle.ts`. That split
 keeps the first billboard path small and keeps pure-2D sprite bundles from
@@ -757,7 +928,8 @@ importing scene rendering code.
 ```typescript
 // src/sprite/billboard-sprite.ts
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
-import type { SpriteBlendMode } from "./sprite-2d.js";
+import type { BillboardBlendDescriptor } from "./billboard-blend.js";
+import type { BillboardCustomShader } from "./billboard-custom-shader.js";
 
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
@@ -766,9 +938,13 @@ export interface BillboardSpriteSystemOptions {
     opacity?: number;
     visible?: boolean;
     order?: number;
+    /** Opt-in per-system custom fragment shader; see `createBillboardCustomShader`. */
+    customShader?: BillboardCustomShader;
 }
 
-export type BillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
+// Blend mode is a descriptor value (see `billboard-blend.ts`), not a string. Billboards accept
+// alpha / premultiplied / cutout / additive; `multiply` is intentionally not offered.
+export type BillboardBlendMode = BillboardBlendDescriptor;
 export type BillboardOrientation = "facing" | "axis-locked";
 export type BillboardDepthMode = "transparent" | "cutout";
 
@@ -874,8 +1050,9 @@ helper or vice versa.
 
 Internally, the shared renderable routes through `system._orientation` and
 `system._depthMode`; the current public factories set `"facing"` or
-`"axis-locked"`, derive `"transparent"` for `"alpha" | "premultiplied"`, and
-derive `"cutout"` for `blendMode: "cutout"`. Transparent systems are
+`"axis-locked"`, and each blend descriptor carries its own `_depthMode` —
+`"transparent"` for `alpha` / `premultiplied` / `additive`, and `"cutout"` for
+`billboardBlendCutout`. Transparent systems are
 alpha-blended, depth-tested, depth-write disabled, maintain a `_worldCenter`
 for the scene's transparent bucket sort, and sort individual billboard
 instances far-to-near before upload. `_worldCenter` is the center of the
@@ -988,6 +1165,20 @@ Depth-hosted layers use the same first 52 bytes, plus:
 | -------------- | ---- | ----- | ------------------ | ----------------------------------------------------------------- |
 | 52..55         | [13] | `z`   | `@location(6)` f32 | NDC depth (`0` = near, `1` = far), consumed by the scene pipeline |
 
+#### Sprite2DLayer `uvScroll` extension (opt-in; +8 B = +2 floats)
+
+Layers created with `uvScroll: true` append two more floats (`uvOffset.xy`) *after* the base
+layout, orthogonally to depth. The wider stride, the extra `@location(7)` attribute, and the
+`+ iUvOffset` WGSL are gated on the per-layer flag, so non-scroll scenes ship none of it.
+
+| Layout                | Stride        | Slot     | Field      | Vertex attr          | Notes                                  |
+| --------------------- | ------------- | -------- | ---------- | -------------------- | -------------------------------------- |
+| pure-2D + `uvScroll`  | 60 B / 15 fl  | [13..14] | `uvOffset` | `@location(7)` f32×2 | `uvOffset.xy` at byte offset 52        |
+| depth + `uvScroll`    | 64 B / 16 fl  | [14..15] | `uvOffset` | `@location(7)` f32×2 | base 56 B + `uvOffset.xy` at offset 56 |
+
+The vertex stage adds `in.iUvOffset` to the sampled UV (`let uv = mix(uvMin, uvMax, corner) + in.iUvOffset`),
+and the pipeline key gains a `:uv${uvKey}` segment so scroll/non-scroll variants never collide.
+
 Visibility (`visible: false`) is implemented by zeroing slots [2..3]; the
 sprite's true size lives in `layer._savedSize` so a later `visible: true`
 (without re-supplying `sizePx`) can restore it.
@@ -1046,10 +1237,10 @@ shader module cache also keys by `_depthMode`: transparent shaders have no
 discard path, while cutout shaders sample texture alpha, discard below
 `billboards.axisAndCutoff.w`, and return the sampled color multiplied by tint and
 `opacityMul`. The `"transparent"` depth mode uses depth compare `greater-equal`,
-depth write off, no culling, and alpha or premultiplied blending. The
+depth write off, no culling, and alpha, premultiplied, or additive blending. The
 `"cutout"` depth mode uses depth compare `greater-equal`, depth write on, no
-blend state, and no culling. Unsupported `additive` and `multiply` blend modes
-throw during system creation.
+blend state, and no culling. The unsupported billboard `multiply` blend mode
+throws during system creation.
 
 Transparent billboard systems sort per billboard before upload, not by
 mutating `system._instanceData`. When `DrawUpdateContext` supplies the active
@@ -1311,7 +1502,7 @@ loses one tick of animation in the captured image. All sprite families
 | `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `greater-equal` | `false`   | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
 | `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `greater-equal` | `true`    | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
 
-The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`. `SpriteRenderer`
+The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`, plus a `cs${customKey}` segment for custom-shader layers (contributed opaquely via `_getSpriteFxHook()?.pipelineKeyPart(layer)`) and a `:uv${uvKey}` segment for `uvScroll` layers. `SpriteRenderer`
 layers always request `hasDepth = false` and `sampleCount = 1`, so their pipelines are built without a depth-stencil descriptor. Depth-hosted layers request `hasDepth = true`, use the target depth-stencil format provided by the frame graph, and set `depthWrite` from the layer's `depth` mode.
 
 ### Bind Group Layouts
@@ -1919,6 +2110,9 @@ never reaches into layer internals.
 | `mesh.billboardMode = BILLBOARDMODE_Y`            | `createAxisLockedBillboardSystem(atlas, [0,1,0])`                     | World-Y is the yaw-locked special case                                            |
 | `mesh.billboardMode = BILLBOARDMODE_X/Z`          | `createAxisLockedBillboardSystem(atlas, [1,0,0])`                     | Same factory covers all lock axes                                                 |
 | `SpriteManager.disableDepthWrite`                 | `Sprite2DLayer.depth` (`"test"` / `"test-write"`) + `SpriteBlendMode` | Composer-baked per layer                                                          |
+| `sprite.blendMode` (ADD / MULTIPLY / etc.)        | Importable `spriteBlend*` / `billboardBlend*` descriptor values        | Tree-shakable; no string lookup table                                            |
+| Custom `ShaderMaterial` on a sprite               | `createSprite2DCustomShader` / `createBillboardCustomShader`           | WGSL fragment body + `fx.time` / `fx.params` / extra textures                    |
+| Animated/scrolling texture (`uOffset`/`vOffset`)  | `Sprite2DLayerOptions.uvScroll` + per-sprite `uvOffset`                | Opt-in per-sprite UV offset (parallax)                                           |
 | `AdvancedDynamicTexture` + `Image`                | `Sprite2DLayer` overlay on a 3D `SceneContext`                        | Different scope — no GUI tree                                                     |
 | `scene.pickSprite(x, y)`                          | Roadmap `pickSprite2D` / `pickBillboardSprite`                        | Picking is not in the current root exports                                        |
 | `SpriteMap` (tile maps)                           | Out of scope                                                          | Future module                                                                     |
@@ -1981,7 +2175,7 @@ Lazy / dynamic-imported:
 
 Depended on by:
 
-- `lab/lite/src/lite/scene50.ts` through `scene57.ts` — current 2D, HUD, depth-hosted, and billboard reference scenes.
+- `lab/lite/src/lite/scene50.ts` through `scene57.ts` — current 2D, HUD, depth-hosted, and billboard reference scenes. Custom-shader, UV-scroll, and additive/multiply blend scenes are `scene92.ts` through `scene98.ts`.
 - Future Particles module — should reuse `SpriteAtlas`, the vertexless-quad pattern, and packed-instance-buffer helpers.
 
 NOT depended on:
@@ -2013,6 +2207,16 @@ because the projection math is the same):
 - **Scene 56-axis-locked-billboards** — arbitrary-axis locked billboard basis math.
 - **Scene 57-cutout-billboards** — cutout billboard alpha discard, no blend state, and depth writes.
 
+Feature scenes added on the `engine/sprite-additive-customshader` branch (each with a Lite impl, a Babylon.js oracle, and a parity spec):
+
+- **Scene 92-sprite-customshader-params** — 2D sprite custom shader driven by an `fx.params` tint.
+- **Scene 93-sprite-customshader-palette** — 2D sprite custom shader with a 256×1 palette-remap lookup texture.
+- **Scene 94-billboard-customshader-params** — facing billboard custom shader, `fx.params` tint.
+- **Scene 95-billboard-customshader-palette** — facing billboard custom shader, palette remap.
+- **Scene 96-sprite-uvoffset-parallax** — `uvScroll` layer with bands of fixed `uvOffset` (parallax).
+- **Scene 97-sprite-multiply-blend** — `spriteBlendMultiply`.
+- **Scene 98-billboard-additive-blend** — `billboardBlendAdditive`.
+
 ### Bundle Size Ceilings
 
 Bundle-size ratchets:
@@ -2037,6 +2241,13 @@ packages/babylon-lite/src/
       sprite-atlas.ts                            # SpriteAtlas, createGrid/loadSpriteAtlas, internal resolveSpriteFrame
 
     sprite-2d.ts                                 # createSprite2DLayer + Index API (no anchor code; foundation only)
+    sprite-blend.ts                              # spriteBlend* descriptor values (alpha/premultiplied/additive/multiply); tree-shakable
+    billboard-blend.ts                           # billboardBlend* descriptor values (alpha/premultiplied/cutout/additive); tree-shakable
+    blend-descriptors.ts                         # Shared _ALPHA_BLEND_STATE / _PREMULTIPLIED_BLEND_STATE GPUBlendState constants
+    sprite-fx-hook.ts                            # Lazy null-by-default custom-shader registry (SpriteFxHook/BillboardFxHook); keeps custom-shader bytes off the always-loaded path
+    custom-shader-core.ts                        # Shared custom-shader mechanics (extra-texture bindings, name validation, SpriteFx UBO, key allocation)
+    sprite-custom-shader.ts                      # createSprite2DCustomShader; registers the 2D SpriteFxHook impl
+    billboard-custom-shader.ts                   # createBillboardCustomShader; registers the billboard FxHook impl
     sprite-renderable.ts                         # Renderable builder for Sprite2DLayer depth-hosted layers
     sprite-pipeline.ts                           # Sprite2D WGSL, pipeline cache, dirty upload helpers
     sprite-renderer.ts                           # createSpriteRenderer / registerSpriteRenderer / unregisterSpriteRenderer / disposeSpriteRenderer + (sampleCount, hasDepth) pipeline cache

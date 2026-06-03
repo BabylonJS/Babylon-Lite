@@ -90,7 +90,6 @@ async function main(): Promise<void> {
     });
     const sprites = createSprite2DLayer(atlas, {
         capacity: 4,
-        blendMode: "alpha",
         depth: "test-write",
     });
     const spriteIndices = addPerInstanceZSprites(sprites, canvas);

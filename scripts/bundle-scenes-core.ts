@@ -12,7 +12,7 @@
 import { build, type Plugin } from "vite";
 import { execFileSync } from "child_process";
 import { resolve, dirname, join, extname } from "path";
-import { rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "fs";
+import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { initialize as initMiniray, minify as minifyWgslMiniray } from "miniray";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
 import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
@@ -424,8 +424,6 @@ function mangleWgslIdentifiers(code: string): string {
         ["getBillboardBasis", "gbb"],
         ["billboards", "bb"],
         ["opacityMul", "om"],
-        ["atlasTex", "atx"],
-        ["atlasSamp", "asp"],
         ["cameraRight", "cr"],
         ["cameraUp", "cu"],
         ["lockAxis", "la"],
@@ -1403,7 +1401,28 @@ async function measureLiveSizes(): Promise<BundleManifest> {
     }
 
     function flush(): void {
-        writeFileSync(manifestPath, JSON.stringify(orderBundleManifest(manifest), null, 2));
+        // The lab UI may fetch manifest.json mid-build, so a plain writeFileSync (which truncates
+        // the live file) can collide with a concurrent reader and surface as a transient Windows
+        // file-lock error (errno -4094 UNKNOWN / EBUSY). Write a sibling temp file and rename it
+        // into place — rename is atomic and never truncates the file readers hold open. Retry a few
+        // times to ride out any residual lock (e.g. AV scanning the freshly written file).
+        const json = JSON.stringify(orderBundleManifest(manifest), null, 2);
+        const tmpPath = `${manifestPath}.tmp`;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                writeFileSync(tmpPath, json);
+                renameSync(tmpPath, manifestPath);
+                return;
+            } catch (err) {
+                if (attempt >= 5) {
+                    throw err;
+                }
+                const wait = Date.now() + 50 * (attempt + 1);
+                while (Date.now() < wait) {
+                    /* brief synchronous backoff before retrying the atomic write */
+                }
+            }
+        }
     }
 
     try {

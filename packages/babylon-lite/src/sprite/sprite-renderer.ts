@@ -16,6 +16,8 @@
 import { getRenderTargetSize, registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
 import type { EngineContext, EngineContextInternal, RenderingContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
+import type { SpriteLayerFx } from "./custom-shader-core.js";
+import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
 import {
     LAYER_UBO_BYTES,
@@ -85,6 +87,8 @@ interface LayerGpu {
      *  buffer is allocated once in `ensureLayerGpu`). Cleared if we ever recreate either. */
     bindGroup: GPUBindGroup | null;
     uploadedVersion: number;
+    /** Opaque fx attachment (`SpriteFx` UBO, scratch, elapsed time); non-null only for `customShader` layers. */
+    fx: SpriteLayerFx | null;
     /** Cached pipeline object. Refreshed when target-defining GPU state resolves to a different pipeline. */
     pipeline: GPURenderPipeline | null;
     /** Snapshot of the last UBO bytes written to `uniformBuffer`. We rebuild the UBO into
@@ -139,6 +143,7 @@ function ensureLayerGpu(rr: SpriteRendererInternal, layer: Sprite2DLayer): Layer
         const cap = layer._capacity;
         const instanceBuffer = createSpriteInstanceBuffer(rr._engine.device, layer, "sprite-layer-instances");
         const uniformBuffer = createEmptyUniformBuffer(rr._engine, LAYER_UBO_BYTES, "sprite-layer-ubo");
+        const fx = _getSpriteFxHook()?.createLayerFx(rr._engine, "sprite-layer-fx-ubo", layer) ?? null;
         lg = {
             layer,
             instanceBuffer,
@@ -146,6 +151,7 @@ function ensureLayerGpu(rr: SpriteRendererInternal, layer: Sprite2DLayer): Layer
             uniformBuffer,
             bindGroup: null,
             uploadedVersion: -1,
+            fx,
             pipeline: null,
             lastUbo: new Float32Array(LAYER_UBO_BYTES / 4),
             uboUploaded: false,
@@ -167,16 +173,22 @@ function ensureLayerGpu(rr: SpriteRendererInternal, layer: Sprite2DLayer): Layer
 
 /** Sync one layer's GPU state to its CPU state — instance vertex data + per-layer UBO.
  *  Both helpers are version-/dirty-gated and skip work in the steady state. */
-function uploadLayer(rr: SpriteRendererInternal, lg: LayerGpu): void {
+function uploadLayer(rr: SpriteRendererInternal, lg: LayerGpu, deltaMs: number): void {
     const layer = lg.layer;
     lg.uploadedVersion = uploadSpriteInstances(rr._engine.device, layer, lg.instanceBuffer, lg.uploadedVersion);
     buildSpriteLayerUbo(layer, rr._targetWidth, rr._targetHeight, _scratchUbo);
     lg.uboUploaded = writeSpriteLayerUboIfDirty(rr._engine.device, lg.uniformBuffer, _scratchUbo, lg.lastUbo, lg.uboUploaded);
+    if (lg.fx) {
+        _getSpriteFxHook()!.updateFx(lg.fx, layer, deltaMs);
+    }
 }
 
 function disposeLayerGpu(lg: LayerGpu): void {
     lg.instanceBuffer.destroy();
     lg.uniformBuffer.destroy();
+    if (lg.fx) {
+        _getSpriteFxHook()!.disposeFx(lg.fx);
+    }
 }
 
 const _scratchUbo = new Float32Array(LAYER_UBO_BYTES / 4);
@@ -193,7 +205,7 @@ function ensureBindGroup(rr: SpriteRendererInternal, lg: LayerGpu, pipeline: GPU
     if (lg.bindGroup) {
         return lg.bindGroup;
     }
-    lg.bindGroup = createSpriteLayerBindGroup(rr._engine, pipeline, 0, lg.layer, lg.uniformBuffer);
+    lg.bindGroup = createSpriteLayerBindGroup(rr._engine, pipeline, 0, lg.layer, lg.uniformBuffer, lg.fx);
     return lg.bindGroup;
 }
 
@@ -238,7 +250,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
 
     // Pre-warm pipelines currently in use, so the first frame doesn't pay compile cost.
     for (const layer of rr.layers) {
-        getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false);
+        getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
     }
 
     return rr;
@@ -289,7 +301,7 @@ function spriteRendererUpdate(rr: SpriteRendererInternal): void {
             continue;
         }
         const lg = ensureLayerGpu(rr, layer);
-        uploadLayer(rr, lg);
+        uploadLayer(rr, lg, deltaMs);
     }
 }
 
@@ -338,7 +350,7 @@ function spriteRendererRecord(rr: SpriteRendererInternal): number {
             continue;
         }
         const sampleCount = 1;
-        const pipeline = getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, sampleCount, layer.blendMode, false);
+        const pipeline = getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, sampleCount, layer.blendMode, false, false, undefined, undefined, layer);
         if (lg.pipeline !== pipeline) {
             lg.pipeline = pipeline;
             lg.bindGroup = null;

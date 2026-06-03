@@ -195,7 +195,7 @@ const _features: GltfFeatureLoader[] = [
     [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
     // Dielectric cluster (ior/specular/transmission/volume) — any of the four triggers the loader;
     // transmission refraction is wired dynamically by the PBR material path when the loaded material needs it.
-    [(j) => ["transmission", "volume", "ior", "specular"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
+    [(j) => ["transmission", "volume", "ior", "specular", "dispersion"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
     [hasExt("KHR_texture_transform"), () => import("./gltf-ext-uv-transform.js")],
     [hasExt("KHR_texture_basisu"), () => import("./gltf-ext-basisu.js")],
     [needsOrmComposite, () => import("./gltf-ext-orm.js")],

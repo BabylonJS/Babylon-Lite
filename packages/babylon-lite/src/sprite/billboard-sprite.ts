@@ -6,10 +6,18 @@
  */
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
-import type { SpriteBlendMode } from "./sprite-2d.js";
+import type { BillboardCustomShader } from "./billboard-custom-shader.js";
+import type { BillboardBlendDescriptor } from "./billboard-blend.js";
+import { billboardBlendAlpha } from "./billboard-blend.js";
+import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 
-/** Blend modes available to billboard sprite systems: standard `alpha`, `premultiplied` alpha, or alpha-test `cutout`. */
-export type BillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
+/**
+ * Blend mode for a billboard sprite system — a pure-data descriptor value. Import one of
+ * `billboardBlendAlpha` (default), `billboardBlendPremultiplied`, or `billboardBlendCutout`
+ * and pass it as `BillboardSpriteSystemOptions.blendMode`. (Type alias of
+ * {@link BillboardBlendDescriptor}.)
+ */
+export type BillboardBlendMode = BillboardBlendDescriptor;
 
 /** Optional configuration for a billboard sprite system. */
 export interface BillboardSpriteSystemOptions {
@@ -19,6 +27,8 @@ export interface BillboardSpriteSystemOptions {
     opacity?: number;
     visible?: boolean;
     order?: number;
+    /** Optional opt-in custom fragment shader (from `createBillboardCustomShader`). */
+    customShader?: BillboardCustomShader;
 }
 
 /** How a billboard orients itself: `facing` always faces the camera, `axis-locked` rotates only around a fixed axis. */
@@ -60,6 +70,13 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _dirtyMax: number;
     /** @internal Optional hooks installed by the opt-in handle module. */
     _handleHooks?: BillboardIndexHandleHooks;
+    /** @internal Optional custom fragment shader for this system. Absent on plain systems. */
+    readonly _customShader?: BillboardCustomShader;
+    /**
+     * Per-system custom-shader params (`fx.params`); set via `setBillboardShaderParams`.
+     * **Absent** on plain systems (only allocated for custom-shader systems, or lazily by the setter).
+     */
+    shaderParams?: [number, number, number, number];
 }
 
 /** @internal Lazy hooks used by the opt-in Handle API to track swap-removes. */
@@ -112,10 +129,6 @@ function resolveOpacity(opts: BillboardSpriteSystemOptions): number {
     return opacity;
 }
 
-function resolveBillboardDepthMode(blendMode: BillboardBlendMode): BillboardDepthMode {
-    return blendMode === "cutout" ? "cutout" : "transparent";
-}
-
 /**
  * Creates a camera-facing billboard sprite system backed by the given atlas.
  * @param atlas - Sprite atlas supplying frames.
@@ -157,11 +170,11 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
     axis: readonly [number, number, number],
     opts: BillboardSpriteSystemOptions
 ): BillboardSpriteSystem<TOrientation> {
-    const blendMode = opts.blendMode ?? "alpha";
-    const depthMode = resolveBillboardDepthMode(blendMode);
+    const blendMode = opts.blendMode ?? billboardBlendAlpha;
+    const depthMode = blendMode._depthMode;
     const capacity = Math.max(1, opts.capacity ?? DEFAULT_CAPACITY);
     const instanceData = new Float32Array(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
-    return {
+    const system: BillboardSpriteSystem<TOrientation> = {
         _entityType: "billboard-sprite-system",
         atlas,
         blendMode,
@@ -182,6 +195,23 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
         _dirtyMin: 0,
         _dirtyMax: 0,
     };
+    // Zero-default-init discipline: the base system never names `_customShader` / `shaderParams`.
+    // The registered hook copies them on only when a custom shader was supplied; the impl lives in
+    // the tree-shaken `billboard-custom-shader` module, so plain scenes ship none of it.
+    _getBillboardFxHook()?.initSystem(system, opts);
+    return system;
+}
+
+/**
+ * Set the custom-shader `fx.params` vec4 for a billboard system created with a `customShader`.
+ * No-op effect on systems without one (the value is simply stored). Read in WGSL as `fx.params`.
+ */
+export function setBillboardShaderParams(system: BillboardSpriteSystem, params: readonly [number, number, number, number]): void {
+    const target = (system.shaderParams ??= [0, 0, 0, 0]);
+    target[0] = params[0];
+    target[1] = params[1];
+    target[2] = params[2];
+    target[3] = params[3];
 }
 
 function growCapacity(system: BillboardSpriteSystem, minCapacity: number): void {

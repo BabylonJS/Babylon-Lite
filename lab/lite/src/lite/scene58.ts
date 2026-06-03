@@ -22,7 +22,7 @@ async function main(): Promise<void> {
         sampling: "linear",
     });
 
-    const layer = createSprite2DLayer(atlas, { capacity: 4, blendMode: "alpha", depth: "none" });
+    const layer = createSprite2DLayer(atlas, { capacity: 4, depth: "none" });
     const manager = createSpriteAnimationManager();
     const centerX = canvas.width * 0.5;
 

@@ -62,7 +62,7 @@ async function main(): Promise<void> {
         gridSize: [SPRITE_ATLAS_INFO.cellWidthPx, SPRITE_ATLAS_INFO.cellHeightPx],
         sampling: "linear",
     });
-    const hud = createSprite2DLayer(atlas, { capacity: 16, blendMode: "alpha", depth: "none" });
+    const hud = createSprite2DLayer(atlas, { capacity: 16, depth: "none" });
     addHudSprites(hud, canvas);
     const hudRenderer = createSpriteRenderer(engine, { layers: [hud], clear: false });
     registerSpriteRenderer(hudRenderer);

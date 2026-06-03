@@ -317,7 +317,8 @@
         "slug": "scene33-lights-punctual",
         "name": "Scene 33 — KHR_lights_punctual",
         "maxMad": 0.07,
-        "maxRawKB": 94,
+        "maxRawKB": 95,
+        "note": "Ceiling raised 93->94 (user-approved) when scene212 added KHR_materials_dispersion: scene33 shares the transmission + dielectric chunks and carries ~0.6 KB of unavoidable dispersion plumbing (the 3-ray WGSL itself ships only in scene212's bundle). Bumped 94->95 (user-approved) after HPM/LWR substrate (#116) adds another ~0.8 KB of shared engine code on top of the dispersion plumbing.",
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true
@@ -795,6 +796,76 @@
         "maxRawKB": 78,
         "description": "Box and sphere CSG2 rows showing subtract, intersect, and add/union with textured StandardMaterial meshes and canvas texture labels.",
         "tags": ["csg", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 92,
+        "slug": "scene92-sprite-customshader-params",
+        "name": "Scene 92 — Sprite Custom Shader (params tint)",
+        "maxMad": 0.02,
+        "maxRawKB": 24,
+        "description": "25×10 pure-2D sprite grid drawn through an opt-in custom fragment shader that multiplies the atlas sample and per-sprite tint by a constant fx.params vec4 set once before the first frame (no fx.time, fully deterministic). BJS SpriteRenderer oracle pre-multiplies each sprite color by the same params.",
+        "tags": ["sprites", "2d", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 93,
+        "slug": "scene93-sprite-customshader-palette",
+        "name": "Scene 93 — Sprite Custom Shader (palette remap)",
+        "maxMad": 0.02,
+        "maxRawKB": 24,
+        "description": "25×10 pure-2D cutout-sprite grid recoloured through a 256×1 palette lookup texture (atlas red channel indexes the palette, source alpha preserved), nearest-filtered for bit-exact lookup. BJS SpriteRenderer oracle renders a pre-baked palette-remapped atlas.",
+        "tags": ["sprites", "2d", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 94,
+        "slug": "scene94-billboard-customshader-params",
+        "name": "Scene 94 — Billboard Custom Shader (params tint)",
+        "maxMad": 0.02,
+        "maxRawKB": 68,
+        "description": "World-space facing billboards drawn through an opt-in custom fragment shader that multiplies the atlas sample and per-sprite tint by a constant fx.params vec4 set once before the first frame (no fx.time, fully deterministic). BJS SpriteManager oracle pre-multiplies each sprite color by the same params.",
+        "tags": ["sprites", "billboards", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 95,
+        "slug": "scene95-billboard-customshader-palette",
+        "name": "Scene 95 — Billboard Custom Shader (palette remap)",
+        "maxMad": 0.02,
+        "maxRawKB": 68,
+        "description": "World-space facing billboards recoloured through a 256×1 palette lookup texture (cutout atlas red channel indexes the palette, source alpha preserved), nearest-filtered for bit-exact lookup. BJS SpriteManager oracle renders a pre-baked palette-remapped atlas.",
+        "tags": ["sprites", "billboards", "shader"],
+        "skipPerf": true
+    },
+    {
+        "id": 96,
+        "slug": "scene96-sprite-uvoffset-parallax",
+        "name": "Scene 96 — Sprite uvOffset Parallax",
+        "maxMad": 0.02,
+        "maxRawKB": 16,
+        "description": "20×9 pure-2D sprite grid sampling one tileable atlas tile (repeat wrap, nearest) where each horizontal band carries a different fixed per-sprite uvOffset (uvScroll), shifting the sampled UV in the vertex stage — the building block for parallax / infinite-scroll backgrounds. BJS SpriteRenderer oracle bakes the same effect into a per-offset rolled-tile atlas selected by cellIndex.",
+        "tags": ["sprites", "2d", "uvoffset"],
+        "skipPerf": true
+    },
+    {
+        "id": 97,
+        "slug": "scene97-sprite-multiply-blend",
+        "name": "Scene 97 — Sprite Multiply Blend",
+        "maxMad": 0.02,
+        "maxRawKB": 21,
+        "description": "25×10 pure-2D sprite grid drawn with the opt-in spriteBlendMultiply blend mode (result = src.rgb * dst.rgb) over a light, non-black clear colour so the opaque icon sprites darken / tint the background. Fully static / deterministic. BJS SpriteRenderer oracle draws the same atlas with ALPHA_MULTIPLY (DST_COLOR / ZERO), matching the multiply RGB math including anti-aliased sprite edges.",
+        "tags": ["sprites", "2d", "blend"],
+        "skipPerf": true
+    },
+    {
+        "id": 98,
+        "slug": "scene98-billboard-additive-blend",
+        "name": "Scene 98 — Billboard Additive Blend",
+        "maxMad": 0.02,
+        "maxRawKB": 62,
+        "description": "World-space facing billboards drawn with the opt-in billboardBlendAdditive blend mode (src-alpha, one); several large overlapping billboards in front of two boxes make the additive brightening obvious. Fully static / deterministic. BJS SpriteManager oracle uses ALPHA_ONEONE with each sprite's RGB pre-multiplied by its own alpha so one*(rgb*a) matches src-alpha*rgb for the opaque cells.",
+        "tags": ["sprites", "billboards", "blend"],
         "skipPerf": true
     },
     {
@@ -1289,5 +1360,17 @@
         "description": "Same 5×5 grid + pillar as scene 200, but useHighPrecisionMatrix=true and useFloatingOrigin=true. F64 caches + eye-relative upload trick keep GPU-facing translations small; rasterization is crisp.",
         "tags": ["hpm", "lwr", "floating-origin", "precision", "procedural", "std"],
         "skipPerf": true
+    },
+    {
+        "id": 212,
+        "slug": "scene212-gltf-dispersion",
+        "name": "Scene 212 - DispersionTest glTF",
+        "maxMad": 0.6,
+        "maxRawKB": 98,
+        "note": "Native-res floor ~0.44 locally; cloud (BrowserStack OSX/Chrome) parity measures ~0.59 due to GPU/driver differences in MSAA edge-resolve on chromatic refraction through a high-frequency checker (BJS bit-exact, optimally aligned, interiors pixel-identical). Ceiling 0.6 covers cloud variance. In-family with iridescence (0.4) / mosquito (0.5).",
+        "description": "KhronosGroup DispersionTest.glb using KHR_materials_dispersion (per-channel chromatic refraction) on a 5x5 grid of transmissive prisms (KHR_materials_transmission + volume + ior), rendered in studio.env with frame-graph scene-texture transmission.",
+        "tags": ["pbr", "gltf", "transmission", "volume", "dispersion", "env", "skybox"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
     }
 ]

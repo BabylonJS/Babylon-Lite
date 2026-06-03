@@ -4,9 +4,10 @@ import { createRenderTarget, targetSignatureKey } from "../../../packages/babylo
 import { createRenderPass, setRenderPassRenderTarget } from "../../../packages/babylon-lite/src/frame-graph/render-pass";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { mat4PerspectiveLH } from "../../../packages/babylon-lite/src/math/mat4-perspective-lh";
+import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { createPickingRay } from "../../../packages/babylon-lite/src/picking/ray";
 
-function projectDepth(matrix: Float32Array, z: number): number {
+function projectDepth(matrix: Mat4, z: number): number {
     const clipZ = matrix[10]! * z + matrix[14]!;
     const clipW = matrix[11]! * z + matrix[15]!;
     return clipZ / clipW;

@@ -2,6 +2,7 @@ import {
     addBillboardSpriteIndex,
     addFacingBillboardSystem,
     addToScene,
+    billboardBlendCutout,
     createBox,
     createEngine,
     createFacingBillboardSystem,
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
         gridSize: [CUTOUT_SPRITE_ATLAS_INFO.cellWidthPx, CUTOUT_SPRITE_ATLAS_INFO.cellHeightPx],
         sampling: "nearest",
     });
-    const billboards = createFacingBillboardSystem(atlas, { capacity: 5, blendMode: "cutout", alphaCutoff: 0.5 });
+    const billboards = createFacingBillboardSystem(atlas, { capacity: 5, blendMode: billboardBlendCutout, alphaCutoff: 0.5 });
 
     addBillboardSpriteIndex(billboards, {
         position: [0, 0.75, 0.15],

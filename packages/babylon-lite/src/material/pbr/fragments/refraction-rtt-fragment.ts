@@ -4,6 +4,7 @@ import type { PbrExt } from "../pbr-flags.js";
 import { getTrilinearAnisotropicSampler } from "../../../resource/trilinear-anisotropic-sampler.js";
 import {
     PBR_HAS_THICKNESS_MAP,
+    PBR2_HAS_DISPERSION,
     PBR2_HAS_REFRACTION,
     PBR2_HAS_REFRACTION_MAP,
     PBR2_HAS_THICKNESS_GLTF_CHANNEL,
@@ -14,7 +15,14 @@ import {
 type TransmissionMat = PbrMaterialProps & { _linearImageProcessing?: boolean };
 const LINEAR_IMAGE_PROCESSING_SLOTS = { NI: `if(scene.vImageInfos.w>=0.0){`, BC: `}` };
 
-function makeRefractionMod(hasVolume: boolean, hasMap: boolean, hasThicknessMap: boolean, useGltfThicknessChannel: boolean): string {
+function makeRefractionMod(
+    hasVolume: boolean,
+    hasMap: boolean,
+    hasThicknessMap: boolean,
+    useGltfThicknessChannel: boolean,
+    hasDispersion: boolean,
+    dispersionSampleWgsl: string | undefined
+): string {
     const thicknessScaleLine = hasVolume || hasThicknessMap ? `let ts=max(length(mesh.world[0].xyz),max(length(mesh.world[1].xyz),length(mesh.world[2].xyz)));` : ``;
     const thicknessLine = hasThicknessMap
         ? `let ths=textureSample(thicknessTexture_,thicknessSampler_,input.uv).${useGltfThicknessChannel ? "g" : "r"};
@@ -28,17 +36,26 @@ let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
         ? `let fr=er*surfaceAlbedo*(ri*ab)*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`
         : `let fr=er*surfaceAlbedo*ri*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`;
 
+    // Refracted environment sample. Dispersion splits the refracted ray into
+    // per-RGB index-of-refraction offsets (chromatic aberration); that 3-ray WGSL
+    // is injected from a dynamically-imported module (see refraction-dispersion-wgsl.ts)
+    // so non-dispersion transmission scenes keep the lean single-ray path below.
+    const sampleLines =
+        hasDispersion && dispersionSampleWgsl
+            ? dispersionSampleWgsl
+            : `let rd=refract(-V,N,material.refractionParams.y);
+let cp=scene.viewProjection*vec4<f32>(input.worldPos+rd*th,1.0);
+let ruv=(cp.xy/cp.w)*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5,0.5);
+let er=textureSampleLevel(refractionTexture,refractionSampler_,ruv,lv).rgb*material.environmentIntensity;`;
+
     return `{
 ${thicknessScaleLine}
 ${textureLine}
 ${thicknessLine}
 let ro=1.0-ri;
-let rd=refract(-V,N,material.refractionParams.y);
 let ra=mix(alphaG,0.0,clamp(material.refractionParams.w*3.0-2.0,0.0,1.0));
 let lv=clamp(log2(f32(textureDimensions(refractionTexture).x)*ra)-4.0,0.0,f32(textureNumLevels(refractionTexture)-1));
-let cp=scene.viewProjection*vec4<f32>(input.worldPos+rd*th,1.0);
-let ruv=(cp.xy/cp.w)*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5,0.5);
-let er=textureSampleLevel(refractionTexture,refractionSampler_,ruv,lv).rgb*material.environmentIntensity;
+${sampleLines}
 ${absorptionLine}
 ${refractionLine}
 color=finalIrradiance*ro*ro+finalRadianceScaled+finalSpecularScaled+directDiffuse*ro*ro+fr+emissive;
@@ -50,7 +67,9 @@ function createRefractionRttFragment(
     hasMap: boolean,
     hasThicknessMap: boolean,
     useGltfThicknessChannel: boolean,
-    linearImageProcessing: boolean
+    linearImageProcessing: boolean,
+    hasDispersion: boolean,
+    dispersionSampleWgsl: string | undefined
 ): ShaderFragment {
     const uboFields: UboField[] = [{ _name: "refractionParams", _type: "vec4<f32>" as const }];
     if (hasVolume) {
@@ -81,8 +100,8 @@ function createRefractionRttFragment(
         _uboFields: uboFields,
         _bindings: bindings,
         _fragmentSlots: linearImageProcessing
-            ? { AI: makeRefractionMod(hasVolume, hasMap, hasThicknessMap, useGltfThicknessChannel), ...LINEAR_IMAGE_PROCESSING_SLOTS }
-            : { AI: makeRefractionMod(hasVolume, hasMap, hasThicknessMap, useGltfThicknessChannel) },
+            ? { AI: makeRefractionMod(hasVolume, hasMap, hasThicknessMap, useGltfThicknessChannel, hasDispersion, dispersionSampleWgsl), ...LINEAR_IMAGE_PROCESSING_SLOTS }
+            : { AI: makeRefractionMod(hasVolume, hasMap, hasThicknessMap, useGltfThicknessChannel, hasDispersion, dispersionSampleWgsl) },
     };
 }
 
@@ -112,7 +131,8 @@ function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: 
         data[vo] = Math.log(Math.max(tint[0]!, 1e-6)) / dist;
         data[vo + 1] = Math.log(Math.max(tint[1]!, 1e-6)) / dist;
         data[vo + 2] = Math.log(Math.max(tint[2]!, 1e-6)) / dist;
-        data[vo + 3] = 0;
+        // w carries the chromatic dispersion strength (0 when no KHR_materials_dispersion).
+        data[vo + 3] = refr.dispersion ?? 0;
     }
 
     const tOff = offsets.get("thicknessParams");
@@ -125,80 +145,92 @@ function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: 
     }
 }
 
-export const refractionRttExt: PbrExt = {
-    id: "refraction",
-    phase: "fragment",
-    detect(mat) {
-        const m = mat as TransmissionMat;
-        const ss = m.subsurface as SubSurfaceProps | undefined;
-        const refr = ss?.refraction;
-        const linearImageProcessing = m._linearImageProcessing ? PBR2_LINEAR_IMAGE_PROCESSING : 0;
-        const intensity = m.transmissive ? (refr?.intensity ?? 0) : 0;
-        if (intensity <= 0) {
-            return { f: 0, f2: linearImageProcessing };
-        }
-        let f = 0;
-        let f2 = linearImageProcessing | PBR2_HAS_REFRACTION;
-        if (refr?.texture) {
-            f2 |= PBR2_HAS_REFRACTION_MAP;
-        }
-        if (ss?.thickness?.texture) {
-            f |= PBR_HAS_THICKNESS_MAP;
-        }
-        if (ss?.thickness?.useGlTFChannel) {
-            f2 |= PBR2_HAS_THICKNESS_GLTF_CHANNEL;
-        }
-        if (ss?.tint?.atDistance !== undefined) {
-            f2 |= PBR2_HAS_VOLUME;
-        }
-        return { f, f2 };
-    },
-    frag(ctx) {
-        const linearImageProcessing = (ctx._features2 & PBR2_LINEAR_IMAGE_PROCESSING) !== 0;
-        if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
-            return linearImageProcessing ? { _id: "linear", _fragmentSlots: LINEAR_IMAGE_PROCESSING_SLOTS } : null;
-        }
-        return createRefractionRttFragment(
-            (ctx._features2 & PBR2_HAS_VOLUME) !== 0,
-            (ctx._features2 & PBR2_HAS_REFRACTION_MAP) !== 0,
-            (ctx._features & PBR_HAS_THICKNESS_MAP) !== 0,
-            (ctx._features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0,
-            linearImageProcessing
-        );
-    },
-    writeUbo(data, mat, offsets) {
-        writeRefractionUBO(data, mat as PbrMaterialProps, offsets);
-    },
-    bind(ctx, entries, b) {
-        if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
+/** Build the PBR refraction/transmission extension. When the scene contains a
+ *  dispersive material, `dispersionSampleWgsl` carries the per-RGB 3-ray sample
+ *  WGSL (dynamically imported, scene-isolated); otherwise it is undefined and the
+ *  lean single-ray refraction path is emitted. */
+export function makeRefractionRttExt(dispersionSampleWgsl?: string): PbrExt {
+    return {
+        id: "refraction",
+        phase: "fragment",
+        detect(mat) {
+            const m = mat as TransmissionMat;
+            const ss = m.subsurface as SubSurfaceProps | undefined;
+            const refr = ss?.refraction;
+            const linearImageProcessing = m._linearImageProcessing ? PBR2_LINEAR_IMAGE_PROCESSING : 0;
+            const intensity = m.transmissive ? (refr?.intensity ?? 0) : 0;
+            if (intensity <= 0) {
+                return { f: 0, f2: linearImageProcessing };
+            }
+            let f = 0;
+            let f2 = linearImageProcessing | PBR2_HAS_REFRACTION;
+            if (refr?.texture) {
+                f2 |= PBR2_HAS_REFRACTION_MAP;
+            }
+            if (ss?.thickness?.texture) {
+                f |= PBR_HAS_THICKNESS_MAP;
+            }
+            if (ss?.thickness?.useGlTFChannel) {
+                f2 |= PBR2_HAS_THICKNESS_GLTF_CHANNEL;
+            }
+            if (ss?.tint?.atDistance !== undefined) {
+                f2 |= PBR2_HAS_VOLUME;
+                // Dispersion requires the volume path (per-channel etas + volumeParams.w storage).
+                if (refr?.dispersion) {
+                    f2 |= PBR2_HAS_DISPERSION;
+                }
+            }
+            return { f, f2 };
+        },
+        frag(ctx) {
+            const linearImageProcessing = (ctx._features2 & PBR2_LINEAR_IMAGE_PROCESSING) !== 0;
+            if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
+                return linearImageProcessing ? { _id: "linear", _fragmentSlots: LINEAR_IMAGE_PROCESSING_SLOTS } : null;
+            }
+            return createRefractionRttFragment(
+                (ctx._features2 & PBR2_HAS_VOLUME) !== 0,
+                (ctx._features2 & PBR2_HAS_REFRACTION_MAP) !== 0,
+                (ctx._features & PBR_HAS_THICKNESS_MAP) !== 0,
+                (ctx._features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0,
+                linearImageProcessing,
+                (ctx._features2 & PBR2_HAS_DISPERSION) !== 0,
+                dispersionSampleWgsl
+            );
+        },
+        writeUbo(data, mat, offsets) {
+            writeRefractionUBO(data, mat as PbrMaterialProps, offsets);
+        },
+        bind(ctx, entries, b) {
+            if (!(ctx._features2 & PBR2_HAS_REFRACTION)) {
+                return b;
+            }
+            const texture = ctx._refractionTexture;
+            if (!texture) {
+                throw new Error("PBR transmission requires a frame-graph refraction texture.");
+            }
+            entries.push({ binding: b++, resource: texture.view });
+            entries.push({ binding: b++, resource: texture.sampler });
+            if ((ctx._features2 & PBR2_HAS_REFRACTION_MAP) !== 0) {
+                const map = ((ctx._material as PbrMaterialProps).subsurface?.refraction as SubSurfaceProps["refraction"] | undefined)?.texture!;
+                entries.push({ binding: b++, resource: map.view });
+                entries.push({ binding: b++, resource: getTrilinearAnisotropicSampler(ctx._engine) });
+            }
+            if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
+                const thickness = (ctx._material as PbrMaterialProps).subsurface?.thickness?.texture!;
+                entries.push({ binding: b++, resource: thickness.view });
+                entries.push({ binding: b++, resource: thickness.sampler });
+            }
             return b;
-        }
-        const texture = ctx._refractionTexture;
-        if (!texture) {
-            throw new Error("PBR transmission requires a frame-graph refraction texture.");
-        }
-        entries.push({ binding: b++, resource: texture.view });
-        entries.push({ binding: b++, resource: texture.sampler });
-        if ((ctx._features2 & PBR2_HAS_REFRACTION_MAP) !== 0) {
-            const map = ((ctx._material as PbrMaterialProps).subsurface?.refraction as SubSurfaceProps["refraction"] | undefined)?.texture!;
-            entries.push({ binding: b++, resource: map.view });
-            entries.push({ binding: b++, resource: getTrilinearAnisotropicSampler(ctx._engine) });
-        }
-        if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
-            const thickness = (ctx._material as PbrMaterialProps).subsurface?.thickness?.texture!;
-            entries.push({ binding: b++, resource: thickness.view });
-            entries.push({ binding: b++, resource: thickness.sampler });
-        }
-        return b;
-    },
-    textures(mat, out) {
-        const tex = (mat as PbrMaterialProps).subsurface?.refraction?.texture;
-        if (tex) {
-            out.push(tex);
-        }
-        const thickness = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
-        if (thickness) {
-            out.push(thickness);
-        }
-    },
-};
+        },
+        textures(mat, out) {
+            const tex = (mat as PbrMaterialProps).subsurface?.refraction?.texture;
+            if (tex) {
+                out.push(tex);
+            }
+            const thickness = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
+            if (thickness) {
+                out.push(thickness);
+            }
+        },
+    };
+}

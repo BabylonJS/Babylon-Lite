@@ -319,6 +319,10 @@ export interface RefractionProps {
      *  sample offset depth (KHR_materials_volume — matches BJS
      *  `useThicknessAsDepth`). Default true when volume is present. */
     useThicknessAsDepth?: boolean;
+    /** Chromatic dispersion strength (KHR_materials_dispersion.dispersion).
+     *  Splits the refracted ray into per-RGB index-of-refraction offsets,
+     *  producing chromatic aberration. Requires volume. Default 0 (off). */
+    dispersion?: number;
 }
 
 /** Tint sub-feature. Controls absorption tint color for transmittance. */

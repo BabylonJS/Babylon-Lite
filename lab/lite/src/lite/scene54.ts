@@ -48,7 +48,7 @@ async function main(): Promise<void> {
         gridSize: [SPRITE_ATLAS_INFO.cellWidthPx, SPRITE_ATLAS_INFO.cellHeightPx],
         sampling: "linear",
     });
-    const billboards = createFacingBillboardSystem(atlas, { capacity: 6, blendMode: "alpha" });
+    const billboards = createFacingBillboardSystem(atlas, { capacity: 6 });
 
     addBillboardSpriteIndex(billboards, {
         position: [-1.6, 0.7, -2.15],

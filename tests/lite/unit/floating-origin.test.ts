@@ -42,6 +42,7 @@ function makeMockEngine(hpm = false, useFO = false): EngineContext {
         canvas: {} as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         useHighPrecisionMatrix: hpm,
         useFloatingOrigin: useFO,
         device,

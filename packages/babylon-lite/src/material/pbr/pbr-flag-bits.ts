@@ -66,3 +66,6 @@ export const PBR2_HAS_IRIDESCENCE = 1 << 17;
 export const PBR2_HAS_IRIDESCENCE_MAP = 1 << 18;
 /** Iridescence thickness texture (G channel). */
 export const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
+/** Material has KHR_materials_dispersion (per-channel chromatic refraction).
+ *  Implies PBR2_HAS_VOLUME (the extension requires KHR_materials_volume). */
+export const PBR2_HAS_DISPERSION = 1 << 20;
