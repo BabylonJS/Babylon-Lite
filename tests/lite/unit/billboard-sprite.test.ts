@@ -21,7 +21,6 @@ import { addFacingBillboardSystem, addAxisLockedBillboardSystem } from "../../..
 import { BILLBOARD_SYSTEM_UBO_BYTES } from "../../../packages/babylon-lite/src/sprite/billboard-pipeline";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene";
 import { registerScene } from "../../../packages/babylon-lite/src/scene/scene-core";
-import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
@@ -59,9 +58,9 @@ function makeMockEngine(): EngineContext {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
-        maxDevicePixelRatio: Infinity,
         _device: device,
         _context: {} as GPUCanvasContext,
+        maxDevicePixelRatio: Infinity,
         format: "bgra8unorm",
         _alphaMode: "opaque",
         _animFrameId: 0,
@@ -282,7 +281,7 @@ describe("FacingBillboardSpriteSystem index API", () => {
 describe("addFacingBillboardSystem", () => {
     it("registers a deferred builder without eager GPU work", () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn> };
         device.createBuffer.mockClear();
 
@@ -294,7 +293,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("routes into a transparent depth-tested scene renderable after registerScene", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { order: 230 });
         addFacingBillboardSystem(scene, system);
 
@@ -309,7 +308,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("routes cutout billboards into the direct depth-write bucket", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { blendMode: "cutout", order: 120 });
         addFacingBillboardSystem(scene, system);
 
@@ -324,7 +323,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("builds a scene-UBO billboard pipeline with depth test and no depth write", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: "premultiplied" });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addFacingBillboardSystem(scene, system);
@@ -346,7 +345,7 @@ describe("addFacingBillboardSystem", () => {
         expect(descriptor.label).toBe("facing-billboard-sprite-pipeline");
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
         expect(vertexBuffer.arrayStride).toBe(BILLBOARD_INSTANCE_STRIDE_BYTES);
-        expect((vertexBuffer.attributes as unknown as GPUVertexAttribute[]).map((attribute) => attribute.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+        expect(vertexBuffer.attributes.map((attribute) => attribute.shaderLocation)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
         const shaderDescriptor = device.createShaderModule.mock.calls.find((call) =>
             (call[0] as GPUShaderModuleDescriptor).code.includes("cameraRight")
@@ -363,7 +362,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("builds a cutout billboard pipeline with alpha discard and depth write", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1, blendMode: "cutout", alphaCutoff: 0.42 });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addFacingBillboardSystem(scene, system);
@@ -381,7 +380,7 @@ describe("addFacingBillboardSystem", () => {
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         expect(descriptor.depthStencil?.depthCompare).toBe("greater-equal");
         expect(descriptor.depthStencil?.depthWriteEnabled).toBe(true);
-        const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
+        const vertexBuffer = descriptor.vertex.buffers![0]!;
         expect(vertexBuffer.arrayStride).toBe(BILLBOARD_INSTANCE_STRIDE_BYTES);
         expect(vertexBuffer.attributes).toContainEqual({ shaderLocation: 6, offset: 48, format: "float32x4" });
         const target = (descriptor.fragment!.targets as GPUColorTargetState[])[0]!;
@@ -403,7 +402,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("uploads transparent billboards far-to-near without reordering logical instance data", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 3 });
         addBillboardSpriteIndex(system, { position: [0, 0, 1], sizeWorld: [1, 1], frame: 0 });
         addBillboardSpriteIndex(system, { position: [100, 0, 2], sizeWorld: [1, 1], frame: 0 });
@@ -438,7 +437,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("ignores hidden billboards when refreshing world center and skips all-hidden draws", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 2 });
         const visibleIndex = addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [1, 1], frame: 0 });
         addBillboardSpriteIndex(system, { position: [1000, 0, 1000], sizeWorld: [1, 1], frame: 0, visible: false });
@@ -465,7 +464,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("uploads transparent billboards in logical order when no camera is supplied", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 3 });
         addBillboardSpriteIndex(system, { position: [10, 0, 1], sizeWorld: [1, 1], frame: 0 });
         addBillboardSpriteIndex(system, { position: [20, 0, 2], sizeWorld: [1, 1], frame: 0 });
@@ -485,7 +484,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("uploads cutout billboards in logical order without transparent sorting", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 3, blendMode: "cutout" });
         addBillboardSpriteIndex(system, { position: [10, 0, 1], sizeWorld: [1, 1], frame: 0 });
         addBillboardSpriteIndex(system, { position: [20, 0, 2], sizeWorld: [1, 1], frame: 0 });
@@ -506,7 +505,7 @@ describe("addFacingBillboardSystem", () => {
 
     it("draws with the billboard bind group at group 1 and disposes GPU buffers with the scene", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createFacingBillboardSystem(makeMockAtlas(), { capacity: 1 });
         addBillboardSpriteIndex(system, { position: [0, 0, 0], sizeWorld: [1, 1] });
         addFacingBillboardSystem(scene, system);
@@ -553,7 +552,7 @@ describe("AxisLockedBillboardSpriteSystem", () => {
 
     it("adds to scene and builds a renderable with axis-locked pipeline", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0], { capacity: 1 });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addAxisLockedBillboardSystem(scene, system);
@@ -565,7 +564,7 @@ describe("AxisLockedBillboardSpriteSystem", () => {
 
     it("generates axis-locked shader with billboards.axisAndCutoff and projectedRight", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0, 1, 0], { capacity: 1 });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addAxisLockedBillboardSystem(scene, system);
@@ -593,7 +592,7 @@ describe("AxisLockedBillboardSpriteSystem", () => {
 
     it("writes axis data to UBO after opacity", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
+        const scene = createSceneContext(engine);
         const system = createAxisLockedBillboardSystem(makeMockAtlas(), [0.35, 1, 0.2], { capacity: 1, opacity: 0.75 });
         addBillboardSpriteIndex(system, { position: [1, 2, 3], sizeWorld: [2, 2], frame: 0 });
         addAxisLockedBillboardSystem(scene, system);

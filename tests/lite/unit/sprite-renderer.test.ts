@@ -72,7 +72,7 @@ function mockBuffer(counters: MockCounters): MockBuffer {
     return buf;
 }
 
-function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounters } {
+function makeMockEngine(): { engine: EngineContext; counters: MockCounters } {
     const counters: MockCounters = { buffersCreated: 0, buffersDestroyed: 0, pipelinesBuilt: 0, shaderModules: 0 };
     const queue = { writeBuffer: vi.fn() };
     const device = {
@@ -107,7 +107,7 @@ function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounte
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 0,
         _cbs: [],
-    } as EngineContextInternal;
+    } as EngineContext;
 
     return { engine: eng, counters };
 }
@@ -170,7 +170,7 @@ describe("createSpriteRenderer", () => {
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
-        const shaderLocations = (vertexBuffer.attributes as unknown as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
+        const shaderLocations = vertexBuffer.attributes.map((attr) => attr.shaderLocation);
 
         expect(vertexBuffer.arrayStride).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5]);
@@ -234,7 +234,7 @@ describe("registerSpriteRenderer / unregisterSpriteRenderer", () => {
     it("pushes the renderer onto its engine._renderingContexts", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContext)._renderingContexts;
+        const list = engine._renderingContexts;
         const before = list.length;
         registerSpriteRenderer(sr);
         expect(list.length).toBe(before + 1);
@@ -244,7 +244,7 @@ describe("registerSpriteRenderer / unregisterSpriteRenderer", () => {
     it("is idempotent — a second register call is a no-op", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContext)._renderingContexts;
+        const list = engine._renderingContexts;
         registerSpriteRenderer(sr);
         const len = list.length;
         registerSpriteRenderer(sr);
@@ -258,14 +258,14 @@ describe("registerSpriteRenderer / unregisterSpriteRenderer", () => {
 
         registerSpriteRenderer(sr);
 
-        expect((engine as EngineContext)._renderingContexts).toContain(sr);
-        expect((otherEngine as EngineContext)._renderingContexts).not.toContain(sr);
+        expect(engine._renderingContexts).toContain(sr);
+        expect(otherEngine._renderingContexts).not.toContain(sr);
     });
 
     it("splices the renderer out", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContext)._renderingContexts;
+        const list = engine._renderingContexts;
         const before = list.length;
         registerSpriteRenderer(sr);
         unregisterSpriteRenderer(sr);
@@ -277,7 +277,7 @@ describe("disposeSpriteRenderer", () => {
     it("unregisters the renderer from the engine", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContext)._renderingContexts;
+        const list = engine._renderingContexts;
 
         registerSpriteRenderer(sr);
         expect(list).toContain(sr);
@@ -290,7 +290,7 @@ describe("disposeSpriteRenderer", () => {
     it("is idempotent after unregistering from the engine", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContext)._renderingContexts;
+        const list = engine._renderingContexts;
 
         registerSpriteRenderer(sr);
         disposeSpriteRenderer(sr);
@@ -321,7 +321,7 @@ describe("disposeSpriteRenderer", () => {
 
         // Force layer GPU resources to be allocated by running an update.
         const fakeEncoder = {} as GPUCommandEncoder;
-        (sr._update as (...args: unknown[]) => void)(fakeEncoder, 16);
+        (sr._update(fakeEncoder, 16);
         const createdBefore = counters.buffersCreated;
         expect(createdBefore).toBeGreaterThan(0);
 
