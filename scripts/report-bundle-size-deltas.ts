@@ -1,5 +1,3 @@
-/// <reference types="node" />
-
 /**
  * Compare current bundle sizes vs master baseline and generate a GitHub PR comment.
  *

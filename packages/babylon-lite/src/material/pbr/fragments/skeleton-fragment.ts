@@ -72,7 +72,7 @@ export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
 import type { PbrExt } from "../pbr-flags.js";
 import { MSH_HAS_SKELETON, MSH_HAS_SKELETON_8 } from "../../mesh-features.js";
 
-export const skeletonExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "skeleton",
     phase: "vertex",
     frag(ctx) {

@@ -100,7 +100,7 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
 
 import type { PbrExt } from "../pbr-flags.js";
 
-export const iblExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "ibl",
     phase: "ibl",
     frag(ctx) {

@@ -416,9 +416,9 @@
                         </tr>
                         <tr>
                             <td>PBR Iridescence</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>Native PBR material/glTF iridescence pending</td>
+                            <td>✅</td>
+                            <td>Native PBR thin-film iridescence (Scene 177); NME iridescence remains covered separately by Scene 87</td>
                         </tr>
 
                         <!-- Lights -->
@@ -454,6 +454,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Dynamic UBO packing</td>
+                        </tr>
+                        <tr>
+                            <td>Clustered / Forward+ Lights</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Opt-in PBR clustered point-light container; Scene 177 exercises 1000 small-range lights</td>
                         </tr>
                         <tr>
                             <td>Per-Mesh Light Inclusion</td>
@@ -966,7 +972,7 @@
                         </tr>
                         <tr>
                             <td>KHR_materials_transmission</td>
-                            <td>⚡</td>
+                            <td>✅</td>
                             <td>✅</td>
                             <td>Frame-graph scene-texture transmission (Scenes 30/33/112)</td>
                         </tr>
@@ -984,9 +990,9 @@
                         </tr>
                         <tr>
                             <td>KHR_materials_iridescence</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>Thin-film interference</td>
+                            <td>✅</td>
+                            <td>glTF loader auto-wires factor/IOR/thickness and packed texture channels (Scene 178)</td>
                         </tr>
                         <tr>
                             <td>KHR_materials_emissive_strength</td>
@@ -1312,7 +1318,7 @@
                             <td>Post-Processing Pipeline</td>
                             <td>⚡</td>
                             <td>✅</td>
-                            <td>Low-level EffectWrapper passes are supported; no built-in Bloom/DOF/SSAO stack yet</td>
+                            <td>Frame-graph post-process viewports, pipelined blur/chromatic passes, and Bloom are covered (Scenes 142-144); no built-in DOF/SSAO stack yet</td>
                         </tr>
                         <tr>
                             <td>GUI (2D / 3D UI)</td>
@@ -1330,7 +1336,7 @@
                             <td>Gaussian Splatting</td>
                             <td>✅</td>
                             <td>✅</td>
-                            <td>.ply / .splat / .sog / .spz loaders, transform baking, and material plugin fragments (Scenes 120-126)</td>
+                            <td>.ply / .splat / .sog / .spz loaders, transform baking, material plugin fragments, depth rendering, and GPU picking (Scenes 120-129)</td>
                         </tr>
                         <tr>
                             <td>Octree / Frustum Culling</td>

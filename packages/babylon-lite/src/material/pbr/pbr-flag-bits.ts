@@ -60,3 +60,9 @@ export const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
 export const PBR2_NO_COLOR_OUTPUT = 1 << 15;
 /** Material view runs discard/clip logic and writes exponential shadow-map color. */
 export const PBR2_ESM_SHADOW_OUTPUT = 1 << 16;
+/** Material has native PBR iridescence enabled. */
+export const PBR2_HAS_IRIDESCENCE = 1 << 17;
+/** Iridescence intensity texture (R channel). */
+export const PBR2_HAS_IRIDESCENCE_MAP = 1 << 18;
+/** Iridescence thickness texture (G channel). */
+export const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;

@@ -30,6 +30,7 @@ import {
     type EngineContext,
     type RenderCanvas,
 } from "babylon-lite";
+import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
 
 // Same CDN assets used by the existing Flight Helmet scene (lab scene 14):
 // PBR model, .env IBL, DDS skybox and a reflective ground texture.
@@ -37,12 +38,7 @@ const MODEL_URL = "https://assets.babylonjs.com/meshes/flightHelmet.glb";
 const ENV_URL = "https://assets.babylonjs.com/core/environments/environmentSpecular.env";
 const SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 const GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
-// Served locally by the lab from lab/public/brdf-lut.png. The bundled Pages build
-// rewrites this to a page-relative path, which a Web Worker would otherwise
-// resolve against its own script URL (…/bundle/demos/) instead of the page. The
-// caller therefore resolves it to an absolute URL (against document.baseURI) on
-// the main thread and passes it in via `brdfUrl` so it loads identically in both.
-export const BRDF_ASSET = "/brdf-lut.png";
+export const BRDF_ASSET = demoAssetUrl("./brdf-lut.png", import.meta.url);
 
 /**
  * Build, register and start the Offscreen demo scene on the given canvas/offscreen.
@@ -53,6 +49,8 @@ export const BRDF_ASSET = "/brdf-lut.png";
  *   (resolved against the document) so it loads correctly inside a worker.
  */
 export async function startOffscreenScene(canvas: RenderCanvas, brdfUrl: string = BRDF_ASSET): Promise<EngineContext> {
+    await configureDemoDracoBase(import.meta.url);
+
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 

@@ -262,7 +262,7 @@ const CC_TEX: ReadonlyArray<readonly [number, "texture" | "roughnessTexture" | "
 ];
 
 /** Clearcoat PBR extension (group 1, base-tex phase). */
-export const clearcoatExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "clearcoat",
     phase: "base-tex",
     detect(mat) {

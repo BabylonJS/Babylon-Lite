@@ -2,7 +2,7 @@ import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_ALPHA_TEST } from "../pbr-flag-bits.js";
 
-export const alphaTestExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "alpha-test",
     phase: "fragment",
     frag(ctx) {

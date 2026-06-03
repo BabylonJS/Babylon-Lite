@@ -200,9 +200,28 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
-                # Resolve baseline ref SHA for cache key
+                # Resolve baseline ref SHA for cache key.
+                # Must mirror getBaselineRef() in scripts/build-perf-baseline.ts so the cache key
+                # matches the ref that pnpm build:perf-baseline will actually build from.
+                # NOTE: do NOT chain `git describe ... | xargs git rev-parse || fallback` — when
+                # `git describe` finds no tag it exits non-zero but xargs still runs `git rev-parse`
+                # with no args, which exits 0 with empty stdout, so the `||` fallbacks never fire
+                # and BASELINE_SHA silently becomes empty. That corrupts the cache key to a
+                # constant string shared across all builds.
                 - script: |
-                      BASELINE_SHA=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | xargs git rev-parse 2>/dev/null || git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
+                      set -u
+                      TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+                      if [ -n "$TAG" ]; then
+                          BASELINE_SHA=$(git rev-parse "$TAG")
+                          echo "Baseline ref: $TAG"
+                      else
+                          BASELINE_SHA=$(git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
+                          echo "Baseline ref: origin/master (no v* tag found)"
+                      fi
+                      if [ -z "$BASELINE_SHA" ]; then
+                          echo "##vso[task.logissue type=error]Failed to resolve baseline SHA — aborting to avoid poisoning the perf-baseline cache with an empty key."
+                          exit 1
+                      fi
                       echo "##vso[task.setvariable variable=BASELINE_SHA]$BASELINE_SHA"
                       echo "Baseline SHA: $BASELINE_SHA"
                       mkdir -p lab/public/bundle-baseline
@@ -354,8 +373,12 @@ stages:
 
                 - script: |
                       npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
-                  displayName: "TypeScript type-check"
+                  displayName: "TypeScript type-check (package)"
 
                 - script: |
                       npx tsc -p lab/tsconfig.typecheck.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
-                  displayName: "Lab TypeScript type-check"
+                  displayName: "TypeScript type-check (lab)"
+
+                - script: |
+                      npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (tests)"

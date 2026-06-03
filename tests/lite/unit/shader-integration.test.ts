@@ -33,8 +33,6 @@ const defaultPbrConfig: PbrTemplateConfig = {
     _hasEmissiveColor: false,
     _hasReflectanceExt: false,
     _hasIbl: false,
-    _hasClearcoat: false,
-    _hasSheen: false,
 };
 
 // ── PBR Template Integration ────────────────────────────────────
@@ -62,7 +60,12 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + clearcoat", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasEmissiveTexture: true, _hasTonemap: true, _hasClearcoat: true });
+        const template = createPbrTemplate({
+            ...defaultPbrConfig,
+            _normalMode: "tangent",
+            _hasEmissiveTexture: true,
+            _hasTonemap: true,
+        });
         const result = composeShader(template, [createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, false, false, false)!]);
         expect(result._fragmentWGSL).toContain("visibility_Kelemen");
         expect(result._fragmentWGSL).toContain("getR0RemappedForClearCoat");
@@ -71,7 +74,12 @@ describe("PBR template + fragments integration", () => {
     });
 
     it("composes PBR + sheen", () => {
-        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasEmissiveTexture: true, _hasTonemap: true, _hasSheen: true });
+        const template = createPbrTemplate({
+            ...defaultPbrConfig,
+            _normalMode: "tangent",
+            _hasEmissiveTexture: true,
+            _hasTonemap: true,
+        });
         const result = composeShader(template, [createSheenFragment(false, false)]);
         expect(result._fragmentWGSL).toContain("normalDistributionFunction_CharlieSheen");
         expect(result._fragmentWGSL).toContain("visibility_Ashikhmin");
@@ -87,7 +95,7 @@ describe("PBR template + fragments integration", () => {
         expect(result._fragmentWGSL).toContain("brdfLUT");
         expect(result._fragmentWGSL).toContain("vSphericalL00");
         // 4 IBL bindings in group 1
-        expect(result._meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(5); // mesh UBO + base textures + 4 IBL
+        expect((result._meshBGLDescriptor.entries as unknown as GPUBindGroupLayoutEntry[]).length).toBeGreaterThanOrEqual(5); // mesh UBO + base textures + 4 IBL
         // Scene UBO should include canonical SH coefficients
         expect(result._vertexWGSL).toContain("vSphericalL00");
     });
@@ -98,7 +106,7 @@ describe("PBR template + fragments integration", () => {
         expect(result._vertexWGSL).toContain("readMatrixFromRawSampler");
         expect(result._vertexWGSL).toContain("finalWorld = mesh.world * influence");
         // Skeleton vertex binding (bone texture)
-        expect(result._meshBGLDescriptor.entries.length).toBeGreaterThanOrEqual(2);
+        expect((result._meshBGLDescriptor.entries as unknown as GPUBindGroupLayoutEntry[]).length).toBeGreaterThanOrEqual(2);
         // Should have extra vertex buffer layouts for joints/weights
         expect(result._vertexBufferLayouts.length).toBeGreaterThanOrEqual(5); // pos + normal + tangent + uv + joints + weights
     });
@@ -111,8 +119,16 @@ describe("PBR template + fragments integration", () => {
         expect(result._vertexWGSL).toContain("weights1");
         expect(result._vertexWGSL).not.toContain("undefined");
         expect(result._vertexBufferLayouts.every((layout) => layout.arrayStride !== undefined)).toBe(true);
-        expect(result._vertexBufferLayouts.some((layout) => layout.attributes.some((attribute) => attribute.shaderLocation === 6 && attribute.format === "uint32x4"))).toBe(true);
-        expect(result._vertexBufferLayouts.some((layout) => layout.attributes.some((attribute) => attribute.shaderLocation === 7 && attribute.format === "float32x4"))).toBe(true);
+        expect(
+            result._vertexBufferLayouts.some((layout) =>
+                (layout.attributes as unknown as GPUVertexAttribute[]).some((attribute: GPUVertexAttribute) => attribute.shaderLocation === 6 && attribute.format === "uint32x4")
+            )
+        ).toBe(true);
+        expect(
+            result._vertexBufferLayouts.some((layout) =>
+                (layout.attributes as unknown as GPUVertexAttribute[]).some((attribute: GPUVertexAttribute) => attribute.shaderLocation === 7 && attribute.format === "float32x4")
+            )
+        ).toBe(true);
     });
 
     it("composes PBR + morph + skeleton", () => {
@@ -137,7 +153,7 @@ describe("PBR template + fragments integration", () => {
         // Instance buffer layout
         const tiLayout = result._vertexBufferLayouts.find((l) => l.stepMode === "instance" && l.arrayStride === 64);
         expect(tiLayout).toBeDefined();
-        expect(tiLayout!.attributes.length).toBe(4); // world0-3
+        expect((tiLayout!.attributes as unknown as GPUVertexAttribute[]).length).toBe(4); // world0-3
     });
 
     it("composes PBR + shadow", () => {
@@ -146,7 +162,7 @@ describe("PBR template + fragments integration", () => {
         expect(result._fragmentWGSL).toContain("computeShadowESM_0");
         expect(result._fragmentWGSL).toContain("@group(2)");
         expect(result._shadowBGLDescriptor).not.toBeNull();
-        expect(result._shadowBGLDescriptor!.entries.length).toBe(3);
+        expect((result._shadowBGLDescriptor!.entries as unknown as GPUBindGroupLayoutEntry[]).length).toBe(3);
     });
 
     it("composes full PBR (IBL + clearcoat + sheen + emissive + shadow)", () => {
@@ -158,8 +174,6 @@ describe("PBR template + fragments integration", () => {
             _hasSpecularAA: true,
             _hasEmissiveColor: true,
             _hasIbl: true,
-            _hasClearcoat: true,
-            _hasSheen: true,
         });
         const fragments: ShaderFragment[] = [
             createIblFragment(true),

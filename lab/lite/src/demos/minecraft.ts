@@ -30,8 +30,9 @@ import { FallingBlocks } from "./minecraft/falling-blocks.js";
 import { WaterSim } from "./minecraft/water-sim.js";
 import { Mobs } from "./minecraft/mobs.js";
 import { saveToFile, loadFromFile, type SaveData } from "./minecraft/save-load.js";
+import { demoAssetUrl } from "./demo-asset-url.js";
 
-const PACK_URL = "/minecraft/voxelpack";
+const PACK_URL = demoAssetUrl("./minecraft/voxelpack", import.meta.url);
 const SEED = 1337;
 const RENDER_RADIUS = 6;
 
@@ -184,12 +185,7 @@ async function main(): Promise<void> {
         particles.update(dt);
 
         // Underwater tint when the camera (eye) is inside a water voxel.
-        const submerged =
-            world.getBlock(
-                Math.floor(player.camera.position.x),
-                Math.floor(player.camera.position.y),
-                Math.floor(player.camera.position.z)
-            ) === Block.WATER;
+        const submerged = world.getBlock(Math.floor(player.camera.position.x), Math.floor(player.camera.position.y), Math.floor(player.camera.position.z)) === Block.WATER;
         underwater.style.opacity = submerged ? "1" : "0";
 
         // Advance the day-night cycle and push lighting to sky + materials.

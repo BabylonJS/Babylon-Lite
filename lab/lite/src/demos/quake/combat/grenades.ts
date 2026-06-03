@@ -12,10 +12,11 @@ import { quakeToEngine } from "../geometry/build-geometry.js";
 import type { QuakePhysics } from "../physics/collision.js";
 import type { MonsterSystem } from "./monsters.js";
 import type { Palette } from "../palette.js";
+import { demoAssetUrl } from "../../demo-asset-url.js";
 
 type V3 = [number, number, number];
 
-const MODEL_URL = "/librequake/progs/grenade.mdl";
+const MODEL_URL = demoAssetUrl("./librequake/progs/grenade.mdl", import.meta.url);
 const POOL = 8;
 const GRAVITY = 800; // Quake sv_gravity (units/s²)
 const LAUNCH_SPEED = 600; // forward muzzle velocity
@@ -62,7 +63,10 @@ const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export class GrenadeSystem {
     private readonly grenades: Grenade[] = [];
 
-    constructor(private readonly deps: GrenadeDeps, private readonly hooks: GrenadeHooks) {}
+    constructor(
+        private readonly deps: GrenadeDeps,
+        private readonly hooks: GrenadeHooks
+    ) {}
 
     async load(): Promise<void> {
         const res = await fetch(MODEL_URL);

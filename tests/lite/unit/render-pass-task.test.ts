@@ -7,13 +7,13 @@ import type { DrawBinding, DrawUpdateContext, Renderable } from "../../../packag
 import { createSceneContext, registerScene } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContextInternal } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { createRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { createRenderTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import { enableRenderTaskTransmission, enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 
-const gpuGlobals = globalThis as typeof globalThis & {
-    GPUBufferUsage?: unknown;
-    GPUShaderStage?: unknown;
-    GPUTextureUsage?: unknown;
+const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
+    GPUBufferUsage?: { UNIFORM: number; COPY_DST: number };
+    GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
+    GPUTextureUsage?: { RENDER_ATTACHMENT: number; TEXTURE_BINDING: number; COPY_SRC: number; COPY_DST: number };
 };
 
 gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8 } as unknown as GPUBufferUsage;
@@ -110,6 +110,7 @@ function makeMockEngine(options?: {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: options?.msaaSamples ?? 4,
         drawCallCount: 0,
+        maxDevicePixelRatio: Infinity,
         device,
         context: { configure: () => undefined } as unknown as GPUCanvasContext,
         format: "bgra8unorm",
@@ -264,7 +265,7 @@ describe("RenderPassTask transparent sorting", () => {
         const everyScene = createSceneContext(everyEngine) as SceneContextInternal;
         everyScene.camera = makeCamera();
         const everyOrder: string[] = [];
-        (everyScene._frameGraph._tasks[0]! as { _config: { transmission?: { copyCount: number } } })._config.transmission = { copyCount: 0 };
+        (everyScene._frameGraph._tasks[0]! as RenderTask)._config.transmission = { copyCount: 0 };
         everyScene._renderables.push(
             makeDrawOrderRenderable("opaque", { order: 100 }, everyOrder),
             makeDrawOrderRenderable("glass-a", { order: 150, _transmissive: true }, everyOrder),
@@ -318,7 +319,7 @@ describe("RenderPassTask transparent sorting", () => {
         const engine = makeMockEngine({ textures });
         const scene = createSceneContext(engine) as SceneContextInternal;
         scene.camera = makeCamera();
-        (scene._frameGraph._tasks[0]! as { _config: { transmission?: { generateMipmaps: false } } })._config.transmission = { generateMipmaps: false };
+        (scene._frameGraph._tasks[0]! as RenderTask)._config.transmission = { generateMipmaps: false };
         scene._renderables.push(makeDrawOrderRenderable("glass", { _transmissive: true }, []));
 
         enableSceneTransmission(scene, engine);
@@ -340,7 +341,7 @@ describe("RenderPassTask transparent sorting", () => {
             textures,
             onBeginPass: (descriptor) => {
                 if (descriptor.depthStencilAttachment) {
-                    mainPassResolveTargets.push(!!(descriptor.colorAttachments[0] as GPURenderPassColorAttachment).resolveTarget);
+                    mainPassResolveTargets.push(!!((descriptor.colorAttachments as unknown as GPURenderPassColorAttachment[])[0] as GPURenderPassColorAttachment).resolveTarget);
                 }
             },
         });

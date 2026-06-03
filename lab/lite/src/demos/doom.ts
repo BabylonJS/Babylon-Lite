@@ -11,9 +11,10 @@
  */
 
 import { createEngine, createSceneContext, registerScene, startEngine } from "babylon-lite";
+import { demoAssetUrl } from "./demo-asset-url.js";
 import { buildDoomLevel } from "./doom/doom-level.js";
 
-const WAD_URL = "/doom/freedoom1.wad";
+const WAD_URL = demoAssetUrl("./doom/freedoom1.wad", import.meta.url);
 const MAP_NAME = "E1M1";
 
 async function main(): Promise<void> {

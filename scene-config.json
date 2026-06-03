@@ -317,7 +317,7 @@
         "slug": "scene33-lights-punctual",
         "name": "Scene 33 — KHR_lights_punctual",
         "maxMad": 0.07,
-        "maxRawKB": 94,
+        "maxRawKB": 93.1,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true
@@ -1235,6 +1235,39 @@
         "tags": ["pbr", "gltf", "env", "transmission", "volume", "skybox"],
         "skipPerf": true,
         "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 177,
+        "slug": "scene177-pbr-iridescence",
+        "name": "Scene 177 - PBR Iridescence Sphere",
+        "maxMad": 0.4,
+        "maxRawKB": 82,
+        "description": "Port of Babylon.js playground #2FDQT5#1505: a metallic PBR sphere using native iridescence defaults against environment.env and a blurred PBR skybox.",
+        "tags": ["pbr", "iridescence", "env", "skybox"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 178,
+        "slug": "scene178-gltf-iridescence-abalone",
+        "name": "Scene 178 - IridescenceAbalone glTF",
+        "maxMad": 0.4,
+        "maxRawKB": 96,
+        "description": "KhronosGroup IridescenceAbalone.glb using KHR_materials_iridescence with packed intensity (R) and thickness (G) texture channels, rendered in studio.env.",
+        "tags": ["pbr", "gltf", "iridescence", "env", "skybox"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 120000
+    },
+    {
+        "id": 179,
+        "slug": "scene179-clustered-sponza-lights",
+        "name": "Scene 179 - Clustered Sponza Lights",
+        "maxMad": 0.5,
+        "maxRawKB": 110,
+        "description": "Khronos Sponza glTF lit by 1000 deterministic small-range point lights through the clustered PBR lighting path (port of playground #CSCJO2#89).",
+        "tags": ["pbr", "gltf", "clustered", "lights"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 180000
     },
     {
         "id": 200,

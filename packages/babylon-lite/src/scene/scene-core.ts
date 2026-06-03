@@ -19,6 +19,7 @@ import { createRenderTask } from "../frame-graph/render-task.js";
 import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
+import type { ClusteredLightContainer } from "../light/clustered.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 
 /** Image processing configuration. */
@@ -112,6 +113,10 @@ export interface SceneContextInternal extends SceneContext, RenderingContext {
     _envTextures?: EnvironmentTextures;
     /** Scene-owned shared LightsUniforms UBO state (group 0 binding 1). */
     _lightGpuState?: SceneLightGpuState;
+    /** Optional clustered point-light container. Only populated by the clustered-light extension API. */
+    _clusteredLightContainer?: ClusteredLightContainer;
+    /** Updates clustered light cells for the camera used by the current render pass. */
+    _clusteredLightUpdater?: (camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void;
 
     /** Frame graph driving this scene's rendering. Created eagerly by
      *  `createSceneContext` with a default `RenderTask` that mirrors

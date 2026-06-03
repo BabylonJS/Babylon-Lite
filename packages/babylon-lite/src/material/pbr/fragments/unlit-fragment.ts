@@ -40,7 +40,7 @@ export function writeUnlitUBO(data: Float32Array, material: PbrMaterialProps, of
     data[off + 2] = tint[2]!;
 }
 
-export const unlitExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "unlit",
     phase: "fragment",
     detect(mat) {

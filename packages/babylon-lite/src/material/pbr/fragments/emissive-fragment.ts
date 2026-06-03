@@ -44,7 +44,7 @@ export function writeEmissiveUBO(data: Float32Array, material: PbrMaterialProps,
     data[off + 2] = material.emissiveColor[2]!;
 }
 
-export const emissiveColorExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "emissive-color",
     phase: "fragment",
     frag(ctx) {

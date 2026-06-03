@@ -5,12 +5,23 @@
 // the mesh GPU buffer, mirroring the monster animation path. Inactive weapons
 // are toggled off with setMeshVisible. No GPL code copied.
 
-import { addToScene, createMeshFromData, createTexture2DFromPixels, setMeshVisible, updateMeshPositions, type EngineContext, type Mesh, type SceneContext, type Texture2D } from "babylon-lite";
+import {
+    addToScene,
+    createMeshFromData,
+    createTexture2DFromPixels,
+    setMeshVisible,
+    updateMeshPositions,
+    type EngineContext,
+    type Mesh,
+    type SceneContext,
+    type Texture2D,
+} from "babylon-lite";
 
 import { parseMdl, expandFrame, type MdlModel } from "./mdl.js";
 import { createQuakeMaterial } from "./quake-material.js";
 import type { Palette } from "../palette.js";
 import type { WeaponId, WeaponDef } from "../combat/weapons.js";
+import { demoAssetUrl } from "../../demo-asset-url.js";
 
 // Placement relative to the camera basis (engine units). The view models are
 // authored at the eye (barrel +X forward, body hanging below), so only small
@@ -32,7 +43,12 @@ function quat(ax: number, ay: number, az: number, angle: number): V4 {
 }
 
 function qmul(a: V4, b: V4): V4 {
-    return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+    return [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ];
 }
 
 interface WeaponEntry {
@@ -54,13 +70,12 @@ export class Viewmodel {
         private readonly lightTex: Texture2D,
         private readonly palette: Palette,
         private readonly whiteUV: [number, number]
-    ) {
-    }
+    ) {}
 
     /** Load every weapon's viewmodel. The first def becomes the active weapon. */
     async load(defs: WeaponDef[]): Promise<void> {
         for (const def of defs) {
-            const url = `/librequake/${def.viewModel.file}`;
+            const url = demoAssetUrl(`./librequake/${def.viewModel.file}`, import.meta.url);
             const res = await fetch(url);
             if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
             const model = parseMdl(await res.arrayBuffer(), this.palette);

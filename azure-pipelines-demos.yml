@@ -1,0 +1,89 @@
+# Azure Pipelines — Babylon Lite Demos Deployment
+#
+# Builds the standalone Lite demos and deploys the generated static output to
+# the Babylon.js website CDN through the deployment server.
+
+trigger:
+    branches:
+        include:
+            - master
+
+pr: none
+
+variables:
+    - group: BabylonJS-Deployment
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "9.15.4"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+    - name: deploymentPath
+      value: cdn/website/lite-demos
+    - name: storageAccount
+      value: babylonsnapshots
+    - name: cdnEndpoint
+      value: babylonjs-webbsite
+    - name: cdnProfile
+      value: babylonjscdn
+
+stages:
+    - stage: DeployDemos
+      displayName: "Deploy Lite Demos"
+      jobs:
+          - job: BuildAndDeploy
+            displayName: "Build and Deploy Lite Demos"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chrome
+                  displayName: "Install Chrome for bundle measurement"
+
+                - script: pnpm build:bundle-demos
+                  displayName: "Build demo bundles and static files"
+                  env:
+                      HEADLESS: "true"
+
+                - script: |
+                      set -euo pipefail
+
+                      DEMOS_DIR="$(System.DefaultWorkingDirectory)/lab/public/bundle/demos"
+                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/lite-demos.zip"
+
+                      if ! test -d "$DEMOS_DIR"; then
+                        echo "No demos build output found at $DEMOS_DIR"
+                        exit 1
+                      fi
+
+                      mkdir -p "$(Build.ArtifactStagingDirectory)"
+                      cd "$DEMOS_DIR"
+                      zip -r "$ZIP_PATH" .
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                        -H "Content-Type: multipart/form-data" \
+                        -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+                        -F "path=$(deploymentPath)" \
+                        -F "storageAccount=$(storageAccount)" \
+                        -F "cdnEndpoint=$(cdnEndpoint)" \
+                        -F "cdnProfile=$(cdnProfile)" \
+                        -F "zip=@$ZIP_PATH"
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=$(cdnEndpoint)&profileName=$(cdnProfile)" --fail-with-body -i -X POST \
+                        -H "Authorization: Bearer $(DEPLOY_TOKEN)"
+                  displayName: "Upload demos to deployment server"

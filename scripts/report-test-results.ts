@@ -44,8 +44,8 @@ for (const file of files) {
     const caseRegex = /<testcase\s([^>]*?)>([\s\S]*?)<\/testcase>/g;
     let caseMatch;
     while ((caseMatch = caseRegex.exec(xml)) !== null) {
-        const cAttrs = caseMatch[1];
-        const cBody = caseMatch[2];
+        const cAttrs = caseMatch[1]!;
+        const cBody = caseMatch[2]!;
 
         const failMatch = cBody.match(/<failure[^>]*?(?:message="([^"]*)")?[^>]*>([\s\S]*?)<\/failure>/);
         const errMatch = cBody.match(/<error[^>]*?(?:message="([^"]*)")?[^>]*>([\s\S]*?)<\/error>/);
@@ -95,7 +95,7 @@ if (failed > 0) {
 
 function attr(str: string, name: string): string {
     const m = str.match(new RegExp(`${name}="([^"]*)"`));
-    return m ? m[1] : "";
+    return m ? m[1]! : "";
 }
 
 function num(str: string, name: string): number {
@@ -127,8 +127,8 @@ function extractWarningAnnotations(body: string): string[] {
     const out: string[] = [];
     const propRegex = /<property\s+([^/]*?)\/?>/g;
     let m;
-    while ((m = propRegex.exec(propsBlock[1])) !== null) {
-        const pAttrs = m[1];
+    while ((m = propRegex.exec(propsBlock[1]!)) !== null) {
+        const pAttrs = m[1]!;
         if (attr(pAttrs, "name").toLowerCase() === "warning") {
             const value = attr(pAttrs, "value");
             if (value) out.push(value);

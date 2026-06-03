@@ -10,6 +10,7 @@
 
 import { indicesToRgba, type Palette } from "../palette.js";
 import { parseWad2, readQpic, TYP_QPIC, type Wad2 } from "../render/wad2.js";
+import { demoAssetUrl } from "../../demo-asset-url.js";
 
 const BAR_W = 320;
 const BAR_H = 24;
@@ -46,7 +47,10 @@ export class SbarHud {
     private painUntil = 0;
     private painTimer = 0;
 
-    private constructor(private readonly wad: Wad2, private readonly palette: Palette) {
+    private constructor(
+        private readonly wad: Wad2,
+        private readonly palette: Palette
+    ) {
         const canvas = document.createElement("canvas");
         canvas.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:9998;image-rendering:pixelated;";
         document.body.appendChild(canvas);
@@ -59,7 +63,7 @@ export class SbarHud {
     /** Load gfx.wad and build the overlay; resolves null if the asset is missing. */
     static async create(palette: Palette): Promise<SbarHud | null> {
         try {
-            const res = await fetch("/librequake/gfx.wad");
+            const res = await fetch(demoAssetUrl("./librequake/gfx.wad", import.meta.url));
             if (!res.ok) return null;
             const wad = parseWad2(await res.arrayBuffer());
             return new SbarHud(wad, palette);

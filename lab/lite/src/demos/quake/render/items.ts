@@ -21,10 +21,11 @@ import { quakeToEngine } from "../geometry/build-geometry.js";
 import type { QuakePhysics } from "../physics/collision.js";
 import type { Palette } from "../palette.js";
 import type { WorldEnt } from "../entities/mover-system.js";
+import { demoAssetUrl } from "../../demo-asset-url.js";
 
 type V3 = [number, number, number];
 
-const ASSET_BASE = "/librequake";
+const ASSET_BASE = demoAssetUrl("./librequake", import.meta.url);
 
 /** Brush-model faces with these textures are clip/skip surfaces — never drawn. */
 const SKIP_TEXTURES = new Set(["skip", "clip", "trigger", "hint", "hintskip", "waterskip"]);
