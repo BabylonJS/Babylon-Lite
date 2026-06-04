@@ -18,7 +18,7 @@
  *     reflections instead of flat shaded colours.
  *   - Emissive boost: each block emits a fraction of its own colour so the
  *     bloom post-process (set up in tetris.ts) gives it a soft halo.
- *   - Ghost piece: emissive-only PBR for a glowing wireframe-ish silhouette.
+ *   - Ghost piece: grey, semi-transparent PBR for a faint landing preview.
  *   - Particle bursts: spawned from `tetris/particles.ts` on each row clear.
  *   - Camera shake: short low-frequency offset applied on every clear, scaled
  *     by the number of lines cleared (4-line tetris is the biggest punch).
@@ -30,7 +30,6 @@ import {
     createArcRotateCamera,
     createBox,
     createDirectionalLight,
-    createGround,
     createHemisphericLight,
     createMeshFromData,
     createPbrMaterial,
@@ -128,8 +127,10 @@ export function createTetrisRenderer(engine: EngineContext, scene: SceneContext)
     const device = (engine as unknown as { device: GPUDevice }).device;
 
     // ── Camera ────────────────────────────────────────────────────────────
-    const target = { x: 0, y: cellWorldY(BOARD_ROWS / 2) - 0.5, z: 0 };
-    const camera = createArcRotateCamera(Math.PI / 2 + 0.04, Math.PI / 2 - 0.06, 30, target);
+    // Aim at the well's true vertical centre (midpoint of the top and bottom
+    // rows) so the framed stage sits centred in view.
+    const target = { x: 0, y: (cellWorldY(0) + cellWorldY(BOARD_ROWS - 1)) / 2, z: 0 };
+    const camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 30, target);
     camera.nearPlane = 0.5;
     camera.farPlane = 400;
     scene.camera = camera;
@@ -210,21 +211,6 @@ export function createTetrisRenderer(engine: EngineContext, scene: SceneContext)
     // this function), so there's no procedural backdrop sphere here.
 
     // ── Static well frame ────────────────────────────────────────────────
-    // Floor: a polished near-black slab. Low roughness lets it pick up soft
-    // environment highlights and the colour bleed from the blocks above, giving
-    // the well a reflective base that grounds the scene.
-    const floor = createGround(engine, { width: BOARD_COLS + 2.2, height: 2.8 });
-    floor.material = createPbrMaterial({
-        baseColorTexture: whiteTex,
-        baseColorFactor: [0.015, 0.018, 0.026, 1],
-        ormTexture: orm(0.12, 0.0),
-        environmentIntensity: 1.0,
-        directIntensity: 0.6,
-        enableSpecularAA: true,
-    });
-    floor.position.set(0, cellWorldY(BOARD_ROWS - 1) - 0.55, 0);
-    addToScene(scene, floor);
-
     // Back panel — a dark, slightly glossy backboard behind the playfield so the
     // colourful blocks read against a deep, even surface rather than the busy
     // skybox. Mid-low roughness keeps the environment reflection diffuse.
@@ -241,15 +227,16 @@ export function createTetrisRenderer(engine: EngineContext, scene: SceneContext)
     back.position.set(0, (cellWorldY(0) + cellWorldY(BOARD_ROWS - 1)) / 2, -0.7);
     addToScene(scene, back);
 
-    // Frame — a real 3-D dark-metal bezel around the left, right and top of the
-    // well (the floor closes the bottom). Polished metallic walls with genuine
-    // Z-thickness catch the studio reflections and define the play area as a
-    // solid cabinet, replacing the old flat neon strips.
+    // Frame — a real 3-D dark-metal bezel fully enclosing the well (left, right,
+    // top and bottom). Polished metallic walls with genuine Z-thickness catch the
+    // studio reflections and define the play area as a solid cabinet, replacing
+    // the old flat neon strips and the separate floor slab.
     const FRAME_CY = (cellWorldY(0) + cellWorldY(BOARD_ROWS - 1)) / 2;
     const frameBars: { sx: number; sy: number; px: number; py: number }[] = [
         { sx: 0.5, sy: BOARD_ROWS + 1.7, px: -(BOARD_COLS / 2 + 0.35), py: FRAME_CY },
         { sx: 0.5, sy: BOARD_ROWS + 1.7, px: BOARD_COLS / 2 + 0.35, py: FRAME_CY },
         { sx: BOARD_COLS + 1.7, sy: 0.5, px: 0, py: cellWorldY(0) + 0.85 },
+        { sx: BOARD_COLS + 1.7, sy: 0.5, px: 0, py: cellWorldY(BOARD_ROWS - 1) - 0.85 },
     ];
     for (const f of frameBars) {
         const bar = createBox(engine, 1);
@@ -321,16 +308,18 @@ export function createTetrisRenderer(engine: EngineContext, scene: SceneContext)
         blockGeometry.indices,
         blockGeometry.uvs,
     );
-    // Ghost piece: bright emissive cyan so it reads as a glowing projection
-    // of where the active piece will land. Kept saturated so a single visible
-    // cell in a busy field still stands out against the colored blocks below.
+    // Ghost piece: a neutral grey, semi-transparent copy of the landing
+    // silhouette. Full block size (not shrunk) so it reads as a faint preview
+    // of where the active piece will settle, letting the colored blocks below
+    // show through.
     ghost.material = createPbrMaterial({
         baseColorTexture: whiteTex,
-        baseColorFactor: [0.2, 0.45, 0.7, 1],
-        ormTexture: orm(0.35, 0.0),
-        emissiveColor: [0.6, 1.4, 2.2],
-        environmentIntensity: 0.4,
-        directIntensity: 0.3,
+        baseColorFactor: [0.55, 0.58, 0.62, 1],
+        ormTexture: orm(0.4, 0.0),
+        environmentIntensity: 0.6,
+        directIntensity: 0.5,
+        alpha: 0.28,
+        alphaBlend: true,
     });
     const ghostMatrices = new Float32Array(16 * GHOST_INSTANCES);
     clearToDegenerate(ghostMatrices, GHOST_INSTANCES);
@@ -450,7 +439,7 @@ export function createTetrisRenderer(engine: EngineContext, scene: SceneContext)
                     if (cy < 0) {
                         continue;
                     }
-                    writeMatrix(ghostMatrices, ghostCount, cellWorldX(cx), cellWorldY(cy), 0, BLOCK_SIZE * 0.78);
+                    writeMatrix(ghostMatrices, ghostCount, cellWorldX(cx), cellWorldY(cy), 0, BLOCK_SIZE);
                     ghostCount++;
                 }
             }
