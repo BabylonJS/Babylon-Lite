@@ -25,25 +25,16 @@ export interface PointLight extends LightBase {
  * @returns Plain `PointLight` data to be added to a scene via `addToScene`.
  */
 export function createPointLight(position: [number, number, number], intensity = 1.0): PointLight {
-    const _localMatrix: Mat4 = allocateMat4();
+    const m = allocateMat4() as unknown as Mat4Storage;
+    m[0] = 1;
+    m[5] = 1;
+    m[10] = 1;
+    m[15] = 1;
+    const _localMatrix = m as unknown as Mat4;
     const { wm, onDirty, lvs } = createLightBase(() => {
-        const m = _localMatrix as unknown as Mat4Storage;
-        m[0] = 1;
-        m[1] = 0;
-        m[2] = 0;
-        m[3] = 0;
-        m[4] = 0;
-        m[5] = 1;
-        m[6] = 0;
-        m[7] = 0;
-        m[8] = 0;
-        m[9] = 0;
-        m[10] = 1;
-        m[11] = 0;
         m[12] = light.position.x;
         m[13] = light.position.y;
         m[14] = light.position.z;
-        m[15] = 1;
         return _localMatrix;
     });
 

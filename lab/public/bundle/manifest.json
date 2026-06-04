@@ -1,7 +1,7 @@
 {
   "scene1": {
     "rawKB": 87.4,
-    "gzipKB": 35.6,
+    "gzipKB": 35.5,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene1-background-dds-skybox-DlMZ2pEV.js",
@@ -33,7 +33,7 @@
     "bjsGzipKB": 343.7
   },
   "scene3": {
-    "rawKB": 50.9,
+    "rawKB": 50.8,
     "gzipKB": 20.2,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -146,13 +146,13 @@
     "bjsGzipKB": 410.4
   },
   "scene9": {
-    "rawKB": 56.2,
+    "rawKB": 56.1,
     "gzipKB": 22.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene9-generate-mipmaps-CUImEqsf.js",
       "scene9-normal-map-fragment-BP7duUVm.js",
-      "scene9-point-light-JLZSkC71.js",
+      "scene9-point-light-ESYN5_k0.js",
       "scene9-standard-renderable-BDPfKSS5.js",
       "scene9-std-ambient-fragment-Cxekaaad.js",
       "scene9-std-opacity-fragment-DvrCnTul.js",
@@ -420,7 +420,7 @@
     "bjsGzipKB": 565.6
   },
   "scene24": {
-    "rawKB": 56.2,
+    "rawKB": 56.1,
     "gzipKB": 23.4,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -428,7 +428,7 @@
       "scene24-cube-texture-DWu8YwZz.js",
       "scene24-generate-mipmaps-Drut-PkZ.js",
       "scene24-parse-camera-C5teympL.js",
-      "scene24-point-light-Cvea4WRr.js",
+      "scene24-point-light-Dzvg6X6L.js",
       "scene24-standard-renderable-vt1MPx20.js",
       "scene24-std-ambient-fragment-DdEcFNW8.js",
       "scene24-std-cube-reflection-fragment-CYvF8dzN.js",
@@ -453,8 +453,8 @@
     "bjsGzipKB": 335.9
   },
   "scene26": {
-    "rawKB": 86.3,
-    "gzipKB": 34.8,
+    "rawKB": 86.2,
+    "gzipKB": 34.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene26-emissive-fragment-DXzEc7Y5.js",
@@ -601,7 +601,7 @@
     "runtimeChunks": [
       "scene33-generate-mipmaps-CFEjLmuk.js",
       "scene33-gltf-ext-dielectric-BD8fbfh2.js",
-      "scene33-gltf-feature-lights-punctual-D3XfME-R.js",
+      "scene33-gltf-feature-lights-punctual-D5fxK647.js",
       "scene33-gltf-glb-parser-BdYiApo0.js",
       "scene33-ibl-fragment-DE6mLQIJ.js",
       "scene33-light-base-B-CHBmUt.js",
@@ -609,7 +609,7 @@
       "scene33-pbr-refraction--MQSC_t_.js",
       "scene33-pbr-renderable-kuWbqXOf.js",
       "scene33-pbr-transmission-ext-BIm1PKUs.js",
-      "scene33-point-light-0LtxyugM.js",
+      "scene33-point-light-fM4uWxGS.js",
       "scene33-rgbd-decode-Baow08lG.js",
       "scene33-scene-uniforms-FTYH6Ct0.js",
       "scene33.js"
@@ -1001,7 +1001,7 @@
     "bjsGzipKB": 551.4
   },
   "scene67": {
-    "rawKB": 75.2,
+    "rawKB": 75.1,
     "gzipKB": 31.2,
     "ignoredRawKB": 9.6,
     "runtimeChunks": [
@@ -1024,7 +1024,7 @@
   },
   "scene68": {
     "rawKB": 85.7,
-    "gzipKB": 34.5,
+    "gzipKB": 34.6,
     "ignoredRawKB": 11.4,
     "runtimeChunks": [
       "scene68-_math-factory-DFVyS8gB.js",
@@ -1045,7 +1045,7 @@
     "bjsGzipKB": 564.3
   },
   "scene69": {
-    "rawKB": 85.2,
+    "rawKB": 85.1,
     "gzipKB": 34.8,
     "ignoredRawKB": 13.3,
     "runtimeChunks": [
@@ -1068,8 +1068,8 @@
     "bjsGzipKB": 564.4
   },
   "scene70": {
-    "rawKB": 85.5,
-    "gzipKB": 35.3,
+    "rawKB": 85.4,
+    "gzipKB": 35.4,
     "ignoredRawKB": 14.9,
     "runtimeChunks": [
       "scene70-_math-factory-DFVyS8gB.js",
@@ -1092,7 +1092,7 @@
     "bjsGzipKB": 564.5
   },
   "scene71": {
-    "rawKB": 85.4,
+    "rawKB": 85.3,
     "gzipKB": 34.8,
     "ignoredRawKB": 12.9,
     "runtimeChunks": [
@@ -1115,7 +1115,7 @@
     "bjsGzipKB": 564.4
   },
   "scene72": {
-    "rawKB": 102.4,
+    "rawKB": 102.3,
     "gzipKB": 42.3,
     "ignoredRawKB": 3.3,
     "runtimeChunks": [
@@ -1699,7 +1699,7 @@
   },
   "scene111": {
     "rawKB": 129.6,
-    "gzipKB": 52.1,
+    "gzipKB": 52.2,
     "ignoredRawKB": 6.4,
     "runtimeChunks": [
       "scene111-_math-factory-DFVyS8gB.js",
@@ -2004,13 +2004,13 @@
     ]
   },
   "scene143": {
-    "rawKB": 65.2,
+    "rawKB": 65.1,
     "gzipKB": 25.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene143-generate-mipmaps-BHg7ig5Q.js",
       "scene143-normal-map-fragment-CCP8Y4uo.js",
-      "scene143-point-light-DW1ypfqA.js",
+      "scene143-point-light-CHHO5fr1.js",
       "scene143-standard-renderable-Bm8Ejhia.js",
       "scene143-std-ambient-fragment-POJhHsBY.js",
       "scene143-std-opacity-fragment-BFyJ36CD.js",
