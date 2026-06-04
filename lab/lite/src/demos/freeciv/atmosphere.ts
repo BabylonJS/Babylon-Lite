@@ -111,7 +111,7 @@ let vis = fx.params.x;
 let a = cover * vis;
 if (a <= 0.001) { discard; }
 if (isShadow) {
-return vec4<f32>(0.05, 0.07, 0.11, a * 0.45) * L.opacityMul;
+return vec4<f32>(0.02, 0.03, 0.05, a * 0.62) * L.opacityMul;
 }
 return vec4<f32>(0.84, 0.88, 0.96, a * 0.52) * L.opacityMul;
 `;
