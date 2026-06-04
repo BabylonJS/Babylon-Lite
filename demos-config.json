@@ -51,5 +51,12 @@
         "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume) framed with the same static camera and studio HDR environment as Scene 176. Frame-graph scene-texture transmission renders the refractive amber. Pure Lite — no BJS.",
         "tags": ["gltf", "pbr", "transmission", "env", "showcase"],
         "mobile": true
+    },
+    {
+        "slug": "bath-day",
+        "name": "Bath Day",
+        "description": "Animated, stylized glTF diorama: a frog enjoying a candle-lit bath surrounded by water and plants, slowly orbiting under a studio HDR environment for PBR lighting. The Draco-compressed model's animation groups auto-play on load. Pure Lite — no BJS. \"Bath Day\" by StanSt (https://sketchfab.com/stanst), CC BY 4.0.",
+        "tags": ["gltf", "pbr", "animation", "diorama", "showcase"],
+        "mobile": true
     }
 ]

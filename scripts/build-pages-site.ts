@@ -210,6 +210,15 @@ async function main(): Promise<void> {
         cpSync(FREECIV_SRC, resolve(SITE, "freeciv"), { recursive: true });
     }
 
+    // 4e-bis. Bath Day demo's vendored glTF model. Committed at
+    //     lab/public/bath_day.glb; the demo loads it relative to the page via
+    //     demoAssetUrl("./bath_day.glb"), which resolves to /bundle/demos/, so
+    //     copy it alongside the demo bundles.
+    if (demos.some((d) => d.slug === "bath-day")) {
+        const glb = resolve(LAB, "public", "bath_day.glb");
+        if (existsSync(glb)) cpSync(glb, resolve(SITE, "bundle/demos/bath_day.glb"));
+    }
+
     // 4e. Draco decoder (JS glue + WASM) and the PBR BRDF LUT. glTF/PBR demos load
     //     these relative to the page (Draco only on KHR_draco_mesh_compression
     //     assets); the bundle ships rewritten relative references, so place the

@@ -187,6 +187,13 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(FREECIV_SRC, resolve(demosDir, "freeciv"), "Freeciv");
     }
 
+    if (demos.some((demo) => demo.slug === "bath-day")) {
+        const glb = resolve(labDir, "public", "bath_day.glb");
+        if (existsSync(glb)) {
+            cpSync(glb, resolve(demosDir, "bath_day.glb"));
+        }
+    }
+
     for (const file of [...DRACO_FILES, "brdf-lut.png"]) {
         const src = resolve(labDir, "public", file);
         if (existsSync(src)) {

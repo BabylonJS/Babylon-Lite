@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Babylon Lite — Demo: Bath Day</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { width: 100%; height: 100%; display: block; }
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0b0809; color: #f4ece9;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      transition: opacity 0.5s ease;
+    }
+    .loading-overlay.is-hidden { opacity: 0; pointer-events: none; }
+    .loading-box { display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; padding: 0 1rem; }
+    .loading-spinner {
+      width: 54px; height: 54px; border-radius: 50%;
+      border: 4px solid rgba(224, 104, 75, 0.25); border-top-color: #e0684b;
+      animation: lite-spin 0.9s linear infinite;
+    }
+    .loading-label { font-size: 1.05rem; font-weight: 600; }
+    .loading-sub { font-size: 0.8rem; color: #b8a9a4; }
+    @keyframes lite-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .loading-spinner { animation-duration: 2.4s; } }
+
+    /* Always-visible attribution required by the CC-BY 4.0 license. */
+    .credit {
+      position: fixed; right: 12px; bottom: 10px; z-index: 10001;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 0.72rem; line-height: 1.3; color: #e9e2df;
+      background: rgba(0, 0, 0, 0.45); padding: 5px 9px; border-radius: 6px;
+      text-decoration: none; backdrop-filter: blur(3px);
+      transition: background 0.2s ease;
+    }
+    .credit:hover { background: rgba(0, 0, 0, 0.7); }
+    .credit b { font-weight: 600; }
+    /* Auto-rotate toggle button. */
+    .ctrl-btn {
+      position: fixed; left: 12px; bottom: 10px; z-index: 10001;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 0.75rem; line-height: 1; color: #e9e2df;
+      background: rgba(0, 0, 0, 0.45); padding: 8px 12px; border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+      backdrop-filter: blur(3px); transition: background 0.2s ease;
+    }
+    .ctrl-btn:hover { background: rgba(0, 0, 0, 0.7); }
+  </style>
+</head>
+<body>
+  <!--
+    This page loads the production-BUNDLED demo (tree-shaken + minified) from
+    /bundle/demos/, NOT the raw TypeScript source. Run `pnpm build:bundle-demos`
+    (also part of `pnpm dev:lab`) to (re)generate the bundle this page references.
+  -->
+  <canvas id="renderCanvas"></canvas>
+  <button id="rotateToggle" class="ctrl-btn" type="button" aria-pressed="true">⏸ Auto-rotate</button>
+  <a class="credit" href="https://sketchfab.com/stanst" target="_blank" rel="noopener noreferrer">
+    <b>&ldquo;Bath Day&rdquo;</b> by StanSt · CC BY 4.0
+  </a>
+  <div id="loadingOverlay" class="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-box">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-label">Loading Bath Day…</div>
+      <div class="loading-sub">Fetching animated glTF diorama & studio environment…</div>
+    </div>
+  </div>
+  <script>
+    // Loading screen: hide once the demo signals ready (or errors) via the canvas
+    // data attributes it sets when its assets are loaded and the engine starts.
+    (function () {
+      var overlay = document.getElementById("loadingOverlay");
+      var canvas = document.getElementById("renderCanvas");
+      if (!overlay || !canvas) return;
+      var done = false;
+      function hide() {
+        if (done) return;
+        done = true;
+        overlay.classList.add("is-hidden");
+        setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
+      }
+      function check() {
+        if (canvas.dataset.ready === "true" || canvas.dataset.error) { hide(); return true; }
+        return false;
+      }
+      if (!check()) {
+        new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
+        setTimeout(hide, 45000);
+      }
+    })();
+  </script>
+  <script type="module" src="/lite/bundle/demos/bath-day.js"></script>
+</body>
+</html>
