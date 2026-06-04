@@ -12,7 +12,7 @@
  *    → return NodeMaterial with `inputs` map + `_buildGroup` dispatcher.
  */
 
-import type { EngineContext, EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult } from "../../render/renderable.js";
 import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
@@ -20,6 +20,7 @@ import { loadGraphEmitters, emitGraph } from "./node-emitter.js";
 import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
 import type { Material } from "../material.js";
 import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js";
+import type * as NodeEnv from "./node-env.js";
 
 // ─── Public API types ───────────────────────────────────────────────
 
@@ -28,6 +29,37 @@ import { compileNodePipeline, type NodeCompileResult } from "./node-pipeline.js"
  *  through the inherited `_buildGroup` hook. */
 export interface NodeMaterial extends Material {
     readonly inputs: Record<string, NodeInputHandle>;
+    /** @internal */
+    readonly _compile: NodeCompileResult;
+    /** @internal */
+    readonly _state: NodeBuildState;
+    /** @internal */
+    readonly _graph: NodeGraph;
+    /** @internal */
+    readonly _vertexBody: string;
+    /** @internal */
+    readonly _fragmentBody: string;
+    /** @internal Ordered list of vertex attribute names that the pipeline's vertex buffers expect. */
+    readonly _vertexAttrNames: readonly string[];
+    /** @internal */
+    readonly _shadowGenerators: readonly import("../../shadow/shadow-generator.js").ShadowGenerator[];
+    /** @internal Whether this material requires alpha blending (derived from graph + JSON flags). */
+    readonly _needsAlphaBlending: boolean;
+    /** @internal */
+    _nodeUBO: GPUBuffer | null;
+    /** @internal */
+    _uboDirty: boolean;
+    /** @internal */
+    _uniformValues: Map<string, UniformSlot>;
+    /** @internal Per-texture-binding Texture2D slot (populated from options.textures and/or inputs.*.texture). */
+    _textureSlots: Map<string, { current: Texture2D | null }>;
+    /** @internal Pre-loaded env helpers (only populated when state.usesEnv was set during emitGraph).
+     *  Forwarded to the renderable so it doesn't have to dynamic-import again. */
+    _envHelpers: typeof NodeEnv | null;
+    /** @internal ESM shadow depth code emitted from the node graph (when shadow generators are present). */
+    readonly _esmShadowDepthCode?: string;
+    /** @internal ESM shadow params UBO buffer. */
+    readonly _esmShadowParamsUBO?: GPUBuffer;
 }
 
 /** A live handle to one named Node Material input (uniform or texture). Set
@@ -65,27 +97,7 @@ export interface ParseNodeMaterialOptions {
 
 // ─── Internal shape (what the renderable + updater read) ────────────
 
-export interface NodeMaterialInternal extends NodeMaterial {
-    readonly _compile: NodeCompileResult;
-    readonly _state: NodeBuildState;
-    readonly _graph: NodeGraph;
-    readonly _vertexBody: string;
-    readonly _fragmentBody: string;
-    /** Ordered list of vertex attribute names that the pipeline's vertex buffers expect. */
-    readonly _vertexAttrNames: readonly string[];
-    readonly _shadowGenerators: readonly import("../../shadow/shadow-generator.js").ShadowGenerator[];
-    /** Whether this material requires alpha blending (derived from graph + JSON flags). */
-    readonly _needsAlphaBlending: boolean;
-    _nodeUBO: GPUBuffer | null;
-    _uboDirty: boolean;
-    _uniformValues: Map<string, UniformSlot>;
-    /** Per-texture-binding Texture2D slot (populated from options.textures and/or inputs.*.texture). */
-    _textureSlots: Map<string, { current: Texture2D | null }>;
-    /** Pre-loaded env helpers (only populated when state.usesEnv was set during emitGraph).
-     *  Forwarded to the renderable so it doesn't have to dynamic-import again. */
-    _envHelpers: typeof import("./node-env.js") | null;
-}
-
+/** @internal */
 interface UniformSlot {
     readonly _name: string;
     readonly _type: NodeValueType;
@@ -155,11 +167,10 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _shadowEmitter = (await import("./node-shadow.js")).emitShadow;
     }
 
-    const _engine = engine as EngineContextInternal;
     const compile = compileNodePipeline(state, vertexWgsl, fragmentWgsl, {
-        _engine,
-        _format: _engine.format,
-        _msaaSamples: _engine.msaaSamples,
+        _engine: engine,
+        _format: engine.format,
+        _msaaSamples: engine.msaaSamples,
         _backFaceCulling: graph.backFaceCulling,
         _alphaMode: graph.needsAlphaBlending ? graph.alphaMode : 0,
         _envEmitter,
@@ -262,7 +273,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     };
     _buildGroup._materialFamily = "node";
 
-    const material: NodeMaterialInternal = {
+    const material: NodeMaterial = {
         inputs,
         _renderFeatures: { features: 0 },
         _buildGroup,
@@ -405,7 +416,7 @@ function extractDefault(raw: unknown, type: NodeValueType): number[] {
 
 // ─── UBO writer ─────────────────────────────────────────────────────
 
-export function writeNodeUBO(engine: EngineContextInternal, buffer: GPUBuffer, material: NodeMaterialInternal): void {
+export function writeNodeUBO(engine: EngineContext, buffer: GPUBuffer, material: NodeMaterial): void {
     const size = material._compile._nodeUboSize;
     if (size === 0) {
         return;
@@ -415,5 +426,5 @@ export function writeNodeUBO(engine: EngineContextInternal, buffer: GPUBuffer, m
         const dstIdx = slot._offsetBytes >> 2;
         scratch.set(slot._values, dstIdx);
     }
-    engine.device.queue.writeBuffer(buffer, 0, scratch);
+    engine._device.queue.writeBuffer(buffer, 0, scratch);
 }

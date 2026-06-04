@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
-import type { EngineContextInternal } from "../../../packages/babylon-lite/src/engine/engine";
-import type { SceneContextInternal } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import { addBillboardSpriteIndex, createFacingBillboardSystem, removeBillboardSpriteIndex } from "../../../packages/babylon-lite/src/sprite/billboard-sprite";
 import { addBillboardSprite, isBillboardSpriteHandleAlive } from "../../../packages/babylon-lite/src/sprite/billboard-sprite-handle";
@@ -97,11 +97,11 @@ function billboardUvMinX(system: ReturnType<typeof createFacingBillboardSystem>,
     return system._instanceData[index * system._instanceFloatsPerSprite + 5]!;
 }
 
-function makeSpriteAnimationScene(): SceneContextInternal {
+function makeSpriteAnimationScene(): SceneContext {
     return {
         _beforeRender: [] as Array<(deltaMs: number) => void>,
         _disposables: [] as Array<() => void>,
-    } as unknown as SceneContextInternal;
+    } as unknown as SceneContext;
 }
 
 function spriteAnimationManagerBinding(manager: ReturnType<typeof createSpriteAnimationManager>): unknown {
@@ -474,10 +474,10 @@ describe("sprite animation render-loop attachments", () => {
         playSprite2DIndexAnimation(manager, layer, 0, 0, 3, true, 50);
         let frameSeenByUpload = -1;
         const renderer = {
-            _engine: { _currentDelta: 51 } as EngineContextInternal,
+            _engine: { _currentDelta: 51 } as EngineContext,
             _beforeUpdate: [] as Array<(deltaMs: number) => void>,
             _disposeCallbacks: [] as Array<() => void>,
-            _update(this: { _beforeUpdate: Array<(d: number) => void>; _engine: EngineContextInternal }): void {
+            _update(this: { _beforeUpdate: Array<(d: number) => void>; _engine: EngineContext }): void {
                 for (const hook of this._beforeUpdate) {
                     hook(this._engine._currentDelta);
                 }
@@ -530,10 +530,10 @@ describe("sprite animation render-loop attachments", () => {
         playSprite2DIndexAnimation(secondManager, secondLayer, 0, 0, 3, true, 50);
 
         const renderer = {
-            _engine: { _currentDelta: 51 } as EngineContextInternal,
+            _engine: { _currentDelta: 51 } as EngineContext,
             _beforeUpdate: [] as Array<(deltaMs: number) => void>,
             _disposeCallbacks: [] as Array<() => void>,
-            _update(this: { _beforeUpdate: Array<(d: number) => void>; _engine: EngineContextInternal }): void {
+            _update(this: { _beforeUpdate: Array<(d: number) => void>; _engine: EngineContext }): void {
                 for (const hook of this._beforeUpdate) {
                     hook(this._engine._currentDelta);
                 }

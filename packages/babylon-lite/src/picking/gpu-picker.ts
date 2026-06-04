@@ -1,8 +1,7 @@
 import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { MeshInternal } from "../mesh/mesh.js";
 import type { PickingInfo } from "./picking-info.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type * as DeformedGeometry from "./deformed-geometry.js";
 import type * as GsPickingPipeline from "./gs-picking-pipeline.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
@@ -25,7 +24,7 @@ const _tiUboScratch = new Uint32Array(4);
 
 /** GPU-based picker — pure state. Use pickAsync() and disposePicker() standalone functions. */
 export interface GpuPicker {
-    /** Optional hook for detailed picking (Phase 2). */
+    /** @internal Optional hook for detailed picking (Phase 2). */
     _detailedPick: ((info: PickingInfo, ray: { origin: [number, number, number]; direction: [number, number, number]; length: number }) => void | Promise<void>) | null;
     /** @internal */
     _scene: SceneContext;
@@ -62,8 +61,8 @@ export function createGpuPicker(scene: SceneContext): GpuPicker {
     };
 }
 
-function ensureTargets(engine: EngineContextInternal, picker: GpuPicker): PickTargets1x1 {
-    const device = engine.device;
+function ensureTargets(engine: EngineContext, picker: GpuPicker): PickTargets1x1 {
+    const device = engine._device;
     if (picker._rt) {
         return picker._rt;
     }
@@ -88,8 +87,8 @@ function ensureTargets(engine: EngineContextInternal, picker: GpuPicker): PickTa
     return picker._rt;
 }
 
-function ensureSceneUbo(engine: EngineContextInternal, picker: GpuPicker): GPUBuffer {
-    const device = engine.device;
+function ensureSceneUbo(engine: EngineContext, picker: GpuPicker): GPUBuffer {
+    const device = engine._device;
     if (!picker._sceneUbo) {
         picker._sceneUbo = createEmptyUniformBuffer(engine, 64, "pick-scene-ubo");
         const sceneBGL = getPickingSceneBGL(engine);
@@ -117,8 +116,8 @@ function computePickVP(out: Float32Array, vp: Float32Array, px: number, py: numb
 /** Pick the mesh at CSS-space canvas coordinates, matching Babylon.js Scene.pick. Returns a PickingInfo. */
 export async function pickAsync(picker: GpuPicker, x: number, y: number): Promise<PickingInfo> {
     const scene = picker._scene;
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine;
+    const device = engine._device;
     const canvas = engine.canvas;
     const camera = scene.camera;
     if (!camera) {
@@ -162,7 +161,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     let nextId = 1;
     let deformedGeometry: typeof DeformedGeometry | null = null;
     for (let mi = 0; mi < meshCount; mi++) {
-        const mesh = meshes[mi] as MeshInternal;
+        const mesh = meshes[mi]!;
         if ((mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
             deformedGeometry = await import("./deformed-geometry.js");
             break;
@@ -187,7 +186,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     const tempBuffers: GPUBuffer[] = [];
     for (let mi = 0; mi < meshCount; mi++) {
         const mesh = meshes[mi]!;
-        const gpu = (mesh as MeshInternal)._gpu;
+        const gpu = mesh._gpu;
         const ti = mesh.thinInstances;
 
         if (ti && ti.count > 0 && ti._gpuBuffer) {
@@ -217,9 +216,8 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
             const meshUbo = createUniformBuffer(engine, _uboView);
             tempBuffers.push(meshUbo);
             let positionBuffer = gpu.positionBuffer;
-            const meshInternal = mesh as MeshInternal;
-            if (deformedGeometry && (meshInternal.morphTargets || meshInternal.skeleton) && meshInternal._cpuPositions) {
-                const deformedPositions = deformedGeometry.computeDeformedPositions(meshInternal);
+            if (deformedGeometry && (mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
+                const deformedPositions = deformedGeometry.computeDeformedPositions(mesh);
                 if (deformedPositions) {
                     positionBuffer = createMappedBuffer(engine, deformedPositions, GPUBufferUsage.VERTEX);
                     tempBuffers.push(positionBuffer);

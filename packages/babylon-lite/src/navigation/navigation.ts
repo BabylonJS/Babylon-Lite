@@ -37,7 +37,6 @@
 
 import type { Vec3 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { MeshInternal } from "../mesh/mesh.js";
 
 // ─── Public types ────────────────────────────────────────────────────
 
@@ -302,12 +301,11 @@ function _mergeMeshes(meshes: Mesh[], doNotReverseIndices: boolean): { positions
     let totalVerts = 0;
     let totalIdx = 0;
     for (const mesh of meshes) {
-        const mi = mesh as unknown as MeshInternal;
-        if (!mi._cpuPositions || !mi._cpuIndices) {
+        if (!mesh._cpuPositions || !mesh._cpuIndices) {
             throw new Error(`Mesh "${mesh.name}" missing CPU geometry for navmesh`);
         }
-        totalVerts += mi._cpuPositions.length;
-        totalIdx += mi._cpuIndices.length;
+        totalVerts += mesh._cpuPositions.length;
+        totalIdx += mesh._cpuIndices.length;
     }
     const positions = new Float32Array(totalVerts);
     const indices = new Uint32Array(totalIdx);
@@ -316,8 +314,7 @@ function _mergeMeshes(meshes: Mesh[], doNotReverseIndices: boolean): { positions
     let iOff = 0;
     let vertBase = 0;
     for (const mesh of meshes) {
-        const mi = mesh as unknown as MeshInternal;
-        const src = mi._cpuPositions!;
+        const src = mesh._cpuPositions!;
         const wm = mesh.worldMatrix;
 
         for (let i = 0; i < src.length; i += 3) {
@@ -329,7 +326,7 @@ function _mergeMeshes(meshes: Mesh[], doNotReverseIndices: boolean): { positions
             positions[pOff++] = x * wm[2]! + y * wm[6]! + z * wm[10]! + wm[14]!;
         }
 
-        const meshIdx = mi._cpuIndices!;
+        const meshIdx = mesh._cpuIndices!;
         const n = meshIdx.length;
         if (doNotReverseIndices) {
             for (let i = 0; i < n; i++) {

@@ -6,9 +6,7 @@
  *  Pillar 4c: materials own shaders — mesh just holds material props. */
 
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import type { Mesh } from "./mesh.js";
-import type { MeshInternal } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import { createSphereData } from "./create-sphere.js";
@@ -46,7 +44,6 @@ export function createMeshFromData(
     tangents?: Float32Array,
     colors?: Float32Array
 ): Mesh {
-    const engineInternal = engine as EngineContextInternal;
     const [min, max] = computeAabb(positions);
     const mesh = {
         name,
@@ -55,8 +52,8 @@ export function createMeshFromData(
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _materialDirty: false,
-        _gpu: uploadMeshToGPU(engineInternal, positions, normals, indices, uvs, uvs2, tangents, colors),
-    } as unknown as MeshInternal;
+        _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
+    } as unknown as Mesh;
     initMeshTransform(mesh);
 
     // Retain CPU geometry for detailed picking (ray-triangle intersection)
@@ -64,9 +61,9 @@ export function createMeshFromData(
     mesh._cpuNormals = normals;
     mesh._cpuUvs = uvs;
     mesh._cpuIndices = indices;
-    engineInternal._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
 
-    return mesh as Mesh;
+    return mesh;
 }
 
 /** Update a mesh's GPU vertex positions in place (e.g. CPU vertex animation).
@@ -75,84 +72,78 @@ export function createMeshFromData(
  *  The mesh must have been created via createMeshFromData / a mesh factory.
  *  Zero-allocation GPU upload only — CPU-side picking geometry is not refreshed. */
 export function updateMeshPositions(engine: EngineContext, mesh: Mesh, positions: Float32Array, vertexOffset = 0): void {
-    const gpu = (mesh as MeshInternal)._gpu;
-    (engine as EngineContextInternal).device.queue.writeBuffer(
-        gpu.positionBuffer,
-        vertexOffset * 3 * 4,
-        positions.buffer as ArrayBuffer,
-        positions.byteOffset,
-        positions.byteLength
-    );
+    const gpu = mesh._gpu;
+    engine._device.queue.writeBuffer(gpu.positionBuffer, vertexOffset * 3 * 4, positions.buffer as ArrayBuffer, positions.byteOffset, positions.byteLength);
 }
 
 /** Create a sphere mesh. Caller must assign material. */
 export function createSphere(engine: EngineContext, options?: SphereOptions): Mesh {
     const data = createSphereData(options);
-    return createMeshFromData(engine as EngineContextInternal, "sphere", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "sphere", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a box mesh. Caller must assign material. */
 export function createBox(engine: EngineContext, size = 1): Mesh {
     const data = createBoxData(size);
-    return createMeshFromData(engine as EngineContextInternal, "box", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "box", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a torus mesh. Caller must assign material. */
 export function createTorus(engine: EngineContext, options?: TorusOptions): Mesh {
     const data = createTorusData(options);
-    return createMeshFromData(engine as EngineContextInternal, "torus", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "torus", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a ground mesh from a heightmap URL. Caller must assign material. */
 export async function createGroundFromHeightMap(engine: EngineContext, url: string, options: GroundOptions): Promise<Mesh> {
     const data = await createGroundCPU(url, options);
-    return createMeshFromData(engine as EngineContextInternal, "ground", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "ground", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a flat ground mesh. Caller must assign material. */
 export function createGround(engine: EngineContext, options?: GroundOptions): Mesh {
     const data = createFlatGroundData(options);
-    return createMeshFromData(engine as EngineContextInternal, "ground", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "ground", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a cylinder (or cone / truncated cone / prism) mesh. Caller must assign material. */
 export function createCylinder(engine: EngineContext, options?: CylinderOptions): Mesh {
     const data = createCylinderData(options);
-    return createMeshFromData(engine as EngineContextInternal, "cylinder", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "cylinder", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a plane (unit quad facing -Z). Caller must assign material. */
 export function createPlane(engine: EngineContext, options?: PlaneOptions): Mesh {
     const data = createPlaneData(options);
-    return createMeshFromData(engine as EngineContextInternal, "plane", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "plane", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a disc (or ring / pie slice via `arc`). Caller must assign material. */
 export function createDisc(engine: EngineContext, options?: DiscOptions): Mesh {
     const data = createDiscData(options);
-    return createMeshFromData(engine as EngineContextInternal, "disc", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "disc", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a polyhedron (15 presets). Caller must assign material. */
 export function createPolyhedron(engine: EngineContext, options?: PolyhedronOptions): Mesh {
     const data = createPolyhedronData(options);
-    return createMeshFromData(engine as EngineContextInternal, "polyhedron", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "polyhedron", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a ribbon from an array of parallel Vec3 paths. Caller must assign material. */
 export function createRibbon(engine: EngineContext, options: RibbonOptions): Mesh {
     const data = createRibbonData(options);
-    return createMeshFromData(engine as EngineContextInternal, "ribbon", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "ribbon", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a tube (circular cross-section swept along a path). Caller must assign material. */
 export function createTube(engine: EngineContext, options: TubeOptions): Mesh {
     const data = createTubeData(options);
-    return createMeshFromData(engine as EngineContextInternal, "tube", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "tube", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create an extruded shape (2D shape swept along a path). Caller must assign material. */
 export function createExtrudeShape(engine: EngineContext, options: ExtrudeShapeOptions): Mesh {
     const data = createExtrudeShapeData(options);
-    return createMeshFromData(engine as EngineContextInternal, "extrude", data.positions, data.normals, data.indices, data.uvs);
+    return createMeshFromData(engine as EngineContext, "extrude", data.positions, data.normals, data.indices, data.uvs);
 }

@@ -1,6 +1,6 @@
-import type { EngineContextInternal } from "../../engine/engine.js";
-import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
-import type { Mesh, MeshGPU, MeshInternal } from "../../mesh/mesh.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene.js";
+import type { Mesh, MeshGPU } from "../../mesh/mesh.js";
 import type { MeshGroupBuildResult, Renderable, DrawUpdateContext } from "../../render/renderable.js";
 import type { Material } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
@@ -73,7 +73,7 @@ function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: 
 }
 
 function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false): Renderable[] {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
     const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh));
@@ -85,11 +85,11 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
 }
 
 function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh): ShaderPacket {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new Float32Array(systemSpec._totalBytes / 4);
     writeSystemUniforms(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
-    engine.device.queue.writeBuffer(systemUBO, 0, systemData);
+    engine._device.queue.writeBuffer(systemUBO, 0, systemData);
     const packet: ShaderPacket = {
         mesh,
         systemUBO,
@@ -114,7 +114,7 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
         }
     }
     const update = (context: DrawUpdateContext): void => {
-        updateCustomUbo(scene.engine as EngineContextInternal, material);
+        updateCustomUbo(scene.engine, material);
         for (const packet of packets) {
             if (packet._disposed) {
                 continue;
@@ -125,7 +125,7 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
             updatePacket(scene, material, packet, context);
         }
     };
-    const draw = (pass: ShaderRenderPass, engine: EngineContextInternal): number => {
+    const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         let draws = 0;
         for (const packet of packets) {
             if (packet._disposed) {
@@ -144,9 +144,8 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
         isTransparent: false,
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
-            const e = eng as EngineContextInternal;
-            const bindings = getOrCreateShaderPipelineBindings(e, material);
-            return { renderable: r, pipeline: getOrCreateShaderPipeline(e, sig, material, bindings), update, draw: (pass) => draw(pass, e) };
+            const bindings = getOrCreateShaderPipelineBindings(eng, material);
+            return { renderable: r, pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings), update, draw: (pass) => draw(pass, eng) };
         },
     };
     return r;
@@ -162,14 +161,14 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         if (!isOverride && packet.mesh.material !== material) {
             return;
         }
-        updateCustomUbo(scene.engine as EngineContextInternal, material);
+        updateCustomUbo(scene.engine, material);
         updatePacket(scene, material, packet, context);
         const m = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
         sortCenter[0] = m[12]!;
         sortCenter[1] = m[13]!;
         sortCenter[2] = m[14]!;
     };
-    const draw = (pass: ShaderRenderPass, engine: EngineContextInternal): number => {
+    const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
         if (packet._disposed) {
             return 0;
         }
@@ -185,19 +184,18 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         mesh: packet.mesh,
         _worldCenter: sortCenter,
         bind(eng, sig) {
-            const e = eng as EngineContextInternal;
-            const bindings = getOrCreateShaderPipelineBindings(e, material);
-            return { renderable: r, pipeline: getOrCreateShaderPipeline(e, sig, material, bindings), update, draw: (pass) => draw(pass, e) };
+            const bindings = getOrCreateShaderPipelineBindings(eng, material);
+            return { renderable: r, pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings), update, draw: (pass) => draw(pass, eng) };
         },
     };
     return r;
 }
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext): void {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const state = material as ShaderMaterialRenderState;
     writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, context._camera ?? scene.camera, context.targetWidth, context.targetHeight);
-    engine.device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
+    engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);
     if (packet._lastResourceVersion !== material._resourceVersion) {
         for (const tex of packet._boundTextures) {
             releaseTexture(tex);
@@ -211,8 +209,8 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
     }
 }
 
-function drawPacket(pass: ShaderRenderPass, engine: EngineContextInternal, material: ShaderMaterial, packet: ShaderPacket): void {
-    const gpu = (packet.mesh as MeshInternal)._gpu;
+function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: ShaderMaterial, packet: ShaderPacket): void {
+    const gpu = packet.mesh._gpu;
     for (let i = 0; i < material.attributes.length; i++) {
         pass.setVertexBuffer(i, getAttrBuffer(engine, gpu, material.attributes[i]!));
     }
@@ -221,7 +219,7 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContextInternal, mater
     pass.drawIndexed(gpu.indexCount);
 }
 
-function ensureCustomUbo(engine: EngineContextInternal, material: ShaderMaterial, customSpec: UboSpec | null): void {
+function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, customSpec: UboSpec | null): void {
     const state = material as ShaderMaterialRenderState;
     if (!customSpec) {
         state._shaderCustomUbo = null;
@@ -239,7 +237,7 @@ function ensureCustomUbo(engine: EngineContextInternal, material: ShaderMaterial
     updateCustomUbo(engine, material);
 }
 
-function updateCustomUbo(engine: EngineContextInternal, material: ShaderMaterial): void {
+function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void {
     const state = material as ShaderMaterialRenderState;
     const customSpec = state._shaderCustomSpec;
     const customUbo = state._shaderCustomUbo;
@@ -258,7 +256,7 @@ function updateCustomUbo(engine: EngineContextInternal, material: ShaderMaterial
             writeTypedValue(customData, offset, slot.decl.type, slot.value);
         }
     }
-    engine.device.queue.writeBuffer(customUbo, 0, bytes);
+    engine._device.queue.writeBuffer(customUbo, 0, bytes);
     state._shaderCustomVersion = material._uniformVersion;
 }
 
@@ -274,7 +272,7 @@ function writeTypedValue(data: ArrayBuffer, offset: number, type: ShaderUniformT
     new Float32Array(data, offset, value.length).set(value);
 }
 
-function createShaderBindGroup(engine: EngineContextInternal, material: ShaderMaterial, systemUBO: GPUBuffer): GPUBindGroup {
+function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, systemUBO: GPUBuffer): GPUBindGroup {
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: { buffer: systemUBO } }];
     let nextBinding = 1;
@@ -290,7 +288,7 @@ function createShaderBindGroup(engine: EngineContextInternal, material: ShaderMa
         }
         entries.push({ binding: nextBinding++, resource: tex.view }, { binding: nextBinding++, resource: tex.sampler });
     }
-    return engine.device.createBindGroup({ label: "shader-material-bg", layout: bindings.group1BGL, entries });
+    return engine._device.createBindGroup({ label: "shader-material-bg", layout: bindings.group1BGL, entries });
 }
 
 function collectShaderTextures(material: ShaderMaterial): Texture2D[] {
@@ -304,8 +302,7 @@ function collectShaderTextures(material: ShaderMaterial): Texture2D[] {
 }
 
 function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket): void {
-    const internal = scene as SceneContextInternal;
-    const list = internal._meshDisposables.get(mesh) ?? [];
+    const list = scene._meshDisposables.get(mesh) ?? [];
     list.push(() => {
         packet._disposed = true;
         if (packet._owner) {
@@ -321,7 +318,7 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
         }
         packet._boundTextures = [];
     });
-    internal._meshDisposables.set(mesh, list);
+    scene._meshDisposables.set(mesh, list);
 }
 
 function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: ShaderMaterial, mesh: Mesh, camera: Camera | null, targetWidth: number, targetHeight: number): void {
@@ -390,7 +387,7 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
 
 let zeroAttrCache: WeakMap<object, Map<string, GPUBuffer>> | null = null;
 
-function getZeroAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: string): GPUBuffer {
+function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
     if (!zeroAttrCache) {
         zeroAttrCache = new WeakMap();
     }
@@ -405,12 +402,12 @@ function getZeroAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: st
     }
     const vertexCount = gpu.positionBuffer.size / 12;
     const stride = name === "uv" || name === "uv2" ? 8 : name === "normal" ? 12 : 16;
-    const buffer = engine.device.createBuffer({ label: `shader-zero-${name}`, size: vertexCount * stride, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    const buffer = engine._device.createBuffer({ label: `shader-zero-${name}`, size: vertexCount * stride, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
     cache.set(name, buffer);
     return buffer;
 }
 
-function getAttrBuffer(engine: EngineContextInternal, gpu: MeshGPU, name: ShaderAttributeName): GPUBuffer {
+function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttributeName): GPUBuffer {
     switch (name) {
         case "position":
             return gpu.positionBuffer;

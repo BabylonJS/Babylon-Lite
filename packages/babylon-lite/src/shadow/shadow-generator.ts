@@ -7,11 +7,13 @@ interface ShadowGeneratorRuntimeConfig {
 }
 
 export interface ShadowTaskInternalState {
+    /** @internal */
     _task: {
         record(): void;
         execute?(): number;
         dispose(): void;
     };
+    /** @internal */
     _casterMeshes: readonly import("../mesh/mesh.js").Mesh[];
 }
 
@@ -47,10 +49,10 @@ export interface ShadowGenerator {
     _preloadShadowTask?(casterMeshes: readonly import("../mesh/mesh.js").Mesh[]): Promise<void>;
     /** @internal Lazily creates (or returns the cached) shadow-task state for rendering the shadow map this frame. */
     _ensureShadowTaskState?(
-        engine: import("../engine/engine.js").EngineContextInternal,
-        scene: import("../scene/scene-core.js").SceneContextInternal,
+        engine: import("../engine/engine.js").EngineContext,
+        scene: import("../scene/scene-core.js").SceneContext,
         casterMeshes: readonly import("../mesh/mesh.js").Mesh[]
     ): ShadowTaskInternalState;
     /** @internal Records the shadow-map render pass for the given task state and returns the number of draw calls issued. */
-    _renderShadowMap?(engine: import("../engine/engine.js").EngineContextInternal, state: ShadowTaskInternalState): number;
+    _renderShadowMap?(engine: import("../engine/engine.js").EngineContext, state: ShadowTaskInternalState): number;
 }

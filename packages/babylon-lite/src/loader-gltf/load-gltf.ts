@@ -1,44 +1,69 @@
 import type { Mat4 } from "../math/types.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
 import { createTransformNode } from "../scene/transform-node.js";
 import { createSceneNodeFromMatrix } from "../scene/scene-node.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
-import type { Mesh, MeshGPU, MeshInternal } from "../mesh/mesh.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, getTextureImageIndex } from "./gltf-parser.js";
+import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, getTextureImageIndex, TYPE_SIZES } from "./gltf-parser.js";
+import type { AccessorView } from "./gltf-parser.js";
+import type { GltfVb } from "./gltf-interleave.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
+
+/** Dynamically-imported interleave module — loaded only when an asset actually
+ *  contains a strided bufferView, so non-interleaved scenes pay zero cost. */
+type InterleaveModule = typeof import("./gltf-interleave.js");
+let _interleavePromise: Promise<InterleaveModule> | undefined;
+function loadInterleave(): Promise<InterleaveModule> {
+    return (_interleavePromise ??= import("./gltf-interleave.js"));
+}
+
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
-    _positions: Float32Array;
-    _normals: Float32Array;
+    /** @internal Tight CPU positions, or null when sourced from an interleaved
+     *  bufferView (in which case `_vb._p` holds the strided source for lazy de-striding). */
+    _positions: Float32Array | null;
+    /** @internal */
+    _normals: Float32Array | null;
+    /** @internal */
     _tangents: Float32Array | null;
-    _uvs: Float32Array;
+    /** @internal */
+    _uvs: Float32Array | null;
+    /** @internal */
     _uv2s: Float32Array | null;
+    /** @internal */
     _colors: Float32Array | null;
+    /** @internal */
     _indices: Uint16Array | Uint32Array;
+    /** @internal */
     _vertexCount: number;
+    /** @internal */
     _indexCount: number;
+    /** @internal */
     _worldMatrix: Mat4;
+    /** @internal */
     _material: GltfMaterialData;
-    /** glTF node index this mesh came from (for hierarchy reconstruction
+    /** @internal Interleaved vertex sources (genuine GPU interleaving + lazy CPU de-stride).
+     *  Absent → all tight. */
+    _vb?: GltfVb;
+    /** @internal glTF node index this mesh came from (for hierarchy reconstruction
      *  and for features that need to resolve skin/morph data lazily). */
     _nodeIndex: number;
-    /** Raw primitive definition — features (skeleton, morph, …) read their
+    /** @internal Raw primitive definition — features (skeleton, morph, …) read their
      *  own attributes/targets from here without bloating core extraction. */
     _primitive: any;
-    /** Pre-decoded primitive (Draco et al.) if a preMesh feature produced one. */
+    /** @internal Pre-decoded primitive (Draco et al.) if a preMesh feature produced one. */
     _decoded?: DecodedPrimitive;
 }
 
@@ -62,6 +87,21 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // animations, variants, …) and dynamic-import them concurrently with
     // mesh extraction. Core loader knows zero feature names.
     const features = await loadGltfFeatures(json);
+
+    // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
+    // dequantization) may rewrite bufferViews/accessors and hand back a replacement
+    // binary chunk. Run sequentially in registry order so later features see earlier
+    // rewrites. No-op (and zero cost) when no triggered feature defines preParse.
+    let activeBin = binChunk;
+    for (const f of features) {
+        if (f.preParse) {
+            const replacement = await f.preParse(json, activeBin);
+            if (replacement) {
+                activeBin = replacement;
+            }
+        }
+    }
+
     const matExts: GltfFeature[] = features.filter((f) => f.applyMaterial);
     // Compose every feature's wrapTexture hook into a single function. Identity
     // when no feature contributes one (common case) — keeps the hot path free
@@ -73,18 +113,18 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     // their primitive-keyed decode caches. Features without `preMesh` contribute
     // nothing; the map stays empty when no primitive-level feature triggered.
     const decodedPrimitives = new Map<unknown, DecodedPrimitive>();
-    for (const frag of await Promise.all(features.flatMap((f) => (f.preMesh ? [f.preMesh(json, binChunk, baseUrl)] : [])))) {
+    for (const frag of await Promise.all(features.flatMap((f) => (f.preMesh ? [f.preMesh(json, activeBin, baseUrl)] : [])))) {
         for (const [k, v] of frag) {
             decodedPrimitives.set(k, v);
         }
     }
 
-    const meshDatas = await extractAllMeshes(json, binChunk, baseUrl, parentMap, worldMatrixCache, decodedPrimitives);
+    const meshDatas = await extractAllMeshes(json, activeBin, baseUrl, parentMap, worldMatrixCache, decodedPrimitives);
 
     const ctx: GltfLoadCtx = {
-        _engine: engine as EngineContextInternal,
+        _engine: engine,
         _json: json,
-        _binChunk: binChunk,
+        _binChunk: activeBin,
         _baseUrl: baseUrl,
         _parentMap: parentMap,
         _worldMatrixCache: worldMatrixCache,
@@ -183,6 +223,10 @@ function needsOrmComposite(json: any): boolean {
 }
 
 const _features: GltfFeatureLoader[] = [
+    // Pre-parse features (buffer-level): order matters — meshopt decompresses
+    // bufferViews first, then quantization dequantizes the resulting accessors.
+    [hasExt("EXT_meshopt_compression"), () => import("./gltf-feature-meshopt.js")],
+    [hasExt("KHR_mesh_quantization"), () => import("./gltf-ext-quantization.js")],
     // Pre-mesh features (geometry decompression)
     [hasExt("KHR_draco_mesh_compression"), () => import("./gltf-feature-draco.js")],
     // Material extensions
@@ -195,7 +239,7 @@ const _features: GltfFeatureLoader[] = [
     [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
     // Dielectric cluster (ior/specular/transmission/volume) — any of the four triggers the loader;
     // transmission refraction is wired dynamically by the PBR material path when the loaded material needs it.
-    [(j) => ["transmission", "volume", "ior", "specular"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
+    [(j) => ["transmission", "volume", "ior", "specular", "dispersion"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
     [hasExt("KHR_texture_transform"), () => import("./gltf-ext-uv-transform.js")],
     [hasExt("KHR_texture_basisu"), () => import("./gltf-ext-basisu.js")],
     [needsOrmComposite, () => import("./gltf-ext-orm.js")],
@@ -209,6 +253,7 @@ const _features: GltfFeatureLoader[] = [
     [hasExt("KHR_node_visibility"), () => import("./gltf-ext-node-visibility.js")],
     [hasExt("KHR_animation_pointer"), () => import("./gltf-feature-animation-pointer.js")],
     [hasExt("EXT_mesh_gpu_instancing"), () => import("./gltf-feature-gpu-instancing.js")],
+    [hasExt("KHR_xmp_json_ld"), () => import("./gltf-feature-xmp.js")],
 ];
 
 /** Dynamic-import every feature the asset triggers. */
@@ -302,6 +347,28 @@ async function extractAllMeshes(
     const partials: Array<Omit<GltfMeshData, "_material">> = [];
     const matPromises: Promise<GltfMaterialData>[] = [];
 
+    // Genuine GPU interleaving is the ONLY reason to touch the interleave module.
+    // Many exporters declare `byteStride` even on tightly-packed bufferViews, and a
+    // preMesh feature (e.g. the basisu extension's readStridedFloat path) may already
+    // de-stride a primitive — so we load the module only for a primitive that is
+    // genuinely over-strided AND not already decoded. Other scenes pay zero cost: the
+    // module is fetched lazily on the first such primitive (memoized), never before.
+    const _accs = json.accessors as any[];
+    const _bvs = json.bufferViews as any[] | undefined;
+    const _strided = (p: any): boolean => {
+        for (const k in p.attributes) {
+            const a = _accs[p.attributes[k]];
+            const s = _bvs?.[a?.bufferView]?.byteStride;
+            if (
+                s !== undefined &&
+                s !== (TYPE_SIZES[a.type] ?? 1) * (a.componentType === 5126 || a.componentType === 5125 ? 4 : a.componentType === 5123 || a.componentType === 5122 ? 2 : 1)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     for (let nodeIdx = 0; nodeIdx < json.nodes.length; nodeIdx++) {
         const node = json.nodes[nodeIdx];
         if (node.mesh === undefined) {
@@ -314,7 +381,22 @@ async function extractAllMeshes(
         for (const primitive of mesh.primitives) {
             const attrs = primitive.attributes;
             const decoded = decodedPrimitives.get(primitive);
-            const resolveAttr = (name: string): { _data: ArrayBufferView; _count: number; _componentCount: number } | null => {
+
+            // Genuine GPU interleaving: only a primitive that genuinely sources ≥1
+            // attribute from an over-strided bufferView (and was not already decoded
+            // by a preMesh feature) takes this path. The module is imported lazily on
+            // first need — non-interleaved assets never fetch it. Tight primitives
+            // fall through to the path below (byte-identical to non-interleaved).
+            if (!decoded && _strided(primitive)) {
+                const ip = (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
+                if (ip) {
+                    matPromises.push(getMat(primitive.material));
+                    partials.push(ip);
+                    continue;
+                }
+            }
+
+            const resolveAttr = (name: string): AccessorView | null => {
                 if (decoded && decoded._attributes.has(name)) {
                     const data = decoded._attributes.get(name)!;
                     const componentCount = data.length / decoded._vertexCount;
@@ -341,7 +423,7 @@ async function extractAllMeshes(
                     ? new Uint32Array(idxData._data as Uint32Array)
                     : idxData._data instanceof Uint8Array
                       ? Uint16Array.from(idxData._data as Uint8Array)
-                      : new Uint16Array(idxData._data.buffer, idxData._data.byteOffset, idxData._count)
+                      : new Uint16Array(idxData._data!.buffer, idxData._data!.byteOffset, idxData._count)
                 : new Uint16Array(0);
 
             // Fire material fetch without awaiting — all materials load in parallel
@@ -373,7 +455,7 @@ async function extractAllMeshes(
 // --- GPU Upload ---
 
 // Pre-resolved generateMipmaps function— loaded once before texture uploads
-let _generateMipmaps: ((engine: EngineContextInternal, texture: GPUTexture, face?: number) => void) | null = null;
+let _generateMipmaps: ((engine: EngineContext, texture: GPUTexture, face?: number) => void) | null = null;
 
 async function ensureMipmapModule(): Promise<void> {
     if (!_generateMipmaps) {
@@ -447,10 +529,10 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
      *  metallicFactor/roughnessFactor. The composite case (MR+occlusion separate) is
      *  handled by the gltf-ext-orm extension which overrides this via `extLayers`. */
 
-    // Build a PbrMaterialPropsInternal from parsed glTF material data.
+    // Build a PbrMaterialProps from parsed glTF material data.
     // Uses shared texture caches so identical bitmaps are uploaded once.
-    const builtMaterialCache = new Map<GltfMaterialData, Promise<PbrMaterialPropsInternal>>();
-    async function buildPbrFromGltfMat(mat: GltfMaterialData): Promise<PbrMaterialPropsInternal> {
+    const builtMaterialCache = new Map<GltfMaterialData, Promise<PbrMaterialProps>>();
+    async function buildPbrFromGltfMat(mat: GltfMaterialData): Promise<PbrMaterialProps> {
         let cached = builtMaterialCache.get(mat);
         if (cached) {
             return cached;
@@ -473,39 +555,46 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
         meshDatas.map(async (m, i): Promise<Mesh> => {
             const material = await buildPbrFromGltfMat(m._material);
 
-            const [boundMin, boundMax] = computeAabb(m._positions, m._worldMatrix);
+            // Interleaved meshes are fully built by the dynamic module (kept out of
+            // this bundle for non-interleaved scenes). The tight path below is
+            // byte-identical to the non-interleaved engine.
+            let mesh: Mesh;
+            if (m._vb) {
+                mesh = (await loadInterleave()).buildInterleavedMesh(engine, m, i, material) as Mesh;
+            } else {
+                const [boundMin, boundMax] = computeAabb(m._positions!, m._worldMatrix);
+                const gpu: MeshGPU = {
+                    positionBuffer: createMappedBuffer(engine, m._positions!, GPUBufferUsage.VERTEX),
+                    normalBuffer: createMappedBuffer(engine, m._normals!, GPUBufferUsage.VERTEX),
+                    tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, GPUBufferUsage.VERTEX) : null,
+                    uvBuffer: createMappedBuffer(engine, m._uvs!, GPUBufferUsage.VERTEX),
+                    uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, GPUBufferUsage.VERTEX) : null,
+                    colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, GPUBufferUsage.VERTEX) : null,
+                    indexBuffer: createMappedBuffer(engine, m._indices, GPUBufferUsage.INDEX),
+                    indexCount: m._indexCount,
+                    indexFormat: (m._indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
+                };
 
-            const gpu: MeshGPU = {
-                positionBuffer: createMappedBuffer(engine, m._positions, GPUBufferUsage.VERTEX),
-                normalBuffer: createMappedBuffer(engine, m._normals, GPUBufferUsage.VERTEX),
-                tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, GPUBufferUsage.VERTEX) : null,
-                uvBuffer: createMappedBuffer(engine, m._uvs, GPUBufferUsage.VERTEX),
-                uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, GPUBufferUsage.VERTEX) : null,
-                colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, GPUBufferUsage.VERTEX) : null,
-                indexBuffer: createMappedBuffer(engine, m._indices, GPUBufferUsage.INDEX),
-                indexCount: m._indexCount,
-                indexFormat: (m._indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
-            };
+                mesh = {
+                    name: `gltf_mesh_${i}`,
+                    material,
+                    receiveShadows: false,
+                    boundMin,
+                    boundMax,
+                    skeleton: null,
+                    morphTargets: null,
+                    _materialDirty: false,
+                    _gpu: gpu,
+                } as unknown as Mesh;
+                initMeshTransform(mesh);
 
-            const mesh = {
-                name: `gltf_mesh_${i}`,
-                material,
-                receiveShadows: false,
-                boundMin,
-                boundMax,
-                skeleton: null,
-                morphTargets: null,
-                _materialDirty: false,
-                _gpu: gpu,
-            } as unknown as MeshInternal;
-            initMeshTransform(mesh);
-
-            // Retain CPU geometry for detailed picking
-            mesh._cpuPositions = m._positions;
-            mesh._cpuNormals = m._normals;
-            mesh._cpuUvs = m._uvs;
-            mesh._cpuIndices = m._indices instanceof Uint32Array ? m._indices : new Uint32Array(m._indices);
-            engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
+                // Retain CPU geometry for detailed picking.
+                mesh._cpuPositions = m._positions!;
+                mesh._cpuNormals = m._normals!;
+                mesh._cpuUvs = m._uvs!;
+                mesh._cpuIndices = m._indices instanceof Uint32Array ? m._indices : new Uint32Array(m._indices);
+                engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
+            }
 
             // Run all per-mesh feature hooks (skeleton, morph, …) in parallel.
             // Each hook mutates `mesh` directly (e.g. attaches mesh.skeleton).
@@ -513,7 +602,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 await Promise.all(meshFeatures.map((f) => f.applyMesh!(m, mesh, ctx)));
             }
 
-            return mesh as Mesh;
+            return mesh;
         })
     );
 

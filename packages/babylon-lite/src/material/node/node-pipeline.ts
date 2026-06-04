@@ -12,7 +12,7 @@
  *  leaves block emitters free of cross-cutting knowledge about the pipeline.
  */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
@@ -44,29 +44,42 @@ const SENTINEL_SCREEN_SIZE = "_NME_SCREEN_SIZE_";
 
 // ─── Compile result ─────────────────────────────────────────────────
 
+/** @internal */
 export interface NodeCompileResult {
+    /** @internal */
     readonly _wgsl: string;
+    /** @internal */
     readonly _pipeline: GPURenderPipeline;
+    /** @internal */
     readonly _meshBGL: GPUBindGroupLayout;
+    /** @internal */
     readonly _nodeUboSize: number;
+    /** @internal */
     readonly _nodeUboOffsets: ReadonlyMap<string, number>;
-    /** The resolved bind-group slot (within group 1) for the node UBO. `null` if no uniforms. */
+    /** @internal The resolved bind-group slot (within group 1) for the node UBO. `null` if no uniforms. */
     readonly _nodeUboBinding: number | null;
-    /** Per-texture binding slots assigned by the pipeline builder. */
+    /** @internal Per-texture binding slots assigned by the pipeline builder. */
     readonly _textureBindings: ReadonlyArray<{ readonly _name: string; readonly _texBinding: number; readonly _sampBinding: number }>;
-    /** Slots for the morph-target texture + weights UBO, or `null` when no MorphTargetsBlock is present. */
+    /** @internal Slots for the morph-target texture + weights UBO, or `null` when no MorphTargetsBlock is present. */
     readonly _morphBindings: { readonly _textureBinding: number; readonly _uboBinding: number } | null;
-    /** Slot assignments for env IBL bindings within group 1, when state.usesEnv is true. */
+    /** @internal Slot assignments for env IBL bindings within group 1, when state.usesEnv is true. */
     readonly _envBindings: {
+        /** @internal */
         readonly _iblTexture: number;
+        /** @internal */
         readonly _iblSampler: number;
+        /** @internal */
         readonly _brdfLUT: number;
+        /** @internal */
         readonly _brdfSampler: number;
     } | null;
-    /** Per shadow-casting light: slot assignments in group 1 for the shadow texture, sampler, and shadowInfo UBO. Empty when the material uses no shadows. */
+    /** @internal Per shadow-casting light: slot assignments in group 1 for the shadow texture, sampler, and shadowInfo UBO. Empty when the material uses no shadows. */
     readonly _shadowBindings: readonly import("./node-shadow.js").ShadowBinding[];
+    /** @internal */
     readonly _usesClipPlanes: boolean;
+    /** @internal */
     readonly _usesMeshAttributeFlags: boolean;
+    /** @internal */
     readonly _esmShadowParamsBinding: number | null;
 }
 
@@ -75,10 +88,10 @@ export interface NodeCompileResult {
 let _cache: Map<string, NodeCompileResult> | null = null;
 let _cachedDevice: GPUDevice | null = null;
 
-function getCache(engine: EngineContextInternal): Map<string, NodeCompileResult> {
-    if (!_cache || _cachedDevice !== engine.device) {
+function getCache(engine: EngineContext): Map<string, NodeCompileResult> {
+    if (!_cache || _cachedDevice !== engine._device) {
         _cache = new Map();
-        _cachedDevice = engine.device;
+        _cachedDevice = engine._device;
     }
     return _cache;
 }
@@ -128,33 +141,43 @@ function indent(body: string): string {
 // ─── Pipeline creation ──────────────────────────────────────────────
 
 export interface CompileOpts {
-    readonly _engine: EngineContextInternal;
+    /** @internal */
+    readonly _engine: EngineContext;
+    /** @internal */
     readonly _format: GPUTextureFormat;
+    /** @internal */
     readonly _depthStencilFormat?: GPUTextureFormat;
+    /** @internal */
     readonly _depthCompare?: GPUCompareFunction;
+    /** @internal */
     readonly _msaaSamples: number;
+    /** @internal */
     readonly _backFaceCulling?: boolean;
+    /** @internal */
     readonly _noColorOutput?: boolean;
+    /** @internal */
     readonly _esmShadowOutput?: boolean;
-    /** ESM shadow depth output code. Supplied by the ESM material view so normal Node bundles don't retain it. */
+    /** @internal ESM shadow depth output code. Supplied by the ESM material view so normal Node bundles don't retain it. */
     readonly _esmShadowDepthCode?: string;
-    /** BJS alpha mode (0=DISABLE, 2=COMBINE). Determines blend state. */
+    /** @internal BJS alpha mode (0=DISABLE, 2=COMBINE). Determines blend state. */
     readonly _alphaMode?: number;
     /** When `state.usesEnv` is true, this factory produces the env IBL
      *  bindings + WGSL. Loaded via `await import("./node-env.js")` from
      *  node-material.ts only when `state.usesEnv` was set during emitGraph,
      *  so non-env scenes never bundle the env helpers. */
+    /** @internal */
     readonly _envEmitter?: typeof import("./node-env.js").emitEnv;
     /** When `state.shadowLights` is non-empty, this factory produces shadow
      *  bindings + WGSL. Loaded via `await import("./node-shadow.js")` from
      *  `node-material.ts` only when `shadowGenerators` was supplied, so
      *  non-shadow scenes never bundle the PCF/ESM helpers. */
+    /** @internal */
     readonly _shadowEmitter?: typeof import("./node-shadow.js").emitShadow;
 }
 
 export function compileNodePipeline(state: NodeBuildState, vertexBody: string, fragmentBody: string, opts: CompileOpts): NodeCompileResult {
     const { _engine, _format, _msaaSamples } = opts;
-    const device = _engine.device;
+    const device = _engine._device;
 
     // Binding layout for group 1:
     //   slot 0         = mesh UBO (world matrix)

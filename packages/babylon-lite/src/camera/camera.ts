@@ -16,14 +16,19 @@ export interface Camera {
     readonly worldMatrixVersion: number;
     /** @internal Cached view matrix + version. */
     _viewCache?: Float32Array;
+    /** @internal */
     _viewVer?: number;
     /** @internal Cached projection matrix + version + aspect. */
     _projCache?: Float32Array;
+    /** @internal */
     _projVer?: number;
+    /** @internal */
     _projAspect?: number;
     /** @internal Cached view-projection matrix + version + aspect. */
     _vpCache?: Float32Array;
+    /** @internal */
     _vpVer?: number;
+    /** @internal */
     _vpAspect?: number;
 }
 

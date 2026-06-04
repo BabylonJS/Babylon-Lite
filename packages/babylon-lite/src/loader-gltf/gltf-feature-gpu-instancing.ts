@@ -15,7 +15,7 @@
  */
 
 import type { GltfFeature } from "./gltf-feature.js";
-import type { Mesh, MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import { resolveAccessor } from "./gltf-parser.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
@@ -102,7 +102,7 @@ const ext: GltfFeature = {
             const nodeWorld = ctx._worldMatrixCache.get(nodeIdx);
             for (const mesh of meshesForNode) {
                 setThinInstances(mesh, matrices, count);
-                expandMeshAabbForInstances(mesh as MeshInternal, matrices, count, nodeWorld);
+                expandMeshAabbForInstances(mesh, matrices, count, nodeWorld);
             }
         }
         return {};
@@ -112,7 +112,7 @@ export default ext;
 
 /** Expand a mesh's world-space AABB to enclose all thin instances so that
  *  auto-framing cameras see the full instanced grid, not just the base mesh. */
-function expandMeshAabbForInstances(mesh: MeshInternal, matrices: Float32Array, count: number, nodeWorld: Mat4 | undefined): void {
+function expandMeshAabbForInstances(mesh: Mesh, matrices: Float32Array, count: number, nodeWorld: Mat4 | undefined): void {
     const positions = mesh._cpuPositions;
     if (!positions || !nodeWorld || count === 0) {
         return;

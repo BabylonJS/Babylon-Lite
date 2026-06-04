@@ -4,6 +4,7 @@ import { addSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex, updateSpr
 
 /** Stable identity for a single 2D sprite that survives swap-remove reindexing. */
 export interface Sprite2DHandle {
+    /** @internal */
     readonly _entityType: "sprite-2d-handle";
     readonly layer: Sprite2DLayer;
     readonly id: number;

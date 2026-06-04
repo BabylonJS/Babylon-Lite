@@ -6,13 +6,13 @@
  */
 
 import type { Camera } from "../camera/camera.js";
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import { getBilinearSampler } from "../resource/samplers.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import {
     buildLightViewMatrix,
@@ -29,19 +29,30 @@ import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generato
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
 
 export interface EsmLightMatrix {
+    /** @internal */
     _view: Float32Array;
+    /** @internal */
     _viewProj: Float32Array;
+    /** @internal */
     _near: number;
+    /** @internal */
     _far: number;
 }
 
 export interface EsmShadowTaskResources {
+    /** @internal */
     _esmTexture: GPUTexture;
+    /** @internal */
     _depthBuffer: GPUTexture;
+    /** @internal */
     _blurTexH: GPUTexture;
+    /** @internal */
     _blurPipeline: GPURenderPipeline;
+    /** @internal */
     _blurHBG: GPUBindGroup;
+    /** @internal */
     _blurVBG: GPUBindGroup;
+    /** @internal */
     _shadowUboData: Float32Array;
 }
 
@@ -256,8 +267,8 @@ function createShadowBlurFragmentWGSL(blurKernel: number): string {
 }
 
 function ensureEsmShadowTaskState(
-    engine: EngineContextInternal,
-    scene: SceneContextInternal,
+    engine: EngineContext,
+    scene: SceneContext,
     sg: ShadowGenerator,
     casterMeshes: readonly Mesh[],
     existingState: ShadowTaskInternalState | null
@@ -304,7 +315,7 @@ function ensureEsmShadowTaskState(
     return taskState;
 }
 
-function renderEsmShadowMap(engine: EngineContextInternal, sg: ShadowGenerator, state: EsmTaskState): number {
+function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: EsmTaskState): number {
     const resources = getEsmShadowTaskResources(sg);
     if (!resources) {
         return 0;
@@ -321,7 +332,7 @@ function renderEsmShadowMap(engine: EngineContextInternal, sg: ShadowGenerator, 
         sg._lightMatrix.set(matrix._viewProj);
         sg._version++;
         writeShadowUboFields(resources._shadowUboData, sg);
-        engine.device.queue.writeBuffer(sg._shadowUBO, 0, resources._shadowUboData as Float32Array<ArrayBuffer>);
+        engine._device.queue.writeBuffer(sg._shadowUBO, 0, resources._shadowUboData as Float32Array<ArrayBuffer>);
     }
     updateShadowCamera(state, matrix);
     state._lastCasterVersion = casterVersion;
@@ -403,8 +414,7 @@ function shadowMatrixChanged(a: Float32Array, b: Float32Array): boolean {
  * @returns A `ShadowGenerator` wired to the directional ESM render path.
  */
 export function createEsmDirectionalShadowGenerator(engine: EngineContext, _light: DirectionalLight, cfg: EsmDirectionalShadowGeneratorConfig = {}): ShadowGenerator {
-    const eng = engine as EngineContextInternal;
-    const device = eng.device;
+    const device = engine._device;
     const mapSize = cfg.mapSize ?? 1024;
     const depthScale = cfg.depthScale ?? 50;
     const bias = cfg.bias ?? 0.00005;
@@ -425,7 +435,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         _forceRefreshEveryFrame: forceRefreshEveryFrame,
     };
 
-    const _shadowParamsUBO = createShadowParamsUBO(eng, bias, depthScale);
+    const _shadowParamsUBO = createShadowParamsUBO(engine, bias, depthScale);
 
     const esmTexture = device.createTexture({
         size: { width: mapSize, height: mapSize },
@@ -464,9 +474,9 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         primitive: { topology: "triangle-list", cullMode: "none" },
     });
 
-    const blurSampler = getBilinearSampler(eng);
+    const blurSampler = getBilinearSampler(engine);
     const blurHData = new Float32Array([1.0 / blurSize, 0, 0, 0]);
-    const blurHUBO = createUniformBuffer(eng, blurHData);
+    const blurHUBO = createUniformBuffer(engine, blurHData);
     const blurHBG = device.createBindGroup({
         layout: blurBGL,
         entries: [
@@ -476,7 +486,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         ],
     });
     const blurVData = new Float32Array([0, 1.0 / blurSize, 0, 0]);
-    const blurVUBO = createUniformBuffer(eng, blurVData);
+    const blurVUBO = createUniformBuffer(engine, blurVData);
     const blurVBG = device.createBindGroup({
         layout: blurBGL,
         entries: [
@@ -489,7 +499,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     const _lightMatrix = new Float32Array(16);
     const _shadowsInfo = new Float32Array([darkness, 0, depthScale, frustumEdgeFalloff]);
     const _depthValues = new Float32Array([0, 1]);
-    const { ubo: _shadowUBO, data: shadowUboData } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
+    const { ubo: _shadowUBO, data: shadowUboData } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);
     const _depthTexture = blurTexV;
     const _depthSampler = blurSampler;
 

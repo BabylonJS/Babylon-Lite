@@ -1,18 +1,17 @@
-import type { SceneContext, SceneContextInternal } from "./scene-core.js";
-import type { MeshInternal } from "../mesh/mesh.js";
+import type { SceneContext } from "./scene-core.js";
+import type { Mesh } from "../mesh/mesh.js";
 
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
 export function processMaterialSwaps(scene: SceneContext): void {
-    const ctx = scene as SceneContextInternal;
-    const q = ctx._materialSwapQueue;
+    const q = scene._materialSwapQueue;
     for (const mesh of q) {
-        (mesh as MeshInternal)._materialDirty = false;
-        const old = ctx._meshDisposables.get(mesh);
+        (mesh as Mesh)._materialDirty = false;
+        const old = scene._meshDisposables.get(mesh);
         if (old) {
             for (const fn of old) {
                 fn();
             }
-            ctx._meshDisposables.delete(mesh);
+            scene._meshDisposables.delete(mesh);
         }
 
         const mat = mesh.material;
@@ -24,15 +23,15 @@ export function processMaterialSwaps(scene: SceneContext): void {
         if (!rebuild) {
             continue;
         }
-        const renderable = rebuild(ctx, mesh);
+        const renderable = rebuild(scene, mesh);
         // Insert by `order` so the renderable list stays sorted (frame-graph
         // tasks bucket opaque/direct/transparent at bind time).
-        let i = ctx._renderables.length;
-        while (i > 0 && ctx._renderables[i - 1]!.order > renderable.order) {
+        let i = scene._renderables.length;
+        while (i > 0 && scene._renderables[i - 1]!.order > renderable.order) {
             i--;
         }
-        ctx._renderables.splice(i, 0, renderable);
+        scene._renderables.splice(i, 0, renderable);
     }
     q.length = 0;
-    ctx._renderableVersion++;
+    scene._renderableVersion++;
 }

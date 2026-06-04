@@ -2,17 +2,17 @@
  *  Keeps the standard renderable chunk unchanged for scenes without thin instances. */
 
 import type { ThinInstanceData } from "./thin-instance.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 
-/** Optional replacement buffers used by GPU culling after it compacts visible instances. */
+/** @internal Optional replacement buffers used by GPU culling after it compacts visible instances. */
 export interface ThinInstanceDrawBuffers {
     readonly matrixBuffer: GPUBuffer;
     readonly colorBuffer: GPUBuffer | null;
 }
 
-/** Sync CPU thin-instance data to GPU buffers, optionally with STORAGE usage for compute culling. */
-export function syncThinInstanceGpuData(engine: EngineContextInternal, ti: ThinInstanceData, hasColor: boolean): void {
-    const device = engine.device;
+/** @internal Sync CPU thin-instance data to GPU buffers, optionally with STORAGE usage for compute culling. */
+export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean): void {
+    const device = engine._device;
     const needsStorage = ti._gpuCullingEnabled;
     if (ti._version !== ti._gpuVersion || ti._gpuBufferStorage !== needsStorage) {
         const byteSize = ti.count * 64;
@@ -58,7 +58,7 @@ export function syncThinInstanceGpuData(engine: EngineContextInternal, ti: ThinI
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */
 export function syncThinInstanceBuffers(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     ti: ThinInstanceData,
     pass: GPURenderPassEncoder | GPURenderBundleEncoder,
     slot: number,

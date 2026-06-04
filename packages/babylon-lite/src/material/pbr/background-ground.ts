@@ -3,7 +3,7 @@
  *  Tree-shaken away from scenes that use `skipGround: true`. */
 
 import type { Mat4 } from "../../math/types.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { getBilinearSampler } from "../../resource/samplers.js";
@@ -43,7 +43,7 @@ const BG_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + alpha + backgro
 
 /** Build the ground renderable for a PBR environment scene. */
 export async function buildGroundRenderable(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     groundSize: number,
     rootPosition: [number, number, number],
     primaryColor: [number, number, number],
@@ -83,7 +83,7 @@ export async function buildGroundRenderable(
         bind(eng, sig) {
             return {
                 renderable: r,
-                pipeline: gndMat.getPipeline(eng as EngineContextInternal, sig),
+                pipeline: gndMat.getPipeline(eng as EngineContext, sig),
                 draw(pass) {
                     pass.setBindGroup(1, gndBG);
                     pass.setVertexBuffer(0, gndBufs.posBuffer);
@@ -102,8 +102,8 @@ export async function buildGroundRenderable(
 // ─── Ground Material ────────────────────────────────────────────────────────
 
 interface GroundMaterial {
-    getPipeline(engine: EngineContextInternal, sig: RenderTargetSignature): GPURenderPipeline;
-    createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler): GPUBindGroup;
+    getPipeline(engine: EngineContext, sig: RenderTargetSignature): GPURenderPipeline;
+    createBindGroup(engine: EngineContext, meshUBO: GPUBuffer, groundTextureView: GPUTextureView, groundSampler: GPUSampler): GPUBindGroup;
 }
 
 /** Module-global pipeline cache — keyed by noise mode + full target signature (color/depth/samples/flipY).
@@ -113,8 +113,8 @@ let _gndLayout: GPUBindGroupLayout | null = null;
 let _gndCachedDevice: GPUDevice | null = null;
 
 function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMaterial {
-    function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
-        const device = engine.device;
+    function getLayout(engine: EngineContext): GPUBindGroupLayout {
+        const device = engine._device;
         if (_gndLayout && _gndCachedDevice === device) {
             return _gndLayout;
         }
@@ -132,7 +132,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
 
     return {
         getPipeline(engine, sig) {
-            const device = engine.device;
+            const device = engine._device;
             if (_gndCachedDevice !== device) {
                 _gndPipelines.clear();
                 _gndLayout = null;
@@ -185,7 +185,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
         },
 
         createBindGroup(engine, meshUBO, groundTextureView, groundSampler) {
-            const device = engine.device;
+            const device = engine._device;
             return device.createBindGroup({
                 layout: getLayout(engine),
                 entries: [
@@ -203,7 +203,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
 /** Ground quad (4 verts, 6 indices — matches BJS CreatePlane with BACKSIDE).
  *  XY plane, normals +Z (become +Y after world rotation). */
 function createGroundBuffers(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     groundSize: number
 ): {
     posBuffer: GPUBuffer;
@@ -243,7 +243,7 @@ function createGroundBuffers(
 
 // ─── Ground UBO ─────────────────────────────────────────────────────────────
 
-function createBgMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColor: [number, number, number]): GPUBuffer {
+function createBgMeshUBO(engine: EngineContext, world: Mat4, primaryColor: [number, number, number]): GPUBuffer {
     const data = new Float32Array(BG_MESH_UNIFORM_SIZE / 4);
     data.set(world, 0); // offset 0: world mat4x4
     data[16] = primaryColor[0]; // offset 64: primaryColor.r
@@ -260,8 +260,8 @@ function createBgMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColo
 
 /** Load a ground diffuse texture from URL and upload to GPU.
  *  Falls back to a 1×1 white pixel if no URL provided. */
-async function loadGroundTexture(engine: EngineContextInternal, url?: string, preloadedImage?: Promise<ImageBitmap>): Promise<GPUTexture> {
-    const device = engine.device;
+async function loadGroundTexture(engine: EngineContext, url?: string, preloadedImage?: Promise<ImageBitmap>): Promise<GPUTexture> {
+    const device = engine._device;
     if (!url) {
         const tex = device.createTexture({
             size: [1, 1],

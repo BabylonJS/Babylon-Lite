@@ -11,6 +11,7 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import type { PbrTemplateExt } from "./pbr-template-ext.js";
+import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
 
 const STAGE_FRAGMENT = 0x2;
@@ -39,66 +40,99 @@ return F0+(F90-F0)*(t2*t2*t);
 
 export interface PbrTemplateConfig {
     /** When true, generates a non-looping single-light direct block + lights UBO binding. */
+    /** @internal */
     readonly _hasSingleLight?: boolean;
     /** When true, generates a multi-light loop + lights UBO binding.
      *  Used for multiple lights or shadow receivers. */
+    /** @internal */
     readonly _hasMultiLight?: boolean;
     /** Pre-built WGSL for the single-light UBO structs. */
+    /** @internal */
     readonly _singleLightWGSL?: string;
     /** Pre-built WGSL for the single-light direct lighting block. */
+    /** @internal */
     readonly _singleLightBlock?: string;
     /** Pre-built WGSL for multi-light (structs + computePbrLight). Passed from
      *  dynamically imported fragments/multilight-wgsl.ts to keep it out of non-shadow bundles. */
+    /** @internal */
     readonly _multiLightWGSL?: string;
     /** Pre-built WGSL for the multi-light direct lighting loop body. */
+    /** @internal */
     readonly _multiLightLoop?: string;
     /** Normal map mode (default: "none") */
+    /** @internal */
     readonly _normalMode?: "tangent" | "cotangent" | "none";
     /** Has emissive texture */
+    /** @internal */
     readonly _hasEmissiveTexture?: boolean;
     /** Has specular-glossiness workflow */
+    /** @internal */
     readonly _hasSpecGloss?: boolean;
     /** Has double-sided rendering */
+    /** @internal */
     readonly _hasDoubleSided?: boolean;
     /** Has tonemap */
+    /** @internal */
     readonly _hasTonemap?: boolean;
     /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
+    /** @internal */
     readonly _acesHelpers?: string;
     /** ACES WGSL: tonemap call block replacing the default exponential one. */
+    /** @internal */
     readonly _acesTonemapCall?: string;
     /** Has alpha blending */
+    /** @internal */
     readonly _hasAlphaBlend?: boolean;
     /** Has specular AA */
+    /** @internal */
     readonly _hasSpecularAA?: boolean;
     /** Has gamma albedo (sRGB base color decode) */
+    /** @internal */
     readonly _hasGammaAlbedo?: boolean;
     /** Has a non-default base-color factor multiplied over the base-color texture. */
+    /** @internal */
     readonly _hasBaseColorFactor?: boolean;
     /** Has morph targets (changes position/normal variable names in vertex shader) */
+    /** @internal */
     readonly _hasMorph?: boolean;
     /** Has occlusion in ORM texture (simple path, no reflectance ext) */
+    /** @internal */
     readonly _hasOcclusion?: boolean;
     /** Has emissive color UBO field (fragment handles emissive computation) */
+    /** @internal */
     readonly _hasEmissiveColor?: boolean;
     /** When true, the reflectance fragment handles F0 + occlusion computation */
+    /** @internal */
     readonly _hasReflectanceExt?: boolean;
     /** When true, include IBL SH coefficients in scene UBO */
+    /** @internal */
     readonly _hasIbl?: boolean;
     /** Has anisotropy layer */
+    /** @internal */
     readonly _hasAnisotropy?: boolean;
     /** Anisotropy WGSL: BRDF helper functions (dynamically imported). */
+    /** @internal */
     readonly _anisoBrdfFunctions?: string;
     /** Anisotropy WGSL: T/B computation block (dynamically imported). */
+    /** @internal */
     readonly _anisoTBBlock?: string;
     /** Optional extension config for advanced features (UV transforms, UV2, vertex colors).
      *  When undefined, base template defaults to master-like behavior (no feature strings). */
+    /** @internal */
     readonly _ext?: PbrTemplateExt;
     /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
+    /** @internal */
     readonly _noColorOutput?: boolean;
     /** Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
+    /** @internal */
     readonly _esmShadowOutput?: boolean;
     /** ESM shadow depth output code. Supplied by the ESM material view so normal PBR bundles don't retain it. */
+    /** @internal */
     readonly _esmShadowDepthCode?: string;
+    /** @internal Per-attribute vertex-buffer interleave layout. Undefined (or per-attribute
+     *  undefined) → canonical tight strides (12/12/16/8). Only set for meshes
+     *  sourcing attributes from a strided bufferView. */
+    readonly _vbStrides?: MeshVbLayout;
 }
 
 /**
@@ -136,20 +170,23 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
+        _vbStrides,
     } = config;
     const hasNormal = _normalMode === "tangent";
     const hasCotangentNormal = _normalMode === "cotangent";
     const hasAnyNormal = hasNormal || hasCotangentNormal;
 
     // ── Base vertex attributes ──────────────────────────────────
+    // arrayStride defaults to the canonical tight element size; interleaved meshes
+    // override it (e.g. 24 for POSITION+NORMAL sharing one stride-24 bufferView).
     const _baseVertexAttributes: VertexAttribute[] = [
-        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
-        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
+        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: _vbStrides?._p?._stride ?? 12 },
+        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: _vbStrides?._n?._stride ?? 12 },
     ];
     if (hasNormal) {
-        _baseVertexAttributes.push({ _name: "tangent", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 });
+        _baseVertexAttributes.push({ _name: "tangent", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: _vbStrides?._t?._stride ?? 16 });
     }
-    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
+    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: _vbStrides?._u?._stride ?? 8 });
     if (_ext) {
         _baseVertexAttributes.push(..._ext.extraVertexAttributes);
     }

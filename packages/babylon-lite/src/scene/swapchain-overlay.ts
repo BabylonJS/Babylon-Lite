@@ -1,8 +1,8 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTask } from "../frame-graph/render-task.js";
-import type { SceneContextInternal } from "./scene-core.js";
+import type { SceneContext } from "./scene-core.js";
 
-function getDefaultSwapchainTask(scene: SceneContextInternal): RenderTask | null {
+function getDefaultSwapchainTask(scene: SceneContext): RenderTask | null {
     for (const task of scene._frameGraph._tasks) {
         const ptask = task as Partial<RenderTask> | undefined;
         if (!ptask?._config || !ptask._colorAttachment) {
@@ -17,12 +17,12 @@ function getDefaultSwapchainTask(scene: SceneContextInternal): RenderTask | null
 }
 
 /** @internal Configure a later scene to preserve pixels already rendered into the same swapchain. */
-export function configureSwapchainOverlayScene(engine: EngineContextInternal, overlay: SceneContextInternal): void {
-    const base = engine._renderingContexts[engine._renderingContexts.length - 1] as Partial<SceneContextInternal> | undefined;
+export function configureSwapchainOverlayScene(engine: EngineContext, overlay: SceneContext): void {
+    const base = engine._renderingContexts[engine._renderingContexts.length - 1] as Partial<SceneContext> | undefined;
     if (!base?._frameGraph) {
         return;
     }
-    const baseTask = getDefaultSwapchainTask(base as SceneContextInternal);
+    const baseTask = getDefaultSwapchainTask(base as SceneContext);
     const overlayTask = getDefaultSwapchainTask(overlay);
     if (!baseTask || !overlayTask) {
         return;

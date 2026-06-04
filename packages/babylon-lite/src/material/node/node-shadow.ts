@@ -15,26 +15,32 @@ import type { Varying } from "../../shader/fragment-types.js";
 const SHADOW_FACTORS_TYPE = `array<f32, ${MAX_LIGHTS}>`;
 const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
+/** @internal */
 export interface ShadowBinding {
+    /** @internal */
     readonly _lightIndex: number;
+    /** @internal */
     readonly _texBinding: number;
+    /** @internal */
     readonly _sampBinding: number;
+    /** @internal */
     readonly _uboBinding: number;
+    /** @internal */
     readonly _shadowType: "esm" | "pcf";
 }
 
 export interface ShadowEmit {
-    /** One per shadow-casting light (3 binding slots each). */
+    /** @internal One per shadow-casting light (3 binding slots each). */
     readonly _bindings: readonly ShadowBinding[];
-    /** Module-scope WGSL: struct + binding decls + compute fns. */
+    /** @internal Module-scope WGSL: struct + binding decls + compute fns. */
     readonly _wgslDecls: string;
-    /** `nme_computeShadowFactors(input) -> array<f32, MAX_LIGHTS>` called from light blocks. */
+    /** @internal `nme_computeShadowFactors(input) -> array<f32, MAX_LIGHTS>` called from light blocks. */
     readonly _fragmentHelper: string;
-    /** Injected into vs_main body: populates vPosFromLight_i + vDepthMetric_i varyings. */
+    /** @internal Injected into vs_main body: populates vPosFromLight_i + vDepthMetric_i varyings. */
     readonly _vertexInject: string;
-    /** GPU BGL entries for group 1 (append to meshBglEntries). */
+    /** @internal GPU BGL entries for group 1 (append to meshBglEntries). */
     readonly _bglEntries: readonly GPUBindGroupLayoutEntry[];
-    /** Total bindings consumed (= shadowLights.length * 3). */
+    /** @internal Total bindings consumed (= shadowLights.length * 3). */
     readonly _bindingCount: number;
 }
 

@@ -29,13 +29,13 @@
  * (e.g., a 3D scene + a UI overlay scene).
  */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Camera } from "../camera/camera.js";
 import type { Renderable, DrawBinding, DrawUpdateContext } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
@@ -73,35 +73,53 @@ export interface RenderTask extends Task {
     /** Render tasks are scene-bound because they consume scene camera, lights, and renderables. */
     readonly scene: SceneContext;
     /** Live task configuration. Mutating `clr` or `clrColor` affects subsequent frames. */
+    /** @internal */
     readonly _config: RenderTaskConfig;
+    /** @internal */
     _autoFromScene: boolean;
 
     /** Source-of-truth renderables. Bucketed binding lists below are derived from
      *  this list at `record()` (or re-sync when auto-filled and `_renderableVersion` changes). */
+    /** @internal */
     _renderables: Renderable[];
+    /** @internal */
     _opaqueBindings: DrawBinding[];
+    /** @internal */
     _directBindings: DrawBinding[];
+    /** @internal */
     _transparentBindings: DrawBinding[];
     /** Cached opaque render bundle. Invalidated by renderable list mutations
      *  (`_lastVersion`) and visibility changes (`_lastVis`). */
+    /** @internal */
     _opaqueBundles: GPURenderBundle[];
+    /** @internal */
     _lastVersion: number;
+    /** @internal */
     _lastVis: number;
 
+    /** @internal */
     _renderPassDescriptor: GPURenderPassDescriptor;
+    /** @internal */
     _colorAttachment: GPURenderPassColorAttachment;
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
      *  frame by `writePassSceneUBO`. Destroyed in `dispose()`. */
+    /** @internal */
     _sceneUBO: GPUBuffer;
+    /** @internal */
     _sceneBG: GPUBindGroup;
+    /** @internal */
     _lightsUBO: GPUBuffer;
+    /** @internal */
     _suData: Float32Array;
+    /** @internal */
     _su: unknown[];
     /** Optional transmission-enabled execute path: copies the scene texture for refraction and draws transmissive
      *  renderables. Present only when the task was configured with `transmission`. Returns the number of draw calls issued. */
+    /** @internal */
     _executeWithTransmission?(sampleCount: number): number;
+    /** @internal */
     _targetSignature: RenderTargetSignature;
 
     /** Add a mesh to this task's explicit render list with an optional per-pass material override.
@@ -109,6 +127,7 @@ export interface RenderTask extends Task {
      *  so the mesh's material family must already have been registered with
      *  the scene (so its batch builder has run). */
     addMesh(mesh: Mesh, opts?: { material?: Material }): void;
+    /** @internal */
     _pendingMeshes: { mesh: Mesh; material: Material }[];
 }
 
@@ -123,8 +142,7 @@ interface MutableDrawUpdateContext {
  *
  *  Swapchain-targeted tasks acquire the swap view per-frame at execute time. */
 export function createRenderTask(config: RenderTaskConfig, engine: EngineContext, scene: SceneContext): RenderTask {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
+    const sc = scene as SceneContext;
     const rt = config.rt;
     config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     config.clr ??= true;
@@ -140,10 +158,10 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _flipY: desc.flipY ?? desc.resolveToSwapchain !== true,
     };
 
-    const sceneBGL = getSceneBindGroupLayout(eng);
-    const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
-    const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
-    const sceneBG = eng.device.createBindGroup({
+    const sceneBGL = getSceneBindGroupLayout(engine);
+    const sceneUBO = createEmptyUniformBuffer(engine, SCENE_UBO_BYTES);
+    const lightsUBO = ensureSceneLightState(engine, sc)._buffer;
+    const sceneBG = engine._device.createBindGroup({
         layout: sceneBGL,
         entries: [
             { binding: 0, resource: { buffer: sceneUBO } },
@@ -155,7 +173,7 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
     const task: RenderTask = {
         name: config.name,
         _config: config,
-        engine: eng,
+        engine: engine,
         scene: sc,
         _passes: [],
         _autoFromScene: false,
@@ -191,15 +209,15 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             if (task._autoFromScene) {
                 task._renderables.push(...sc._renderables);
             }
-            buildRenderTarget(rt, eng);
+            buildRenderTarget(rt, engine);
             updateContext.targetWidth = rt._width;
             updateContext.targetHeight = rt._height;
-            refreshTaskSceneBindGroup(task, eng);
-            buildBindings(task, eng, targetSignature);
+            refreshTaskSceneBindGroup(task, engine);
+            buildBindings(task, engine, targetSignature);
             buildRenderPassDescriptor(task, rt);
         },
         execute(): number {
-            return executePass(task, eng, targetSignature, updateContext);
+            return executePass(task, engine, targetSignature, updateContext);
         },
         dispose(): void {
             task._passes.length = 0;
@@ -240,7 +258,7 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolvePendingMeshes(task: RenderTask, sc: SceneContextInternal): void {
+function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
     if (task._pendingMeshes.length === 0) {
         return;
     }
@@ -273,7 +291,7 @@ function sortTransparentBindings(task: RenderTask, camera: Camera | null | undef
 }
 
 /** (Re)bucket task._renderables into bound lists. */
-function buildBindings(task: RenderTask, eng: EngineContextInternal, targetSignature: RenderTargetSignature): void {
+function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature): void {
     const opaque = task._opaqueBindings;
     const direct = task._directBindings;
     const transparent = task._transparentBindings;
@@ -293,7 +311,7 @@ function buildBindings(task: RenderTask, eng: EngineContextInternal, targetSigna
     opaque.sort((a, b) => a.renderable.order - b.renderable.order);
     direct.sort((a, b) => a.renderable.order - b.renderable.order);
     task._opaqueBundles.length = 0;
-    task._lastVersion = (task.scene as SceneContextInternal)._renderableVersion;
+    task._lastVersion = (task.scene as SceneContext)._renderableVersion;
 }
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
@@ -319,8 +337,8 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     task._renderPassDescriptor.depthStencilAttachment = depthAttachment ?? undefined;
 }
 
-function prepareRenderTaskPass(task: RenderTask, eng: EngineContextInternal, targetSignature: RenderTargetSignature, context: DrawUpdateContext): void {
-    const sc = task.scene as SceneContextInternal;
+function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): void {
+    const sc = task.scene as SceneContext;
     // Auto-resync when the source scene mutates.
     if (task._autoFromScene && task._lastVersion !== sc._renderableVersion) {
         task._renderables.length = 0;
@@ -350,7 +368,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContextInternal, tar
     sortTransparentBindings(task, camera);
 }
 
-function executePass(task: RenderTask, eng: EngineContextInternal, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
+function executePass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): number {
     const sc = task.scene;
     const sampleCount = targetSignature._sampleCount;
     prepareRenderTaskPass(task, eng, targetSignature, context);
@@ -382,10 +400,10 @@ function executePass(task: RenderTask, eng: EngineContextInternal, targetSignatu
  *  and issues all draws (viewport/scissor, group(0) bind, opaque bundle replay,
  *  then direct-draws non-transparent direct + transparent). Returns the draw count. */
 function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
-    const eng = task.engine as EngineContextInternal;
+    const eng = task.engine as EngineContext;
     const cfg = task._config;
     const rt = cfg.rt;
-    const scene = task.scene as SceneContextInternal;
+    const scene = task.scene as SceneContext;
     const opaqueBindings = task._opaqueBindings;
     const opaqueBundles = task._opaqueBundles;
     const sceneBG = task._sceneBG;
@@ -410,7 +428,7 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     // be replayed standalone (executeBundles inherits no inherited state).
     if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
         const desc = rt._descriptor;
-        const be = eng.device.createRenderBundleEncoder({
+        const be = eng._device.createRenderBundleEncoder({
             colorFormats: desc.colorFormat ? [desc.colorFormat] : [],
             depthStencilFormat: desc.depthStencilFormat,
             sampleCount: desc.sampleCount ?? 1,
@@ -430,13 +448,13 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     return draws;
 }
 
-function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContextInternal): void {
-    const lightsUBO = ensureSceneLightState(eng, task.scene as SceneContextInternal)._buffer;
+function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
+    const lightsUBO = ensureSceneLightState(eng, task.scene as SceneContext)._buffer;
     if (lightsUBO === task._lightsUBO) {
         return;
     }
     task._lightsUBO = lightsUBO;
-    task._sceneBG = eng.device.createBindGroup({
+    task._sceneBG = eng._device.createBindGroup({
         layout: getSceneBindGroupLayout(eng),
         entries: [
             { binding: 0, resource: { buffer: task._sceneUBO } },
@@ -449,7 +467,7 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContextInternal)
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
  *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContextInternal, scene: SceneContextInternal, camera: Camera | null, flipY?: boolean): void {
+function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null, flipY?: boolean): void {
     if (!camera) {
         return;
     }
@@ -527,7 +545,7 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContextInternal, scene: 
         data[90] = scene.clipPlane[2];
         data[91] = scene.clipPlane[3];
     }
-    eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
+    eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
 function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext): void {
@@ -537,7 +555,7 @@ function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext
 }
 
 /** Iterate DrawBindings, deduping setPipeline. */
-function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContextInternal): number {
+function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
     for (const b of list) {

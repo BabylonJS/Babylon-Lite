@@ -11,7 +11,6 @@
  */
 
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -21,7 +20,6 @@ import { createTransformNode } from "../scene/transform-node.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { uploadMeshToGPU, initMeshTransform } from "../mesh/mesh.js";
-import type { MeshInternal } from "../mesh/mesh.js";
 import { loadTexture2D } from "../texture/texture-2d.js";
 // ─── .babylon JSON Types ───────────────────────────────────────────
 
@@ -297,7 +295,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                 const cubeName = md.reflectionTexture.name;
                 texturePromises.push(
                     import("../texture/cube-texture.js").then(({ loadCubeTexture }) =>
-                        loadCubeTexture(engine as EngineContextInternal, baseUrl + cubeName).then((cube) => {
+                        loadCubeTexture(engine as EngineContext, baseUrl + cubeName).then((cube) => {
                             mat.reflectionCubeTexture = cube;
                         })
                     )
@@ -403,7 +401,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                     }
 
                     const subIndices = allIndices.slice(sub.indexStart, sub.indexStart + sub.indexCount);
-                    const gpu = uploadMeshToGPU(engine as EngineContextInternal, positions, normals, subIndices, uvs, uvs2);
+                    const gpu = uploadMeshToGPU(engine as EngineContext, positions, normals, subIndices, uvs, uvs2);
 
                     let mat: StandardMaterialProps;
                     if (matIds && sub.materialIndex < matIds.length) {
@@ -421,7 +419,7 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                         receiveShadows: false,
                         _materialDirty: false,
                         _gpu: gpu,
-                    } as unknown as MeshInternal;
+                    } as unknown as Mesh;
 
                     mesh._cpuPositions = positions;
                     mesh._cpuNormals = normals;

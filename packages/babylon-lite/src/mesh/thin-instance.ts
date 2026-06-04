@@ -12,33 +12,33 @@ export interface ThinInstanceData {
     matrices: Float32Array;
     /** Active instance count. */
     count: number;
-    /** Allocated capacity (in instances). */
+    /** @internal Allocated capacity (in instances). */
     _capacity: number;
-    /** Version counter — bumped by helpers, checked by render system. */
+    /** @internal Version counter — bumped by helpers, checked by render system. */
     _version: number;
-    /** GPU buffer — created and managed by render system, not user. */
+    /** @internal GPU buffer — created and managed by render system, not user. */
     _gpuBuffer: GPUBuffer | null;
-    /** Whether the current matrix GPU buffer was created with STORAGE usage. */
+    /** @internal Whether the current matrix GPU buffer was created with STORAGE usage. */
     _gpuBufferStorage: boolean;
-    /** Last version uploaded to GPU. */
+    /** @internal Last version uploaded to GPU. */
     _gpuVersion: number;
 
-    /** Min dirty instance index (inclusive). */
+    /** @internal Min dirty instance index (inclusive). */
     _dirtyMin: number;
-    /** Max dirty instance index (exclusive). */
+    /** @internal Max dirty instance index (exclusive). */
     _dirtyMax: number;
 
     /** Optional per-instance RGBA colors (4 floats per instance). */
     colors?: Float32Array | null;
-    /** Color version counter — independent of matrix version. */
+    /** @internal Color version counter — independent of matrix version. */
     _colorVersion: number;
-    /** GPU buffer for per-instance colors. */
+    /** @internal GPU buffer for per-instance colors. */
     _colorGpuBuffer: GPUBuffer | null;
-    /** Whether the current color GPU buffer was created with STORAGE usage. */
+    /** @internal Whether the current color GPU buffer was created with STORAGE usage. */
     _colorGpuBufferStorage: boolean;
-    /** Last color version uploaded to GPU. */
+    /** @internal Last color version uploaded to GPU. */
     _colorGpuVersion: number;
-    /** Opt-in flag for GPU frustum culling + indirect drawing. */
+    /** @internal Opt-in flag for GPU frustum culling + indirect drawing. */
     _gpuCullingEnabled: boolean;
 }
 

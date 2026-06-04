@@ -5,7 +5,7 @@
  * converts sRGB→linear on read and linear→sRGB on write, so filtering is correct.
  */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 const BLIT_SHADER = `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
@@ -28,8 +28,8 @@ function clearCache(): void {
     cachedDevice = null;
 }
 
-function ensureResources(engine: EngineContextInternal): void {
-    const device = engine.device;
+function ensureResources(engine: EngineContext): void {
+    const device = engine._device;
     if (device !== cachedDevice) {
         clearCache();
         cachedDevice = device;
@@ -44,8 +44,8 @@ function ensureResources(engine: EngineContextInternal): void {
     });
 }
 
-function getPipeline(engine: EngineContextInternal, format: GPUTextureFormat): GPURenderPipeline {
-    const device = engine.device;
+function getPipeline(engine: EngineContext, format: GPUTextureFormat): GPURenderPipeline {
+    const device = engine._device;
     ensureResources(engine);
     pipelineCache ??= new Map();
     let pipeline = pipelineCache.get(format);
@@ -62,18 +62,18 @@ function getPipeline(engine: EngineContextInternal, format: GPUTextureFormat): G
 }
 
 /** Generate mip chain for a 2D texture via GPU blit. Works for cube faces via optional `face` layer index. */
-export function generateMipmaps(engine: EngineContextInternal, texture: GPUTexture, face?: number): void {
-    const device = engine.device;
+export function generateMipmaps(engine: EngineContext, texture: GPUTexture, face?: number): void {
+    const device = engine._device;
     const encoder = device.createCommandEncoder();
     recordMipmaps(engine, texture, encoder, face);
     device.queue.submit([encoder.finish()]);
 }
 
-export function recordMipmaps(engine: EngineContextInternal, texture: GPUTexture, encoder: GPUCommandEncoder, face?: number): void {
+export function recordMipmaps(engine: EngineContext, texture: GPUTexture, encoder: GPUCommandEncoder, face?: number): void {
     if (texture.mipLevelCount <= 1) {
         return;
     }
-    const device = engine.device;
+    const device = engine._device;
     const pipeline = getPipeline(engine, texture.format);
     const vp = face != null ? { dimension: "2d" as const, baseArrayLayer: face, arrayLayerCount: 1 } : {};
     for (let mip = 1; mip < texture.mipLevelCount; mip++) {

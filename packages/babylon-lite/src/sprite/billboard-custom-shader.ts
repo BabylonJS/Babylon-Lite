@@ -23,7 +23,7 @@
  *     body owns all alpha handling.
  */
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { BillboardDepthMode, BillboardOrientation } from "./billboard-sprite.js";
 import { makeBillboardBasisWgsl } from "./billboard-pipeline.js";
 import type { CustomShaderTexture, SpriteLayerFx } from "./custom-shader-core.js";
@@ -53,6 +53,7 @@ export interface BillboardCustomShaderOptions {
 
 /** Opaque custom-shader descriptor produced by {@link createBillboardCustomShader}. */
 export interface BillboardCustomShader {
+    /** @internal */
     readonly _entityType: "billboard-custom-shader";
     /** @internal Extra textures bound after the atlas. */
     readonly _extraTextures: readonly BillboardCustomTexture[];
@@ -61,11 +62,11 @@ export interface BillboardCustomShader {
     /** @internal Builds the full WGSL for the given orientation (depth mode is irrelevant — the body owns alpha). */
     readonly _composeWgsl: (orientation: BillboardOrientation, depthMode: BillboardDepthMode) => string;
     /** @internal Compile + cache the `GPUShaderModule` for an orientation (owns its per-device cache). */
-    readonly _getShaderModule: (engine: EngineContextInternal, orientation: BillboardOrientation, depthMode: BillboardDepthMode) => GPUShaderModule;
+    readonly _getShaderModule: (engine: EngineContext, orientation: BillboardOrientation, depthMode: BillboardDepthMode) => GPUShaderModule;
     /** @internal Extra-texture + fx UBO bind-group **layout** entries, starting at `startBinding` (3). */
     readonly _layoutEntries: (startBinding: number) => GPUBindGroupLayoutEntry[];
     /** @internal Build the opaque per-system fx attachment (owns the `SpriteFx` UBO, scratch, and elapsed time). */
-    readonly _createLayerFx: (engine: EngineContextInternal, label: string) => SpriteLayerFx;
+    readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx;
 }
 
 function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {

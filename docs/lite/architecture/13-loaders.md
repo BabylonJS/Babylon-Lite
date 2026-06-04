@@ -2,6 +2,10 @@
 > Package paths:
 > - `packages/babylon-lite/src/loader-gltf/load-gltf.ts` — GLB 2.0 loader
 > - `packages/babylon-lite/src/loader-gltf/gltf-ext-basisu.ts` — glTF `KHR_texture_basisu` feature module
+> - `packages/babylon-lite/src/loader-gltf/gltf-feature-meshopt.ts` + `meshopt-decode.ts` — `EXT_meshopt_compression` feature module + decoder
+> - `packages/babylon-lite/src/loader-gltf/gltf-ext-quantization.ts` — `KHR_mesh_quantization` feature module
+> - `packages/babylon-lite/src/loader-gltf/gltf-feature-xmp.ts` — `KHR_xmp_json_ld` metadata feature module
+> - `packages/babylon-lite/src/loader-gltf/gltf-interleave.ts` — dynamic native interleaved-vertex-buffer support (de-strided CPU copies built lazily on demand)
 > - `packages/babylon-lite/src/loader-env/load-env.ts` — Babylon .env environment loader
 > - `packages/babylon-lite/src/loader-env/load-dds-env.ts` — DDS cubemap environment loader
 > - `packages/babylon-lite/src/loader-env/env-helpers.ts` — Shared environment assembly helpers
@@ -280,6 +284,52 @@ Design constraints:
 - Core texture cache keys remain image-bitmap based; KTX2 feature caches by glTF texture index and sRGB flag.
 - Scene 112 (`FlightHelmetKTX`) validates the path and keeps existing scene runtime bundle sizes unchanged.
 
+### Interleaved Vertex Buffers (`gltf-interleave.ts`)
+
+glTF allows multiple vertex attributes to share one `bufferView` with a non-zero
+`byteStride` (interleaved layout). Babylon Lite supports this **at the GPU level**
+rather than rewriting the asset:
+
+```
+primitive has a strided (byteStride > 0), non-decoded accessor
+  ↓
+dynamic import("./gltf-interleave.js")   // never fetched by tight-only scenes
+  ↓
+buildInterleavedPartial(json, binChunk, attrs)
+  ├─ records each strided attribute's { bufferView slice, offset, stride }
+  └─ resolves tight attributes directly
+  ↓
+uploadMeshes binds the ONE raw bufferView slice to every attribute slot at the
+attribute's byte offset with pipeline arrayStride = byteStride
+```
+
+Design constraints:
+
+- **No CPU de-interleave / asset rewrite.** The raw interleaved bytes are uploaded
+  once and bound to each slot — the GPU does the striding.
+- **De-strided CPU copies are lazy.** `installLazyCpu()` defines
+  `_cpuPositions/_cpuNormals/_cpuUvs` as caching getters that de-stride on first
+  access; a mesh that is never picked / CSG'd / navigated never materializes them.
+- **Zero cost to non-interleaved scenes.** The whole module is dynamic-imported and
+  only loaded when a genuinely-strided, non-decoded primitive is encountered. Decoded
+  paths (Draco, `KHR_texture_basisu` de-stride) bypass it.
+- Validated by Scene 210 (`XmpMetadataRoundedCube`, genuinely interleaved).
+
+### `EXT_meshopt_compression` + `KHR_mesh_quantization` (`gltf-feature-meshopt.ts`, `gltf-ext-quantization.ts`)
+
+`EXT_meshopt_compression` bufferViews are decoded by a dynamically-imported meshopt
+decoder (`meshopt-decode.ts`) before accessor resolution; `KHR_mesh_quantization`
+lets normalized/quantized attribute formats upload natively. Both are dynamic feature
+modules, so non-meshopt scenes pay zero runtime bytes. Validated by Scene 211
+(`BrainStem` glTF-Meshopt-EXT, skinned + animated).
+
+### `KHR_xmp_json_ld` Metadata (`gltf-feature-xmp.ts`)
+
+Pure metadata with no render effect: the feature's `applyAsset` hook surfaces the
+document-level JSON-LD packets (and the `asset`-referenced packet) on
+`AssetContainer.xmpMetadata = { packets, assetPacket }`. Dynamic-imported only when
+`extensionsUsed` lists `KHR_xmp_json_ld`. Validated by Scene 210.
+
 ### Bounding Box Computation
 
 World-space AABB is computed by transforming every vertex position through the world matrix:
@@ -531,6 +581,10 @@ output_L1_-1 = raw_L1_-1 × B1m
 | `computeWorldBounds` | Known positions × identity matrix → correct AABB |
 | `KHR_texture_basisu` | Scene 112 FlightHelmetKTX loads KTX2 texture sources and matches Babylon.js within `maxMad: 0.02` |
 | `KHR_texture_basisu bundle isolation` | Existing scenes have no positive runtime-loaded JS deltas when KTX2 support is present |
+| `Interleaved vertex buffers` | Strided accessors resolve to GPU offset/stride; `gltf-interleave.test.ts` covers strided detection + lazy de-stride |
+| `KHR_xmp_json_ld` | Scene 210 XmpMetadataRoundedCube (genuinely interleaved) matches Babylon.js within `maxMad: 0.2`; metadata surfaced on `AssetContainer.xmpMetadata` |
+| `EXT_meshopt_compression` + `KHR_mesh_quantization` | Scene 211 BrainStem (glTF-Meshopt-EXT) matches Babylon.js within `maxMad: 0.2` |
+| `glTF feature bundle isolation` | Non-interleaved / non-meshopt / non-XMP scenes never load the corresponding dynamic chunk (verified via `coverage:scene`) |
 | **.env** | |
 | `.env magic validation` | Bad magic → throws |
 | `RGBD decode` | Known RGBD values → correct linear HDR |

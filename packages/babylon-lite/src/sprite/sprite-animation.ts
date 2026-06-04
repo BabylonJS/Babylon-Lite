@@ -1,12 +1,6 @@
 /** Optional Babylon.js-style frame animation core for sprite families. */
-import type { SceneContextInternal } from "../scene/scene-core.js";
-import type { SceneContext } from "../scene/scene.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { SpriteRenderer } from "./sprite-renderer.js";
-
-interface SpriteAnimationRendererInternal extends SpriteRenderer {
-    _beforeUpdate: ((deltaMs: number) => void)[];
-    _disposeCallbacks: (() => void)[];
-}
 
 /** Abstracts the sprite a frame animation drives, decoupling the animation core from each sprite family. */
 export interface SpriteAnimationTarget {
@@ -27,6 +21,7 @@ export interface PlaySpriteAnimationOptions {
 
 /** A single frame-range animation playing on a {@link SpriteAnimationTarget}. */
 export interface SpriteFrameAnimation {
+    /** @internal */
     readonly _entityType: "sprite-frame-animation";
     readonly target: SpriteAnimationTarget;
     from: number;
@@ -50,26 +45,29 @@ export interface SpriteAnimationManagerOptions {
 
 /** Owns a set of sprite frame animations and advances them in lockstep. */
 export interface SpriteAnimationManager {
+    /** @internal */
     readonly _entityType: "sprite-animation-manager";
     animations: SpriteFrameAnimation[];
     fixedDeltaMs: number;
     running: boolean;
+    /** @internal */
+    readonly _onUpdate?: (deltaMs: number) => void;
+    /** @internal */
+    _binding?: SpriteAnimationBinding;
+    /** @internal */
+    _animationManager?: import("../animation/animation-manager.js").AnimationManager;
+    /** @internal */
+    _loopManager?: import("../animation/animation-manager.js").AnimationManager;
+    /** @internal Animation task created by sprite-animation-task. */
+    _animationTask?: import("../animation/animation-manager.js").AnimationTask;
 }
 
 /** Handle to a sprite animation manager attached to a scene or renderer; dispose it to detach. */
 export interface SpriteAnimationBinding {
+    /** @internal */
     readonly _entityType: "sprite-animation-binding";
     active: boolean;
-}
-
-interface SpriteAnimationManagerInternal extends SpriteAnimationManager {
-    readonly onUpdate?: (deltaMs: number) => void;
-    _binding?: SpriteAnimationBindingInternal;
-    _animationManager?: unknown;
-    _loopManager?: unknown;
-}
-
-interface SpriteAnimationBindingInternal extends SpriteAnimationBinding {
+    /** @internal */
     _dispose: () => void;
 }
 
@@ -94,10 +92,6 @@ function clearSpriteAnimationOwner(animation: SpriteFrameAnimation): void {
     spriteAnimationOwners?.delete(animation);
 }
 
-function asSpriteAnimationManagerInternal(manager: SpriteAnimationManager): SpriteAnimationManagerInternal {
-    return manager as SpriteAnimationManagerInternal;
-}
-
 function normalizeDelay(delayMs: number): number {
     return Number.isFinite(delayMs) && delayMs > 1 ? delayMs : 1;
 }
@@ -108,12 +102,12 @@ function normalizeDelay(delayMs: number): number {
  * @returns The new manager.
  */
 export function createSpriteAnimationManager(options?: SpriteAnimationManagerOptions): SpriteAnimationManager {
-    const manager: SpriteAnimationManagerInternal = {
+    const manager: SpriteAnimationManager = {
         _entityType: "sprite-animation-manager",
         animations: [],
         fixedDeltaMs: options?.fixedDeltaMs ?? 0,
         running: false,
-        onUpdate: options?.onUpdate,
+        _onUpdate: options?.onUpdate,
     };
     return manager;
 }
@@ -323,29 +317,27 @@ function advanceSpriteAnimation(animation: SpriteFrameAnimation, deltaMs: number
  */
 export function attachSpriteAnimationsToScene(scene: SceneContext, manager: SpriteAnimationManager): SpriteAnimationBinding {
     assertCanAttachToRenderLoop(manager);
-    const managerInternal = asSpriteAnimationManagerInternal(manager);
-    const sceneInternal = scene as SceneContextInternal;
     const hook = (deltaMs: number): void => {
         updateSpriteAnimationManager(manager, deltaMs);
     };
     // Run before hooks currently registered on the scene; later onBeforeRender calls can still prepend ahead of it.
-    sceneInternal._beforeRender.unshift(hook);
+    scene._beforeRender.unshift(hook);
 
-    const binding: SpriteAnimationBindingInternal = {
+    const binding: SpriteAnimationBinding = {
         _entityType: "sprite-animation-binding",
         active: true,
         _dispose: () => {
-            const index = sceneInternal._beforeRender.indexOf(hook);
+            const index = scene._beforeRender.indexOf(hook);
             if (index !== -1) {
-                sceneInternal._beforeRender.splice(index, 1);
+                scene._beforeRender.splice(index, 1);
             }
-            if (managerInternal._binding === binding) {
-                managerInternal._binding = undefined;
+            if (manager._binding === binding) {
+                manager._binding = undefined;
             }
         },
     };
-    managerInternal._binding = binding;
-    sceneInternal._disposables.push(() => disposeSpriteAnimationBinding(binding));
+    manager._binding = binding;
+    scene._disposables.push(() => disposeSpriteAnimationBinding(binding));
     return binding;
 }
 
@@ -358,35 +350,33 @@ export function attachSpriteAnimationsToScene(scene: SceneContext, manager: Spri
  */
 export function attachSpriteAnimationsToRenderer(renderer: SpriteRenderer, manager: SpriteAnimationManager): SpriteAnimationBinding {
     assertCanAttachToRenderLoop(manager);
-    const managerInternal = asSpriteAnimationManagerInternal(manager);
-    const rendererInternal = renderer as SpriteAnimationRendererInternal;
     const hook = (deltaMs: number): void => {
         updateSpriteAnimationManager(manager, deltaMs);
     };
-    rendererInternal._beforeUpdate.push(hook);
+    renderer._beforeUpdate.push(hook);
 
-    const binding: SpriteAnimationBindingInternal = {
+    const binding: SpriteAnimationBinding = {
         _entityType: "sprite-animation-binding",
         active: true,
         _dispose: () => {
-            const index = rendererInternal._beforeUpdate.indexOf(hook);
+            const index = renderer._beforeUpdate.indexOf(hook);
             if (index !== -1) {
-                rendererInternal._beforeUpdate.splice(index, 1);
+                renderer._beforeUpdate.splice(index, 1);
             }
-            const disposeIndex = rendererInternal._disposeCallbacks.indexOf(disposeWithRenderer);
+            const disposeIndex = renderer._disposeCallbacks.indexOf(disposeWithRenderer);
             if (disposeIndex !== -1) {
-                rendererInternal._disposeCallbacks.splice(disposeIndex, 1);
+                renderer._disposeCallbacks.splice(disposeIndex, 1);
             }
-            if (managerInternal._binding === binding) {
-                managerInternal._binding = undefined;
+            if (manager._binding === binding) {
+                manager._binding = undefined;
             }
         },
     };
     function disposeWithRenderer(): void {
         disposeSpriteAnimationBinding(binding);
     }
-    managerInternal._binding = binding;
-    rendererInternal._disposeCallbacks.push(disposeWithRenderer);
+    manager._binding = binding;
+    renderer._disposeCallbacks.push(disposeWithRenderer);
     return binding;
 }
 
@@ -400,21 +390,20 @@ export function disposeSpriteAnimationBinding(binding: SpriteAnimationBinding): 
         return;
     }
     binding.active = false;
-    (binding as Partial<SpriteAnimationBindingInternal>)._dispose?.();
+    binding._dispose();
 }
 
 function assertNoActiveBinding(manager: SpriteAnimationManager): void {
-    const managerInternal = asSpriteAnimationManagerInternal(manager);
-    if (managerInternal._binding?.active) {
+    if (manager._binding?.active) {
         throw new Error("SpriteAnimationManager is already attached to a render loop.");
     }
-    if (managerInternal._animationManager && managerInternal._animationManager !== managerInternal._loopManager) {
+    if (manager._animationManager && manager._animationManager !== manager._loopManager) {
         throw new Error("SpriteAnimationManager is already attached to an AnimationManager.");
     }
 }
 
 function assertCanAttachToRenderLoop(manager: SpriteAnimationManager): void {
-    if (asSpriteAnimationManagerInternal(manager).running) {
+    if (manager.running) {
         throw new Error("SpriteAnimationManager is already running autonomously.");
     }
     assertNoActiveBinding(manager);

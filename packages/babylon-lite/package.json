@@ -45,16 +45,17 @@
         "types": "./dist/index.d.ts"
     },
     "devDependencies": {
+        "@microsoft/api-extractor": "^7.58.7",
         "@webgpu/types": "^0.1.52",
         "typescript": "^5.7.0",
         "vite": "^6.0.0",
         "vite-plugin-dts": "^4.5.4"
     },
     "dependencies": {
-        "draco3d": "^1.5.7",
-        "manifold-3d": "3.4.0",
         "@recast-navigation/core": "0.43.0",
         "@recast-navigation/generators": "0.43.0",
-        "@recast-navigation/wasm": "0.43.0"
+        "@recast-navigation/wasm": "0.43.0",
+        "draco3d": "^1.5.7",
+        "manifold-3d": "3.4.0"
     }
 }

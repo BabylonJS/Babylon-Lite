@@ -10,7 +10,7 @@
  *  Pipelines are cached per (features, format, msaaSamples) tuple.
  *  Shared scene UBO layout is identical across all variants (176 bytes). */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { _standardFeatureKey } from "./standard-material.js";
@@ -65,12 +65,17 @@ function composeStandardShader(features: number, _meshFeatures = 0, fragments: S
  *  per-sig pipeline cache. Created once at renderable build time, shared across
  *  all sig-specific pipelines. */
 export interface StandardShaderBindings {
+    /** @internal */
     _features: number;
+    /** @internal */
     _meshFeatures: number;
+    /** @internal */
     _meshBGL: GPUBindGroupLayout;
+    /** @internal */
     _shadowBGL: GPUBindGroupLayout | null;
+    /** @internal */
     _composed: ComposedShader;
-    /** Per-sig pipeline cache. Key = `targetSignatureKey(sig)`. */
+    /** @internal Per-sig pipeline cache. Key = `targetSignatureKey(sig)`. */
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
@@ -88,12 +93,12 @@ function getComposedCache(): Map<string, ComposedShader> {
     return _composedCache;
 }
 
-function ensureDevice(engine: EngineContextInternal): void {
-    if (_cachedDevice !== engine.device) {
+function ensureDevice(engine: EngineContext): void {
+    if (_cachedDevice !== engine._device) {
         _bindingsCache.clear();
         _composedCache?.clear();
         clearSceneBGLCache();
-        _cachedDevice = engine.device;
+        _cachedDevice = engine._device;
     }
 }
 
@@ -109,7 +114,7 @@ export function clearStandardPipelineCache(): void {
  *  Used at renderable build time so per-mesh bind groups can be created BEFORE the
  *  first bind() call (when sig is known). */
 export function getOrCreateStandardBindings(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     features: number,
     meshFeatures: number,
     fragments: ShaderFragment[] = [],
@@ -130,7 +135,7 @@ export function getOrCreateStandardBindings(
         cc.set(key, composed);
     }
 
-    const device = engine.device;
+    const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     let shadowBGL: GPUBindGroupLayout | null = null;
     const hasShadow = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
@@ -151,7 +156,7 @@ export function getOrCreateStandardBindings(
 }
 
 /** Get-or-build a sig-specific pipeline on top of a shader bindings. Called at bind() time. */
-export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
+export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline {
     ensureDevice(engine);
     const key = targetSignatureKey(sig);
     const cached = bindings._pipelines.get(key);
@@ -159,7 +164,7 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
         return cached;
     }
 
-    const device = engine.device;
+    const device = engine._device;
     const composed = bindings._composed;
     const features = bindings._features;
     const sceneBGL = getSceneBindGroupLayout(engine);
@@ -213,13 +218,13 @@ export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: 
  *
  *  Mirrors `createPbrMeshBindGroup` in pbr-pipeline.ts. */
 export function createStandardMeshBindGroup(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     bindings: StandardShaderBindings,
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
     material: StandardMaterialProps
 ): GPUBindGroup {
-    const device = engine.device;
+    const device = engine._device;
     const features = bindings._features;
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;

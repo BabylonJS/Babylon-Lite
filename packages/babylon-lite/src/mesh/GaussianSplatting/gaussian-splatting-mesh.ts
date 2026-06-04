@@ -10,7 +10,7 @@
  *  scenes never pull in this pipeline. */
 
 import type { SceneNode } from "../../scene/scene-node.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { Mat4 } from "../../math/types.js";
 import { mat4Identity, mat4Compose } from "../../math/mat4.js";
 import { ObservableVec3 } from "../../math/observable-vec3.js";
@@ -34,32 +34,44 @@ export interface GsShaderFragment {
 
 /** Per-mesh GPU resources owned by a GaussianSplattingMesh. */
 export interface GaussianSplattingGpu {
+    /** @internal */
     _centersTex: GPUTexture;
+    /** @internal */
     _centersView: GPUTextureView;
+    /** @internal */
     _covATex: GPUTexture;
+    /** @internal */
     _covAView: GPUTextureView;
+    /** @internal */
     _covBTex: GPUTexture;
+    /** @internal */
     _covBView: GPUTextureView;
+    /** @internal */
     _colorsTex: GPUTexture;
+    /** @internal */
     _colorsView: GPUTextureView;
+    /** @internal */
     _sampler: GPUSampler;
-    /** Quad vertex buffer (4 vec2 corners). */
+    /** @internal Quad vertex buffer (4 vec2 corners). */
     _quadBuffer: GPUBuffer;
-    /** Quad index buffer (uint16 [0,1,2,0,2,3]). */
+    /** @internal Quad index buffer (uint16 [0,1,2,0,2,3]). */
     _indexBuffer: GPUBuffer;
-    /** Per-instance splatIndex (Float32 × vertexCount), back-to-front order. */
+    /** @internal Per-instance splatIndex (Float32 × vertexCount), back-to-front order. */
     _splatIndexBuffer: GPUBuffer;
-    /** CPU-side scratch matching `splatIndexBuffer`. */
+    /** @internal CPU-side scratch matching `splatIndexBuffer`. */
     _splatIndexCpu: Float32Array;
     /** Packed view-dependent SH textures (1..5 rgba32uint), `null` when
      *  the cloud has no SH data. Layout: 16 bytes per splat per texture. */
+    /** @internal */
     _shTextures: GPUTexture[] | null;
+    /** @internal */
     _shViews: GPUTextureView[] | null;
 }
 
 /** Public Gaussian-splatting mesh handle.  `_kind` is a brand so consumers can
  *  narrow on it; the renderable is wired up by `loadSplat()` directly. */
 export interface GaussianSplattingMesh extends SceneNode {
+    /** @internal */
     readonly _kind: "gs-mesh";
     /** Number of splats in the cloud. */
     readonly vertexCount: number;
@@ -72,26 +84,27 @@ export interface GaussianSplattingMesh extends SceneNode {
     /** Spherical-harmonics degree (0 means no view-dependent SH). Set at load
      *  time and immutable afterwards — `updateData` rejects a degree change. */
     readonly shDegree: number;
-    /** Sort worker. Owned by the mesh; terminated on dispose. */
+    /** @internal Sort worker. Owned by the mesh; terminated on dispose. */
     _worker: Worker;
-    /** Scratch for the worker round-trip. high-32 = depth, low-32 = index. */
+    /** @internal Scratch for the worker round-trip. high-32 = depth, low-32 = index. */
     _depthMix: BigInt64Array;
     /** Snapshot of the world matrix posted to the worker on the last sort.
      *  Used to decide whether a re-sort is needed this frame. Mirrors BJS
      *  `ICameraViewInfo.sortWorldMatrix`. */
+    /** @internal */
     _sortWorldMatrix: Float32Array;
-    /** Snapshot of the camera-forward vector (`view[2,6,10]`) on the last sort. */
+    /** @internal Snapshot of the camera-forward vector (`view[2,6,10]`) on the last sort. */
     _sortCameraForward: Float32Array;
-    /** Snapshot of the camera world-space position on the last sort. */
+    /** @internal Snapshot of the camera world-space position on the last sort. */
     _sortCameraPosition: Float32Array;
-    /** True between postMessage and onmessage; throttles re-sort requests. */
+    /** @internal True between postMessage and onmessage; throttles re-sort requests. */
     _canPostToWorker: boolean;
     /** Resolves on the first sort completion. The lab scene awaits this
      *  before flagging `dataset.ready`. */
     readonly firstSortReady: Promise<void>;
-    /** Resolver for {@link firstSortReady}; called once the first sort completes, then cleared to null. */
+    /** @internal Resolver for {@link firstSortReady}; called once the first sort completes, then cleared to null. */
     _firstSortResolve: (() => void) | null;
-    /** GPU resources, populated by `createGaussianSplattingMesh`. */
+    /** @internal GPU resources, populated by `createGaussianSplattingMesh`. */
     _gs: GaussianSplattingGpu;
     /** Raw 32-byte/splat row buffer. Mirrors BJS `splatsData` (with
      *  `keepInRam:true`) — exposed for inspection + `updateData` round-trips. */
@@ -110,8 +123,8 @@ export interface GaussianSplattingMesh extends SceneNode {
  *  `parsed.data` is retained on the mesh as `splatsData` so callers can mutate
  *  the row data and round-trip it via `mesh.updateData(buffer)` — matches
  *  `keepInRam:true` semantics on BJS `GaussianSplattingMesh`. */
-export function createGaussianSplattingMesh(engine: EngineContextInternal, name: string, geom: SplatGeometry, worker: Worker, parsed: ParsedSplat): GaussianSplattingMesh {
-    const device = engine.device;
+export function createGaussianSplattingMesh(engine: EngineContext, name: string, geom: SplatGeometry, worker: Worker, parsed: ParsedSplat): GaussianSplattingMesh {
+    const device = engine._device;
     const queue = device.queue;
     const { textureWidth, textureHeight, vertexCount } = geom;
 

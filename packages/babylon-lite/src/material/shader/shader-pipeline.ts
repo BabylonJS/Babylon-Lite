@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -27,18 +27,18 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
 
 const SHADER_STAGE_ALL = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
 
-export function getOrCreateShaderPipelineBindings(engine: EngineContextInternal, material: ShaderMaterial): ShaderPipelineBindings {
+export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
     const state = material as ShaderMaterialPipelineState;
-    if (state._shaderBindings && state._shaderDevice === engine.device) {
+    if (state._shaderBindings && state._shaderDevice === engine._device) {
         return state._shaderBindings;
     }
 
-    state._shaderDevice = engine.device;
+    state._shaderDevice = engine._device;
     const systemFields = material.uniformDecls.filter((u) => _isShaderSystemUniform(u.name)).map(toUboField);
     const customFields = material.uniformDecls.filter((u) => !_isShaderSystemUniform(u.name)).map(toUboField);
     const systemSpec = computeUboLayout(systemFields.length > 0 ? systemFields : [{ _name: "_pad", _type: "vec4<f32>" }]);
     const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
-    const group1BGL = engine.device.createBindGroupLayout({
+    const group1BGL = engine._device.createBindGroupLayout({
         label: "shader-material-group1",
         entries: buildBindGroupLayoutEntries(material.samplerDecls, customSpec !== null),
     });
@@ -57,18 +57,13 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContextInternal,
     return bindings;
 }
 
-export function getOrCreateShaderPipeline(
-    engine: EngineContextInternal,
-    sig: RenderTargetSignature,
-    material: ShaderMaterial,
-    bindings: ShaderPipelineBindings
-): GPURenderPipeline {
+export function getOrCreateShaderPipeline(engine: EngineContext, sig: RenderTargetSignature, material: ShaderMaterial, bindings: ShaderPipelineBindings): GPURenderPipeline {
     const key = targetSignatureKey(sig);
     const cached = bindings.pipelines.get(key);
     if (cached) {
         return cached;
     }
-    const device = engine.device;
+    const device = engine._device;
     const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
     const fragModule = sig._colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;

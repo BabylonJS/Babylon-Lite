@@ -10,11 +10,11 @@
  * 2. Wrapping `r.bind` to manage per-binding cull state and run the compute cull
  *    pass each frame before the draw call. */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
-import type { Mesh, MeshInternal } from "../../mesh/mesh.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { ThinInstanceDrawBuffers } from "../../mesh/thin-instance-gpu.js";
 import type { Renderable } from "../../render/renderable.js";
-import type { SceneContextInternal } from "../../scene/scene.js";
+import type { SceneContext } from "../../scene/scene.js";
 
 type CullApi = typeof import("../../mesh/thin-instance-gpu-culling.js");
 
@@ -23,16 +23,16 @@ type CullApi = typeof import("../../mesh/thin-instance-gpu-culling.js");
  * Installs `_drawHook` on the mesh's ThinInstanceData and wraps `r.bind` so that
  * the compute cull pass runs before the draw call every frame. Replaces
  * `drawIndexed` with `drawIndexedIndirect` when visible instances are available. */
-export function patchRenderableForCulling(r: Renderable, mesh: Mesh, scene: SceneContextInternal, cullApi: CullApi): void {
+export function patchRenderableForCulling(r: Renderable, mesh: Mesh, scene: SceneContext, cullApi: CullApi): void {
     const std = (r as any)._std as
         | {
               meshBindGroup: GPUBindGroup;
               shadowBindGroup: GPUBindGroup | null;
               receiveShadows: boolean;
-              engine: EngineContextInternal;
+              engine: EngineContext;
               tiSync:
                   | ((
-                        engine: EngineContextInternal,
+                        engine: EngineContext,
                         ti: NonNullable<Mesh["thinInstances"]>,
                         pass: GPURenderPassEncoder | GPURenderBundleEncoder,
                         slot: number,
@@ -48,7 +48,7 @@ export function patchRenderableForCulling(r: Renderable, mesh: Mesh, scene: Scen
     }
 
     const ti = mesh.thinInstances;
-    const mi = mesh as MeshInternal;
+    const mi = mesh as Mesh;
 
     // Mark as direct (bypasses render bundles — needed for compute + indirect draw).
     (r as any)._direct = true;

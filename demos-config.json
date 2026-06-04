@@ -51,5 +51,13 @@
         "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume) framed with the same static camera and studio HDR environment as Scene 176. Frame-graph scene-texture transmission renders the refractive amber. Pure Lite — no BJS.",
         "tags": ["gltf", "pbr", "transmission", "env", "showcase"],
         "mobile": true
+    },
+    {
+        "slug": "littlest-tokyo",
+        "name": "Littlest Tokyo",
+        "description": "Animated glTF showcase: Glen Fox's beloved \"Littlest Tokyo\" diorama rendered by Lite from a full-fidelity glTF, with PBR materials lit by an HDR environment (shared as both IBL and skybox) and looping animation driving the cars, train and drifting smoke. Orbit freely to explore the tiny city, or pause the auto-rotation. Model: \"Littlest Tokyo\" by Glen Fox (CC-BY 4.0).",
+        "tags": ["gltf", "animation", "showcase"],
+        "fetch": "littlest-tokyo",
+        "mobile": true
     }
 ]

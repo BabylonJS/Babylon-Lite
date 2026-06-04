@@ -11,10 +11,14 @@ import type { MeshGroupBuilder } from "../render/renderable.js";
  *  user-facing properties while the shared `_buildGroup` hook lets the renderer
  *  dispatch every material through a common path. */
 export interface Material {
+    /** @internal */
     readonly _buildGroup: MeshGroupBuilder;
-    /** Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
+    /** Optional human-readable name. Populated by loaders from the source asset
+     *  (e.g. the glTF material name) so callers can look a material up by name. */
+    name?: string;
+    /** @internal Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
     _renderFeatures?: MaterialRenderFeatures;
-    /** Monotonic material UBO version. Renderables track their last seen value independently. */
+    /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */
     _uboVersion: number;
 }
 
@@ -32,5 +36,6 @@ export interface MaterialRenderFeatures {
  *  scenes that never create views do not retain view-specific unwrap branches. */
 export interface MaterialView extends Material {
     readonly source: Material;
+    /** @internal */
     _renderFeatures: MaterialRenderFeatures;
 }

@@ -5,6 +5,7 @@ import tseslint from "typescript-eslint";
 import eslintPluginPrettier from "eslint-plugin-prettier";
 import eslintConfigPrettier from "eslint-config-prettier";
 import tsdoc from "eslint-plugin-tsdoc";
+import babylonLiteRules from "./eslint-rules/underscore-requires-internal.mjs";
 
 export default tseslint.config(
     // ===========================================
@@ -75,10 +76,15 @@ export default tseslint.config(
         },
         plugins: {
             tsdoc,
+            "babylon-lite": babylonLiteRules,
         },
         rules: {
             // TSDoc syntax correctness — any TSDoc comment that IS written must be valid.
             "tsdoc/syntax": "error",
+
+            // Underscore-prefixed members must have @internal (paired with api-extractor's
+            // `ae-internal-missing-underscore` check) — see GUIDANCE.md §4b′.
+            "babylon-lite/underscore-requires-internal": "error",
 
             // Console
             "no-console": ["error", { allow: ["warn", "error", "time", "timeEnd", "trace"] }],

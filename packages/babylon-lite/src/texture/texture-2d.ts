@@ -9,7 +9,6 @@
 
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 
 /** A loaded 2D texture: the GPU texture, its default view and sampler, pixel
  *  dimensions, and an optional per-texture UV transform. This is the public
@@ -91,8 +90,8 @@ export interface Texture2DOptions {
 let _tex2dCache: WeakMap<GPUDevice, Map<string, Promise<Texture2D>>> | null = null;
 
 /** Clear the texture cache for a device, releasing cache-held refs. */
-export function clearTexture2DCache(engine: EngineContextInternal): void {
-    const device = engine.device;
+export function clearTexture2DCache(engine: EngineContext): void {
+    const device = engine._device;
     _tex2dCache?.delete(device);
 }
 
@@ -104,7 +103,7 @@ export function clearTexture2DCache(engine: EngineContextInternal): void {
  *  @param opts - Sampler, format, and decode overrides.
  *  @returns A promise resolving to the uploaded `Texture2D`. */
 export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
-    const device = (engine as EngineContextInternal).device;
+    const device = engine._device;
     if (!_tex2dCache) {
         _tex2dCache = new WeakMap();
     }
@@ -121,14 +120,14 @@ export function loadTexture2D(engine: EngineContext, url: string, opts: Texture2
     }
 
     const map = dc;
-    const p = loadTexture2DImpl(engine as EngineContextInternal, url, opts);
+    const p = loadTexture2DImpl(engine, url, opts);
     map.set(key, p);
     p.catch(() => map.delete(key));
     return p;
 }
 
-async function loadTexture2DImpl(engine: EngineContextInternal, url: string, opts: Texture2DOptions): Promise<Texture2D> {
-    const device = engine.device;
+async function loadTexture2DImpl(engine: EngineContext, url: string, opts: Texture2DOptions): Promise<Texture2D> {
+    const device = engine._device;
     const mipMaps = opts.mipMaps ?? true;
     const addressModeU = opts.addressModeU ?? "repeat";
     const addressModeV = opts.addressModeV ?? "repeat";

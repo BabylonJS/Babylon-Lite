@@ -7,6 +7,7 @@ import type { ShaderFragment, ComposedShader } from "../../shader/fragment-types
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import { createPbrTemplate } from "./pbr-template.js";
+import type { MeshVbLayout } from "../../mesh/mesh.js";
 import {
     PBR_HAS_NORMAL_MAP,
     PBR_HAS_ALPHA_BLEND,
@@ -64,7 +65,9 @@ type PbrComposeFn = (
     _sceneFeatures?: number,
     _lightMode?: PbrLightMode,
     _singleLightType?: string,
-    _esmShadowDepthCode?: string
+    _esmShadowDepthCode?: string,
+    _vbStrides?: MeshVbLayout,
+    _vbKey?: string
 ) => ComposedShader;
 
 /** Create a memoized shader composer for a given scene's resolved PBR deps. */
@@ -92,9 +95,11 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         sceneFeatures = 0,
         lightMode: PbrLightMode = 0,
         singleLightType = "",
-        _esmShadowDepthCode = ""
+        _esmShadowDepthCode = "",
+        vbStrides?: MeshVbLayout,
+        vbKey = ""
     ): ComposedShader {
-        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}`;
+        const ckey = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${lightMode}:${singleLightType}${vbKey}`;
         const cached = cache.get(ckey);
         if (cached) {
             return cached;
@@ -163,6 +168,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
             _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
             _esmShadowDepthCode,
+            _vbStrides: vbStrides,
         });
 
         const frags: ShaderFragment[] = [];

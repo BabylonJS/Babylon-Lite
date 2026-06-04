@@ -17,7 +17,7 @@ import type { Camera } from "../camera/camera.js";
 export interface DrawUpdateContext {
     readonly targetWidth: number;
     readonly targetHeight: number;
-    /** Active pass camera. Null for camera-less passes. */
+    /** @internal Active pass camera. Null for camera-less passes. */
     readonly _camera?: Camera | null;
 }
 
@@ -45,7 +45,7 @@ export interface DrawBinding {
      *  version-guarded to avoid redundant writes. Render task transparent sorting
      *  runs after these updates, so renderables may refresh `_worldCenter` here. */
     update?(context: DrawUpdateContext): void;
-    /** Scratch: camera-space depth for transparent sorting (per-pass). */
+    /** @internal Scratch: camera-space depth for transparent sorting (per-pass). */
     _sortDistance?: number;
 }
 
@@ -56,17 +56,17 @@ export interface Renderable {
     readonly order: number;
     /** Whether this renderable is transparent (auto-derived from material). */
     readonly isTransparent: boolean;
-    /** True transmissive/refractive surface. Excluded from opaque-scene RTT; also direct-drawn. */
+    /** @internal True transmissive/refractive surface. Excluded from opaque-scene RTT; also direct-drawn. */
     readonly _transmissive?: boolean;
-    /** Whether this non-transparent renderable must direct-draw after cached opaque bundles. */
+    /** @internal Whether this non-transparent renderable must direct-draw after cached opaque bundles. */
     readonly _direct?: boolean;
     /** Reference to the source mesh (for distance sort + material-change detection). */
     readonly mesh?: Mesh;
-    /** Scratch: camera-space depth for transparent sorting. */
+    /** @internal Scratch: camera-space depth for transparent sorting. */
     _sortDistance?: number;
-    /** World-space center for distance sort computation. */
+    /** @internal World-space center for distance sort computation. */
     _worldCenter?: [number, number, number];
-    /** Material reference at build time — for detecting material swaps. */
+    /** @internal Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
     /**
      * Resolve target-specific GPU state (pipeline) and return a `DrawBinding` whose
@@ -115,6 +115,8 @@ export interface MeshGroupBuildResult {
  * @param meshes - All meshes that use this builder's material type.
  */
 export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise<MeshGroupBuildResult>) & {
+    /** @internal */
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
+    /** @internal */
     _materialFamily?: "standard" | "pbr" | "node";
 };

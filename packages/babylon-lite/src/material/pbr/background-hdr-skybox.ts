@@ -4,7 +4,7 @@
  *  Tree-shaken away from scenes that use the default solid-color skybox. */
 
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
@@ -16,7 +16,7 @@ import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buff
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2
 
-function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
     // prettier-ignore
     const positions = new Float32Array([
      S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
@@ -59,7 +59,7 @@ export function buildHdrSkyboxRenderable(
     rootPosition: [number, number, number],
     primaryColor: [number, number, number]
 ): Renderable {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
 
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 
@@ -77,7 +77,7 @@ export function buildHdrSkyboxRenderable(
         bind(eng, sig) {
             return {
                 renderable: r,
-                pipeline: mat.getPipeline(eng as EngineContextInternal, sig),
+                pipeline: mat.getPipeline(eng as EngineContext, sig),
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
                     pass.setVertexBuffer(0, skyBufs.posBuffer);
@@ -94,7 +94,7 @@ export function buildHdrSkyboxRenderable(
 // ─── HDR Skybox UBO ─────────────────────────────────────────────────────────────
 
 function createSkyHdrMeshUBO(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     world: Float32Array,
     primaryColor: [number, number, number],
     skyOutputColor: [number, number, number],

@@ -235,7 +235,12 @@ async function startStaticLabServer(): Promise<StartedServer> {
                 return;
             }
 
-            const candidates = [resolve(labDir, cleanPath), resolve(labPublicDir, cleanPath)];
+            const candidates = [
+                resolve(labDir, cleanPath),
+                resolve(labDir, "lite", cleanPath),
+                resolve(labPublicDir, cleanPath),
+                resolve(labPublicDir, cleanPath.replace(/^lite\//, "")),
+            ];
             for (const filePath of candidates) {
                 if (existsSync(filePath) && statSync(filePath).isFile()) {
                     res.writeHead(200, {
@@ -393,6 +398,9 @@ function pathFromCoverageUrl(rawUrl: string): string | null {
     }
     if (pathname.startsWith("/bundle/")) {
         return resolve(labPublicDir, `.${pathname}`);
+    }
+    if (pathname.startsWith("/lite/bundle/")) {
+        return resolve(labPublicDir, `.${pathname.slice("/lite".length)}`);
     }
     return null;
 }

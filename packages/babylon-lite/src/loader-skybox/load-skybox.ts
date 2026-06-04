@@ -1,8 +1,8 @@
 /** High-level skybox loader.
  *  Loads a cube texture and registers a skybox for the auto-builder. */
 
-import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { SceneContext } from "../scene/scene.js";
+import type { EngineContext } from "../engine/engine.js";
 import { loadCubeTexture } from "../texture/cube-texture.js";
 import { createBoxData } from "../mesh/create-box.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -27,7 +27,7 @@ export interface SkyboxData {
  *  @param size    - Box size (default 100, matches Babylon)
  */
 export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size = 100): Promise<void> {
-    const eng = scene.engine as EngineContextInternal;
+    const eng = scene.engine as EngineContext;
 
     const cubeTex = await loadCubeTexture(eng, baseUrl, ext);
 
@@ -54,5 +54,5 @@ export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: stri
 
     // Build the skybox renderable inline — task supplies sceneBG at draw time, no ordering constraints.
     const { buildSkyboxRenderable } = await import("./skybox-renderable.js");
-    (scene as SceneContextInternal)._renderables.push(buildSkyboxRenderable(scene, skyboxData));
+    scene._renderables.push(buildSkyboxRenderable(scene, skyboxData));
 }

@@ -1,5 +1,5 @@
 import { registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
-import type { EngineContext, EngineContextInternal, RenderingContext } from "../engine/engine.js";
+import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import { createFrameGraph } from "./frame-graph.js";
 import type { FrameGraph } from "./frame-graph.js";
 
@@ -22,13 +22,13 @@ export interface FrameGraphContext extends RenderingContext {
 }
 
 interface FrameGraphContextInternal extends FrameGraphContext {
-    readonly _engine: EngineContextInternal;
+    readonly _engine: EngineContext;
     _disposed: boolean;
 }
 
 /** Create a scene-less frame-graph context for fullscreen effects and post-process chains. */
 export function createFrameGraphContext(engine: EngineContext, options?: FrameGraphContextOptions): FrameGraphContext {
-    const eng = engine as EngineContextInternal;
+    const eng = engine as EngineContext;
     const update = options?.update;
     const ctx: FrameGraphContextInternal = {
         name: options?.name ?? "frame-graph",

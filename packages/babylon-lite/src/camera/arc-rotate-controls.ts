@@ -1,5 +1,5 @@
 import type { ArcRotateCamera } from "./arc-rotate.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
+import type { SceneContext } from "../scene/scene.js";
 
 /**
  * Attach orbit/zoom/pan controls to an ArcRotateCamera.
@@ -189,7 +189,7 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
     if (scene) {
         // Hook into the engine's render loop — single RAF chain
-        (scene as SceneContextInternal)._beforeRender.push(applyInertia);
+        scene._beforeRender.push(applyInertia);
     } else {
         // Fallback: own RAF loop (for callers that don't pass scene)
         animFrameId = requestAnimationFrame(applyInertia);
@@ -214,9 +214,9 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
             cancelAnimationFrame(animFrameId);
         }
         if (scene) {
-            const idx = (scene as SceneContextInternal)._beforeRender.indexOf(applyInertia);
+            const idx = scene._beforeRender.indexOf(applyInertia);
             if (idx >= 0) {
-                (scene as SceneContextInternal)._beforeRender.splice(idx, 1);
+                scene._beforeRender.splice(idx, 1);
             }
         }
         for (const [ev, h] of listeners) {

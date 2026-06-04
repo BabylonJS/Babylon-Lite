@@ -37,6 +37,7 @@ export type BillboardOrientation = "facing" | "axis-locked";
 export type BillboardDepthMode = "transparent" | "cutout";
 
 export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation = BillboardOrientation> {
+    /** @internal */
     readonly _entityType: "billboard-sprite-system";
     readonly atlas: SpriteAtlas;
     readonly blendMode: BillboardBlendMode;

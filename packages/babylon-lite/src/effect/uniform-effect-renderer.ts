@@ -1,4 +1,4 @@
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
 import type { Task } from "../frame-graph/task.js";
@@ -22,7 +22,7 @@ export interface UniformEffectWrapper {
 }
 
 interface UniformEffectWrapperInternal extends UniformEffectWrapper {
-    _engine: EngineContextInternal;
+    _engine: EngineContext;
     _shader: GPUShaderModule | null;
     _bindGroupLayout: GPUBindGroupLayout | null;
     _pipelineLayout: GPUPipelineLayout | null;
@@ -43,7 +43,9 @@ export interface UniformEffectRenderTaskConfig {
 /** A frame-graph task that draws a `UniformEffectWrapper` as a fullscreen pass into a render target. */
 export interface UniformEffectRenderTask extends Task {
     readonly name: string;
+    /** @internal */
     readonly _config: UniformEffectRenderTaskConfig;
+    /** @internal */
     readonly _rt: RenderTarget;
 }
 
@@ -61,7 +63,7 @@ interface UniformEffectRenderTaskInternal extends UniformEffectRenderTask {
  * @returns The new uniform effect wrapper.
  */
 export function createUniformEffectWrapper(engine: EngineContext, options: UniformEffectWrapperOptions): UniformEffectWrapper {
-    const eng = engine as EngineContextInternal;
+    const eng = engine as EngineContext;
     const byteLength = align4(options.uniformByteLength);
     return {
         name: options.name ?? "uniform-effect-wrapper",
@@ -71,7 +73,7 @@ export function createUniformEffectWrapper(engine: EngineContext, options: Unifo
         _bindGroupLayout: null,
         _pipelineLayout: null,
         _bindGroup: null,
-        _uniformBuffer: eng.device.createBuffer({
+        _uniformBuffer: eng._device.createBuffer({
             label: `${options.name ?? "uniform-effect-wrapper"}-ubo`,
             size: byteLength,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -91,7 +93,7 @@ export function setUniformEffectUniforms(wrapper: UniformEffectWrapper, data: Ar
     if (bytes.byteLength > internal._uniformByteLength) {
         throw new Error(`setUniformEffectUniforms: ${bytes.byteLength} bytes exceeds uniform size ${internal._uniformByteLength}.`);
     }
-    internal._engine.device.queue.writeBuffer(internal._uniformBuffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    internal._engine._device.queue.writeBuffer(internal._uniformBuffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
 /**
@@ -102,7 +104,7 @@ export function setUniformEffectUniforms(wrapper: UniformEffectWrapper, data: Ar
  * @returns The render task to add to a frame graph.
  */
 export function createUniformEffectRenderTask(config: UniformEffectRenderTaskConfig, engine: EngineContext, scene?: SceneContext): UniformEffectRenderTask {
-    const eng = engine as EngineContextInternal;
+    const eng = engine as EngineContext;
     const effect = config.effect as UniformEffectWrapperInternal;
     const rt = config.target;
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
@@ -159,7 +161,7 @@ export function disposeUniformEffectWrapper(wrapper: UniformEffectWrapper): void
     internal._bindGroup = null;
 }
 
-function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, eng: EngineContextInternal, clear: boolean, clearColor: GPUColorDict): void {
+function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, eng: EngineContext, clear: boolean, clearColor: GPUColorDict): void {
     att.clearValue = clearColor;
     att.loadOp = clear ? "clear" : "load";
     if (rt._descriptor.resolveToSwapchain === true) {
@@ -177,7 +179,7 @@ function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: Render
 }
 
 function getUniformEffectPipeline(wrapper: UniformEffectWrapperInternal, targetSignature: RenderTargetSignature): GPURenderPipeline {
-    const device = wrapper._engine.device;
+    const device = wrapper._engine._device;
     return device.createRenderPipeline({
         label: `${wrapper.name}-${targetSignatureKey(targetSignature)}`,
         layout: getPipelineLayout(wrapper),
@@ -194,7 +196,7 @@ function getUniformEffectPipeline(wrapper: UniformEffectWrapperInternal, targetS
 
 function getShaderModule(wrapper: UniformEffectWrapperInternal): GPUShaderModule {
     if (!wrapper._shader) {
-        wrapper._shader = wrapper._engine.device.createShaderModule({
+        wrapper._shader = wrapper._engine._device.createShaderModule({
             label: wrapper.name,
             code: `${wrapper.options.vertexWGSL ?? DEFAULT_VERTEX_WGSL}\n${wrapper.options.fragmentWGSL}`,
         });
@@ -204,7 +206,7 @@ function getShaderModule(wrapper: UniformEffectWrapperInternal): GPUShaderModule
 
 function getPipelineLayout(wrapper: UniformEffectWrapperInternal): GPUPipelineLayout {
     if (!wrapper._pipelineLayout) {
-        wrapper._pipelineLayout = wrapper._engine.device.createPipelineLayout({
+        wrapper._pipelineLayout = wrapper._engine._device.createPipelineLayout({
             label: `${wrapper.name}-pipeline-layout`,
             bindGroupLayouts: [getBindGroupLayout(wrapper)],
         });
@@ -214,7 +216,7 @@ function getPipelineLayout(wrapper: UniformEffectWrapperInternal): GPUPipelineLa
 
 function getBindGroupLayout(wrapper: UniformEffectWrapperInternal): GPUBindGroupLayout {
     if (!wrapper._bindGroupLayout) {
-        wrapper._bindGroupLayout = wrapper._engine.device.createBindGroupLayout({
+        wrapper._bindGroupLayout = wrapper._engine._device.createBindGroupLayout({
             label: `${wrapper.name}-bgl`,
             entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
         });
@@ -224,7 +226,7 @@ function getBindGroupLayout(wrapper: UniformEffectWrapperInternal): GPUBindGroup
 
 function getUniformEffectBindGroup(wrapper: UniformEffectWrapperInternal): GPUBindGroup {
     if (!wrapper._bindGroup) {
-        wrapper._bindGroup = wrapper._engine.device.createBindGroup({
+        wrapper._bindGroup = wrapper._engine._device.createBindGroup({
             label: `${wrapper.name}-bg`,
             layout: getBindGroupLayout(wrapper),
             entries: [{ binding: 0, resource: { buffer: wrapper._uniformBuffer, size: wrapper._uniformByteLength } }],

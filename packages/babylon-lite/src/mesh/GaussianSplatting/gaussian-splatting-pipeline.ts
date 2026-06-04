@@ -16,7 +16,7 @@
  *
  *  The pipeline is cached per `RenderTargetSignature`. */
 
-import type { EngineContextInternal, EngineContext } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Renderable, DrawBinding } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
@@ -114,8 +114,8 @@ export function applyGsFragments(wgsl: string, fragments: readonly GsShaderFragm
     return mangled;
 }
 
-function getOrCreatePipeline(engine: EngineContextInternal, sig: RenderTargetSignature, fragments?: readonly GsShaderFragment[]): PipelineEntry {
-    const device = engine.device;
+function getOrCreatePipeline(engine: EngineContext, sig: RenderTargetSignature, fragments?: readonly GsShaderFragment[]): PipelineEntry {
+    const device = engine._device;
     if (!_cache || _cache.device !== device) {
         _cache = { device, modules: new Map(), entries: new Map() };
     }
@@ -190,8 +190,8 @@ function getOrCreatePipeline(engine: EngineContextInternal, sig: RenderTargetSig
  *  builder installed by `addToScene`. Owns the per-mesh UBO and a per-signature
  *  bind-group cache. */
 export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: GaussianSplattingMesh, fragments?: readonly GsShaderFragment[]): Renderable {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine;
+    const device = engine._device;
 
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4; // 3 mat4 + viewport,focal,dataSize,alpha,pad → 224 bytes
     const ubo = device.createBuffer({
@@ -318,7 +318,7 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
         order: 200,
         isTransparent: true,
         bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
-            const entry = getOrCreatePipeline(eng as EngineContextInternal, sig, fragments);
+            const entry = getOrCreatePipeline(eng, sig, fragments);
             const bindGroup = getBindGroup(entry);
             return {
                 renderable: r,

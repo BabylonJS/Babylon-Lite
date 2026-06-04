@@ -34,30 +34,33 @@ export type RenderPassExecuteFunc = (pass: GPURenderPassEncoder) => number;
 export interface Pass {
     readonly name: string;
 
-    /** The task that owns this pass. Set on creation via `createRenderPass`. */
+    /** @internal The task that owns this pass. Set on creation via `createRenderPass`. */
     _parentTask: Task;
 
     /** Render targets (textures) this pass references. Used (later) by the
      *  texture manager to compute lifetimes / aliasing. Lifted from BJS'
      *  `FrameGraphRenderPass` so future compute / copy / object-list passes
      *  share the same surface without re-introducing it per pass type. */
+    /** @internal */
     _dependencies: Set<RenderTarget>;
 
-    /** Body of the pass (issues GPU work). Set via `setRenderPassExecuteFunc`. */
+    /** @internal Body of the pass (issues GPU work). Set via `setRenderPassExecuteFunc`. */
     _executeFunc: RenderPassExecuteFunc | null;
-    /** Optional per-frame preparation that runs before `_executeFunc`. */
+    /** @internal Optional per-frame preparation that runs before `_executeFunc`. */
     _beforeExecute: (() => void) | null;
 
     /** Called once after every task has recorded. Use to build caches that
      *  depend on RT textures being allocated (RenderPass builds its
      *  `GPURenderPassDescriptor` here). May be a no-op. */
+    /** @internal */
     _initialize(): void;
 
     /** Called once per frame by `_executeTask()`. Performs this pass's concrete
      *  GPU work and returns the number of draw calls issued. */
+    /** @internal */
     _execute(): number;
 
-    /** Free pass-owned GPU/CPU state. Idempotent. */
+    /** @internal Free pass-owned GPU/CPU state. Idempotent. */
     _dispose(): void;
 }
 

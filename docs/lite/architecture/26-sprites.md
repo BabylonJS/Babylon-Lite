@@ -267,7 +267,7 @@ export interface RenderingContext {
     _record(): number;
 }
 
-/** @internal Inside EngineContextInternal: */
+/** @internal Inside EngineContext: */
 //   _renderingContexts: RenderingContext[];
 
 export function registerRenderingContext(engine: EngineContext, context: RenderingContext): boolean;
@@ -1496,11 +1496,11 @@ loses one tick of animation in the captured image. All sprite families
 
 ### Sprite2DLayer per-`depth` Pipeline State
 
-| Layer `depth`  | Drawn via                                                                       | Depth attachment        | Depth compare | Depth write | Instance layout / Z                  | Render order                                                |
-| -------------- | ------------------------------------------------------------------------------- | ----------------------- | ------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
-| `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none          | `false`     | 52 B / 13 floats; no slot [13]       | engine registration order; layer order within the renderer  |
-| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `greater-equal` | `false`   | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
-| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `greater-equal` | `true`    | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
+| Layer `depth`  | Drawn via                                                                       | Depth attachment        | Depth compare   | Depth write | Instance layout / Z                  | Render order                                                |
+| -------------- | ------------------------------------------------------------------------------- | ----------------------- | --------------- | ----------- | ------------------------------------ | ----------------------------------------------------------- |
+| `"none"`       | A `SpriteRenderer` registered on the engine                                     | none                    | none            | `false`     | 52 B / 13 floats; no slot [13]       | engine registration order; layer order within the renderer  |
+| `"test"`       | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 200`) | engine depth attachment | `greater-equal` | `false`     | 56 B / 14 floats; slot [13] consumed | scene transparent queue (after opaque meshes)               |
+| `"test-write"` | `addDepthHostedSpriteLayer` → `sprite-renderable.ts` (renderable `order = 100`) | engine depth attachment | `greater-equal` | `true`      | 56 B / 14 floats; slot [13] consumed | direct-drawn after cached opaque meshes, before transparent |
 
 The sprite pipeline cache key includes `(format, sampleCount, blendMode, hasDepth, depthWrite, depthStencilFormat)`, plus a `cs${customKey}` segment for custom-shader layers (contributed opaquely via `_getSpriteFxHook()?.pipelineKeyPart(layer)`) and a `:uv${uvKey}` segment for `uvScroll` layers. `SpriteRenderer`
 layers always request `hasDepth = false` and `sampleCount = 1`, so their pipelines are built without a depth-stencil descriptor. Depth-hosted layers request `hasDepth = true`, use the target depth-stencil format provided by the frame graph, and set `depthWrite` from the layer's `depth` mode.

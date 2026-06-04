@@ -33,14 +33,17 @@ export type StdExtPhase = "mesh";
 /** Unified extension for Standard material. Each fragment module exports one.
  *  Fragments register via `_registerStdExt(ext)` at dynamic-import sites. */
 export interface StdExt {
+    /** @internal */
     readonly _id: string;
+    /** @internal */
     readonly _phase: StdExtPhase;
-    /** Feature bit this ext gates on. */
+    /** @internal Feature bit this ext gates on. */
     readonly _feature: number;
+    /** @internal */
     _frag(features: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
-    /** Push group-1 bind entries starting at binding `b`; return new b. */
+    /** @internal Push group-1 bind entries starting at binding `b`; return new b. */
     _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number;
-    /** Enumerate textures for acquire/release. */
+    /** @internal Enumerate textures for acquire/release. */
     _textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
 }
 

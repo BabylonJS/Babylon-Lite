@@ -23,12 +23,9 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-}
-
-/** @internal LightBase with internal pipeline integration callbacks. Not re-exported from index.ts. */
-export interface LightBaseInternal extends LightBase {
+    /** @internal */
     readonly _writeLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
-    /** Monotonically increasing version — bumped when any UBO-relevant property changes. */
+    /** @internal Monotonically increasing version — bumped when any UBO-relevant property changes. */
     readonly _lightVersion: number;
 }
 

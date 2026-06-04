@@ -1,18 +1,18 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { FogConfig } from "./standard/standard-material.js";
 
 const SCENE_UNIFORM_FLOATS = 44;
 let _sceneUniformScratch: Float32Array<ArrayBuffer> | null = null;
 
 export function updateSceneUniforms(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     sceneUBO: GPUBuffer,
     viewProjection: Float32Array,
     viewMatrix: Float32Array,
     eyePosition: [number, number, number],
     fog?: FogConfig
 ): void {
-    const device = engine.device;
+    const device = engine._device;
     if (!_sceneUniformScratch) {
         _sceneUniformScratch = new Float32Array(SCENE_UNIFORM_FLOATS);
     }

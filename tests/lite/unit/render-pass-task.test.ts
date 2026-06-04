@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
-import type { EngineContextInternal } from "../../../packages/babylon-lite/src/engine/engine";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { createSceneContext, registerScene } from "../../../packages/babylon-lite/src/scene/scene";
-import type { SceneContextInternal } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createRenderTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import { enableRenderTaskTransmission, enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
@@ -50,7 +49,7 @@ function makeMockEngine(options?: {
     bindGroupLayouts?: GPUBindGroupLayoutDescriptor[];
     samplers?: GPUSamplerDescriptor[];
     textures?: GPUTextureDescriptor[];
-}): EngineContextInternal {
+}): EngineContext {
     let currentPipeline: GPURenderPipeline | null = null;
     const pass = {
         setViewport: () => undefined,
@@ -108,10 +107,10 @@ function makeMockEngine(options?: {
         msaaSamples: options?.msaaSamples ?? 4,
         drawCallCount: 0,
         maxDevicePixelRatio: Infinity,
-        device,
-        context: { configure: () => undefined } as unknown as GPUCanvasContext,
+        _device: device,
+        _context: { configure: () => undefined } as unknown as GPUCanvasContext,
         format: "bgra8unorm",
-        alphaMode: "opaque",
+        _alphaMode: "opaque",
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
@@ -173,7 +172,7 @@ function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "or
 describe("RenderPassTask transparent sorting", () => {
     it("preserves custom depth compare when transmission retargets a render task", () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         const rt = createRenderTarget({
             colorFormat: "bgra8unorm",
             depthStencilFormat: "depth32float",
@@ -190,7 +189,7 @@ describe("RenderPassTask transparent sorting", () => {
 
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         const drawOrder: string[] = [];
 
@@ -207,7 +206,7 @@ describe("RenderPassTask transparent sorting", () => {
 
     it("sorts transparent draws by camera-space depth instead of radial distance", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         const drawOrder: string[] = [];
 
@@ -224,7 +223,7 @@ describe("RenderPassTask transparent sorting", () => {
 
     it("direct-draws dynamic depth-write renderables without marking them transmissive", async () => {
         const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         const drawOrder: string[] = [];
 
@@ -244,7 +243,7 @@ describe("RenderPassTask transparent sorting", () => {
     it("updates per-task transmission snapshots according to copy count", async () => {
         let defaultCopies = 0;
         const defaultEngine = makeMockEngine({ msaaSamples: 1, onCopy: () => defaultCopies++ });
-        const defaultScene = createSceneContext(defaultEngine) as SceneContextInternal;
+        const defaultScene = createSceneContext(defaultEngine);
         defaultScene.camera = makeCamera();
         const defaultOrder: string[] = [];
         defaultScene._renderables.push(
@@ -259,7 +258,7 @@ describe("RenderPassTask transparent sorting", () => {
 
         let everyCopies = 0;
         const everyEngine = makeMockEngine({ msaaSamples: 1, onCopy: () => everyCopies++ });
-        const everyScene = createSceneContext(everyEngine) as SceneContextInternal;
+        const everyScene = createSceneContext(everyEngine);
         everyScene.camera = makeCamera();
         const everyOrder: string[] = [];
         (everyScene._frameGraph._tasks[0]! as RenderTask)._config.transmission = { copyCount: 0 };
@@ -277,7 +276,7 @@ describe("RenderPassTask transparent sorting", () => {
     it("uses a repeat anisotropic sampler for the transmission refraction texture", async () => {
         const samplers: GPUSamplerDescriptor[] = [];
         const engine = makeMockEngine({ samplers });
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         scene._renderables.push(makeDrawOrderRenderable("transmissive", { isTransparent: true, _transmissive: true }, []));
 
@@ -298,7 +297,7 @@ describe("RenderPassTask transparent sorting", () => {
     it("allocates only refraction mips reachable by the shader LOD bias", async () => {
         const textures: GPUTextureDescriptor[] = [];
         const engine = makeMockEngine({ textures });
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         scene._renderables.push(makeDrawOrderRenderable("glass", { _transmissive: true }, []));
 
@@ -314,7 +313,7 @@ describe("RenderPassTask transparent sorting", () => {
     it("allocates only mip 0 for transmission when mipmap generation is disabled", async () => {
         const textures: GPUTextureDescriptor[] = [];
         const engine = makeMockEngine({ textures });
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         (scene._frameGraph._tasks[0]! as RenderTask)._config.transmission = { generateMipmaps: false };
         scene._renderables.push(makeDrawOrderRenderable("glass", { _transmissive: true }, []));
@@ -338,11 +337,11 @@ describe("RenderPassTask transparent sorting", () => {
             textures,
             onBeginPass: (descriptor) => {
                 if (descriptor.depthStencilAttachment) {
-                    mainPassResolveTargets.push(!!((descriptor.colorAttachments as unknown as GPURenderPassColorAttachment[])[0] as GPURenderPassColorAttachment).resolveTarget);
+                    mainPassResolveTargets.push(!!((descriptor.colorAttachments as GPURenderPassColorAttachment[])[0] as GPURenderPassColorAttachment).resolveTarget);
                 }
             },
         });
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         scene._renderables.push(makeDrawOrderRenderable("opaque", { order: 100 }, []), makeDrawOrderRenderable("glass", { order: 150, _transmissive: true }, []));
 
@@ -374,7 +373,7 @@ describe("RenderPassTask transparent sorting", () => {
                 }
             },
         });
-        const scene = createSceneContext(engine) as SceneContextInternal;
+        const scene = createSceneContext(engine);
         scene.camera = makeCamera();
         const drawOrder: string[] = [];
         scene._renderables.push(

@@ -1,6 +1,6 @@
 import { getProjectionMatrix, getViewMatrix, type Camera } from "../camera/camera.js";
-import type { EngineContextInternal } from "../engine/engine.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { SceneContext } from "../scene/scene.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { PbrExt } from "../material/pbr/pbr-flags.js";
 import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
@@ -24,6 +24,7 @@ export interface ClusteredLightContainer {
     horizontalTiles: number;
     verticalTiles: number;
     zSlices: number;
+    /** @internal */
     _version: number;
 }
 
@@ -73,10 +74,10 @@ export function createClusteredPointLight(container: ClusteredLightContainer, op
 }
 
 export function addClusteredLightContainer(scene: SceneContext, container: ClusteredLightContainer): void {
-    const ctx = scene as SceneContextInternal;
+    const ctx = scene as SceneContext;
     ctx._clusteredLightContainer = container;
     _registerPbrExt(clusteredPbrExt);
-    const state = buildClusteredLightGpuState(ctx.engine as EngineContextInternal, ctx, container);
+    const state = buildClusteredLightGpuState(ctx.engine, ctx, container);
     ctx._clusteredLightUpdater = (camera, targetWidth, targetHeight) => state.refresh(camera, targetWidth, targetHeight);
     ctx._disposables.push(() => state.dispose());
     for (const mesh of ctx.meshes) {
@@ -123,7 +124,7 @@ const clusteredPbrExt: PbrExt = {
     },
 };
 
-export function buildClusteredLightGpuState(engine: EngineContextInternal, scene: SceneContextInternal, container: ClusteredLightContainer): ClusteredLightGpuState {
+export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneContext, container: ClusteredLightContainer): ClusteredLightGpuState {
     const camera = scene.camera;
     if (!camera) {
         throw new Error("buildClusteredLightGpuState: scene.camera is required");
@@ -133,7 +134,7 @@ export function buildClusteredLightGpuState(engine: EngineContextInternal, scene
     const tileCountX = Math.max(1, container.horizontalTiles | 0);
     const tileCountY = Math.max(1, container.verticalTiles | 0);
     const zSlices = Math.max(1, container.zSlices | 0);
-    const dataTextureWidth = Math.max(1, Math.min(MAX_DATA_TEXTURE_WIDTH, engine.device.limits.maxTextureDimension2D));
+    const dataTextureWidth = Math.max(1, Math.min(MAX_DATA_TEXTURE_WIDTH, engine._device.limits.maxTextureDimension2D));
     const batchCount = Math.max(1, Math.ceil(container.pointLights.length / CLUSTER_BATCH_SIZE));
     const lightTexels = Math.max(1, container.pointLights.length * 2);
     const lightData = new Float32Array(textureElementCount(lightTexels, 4, dataTextureWidth));
@@ -220,7 +221,7 @@ export function buildClusteredLightGpuState(engine: EngineContextInternal, scene
             paramsF[4] = sliceScale;
             paramsF[5] = sliceBias;
             paramsU[7] = batchCount;
-            engine.device.queue.writeBuffer(paramsBuffer, 0, paramsF as Float32Array<ArrayBuffer>);
+            engine._device.queue.writeBuffer(paramsBuffer, 0, paramsF as Float32Array<ArrayBuffer>);
             writeDataTexture(engine, lightsTexture, lightData, 4, lightTexels, dataTextureWidth);
             writeDataTexture(engine, cellsTexture, sliceData, 4, zSlices, dataTextureWidth);
             writeDataTexture(engine, indicesTexture, maskData, 1, maskTexels, dataTextureWidth);
@@ -246,7 +247,7 @@ function textureElementCount(texels: number, components: number, dataTextureWidt
 }
 
 function createDataTexture(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     data: Float32Array | Uint32Array,
     format: GPUTextureFormat,
     components: number,
@@ -255,7 +256,7 @@ function createDataTexture(
     dataTextureWidth: number
 ): GPUTexture {
     const height = Math.max(1, Math.ceil(texels / dataTextureWidth));
-    const texture = engine.device.createTexture({
+    const texture = engine._device.createTexture({
         label,
         size: { width: dataTextureWidth, height },
         format,
@@ -265,16 +266,9 @@ function createDataTexture(
     return texture;
 }
 
-function writeDataTexture(
-    engine: EngineContextInternal,
-    texture: GPUTexture,
-    data: Float32Array | Uint32Array,
-    components: number,
-    texels: number,
-    dataTextureWidth: number
-): void {
+function writeDataTexture(engine: EngineContext, texture: GPUTexture, data: Float32Array | Uint32Array, components: number, texels: number, dataTextureWidth: number): void {
     const height = Math.max(1, Math.ceil(texels / dataTextureWidth));
-    engine.device.queue.writeTexture({ texture }, data.buffer, { bytesPerRow: dataTextureWidth * components * 4, rowsPerImage: height }, { width: dataTextureWidth, height });
+    engine._device.queue.writeTexture({ texture }, data.buffer, { bytesPerRow: dataTextureWidth * components * 4, rowsPerImage: height }, { width: dataTextureWidth, height });
 }
 
 function addLightToClusters(

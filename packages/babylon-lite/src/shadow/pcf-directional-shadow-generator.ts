@@ -17,7 +17,7 @@
 
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { buildLightViewMatrix, createSharedShadowUBO, createShadowParamsUBO, multiply4x4 } from "./shadow-base.js";
 import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap, type PcfLightMatrix, type PcfTaskState } from "./pcf-shadow-task-hooks.js";
@@ -99,8 +99,7 @@ export interface PcfDirectionalShadowGeneratorConfig {
  * @returns A `ShadowGenerator` wired to the directional PCF render path.
  */
 export function createPcfDirectionalShadowGenerator(engine: EngineContext, _light: DirectionalLight, cfg: PcfDirectionalShadowGeneratorConfig = {}): ShadowGenerator {
-    const eng = engine as EngineContextInternal;
-    const device = eng.device;
+    const device = engine._device;
     const mapSize = cfg.mapSize ?? 1024;
     const bias = cfg.bias ?? 0.00005;
     const darkness = cfg.darkness ?? 0;
@@ -111,7 +110,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
     const _lightMatrix = new Float32Array(16);
     const _shadowsInfo = new Float32Array([darkness, mapSize, 1.0 / mapSize, 0]);
     const _depthValues = new Float32Array([0, 1]);
-    const { ubo: _shadowUBO } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
+    const { ubo: _shadowUBO } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);
     const _config: ShadowGenerator["_config"] = {
         _mapSize: mapSize,
         _bias: bias,
@@ -136,7 +135,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
         _lightMatrix,
         _shadowsInfo,
         _depthValues,
-        _shadowParamsUBO: createShadowParamsUBO(eng, bias, 1.0 / mapSize),
+        _shadowParamsUBO: createShadowParamsUBO(engine, bias, 1.0 / mapSize),
         _shadowUBO,
         _config,
         _version: 0,

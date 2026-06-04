@@ -4,8 +4,8 @@
     "gzipKB": 8.4
   },
   "doom": {
-    "rawKB": 121.5,
-    "gzipKB": 40
+    "rawKB": 97.2,
+    "gzipKB": 32.5
   },
   "quake": {
     "rawKB": 123.2,
@@ -16,15 +16,19 @@
     "gzipKB": 36.7
   },
   "offscreen": {
-    "rawKB": 89.4,
-    "gzipKB": 34.8
+    "rawKB": 174,
+    "gzipKB": 71.4
   },
   "freeciv": {
     "rawKB": 49.3,
     "gzipKB": 19.2
   },
   "mosquito-amber": {
-    "rawKB": 96.6,
-    "gzipKB": 37.7
+    "rawKB": 97.2,
+    "gzipKB": 38
+  },
+  "littlest-tokyo": {
+    "rawKB": 53.3,
+    "gzipKB": 20.6
   }
 }

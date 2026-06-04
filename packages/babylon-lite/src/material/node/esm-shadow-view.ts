@@ -6,7 +6,9 @@ import { NODE_ESM_SHADOW_OUTPUT } from "./node-flags.js";
 import type { NodeMaterial } from "./node-material.js";
 
 export interface NodeEsmShadowMaterialView extends MaterialView {
+    /** @internal */
     readonly _esmShadowParamsUBO: GPUBuffer;
+    /** @internal */
     readonly _esmShadowDepthCode: string;
 }
 

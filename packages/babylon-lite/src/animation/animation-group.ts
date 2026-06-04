@@ -3,7 +3,7 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
-import { PATH_POINTER } from "./types.js";
+import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
@@ -41,7 +41,7 @@ export interface AnimationGroup {
     loopAnimation: boolean;
     /** Weighted contribution used by AnimationManager mixing (default 1). */
     weight: number;
-    /** Debug: internal animation controller. */
+    /** @internal Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
     _propertyMixer?: AnimationPropertyMixer;
@@ -104,14 +104,23 @@ function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationControlle
 /** Create AnimationGroup(s) from parsed glTF animation data.
  *  Returns one group per animation clip. */
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[] {
-    const { clips, nodes, skeletons, morphBindings } = animData;
+    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices } = animData;
     const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer)) {
+    const hasNodeWriteback = clips.some((c) =>
+        c.channels.some(
+            (ch) =>
+                (ch.path === PATH_TRANSLATION || ch.path === PATH_ROTATION || ch.path === PATH_SCALE) &&
+                ch.nodeIdx >= 0 &&
+                !excludedNodeIndices.has(ch.nodeIdx) &&
+                !!nodeTargets[ch.nodeIdx]
+        )
+    );
+    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && !hasPointer && !hasNodeWriteback)) {
         return [];
     }
 
     return clips.map((clip, clipIndex) => {
-        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings);
+        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices);
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,

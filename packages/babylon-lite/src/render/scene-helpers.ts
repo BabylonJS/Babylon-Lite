@@ -3,7 +3,7 @@
  *  Centralises patterns that PBR and Standard pipelines previously duplicated:
  *  scene BGL creation, mesh world-matrix updates, and pipeline descriptors. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
 
@@ -15,8 +15,8 @@ let _cachedDevice: GPUDevice | null = null;
 /** Shared scene bind group layout:
  *  binding 0: per-pass SceneUniforms UBO
  *  binding 1: scene-owned LightsUniforms UBO */
-export function getSceneBindGroupLayout(engine: EngineContextInternal): GPUBindGroupLayout {
-    const device = engine.device;
+export function getSceneBindGroupLayout(engine: EngineContext): GPUBindGroupLayout {
+    const device = engine._device;
     if (_cachedSceneBGL && _cachedDevice === device) {
         return _cachedSceneBGL;
     }
@@ -43,12 +43,13 @@ export function clearSceneBGLCache(): void {
 export interface WorldMatrixPacket {
     readonly mesh: Mesh;
     readonly meshUBO: GPUBuffer;
+    /** @internal */
     _lastWorldVersion: number;
 }
 
 /** Write world matrices to UBOs for packets whose version has changed. */
-export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: WorldMatrixPacket[]): void {
-    const device = engine.device;
+export function updateWorldMatrixUBOs(engine: EngineContext, packets: WorldMatrixPacket[]): void {
+    const device = engine._device;
     for (const p of packets) {
         const wm = p.mesh.worldMatrix;
         if (p.mesh.worldMatrixVersion !== p._lastWorldVersion) {
@@ -61,22 +62,33 @@ export function updateWorldMatrixUBOs(engine: EngineContextInternal, packets: Wo
 // ── Pipeline descriptor builder ──────────────────────────────────
 
 export interface PipelineDescriptorOpts {
+    /** @internal */
     _label: string;
-    _engine: EngineContextInternal;
+    /** @internal */
+    _engine: EngineContext;
+    /** @internal */
     _bgls: GPUBindGroupLayout[];
+    /** @internal */
     _vertModule: GPUShaderModule;
+    /** @internal */
     _fragModule: GPUShaderModule;
+    /** @internal */
     _vertexBuffers: GPUVertexBufferLayout[];
+    /** @internal */
     _format: GPUTextureFormat;
-    /** Depth-stencil format. Default: `"depth24plus-stencil8"` (matches the engine's default RT). */
+    /** @internal Depth-stencil format. Default: `"depth24plus-stencil8"` (matches the engine's default RT). */
     _depthStencilFormat?: GPUTextureFormat;
-    /** Depth compare. Default: reverse-Z `"greater-equal"`. */
+    /** @internal Depth compare. Default: reverse-Z `"greater-equal"`. */
     _depthCompare?: GPUCompareFunction;
+    /** @internal */
     _msaaSamples: number;
+    /** @internal */
     _depthWriteEnabled?: boolean;
+    /** @internal */
     _cullMode?: GPUCullMode;
+    /** @internal */
     _blend?: GPUBlendState;
-    /** When true, build with `frontFace: "cw"` (offscreen RTT with Y-flipped projection). */
+    /** @internal When true, build with `frontFace: "cw"` (offscreen RTT with Y-flipped projection). */
     _flipY?: boolean;
 }
 
@@ -86,7 +98,7 @@ export function createDefaultPipelineDescriptor(opts: PipelineDescriptorOpts): G
     const target: GPUColorTargetState = opts._blend ? { format: opts._format, blend: opts._blend } : { format: opts._format };
     return {
         label: opts._label,
-        layout: opts._engine.device.createPipelineLayout({ bindGroupLayouts: opts._bgls }),
+        layout: opts._engine._device.createPipelineLayout({ bindGroupLayouts: opts._bgls }),
         vertex: { module: opts._vertModule, entryPoint: "main", buffers: opts._vertexBuffers },
         fragment: { module: opts._fragModule, entryPoint: "main", targets: [target] },
         depthStencil: {

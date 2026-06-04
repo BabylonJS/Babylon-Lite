@@ -53,12 +53,19 @@ export interface PbrTemplateExt {
  * Each flag corresponds to a detected feature in the scene.
  */
 export function createPbrTemplateExt(flags: {
+    /** @internal */
     _hasUvTransform: boolean;
+    /** @internal */
     _hasVertexColor: boolean;
+    /** @internal */
     _hasUv2: boolean;
+    /** @internal */
     _hasOcclusionUv2: boolean;
+    /** @internal */
     _hasAnyNormal: boolean;
+    /** @internal */
     _hasEmissiveTexture: boolean;
+    /** @internal */
     _hasSpecGloss: boolean;
 }): PbrTemplateExt {
     const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasOcclusionUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;

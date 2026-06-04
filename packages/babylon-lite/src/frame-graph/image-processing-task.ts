@@ -1,6 +1,6 @@
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "./task.js";
 
@@ -28,32 +28,30 @@ interface ImageProcessingState {
  * @returns The task to add to the frame graph.
  */
 export function createImageProcessingTask(config: ImageProcessingTaskConfig, engine: EngineContext, scene: SceneContext): Task {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
     let state: ImageProcessingState | null = null;
     const task: Task = {
         name: config.name ?? "image-processing",
-        engine: eng,
-        scene: sc,
+        engine,
+        scene,
         _passes: [],
         record(): void {
             disposeImageProcessingState(state);
-            state = createImageProcessingState(eng, config.source);
+            state = createImageProcessingState(engine, config.source);
         },
         execute(): number {
             if (!state) {
                 return 0;
             }
-            const img = sc.imageProcessing as { exposure: number; contrast: number; toneMappingEnabled: boolean | number };
+            const img = scene.imageProcessing as { exposure: number; contrast: number; toneMappingEnabled: boolean | number };
             const data = new Float32Array([img.exposure, img.contrast, img.toneMappingEnabled === true ? 1 : 0, 0]);
-            eng.device.queue.writeBuffer(state.params, 0, data);
-            const pass = eng._currentEncoder.beginRenderPass({
+            engine._device.queue.writeBuffer(state.params, 0, data);
+            const pass = engine._currentEncoder.beginRenderPass({
                 colorAttachments: [
                     {
-                        view: eng._swapchainView,
+                        view: engine._swapchainView,
                         loadOp: "clear",
                         storeOp: "store",
-                        clearValue: sc.clearColor,
+                        clearValue: scene.clearColor,
                     },
                 ],
             });
@@ -72,12 +70,12 @@ export function createImageProcessingTask(config: ImageProcessingTaskConfig, eng
     return task;
 }
 
-function createImageProcessingState(engine: EngineContextInternal, source: ImageProcessingSource): ImageProcessingState {
+function createImageProcessingState(engine: EngineContext, source: ImageProcessingSource): ImageProcessingState {
     const texture = resolveImageProcessingTexture(source);
     if (!texture) {
         throw new Error("Image processing source has no color texture");
     }
-    const device = engine.device;
+    const device = engine._device;
     const sampleCount = (texture as { sampleCount?: number }).sampleCount ?? 1;
     const multisampled = sampleCount > 1;
     const params = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });

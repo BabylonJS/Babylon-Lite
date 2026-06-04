@@ -38,12 +38,13 @@ export interface Task {
     /** Passes recorded by this task. Populated during `record()` by
      *  `createRenderPass(name, task)` / `addRenderPass(fg, name)`.
      *  Mirrors BJS `FrameGraphTask._passes`. */
+    /** @internal */
     _passes: Pass[];
 
     /** Called once when the frame graph is built. Must complete synchronously. */
     record(): void;
 
-    /** Optional asynchronous preparation run before synchronous frame-graph build. */
+    /** @internal Optional asynchronous preparation run before synchronous frame-graph build. */
     _preload?(): Promise<void>;
 
     /** Optional fast path for built-in tasks that execute without recorded Pass objects. */

@@ -1,10 +1,10 @@
-import type { MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 
-export function hasCpuDeformation(mesh: MeshInternal): boolean {
+export function hasCpuDeformation(mesh: Mesh): boolean {
     return !!mesh._cpuPositions && (!!mesh.morphTargets || !!mesh.skeleton);
 }
 
-export function computeDeformedPositions(mesh: MeshInternal): Float32Array | null {
+export function computeDeformedPositions(mesh: Mesh): Float32Array | null {
     const base = mesh._cpuPositions;
     if (!base) {
         return null;
@@ -16,7 +16,7 @@ export function computeDeformedPositions(mesh: MeshInternal): Float32Array | nul
     return out;
 }
 
-export function computeDeformedNormals(mesh: MeshInternal): Float32Array | null {
+export function computeDeformedNormals(mesh: Mesh): Float32Array | null {
     const base = mesh._cpuNormals;
     if (!base) {
         return null;
@@ -28,7 +28,7 @@ export function computeDeformedNormals(mesh: MeshInternal): Float32Array | null 
     return out;
 }
 
-function applyMorphPositions(mesh: MeshInternal, out: Float32Array): void {
+function applyMorphPositions(mesh: Mesh, out: Float32Array): void {
     const morph = mesh.morphTargets;
     if (!morph) {
         return;
@@ -51,7 +51,7 @@ function applyMorphPositions(mesh: MeshInternal, out: Float32Array): void {
     }
 }
 
-function applyMorphNormals(mesh: MeshInternal, out: Float32Array): void {
+function applyMorphNormals(mesh: Mesh, out: Float32Array): void {
     const morph = mesh.morphTargets;
     if (!morph) {
         return;
@@ -74,7 +74,7 @@ function applyMorphNormals(mesh: MeshInternal, out: Float32Array): void {
     }
 }
 
-function applySkinPositions(mesh: MeshInternal, out: Float32Array): void {
+function applySkinPositions(mesh: Mesh, out: Float32Array): void {
     const skeleton = mesh.skeleton;
     if (!skeleton) {
         return;
@@ -94,7 +94,7 @@ function applySkinPositions(mesh: MeshInternal, out: Float32Array): void {
     }
 }
 
-function applySkinNormals(mesh: MeshInternal, out: Float32Array): void {
+function applySkinNormals(mesh: Mesh, out: Float32Array): void {
     const skeleton = mesh.skeleton;
     if (!skeleton) {
         return;

@@ -10,7 +10,6 @@
 
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import { loadTexture2D } from "./texture-2d.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
 import { getCompressedFormat, suffixToFeature } from "./compressed-formats.js";
@@ -129,8 +128,8 @@ function parseKtx1(buffer: ArrayBuffer): KtxParseResult {
 
 // ── GPU upload ──────────────────────────────────────────────────────
 
-function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
-    const device = engine.device;
+function uploadCompressed(engine: EngineContext, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
+    const device = engine._device;
     const fmt = parsed.format;
     const texture = device.createTexture({
         size: { width: parsed.width, height: parsed.height },
@@ -201,7 +200,7 @@ function rewriteUrl(baseUrl: string, suffix: string): string {
  * @returns A Texture2D (same interface whether compressed or fallback).
  */
 export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, suffixes: string[], opts: Texture2DOptions = {}): Promise<Texture2D> {
-    const device = (engine as EngineContextInternal).device;
+    const device = engine._device;
 
     // Collect all suffixes whose feature the device supports
     const supported: string[] = [];
@@ -221,7 +220,7 @@ export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, s
                 throw new Error(`KTX fetch failed: ${resp.status}`);
             }
             const parsed = parseKtx1(await resp.arrayBuffer());
-            return uploadCompressed(engine as EngineContextInternal, parsed, opts);
+            return uploadCompressed(engine, parsed, opts);
         } catch (e) {
             console.warn(`KTX load failed for suffix "${suffix}":`, e);
         }

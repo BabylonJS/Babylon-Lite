@@ -4,6 +4,7 @@ import { addBillboardSpriteIndex, removeBillboardSpriteIndex, setBillboardSprite
 
 /** Stable identity for a single billboard sprite that survives swap-remove reindexing. */
 export interface BillboardSpriteHandle {
+    /** @internal */
     readonly _entityType: "billboard-sprite-handle";
     readonly system: BillboardSpriteSystem;
     readonly id: number;

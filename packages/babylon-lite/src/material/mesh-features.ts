@@ -1,4 +1,4 @@
-import type { Mesh, MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 
 export const MSH_HAS_TANGENTS = 1 << 0;
 export const MSH_HAS_SKELETON = 1 << 1;
@@ -12,7 +12,7 @@ export const MSH_RECEIVE_SHADOWS = 1 << 8;
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
-    const gpu = (mesh as MeshInternal)._gpu;
+    const gpu = mesh._gpu;
     let features = 0;
     if (gpu.tangentBuffer) {
         features |= MSH_HAS_TANGENTS;

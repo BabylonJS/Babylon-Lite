@@ -13,10 +13,10 @@
  */
 
 import type { Mat4 } from "../math/types.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
 import type { AssetContainer } from "../asset-container.js";
-import type { Mesh, MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import type { GltfMatExtCtx, GltfMaterialData } from "./gltf-material.js";
 import type { GltfMeshData } from "./load-gltf.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
@@ -25,20 +25,28 @@ import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 
 /** Per-load context handed to every non-material feature hook. */
 export interface GltfLoadCtx {
-    _engine: EngineContextInternal;
+    /** @internal */
+    _engine: EngineContext;
+    /** @internal */
     _json: any;
+    /** @internal */
     _binChunk: DataView;
+    /** @internal */
     _baseUrl: string;
+    /** @internal */
     _parentMap: Map<number, number>;
+    /** @internal */
     _worldMatrixCache: Map<number, Mat4>;
-    /** All material-layer features active for this load (so e.g. variants can re-use them). */
+    /** @internal All material-layer features active for this load (so e.g. variants can re-use them). */
     _matExts: GltfFeature[];
     /** Composed texture-wrap function aggregating every active feature's
      *  `wrapTexture` hook. Identity when no feature contributes one. */
+    /** @internal */
     _wrapTex: TextureWrapFn;
     /** glTF-node-index → SceneNode, populated by buildNodeHierarchy. Consumers:
      *  KHR_node_visibility (load-time), KHR_animation_pointer (runtime pointer writers).
      *  `undefined` for a given index means the node was unreachable from any scene root. */
+    /** @internal */
     _nodeMap?: (TransformNode | undefined)[];
 }
 
@@ -46,16 +54,28 @@ export interface GltfLoadCtx {
  *  KHR_draco_mesh_compression populate this in their `preMesh` hook so that
  *  the core mesh-extraction loop stays feature-agnostic. */
 export interface DecodedPrimitive {
+    /** @internal */
     _attributes: Map<string, Float32Array | Uint32Array | Int32Array>;
+    /** @internal */
     _indices: Uint32Array;
+    /** @internal */
     _vertexCount: number;
+    /** @internal */
     _indexCount: number;
 }
 
-/** A glTF feature module. Each module implements one or more of the four hooks. */
+/** A glTF feature module. Each module implements one or more of the hooks. */
 export interface GltfFeature {
     /** Diagnostic id, e.g. "KHR_materials_clearcoat" or "_skeleton". */
     id: string;
+    /** Pre-parse hook: runs before any accessor is read. May mutate `json`
+     *  (bufferViews/accessors) and return a REPLACEMENT binary chunk that
+     *  subsequent hooks + the core accessor reader resolve against. Used by
+     *  buffer-level features such as EXT_meshopt_compression (decompresses
+     *  bufferViews) and KHR_mesh_quantization (dequantizes accessors to FLOAT).
+     *  Returning `undefined`/`void` leaves the binary chunk unchanged. Hooks run
+     *  sequentially in registry order so later features see earlier rewrites. */
+    preParse?(json: any, binChunk: DataView): Promise<DataView | void>;
     /** Pre-extract hook: runs before mesh extraction. Returns a map of glTF
      *  primitive objects to pre-decoded attribute/index data. Used by e.g. Draco. */
     preMesh?(json: unknown, binChunk: DataView, baseUrl: string): Promise<Map<unknown, DecodedPrimitive>>;
@@ -67,10 +87,10 @@ export interface GltfFeature {
      *  `uScale/vScale/uOffset/vOffset/uAng` via `cloneTexture2D`). Called eagerly during
      *  material assembly. Unknown textureInfos must return `tex` unchanged. */
     wrapTexture?(tex: Texture2D, texInfo: unknown): Texture2D;
-    /** Per-mesh hook: mutates a freshly-uploaded `MeshInternal`
+    /** Per-mesh hook: mutates a freshly-uploaded `Mesh`
      *  (e.g. attaches `mesh.skeleton`, `mesh.morphTargets`). Runs in parallel
      *  for each mesh inside the loader's mesh-upload Promise.all. */
-    applyMesh?(meshData: GltfMeshData, mesh: MeshInternal, ctx: GltfLoadCtx): Promise<void>;
+    applyMesh?(meshData: GltfMeshData, mesh: Mesh, ctx: GltfLoadCtx): Promise<void>;
     /** Per-asset hook: contributes a fragment merged into the final `AssetContainer`
      *  (e.g. `animationGroups`, `materialVariants`). Runs once after the mesh
      *  hierarchy is built. */

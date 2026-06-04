@@ -2,8 +2,17 @@ import type { EngineContext } from "../engine/engine.js";
 
 /** A unit of per-frame animation work owned by an {@link AnimationManager}. */
 export interface AnimationTask {
+    /** @internal */
     readonly _entityType: "animation-task";
     active: boolean;
+    /** @internal */
+    _update: AnimationTaskUpdate;
+    /** @internal */
+    _dispose?: (manager: AnimationManager) => void;
+    /** @internal */
+    _category?: string;
+    /** @internal */
+    _owner?: AnimationManager;
 }
 
 /** Callback invoked each tick to advance a single {@link AnimationTask} by `deltaMs` milliseconds. */
@@ -16,13 +25,6 @@ export interface AnimationTaskOptions {
     readonly category?: string;
     /** Called when the task is removed from its manager, allowing it to release any owned resources. */
     readonly dispose?: (manager: AnimationManager) => void;
-}
-
-interface AnimationTaskInternal extends AnimationTask {
-    _update: AnimationTaskUpdate;
-    _dispose?: (manager: AnimationManager) => void;
-    _category?: string;
-    _owner?: AnimationManager;
 }
 
 /** Options for {@link createAnimationManager}. */
@@ -43,8 +45,11 @@ export interface AnimationManager {
     readonly onUpdate?: (deltaMs: number) => void;
     /** @internal Optional feature updaters installed by category-specific adapters. */
     _taskCategory?: string;
+    /** @internal */
     _taskCategoryHandler?: AnimationTaskCategoryHandler;
+    /** @internal */
     _rafId: number;
+    /** @internal */
     _lastTime: number;
 }
 
@@ -59,7 +64,7 @@ export function createAnimationTask(update: AnimationTaskUpdate, options?: Anima
         _update: update,
         _category: options?.category,
         _dispose: options?.dispose,
-    } as AnimationTaskInternal;
+    };
 }
 
 /** Creates an animation manager with no tasks attached.
@@ -90,8 +95,7 @@ export function setAnimationTaskCategoryHandler(manager: AnimationManager, categ
 /** Attaches `task` to `manager` and marks it active.
  *  @throws If the task is already attached to a different manager. */
 export function addAnimationTask(manager: AnimationManager, task: AnimationTask): void {
-    const internal = task as AnimationTaskInternal;
-    const owner = internal._owner;
+    const owner = task._owner;
     if (owner === manager) {
         return;
     }
@@ -99,8 +103,8 @@ export function addAnimationTask(manager: AnimationManager, task: AnimationTask)
         throw new Error("AnimationTask is already attached to another AnimationManager");
     }
     task.active = true;
-    internal._owner = manager;
-    manager.animations.push(internal);
+    task._owner = manager;
+    manager.animations.push(task);
 }
 
 /** Detaches `task` from `manager`, marking it inactive and running its dispose hook if it was attached. */
@@ -108,8 +112,8 @@ export function removeAnimationTask(manager: AnimationManager, task: AnimationTa
     const index = manager.animations.indexOf(task);
     if (index !== -1) {
         removeAnimationTaskAt(manager, index);
-    } else if ((task as AnimationTaskInternal)._owner === manager) {
-        (task as AnimationTaskInternal)._owner = undefined;
+    } else if (task._owner === manager) {
+        task._owner = undefined;
         task.active = false;
     }
 }
@@ -134,7 +138,7 @@ export function updateAnimationManager(manager: AnimationManager, deltaMs: numbe
     // iteration. Removed tasks are marked inactive and skipped below.
     const tasks = manager.animations.slice();
     for (let index = 0; index < tasks.length; index++) {
-        const task = tasks[index]! as AnimationTaskInternal;
+        const task = tasks[index]!;
         if (!task.active || (task._category && task._category === handledCategory)) {
             continue;
         }
@@ -179,7 +183,7 @@ export function stopAnimationManager(manager: AnimationManager): void {
 }
 
 function removeAnimationTaskAt(manager: AnimationManager, index: number): void {
-    const task = manager.animations[index]! as AnimationTaskInternal;
+    const task = manager.animations[index]!;
     manager.animations.splice(index, 1);
     if (task._owner === manager) {
         task._owner = undefined;

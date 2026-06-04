@@ -6,7 +6,6 @@ import type { AnimationManager } from "./animation-manager.js";
 import type { NodeRest, SkeletonBinding } from "./types.js";
 import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 
@@ -337,7 +336,7 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
     if (!manager.engine) {
         throw new Error("Weighted glTF animation requires an AnimationManager engine");
     }
-    const device = (manager.engine as EngineContextInternal).device;
+    const device = manager.engine._device;
     const { nodes, trs, localMat, worldMat } = target;
 
     for (let i = 0; i < nodes.length; i++) {

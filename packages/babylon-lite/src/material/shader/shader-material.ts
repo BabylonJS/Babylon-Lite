@@ -88,9 +88,13 @@ export interface ShaderMaterial extends Material {
     readonly backFaceCulling: boolean;
     readonly depthWrite: boolean;
     readonly depthCompare: GPUCompareFunction;
+    /** @internal */
     _uniformValues: Map<string, ShaderUniformSlot>;
+    /** @internal */
     _textureSlots: Map<string, ShaderTextureSlot>;
+    /** @internal */
     _uniformVersion: number;
+    /** @internal */
     _resourceVersion: number;
 }
 

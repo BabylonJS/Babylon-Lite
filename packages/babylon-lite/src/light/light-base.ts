@@ -11,6 +11,7 @@ export { ObservableVec3 } from "../math/observable-vec3.js";
  *  property changes (position, direction, intensity, color, range, etc.).
  *  Shared across all lights created from the same createLightBase call. */
 export interface LightVersionState {
+    /** @internal */
     _lightVersion: number;
     bump(): void;
 }

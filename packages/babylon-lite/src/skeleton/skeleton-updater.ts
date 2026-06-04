@@ -1,8 +1,8 @@
 // Per-frame skeleton animation — evaluates clips and uploads bone matrices.
 // Zero per-frame allocation: all scratch buffers pre-allocated at init.
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
-import type { AnimationClip, NodeRest, SkeletonBinding } from "../animation/types.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { AnimationClip, NodeRest, SkeletonBinding, AnimatedNodeTarget } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
 import { evaluateSampler } from "../animation/evaluate.js";
@@ -60,9 +60,9 @@ export interface AnimationController {
     speedRatio: number;
     /** Whether animation loops (default true). */
     loop: boolean;
-    /** Debug: node world matrices (numNodes × 16 floats, column-major). */
+    /** @internal Debug: node world matrices (numNodes × 16 floats, column-major). */
     readonly _debugWorldMat?: Float32Array;
-    /** Debug: node names. */
+    /** @internal Debug: node names. */
     readonly _debugNodeNames?: string[];
 }
 
@@ -74,10 +74,40 @@ export function createAnimationController(
     clip: AnimationClip,
     nodes: readonly NodeRest[],
     skeletons: readonly SkeletonBinding[],
-    morphBindings: readonly MorphBinding[]
+    morphBindings: readonly MorphBinding[],
+    nodeTargets?: readonly (AnimatedNodeTarget | undefined)[],
+    excludedNodeIndices?: ReadonlySet<number>
 ): AnimationController {
     const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
+
+    // Plain node-TRS bindings: glTF translation/rotation/scale channels that target
+    // a non-excluded node with a live scene node. These move node-animated meshes
+    // (and their descendants) — without this, only skeleton/morph/pointer outputs
+    // would be applied and node-animated meshes would stay frozen at their rest pose.
+    // Excluded nodes are skin joints + skinned-mesh nodes and their ancestors. A
+    // binding list is per-clip: only nodes THIS clip animates are kept, so untouched
+    // nodes never needlessly dirty the scene. mask bits: 1 = translation, 2 = rotation,
+    // 4 = scale.
+    const nodeTrsBindings: { target: AnimatedNodeTarget; off: number; mask: number }[] = [];
+    if (nodeTargets) {
+        const maskByNode = new Map<number, number>();
+        for (let ci = 0; ci < clip.channels.length; ci++) {
+            const ch = clip.channels[ci]!;
+            const bit = ch.path === PATH_TRANSLATION ? 1 : ch.path === PATH_ROTATION ? 2 : ch.path === PATH_SCALE ? 4 : 0;
+            if (bit === 0) {
+                continue;
+            }
+            const ni = ch.nodeIdx;
+            if (ni < 0 || excludedNodeIndices?.has(ni) || !nodeTargets[ni]) {
+                continue;
+            }
+            maskByNode.set(ni, (maskByNode.get(ni) ?? 0) | bit);
+        }
+        for (const [ni, mask] of maskByNode) {
+            nodeTrsBindings.push({ target: nodeTargets[ni]!, off: ni * TRS_STRIDE, mask });
+        }
+    }
 
     // Pre-allocate scratch buffers (once)
     const currentTRS = new Float32Array(numNodes * TRS_STRIDE);
@@ -125,7 +155,7 @@ export function createAnimationController(
                       if (requiresEngine && !activeEngine) {
                           throw new Error("AnimationController.tick requires an EngineContext for skeleton or morph animation");
                       }
-                      const device = requiresEngine ? (activeEngine as EngineContextInternal).device : null;
+                      const device = requiresEngine ? activeEngine!._device : null;
 
                       if (ctrl.playing) {
                           ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
@@ -196,6 +226,25 @@ export function createAnimationController(
                                   }
                                   break;
                               }
+                          }
+                      }
+
+                      // 2b. Apply plain node-TRS channels to the live scene graph so
+                      // node-animated meshes (and their descendants) move. Skeleton
+                      // joints + skinned-mesh chains are excluded (handled by the bone
+                      // path below). The skeleton path is independent: it reads `nodes`
+                      // and uploads bone textures, never the scene hierarchy.
+                      for (let bi = 0; bi < nodeTrsBindings.length; bi++) {
+                          const b = nodeTrsBindings[bi]!;
+                          const o = b.off;
+                          if (b.mask & 1) {
+                              b.target.position.set(currentTRS[o + T_OFF]!, currentTRS[o + T_OFF + 1]!, currentTRS[o + T_OFF + 2]!);
+                          }
+                          if (b.mask & 2) {
+                              b.target.rotationQuaternion.set(currentTRS[o + R_OFF]!, currentTRS[o + R_OFF + 1]!, currentTRS[o + R_OFF + 2]!, currentTRS[o + R_OFF + 3]!);
+                          }
+                          if (b.mask & 4) {
+                              b.target.scaling.set(currentTRS[o + S_OFF]!, currentTRS[o + S_OFF + 1]!, currentTRS[o + S_OFF + 2]!);
                           }
                       }
 

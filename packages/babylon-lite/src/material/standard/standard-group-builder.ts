@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import { _registerStdExt } from "./standard-flags.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -24,7 +24,7 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     const hasTI = meshes.some((m) => !!m.thinInstances);
     const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
 
-    let tiSync: ((engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
+    let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
     let tiFragment: any;
     let shadowFragment: any;
 

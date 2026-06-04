@@ -2,13 +2,13 @@
 import { getTrilinearSampler } from "../resource/samplers.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 
 type CubeResult = { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler };
 let _cc: WeakMap<GPUDevice, Map<string, Promise<CubeResult>>> | null = null;
 
-export function loadCubeTexture(engine: EngineContextInternal, baseUrl: string, ext = ".jpg"): Promise<CubeResult> {
-    const device = engine.device;
+export function loadCubeTexture(engine: EngineContext, baseUrl: string, ext = ".jpg"): Promise<CubeResult> {
+    const device = engine._device;
     if (!_cc) {
         _cc = new WeakMap();
     }

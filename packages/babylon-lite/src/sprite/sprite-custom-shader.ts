@@ -34,7 +34,7 @@ import {
     nextCustomShaderKey,
     validateExtraTextureNames,
 } from "./custom-shader-core.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { makeSpritePrologueWgsl } from "./sprite-pipeline.js";
 import type { SpriteFxHook } from "./sprite-fx-hook.js";
 import { _registerSpriteFxHook } from "./sprite-fx-hook.js";
@@ -52,6 +52,7 @@ export interface Sprite2DCustomShaderOptions {
 
 /** A compiled-on-demand custom sprite shader. Pure data; pass as `customShader` to `createSprite2DLayer`. */
 export interface Sprite2DCustomShader {
+    /** @internal */
     readonly _entityType: "sprite-2d-custom-shader";
     /** @internal Extra textures bound after the atlas. */
     readonly _extraTextures: readonly Sprite2DCustomTexture[];
@@ -60,11 +61,11 @@ export interface Sprite2DCustomShader {
     /** @internal Compose the full WGSL module for a given layout (`hasDepth` → group index). */
     readonly _composeWgsl: (hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean) => string;
     /** @internal Compile + cache the `GPUShaderModule` for a layout (owns its per-device cache). */
-    readonly _getShaderModule: (engine: EngineContextInternal, hasDepth: boolean, uvScroll: boolean) => GPUShaderModule;
+    readonly _getShaderModule: (engine: EngineContext, hasDepth: boolean, uvScroll: boolean) => GPUShaderModule;
     /** @internal Extra-texture + fx UBO bind-group **layout** entries, starting at `startBinding` (3). */
     readonly _layoutEntries: (startBinding: number) => GPUBindGroupLayoutEntry[];
     /** @internal Build the opaque per-layer fx attachment (owns the `SpriteFx` UBO, scratch, and elapsed time). */
-    readonly _createLayerFx: (engine: EngineContextInternal, label: string) => SpriteLayerFx;
+    readonly _createLayerFx: (engine: EngineContext, label: string) => SpriteLayerFx;
 }
 
 function makeCustomSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, extraTextures: readonly Sprite2DCustomTexture[], fragment: string, uvScroll: boolean): string {

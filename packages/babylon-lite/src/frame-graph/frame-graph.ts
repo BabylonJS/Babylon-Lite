@@ -23,12 +23,14 @@ import type { Task } from "./task.js";
 /** The frame graph — an ordered list of tasks. */
 export interface FrameGraph {
     /** Ordered list of tasks. Executed in array order each frame. */
+    /** @internal */
     _tasks: Task[];
 
     /** Set during `build()` while a single task's `record()` is running.
      *  Used by `addRenderPass` to associate a
      *  freshly-created pass with the task that is currently recording.
      *  Mirrors BJS' implicit "currentProcessedTask" in `frameGraph.buildAsync`. */
+    /** @internal */
     _currentProcessedTask: Task | null;
 
     /** Build (or rebuild) every task in execute order. */

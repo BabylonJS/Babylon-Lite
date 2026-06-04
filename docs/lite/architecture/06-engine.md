@@ -14,7 +14,7 @@ The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `O
 export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 
 /** Handle to the WebGPU engine — public API surface.
- *  GPU internals (device, context, format) are @internal (EngineContextInternal) — not user-facing. */
+ *  GPU internals (device, context, format) are @internal — not user-facing. */
 export interface EngineContext {
   readonly canvas: RenderCanvas;
   readonly msaaSamples: number;           // 1 or 4
@@ -165,19 +165,19 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `createEngine(canvas)` | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()` |
-| `engine.device` | `engine._device` |
-| `engine.format` | `engine._textureHelper._glslang.getPreferredFormat()` |
-| `engine.msaaSamples` (1 or 4) | `engine._samples` |
+| Babylon Lite                                           | Babylon.js                                                                                                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createEngine(canvas)`                                 | `new BABYLON.WebGPUEngine(canvas)` + `engine.initAsync()`                                                                                           |
+| `engine._device`                                       | `engine._device`                                                                                                                                    |
+| `engine.format`                                        | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
+| `engine.msaaSamples` (1 or 4)                          | `engine._samples`                                                                                                                                   |
 | `registerScene(engine, scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
-| `stopEngine(engine)` | `engine.stopRenderLoop()` |
-| `resizeEngine(engine)` | `engine.resize()` |
-| Registered `RenderingContext`s | Engine render loop callbacks |
-| Scene frame graph execution | Scene render graph / rendering manager |
-| `scene._prePasses` in `_update()` | `scene.onBeforeRenderObservable` + shadow pre-work |
-| `scene._frameGraph.execute()` | Internal draw list dispatch |
+| `stopEngine(engine)`                                   | `engine.stopRenderLoop()`                                                                                                                           |
+| `resizeEngine(engine)`                                 | `engine.resize()`                                                                                                                                   |
+| Registered `RenderingContext`s                         | Engine render loop callbacks                                                                                                                        |
+| Scene frame graph execution                            | Scene render graph / rendering manager                                                                                                              |
+| `scene._prePasses` in `_update()`                      | `scene.onBeforeRenderObservable` + shadow pre-work                                                                                                  |
+| `scene._frameGraph.execute()`                          | Internal draw list dispatch                                                                                                                         |
 
 ## Dependencies
 
@@ -187,17 +187,17 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 
 ## Test Specification
 
-| Test | Description |
-|---|---|
-| `createEngine returns valid Engine` | Mock `navigator.gpu`, verify all interface fields are populated |
+| Test                                              | Description                                                                                    |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `createEngine returns valid Engine`               | Mock `navigator.gpu`, verify all interface fields are populated                                |
 | `resize only recreates targets when size changes` | Call resize with same dimensions → targets unchanged; change `clientWidth` → targets recreated |
-| `start/stop manages rAF` | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop |
-| `renderFrame calls scene callbacks` | Verify pre-passes → updaters → renderables order |
-| `MSAA resolve target is swap chain view` | Inspect color attachment `resolveTarget` in render pass descriptor |
-| `depth format is depth24plus-stencil8` | Verify `depthTexture.format` |
+| `start/stop manages rAF`                          | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop                 |
+| `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
+| `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
+| `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
 
 ## File Manifest
 
-| File | Size | Purpose |
-|---|---|---|
+| File                   | Size       | Purpose                                               |
+| ---------------------- | ---------- | ----------------------------------------------------- |
 | `src/engine/engine.ts` | ~150 lines | Engine interface, creation, render loop, MSAA targets |

@@ -47,7 +47,7 @@ import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied, sprite
 import { createSprite2DCustomShader } from "../../../packages/babylon-lite/src/sprite/sprite-custom-shader";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
-import type { EngineContextInternal } from "../../../packages/babylon-lite/src/engine/engine";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 // ── Mock GPU device ───────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ function mockBuffer(counters: MockCounters): MockBuffer {
     return buf;
 }
 
-function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounters } {
+function makeMockEngine(): { engine: EngineContext; counters: MockCounters } {
     const counters: MockCounters = { buffersCreated: 0, buffersDestroyed: 0, pipelinesBuilt: 0, shaderModules: 0 };
     const queue = { writeBuffer: vi.fn() };
     const device = {
@@ -105,10 +105,10 @@ function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounte
         msaaSamples: 4,
         drawCallCount: 0,
         maxDevicePixelRatio: Infinity,
-        device,
-        context: {} as GPUCanvasContext,
+        _device: device,
+        _context: {} as GPUCanvasContext,
         format: "bgra8unorm",
-        alphaMode: "opaque",
+        _alphaMode: "opaque",
         _animFrameId: 0,
         _renderFn: null,
         _renderingContexts: [],
@@ -116,7 +116,7 @@ function makeMockEngine(): { engine: EngineContextInternal; counters: MockCounte
         _swapchainView: {} as GPUTextureView,
         _currentDelta: 0,
         _cbs: [],
-    } as EngineContextInternal;
+    } as EngineContext;
 
     return { engine: eng, counters };
 }
@@ -176,10 +176,10 @@ describe("createSpriteRenderer", () => {
         const { engine } = makeMockEngine();
         createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
 
-        const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
-        const shaderLocations = (vertexBuffer.attributes as unknown as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
+        const shaderLocations = (vertexBuffer.attributes as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
 
         expect(vertexBuffer.arrayStride).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5]);
@@ -195,9 +195,9 @@ describe("createSpriteRenderer", () => {
         const cache = createSpritePipelineCache();
         const sceneBGL = {} as GPUBindGroupLayout;
 
-        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL);
+        getOrCreateSpritePipeline(engine, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL);
 
-        const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 1.0 - in.iZ, 1.0)");
@@ -231,16 +231,16 @@ describe("uvScroll (per-sprite uvOffset)", () => {
         const cache = createSpritePipelineCache();
         const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
 
-        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, spriteBlendAlpha, false, false, undefined, undefined, layer);
+        getOrCreateSpritePipeline(engine, cache, "bgra8unorm", 4, spriteBlendAlpha, false, false, undefined, undefined, layer);
 
-        const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
-        const shaderLocations = vertexBuffer.attributes.map((attr) => attr.shaderLocation);
+        const shaderLocations = (vertexBuffer.attributes as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
 
         expect(vertexBuffer.arrayStride).toBe(PURE_2D_UVSCROLL_STRIDE_BYTES);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5, 7]);
-        const uvAttr = vertexBuffer.attributes.find((a) => a.shaderLocation === 7)!;
+        const uvAttr = (vertexBuffer.attributes as GPUVertexAttribute[]).find((a) => a.shaderLocation === 7)!;
         expect(uvAttr.offset).toBe(52);
         expect(uvAttr.format).toBe("float32x2");
 
@@ -255,16 +255,16 @@ describe("uvScroll (per-sprite uvOffset)", () => {
         const sceneBGL = {} as GPUBindGroupLayout;
         const layer = createSprite2DLayer(makeMockAtlas(), { depth: "test", uvScroll: true });
 
-        getOrCreateSpritePipeline(engine as EngineContextInternal, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL, layer);
+        getOrCreateSpritePipeline(engine, cache, "bgra8unorm", 4, spriteBlendAlpha, true, false, "depth24plus-stencil8", sceneBGL, layer);
 
-        const device = engine.device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
+        const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn> };
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
         const vertexBuffer = (descriptor.vertex.buffers as GPUVertexBufferLayout[])[0]!;
-        const shaderLocations = vertexBuffer.attributes.map((attr) => attr.shaderLocation);
+        const shaderLocations = (vertexBuffer.attributes as GPUVertexAttribute[]).map((attr) => attr.shaderLocation);
 
         expect(vertexBuffer.arrayStride).toBe(DEPTH_UVSCROLL_STRIDE_BYTES);
         expect(shaderLocations).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-        const uvAttr = vertexBuffer.attributes.find((a) => a.shaderLocation === 7)!;
+        const uvAttr = (vertexBuffer.attributes as GPUVertexAttribute[]).find((a) => a.shaderLocation === 7)!;
         expect(uvAttr.offset).toBe(56);
     });
 
@@ -356,7 +356,7 @@ describe("registerSpriteRenderer / unregisterSpriteRenderer", () => {
     it("pushes the renderer onto its engine._renderingContexts", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = engine._renderingContexts;
         const before = list.length;
         registerSpriteRenderer(sr);
         expect(list.length).toBe(before + 1);
@@ -366,7 +366,7 @@ describe("registerSpriteRenderer / unregisterSpriteRenderer", () => {
     it("is idempotent — a second register call is a no-op", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = engine._renderingContexts;
         registerSpriteRenderer(sr);
         const len = list.length;
         registerSpriteRenderer(sr);
@@ -380,14 +380,14 @@ describe("registerSpriteRenderer / unregisterSpriteRenderer", () => {
 
         registerSpriteRenderer(sr);
 
-        expect((engine as EngineContextInternal)._renderingContexts).toContain(sr);
-        expect((otherEngine as EngineContextInternal)._renderingContexts).not.toContain(sr);
+        expect(engine._renderingContexts).toContain(sr);
+        expect(otherEngine._renderingContexts).not.toContain(sr);
     });
 
     it("splices the renderer out", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = engine._renderingContexts;
         const before = list.length;
         registerSpriteRenderer(sr);
         unregisterSpriteRenderer(sr);
@@ -399,7 +399,7 @@ describe("disposeSpriteRenderer", () => {
     it("unregisters the renderer from the engine", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = engine._renderingContexts;
 
         registerSpriteRenderer(sr);
         expect(list).toContain(sr);
@@ -412,7 +412,7 @@ describe("disposeSpriteRenderer", () => {
     it("is idempotent after unregistering from the engine", () => {
         const { engine } = makeMockEngine();
         const sr = createSpriteRenderer(engine, { layers: [createSprite2DLayer(makeMockAtlas())] });
-        const list = (engine as EngineContextInternal)._renderingContexts;
+        const list = engine._renderingContexts;
 
         registerSpriteRenderer(sr);
         disposeSpriteRenderer(sr);
@@ -493,7 +493,7 @@ describe("pure-2D instance layout", () => {
         const layer = createSprite2DLayer(makeMockAtlas(), { capacity: 1 });
         addSprite2DIndex(layer, { positionPx: [10, 10], sizePx: [32, 32], frame: 0, z: 0.25 });
         const sr = createSpriteRenderer(engine, { layers: [layer] });
-        const device = engine.device as unknown as { createBuffer: ReturnType<typeof vi.fn>; queue: { writeBuffer: ReturnType<typeof vi.fn> } };
+        const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn>; queue: { writeBuffer: ReturnType<typeof vi.fn> } };
         device.createBuffer.mockClear();
         device.queue.writeBuffer.mockClear();
 
@@ -523,13 +523,13 @@ describe("Sprite2D custom shader", () => {
     });
 
     it("rejects invalid extra-texture names", () => {
-        const makeTex = () => ({ view: {}, sampler: {} }) as unknown as import("../../packages/babylon-lite/src/texture/texture-2d").Texture2D;
+        const makeTex = () => ({ view: {}, sampler: {} }) as unknown as import("../../../packages/babylon-lite/src/texture/texture-2d").Texture2D;
         expect(() => createSprite2DCustomShader({ fragment: FX_FRAGMENT, extraTextures: [{ name: "1bad", texture: makeTex() }] })).toThrow();
     });
 
     it("composes WGSL that wraps the user fragment body with the SpriteFx UBO and fs entry point", () => {
         const cs = createSprite2DCustomShader({ fragment: FX_FRAGMENT });
-        const wgsl = cs._composeWgsl(false, 0);
+        const wgsl = cs._composeWgsl(false, 0, false);
         expect(wgsl).toContain("@binding(3) var<uniform> fx: SpriteFx");
         expect(wgsl).toContain("fn fs(in: VOut) -> @location(0) vec4<f32>");
         expect(wgsl).toContain(FX_FRAGMENT);
@@ -539,7 +539,7 @@ describe("Sprite2D custom shader", () => {
     });
 
     it("places the fx UBO after extra textures and binds them", () => {
-        const makeTex = () => ({ view: {}, sampler: {} }) as unknown as import("../../packages/babylon-lite/src/texture/texture-2d").Texture2D;
+        const makeTex = () => ({ view: {}, sampler: {} }) as unknown as import("../../../packages/babylon-lite/src/texture/texture-2d").Texture2D;
         const cs = createSprite2DCustomShader({
             fragment: FX_FRAGMENT,
             extraTextures: [
@@ -547,7 +547,7 @@ describe("Sprite2D custom shader", () => {
                 { name: "noise", texture: makeTex() },
             ],
         });
-        const wgsl = cs._composeWgsl(false, 0);
+        const wgsl = cs._composeWgsl(false, 0, false);
         expect(wgsl).toContain("@binding(3) var paletteTex: texture_2d<f32>");
         expect(wgsl).toContain("@binding(4) var paletteSamp: sampler");
         expect(wgsl).toContain("@binding(5) var noiseTex: texture_2d<f32>");
@@ -572,7 +572,7 @@ describe("Sprite2D custom shader", () => {
 
     it("getOrCreateSpritePipeline builds a distinct pipeline + module for a custom shader", () => {
         const { engine, counters } = makeMockEngine();
-        const eng = engine as EngineContextInternal;
+        const eng = engine;
         const cache = createSpritePipelineCache();
         const plain = getOrCreateSpritePipeline(eng, cache, eng.format, 1, spriteBlendAlpha, false);
         const modulesAfterPlain = counters.shaderModules;
@@ -592,7 +592,7 @@ describe("Sprite2D custom shader", () => {
         const layer = createSprite2DLayer(makeMockAtlas(), { capacity: 1, customShader: cs });
         addSprite2DIndex(layer, { positionPx: [10, 10], sizePx: [32, 32] });
         const sr = createSpriteRenderer(engine, { layers: [layer] });
-        const device = engine.device as unknown as { createBuffer: ReturnType<typeof vi.fn>; queue: { writeBuffer: ReturnType<typeof vi.fn> } };
+        const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn>; queue: { writeBuffer: ReturnType<typeof vi.fn> } };
 
         sr._update();
 

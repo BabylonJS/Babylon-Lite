@@ -21,4 +21,7 @@ export interface AssetContainer {
     camera?: import("./camera/camera.js").Camera;
     /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
     materialVariants?: MaterialVariantData;
+    /** KHR_xmp_json_ld metadata. `packets` are the JSON-LD packets declared at the
+     *  document level; `assetPacket` is the packet referenced by `asset` (if any). */
+    xmpMetadata?: { packets: unknown[]; assetPacket?: unknown };
 }

@@ -1,19 +1,27 @@
 /** Internal sprite pipeline helpers: owns WGSL, bind-group schema, pipeline construction, and bind-group creation. */
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, DEPTH_UVSCROLL_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES, PURE_2D_UVSCROLL_STRIDE_BYTES } from "./sprite-2d.js";
 
+/** @internal */
 export interface SpritePipelineDeviceCache {
+    /** @internal */
     _shaderModule: GPUShaderModule | null;
+    /** @internal */
     _sceneShaderModule: GPUShaderModule | null;
+    /** @internal */
     _shaderModuleUv: GPUShaderModule | null;
+    /** @internal */
     _sceneShaderModuleUv: GPUShaderModule | null;
+    /** @internal */
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
+/** @internal */
 export interface SpritePipelineCache {
+    /** @internal */
     _devices: WeakMap<GPUDevice, SpritePipelineDeviceCache>;
 }
 
@@ -118,7 +126,7 @@ export function getSpritePipelineCacheSize(cache: SpritePipelineCache, device: G
 }
 
 export function getOrCreateSpritePipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: SpritePipelineCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
@@ -143,7 +151,7 @@ export function getOrCreateSpritePipeline(
 }
 
 export function createSpriteLayerBindGroup(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     pipeline: GPURenderPipeline,
     spriteBindGroupIndex: 0 | 1,
     layer: Sprite2DLayer,
@@ -161,14 +169,14 @@ export function createSpriteLayerBindGroup(
             entries.push(entry);
         }
     }
-    return engine.device.createBindGroup({
+    return engine._device.createBindGroup({
         layout: pipeline.getBindGroupLayout(spriteBindGroupIndex),
         entries,
     });
 }
 
-function getSpritePipelineDeviceCache(engine: EngineContextInternal, cache: SpritePipelineCache): SpritePipelineDeviceCache {
-    let deviceCache = cache._devices.get(engine.device);
+function getSpritePipelineDeviceCache(engine: EngineContext, cache: SpritePipelineCache): SpritePipelineDeviceCache {
+    let deviceCache = cache._devices.get(engine._device);
     if (!deviceCache) {
         deviceCache = {
             _shaderModule: null,
@@ -177,7 +185,7 @@ function getSpritePipelineDeviceCache(engine: EngineContextInternal, cache: Spri
             _sceneShaderModuleUv: null,
             _pipelines: new Map(),
         };
-        cache._devices.set(engine.device, deviceCache);
+        cache._devices.set(engine._device, deviceCache);
     }
     return deviceCache;
 }
@@ -206,7 +214,7 @@ function spritePipelineKey(
     return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}`;
 }
 
-function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
+function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
     const customModule = layer ? _getSpriteFxHook()?.shaderModule(engine, hasDepth, layer) : null;
     if (customModule) {
         return customModule;
@@ -214,22 +222,22 @@ function getShaderModule(engine: EngineContextInternal, cache: SpritePipelineDev
     const uvScroll = layer?._uvScroll === true;
     if (hasDepth) {
         if (uvScroll) {
-            cache._sceneShaderModuleUv ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1, true) });
+            cache._sceneShaderModuleUv ??= engine._device.createShaderModule({ code: makeSpriteWgsl(true, 1, true) });
             return cache._sceneShaderModuleUv;
         }
-        cache._sceneShaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(true, 1, false) });
+        cache._sceneShaderModule ??= engine._device.createShaderModule({ code: makeSpriteWgsl(true, 1, false) });
         return cache._sceneShaderModule;
     }
     if (uvScroll) {
-        cache._shaderModuleUv ??= engine.device.createShaderModule({ code: makeSpriteWgsl(false, 0, true) });
+        cache._shaderModuleUv ??= engine._device.createShaderModule({ code: makeSpriteWgsl(false, 0, true) });
         return cache._shaderModuleUv;
     }
-    cache._shaderModule ??= engine.device.createShaderModule({ code: makeSpriteWgsl(false, 0, false) });
+    cache._shaderModule ??= engine._device.createShaderModule({ code: makeSpriteWgsl(false, 0, false) });
     return cache._shaderModule;
 }
 
 function buildSpritePipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: SpritePipelineDeviceCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
@@ -240,7 +248,7 @@ function buildSpritePipeline(
     sceneBindGroupLayout?: GPUBindGroupLayout,
     layer?: Sprite2DLayer
 ): GPURenderPipeline {
-    const device = engine.device;
+    const device = engine._device;
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },

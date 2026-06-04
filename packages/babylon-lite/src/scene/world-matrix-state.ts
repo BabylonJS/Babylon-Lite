@@ -37,18 +37,12 @@ export interface WorldMatrixAccessors {
     markLocalDirty(): void;
     /** Reference to parent — set directly. */
     parent: IWorldMatrixProvider | null;
-}
-
-/** Internal contract exposed via the state symbol so a parent can push invalidation
- *  into a child's closure and a child can (de)register itself in its parent's list,
- *  all without going through the host's public property getters. */
-interface WorldMatrixStateInternal extends WorldMatrixAccessors {
-    /** Push: mark this node and its whole subtree dirty (clean-guarded). */
+    /** @internal Push: mark this node and its whole subtree dirty (clean-guarded). */
     _invalidate(): void;
-    /** Register a same-module child so future invalidations reach it. */
-    _addChild(child: WorldMatrixStateInternal): void;
-    /** Deregister a child (reparent away). */
-    _removeChild(child: WorldMatrixStateInternal): void;
+    /** @internal Register a same-module child so future invalidations reach it. */
+    _addChild(child: WorldMatrixAccessors): void;
+    /** @internal Deregister a child (reparent away). */
+    _removeChild(child: WorldMatrixAccessors): void;
 }
 
 const WM_STATE = Symbol("wmState");
@@ -60,12 +54,12 @@ export function attachWorldMatrixState(host: object, state: WorldMatrixAccessors
     (host as unknown as Record<symbol, unknown>)[WM_STATE] = state;
 }
 
-function peekWorldMatrixState(p: IWorldMatrixProvider | null): WorldMatrixStateInternal | null {
+function peekWorldMatrixState(p: IWorldMatrixProvider | null): WorldMatrixAccessors | null {
     if (p === null) {
         return null;
     }
     const s = (p as unknown as Record<symbol, unknown>)[WM_STATE];
-    return (s as WorldMatrixStateInternal | undefined) ?? null;
+    return (s as WorldMatrixAccessors | undefined) ?? null;
 }
 
 /**
@@ -80,8 +74,8 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
     let _cachedWorld: Mat4 | null = null;
     const _ownedWorld = new Float32Array(16) as Mat4;
     let _parent: IWorldMatrixProvider | null = null;
-    let _parentState: WorldMatrixStateInternal | null = null;
-    const _children: WorldMatrixStateInternal[] = [];
+    let _parentState: WorldMatrixAccessors | null = null;
+    const _children: WorldMatrixAccessors[] = [];
 
     // Mark this node — and, transitively, its whole subtree — dirty, bumping the
     // version so per-frame consumers (which gate UBO uploads on worldMatrixVersion)
@@ -108,7 +102,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
         }
     }
 
-    const state: WorldMatrixStateInternal = {
+    const state: WorldMatrixAccessors = {
         get parent(): IWorldMatrixProvider | null {
             return _parent;
         },
@@ -162,11 +156,11 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             invalidate();
         },
 
-        _addChild(child: WorldMatrixStateInternal): void {
+        _addChild(child: WorldMatrixAccessors): void {
             _children.push(child);
         },
 
-        _removeChild(child: WorldMatrixStateInternal): void {
+        _removeChild(child: WorldMatrixAccessors): void {
             const i = _children.indexOf(child);
             if (i >= 0) {
                 _children.splice(i, 1);

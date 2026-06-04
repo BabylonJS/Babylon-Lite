@@ -94,6 +94,9 @@ importers:
       '@babylonjs/loaders':
         specifier: ^9.5.0
         version: 9.5.0(@babylonjs/core@9.5.0)(babylonjs-gltf2interface@9.5.0)
+      '@babylonjs/materials':
+        specifier: ^9.5.0
+        version: 9.10.1(@babylonjs/core@9.5.0)
       '@recast-navigation/core':
         specifier: 0.43.0
         version: 0.43.0
@@ -137,6 +140,9 @@ importers:
         specifier: 3.4.0
         version: 3.4.0(@gltf-transform/core@4.3.0)(@gltf-transform/extensions@4.3.0)(@gltf-transform/functions@4.3.0)(esbuild-wasm@0.27.7)
     devDependencies:
+      '@microsoft/api-extractor':
+        specifier: ^7.58.7
+        version: 7.58.7(@types/node@25.5.0)
       '@webgpu/types':
         specifier: ^0.1.52
         version: 0.1.69
@@ -185,6 +191,11 @@ packages:
     peerDependencies:
       '@babylonjs/core': ^9.0.0
       babylonjs-gltf2interface: ^9.0.0
+
+  '@babylonjs/materials@9.10.1':
+    resolution: {integrity: sha512-L6/k2liWZCgU5EmAEPc59EUpFDLumtWSBm9tHVubuXOr0JdTNR+Ot+hyk1uNHBI15ydOXexBletFbAlLnNuQOw==}
+    peerDependencies:
+      '@babylonjs/core': ^9.0.0
 
   '@colors/colors@1.6.0':
     resolution: {integrity: sha512-Ir+AOibqzrIsL6ajt3Rz3LskB7OiMVHqltZmspbW/TJuTVuyOMirVqAkjfY6JISiLHgyNqicAC8AyHHGzNd/dA==}
@@ -3579,6 +3590,10 @@ snapshots:
       '@babylonjs/core': 9.5.0
       babylonjs-gltf2interface: 9.5.0
 
+  '@babylonjs/materials@9.10.1(@babylonjs/core@9.5.0)':
+    dependencies:
+      '@babylonjs/core': 9.5.0
+
   '@colors/colors@1.6.0': {}
 
   '@dabh/diagnostics@2.0.8':
@@ -4460,7 +4475,7 @@ snapshots:
       '@typescript-eslint/types': 8.56.1
       '@typescript-eslint/visitor-keys': 8.56.1
       debug: 4.4.3
-      minimatch: 10.2.4
+      minimatch: 10.2.5
       semver: 7.7.4
       tinyglobby: 0.2.15
       ts-api-utils: 2.5.0(typescript@5.9.3)
@@ -4475,7 +4490,7 @@ snapshots:
       '@typescript-eslint/types': 8.57.2
       '@typescript-eslint/visitor-keys': 8.57.2
       debug: 4.4.3
-      minimatch: 10.2.4
+      minimatch: 10.2.5
       semver: 7.7.4
       tinyglobby: 0.2.15
       ts-api-utils: 2.5.0(typescript@5.9.3)

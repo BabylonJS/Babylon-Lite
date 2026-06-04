@@ -1,4 +1,4 @@
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
 import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskSettings } from "../frame-graph/post-process-task.js";
@@ -58,7 +58,7 @@ const scaledKernel = (kernel: number, scale: number): number => kernel * scale;
  * @returns The bloom post-process task.
  */
 export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BloomPostProcessTask {
-    const eng = engine as EngineContextInternal;
+    const eng = engine as EngineContext;
     const params = {
         sourceTexture: config.sourceTexture,
         targetTexture: config.targetTexture ?? null,
@@ -266,7 +266,7 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
     return task;
 }
 
-function createScaledBloomTarget(label: string, source: RenderTarget, scale: number, engine: EngineContextInternal): RenderTarget {
+function createScaledBloomTarget(label: string, source: RenderTarget, scale: number, engine: EngineContext): RenderTarget {
     const srcDesc = source._descriptor;
     if (!srcDesc.colorFormat) {
         throw new Error(`BloomPostProcessTask "${label}": sourceTexture must have a colorFormat.`);
@@ -283,7 +283,7 @@ function createScaledBloomTarget(label: string, source: RenderTarget, scale: num
     });
 }
 
-function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number, engine: EngineContextInternal): void {
+function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number, engine: EngineContext): void {
     const colorFormat = source._descriptor.colorFormat;
     if (!colorFormat) {
         throw new Error(`BloomPostProcessTask "${target._descriptor.label ?? "target"}": sourceTexture must have a colorFormat.`);
@@ -296,7 +296,7 @@ function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, sca
     };
 }
 
-function resolveSourceSize(source: RenderTarget, engine: EngineContextInternal): { width: number; height: number } {
+function resolveSourceSize(source: RenderTarget, engine: EngineContext): { width: number; height: number } {
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }

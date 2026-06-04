@@ -7,9 +7,9 @@
 
 import type { Camera } from "../camera/camera.js";
 import { getViewProjectionMatrix } from "../camera/camera.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { DrawUpdateContext } from "../render/renderable.js";
-import type { Mesh, MeshGPU, MeshInternal } from "./mesh.js";
+import type { Mesh, MeshGPU } from "./mesh.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import { syncThinInstanceGpuData } from "./thin-instance-gpu.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
@@ -65,21 +65,37 @@ dstColors[outIndex]=srcColors[i];
 
 /** Per-render-binding GPU culling state. */
 export interface ThinInstanceGpuCullState {
+    /** @internal */
     _capacity: number;
+    /** @internal */
     _visibleMatrixBuffer: GPUBuffer | null;
+    /** @internal */
     _visibleColorBuffer: GPUBuffer | null;
+    /** @internal */
     _argsBuffer: GPUBuffer | null;
+    /** @internal */
     _paramsBuffer: GPUBuffer | null;
+    /** @internal */
     _bindGroup: GPUBindGroup | null;
+    /** @internal */
     _srcMatrixBuffer: GPUBuffer | null;
+    /** @internal */
     _srcColorBuffer: GPUBuffer | null;
+    /** @internal */
     _hasColor: boolean;
+    /** @internal */
     _localSphereReady: boolean;
+    /** @internal */
     _localSphere: Float32Array;
+    /** @internal */
     _paramsBytes: ArrayBuffer;
+    /** @internal */
     _paramsF32: Float32Array;
+    /** @internal */
     _paramsU32: Uint32Array;
+    /** @internal */
     _argsData: Uint32Array;
+    /** @internal */
     _drawBuffers: ThinInstanceDrawBuffers | null;
 }
 
@@ -132,7 +148,7 @@ export function destroyTiCullState(state: ThinInstanceGpuCullState): void {
 
 /** Run culling for one render binding and return buffers for the subsequent indirect draw. */
 export function prepareTiCull(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     state: ThinInstanceGpuCullState,
     mesh: Mesh,
     gpu: MeshGPU,
@@ -149,7 +165,7 @@ export function prepareTiCull(
         state._drawBuffers = null;
         return null;
     }
-    if (!state._localSphereReady && !computeLocalSphere(mesh as MeshInternal, state._localSphere)) {
+    if (!state._localSphereReady && !computeLocalSphere(mesh as Mesh, state._localSphere)) {
         state._drawBuffers = null;
         return null;
     }
@@ -180,7 +196,7 @@ export function prepareTiCull(
         if (hasColor) {
             entries.push({ binding: 4, resource: { buffer: sourceColorBuffer! } }, { binding: 5, resource: { buffer: visibleColorBuffer! } });
         }
-        state._bindGroup = engine.device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
+        state._bindGroup = engine._device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries });
         state._srcMatrixBuffer = sourceMatrixBuffer;
         state._srcColorBuffer = sourceColorBuffer;
         state._hasColor = hasColor;
@@ -200,8 +216,8 @@ export function prepareTiCull(
     return { drawBuffers: state._drawBuffers, argsBuffer };
 }
 
-function ensureCullBuffers(engine: EngineContextInternal, state: ThinInstanceGpuCullState, capacity: number, hasColor: boolean): void {
-    const device = engine.device;
+function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullState, capacity: number, hasColor: boolean): void {
+    const device = engine._device;
     if (state._capacity < capacity) {
         state._visibleMatrixBuffer?.destroy();
         state._visibleColorBuffer?.destroy();
@@ -240,8 +256,8 @@ function ensureCullBuffers(engine: EngineContextInternal, state: ThinInstanceGpu
     }
 }
 
-function getCullPipeline(engine: EngineContextInternal, hasColor: boolean): GPUComputePipeline {
-    const device = engine.device;
+function getCullPipeline(engine: EngineContext, hasColor: boolean): GPUComputePipeline {
+    const device = engine._device;
     if (_cachedDevice !== device) {
         _cachedDevice = device;
         _pipelineNoColor = null;
@@ -261,15 +277,7 @@ function getCullPipeline(engine: EngineContextInternal, hasColor: boolean): GPUC
     return _pipelineNoColor;
 }
 
-function writeCullParams(
-    engine: EngineContextInternal,
-    state: ThinInstanceGpuCullState,
-    mesh: Mesh,
-    indexCount: number,
-    instanceCount: number,
-    camera: Camera,
-    aspect: number
-): void {
+function writeCullParams(engine: EngineContext, state: ThinInstanceGpuCullState, mesh: Mesh, indexCount: number, instanceCount: number, camera: Camera, aspect: number): void {
     const params = state._paramsF32;
     const viewProjection = getViewProjectionMatrix(camera, aspect);
     writeFrustumPlanes(params, viewProjection);
@@ -284,8 +292,8 @@ function writeCullParams(
     args[3] = 0;
     args[4] = 0;
 
-    engine.device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
-    engine.device.queue.writeBuffer(state._paramsBuffer!, 0, state._paramsBytes);
+    engine._device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
+    engine._device.queue.writeBuffer(state._paramsBuffer!, 0, state._paramsBytes);
 }
 
 function writeFrustumPlanes(out: Float32Array, m: Float32Array): void {
@@ -305,7 +313,7 @@ function writePlane(out: Float32Array, offset: number, x: number, y: number, z: 
     out[offset + 3] = w * invLen;
 }
 
-function computeLocalSphere(mesh: MeshInternal, out: Float32Array): boolean {
+function computeLocalSphere(mesh: Mesh, out: Float32Array): boolean {
     const positions = mesh._cpuPositions;
     if (!positions || positions.length < 3) {
         return false;
