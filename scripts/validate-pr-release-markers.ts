@@ -64,6 +64,12 @@ function getPullRequestFromEnv(): PullRequestInfo | undefined {
 async function getPullRequestFromGitHub(): Promise<PullRequestInfo | undefined> {
     const repository = cleanAzureValue(process.env.GITHUB_REPOSITORY) ?? cleanAzureValue(process.env.BUILD_REPOSITORY_NAME);
     const pullRequestNumber = cleanAzureValue(process.env.PR_NUMBER) ?? cleanAzureValue(process.env.SYSTEM_PULLREQUEST_PULLREQUESTNUMBER);
+    const githubToken = cleanAzureValue(process.env.GITHUB_TOKEN);
+
+    if (pullRequestNumber && !githubToken) {
+        console.warn("GITHUB_TOKEN is not configured; skipping PR label enforcement and checking commit messages only.");
+        return undefined;
+    }
 
     if (pullRequestNumber && (!repository || !repository.includes("/"))) {
         fail("PR_NUMBER is set, but GITHUB_REPOSITORY is missing or is not in owner/repo form; refusing to skip breaking-label enforcement.");
@@ -77,10 +83,7 @@ async function getPullRequestFromGitHub(): Promise<PullRequestInfo | undefined> 
         Accept: "application/vnd.github+json",
         "User-Agent": "babylon-lite-release-marker-check",
     };
-    const githubToken = cleanAzureValue(process.env.GITHUB_TOKEN);
-    if (githubToken) {
-        headers.Authorization = `Bearer ${githubToken}`;
-    }
+    headers.Authorization = `Bearer ${githubToken}`;
 
     const response = await fetch(`https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}`, { headers });
     if (!response.ok) {

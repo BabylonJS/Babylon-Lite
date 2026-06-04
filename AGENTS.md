@@ -56,7 +56,8 @@ Because GitHub squash merge usually builds the final commit from the PR title
 and body, agents must make sure breaking-change markers are present in the PR
 title/body or in the final squash message, not only in an intermediate local
 commit. If a PR is labeled `breaking`, `breaking change`, `major`, or
-`semver-major`, PR CI will require a marker in the PR title/body.
+`semver-major`, PR CI will require a marker in the PR title/body when the
+release-marker job has a repo-scoped `GITHUB_TOKEN` available to read PR labels.
 
 Manual patch/minor/major releases are requested by editing `config/release.json`
 and incrementing its `nonce`; weekly scheduled releases remain `auto`.
