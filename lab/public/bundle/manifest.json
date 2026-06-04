@@ -595,23 +595,16 @@
     "bjsGzipKB": 672
   },
   "scene33": {
-    "rawKB": 94.2,
-    "gzipKB": 37.8,
+    "rawKB": 50.2,
+    "gzipKB": 19.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene33-generate-mipmaps-DKyjTeYR.js",
       "scene33-gltf-ext-dielectric-BD8fbfh2.js",
       "scene33-gltf-feature-lights-punctual-JGJ44ySP.js",
       "scene33-gltf-glb-parser-BdYiApo0.js",
-      "scene33-ibl-fragment-DE6mLQIJ.js",
       "scene33-light-base-gX39dedj.js",
-      "scene33-multilight-wgsl-WMFYMxiS.js",
-      "scene33-pbr-refraction-XbGsOIHQ.js",
-      "scene33-pbr-renderable-BXu_pwv1.js",
-      "scene33-pbr-transmission-ext-3iTRLO27.js",
       "scene33-point-light-Blj0gYd8.js",
-      "scene33-rgbd-decode-Baow08lG.js",
-      "scene33-scene-uniforms-FTYH6Ct0.js",
       "scene33.js"
     ],
     "bjsRawKB": 2785.6,
@@ -764,7 +757,7 @@
     "bjsGzipKB": 368.8
   },
   "scene54": {
-    "rawKB": 56.2,
+    "rawKB": 56.3,
     "gzipKB": 22.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -778,7 +771,7 @@
     "bjsGzipKB": 368.7
   },
   "scene55": {
-    "rawKB": 29.5,
+    "rawKB": 29.6,
     "gzipKB": 12.2,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -789,7 +782,7 @@
     "bjsGzipKB": 240.4
   },
   "scene56": {
-    "rawKB": 56.5,
+    "rawKB": 56.6,
     "gzipKB": 22.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -803,7 +796,7 @@
     "bjsGzipKB": 359.7
   },
   "scene57": {
-    "rawKB": 56.5,
+    "rawKB": 56.6,
     "gzipKB": 22.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -1639,7 +1632,7 @@
     "bjsGzipKB": 368.7
   },
   "scene95": {
-    "rawKB": 61.5,
+    "rawKB": 61.6,
     "gzipKB": 23.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [

@@ -15,7 +15,7 @@
 //
 // Implemented from public Doom format documentation; no GPL Doom source is used.
 
-import { createTexture2DFromPixels, type EngineContext, type SpriteAtlas, type SpriteFrame as AtlasFrame, type Texture2D } from "babylon-lite";
+import { createTexture2DFromPixels, type EngineContext, type SpriteAtlas, type SpriteFrame, type Texture2D } from "babylon-lite";
 import type { Wad } from "../wad/wad-file.js";
 import { getLump } from "../wad/wad-file.js";
 import { decodePatch } from "../wad/graphics.js";
@@ -37,7 +37,7 @@ export interface SpriteImage {
 }
 
 /** All rotations for one animation frame of one sprite. */
-interface SpriteFrame {
+interface DoomSpriteFrame {
     /** True when the frame has 8 distinct rotations; false when a single image is used. */
     rotated: boolean;
     /** Index 0..7 for rotations 1..8 (or [0] only when not rotated). */
@@ -54,8 +54,8 @@ interface RawRot {
 const ATLAS_WIDTH = 1024;
 
 export class SpriteStore {
-    /** spriteName -> frame index -> SpriteFrame. */
-    private readonly frames = new Map<string, SpriteFrame[]>();
+    /** spriteName -> frame index -> DoomSpriteFrame. */
+    private readonly frames = new Map<string, DoomSpriteFrame[]>();
     /** Raw rotation records discovered in the S namespace, keyed by sprite name. */
     private readonly raw = new Map<string, RawRot[]>();
     private _atlas: Texture2D | null = null;
@@ -146,7 +146,7 @@ export class SpriteStore {
         for (const sprite of spriteNames) {
             const records = this.raw.get(sprite);
             if (!records || this.frames.has(sprite)) continue;
-            const frameList: SpriteFrame[] = [];
+            const frameList: DoomSpriteFrame[] = [];
             this.frames.set(sprite, frameList);
 
             // Decode each unique lump once, then assign to the rotation slots it serves.
@@ -238,7 +238,7 @@ export class SpriteStore {
         // pivot (leftOffset/topOffset) and mirror flag are folded into the frame pivot so the
         // billboard quad anchors exactly where the hand-built mesh used to. Mirrored images keep
         // the source UVs (flip is applied per-instance via `flipX`) but mirror the pivot X.
-        const frames: AtlasFrame[] = [];
+        const frames: SpriteFrame[] = [];
         for (const it of items) {
             const img = it.img;
             const pivotX = img.mirror ? (img.aw - img.leftOffset) / img.aw : img.leftOffset / img.aw;
