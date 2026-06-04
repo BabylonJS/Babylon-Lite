@@ -90,6 +90,10 @@ function loadDemosConfig(): DemoConfigEntry[] {
     return JSON.parse(readFileSync(resolve(ROOT, "demos-config.json"), "utf-8")) as DemoConfigEntry[];
 }
 
+export function loadDemoConfig(slug: string): DemoConfigEntry | undefined {
+    return loadDemosConfig().find((demo) => demo.slug === slug);
+}
+
 function escapeHtml(value: string): string {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -162,7 +166,7 @@ function copyRequiredDir(source: string, target: string, label: string): void {
     cpSync(source, target, { recursive: true });
 }
 
-function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
+export function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
     if (demos.some((demo) => demo.slug === "doom")) {
         if (!existsSync(DOOM_SRC)) {
             throw new Error(`Missing DOOM assets at ${DOOM_SRC}`);
@@ -221,7 +225,10 @@ function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoMa
 }
 
 export async function buildDemo(slug: string): Promise<void> {
-    const demoOutDir = resolve(demosDir, slug);
+    // Build into a temp dir whose name can never collide with a runtime asset folder
+    // (e.g. the "freeciv" demo also copies game data into demos/freeciv); the dot prefix
+    // also keeps it out of the slug-based stale-chunk cleanup below.
+    const demoOutDir = resolve(demosDir, `.build-${slug}`);
     rmSync(demoOutDir, { recursive: true, force: true });
 
     const buildResult = await build({

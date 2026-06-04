@@ -4,25 +4,20 @@
  * Pure-2D, no scene: a handful of sprites are mutated every animation frame to
  * make the static tilemap feel alive:
  *   - a roaming **scout** (explorer unit) that wanders the continent,
- *   - a **pulsing selection ring** cycling the four `unit.select*` frames on it,
- *   - a few pieces of **roaming wildlife** from the animals sheet, and
- *   - **fog of war** that hides unexplored land and dims tiles you've seen but
- *     can't currently watch, lifting as the scout (and your cities) gain sight.
+ *   - a **pulsing selection ring** cycling the four `unit.select*` frames on it, and
+ *   - a few pieces of **roaming wildlife** from the animals sheet.
+ *
+ * Fog of war (which lifts as the scout and cities gain sight) lives in its own
+ * module (`fog.ts`); it reads the scout's tile from here each frame.
  *
  * Everything is seeded off the world so the demo replays identically.
  */
 
-import { addSprite2DIndex, clearSprite2DLayer, setSprite2DFrameIndex, updateSprite2DIndex } from "babylon-lite";
+import { addSprite2DIndex, setSprite2DFrameIndex, updateSprite2DIndex } from "babylon-lite";
 import { DIR8, DIR_DELTA, TILE_H, TILE_W, isoCentre } from "./iso.js";
 import type { TileLayers, TileSheets } from "./tilemap.js";
-import type { City, GameMap } from "./worldgen.js";
+import type { GameMap } from "./worldgen.js";
 
-/** Tile sight radius (Manhattan) around cities and the scout. */
-const CITY_SIGHT = 2;
-const SCOUT_SIGHT = 3;
-/** Fog opacity for tiles never seen vs. seen-but-not-currently-visible. */
-const UNEXPLORED_ALPHA = 0.92;
-const EXPLORED_ALPHA = 0.55;
 /** Wildlife species drawn from the animals sheet. */
 const ANIMAL_TAGS = ["u.wolf", "u.bear", "u.leopard", "u.tiger", "u.crocodile", "u.gorilla", "u.snake"] as const;
 const ANIMAL_COUNT = 6;
@@ -88,9 +83,9 @@ function ease(t: number): number {
 }
 
 /**
- * Spawn the moving sprites + fog and return a `step` driver. Adds the scout to
- * the (otherwise static) unit layer, wildlife to the animals layer, one ring to
- * the selection layer, and rebuilds the fog layer whenever sight changes.
+ * Spawn the moving sprites and return a `step` driver. Adds the scout to the
+ * (otherwise static) unit layer, wildlife to the animals layer, and one ring to
+ * the selection layer. Fog of war is handled separately (see `fog.ts`).
  */
 export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLayers): LiveSim {
     const { width, height } = world;
@@ -174,52 +169,6 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
         });
     }
 
-    // --- Fog of war ------------------------------------------------------
-    // The whole map starts charted (like an old surveyor's map / the minimap):
-    // every tile reads as the soft "seen but not currently watched" haze, and
-    // only lifts to fully clear under a city's or the scout's live sight. This
-    // avoids the near-black "unexplored void" that swallowed the parchment look.
-    const explored = new Uint8Array(width * height).fill(1);
-    const visible = new Uint8Array(width * height);
-    const fogFrame = sheets.terrain.grid("grid_main").frameOf("t.unknown1") ?? 0;
-
-    const stampSight = (cx: number, cy: number, r: number): void => {
-        for (let dy = -r; dy <= r; dy++) {
-            for (let dx = -r; dx <= r; dx++) {
-                if (Math.abs(dx) + Math.abs(dy) > r) continue;
-                const x = cx + dx;
-                const y = cy + dy;
-                if (x < 0 || y < 0 || x >= width || y >= height) continue;
-                const i = y * width + x;
-                visible[i] = 1;
-                explored[i] = 1;
-            }
-        }
-    };
-
-    const rebuildFog = (): void => {
-        visible.fill(0);
-        for (const c of world.cities as City[]) stampSight(c.x, c.y, CITY_SIGHT);
-        stampSight(scout.x, scout.y, SCOUT_SIGHT);
-
-        clearSprite2DLayer(layers.fog);
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const i = y * width + x;
-                if (visible[i]) continue; // currently in sight → clear
-                const alpha = explored[i] ? EXPLORED_ALPHA : UNEXPLORED_ALPHA;
-                const [px, py] = isoCentre(x, y);
-                addSprite2DIndex(layers.fog, {
-                    positionPx: [px, py],
-                    sizePx: [TILE_W, TILE_H],
-                    frame: fogFrame,
-                    color: [0, 0, 0, alpha],
-                });
-            }
-        }
-    };
-    rebuildFog();
-
     // Player-issued orders: a queue of adjacent tiles for the scout to walk. The
     // scout is fully player-controlled — it idles until the player clicks a
     // destination, then follows the commanded path.
@@ -286,7 +235,8 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
 
     return {
         step(dtMs: number): void {
-            // Scout movement + fog reveal on tile change.
+            // Scout movement (sight/fog reveal is handled by the fog module, which
+            // reads the scout's tile each frame).
             const scoutArrived = advanceWalker(scout, dtMs, pickScoutTarget);
             // While following a commanded path, step crisply between tiles instead of
             // taking the lazy wander pause.
@@ -294,7 +244,6 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
             const [scx, scy] = walkerPx(scout);
             updateSprite2DIndex(layers.unit, scout.index, { positionPx: [scx, scy + scout.yOffset] });
             updateSprite2DIndex(layers.selection, ringIndex, { positionPx: [scx, scy] });
-            if (scoutArrived) rebuildFog();
 
             // Pulsing selection ring — frozen on a steady frame while the scout is
             // selected so the player can see it's the unit under their command.

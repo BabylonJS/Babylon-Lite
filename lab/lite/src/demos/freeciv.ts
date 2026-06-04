@@ -18,9 +18,12 @@ import { loadFreecivSheet } from "./freeciv/atlas.js";
 import { createAtmosphere } from "./freeciv/atmosphere.js";
 import { createBackdrop } from "./freeciv/backdrop.js";
 import { createWater } from "./freeciv/water.js";
+import { createDayNight } from "./freeciv/daynight.js";
 import { createVignette } from "./freeciv/vignette.js";
 import { generateWorld, type GameMap } from "./freeciv/worldgen.js";
 import { buildTilemap, type Bounds, type TileLayers, type TileSheets } from "./freeciv/tilemap.js";
+import { createCoastFoam } from "./freeciv/coastfoam.js";
+import { createFog } from "./freeciv/fog.js";
 import { createLiveSim } from "./freeciv/live.js";
 import { createPicker } from "./freeciv/pick.js";
 import { createMinimap } from "./freeciv/minimap.js";
@@ -52,8 +55,9 @@ async function main(): Promise<void> {
     const cap = world.width * world.height;
 
     // Back-to-front: ocean → coast → terrain base → raised forest/hills/mountains
-    // → river → road → improvements → specials → city → unit → wildlife → fog →
+    // → river → road → improvements → specials → city → unit → wildlife →
     // selection ring (the ring rides on top so it stays crisp over the scout).
+    // Fog of war is a separate fullscreen field layer added to the renderer below.
     const tileLayers: TileLayers = {
         ocean: createSprite2DLayer(ocean.grid("grid_main").atlas, { capacity: cap, order: 0 }),
         coast: createSprite2DLayer(water.grid("grid_coasts").atlas, { capacity: cap * 2, order: 1 }),
@@ -68,7 +72,6 @@ async function main(): Promise<void> {
         city: createSprite2DLayer(cities.grid("grid_main").atlas, { capacity: 64, order: 10, pivot: [0.5, 1.0] }),
         unit: createSprite2DLayer(units.grid("grid_main").atlas, { capacity: 64, order: 11, pivot: [0.5, 1.0] }),
         animals: createSprite2DLayer(animals.grid("grid_main").atlas, { capacity: 64, order: 12, pivot: [0.5, 1.0] }),
-        fog: createSprite2DLayer(terrain.grid("grid_main").atlas, { capacity: cap, order: 13 }),
         selection: createSprite2DLayer(select.grid("grid_main").atlas, { capacity: 4, order: 14 }),
     };
     // Tile-hover highlight: a cyan-tinted selection bracket on its own top layer.
@@ -93,7 +96,6 @@ async function main(): Promise<void> {
         tileLayers.city,
         tileLayers.unit,
         tileLayers.animals,
-        tileLayers.fog,
         tileLayers.selection,
         highlightLayer,
     ];
@@ -172,6 +174,20 @@ async function main(): Promise<void> {
     // Drifting clouds over the parchment backdrop, behind the map (subtle).
     const atmosphere = createAtmosphere(engine, sr);
 
+    // Fog of war: one continuous, world-anchored haze field (a fullscreen quad that
+    // samples a per-tile sight texture) instead of per-tile diamonds, so the sight
+    // frontier reads as smooth drifting mist with no isometric silhouette.
+    const fog = createFog(engine, sr, world);
+
+    // Breaking surf along every shoreline: a fullscreen field quad that samples a
+    // static land/ocean mask (its 0.5 contour is the coastline) and paints animated
+    // foam in a band on the ocean side — same continuous-field trick as the fog.
+    const coastFoam = createCoastFoam(engine, sr, world);
+
+    // Slow day/night cycle: a full-screen multiply grade plus warm additive city
+    // lights that bloom after sunset. Above the clouds, below the vignette/HUD.
+    const dayNight = createDayNight(engine, sr, world);
+
     // Screen-space vignette: darkens the corners so the void around the island
     // fades to shadow instead of exposing the Mercator backdrop at the edges.
     const vignette = createVignette(engine, sr);
@@ -201,7 +217,11 @@ async function main(): Promise<void> {
         const dt = Math.min(100, now - last);
         last = now;
         sim.step(dt);
-        atmosphere.update(view);
+        const [scoutX, scoutY] = sim.scoutTile();
+        fog.update(view, scoutX, scoutY);
+        coastFoam.update(view);
+        dayNight.update(view);
+        atmosphere.update(view, dayNight.daylight());
         vignette.update();
         waterFx.update();
         labels.update(view, engine);

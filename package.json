@@ -12,6 +12,7 @@
         "build:pages-site": "tsx scripts/build-pages-site.ts",
         "build:bundle-scenes": "tsx scripts/build-bundle-scenes.ts",
         "build:bundle-demos": "tsx scripts/build-bundle-demos.ts",
+        "build:bundle-demo": "tsx scripts/build-bundle-demo.ts",
         "build:bundle-master-info": "tsx scripts/build-master-bundle-info.ts",
         "fetch:freedoom": "tsx scripts/fetch-freedoom.ts",
         "fetch:librequake": "tsx scripts/fetch-librequake.ts",
