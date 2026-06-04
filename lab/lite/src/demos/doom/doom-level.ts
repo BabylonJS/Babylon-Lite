@@ -93,13 +93,13 @@ export function buildDoomLevel(engine: EngineContext, scene: SceneContext, wadBy
         if (spriteStore.has(extra)) usedSprites.add(extra);
     }
     spriteStore.build(usedSprites);
-    const spriteRenderer = new SpriteRenderer(engine, scene, spriteStore, colormapTex);
+    const spriteRenderer = new SpriteRenderer(scene, spriteStore, colormapTex);
 
     // Player state, HUD overlay and sound, wired to world events.
     const player = new Player(world);
     const sound = new DoomSound(wad);
-    const hud = new DoomHud(wad, player);
-    const weaponView = new WeaponView(wad);
+    const hud = new DoomHud(engine, wad, player, colormapTex);
+    const weaponView = new WeaponView(engine, wad, colormapTex);
     world.events = {
         message: (text) => {
             player.setMessage(text);

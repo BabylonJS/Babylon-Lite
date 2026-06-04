@@ -283,14 +283,26 @@ function writeInstance(system: BillboardSpriteSystem, slotIndex: number, props: 
         uvMaxX = prev![7]!;
         uvMaxY = prev![8]!;
     }
-    const wantsFlipX = props.flipX ?? (!isAdd && prev![5]! > prev![7]!);
-    const wantsFlipY = props.flipY ?? (!isAdd && prev![6]! > prev![8]!);
-    if (uvMinX > uvMaxX !== wantsFlipX) {
+    // Flip currently baked into the (possibly preserved) UV endpoints.
+    const currentFlipX = uvMinX > uvMaxX;
+    const currentFlipY = uvMinY > uvMaxY;
+    // Flip carried over from the previous instance (used when the flag is omitted,
+    // so a frame change keeps the existing flip).
+    const prevFlipX = !isAdd && prev![5]! > prev![7]!;
+    const prevFlipY = !isAdd && prev![6]! > prev![8]!;
+    // Resolve the desired flip. The explicit `=== true` test (rather than a
+    // `boolean !== flag` XOR) keeps both operands genuine booleans so terser's
+    // `booleans_as_integers` pass cannot turn the flag into a number and break the
+    // strict comparison (a boolean is never `!==`-equal to the integer 0/1 it maps
+    // a flag onto).
+    const wantsFlipX = props.flipX !== undefined ? props.flipX === true : prevFlipX;
+    const wantsFlipY = props.flipY !== undefined ? props.flipY === true : prevFlipY;
+    if (currentFlipX !== wantsFlipX) {
         const previousMinX = uvMinX;
         uvMinX = uvMaxX;
         uvMaxX = previousMinX;
     }
-    if (uvMinY > uvMaxY !== wantsFlipY) {
+    if (currentFlipY !== wantsFlipY) {
         const previousMinY = uvMinY;
         uvMinY = uvMaxY;
         uvMaxY = previousMinY;

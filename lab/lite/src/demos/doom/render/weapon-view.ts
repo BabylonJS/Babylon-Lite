@@ -1,20 +1,36 @@
-// First-person weapon sprite overlay for the DOOM demo.
+// First-person weapon sprite overlay for the DOOM demo — Babylon-Lite Sprite2D path.
 //
 // DOOM draws the player's weapon as a "player sprite" (psprite): a full-bright
 // sprite anchored near the bottom-center of the 3D view, bobbing with movement
-// and showing a muzzle-flash overlay when fired. We reproduce that here as a 2D
-// canvas overlay so it costs nothing in the WebGPU bundle and never touches the
-// parity-tested engine (matching the DOM HUD approach).
+// and showing a muzzle-flash overlay when fired. Here we reproduce it with a lite
+// `Sprite2DLayer` drawn by a `SpriteRenderer` overlay (a 2D pass layered on top of
+// the scene's swapchain), exercising the engine's Sprite2D custom-shader hook: the
+// same palette + COLORMAP lookup the world uses, sampled at the full-bright row.
 //
-// Weapon sprite lumps are decoded from the WAD's S_START..S_END namespace and
-// colored with PLAYPAL palette 0 (full-bright). Placement uses the documented
-// psprite formula: a virtual 320x200 frame with the sprite's pivot offsets,
-// the ready weapon resting at WEAPONTOP. No GPL Doom source is used.
+// Weapon sprite lumps are decoded from the WAD into one palette-indexed atlas
+// (R = palette index, A = coverage). Placement uses the documented psprite
+// formula: a virtual 320x200 frame with the sprite's pivot offsets, the ready
+// weapon resting at WEAPONTOP. No GPL Doom source is used.
 
+import {
+    addSprite2DIndex,
+    createSprite2DCustomShader,
+    createSprite2DLayer,
+    createSpriteAtlasFromFrames,
+    createSpriteRenderer,
+    disposeSpriteRenderer,
+    registerSpriteRenderer,
+    updateSprite2DIndex,
+    type EngineContext,
+    type Sprite2DLayer,
+    type SpriteAtlas,
+    type SpriteAtlasFrameSource,
+    type SpriteRenderer,
+    type Texture2D,
+} from "babylon-lite";
 import type { Wad } from "../wad/wad-file.js";
 import { findLumpIndex, getLump } from "../wad/wad-file.js";
 import { decodePatch } from "../wad/graphics.js";
-import { parsePlaypal } from "../wad/palette.js";
 import type { Player } from "../player/player.js";
 import { Weapon } from "../player/player.js";
 
@@ -39,9 +55,9 @@ const WEAPON_SPRITES: Record<Weapon, WeaponSprites> = {
     [Weapon.CHAINSAW]: { ready: "SAWGC0", fire: "SAWGA0", flash: null },
 };
 
-// A decoded sprite ready to blit: its own pixel canvas plus pivot offsets.
-interface DecodedSprite {
-    canvas: HTMLCanvasElement;
+/** One decoded psprite placed in the shared atlas: its lite frame index plus pivot offsets. */
+interface PSprite {
+    frameIndex: number;
     width: number;
     height: number;
     leftOffset: number;
@@ -54,12 +70,25 @@ const FRAME_H = 200;
 const FLASH_SECONDS = 0.12; // muzzle flash / fire-frame duration after a shot
 const BOB_AMP = 6; // virtual pixels of weapon bob while moving
 const BOB_SPEED = 3.43; // rad/s, ~Doom's 1.8s bob cycle
+const ATLAS_WIDTH = 512;
+
+// Full-bright psprite fragment: palette-indexed sample → COLORMAP row 0 (full-bright),
+// with a hard cutout discard on coverage. Mirrors the world/enemy palette path.
+const WEAPON_FRAGMENT = `let src = textureSample(atlasTex, atlasSamp, in.uv);
+if (src.a < 0.5) { discard; }
+let idx = floor(src.r * 255.0 + 0.5);
+let lut = textureSample(colormapTex, colormapSamp, vec2<f32>((idx + 0.5) / 256.0, 0.5 / 34.0));
+return vec4<f32>(lut.rgb, 1.0);`;
+
+const GUN_SLOT = 0;
+const FLASH_SLOT = 1;
 
 export class WeaponView {
-    private readonly canvas: HTMLCanvasElement;
-    private readonly ctx: CanvasRenderingContext2D;
-    private readonly palette: Uint8Array;
-    private readonly cache = new Map<string, DecodedSprite | null>();
+    private readonly atlas: SpriteAtlas;
+    private readonly sprites = new Map<string, PSprite>();
+    private readonly layer: Sprite2DLayer;
+    private readonly renderer: SpriteRenderer;
+    private registered = false;
 
     private lastRefire = 0;
     private lastWeapon: Weapon | null = null;
@@ -67,41 +96,62 @@ export class WeaponView {
     private bobPhase = 0;
     private bobAmp = 0;
 
-    constructor(private readonly wad: Wad) {
-        this.palette = parsePlaypal(wad); // palette 0 used (full-bright psprites)
-        const canvas = document.createElement("canvas");
-        canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:47;image-rendering:pixelated";
-        document.body.appendChild(canvas);
-        this.canvas = canvas;
-        this.ctx = canvas.getContext("2d")!;
+    constructor(
+        private readonly engine: EngineContext,
+        wad: Wad,
+        colormapTex: Texture2D
+    ) {
+        this.atlas = this.buildAtlas(wad);
+        const customShader = createSprite2DCustomShader({
+            fragment: WEAPON_FRAGMENT,
+            extraTextures: [{ name: "colormap", texture: colormapTex }],
+        });
+        // Layer pivot [0,0]: each sprite's `positionPx` is its top-left corner,
+        // matching the virtual-frame placement computed in `place`.
+        this.layer = createSprite2DLayer(this.atlas, { depth: "none", pivot: [0, 0], capacity: 2, customShader });
+        // Gun + flash slots, both hidden until the first `update`.
+        addSprite2DIndex(this.layer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
+        addSprite2DIndex(this.layer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
+        this.renderer = createSpriteRenderer(engine, { layers: [this.layer], clear: false });
     }
 
-    /** Decodes a psprite lump to a pixel canvas (palette 0, full-bright). Cached. */
-    private decode(name: string): DecodedSprite | null {
-        const cached = this.cache.get(name);
-        if (cached !== undefined) return cached;
-        const idx = findLumpIndex(this.wad, name);
-        if (idx < 0) {
-            this.cache.set(name, null);
-            return null;
+    /** Decode every weapon psprite lump into one palette-indexed atlas (R = index, A = coverage). */
+    private buildAtlas(wad: Wad): SpriteAtlas {
+        interface Pending {
+            name: string;
+            indices: Uint8Array;
+            opaque: Uint8Array;
+            w: number;
+            h: number;
+            left: number;
+            top: number;
         }
-        const img = decodePatch(getLump(this.wad, idx));
-        const c = document.createElement("canvas");
-        c.width = img.width;
-        c.height = img.height;
-        const data = new ImageData(img.width, img.height);
-        for (let i = 0; i < img.width * img.height; i++) {
-            if (!img.opaque[i]) continue;
-            const p = img.indices[i]! * 3;
-            data.data[i * 4 + 0] = this.palette[p]!;
-            data.data[i * 4 + 1] = this.palette[p + 1]!;
-            data.data[i * 4 + 2] = this.palette[p + 2]!;
-            data.data[i * 4 + 3] = 255;
+        const seen = new Set<string>();
+        const pending: Pending[] = [];
+        for (const ws of Object.values(WEAPON_SPRITES)) {
+            for (const name of [ws.ready, ws.fire, ws.flash]) {
+                if (!name || seen.has(name)) continue;
+                seen.add(name);
+                const idx = findLumpIndex(wad, name);
+                if (idx < 0) continue;
+                const img = decodePatch(getLump(wad, idx));
+                pending.push({ name, indices: img.indices, opaque: img.opaque, w: img.width, h: img.height, left: img.leftOffset, top: img.topOffset });
+            }
         }
-        c.getContext("2d")!.putImageData(data, 0, 0);
-        const dec: DecodedSprite = { canvas: c, width: img.width, height: img.height, leftOffset: img.leftOffset, topOffset: img.topOffset };
-        this.cache.set(name, dec);
-        return dec;
+
+        // Encode each patch as a palette-indexed RGBA frame (R = palette index, A = coverage)
+        // and let the engine packer build + upload the atlas.
+        const sources: SpriteAtlasFrameSource[] = pending.map((it, i) => {
+            this.sprites.set(it.name, { frameIndex: i, width: it.w, height: it.h, leftOffset: it.left, topOffset: it.top });
+            const px = new Uint8Array(it.w * it.h * 4);
+            for (let si = 0; si < it.w * it.h; si++) {
+                if (!it.opaque[si]) continue;
+                px[si * 4] = it.indices[si]!;
+                px[si * 4 + 3] = 255;
+            }
+            return { pixels: px, width: it.w, height: it.h, pivot: [0, 0], name: it.name };
+        });
+        return createSpriteAtlasFromFrames(this.engine, sources, { maxWidthPx: ATLAS_WIDTH });
     }
 
     /**
@@ -109,12 +159,15 @@ export class WeaponView {
      * the previous frame. Hidden while the player is dead.
      */
     update(player: Player, dt: number, moving: boolean): void {
-        this.resize();
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        if (!this.registered) {
+            registerSpriteRenderer(this.renderer);
+            this.registered = true;
+        }
         if (player.dead) {
             this.lastRefire = player.refireDelay;
             this.lastWeapon = player.weapon;
+            this.hide(GUN_SLOT);
+            this.hide(FLASH_SLOT);
             return;
         }
 
@@ -135,39 +188,39 @@ export class WeaponView {
         const bobY = this.bobAmp * Math.abs(Math.sin(this.bobPhase));
 
         const firing = this.flashTimer > 0;
-        const sprites = WEAPON_SPRITES[player.weapon];
-        const gun = this.decode(firing ? sprites.fire : sprites.ready) ?? this.decode(sprites.ready);
-        if (gun) this.draw(gun, bobX, bobY);
-        if (firing && sprites.flash) {
-            const flash = this.decode(sprites.flash);
-            if (flash) this.draw(flash, bobX, bobY);
-        }
+        const sp = WEAPON_SPRITES[player.weapon];
+        const gun = this.sprites.get(firing ? sp.fire : sp.ready) ?? this.sprites.get(sp.ready);
+        if (gun) this.place(GUN_SLOT, gun, bobX, bobY);
+        else this.hide(GUN_SLOT);
+
+        const flash = firing && sp.flash ? this.sprites.get(sp.flash) : undefined;
+        if (flash) this.place(FLASH_SLOT, flash, bobX, bobY);
+        else this.hide(FLASH_SLOT);
     }
 
-    /** Blits one psprite into the virtual 320x200 frame, scaled to the viewport. */
-    private draw(s: DecodedSprite, bobX: number, bobY: number): void {
-        const ctx = this.ctx;
-        const scale = this.canvas.height / FRAME_H;
-        const frameLeft = (this.canvas.width - FRAME_W * scale) / 2;
-        // psprite placement: pivot column at frame center area, ready weapon at WEAPONTOP.
+    /** Position one psprite slot in the virtual 320x200 frame, scaled to the render target. */
+    private place(slot: number, s: PSprite, bobX: number, bobY: number): void {
+        const canvas = this.engine.canvas;
+        const scale = canvas.height / FRAME_H;
+        const frameLeft = (canvas.width - FRAME_W * scale) / 2;
         const vx = -s.leftOffset + bobX;
         const vy = WEAPONTOP - s.topOffset + bobY;
-        const dx = frameLeft + vx * scale;
-        const dy = vy * scale;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(s.canvas, dx, dy, s.width * scale, s.height * scale);
+        updateSprite2DIndex(this.layer, slot, {
+            positionPx: [frameLeft + vx * scale, vy * scale],
+            sizePx: [s.width * scale, s.height * scale],
+            frame: s.frameIndex,
+            visible: true,
+        });
     }
 
-    private resize(): void {
-        const w = this.canvas.clientWidth;
-        const h = this.canvas.clientHeight;
-        if (w > 0 && h > 0 && (this.canvas.width !== w || this.canvas.height !== h)) {
-            this.canvas.width = w;
-            this.canvas.height = h;
-        }
+    private hide(slot: number): void {
+        updateSprite2DIndex(this.layer, slot, { visible: false });
     }
 
     dispose(): void {
-        this.canvas.remove();
+        if (this.registered) {
+            disposeSpriteRenderer(this.renderer);
+            this.registered = false;
+        }
     }
 }

@@ -764,8 +764,8 @@
     "bjsGzipKB": 368.8
   },
   "scene54": {
-    "rawKB": 56.4,
-    "gzipKB": 22.7,
+    "rawKB": 56.5,
+    "gzipKB": 22.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene54-billboard-renderable-eAo7pDzu.js",
@@ -827,7 +827,7 @@
     "bjsGzipKB": 195.2
   },
   "scene59": {
-    "rawKB": 59.7,
+    "rawKB": 59.8,
     "gzipKB": 23.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -1639,7 +1639,7 @@
     "bjsGzipKB": 368.7
   },
   "scene95": {
-    "rawKB": 61.7,
+    "rawKB": 61.8,
     "gzipKB": 23.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [

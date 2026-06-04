@@ -1,21 +1,37 @@
-// DOOM status bar rendered from the real WAD STBAR graphics.
+// DOOM status bar rendered from the real WAD STBAR graphics — Babylon-Lite Sprite2D path.
 //
 // The classic status bar (STBAR) and all of its widgets — the big red counters,
-// the ARMS panel, the animated face, the keys and the per-type ammo list — are
-// decoded straight from the IWAD's UI lumps and blitted onto a 2D canvas overlay
-// (palette 0, nearest sampling), exactly like the weapon view. This keeps it out
-// of the WebGPU bundle and away from the parity-tested engine while looking
-// pixel-faithful. Widget coordinates come from public DOOM documentation
-// (st_stuff.c layout constants); no GPL Doom source is used.
+// the ARMS panel, the animated face, the keys, the per-type ammo list and the
+// pickup-message text (STCFN small font) — are decoded straight from the IWAD's
+// UI lumps into one palette-indexed atlas and drawn each frame through a lite
+// `Sprite2DLayer` overlay (a 2D pass on top of the scene swapchain), reusing the
+// same palette + COLORMAP full-bright shader as the world/weapon. Widget
+// coordinates come from public DOOM documentation (st_stuff.c layout constants);
+// no GPL Doom source is used.
 //
-// A handful of feedback effects that have no STBAR equivalent — the full-screen
-// pain/pickup tint, the pickup message line, a center crosshair (our addition,
-// since DOOM has none) and the death prompt — stay as lightweight DOM overlays.
+// A few feedback effects that have no STBAR equivalent — the full-screen
+// pain/pickup tint, a center crosshair (our addition, since DOOM has none) and
+// the death prompt — stay as lightweight DOM overlays.
 
+import {
+    addSprite2DIndex,
+    clearSprite2DLayer,
+    createSprite2DCustomShader,
+    createSprite2DLayer,
+    createSpriteAtlasFromFrames,
+    createSpriteRenderer,
+    disposeSpriteRenderer,
+    registerSpriteRenderer,
+    type EngineContext,
+    type Sprite2DLayer,
+    type SpriteAtlas,
+    type SpriteAtlasFrameSource,
+    type SpriteRenderer,
+    type Texture2D,
+} from "babylon-lite";
 import type { Wad } from "../wad/wad-file.js";
 import { findLumpIndex, getLump } from "../wad/wad-file.js";
 import { decodePatch } from "../wad/graphics.js";
-import { parsePlaypal } from "../wad/palette.js";
 import type { Player } from "../player/player.js";
 import { Weapon } from "../player/player.js";
 import { Pickup } from "../mobj/info.js";
@@ -51,23 +67,47 @@ const KEY_ROWS: readonly [Pickup, Pickup, number][] = [
     [Pickup.KEY_RED, Pickup.KEY_RED_SKULL, 191],
 ];
 
-/** A decoded UI patch ready to blit: its pixel canvas plus pivot offsets. */
-interface DecodedPatch {
-    canvas: HTMLCanvasElement;
+/** One decoded UI lump placed in the shared atlas: its lite frame index plus pivot offsets. */
+interface UiPatch {
+    frameIndex: number;
     width: number;
     height: number;
     leftOffset: number;
     topOffset: number;
 }
 
+const ATLAS_WIDTH = 1024;
+
+// Full-bright UI fragment: palette-indexed sample → COLORMAP row 0, cutout discard.
+// Identical to the weapon overlay; the world's COLORMAP texture is reused.
+const HUD_FRAGMENT = `let src = textureSample(atlasTex, atlasSamp, in.uv);
+if (src.a < 0.5) { discard; }
+let idx = floor(src.r * 255.0 + 0.5);
+let lut = textureSample(colormapTex, colormapSamp, vec2<f32>((idx + 0.5) / 256.0, 0.5 / 34.0));
+return vec4<f32>(lut.rgb, 1.0);`;
+
+/** Enumerates every HUD lump baked into the atlas (fixed names + digit / face / font ranges). */
+function hudLumpNames(): string[] {
+    const names = ["STBAR", "STARMS", "STTPRCNT", "STFDEAD0"];
+    for (let i = 0; i < 10; i++) names.push(`STTNUM${i}`, `STYSNUM${i}`);
+    for (let i = 0; i < 9; i++) names.push(`STKEYS${i}`);
+    for (let pl = 0; pl < 5; pl++) {
+        names.push(`STFOUCH${pl}`);
+        for (let look = 0; look < 3; look++) names.push(`STFST${pl}${look}`);
+    }
+    // Small message font (STCFN), printable ASCII 33..95 ('!'..'_').
+    for (let code = 33; code <= 95; code++) names.push(`STCFN${String(code).padStart(3, "0")}`);
+    return names;
+}
+
 export class DoomHud {
-    private readonly canvas: HTMLCanvasElement;
-    private readonly ctx: CanvasRenderingContext2D;
-    private readonly palette: Uint8Array;
-    private readonly cache = new Map<string, DecodedPatch | null>();
+    private readonly atlas: SpriteAtlas;
+    private readonly patches = new Map<string, UiPatch>();
+    private readonly layer: Sprite2DLayer;
+    private readonly renderer: SpriteRenderer;
+    private registered = false;
 
     private readonly crosshair: HTMLDivElement;
-    private readonly messageEl: HTMLDivElement;
     private readonly painEl: HTMLDivElement;
     private readonly deathEl: HTMLDivElement;
 
@@ -75,19 +115,33 @@ export class DoomHud {
     private readonly tallW: number;
     private readonly shortW: number;
     private faceTime = 0;
+    private message = "";
 
-    constructor(private readonly wad: Wad, private readonly player: Player) {
-        this.palette = parsePlaypal(wad); // palette 0 used (full-bright UI)
+    // Per-frame placement state (set at the top of `update`).
+    private scale = 1;
+    private frameLeft = 0;
+
+    constructor(
+        private readonly engine: EngineContext,
+        wad: Wad,
+        private readonly player: Player,
+        colormapTex: Texture2D
+    ) {
+        this.atlas = this.buildAtlas(wad);
+        const customShader = createSprite2DCustomShader({
+            fragment: HUD_FRAGMENT,
+            extraTextures: [{ name: "colormap", texture: colormapTex }],
+        });
+        this.layer = createSprite2DLayer(this.atlas, { depth: "none", pivot: [0, 0], capacity: 160, customShader });
+        this.renderer = createSpriteRenderer(engine, { layers: [this.layer], clear: false });
+
+        this.tallW = this.patches.get("STTNUM0")?.width ?? 14;
+        this.shortW = this.patches.get("STYSNUM0")?.width ?? 4;
 
         // Red damage / pickup full-screen tint.
         const pain = document.createElement("div");
         pain.style.cssText = "position:fixed;inset:0;pointer-events:none;background:#ff0000;opacity:0;transition:opacity .1s linear;z-index:48";
         this.painEl = pain;
-
-        // Pickup / status message line.
-        const message = document.createElement("div");
-        message.style.cssText = "position:fixed;left:12px;top:10px;color:#e8e8b0;font:bold 18px 'Courier New',monospace;text-shadow:2px 2px 0 #000;opacity:0;transition:opacity .3s linear;z-index:51";
-        this.messageEl = message;
 
         // Center crosshair (shows where autoaimed shots are sent).
         const cross = document.createElement("div");
@@ -108,73 +162,93 @@ export class DoomHud {
             `<div style="margin-top:14px;color:#e8e8b0;font-weight:bold;font-size:18px;text-shadow:2px 2px 0 #000">Press SPACE to restart</div>`;
         this.deathEl = death;
 
-        // Status-bar canvas, drawn above the weapon overlay (z-index 47).
-        const canvas = document.createElement("canvas");
-        canvas.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:50;image-rendering:pixelated";
-        this.canvas = canvas;
-        this.ctx = canvas.getContext("2d")!;
-
         document.body.appendChild(pain);
         document.body.appendChild(cross);
         document.body.appendChild(death);
-        document.body.appendChild(message);
-        document.body.appendChild(canvas);
-
-        this.tallW = this.decode("STTNUM0")?.width ?? 14;
-        this.shortW = this.decode("STYSNUM0")?.width ?? 4;
     }
 
-    /** Decodes a UI lump to a pixel canvas (palette 0, full-bright). Cached. */
-    private decode(name: string): DecodedPatch | null {
-        const cached = this.cache.get(name);
-        if (cached !== undefined) return cached;
-        const idx = findLumpIndex(this.wad, name);
-        if (idx < 0) {
-            this.cache.set(name, null);
-            return null;
+    /** Decode every HUD lump into one palette-indexed atlas (R = index, A = coverage). */
+    private buildAtlas(wad: Wad): SpriteAtlas {
+        interface Pending {
+            name: string;
+            indices: Uint8Array;
+            opaque: Uint8Array;
+            w: number;
+            h: number;
+            left: number;
+            top: number;
         }
-        const img = decodePatch(getLump(this.wad, idx));
-        const c = document.createElement("canvas");
-        c.width = img.width;
-        c.height = img.height;
-        const data = new ImageData(img.width, img.height);
-        for (let i = 0; i < img.width * img.height; i++) {
-            if (!img.opaque[i]) continue;
-            const p = img.indices[i]! * 3;
-            data.data[i * 4 + 0] = this.palette[p]!;
-            data.data[i * 4 + 1] = this.palette[p + 1]!;
-            data.data[i * 4 + 2] = this.palette[p + 2]!;
-            data.data[i * 4 + 3] = 255;
+        const pending: Pending[] = [];
+        for (const name of hudLumpNames()) {
+            const idx = findLumpIndex(wad, name);
+            if (idx < 0) continue;
+            const img = decodePatch(getLump(wad, idx));
+            pending.push({ name, indices: img.indices, opaque: img.opaque, w: img.width, h: img.height, left: img.leftOffset, top: img.topOffset });
         }
-        c.getContext("2d")!.putImageData(data, 0, 0);
-        const dec: DecodedPatch = { canvas: c, width: img.width, height: img.height, leftOffset: img.leftOffset, topOffset: img.topOffset };
-        this.cache.set(name, dec);
-        return dec;
+
+        // Encode each patch as a palette-indexed RGBA frame (R = palette index, A = coverage)
+        // and let the engine packer build + upload the atlas.
+        const sources: SpriteAtlasFrameSource[] = pending.map((it, i) => {
+            this.patches.set(it.name, { frameIndex: i, width: it.w, height: it.h, leftOffset: it.left, topOffset: it.top });
+            const px = new Uint8Array(it.w * it.h * 4);
+            for (let si = 0; si < it.w * it.h; si++) {
+                if (!it.opaque[si]) continue;
+                px[si * 4] = it.indices[si]!;
+                px[si * 4 + 3] = 255;
+            }
+            return { pixels: px, width: it.w, height: it.h, pivot: [0, 0], name: it.name };
+        });
+        return createSpriteAtlasFromFrames(this.engine, sources, { maxWidthPx: ATLAS_WIDTH });
     }
 
-    /** Blits one patch at virtual (vx,vy), honoring its pivot offsets. */
-    private drawPatch(name: string, vx: number, vy: number, scale: number, frameLeft: number): void {
-        const p = this.decode(name);
+    /** Adds one patch sprite at virtual (vx,vy), honoring its pivot offsets. */
+    private blit(name: string, vx: number, vy: number): void {
+        const p = this.patches.get(name);
         if (!p) return;
-        const dx = frameLeft + (vx - p.leftOffset) * scale;
-        const dy = (vy - p.topOffset) * scale;
-        this.ctx.drawImage(p.canvas, dx, dy, p.width * scale, p.height * scale);
+        const dx = this.frameLeft + (vx - p.leftOffset) * this.scale;
+        const dy = (vy - p.topOffset) * this.scale;
+        addSprite2DIndex(this.layer, {
+            positionPx: [dx, dy],
+            sizePx: [p.width * this.scale, p.height * this.scale],
+            frame: p.frameIndex,
+        });
     }
 
     /**
-     * Draws an integer right-justified so its rightmost edge sits at virtual `rightX`.
+     * Adds an integer right-justified so its rightmost edge sits at virtual `rightX`.
      * `prefix` (e.g. "STTNUM"/"STYSNUM") + digit picks the font lump.
      */
-    private drawNum(value: number, rightX: number, y: number, prefix: string, advance: number, maxDigits: number, scale: number, frameLeft: number): void {
+    private blitNum(value: number, rightX: number, y: number, prefix: string, advance: number, maxDigits: number): void {
         let v = Math.max(0, Math.floor(value));
         let x = rightX;
         let n = 0;
         do {
             x -= advance;
-            this.drawPatch(`${prefix}${v % 10}`, x, y, scale, frameLeft);
+            this.blit(`${prefix}${v % 10}`, x, y);
             v = Math.floor(v / 10);
             n++;
         } while (v > 0 && n < maxDigits);
+    }
+
+    /** Adds the pickup message as a row of STCFN small-font sprites at virtual (8,8). */
+    private blitMessage(text: string): void {
+        let x = 8;
+        const y = 8;
+        for (const ch of text.toUpperCase()) {
+            const code = ch.charCodeAt(0);
+            if (ch === " ") {
+                x += 5;
+                continue;
+            }
+            if (code < 33 || code > 95) continue;
+            const p = this.patches.get(`STCFN${String(code).padStart(3, "0")}`);
+            if (!p) {
+                x += 5;
+                continue;
+            }
+            this.blit(`STCFN${String(code).padStart(3, "0")}`, x, y);
+            x += p.width + 1;
+        }
     }
 
     /** Picks the status-bar face lump for the current player state. */
@@ -189,45 +263,47 @@ export class DoomHud {
     }
 
     flashMessage(text: string): void {
-        this.messageEl.textContent = text;
-        this.messageEl.style.opacity = "1";
+        this.message = text;
     }
 
     update(dt: number): void {
+        if (!this.registered) {
+            registerSpriteRenderer(this.renderer);
+            this.registered = true;
+        }
         this.faceTime += dt;
-        this.resize();
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        ctx.imageSmoothingEnabled = false;
+
+        const canvas = this.engine.canvas;
+        this.scale = canvas.height / FRAME_H;
+        this.frameLeft = (canvas.width - FRAME_W * this.scale) / 2;
 
         const p = this.player;
-        const scale = this.canvas.height / FRAME_H;
-        const frameLeft = (this.canvas.width - FRAME_W * scale) / 2;
+        clearSprite2DLayer(this.layer);
 
         // Background bar + the ARMS panel overlay.
-        this.drawPatch("STBAR", 0, BAR_Y, scale, frameLeft);
-        this.drawPatch("STARMS", 104, BAR_Y, scale, frameLeft);
+        this.blit("STBAR", 0, BAR_Y);
+        this.blit("STARMS", 104, BAR_Y);
 
         // Ready-weapon ammo (tall, right-justified). Skip for ammo-less weapons.
         const ready = p.currentAmmo();
-        if (ready >= 0) this.drawNum(ready, 44, 171, "STTNUM", this.tallW, 3, scale, frameLeft);
+        if (ready >= 0) this.blitNum(ready, 44, 171, "STTNUM", this.tallW, 3);
 
         // Health + armor percentages (tall number then a '%').
-        this.drawNum(p.health, 90, 171, "STTNUM", this.tallW, 3, scale, frameLeft);
-        this.drawPatch("STTPRCNT", 90, 171, scale, frameLeft);
-        this.drawNum(p.armor, 221, 171, "STTNUM", this.tallW, 3, scale, frameLeft);
-        this.drawPatch("STTPRCNT", 221, 171, scale, frameLeft);
+        this.blitNum(p.health, 90, 171, "STTNUM", this.tallW, 3);
+        this.blit("STTPRCNT", 90, 171);
+        this.blitNum(p.armor, 221, 171, "STTNUM", this.tallW, 3);
+        this.blit("STTPRCNT", 221, 171);
 
         // ARMS: light owned slots with the yellow digit over the baked-in grey.
         for (let i = 0; i < ARMS_WEAPONS.length; i++) {
             if (!p.weaponsOwned.has(ARMS_WEAPONS[i]!)) continue;
             const x = 111 + (i % 3) * 12;
             const ry = 172 + Math.floor(i / 3) * 10;
-            this.drawPatch(`STYSNUM${i + 2}`, x, ry, scale, frameLeft);
+            this.blit(`STYSNUM${i + 2}`, x, ry);
         }
 
         // Face.
-        this.drawPatch(this.faceLump(), 143, BAR_Y, scale, frameLeft);
+        this.blit(this.faceLump(), 143, BAR_Y);
 
         // Keys: combined card+skull icon if both are held.
         for (let c = 0; c < KEY_ROWS.length; c++) {
@@ -238,36 +314,31 @@ export class DoomHud {
             if (hasCard && hasSkull) lump = `STKEYS${c + 6}`;
             else if (hasSkull) lump = `STKEYS${c + 3}`;
             else if (hasCard) lump = `STKEYS${c}`;
-            if (lump) this.drawPatch(lump, 239, ky, scale, frameLeft);
+            if (lump) this.blit(lump, 239, ky);
         }
 
         // Per-type ammo list: current (right edge 288) and max (right edge 314).
         for (const [idx, ay] of AMMO_ROWS) {
-            this.drawNum(p.ammo[idx]!, 288, ay, "STYSNUM", this.shortW, 3, scale, frameLeft);
-            this.drawNum(p.maxAmmo[idx]!, 314, ay, "STYSNUM", this.shortW, 3, scale, frameLeft);
+            this.blitNum(p.ammo[idx]!, 288, ay, "STYSNUM", this.shortW, 3);
+            this.blitNum(p.maxAmmo[idx]!, 314, ay, "STYSNUM", this.shortW, 3);
         }
 
+        // Pickup message (STCFN small font) along the top edge.
+        if (p.messageTics > 0 && this.message) this.blitMessage(this.message);
+
         // DOM feedback overlays.
-        this.messageEl.style.opacity = p.messageTics > 0 ? "1" : "0";
         this.painEl.style.opacity = (p.painFlash * 0.4).toFixed(2);
         this.deathEl.style.opacity = p.dead ? "1" : "0";
         this.crosshair.style.opacity = p.dead ? "0" : ".85";
     }
 
-    private resize(): void {
-        const w = this.canvas.clientWidth;
-        const h = this.canvas.clientHeight;
-        if (w > 0 && h > 0 && (this.canvas.width !== w || this.canvas.height !== h)) {
-            this.canvas.width = w;
-            this.canvas.height = h;
-        }
-    }
-
     dispose(): void {
-        this.canvas.remove();
+        if (this.registered) {
+            disposeSpriteRenderer(this.renderer);
+            this.registered = false;
+        }
         this.crosshair.remove();
         this.deathEl.remove();
-        this.messageEl.remove();
         this.painEl.remove();
     }
 }
