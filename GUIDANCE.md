@@ -287,6 +287,69 @@ When a parity diff exists on specific meshes:
 
 ---
 
+## Large World Rendering (Floating Origin) — Feature Parity
+
+Lite supports Large World Rendering (LWR / floating origin, "FO") via
+`useFloatingOrigin: true` on the engine. The canonical offset is the active
+**scene camera's** world position (`scene.camera.worldMatrix[12..14]`, invalidated
+by `camera.worldMatrixVersion`); there is no scene-side mirror state. Every
+world-space position must be made eye-relative (subtract that offset) **in F64
+before it reaches an F32 store**, so it matches the eye-relative mesh world
+matrices the packer produces. See `docs/lite/architecture/32-large-world-rendering.md`.
+
+**FO-wired features (each with a paired parity scene, Lite `useFloatingOrigin`
+vs BJS `useLargeWorldRendering`):** mesh world matrix + thin instances, point &
+spot light positions, sprites/billboards, shadow light-space matrices (PCF
+directional/spot + ESM directional).
+
+> **Some features are intentionally NOT floating-origin wired because Babylon.js
+> itself is degenerate for them under `useLargeWorldRendering`** — there is no
+> correct far-from-origin reference to match, so wiring Lite would only create an
+> unvalidatable divergence:
+>
+> - **Clip planes.** Babylon.js `BindClipPlane` (`Materials/clipPlaneMaterialHelper`)
+>   uploads the plane via a plain `setFloat4` with no floating-origin bias, while the
+>   shader evaluates `dot(worldPos, n) + d` against an eye-relative `worldPos`. The
+>   raw world-space constant `d` (≈ −offset·n) then clips the entire scene — Babylon.js
+>   renders fully black far from the origin.
+> - **Clustered lights.** `Lights/Clustered/clusteredLightContainer` packs raw world
+>   light positions into the light-data texture with no offset, and the shader diffs them
+>   against eye-relative `posW`, so every clustered light becomes effectively infinitely
+>   far away and contributes nothing far from the origin.
+> - **Background-ground / skybox material.** Babylon.js makes `vEyePosition` eye-relative
+>   under `useLargeWorldRendering` but leaves `BackgroundMaterial.sceneCenter` at the world
+>   origin for the OPACITYFRESNEL path (only REFLECTIONFRESNEL is offset), so the floor-fade
+>   term degenerates (`normalize(0)`) and the ground renders transparent far from the origin.
+>
+> If Babylon.js upstream fixes the floating-origin handling for any of these, port the
+> matching offset logic into Lite and add a paired far-from-origin parity scene.
+
+> **MANDATORY when porting a feature that Babylon.js floating-origin-wires:**
+> Babylon.js applies a floating-origin offset in several feature modules that
+> Lite does **not yet implement**. When any of the features below is added to
+> Lite, you **MUST** also port the corresponding floating-origin logic (subtract
+> the active scene-camera offset from every world-space position/centre the
+> feature uploads, gated behind `useFloatingOrigin`, exactly no-op when off), and
+> add a paired far-from-origin parity scene. Search the installed
+> `@babylonjs/core` for `floatingOrigin`/`FloatingOrigin` references in the
+> module you are porting and replicate the offset subtraction.
+>
+> | Not-yet-in-Lite feature | Babylon.js module with FO logic |
+> | --- | --- |
+> | Rectangular area lights | `Lights/rectAreaLight.js` |
+> | Cascaded shadow maps (CSM) | `Lights/Shadows/cascadedShadowGenerator.js` |
+> | CPU & GPU particle systems | `Particles/thinParticleSystem.js`, `Particles/gpuParticleSystem.js` |
+> | Edges renderer | `Rendering/edgesRenderer.js` |
+> | Bounding-box renderer | `Rendering/boundingBoxRenderer.js` |
+> | Utility-layer / gizmos | `Rendering/utilityLayerRenderer.js` |
+> | Havok physics (multi-region FO) | `Physics/v2/Plugins/havokPlugin.js` |
+>
+> Skipping the floating-origin port when implementing one of these silently
+> breaks the feature at far-from-origin scale (jitter, mis-placed geometry,
+> collapsed lighting) even though it looks correct near the origin.
+
+---
+
 ## Design Philosophy: Slim, Not Dumb
 
 For any feature, we follow this process:

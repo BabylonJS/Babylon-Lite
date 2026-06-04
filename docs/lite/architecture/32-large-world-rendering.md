@@ -167,9 +167,28 @@ Each has a paired parity scene (Lite `useFloatingOrigin` vs BJS `useLargeWorldRe
 
 ## Out of scope
 
-- Clip planes: not wired.
-- Particles: N/A — Lite has no particle system.
-- Background material centre: not wired.
-- Havok multi-region floating origin: not in scope.
+Three features are **degenerate in Babylon.js itself** under `useLargeWorldRendering`, so there
+is no correct far-from-origin reference to match and Lite intentionally does not wire them:
 
-These extensions can be added incrementally — the substrate (per-frame version tracking, packer offset path, scene state) already supports them.
+- Clip planes: Babylon.js `BindClipPlane` (`Materials/clipPlaneMaterialHelper`) uploads the plane
+  with a plain `setFloat4` (no offset bias), while the shader evaluates `dot(worldPos, n) + d`
+  against an eye-relative `worldPos`. The raw world-space `d` (≈ −offset·n) clips the whole scene —
+  Babylon.js renders fully black far from the origin.
+- Clustered point lights: `Lights/Clustered/clusteredLightContainer` packs raw world light
+  positions into the light-data texture with no offset; the shader diffs them against eye-relative
+  `posW`, so every clustered light becomes effectively infinitely far and contributes nothing.
+- Background-ground / skybox material: Babylon.js makes `vEyePosition` eye-relative (≈0) under
+  `useLargeWorldRendering` but leaves `BackgroundMaterial.sceneCenter` (→ `vBackgroundCenter`) at
+  the world origin for the OPACITYFRESNEL path (only REFLECTIONFRESNEL is offset). The floor
+  falloff term `dot(normalW, normalize(vEyePosition - vBackgroundCenter))` degenerates to
+  `normalize(0)` and the ground fades to fully transparent. (`createDefaultEnvironment` users
+  should keep the environment near the origin.)
+
+- Particles: N/A — Lite has no particle system.
+- Rect-area lights, cascaded shadow maps, edges/bounding-box renderers, utility-layer/gizmos,
+  Havok multi-region floating origin: N/A — Lite does not implement these yet. Babylon.js
+  floating-origin-wires them; when any is ported to Lite, the floating-origin offset MUST be
+  ported with it (see `GUIDANCE.md` → "Large World Rendering — Feature Parity").
+
+These extensions slot into the same substrate (per-frame version tracking, packer offset path,
+scene state) already used by the wired features.
