@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PNG } from "pngjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -147,11 +148,28 @@ function uvTransform(json) {
     };
 }
 
-function bakeGlb(file, { normalize }) {
+function loadColormap(file) {
+    return PNG.sync.read(fs.readFileSync(file));
+}
+// Nearest-texel sample of an sRGB PNG, returning a linear-RGB triple in [0,1].
+// v=0 maps to the top row (glTF / WebGPU texture convention, invertY:false).
+function sampleSrgbToLinear(png, u, v) {
+    const clamp = (n, hi) => Math.max(0, Math.min(hi, n));
+    const x = clamp(Math.floor(u * png.width), png.width - 1);
+    const y = clamp(Math.floor(v * png.height), png.height - 1);
+    const o = (y * png.width + x) * 4;
+    const dec = (c) => {
+        const s = c / 255;
+        return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    return [dec(png.data[o]), dec(png.data[o + 1]), dec(png.data[o + 2])];
+}
+
+function bakeGlb(file, { normalize, colormap }) {
     const { json, bin } = readGlb(file);
     const world = worldMatrices(json);
     const xform = uvTransform(json);
-    const positions = [], normals = [], uvs = [], indices = [];
+    const positions = [], normals = [], uvs = [], indices = [], colors = [];
     let base = 0;
 
     json.nodes.forEach((node, ni) => {
@@ -173,11 +191,23 @@ function bakeGlb(file, { normalize }) {
                 } else {
                     normals.push(0, 1, 0);
                 }
+                let tu = 0, tv = 0;
                 if (uv) {
-                    const [tu, tv] = xform(uv[i * 2], uv[i * 2 + 1]);
+                    [tu, tv] = xform(uv[i * 2], uv[i * 2 + 1]);
                     uvs.push(tu, tv);
                 } else {
                     uvs.push(0, 0);
+                }
+                // Bake the palette swatch at this vertex's UV into a per-vertex
+                // linear-RGB colour. The Cube Pets atlas is a grid of flat
+                // swatches and the face detail (eyes/nose) lives in tiny swatches;
+                // at cell size on screen the texture either mip-blurs those
+                // swatches into the body colour or drops them sub-pixel. Sampling
+                // once per vertex here turns each region into an interpolated
+                // vertex colour that survives at any on-screen size.
+                if (colormap) {
+                    const [r, g, b] = sampleSrgbToLinear(colormap, tu, tv);
+                    colors.push(r, g, b);
                 }
             }
             if (idx) for (let i = 0; i < idx.length; i++) indices.push(idx[i] + base);
@@ -207,6 +237,7 @@ function bakeGlb(file, { normalize }) {
         positions: positions.map((v) => +v.toFixed(4)),
         normals: normals.map((v) => +v.toFixed(4)),
         uvs: uvs.map((v) => +v.toFixed(5)),
+        colors: colormap ? colors.map((v) => +v.toFixed(4)) : undefined,
         indices,
         verts: positions.length / 3,
         tris: indices.length / 3,
@@ -214,11 +245,12 @@ function bakeGlb(file, { normalize }) {
     };
 }
 
-function bakePet(name) {
-    return { name, ...bakeGlb(path.join(GLB_DIR, `animal-${name}.glb`), { normalize: true }) };
+function bakePet(name, colormap) {
+    return { name, ...bakeGlb(path.join(GLB_DIR, `animal-${name}.glb`), { normalize: true, colormap }) };
 }
 
-const pets = PETS.map(bakePet);
+const petColormap = loadColormap(TEX_SRC);
+const pets = PETS.map((n) => bakePet(n, petColormap));
 fs.mkdirSync(path.dirname(OUT_JSON), { recursive: true });
 fs.writeFileSync(OUT_JSON, JSON.stringify({ pets }));
 fs.copyFileSync(TEX_SRC, OUT_TEX);

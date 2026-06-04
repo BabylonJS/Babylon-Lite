@@ -56,6 +56,10 @@ interface PetGeometry {
     normals: Float32Array;
     uvs: Float32Array;
     indices: Uint32Array;
+    /** Per-vertex linear-RGB colour baked from the palette atlas, so the tiny
+     *  face swatches (eyes/nose) survive at cell size instead of being mip-blurred
+     *  or dropped sub-pixel by texture minification. */
+    colors: Float32Array;
 }
 
 /** Fetch the offline-baked Cube Pets geometry (see scripts/bake-tetris-pets.mjs).
@@ -67,13 +71,14 @@ async function loadPetGeometries(url: string): Promise<PetGeometry[]> {
         throw new Error(`Failed to load pet geometry from ${url}: ${res.status}`);
     }
     const data = (await res.json()) as {
-        pets: { positions: number[]; normals: number[]; uvs: number[]; indices: number[] }[];
+        pets: { positions: number[]; normals: number[]; uvs: number[]; indices: number[]; colors: number[] }[];
     };
     return data.pets.map((p) => ({
         positions: new Float32Array(p.positions),
         normals: new Float32Array(p.normals),
         uvs: new Float32Array(p.uvs),
         indices: new Uint32Array(p.indices),
+        colors: new Float32Array(p.colors),
     }));
 }
 
@@ -257,7 +262,7 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // camera so its specular highlight reflects straight back off the glossy
     // front faces — i.e. the player sees a bright reflective glint on every
     // block at the initial camera angle, not just on the chamfered edges.
-    addToScene(scene, createHemisphericLight([0, 1, 0.25], 0.45));
+    addToScene(scene, createHemisphericLight([0, 1, 0.25], 0.75));
     const sun = createDirectionalLight([0.22, -0.5, -0.84], 2.2);
     addToScene(scene, sun);
 
@@ -348,29 +353,31 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // single PBR material serves every type; per-type geometry is thin-instanced
     // across the board exactly like the old chamfered cubes.
     const petGeometries = await loadPetGeometries("/tetris-pets.json");
-    const petColormap = await loadTexture2D(engine, "/textures/tetris-pets-colormap.png", {
-        srgb: true,
-        invertY: false,
-        // colormap.png is a palette atlas of solid swatches. Linear filtering +
-        // mipmaps average neighbouring swatches at the pets' small on-screen
-        // size, muddying the colours and erasing the tiny eye faces. Point
-        // sampling with no mips keeps every swatch (and the eyes) crisp.
-        mipMaps: false,
-        minFilter: "nearest",
-        magFilter: "nearest",
-    });
+    // Pets are coloured by baked per-vertex colours (sampled offline from the
+    // palette atlas), not by sampling the atlas at render time. The atlas' tiny
+    // eye/nose swatches are smaller than a screen pixel at cell size, so texture
+    // sampling either mip-blurs them into the body colour or drops them entirely;
+    // vertex colours interpolate in screen space and stay crisp at any size. The
+    // shared 1×1 `whiteTex` base lets `baseColor *= vColor` pass the vertex colour
+    // through unchanged.
     const petMaterial = createPbrMaterial({
-        baseColorTexture: petColormap,
-        // Soft matte-toy surface: fairly rough, non-metallic. A gentle emissive
-        // lift from the same colormap self-illuminates the pets so their bright
-        // palette reads vividly (like the Kenney studio renders) instead of being
-        // dimmed by the dark stage and ACES tone mapping.
-        ormTexture: orm(0.55, 0.0),
-        emissiveTexture: petColormap,
-        emissiveColor: [0.35, 0.35, 0.35],
-        environmentIntensity: 1.35,
-        directIntensity: 1.6,
+        baseColorTexture: whiteTex,
+        // Soft matte-toy surface. The dark/low-albedo pets (cat, panda) sit
+        // against a near-black stage, so they need plenty of *diffuse* light to
+        // read as bright solid toys — otherwise their lit body nearly matches the
+        // backdrop and looks ghostly/see-through. We push direct + hemispheric
+        // light and a uniform emissive lift (rather than env reflection, which
+        // just mirrors the studio backdrop onto dark bodies and worsens the
+        // illusion). Mid-high roughness keeps them matte, not glassy.
+        ormTexture: orm(0.62, 0.0),
+        emissiveColor: [0.18, 0.18, 0.18],
+        environmentIntensity: 1.15,
+        directIntensity: 2.2,
+        reflectance: 0.04,
         enableSpecularAA: true,
+        // The Cube Pets meshes are authored double-sided; the face decals (eyes,
+        // nose) are wound opposite the body, so back-face culling would drop them.
+        doubleSided: true,
     });
 
     const MAX_INSTANCES = BOARD_COLS * BOARD_ROWS + 4;
@@ -380,7 +387,7 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
 
     for (let c = 0; c < PIECE_COLORS.length; c++) {
         const geo = petGeometries[c] ?? petGeometries[0]!;
-        const mesh = createMeshFromData(engine, `tetris_pet_${c}`, geo.positions, geo.normals, geo.indices, geo.uvs);
+        const mesh = createMeshFromData(engine, `tetris_pet_${c}`, geo.positions, geo.normals, geo.indices, geo.uvs, undefined, undefined, geo.colors);
         mesh.material = petMaterial;
         const buf = new Float32Array(16 * MAX_INSTANCES);
         clearToDegenerate(buf, MAX_INSTANCES);
@@ -394,18 +401,19 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // where the piece will land. One mesh per type; each frame only the active
     // type is populated so the preview always matches the falling pet.
     const ghostMat = createPbrMaterial({
-        baseColorTexture: petColormap,
+        baseColorTexture: whiteTex,
         ormTexture: orm(0.55, 0.0),
         environmentIntensity: 0.5,
         directIntensity: 0.5,
         alpha: 0.3,
         alphaBlend: true,
+        doubleSided: true,
     });
     const ghostMeshes: Mesh[] = [];
     const ghostBuffers: Float32Array[] = [];
     for (let c = 0; c < petGeometries.length; c++) {
         const geo = petGeometries[c] ?? petGeometries[0]!;
-        const gm = createMeshFromData(engine, `tetris_ghost_${c}`, geo.positions, geo.normals, geo.indices, geo.uvs);
+        const gm = createMeshFromData(engine, `tetris_ghost_${c}`, geo.positions, geo.normals, geo.indices, geo.uvs, undefined, undefined, geo.colors);
         gm.material = ghostMat;
         const gb = new Float32Array(16 * GHOST_INSTANCES);
         clearToDegenerate(gb, GHOST_INSTANCES);
