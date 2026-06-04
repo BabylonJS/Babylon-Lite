@@ -43,6 +43,11 @@ export interface GameState {
     lastClear: number;
     /** Monotonic version, bumped on any visible state change. */
     version: number;
+    /** Rows cleared since the renderer last drained, with their pre-shift colors.
+     *  Each entry: { row, colors[BOARD_COLS] } where colors[c] is 1..7. The
+     *  renderer drains this queue each frame to spawn particle bursts and
+     *  trigger camera shake. */
+    pendingClears: Array<{ row: number; colors: Cellv[] }>;
 }
 
 export function createGame(): GameState {
@@ -59,6 +64,7 @@ export function createGame(): GameState {
         gravityAcc: 0,
         lastClear: 0,
         version: 0,
+        pendingClears: [],
     };
     state.next = drawFromBag(state);
     spawnNext(state);
@@ -76,6 +82,7 @@ export function restartGame(g: GameState): void {
     g.paused = false;
     g.gravityAcc = 0;
     g.lastClear = 0;
+    g.pendingClears.length = 0;
     g.next = drawFromBag(g);
     spawnNext(g);
     g.version++;
@@ -267,6 +274,13 @@ function clearFullLines(g: GameState): number {
         }
         if (full) {
             cleared++;
+            // Snapshot the cells before the shift so particles can be coloured
+            // with the original block colors of the row that just disappeared.
+            const colors: Cellv[] = new Array(BOARD_COLS);
+            for (let x = 0; x < BOARD_COLS; x++) {
+                colors[x] = g.board[y * BOARD_COLS + x]!;
+            }
+            g.pendingClears.push({ row: y, colors });
             for (let yy = y; yy > 0; yy--) {
                 for (let x = 0; x < BOARD_COLS; x++) {
                     g.board[yy * BOARD_COLS + x] = g.board[(yy - 1) * BOARD_COLS + x]!;

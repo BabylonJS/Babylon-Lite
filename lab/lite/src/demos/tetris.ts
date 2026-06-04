@@ -2,32 +2,83 @@
  * Demo — 3D Tetris.
  *
  * Classic Tetris rules played on a 10×20 well, rendered with Babylon Lite's
- * thin-instanced cubes for a low-draw-call 3D playfield (7 colored meshes +
- * 1 ghost piece + a few static frame parts). Game logic, DOM HUD and 3D
- * rendering are split into ./tetris/{game,renderer,hud}.ts; this file is the
- * wiring + input layer.
+ * thin-instanced PBR cubes, HDR image-based lighting, MSAA-anti-aliased
+ * direct rendering and shader-material particle bursts on line clears.
+ *
+ * Game logic, DOM HUD, particles and 3D rendering are split into
+ * ./tetris/{game,renderer,hud,particles}.ts; this file is the wiring + input
+ * layer + scene/IBL setup.
  */
 
-import { createEngine, createSceneContext, onBeforeRender, registerScene, startEngine } from "babylon-lite";
+import {
+    createEngine,
+    createSceneContext,
+    loadEnvironment,
+    onBeforeRender,
+    registerScene,
+    startEngine,
+} from "babylon-lite";
 
 import { createGame, hardDrop, moveLeft, moveRight, restartGame, rotateCCW, rotateCW, softDrop, tickGame, togglePause } from "./tetris/game.js";
 import { createTetrisRenderer } from "./tetris/renderer.js";
 import { createTetrisHud } from "./tetris/hud.js";
+import { demoAssetUrl } from "./demo-asset-url.js";
+
+// Studio HDR env (same as mosquito-amber) — bright key + soft fill from every
+// angle, gives the glossy enamel cubes something specular to reflect.
+const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 // Repeat rates for held arrow keys (ms).
-const DAS_DELAY = 170; // delayed auto-shift before repeats kick in
-const DAS_REPEAT = 55; // repeat interval after delay
+const DAS_DELAY = 170;
+const DAS_REPEAT = 55;
 const SOFT_DROP_REPEAT = 45;
 
 interface RepeatState {
     keyDown: boolean;
-    next: number; // performance.now() ms at which the next repeat fires
+    next: number;
 }
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+
+    // 2× supersample for crisp edges. The engine sizes its swapchain to
+    // `clientWidth * devicePixelRatio`, so doubling the reported DPR causes
+    // the scene to render at 4× the pixel count and the browser does the
+    // final bilinear downsample to the display — combined with the default
+    // 4× MSAA on the render task this gives effectively ~16× anti-aliasing
+    // on the high-contrast block silhouettes + neon rails.
+    const baseDpr = globalThis.devicePixelRatio || 1;
+    try {
+        Object.defineProperty(globalThis, "devicePixelRatio", {
+            configurable: true,
+            get: () => baseDpr * 2,
+        });
+    } catch {
+        // Some browsers refuse to override DPR — accept the fallback.
+    }
+
     const engine = await createEngine(canvas);
+
+    // Use the default render task — it sets up a 4× MSAA swapchain target so
+    // the high-contrast block edges read as crisp lines rather than the
+    // jagged staircase we'd get from a sampleCount=1 source target.
     const scene = createSceneContext(engine);
+
+    // HDR IBL — drives reflections + ambient on all PBR materials. We don't
+    // want the env as a visible skybox (it would compete with the dark backdrop
+    // designed to make the colored blocks pop), so skip both skybox + ground.
+    await loadEnvironment(scene, ENV_URL, {
+        skipSkybox: true,
+        skipGround: true,
+        brdfUrl: demoAssetUrl("./brdf-lut.png", import.meta.url),
+    });
+
+    // ACES-style tone mapping so the bright emissive particle chips don't
+    // clip to pure white. Slightly dialled-down exposure keeps the dark
+    // backdrop punchy.
+    scene.imageProcessing.toneMappingEnabled = true;
+    scene.imageProcessing.exposure = 0.95;
+    scene.imageProcessing.contrast = 1.15;
 
     const game = createGame();
     const renderer = createTetrisRenderer(engine, scene);
@@ -43,8 +94,6 @@ async function main(): Promise<void> {
 
     function keyHandler(e: KeyboardEvent): void {
         if (e.repeat) {
-            // We do our own repeat handling so behaviour stays consistent across
-            // browser key-repeat settings.
             e.preventDefault();
             return;
         }
@@ -107,7 +156,6 @@ async function main(): Promise<void> {
 
     window.addEventListener("keydown", keyHandler);
     window.addEventListener("keyup", keyUpHandler);
-    // Pause when the tab is hidden so the player doesn't return to a topped-out well.
     document.addEventListener("visibilitychange", () => {
         if (document.hidden && !game.over && !game.paused) {
             togglePause(game);
@@ -117,18 +165,12 @@ async function main(): Promise<void> {
     onBeforeRender(scene, (deltaMs: number) => {
         const now = performance.now();
         if (left.keyDown && now >= left.next) {
-            if (moveLeft(game)) {
-                left.next = now + DAS_REPEAT;
-            } else {
-                left.next = now + DAS_REPEAT;
-            }
+            moveLeft(game);
+            left.next = now + DAS_REPEAT;
         }
         if (right.keyDown && now >= right.next) {
-            if (moveRight(game)) {
-                right.next = now + DAS_REPEAT;
-            } else {
-                right.next = now + DAS_REPEAT;
-            }
+            moveRight(game);
+            right.next = now + DAS_REPEAT;
         }
         if (down.keyDown && now >= down.next) {
             softDrop(game);
@@ -136,7 +178,7 @@ async function main(): Promise<void> {
         }
 
         tickGame(game, deltaMs);
-        renderer.sync(game);
+        renderer.sync(game, deltaMs);
         hud.render(game);
     });
 
