@@ -40,8 +40,10 @@ function computeLightsVersion(lights: readonly LightBase[]): number {
     return v;
 }
 
-/** Fill a Float32Array with standard light data. Reused by create and refresh paths. */
-function fillLightsData(data: Float32Array, lights: readonly LightBase[]): void {
+/** Fill a Float32Array with standard light data. Reused by create and refresh paths.
+ *  `foX/foY/foZ` is the floating-origin offset (active camera world position)
+ *  subtracted from world-space light positions; 0 for non-LWR scenes. */
+function fillLightsData(data: Float32Array, lights: readonly LightBase[], foX = 0, foY = 0, foZ = 0): void {
     data.fill(0);
     let count = 0;
     const headerFloats = 4; // count + 3 padding
@@ -52,12 +54,35 @@ function fillLightsData(data: Float32Array, lights: readonly LightBase[]): void 
         if (!light._writeLightUbo) {
             continue;
         }
-        light._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS);
+        light._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS, foX, foY, foZ);
         count++;
     }
     // Write count as u32 bit pattern into the first float slot (zero allocation)
     _countU32[0] = count;
     data[0] = _countF32[0]!;
+}
+
+/** Floating-origin offset (active camera world position) for the lights UBO.
+ *  Returns 0 for non-LWR engines or when no camera is set, so position
+ *  subtraction is a no-op. Bundled inline (same precedent as the eye-position
+ *  branch in render-task.ts) — the cost is three property reads. */
+function foLightOffset(engine: EngineContext, scene: SceneContext): readonly [number, number, number] {
+    const cam = engine.useFloatingOrigin ? scene.camera : undefined;
+    if (!cam) {
+        return _zeroOffset;
+    }
+    const w = cam.worldMatrix;
+    return [w[12]!, w[13]!, w[14]!];
+}
+const _zeroOffset: readonly [number, number, number] = [0, 0, 0];
+
+/** When floating origin is on, the lights UBO bakes the camera offset into
+ *  every light position, so it must be re-uploaded whenever the camera moves
+ *  (its `worldMatrixVersion` changes) even if no light property changed —
+ *  otherwise positions would hold stale `world - oldOffset` bytes. Returns 0
+ *  for non-LWR engines so the version is unaffected. */
+function foCameraVersion(engine: EngineContext, scene: SceneContext): number {
+    return engine.useFloatingOrigin && scene.camera ? scene.camera.worldMatrixVersion : 0;
 }
 
 /** @internal */
@@ -84,11 +109,12 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
     const registerDisposer = !state;
     state?._buffer.destroy();
     const scratch = new Float32Array(byteSize / 4);
-    fillLightsData(scratch, scene.lights);
+    const [foX, foY, foZ] = foLightOffset(engine, scene);
+    fillLightsData(scratch, scene.lights, foX, foY, foZ);
     state = {
         _buffer: createUniformBuffer(engine, scratch),
         _scratch: scratch,
-        _version: computeLightsVersion(scene.lights),
+        _version: computeLightsVersion(scene.lights) + foCameraVersion(engine, scene),
         _lightCount: scene.lights.length,
         _byteSize: byteSize,
     };
@@ -105,11 +131,12 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
 /** @internal */
 export function refreshSceneLightsUBO(engine: EngineContext, scene: SceneContext): GPUBuffer {
     const state = ensureSceneLightState(engine, scene);
-    const version = computeLightsVersion(scene.lights);
+    const version = computeLightsVersion(scene.lights) + foCameraVersion(engine, scene);
     if (version !== state._version || scene.lights.length !== state._lightCount) {
         state._version = version;
         state._lightCount = scene.lights.length;
-        fillLightsData(state._scratch, scene.lights);
+        const [foX, foY, foZ] = foLightOffset(engine, scene);
+        fillLightsData(state._scratch, scene.lights, foX, foY, foZ);
         engine._device.queue.writeBuffer(state._buffer, 0, state._scratch as Float32Array<ArrayBuffer>);
     }
     return state._buffer;

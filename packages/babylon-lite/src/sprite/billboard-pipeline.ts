@@ -198,7 +198,10 @@ export function uploadSortedBillboardInstances(
     system: BillboardSpriteSystem,
     instanceBuffer: GPUBuffer,
     scratch: BillboardInstanceSortScratch,
-    cameraViewMatrix: Mat4
+    cameraViewMatrix: Mat4,
+    foX = 0,
+    foY = 0,
+    foZ = 0
 ): void {
     const count = system.count;
     if (count === 0) {
@@ -211,11 +214,15 @@ export function uploadSortedBillboardInstances(
     const sortedData = scratch._sortedInstanceData;
     const indices = scratch._sortIndices;
     const depths = scratch._sortDepths;
+    // Under floating origin the camera offset (foX/foY/foZ) is subtracted from each
+    // anchor so the GPU receives eye-relative positions that match the eye-relative
+    // view-projection. The sort depth is computed from the same eye-relative anchor.
+    // With a zero offset this is identical to the raw-anchor path.
     for (let index = 0; index < count; index++) {
         const base = index * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-        const anchorX = sourceData[base]!;
-        const anchorY = sourceData[base + 1]!;
-        const anchorZ = sourceData[base + 2]!;
+        const anchorX = sourceData[base]! - foX;
+        const anchorY = sourceData[base + 1]! - foY;
+        const anchorZ = sourceData[base + 2]! - foZ;
         indices[index] = index;
         depths[index] = cameraViewMatrix[2]! * anchorX + cameraViewMatrix[6]! * anchorY + cameraViewMatrix[10]! * anchorZ + cameraViewMatrix[14]!;
     }
@@ -223,7 +230,10 @@ export function uploadSortedBillboardInstances(
     for (let outIndex = 0; outIndex < count; outIndex++) {
         const sourceBase = indices[outIndex]! * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
         const destBase = outIndex * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
-        for (let field = 0; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
+        sortedData[destBase] = sourceData[sourceBase]! - foX;
+        sortedData[destBase + 1] = sourceData[sourceBase + 1]! - foY;
+        sortedData[destBase + 2] = sourceData[sourceBase + 2]! - foZ;
+        for (let field = 3; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
             sortedData[destBase + field] = sourceData[sourceBase + field]!;
         }
     }
@@ -246,11 +256,43 @@ export function ensureBillboardInstanceBuffer(
     return { buffer: createBillboardInstanceBuffer(device, system, label), capacity: system._capacity, reallocated: true };
 }
 
-export function uploadBillboardInstances(device: GPUDevice, system: BillboardSpriteSystem, instanceBuffer: GPUBuffer, uploadedVersion: number): number {
+export function uploadBillboardInstances(
+    device: GPUDevice,
+    system: BillboardSpriteSystem,
+    instanceBuffer: GPUBuffer,
+    uploadedVersion: number,
+    foX = 0,
+    foY = 0,
+    foZ = 0,
+    foScratch: BillboardInstanceSortScratch | null = null
+): number {
     if (uploadedVersion === system._version) {
         return uploadedVersion;
     }
     if (system.count === 0) {
+        system._dirtyMin = 0;
+        system._dirtyMax = 0;
+        return system._version;
+    }
+    // Floating-origin path: anchors live at world scale (~5e6), so they must be made
+    // eye-relative (offset subtracted) before upload — otherwise the eye-relative
+    // view-projection in the shader would cancel catastrophically in F32. The whole
+    // range is re-uploaded because every anchor depends on the live camera offset.
+    if ((foX !== 0 || foY !== 0 || foZ !== 0) && foScratch) {
+        const count = system.count;
+        ensureBillboardInstanceSortScratch(foScratch, count);
+        const sourceData = system._instanceData;
+        const dest = foScratch._sortedInstanceData;
+        for (let index = 0; index < count; index++) {
+            const base = index * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE;
+            dest[base] = sourceData[base]! - foX;
+            dest[base + 1] = sourceData[base + 1]! - foY;
+            dest[base + 2] = sourceData[base + 2]! - foZ;
+            for (let field = 3; field < BILLBOARD_INSTANCE_FLOATS_PER_SPRITE; field++) {
+                dest[base + field] = sourceData[base + field]!;
+            }
+        }
+        device.queue.writeBuffer(instanceBuffer, 0, dest.buffer, dest.byteOffset, count * BILLBOARD_INSTANCE_STRIDE_BYTES);
         system._dirtyMin = 0;
         system._dirtyMax = 0;
         return system._version;

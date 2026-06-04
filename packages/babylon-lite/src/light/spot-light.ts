@@ -55,13 +55,13 @@ export function createSpotLight(position: [number, number, number], direction: [
             intensity,
             range: Number.MAX_VALUE,
 
-            _writeLightUbo: (data: Float32Array, offset: number) => {
+            _writeLightUbo: (data: Float32Array, offset: number, foX = 0, foY = 0, foZ = 0) => {
                 const o = offset;
                 const w = light.worldMatrix;
-                // Position = worldMatrix column 3
-                data[o] = w[12]!;
-                data[o + 1] = w[13]!;
-                data[o + 2] = w[14]!;
+                // Position = worldMatrix column 3 (eye-relative under floating origin)
+                data[o] = w[12]! - foX;
+                data[o + 1] = w[13]! - foY;
+                data[o + 2] = w[14]! - foZ;
                 data[o + 3] = 2;
                 data[o + 4] = light.diffuse[0] * light.intensity;
                 data[o + 5] = light.diffuse[1] * light.intensity;

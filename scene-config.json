@@ -1363,6 +1363,66 @@
         "skipPerf": true
     },
     {
+        "id": 202,
+        "slug": "scene202-floating-origin-point-light",
+        "name": "Scene 202 - LWR Point Light",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Point-lit 3×3 box grid + central sphere at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The point light's world position is baked with the camera offset in the lights UBO so the GPU shades with an eye-relative light position — crisp specular highlights vs F32 cancellation jitter. Pairs with BJS useLargeWorldRendering.",
+        "tags": ["hpm", "lwr", "floating-origin", "point-light", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 203,
+        "slug": "scene203-floating-origin-spot-light",
+        "name": "Scene 203 - LWR Spot Light",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Spot light aimed down onto a ground + box ring + sphere at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The spot's world position is baked with the camera offset in the lights UBO (direction untouched) so the GPU shades eye-relative — a crisp light cone vs F32 cancellation jitter. Pairs with BJS useLargeWorldRendering.",
+        "tags": ["hpm", "lwr", "floating-origin", "spot-light", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 204,
+        "slug": "scene204-floating-origin-thin-instances",
+        "name": "Scene 204 - LWR Thin Instances",
+        "maxMad": 0.5,
+        "maxRawKB": 60,
+        "description": "Thin-instanced box (5×5 local grid) on a mesh node at world (~5e6, 1, ~5e6) with useFloatingOrigin=true. Both Lite and BJS compose finalWorld = mesh.world * instance, so the large coordinate lives in the eye-relative mesh.world and instance matrices stay local — crisp instanced geometry vs F32 jitter. Pairs with BJS useLargeWorldRendering.",
+        "tags": ["hpm", "lwr", "floating-origin", "thin-instances", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 205,
+        "slug": "scene205-floating-origin-facing-billboards",
+        "name": "Scene 205 - LWR Facing Billboards",
+        "maxMad": 0.5,
+        "maxRawKB": 65,
+        "description": "World-space camera-facing billboard sprite cards (transparent, depth-tested, alpha) at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The billboard upload bakes the active camera world position into every anchor so the GPU sees eye-relative positions matching the eye-relative view-projection — crisp cards vs F32 jitter. Exercises the sorted/transparent billboard upload path. Pairs with BJS useLargeWorldRendering + SpriteManager.",
+        "tags": ["hpm", "lwr", "floating-origin", "sprites", "billboards", "depth"],
+        "skipPerf": true
+    },
+    {
+        "id": 206,
+        "slug": "scene206-floating-origin-cutout-billboards",
+        "name": "Scene 206 - LWR Cutout Billboards",
+        "maxMad": 1.0,
+        "maxRawKB": 65,
+        "description": "Hard-alpha (alpha-tested, depth-writing) world-space billboard sprite cards at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises the opaque/cutout billboard upload path (uploadBillboardInstances) which bakes the active camera world position into every anchor and re-uploads on camera movement. The cutout cards themselves match BJS within ~0.2 MAD; the higher 1.0 ceiling accommodates the intrinsic sub-pixel large-world residual amplified by razor-sharp alpha-test edges and high-contrast opaque box silhouettes against the dark background (a billboard-FO regression would shift the large card areas far beyond this). Pairs with BJS useLargeWorldRendering + alpha-test facing planes.",
+        "tags": ["hpm", "lwr", "floating-origin", "sprites", "billboards", "depth"],
+        "skipPerf": true
+    },
+    {
+        "id": 207,
+        "slug": "scene207-floating-origin-directional-shadows",
+        "name": "Scene 207 - LWR Directional Shadows",
+        "maxMad": 0.5,
+        "maxRawKB": 75,
+        "description": "Directional-light PCF shadows (sphere + boxes casting onto a ground receiver) at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises the shadow light-space matrix under floating origin: the PCF directional generator builds its light view/projection eye-relative (camera offset subtracted from the light position and caster AABBs) so the shadow matches the eye-relative mesh world matrices used by both the caster pass and the receiver shader — correctly placed, crisp shadows vs F32 collapse. Pairs with BJS useLargeWorldRendering + ShadowGenerator (usePercentageCloserFiltering).",
+        "tags": ["hpm", "lwr", "floating-origin", "shadow", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
         "id": 210,
         "slug": "scene210-xmp-metadata-cube",
         "name": "Scene 210 — XMP Metadata Cube",

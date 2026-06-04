@@ -35,9 +35,12 @@ export interface PcfSpotlightShadowGeneratorConfig {
     forceRefreshEveryFrame?: boolean;
 }
 
-/** @internal Compute the PCF spot-light view/projection matrix for ShadowTask. */
-export function _computeSpotLightMatrix(light: SpotLight, near: number, far: number): PcfLightMatrix {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z);
+/** @internal Compute the PCF spot-light view/projection matrix for ShadowTask.
+ *  Under floating-origin (`offX/offY/offZ` ≠ 0) the light view is built eye-relative
+ *  (offset subtracted from the spot position) so the returned view/viewProj match the
+ *  eye-relative mesh world matrices used by both the caster pass and the receiver shader. */
+export function _computeSpotLightMatrix(light: SpotLight, near: number, far: number, offX = 0, offY = 0, offZ = 0): PcfLightMatrix {
+    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
     const f = 1.0 / Math.tan(light.angle * 0.5);
     const proj = new Float32Array(16);
     proj[0] = f;
@@ -113,7 +116,7 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
         return state;
     };
     sg._renderShadowMap = (engine, state) => {
-        return renderPcfShadowMap(engine, sg, state as PcfTaskState, () => _computeSpotLightMatrix(_light, near, far));
+        return renderPcfShadowMap(engine, sg, state as PcfTaskState, (_casterMeshes, offX, offY, offZ) => _computeSpotLightMatrix(_light, near, far, offX, offY, offZ));
     };
     return sg;
 }

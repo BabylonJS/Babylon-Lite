@@ -152,12 +152,24 @@ Non-LWR bundles do not statically reference `large-world/floating-origin.js`. Th
 | `frame-graph/render-task.ts` (`vEyePosition` subtract) | Scene UBO eye-position offset |
 | `math/pack-mat4-into-f32.ts` (`offsetXYZ` 5th arg) | Subtraction at the GPU pack boundary |
 
+## Wired features
+
+Beyond the foundation (mesh world matrix, view matrix, eye position), the following
+features subtract the active-camera offset so they stay precise at far-from-origin scale.
+Each has a paired parity scene (Lite `useFloatingOrigin` vs BJS `useLargeWorldRendering`):
+
+- Point + spot light positions (lights UBO offset bake) — scenes 202, 203.
+- Thin-instance per-instance world matrices — scene 204.
+- Sprites / billboard sprites (anchor offset bake on both upload paths) — scenes 205 (facing transparent), 206 (cutout/opaque).
+- Shadow light-space matrix (PCF directional/spot + ESM directional generators build the
+  light view/projection eye-relative, so the caster pass and receiver shader stay consistent
+  with the eye-relative mesh world matrices) — scene 207.
+
 ## Out of scope
 
-- Light position offsetting (point/spot lights): not yet wired. Lights at far-from-origin scale will exhibit F32 jitter on their UBO positions.
-- Shadow-camera offsetting (light-space view): not yet wired. Shadow maps at far-from-origin scale will misalign with the camera's eye-relative frame.
-- Thin-instance per-instance world offsetting: not wired. Thin instances are mesh-local; only the parent mesh's world matrix is offset.
-- Clip planes, sprites, particles, background material centre: not wired.
+- Clip planes: not wired.
+- Particles: N/A — Lite has no particle system.
+- Background material centre: not wired.
 - Havok multi-region floating origin: not in scope.
 
 These extensions can be added incrementally — the substrate (per-frame version tracking, packer offset path, scene state) already supports them.
