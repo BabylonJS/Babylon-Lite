@@ -333,10 +333,8 @@ export class DoomHud {
     }
 
     dispose(): void {
-        if (this.registered) {
-            disposeSpriteRenderer(this.renderer);
-            this.registered = false;
-        }
+        disposeSpriteRenderer(this.renderer);
+        this.registered = false;
         this.crosshair.remove();
         this.deathEl.remove();
         this.painEl.remove();

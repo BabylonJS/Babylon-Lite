@@ -218,9 +218,7 @@ export class WeaponView {
     }
 
     dispose(): void {
-        if (this.registered) {
-            disposeSpriteRenderer(this.renderer);
-            this.registered = false;
-        }
+        disposeSpriteRenderer(this.renderer);
+        this.registered = false;
     }
 }

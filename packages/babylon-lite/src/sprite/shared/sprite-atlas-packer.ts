@@ -73,10 +73,11 @@ export function createSpriteAtlasFromFrames(engine: EngineContext, sources: read
         }
         xs[i] = penX;
         ys[i] = penY;
-        penX += s.width + padding;
-        if (penX > atlasWidth) {
-            atlasWidth = penX;
+        const rightEdge = penX + s.width;
+        if (rightEdge > atlasWidth) {
+            atlasWidth = rightEdge;
         }
+        penX = rightEdge + padding;
         if (s.height > shelfHeight) {
             shelfHeight = s.height;
         }
