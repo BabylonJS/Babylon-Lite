@@ -69,3 +69,6 @@ pages-dist/
 
 # Generated TypeDoc API documentation (regenerated on demand)
 lab/public/lite/api-docs/
+
+# Kenney asset source GLBs (CC0) - bake outputs are committed under lab/public
+scratch/

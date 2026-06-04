@@ -208,15 +208,20 @@ export const PIECE_ROTATIONS: readonly (readonly Cell[])[][] = [
     ],
 ];
 
-/** Linear RGB diffuse colors, one per piece. */
+/**
+ * Display RGB colours, one per piece — set to each Cube Pet's body colour so
+ * the HUD next-piece preview and line-clear particle bursts match the animal
+ * that renders for that piece. Piece order I,O,T,S,Z,J,L maps to
+ * pig, panda, bunny, crab, chick, cat, caterpillar.
+ */
 export const PIECE_COLORS: readonly [number, number, number][] = [
-    [0.15, 0.85, 0.95], // I — cyan
-    [0.95, 0.85, 0.15], // O — yellow
-    [0.7, 0.2, 0.85], // T — purple
-    [0.2, 0.85, 0.25], // S — green
-    [0.95, 0.2, 0.2], // Z — red
-    [0.2, 0.35, 0.95], // J — blue
-    [0.95, 0.55, 0.15], // L — orange
+    [0.859, 0.490, 0.588], // I — pig (pink)
+    [0.82, 0.82, 0.85], // O — panda (white/grey)
+    [0.918, 0.569, 0.408], // T — bunny (tan)
+    [0.753, 0.290, 0.275], // S — crab (red)
+    [1.0, 0.788, 0.357], // Z — chick (yellow)
+    [0.396, 0.396, 0.478], // J — cat (slate-blue)
+    [0.306, 0.722, 0.510], // L — caterpillar (green)
 ];
 
 /** Default spawn column inside the 10-wide playfield. */

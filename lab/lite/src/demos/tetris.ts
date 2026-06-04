@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     // without crushing the glossy block highlights.
 
     const game = createGame();
-    const renderer = createTetrisRenderer(engine, scene);
+    const renderer = await createTetrisRenderer(engine, scene);
     const hud = createTetrisHud(document.body);
 
     hud.onRestart(() => {
