@@ -82,6 +82,7 @@ export function assemblePbrProps(
         enableSpecularAA: true,
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : undefined),
+        ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,

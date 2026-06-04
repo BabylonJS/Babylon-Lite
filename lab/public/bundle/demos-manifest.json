@@ -4,27 +4,31 @@
     "gzipKB": 8.4
   },
   "doom": {
-    "rawKB": 97.1,
+    "rawKB": 97.2,
     "gzipKB": 32.5
   },
   "quake": {
-    "rawKB": 123.1,
+    "rawKB": 123.2,
     "gzipKB": 44.2
   },
   "minecraft": {
-    "rawKB": 102.8,
+    "rawKB": 102.9,
     "gzipKB": 36.7
   },
   "offscreen": {
-    "rawKB": 173.7,
-    "gzipKB": 71.2
+    "rawKB": 174,
+    "gzipKB": 71.4
   },
   "freeciv": {
-    "rawKB": 49.2,
-    "gzipKB": 19.1
+    "rawKB": 49.3,
+    "gzipKB": 19.2
   },
   "mosquito-amber": {
-    "rawKB": 96.6,
-    "gzipKB": 37.6
+    "rawKB": 97.2,
+    "gzipKB": 38
+  },
+  "littlest-tokyo": {
+    "rawKB": 53.3,
+    "gzipKB": 20.6
   }
 }

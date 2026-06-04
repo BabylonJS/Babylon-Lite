@@ -1,0 +1,12 @@
+"Littlest Tokyo" by Glen Fox — CC Attribution (CC-BY 4.0)
+
+Author:   Glen Fox  (https://artstation.com/glenatron)
+Artwork:  https://artstation.com/artwork/1AGwX
+License:  Creative Commons Attribution 4.0 International (CC-BY 4.0)
+          https://creativecommons.org/licenses/by/4.0/
+Source:   https://sketchfab.com/3d-models/littlest-tokyo-94b24a60dc1b48248de50bf087c0f042
+
+This model is bundled as a glTF animation showcase for Babylon Lite. The CC-BY
+license permits use, sharing and adaptation provided the author is credited;
+Glen Fox is credited on the demo card and inside the demo page. The full-fidelity
+uncompressed binary is committed to this repository.

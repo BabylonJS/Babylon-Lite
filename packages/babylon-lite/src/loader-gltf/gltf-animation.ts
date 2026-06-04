@@ -9,7 +9,7 @@
  */
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding } from "../animation/types.js";
+import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding, AnimatedNodeTarget } from "../animation/types.js";
 import { INTERP_LINEAR, INTERP_STEP, INTERP_CUBICSPLINE, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS } from "../animation/types.js";
 import { mat4Identity } from "../math/mat4-identity.js";
 import { mat4Invert } from "../math/mat4-invert.js";
@@ -304,8 +304,56 @@ export function parseAnimationData(
         }
     }
 
-    if (clips.length === 0 || (skeletons.length === 0 && morphBindings.length === 0 && pointerChannelCount === 0)) {
+    // Build the node-TRS writeback inputs. `nodeTargets` exposes each glTF node's
+    // live scene node (via the structural AnimatedNodeTarget view) so the controller
+    // can push evaluated local TRS back onto the scene graph, moving non-skinned
+    // node-animated meshes and their descendants. `excludedNodeIndices` lists nodes
+    // that MUST NOT be written: skin joints (driven by the skeleton path) plus
+    // skinned-mesh nodes and all their ancestors — their bone matrices bake an
+    // `invMeshWorld` captured at load, so moving them at runtime would
+    // double-transform the skinned vertices.
+    const nodeTargets: readonly (AnimatedNodeTarget | undefined)[] = (nodeMap as readonly (AnimatedNodeTarget | undefined)[] | undefined) ?? [];
+    const excludedNodeIndices = new Set<number>();
+    for (const skin of json.skins ?? []) {
+        for (const ji of skin.joints ?? []) {
+            excludedNodeIndices.add(ji);
+        }
+    }
+    for (let ni = 0; ni < nodeCount; ni++) {
+        if (json.nodes[ni]?.skin === undefined) {
+            continue;
+        }
+        let p = ni;
+        while (p >= 0 && !excludedNodeIndices.has(p)) {
+            excludedNodeIndices.add(p);
+            p = findParent(parentMap, p);
+        }
+    }
+
+    if (
+        clips.length === 0 ||
+        (skeletons.length === 0 && morphBindings.length === 0 && pointerChannelCount === 0 && !hasWritableNodeChannel(clips, nodeTargets, excludedNodeIndices))
+    ) {
         return null;
     }
-    return { clips, nodes, skeletons, morphBindings };
+    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices };
+}
+
+/** True if any clip animates a non-excluded node that has a live scene target —
+ *  i.e. there is at least one plain node-TRS channel the controller can write
+ *  back. Lets purely-skinned/morph/pointer assets short-circuit unchanged. */
+function hasWritableNodeChannel(clips: readonly AnimationClip[], nodeTargets: readonly (AnimatedNodeTarget | undefined)[], excludedNodeIndices: ReadonlySet<number>): boolean {
+    for (const clip of clips) {
+        for (const ch of clip.channels) {
+            if (
+                (ch.path === PATH_TRANSLATION || ch.path === PATH_ROTATION || ch.path === PATH_SCALE) &&
+                ch.nodeIdx >= 0 &&
+                !excludedNodeIndices.has(ch.nodeIdx) &&
+                nodeTargets[ch.nodeIdx]
+            ) {
+                return true;
+            }
+        }
+    }
+    return false;
 }

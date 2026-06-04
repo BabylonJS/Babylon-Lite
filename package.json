@@ -17,6 +17,7 @@
         "fetch:librequake": "tsx scripts/fetch-librequake.ts",
         "fetch:voxelpack": "tsx scripts/fetch-voxelpack.ts",
         "fetch:freeciv": "tsx scripts/fetch-freeciv.ts",
+        "fetch:littlest-tokyo": "tsx scripts/fetch-littlest-tokyo.ts",
         "test": "pnpm build:bundle-scenes && pnpm test:parity",
         "test:watch": "vitest --project unit",
         "test:unit": "vitest run --project unit",

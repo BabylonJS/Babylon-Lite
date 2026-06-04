@@ -99,12 +99,31 @@ export interface MorphBinding {
     readonly runtimeMorphTargets?: MorphTargetData;
 }
 
+/** Minimal structural view of a scene node's animatable transform. Lets the
+ *  animation controller apply plain glTF node-TRS channels (translation/rotation/
+ *  scale) to scene nodes without importing the scene layer. `SceneNode` is
+ *  structurally compatible with this interface. */
+export interface AnimatedNodeTarget {
+    readonly position: { set(x: number, y: number, z: number): void };
+    readonly rotationQuaternion: { set(x: number, y: number, z: number, w: number): void };
+    readonly scaling: { set(x: number, y: number, z: number): void };
+}
+
 /** Everything the animation system needs, parsed from a glTF file. */
 export interface GltfAnimationData {
     readonly clips: readonly AnimationClip[];
     readonly nodes: readonly NodeRest[];
     readonly skeletons: readonly SkeletonBinding[];
     readonly morphBindings: readonly MorphBinding[];
+    /** Scene-node targets indexed by glTF node index. Used to write plain node-TRS
+     *  channels (non-skeletal node animation) back onto the live scene graph so the
+     *  affected meshes — and their descendants — actually move. */
+    readonly nodeTargets: readonly (AnimatedNodeTarget | undefined)[];
+    /** Node indices excluded from node-TRS writeback: skin joints (driven by the
+     *  skeleton path) plus skinned-mesh nodes and all their ancestors (their bone
+     *  matrices bake an `invMeshWorld` captured at load, so moving them at runtime
+     *  would double-transform the skinned vertices). */
+    readonly excludedNodeIndices: ReadonlySet<number>;
 }
 
 // ─── GPU-side data objects attached to Mesh ─────────────────────────────────
