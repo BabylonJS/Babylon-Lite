@@ -288,7 +288,6 @@
         "name": "Scene 30 — KHR_materials_volume_testing",
         "maxMad": 0.15,
         "maxRawKB": 100.6,
-        "note": "Bumped 97.4->100.6 (user-approved, current+3%) for disabling the WGSL identifier mangler in the scene bundler, which silently corrupted this transmission shader.",
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment with frame-graph scene-texture transmission. Matches PG #YG3BBF#16.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume"],
         "skipPerf": true
@@ -319,7 +318,6 @@
         "name": "Scene 33 — KHR_lights_punctual",
         "maxMad": 0.07,
         "maxRawKB": 99.3,
-        "note": "Bumped 95->96 (iOS pinch-zoom fix), then 96->99.3 (user-approved, current+3%) for disabling the WGSL identifier mangler in the scene bundler.",
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
         "skipPerf": true
@@ -893,7 +891,6 @@
         "name": "Scene 112 — KHR_texture_basisu Flight Helmet",
         "maxMad": 0.4,
         "maxRawKB": 117.4,
-        "note": "Bumped 113.6->117.4 (user-approved, current+3%) for disabling the WGSL identifier mangler in the scene bundler.",
         "description": "BabylonJS/Assets FlightHelmetKTX glTF model using KHR_texture_basisu KTX2 source textures and frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "env", "basis", "transmission"],
         "skipPerf": true
@@ -1304,7 +1301,6 @@
         "name": "Scene 176 - MosquitoInAmber",
         "maxMad": 0.5,
         "maxRawKB": 97,
-        "note": "Bumped 96->97 (user-approved) to absorb the shared iOS pinch-zoom fix in attachControl (gesture* handlers + multi-touch suppression) that every ArcRotate scene inherits.",
         "description": "KhronosGroup MosquitoInAmber.gltf (KHR_materials_transmission + ior + volume) against the studio.env HDR environment used as IBL and a blurred HDR skybox, with frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume", "skybox"],
         "skipPerf": true,
@@ -1351,8 +1347,7 @@
         "maxRawKB": 50,
         "description": "5×5 grid of boxes + pillar at world (~5e6, *, ~5e6) with useHighPrecisionMatrix=false. F32 view-proj chain visibly jitters at this magnitude — stair-stepped silhouettes, mis-aligned cube faces. Compare to scene 201 (FO on) for the precision win.",
         "tags": ["hpm", "lwr", "precision", "procedural", "std"],
-        "skipPerf": true,
-        "_madCeilingNotes": "Measured MAD = 1.386 on local Windows Chromium (WebGPU/D3D), 2.095 on CI macOS BrowserStack (WebGPU/Metal). Cross-platform drift is intrinsic F32 catastrophic-cancellation noise on the view×world product at 5e6 coords — neither a Lite bug nor a BJS bug. Matrix multiplication is non-associative in F32, and once cancellation consumes ~20 of the 23 mantissa bits, the remaining few bits are exquisitely sensitive to op ordering, SIMD packing, and WGSL→driver codegen, which differ substantially between the D3D and Metal backends. Ceiling 2.5 = ~20% headroom above the observed macOS MAD to absorb future driver/codegen drift. Sky is byte-identical (camera-position precision doesn't affect rays at infinity); diff is concentrated on geometry edges and interiors. The pair scene 200 (MAD~1.4–2.1) vs scene 201 (MAD=0) is the parity proof that LWR/HPM eliminates the cancellation entirely."
+        "skipPerf": true
     },
     {
         "id": 201,
@@ -1370,7 +1365,6 @@
         "name": "Scene 210 — XMP Metadata Cube",
         "maxMad": 0.2,
         "maxRawKB": 73.4,
-        "note": "Bumped 71->73.4 (user-approved, current+3%) for disabling the WGSL identifier mangler in the scene bundler.",
         "description": "KhronosGroup XmpMetadataRoundedCube.glb exercising the KHR_xmp_json_ld extension; JSON-LD metadata packets are surfaced on the AssetContainer with zero render impact, rendered in environmentSpecular.env with a skybox.",
         "tags": ["pbr", "gltf", "xmp", "metadata", "env", "skybox"],
         "skipPerf": true,
@@ -1393,7 +1387,6 @@
         "name": "Scene 212 - DispersionTest glTF",
         "maxMad": 0.6,
         "maxRawKB": 101,
-        "note": "Bumped 98->101 (user-approved, current+3%) for disabling the WGSL identifier mangler in the scene bundler.",
         "description": "KhronosGroup DispersionTest.glb using KHR_materials_dispersion (per-channel chromatic refraction) on a 5x5 grid of transmissive prisms (KHR_materials_transmission + volume + ior), rendered in studio.env with frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "transmission", "volume", "dispersion", "env", "skybox"],
         "skipPerf": true,
