@@ -4,7 +4,7 @@ import type { SceneContext } from "../../scene/scene.js";
 
 /** Compute ground size and skybox size from scene bounds.
  *  Matches BJS EnvironmentHelper._setupSizes() with sizeAuto=true.
- *  @param userSkyboxSize  Optional user-provided skyboxSize (BJS still applies
+ *  @param userSkyboxSize - Optional user-provided skyboxSize (BJS still applies
  *                         diagonal override + ×1.5 even for explicit values). */
 export function computeSceneSize(
     scene: SceneContext,

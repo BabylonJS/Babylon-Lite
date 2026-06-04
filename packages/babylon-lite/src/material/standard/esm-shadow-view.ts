@@ -6,7 +6,9 @@ import { ESM_SHADOW_OUTPUT, MATERIAL_ALPHA_BLEND } from "./standard-flags.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 
 export interface StandardEsmShadowMaterialView extends MaterialView {
+    /** @internal */
     readonly _esmShadowParamsUBO: GPUBuffer;
+    /** @internal */
     readonly _esmShadowDepthCode: string;
 }
 

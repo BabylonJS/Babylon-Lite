@@ -5,6 +5,10 @@
 
 import type { Quat } from "./types.js";
 
+/**
+ * A 4-component quaternion whose `x`/`y`/`z`/`w` setters fire an `onDirty` callback
+ * when a component actually changes, letting the hierarchy system detect rotation updates.
+ */
 export class ObservableQuat implements Quat {
     private _x: number;
     private _y: number;

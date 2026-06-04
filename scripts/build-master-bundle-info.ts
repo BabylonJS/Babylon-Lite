@@ -32,17 +32,22 @@ function resolveMasterRef(): string {
 }
 
 function sceneExists(ref: string, scene: string): boolean {
-    try {
-        execFileSync("git", ["cat-file", "-e", `${ref}:lab/src/lite/${scene}.ts`], { cwd: ROOT, stdio: "ignore" });
-        return true;
-    } catch {
-        return false;
+    for (const scenePath of [`lab/lite/src/lite/${scene}.ts`, `lab/src/lite/${scene}.ts`]) {
+        try {
+            execFileSync("git", ["cat-file", "-e", `${ref}:${scenePath}`], { cwd: ROOT, stdio: "ignore" });
+            return true;
+        } catch {
+            // Try the next layout.
+        }
     }
+    return false;
 }
 
 function getScenes(): string[] {
     if (process.env.BUNDLE_SCENES) {
-        return process.env.BUNDLE_SCENES.split(",").map((s) => s.trim()).filter(Boolean);
+        return process.env.BUNDLE_SCENES.split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
     }
     const config = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8")) as Array<{ id: number }>;
     return config.map((s) => `scene${s.id}`);

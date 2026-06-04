@@ -40,7 +40,7 @@ influence = influence + readMatrixFromRawSampler(boneSampler, f32(joints1[3])) *
 
 /**
  * Create a skeleton fragment.
- * @param has8Bones Whether to use 8-bone skinning (joints1/weights1).
+ * @param has8Bones - Whether to use 8-bone skinning (joints1/weights1).
  */
 export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
     return {
@@ -72,7 +72,7 @@ export function createSkeletonFragment(has8Bones: boolean): ShaderFragment {
 import type { PbrExt } from "../pbr-flags.js";
 import { MSH_HAS_SKELETON, MSH_HAS_SKELETON_8 } from "../../mesh-features.js";
 
-export const skeletonExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "skeleton",
     phase: "vertex",
     frag(ctx) {

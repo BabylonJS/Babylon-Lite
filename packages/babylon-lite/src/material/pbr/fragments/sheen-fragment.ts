@@ -90,9 +90,9 @@ color = color + sheenDirectTerm;
 
 /**
  * Create a sheen fragment.
- * @param hasSheenTexture Whether the material has a sheen texture.
- * @param hasIbl Whether IBL is active for this pipeline.
- * @param hasAlbedoScaling When true, uses BJS-spec sheen math (no F0 attenuation,
+ * @param hasSheenTexture - Whether the material has a sheen texture.
+ * @param hasIbl - Whether IBL is active for this pipeline.
+ * @param hasAlbedoScaling - When true, uses BJS-spec sheen math (no F0 attenuation,
  *   proper base-layer albedo scaling, treats sheen texture as linear — upload
  *   as sRGB so the sampler does the conversion). When false (legacy), applies
  *   pow(rgb, 2.2) to the texture and uses (1-F0) as the sheen intensity scalar.
@@ -207,7 +207,7 @@ export function writeSheenUBO(data: Float32Array, material: PbrMaterialProps, of
     data[ti + 3] = 0;
 }
 
-export const sheenExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "sheen",
     phase: "base-tex",
     detect(mat) {

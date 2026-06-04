@@ -1,0 +1,454 @@
+/// <reference types="node" />
+
+import { execFileSync } from "child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { dirname, resolve } from "path";
+import { Extractor, ExtractorConfig, ExtractorLogLevel } from "@microsoft/api-extractor";
+
+type PullRequestInfo = {
+    title: string;
+    body: string;
+};
+
+type CallableSignature = {
+    prefix: string;
+    parameters: string[];
+    suffix: string;
+};
+
+const PACKAGE_NAME = "@babylonjs/lite";
+const API_REPORT_FILE_NAME = "babylon-lite.api.md";
+const BREAKING_MARKER = /^(?:BREAKING[ -]CHANGE:|[a-z][a-z0-9-]*(?:\([^)]+\))?!:)/m;
+const COMMENT_MAX_DIFF_LENGTH = 30_000;
+
+function run(command: string, args: string[], cwd: string, options: { allowFailure?: boolean; inheritStdio?: boolean } = {}): string {
+    try {
+        return (
+            execFileSync(command, args, {
+                cwd,
+                encoding: "utf-8",
+                stdio: options.inheritStdio ? "inherit" : ["ignore", "pipe", "pipe"],
+            })?.trim() ?? ""
+        );
+    } catch (error) {
+        if (options.allowFailure) {
+            const output = error instanceof Error && "stdout" in error ? String((error as { stdout?: unknown }).stdout ?? "") : "";
+            return output.trim();
+        }
+        throw error;
+    }
+}
+
+function normalizeBranchRef(value: string | undefined): string {
+    const branch = value?.replace(/^refs\/heads\//, "").trim();
+    return branch || "master";
+}
+
+function escapeAzureVariableValue(value: string): string {
+    return value.replace(/%/g, "%AZP25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
+function packageDir(projectRoot: string): string {
+    return resolve(projectRoot, "packages/babylon-lite");
+}
+
+function generateApiReport(projectRoot: string, outputDir: string): string {
+    const currentPackageDir = packageDir(projectRoot);
+    const entryPoint = resolve(currentPackageDir, "dist/index.d.ts");
+    const reportFolder = resolve(outputDir, "approved");
+    const reportTempFolder = resolve(outputDir, "temp");
+
+    if (!existsSync(entryPoint)) {
+        throw new Error(`Cannot generate API report because ${entryPoint} does not exist.`);
+    }
+
+    mkdirSync(reportFolder, { recursive: true });
+    mkdirSync(reportTempFolder, { recursive: true });
+
+    const config = ExtractorConfig.prepare({
+        configObject: {
+            projectFolder: currentPackageDir,
+            mainEntryPointFilePath: entryPoint,
+            compiler: {
+                overrideTsconfig: {
+                    compilerOptions: {
+                        target: "es2022",
+                        module: "esnext",
+                        moduleResolution: "bundler",
+                        lib: ["es2022", "dom", "dom.iterable"],
+                        types: ["@webgpu/types"],
+                        strict: true,
+                        declaration: true,
+                        skipLibCheck: true,
+                    },
+                    include: [entryPoint],
+                },
+            },
+            apiReport: {
+                enabled: true,
+                reportFileName: "babylon-lite",
+                reportFolder,
+                reportTempFolder,
+            },
+            docModel: { enabled: false },
+            tsdocMetadata: { enabled: false },
+            dtsRollup: { enabled: false },
+            messages: {
+                compilerMessageReporting: {
+                    default: { logLevel: ExtractorLogLevel.Warning },
+                },
+                extractorMessageReporting: {
+                    default: { logLevel: ExtractorLogLevel.Warning },
+                    "ae-missing-release-tag": { logLevel: ExtractorLogLevel.None },
+                    "ae-undocumented": { logLevel: ExtractorLogLevel.None },
+                    "ae-forgotten-export": { logLevel: ExtractorLogLevel.None },
+                    "ae-unresolved-link": { logLevel: ExtractorLogLevel.None },
+                    "ae-internal-missing-underscore": { logLevel: ExtractorLogLevel.Error },
+                },
+                tsdocMessageReporting: {
+                    default: { logLevel: ExtractorLogLevel.None },
+                },
+            },
+        },
+        configObjectFullPath: undefined,
+        packageJsonFullPath: resolve(currentPackageDir, "package.json"),
+    });
+
+    const result = Extractor.invoke(config, {
+        localBuild: true,
+        showVerboseMessages: false,
+        messageCallback: (message) => {
+            if (String(message.messageId).startsWith("console-api-report-")) {
+                message.handled = true;
+            }
+        },
+    });
+    if (!result.succeeded) {
+        throw new Error(`API Extractor failed: ${result.errorCount} errors, ${result.warningCount} warnings`);
+    }
+
+    const reportPath = resolve(reportTempFolder, API_REPORT_FILE_NAME);
+    if (!existsSync(reportPath)) {
+        throw new Error(`API Extractor did not write the expected report at ${reportPath}.`);
+    }
+
+    return reportPath;
+}
+
+function createTargetWorktree(rootDir: string, targetRef: string): string {
+    const worktreeDir = mkdtempSync(resolve(tmpdir(), "babylon-lite-api-baseline-"));
+    run("git", ["fetch", "origin", `${targetRef}:refs/remotes/origin/${targetRef}`], rootDir, { inheritStdio: true });
+    run("git", ["worktree", "add", "--detach", worktreeDir, `origin/${targetRef}`], rootDir, { inheritStdio: true });
+    return worktreeDir;
+}
+
+function removeTargetWorktree(rootDir: string, worktreeDir: string): void {
+    run("git", ["worktree", "remove", "--force", worktreeDir], rootDir, { allowFailure: true, inheritStdio: true });
+    rmSync(worktreeDir, { recursive: true, force: true });
+}
+
+function buildPackage(projectRoot: string, options: { installDependencies: boolean }): void {
+    if (options.installDependencies) {
+        run("pnpm", ["install", "--frozen-lockfile"], projectRoot, { inheritStdio: true });
+    }
+    run("pnpm", ["--filter", "babylon-lite", "exec", "vite", "build", "--logLevel", "warn"], projectRoot, { inheritStdio: true });
+}
+
+function diffReports(rootDir: string, targetReport: string, currentReport: string): string {
+    return run("git", ["diff", "--no-index", "--unified=3", "--", targetReport, currentReport], rootDir, { allowFailure: true });
+}
+
+function normalizeApiLine(line: string): string {
+    return line.trim().replace(/\s+/g, " ");
+}
+
+function isIgnorableApiLine(content: string): boolean {
+    return !content || content === "}" || content.startsWith("//") || content.startsWith("/*") || content.startsWith("*");
+}
+
+function collectChangedApiLines(diff: string, marker: "+" | "-"): string[] {
+    const changedLines: string[] = [];
+
+    for (const line of diff.split(/\r?\n/)) {
+        if (!line.startsWith(marker) || line.startsWith(`${marker}${marker}${marker}`)) {
+            continue;
+        }
+
+        const content = normalizeApiLine(line.slice(1));
+        if (isIgnorableApiLine(content)) {
+            continue;
+        }
+
+        changedLines.push(content);
+    }
+
+    return changedLines;
+}
+
+function updateDepth(character: string, depth: { angle: number; square: number; curly: number }): void {
+    if (character === "<") {
+        depth.angle += 1;
+    } else if (character === ">" && depth.angle > 0) {
+        depth.angle -= 1;
+    } else if (character === "[") {
+        depth.square += 1;
+    } else if (character === "]" && depth.square > 0) {
+        depth.square -= 1;
+    } else if (character === "{") {
+        depth.curly += 1;
+    } else if (character === "}" && depth.curly > 0) {
+        depth.curly -= 1;
+    }
+}
+
+function findParameterStart(line: string): number {
+    const depth = { angle: 0, square: 0, curly: 0 };
+
+    for (let index = 0; index < line.length; index += 1) {
+        const character = line[index]!;
+        if (character === "(" && depth.angle === 0 && depth.square === 0 && depth.curly === 0) {
+            return index;
+        }
+        updateDepth(character, depth);
+    }
+
+    return -1;
+}
+
+function findParameterEnd(line: string, parameterStart: number): number {
+    const depth = { angle: 0, square: 0, curly: 0 };
+    let parenDepth = 0;
+
+    for (let index = parameterStart; index < line.length; index += 1) {
+        const character = line[index]!;
+        if (character === "(" && depth.angle === 0 && depth.square === 0 && depth.curly === 0) {
+            parenDepth += 1;
+        } else if (character === ")" && depth.angle === 0 && depth.square === 0 && depth.curly === 0) {
+            parenDepth -= 1;
+            if (parenDepth === 0) {
+                return index;
+            }
+        } else {
+            updateDepth(character, depth);
+        }
+    }
+
+    return -1;
+}
+
+function splitParameters(parametersText: string): string[] {
+    const parameters: string[] = [];
+    const depth = { angle: 0, square: 0, curly: 0 };
+    let parenDepth = 0;
+    let segmentStart = 0;
+
+    for (let index = 0; index < parametersText.length; index += 1) {
+        const character = parametersText[index]!;
+
+        if (character === "(" && depth.angle === 0 && depth.square === 0 && depth.curly === 0) {
+            parenDepth += 1;
+        } else if (character === ")" && depth.angle === 0 && depth.square === 0 && depth.curly === 0 && parenDepth > 0) {
+            parenDepth -= 1;
+        } else if (character === "," && depth.angle === 0 && depth.square === 0 && depth.curly === 0 && parenDepth === 0) {
+            parameters.push(normalizeApiLine(parametersText.slice(segmentStart, index)));
+            segmentStart = index + 1;
+        } else {
+            updateDepth(character, depth);
+        }
+    }
+
+    const finalParameter = normalizeApiLine(parametersText.slice(segmentStart));
+    if (finalParameter) {
+        parameters.push(finalParameter);
+    }
+
+    return parameters;
+}
+
+function parseCallableSignature(line: string): CallableSignature | undefined {
+    const parameterStart = findParameterStart(line);
+    if (parameterStart === -1) {
+        return undefined;
+    }
+
+    const parameterEnd = findParameterEnd(line, parameterStart);
+    if (parameterEnd === -1) {
+        return undefined;
+    }
+
+    return {
+        prefix: normalizeApiLine(line.slice(0, parameterStart)),
+        parameters: splitParameters(line.slice(parameterStart + 1, parameterEnd)),
+        suffix: normalizeApiLine(line.slice(parameterEnd + 1)),
+    };
+}
+
+function isOptionalParameter(parameter: string): boolean {
+    return parameter.startsWith("...") || /^[A-Za-z_$][\w$]*\s*\?:/.test(parameter);
+}
+
+function isNonBreakingOptionalParameterExpansion(removedLine: string, addedLine: string): boolean {
+    const removedSignature = parseCallableSignature(removedLine);
+    const addedSignature = parseCallableSignature(addedLine);
+
+    if (!removedSignature || !addedSignature) {
+        return false;
+    }
+
+    if (removedSignature.prefix !== addedSignature.prefix || removedSignature.suffix !== addedSignature.suffix) {
+        return false;
+    }
+
+    if (addedSignature.parameters.length <= removedSignature.parameters.length) {
+        return false;
+    }
+
+    for (let index = 0; index < removedSignature.parameters.length; index += 1) {
+        if (removedSignature.parameters[index] !== addedSignature.parameters[index]) {
+            return false;
+        }
+    }
+
+    return addedSignature.parameters.slice(removedSignature.parameters.length).every(isOptionalParameter);
+}
+
+export function breakingApiLines(diff: string): string[] {
+    const removedLines = collectChangedApiLines(diff, "-");
+    const addedLines = collectChangedApiLines(diff, "+");
+
+    return removedLines.filter((removedLine) => !addedLines.some((addedLine) => isNonBreakingOptionalParameterExpansion(removedLine, addedLine)));
+}
+
+function truncateDiff(diff: string): string {
+    if (diff.length <= COMMENT_MAX_DIFF_LENGTH) {
+        return diff;
+    }
+
+    return `${diff.slice(0, COMMENT_MAX_DIFF_LENGTH)}\n\n... diff truncated for GitHub comment length ...`;
+}
+
+function formatComment(diff: string, breakingLines: string[]): string {
+    if (!diff) {
+        return "**API Report**: No public API changes detected.";
+    }
+
+    const lines = ["## API Changes", "", `API Extractor detected public API changes for \`${PACKAGE_NAME}\`.`];
+
+    if (breakingLines.length > 0) {
+        lines.push("", "**Potentially breaking changes detected.** Removed or changed public API lines:", "");
+        for (const line of breakingLines.slice(0, 20)) {
+            lines.push(`- \`${line.replace(/`/g, "\\`")}\``);
+        }
+        if (breakingLines.length > 20) {
+            lines.push(`- ...and ${breakingLines.length - 20} more removed/changed lines.`);
+        }
+    } else {
+        lines.push("", "No removed public API lines were detected; this appears to be additive.");
+    }
+
+    lines.push("", "<details>", "<summary>API Extractor diff</summary>", "", "```diff", truncateDiff(diff), "```", "", "</details>");
+
+    return lines.join("\n");
+}
+
+function getPullRequestFromEnv(): PullRequestInfo | undefined {
+    if (!process.env.PR_TITLE && !process.env.PR_BODY) {
+        return undefined;
+    }
+
+    return {
+        title: process.env.PR_TITLE ?? "",
+        body: process.env.PR_BODY ?? "",
+    };
+}
+
+async function getPullRequestFromGitHub(): Promise<PullRequestInfo | undefined> {
+    const repository = process.env.GITHUB_REPOSITORY;
+    const pullRequestNumber = process.env.PR_NUMBER;
+    const token = process.env.GITHUB_TOKEN;
+
+    if (!repository || !pullRequestNumber || !token) {
+        return undefined;
+    }
+
+    const response = await fetch(`https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}`, {
+        headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${token}`,
+            "user-agent": "babylon-lite-api-report-check",
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to read PR metadata from GitHub: ${response.status} ${response.statusText}`);
+    }
+
+    const pullRequest = (await response.json()) as { title?: unknown; body?: unknown };
+    return {
+        title: typeof pullRequest.title === "string" ? pullRequest.title : "",
+        body: typeof pullRequest.body === "string" ? pullRequest.body : "",
+    };
+}
+
+async function hasBreakingMarkerInPullRequest(): Promise<boolean> {
+    const pullRequest = getPullRequestFromEnv() ?? (await getPullRequestFromGitHub());
+    if (!pullRequest) {
+        return false;
+    }
+
+    return BREAKING_MARKER.test(`${pullRequest.title}\n\n${pullRequest.body}`);
+}
+
+async function main(): Promise<void> {
+    const rootDir = resolve(__dirname, "..");
+    const targetBranch = normalizeBranchRef(process.env.SYSTEM_PULLREQUEST_TARGETBRANCH ?? process.env.API_REPORT_TARGET_BRANCH);
+    const outputDir = resolve(rootDir, "test-results/api-report");
+    const currentOutputDir = resolve(outputDir, "current");
+    const targetOutputDir = resolve(outputDir, "target");
+    const commentPath = process.env.API_REPORT_COMMENT_PATH ?? resolve(outputDir, "api-report-comment.md");
+    let targetWorktree = "";
+
+    console.log(`Generating API report comparison against ${targetBranch}.`);
+    rmSync(outputDir, { recursive: true, force: true });
+    mkdirSync(outputDir, { recursive: true });
+
+    try {
+        console.log("Building current branch package...");
+        buildPackage(rootDir, { installDependencies: false });
+        const currentReport = generateApiReport(rootDir, currentOutputDir);
+
+        console.log(`Building target branch package from origin/${targetBranch}...`);
+        targetWorktree = createTargetWorktree(rootDir, targetBranch);
+        buildPackage(targetWorktree, { installDependencies: true });
+        const targetReport = generateApiReport(targetWorktree, targetOutputDir);
+
+        const diff = diffReports(rootDir, targetReport, currentReport);
+        const breakingLines = breakingApiLines(diff);
+        const comment = formatComment(diff, breakingLines);
+
+        mkdirSync(dirname(commentPath), { recursive: true });
+        writeFileSync(commentPath, comment, "utf-8");
+        console.log(comment);
+
+        const hasApiChanges = diff.length > 0;
+        console.log(`##vso[task.setvariable variable=POST_API_COMMENT]${hasApiChanges ? "true" : "false"}`);
+        console.log(`##vso[task.setvariable variable=API_COMMENT_BODY]${escapeAzureVariableValue(comment)}`);
+
+        if (breakingLines.length > 0 && !(await hasBreakingMarkerInPullRequest())) {
+            console.error(
+                "API Extractor detected removed or changed public API lines, but the PR title or description does not contain a breaking-change marker. " +
+                    "Add a Conventional Commit breaking marker such as 'feat!: ...' or a 'BREAKING CHANGE:' footer."
+            );
+            process.exitCode = 1;
+        }
+    } finally {
+        if (targetWorktree) {
+            removeTargetWorktree(rootDir, targetWorktree);
+        }
+    }
+}
+
+if (require.main === module) {
+    void main();
+}

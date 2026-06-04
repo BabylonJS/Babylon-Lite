@@ -1,0 +1,19 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "entryPoints": ["packages/babylon-lite/src/index.ts"],
+    "tsconfig": "packages/babylon-lite/tsconfig.json",
+    "out": "lab/public/lite/api-docs",
+    "name": "Babylon Lite API",
+    "readme": "none",
+    "githubPages": false,
+    "hideGenerator": true,
+    "excludeInternal": true,
+    "excludePrivate": true,
+    "skipErrorChecking": true,
+    "validation": {
+        "notExported": false,
+        "invalidLink": true,
+        "notDocumented": true
+    },
+    "requiredToBeDocumented": ["Enum", "Variable", "Function", "Class", "Interface", "TypeAlias"]
+}

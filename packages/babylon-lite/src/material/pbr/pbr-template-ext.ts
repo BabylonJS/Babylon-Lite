@@ -53,12 +53,19 @@ export interface PbrTemplateExt {
  * Each flag corresponds to a detected feature in the scene.
  */
 export function createPbrTemplateExt(flags: {
+    /** @internal */
     _hasUvTransform: boolean;
+    /** @internal */
     _hasVertexColor: boolean;
+    /** @internal */
     _hasUv2: boolean;
+    /** @internal */
     _hasOcclusionUv2: boolean;
+    /** @internal */
     _hasAnyNormal: boolean;
+    /** @internal */
     _hasEmissiveTexture: boolean;
+    /** @internal */
     _hasSpecGloss: boolean;
 }): PbrTemplateExt {
     const { _hasUvTransform, _hasVertexColor, _hasUv2, _hasOcclusionUv2, _hasAnyNormal, _hasEmissiveTexture, _hasSpecGloss } = flags;
@@ -149,7 +156,11 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     const uvForSpecGloss = uvVarName("specGloss");
 
     // ── Base color modifier ─────────────────────────────────────
-    const baseColorMod = _hasVertexColor ? "\nbaseColor *= input.vColor;" : "";
+    // NOTE: backtick (not double-quote) so the bundle's WGSL identifier mangler
+    // rewrites `baseColor` here to match the mangled `var bc=` declaration in
+    // pbr-template.ts. A plain string is skipped by the mangler and produces
+    // `unresolved value 'baseColor'` in the bundled shader. See thin-instance-fragment.ts.
+    const baseColorMod = _hasVertexColor ? `\nbaseColor *= input.vColor;` : "";
 
     // ── Normal scale modifier ───────────────────────────────────
     // When ext is active, emit the scaledNormal line (replaces default normalMapRaw).

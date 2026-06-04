@@ -17,11 +17,11 @@
 
 import type { SpotLight } from "../light/spot-light.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { buildLightViewMatrix, createSharedShadowUBO, createShadowParamsUBO, multiply4x4 } from "./shadow-base.js";
 import { ensurePcfShadowTaskState, preloadPcfShadowTaskState, renderPcfShadowMap, type PcfLightMatrix, type PcfTaskState } from "./pcf-shadow-task-hooks.js";
 
+/** Configuration for a spot-light PCF shadow generator: map size, depth bias, darkness, and projection near/far planes. */
 export interface PcfSpotlightShadowGeneratorConfig {
     mapSize?: number;
     bias?: number;
@@ -48,9 +48,16 @@ export function _computeSpotLightMatrix(light: SpotLight, near: number, far: num
     return { _view: view, _viewProj: multiply4x4(proj, view), _near: near, _far: far };
 }
 
+/**
+ * Creates a PCF (percentage-closer filtering) shadow generator for a spot light, using a
+ * perspective projection derived from the light's cone angle.
+ * @param engine - The engine providing the GPU device.
+ * @param _light - The spot light that casts the shadows.
+ * @param cfg - Optional shadow-map and projection configuration.
+ * @returns A `ShadowGenerator` wired to the spot-light PCF render path.
+ */
 export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light: SpotLight, cfg: PcfSpotlightShadowGeneratorConfig = {}): ShadowGenerator {
-    const eng = engine as EngineContextInternal;
-    const device = eng.device;
+    const device = engine._device;
     const mapSize = cfg.mapSize ?? 512;
     const bias = cfg.bias ?? 0.00005;
     const darkness = cfg.darkness ?? 0;
@@ -72,14 +79,14 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
     });
 
     // Shadow params UBO (depthScale slot reused as texel size for PCF offsets)
-    const _shadowParamsUBO = createShadowParamsUBO(eng, bias, 1.0 / mapSize);
+    const _shadowParamsUBO = createShadowParamsUBO(engine, bias, 1.0 / mapSize);
 
     const _lightMatrix = new Float32Array(16);
     const _shadowsInfo = new Float32Array([darkness, mapSize, 1.0 / mapSize, 0]);
     const _depthValues = new Float32Array([0, far]);
 
     // Shared shadow UBO for all receiver meshes (96 bytes)
-    const { ubo: _shadowUBO } = createSharedShadowUBO(eng, _lightMatrix, _depthValues, _shadowsInfo);
+    const { ubo: _shadowUBO } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);
     const _config: ShadowGenerator["_config"] = {
         _mapSize: mapSize,
         _bias: bias,

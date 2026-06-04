@@ -1,5 +1,5 @@
 import type { Mat4 } from "../math/types.js";
-import type { MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import type { GpuPicker } from "./gpu-picker.js";
 import type { PickingInfo } from "./picking-info.js";
 import type { Ray } from "./ray.js";
@@ -18,7 +18,7 @@ export function enableDetailedPicking(picker: GpuPicker): void {
 
 async function detailedPick(info: PickingInfo, ray: Ray): Promise<void> {
     const mesh = info.pickedMesh;
-    const mi = mesh as MeshInternal | null;
+    const mi = mesh as Mesh | null;
     if (!mi || !mi._cpuPositions || !mi._cpuIndices) {
         return;
     }
@@ -157,14 +157,14 @@ function clampBarycentric(value: number): number {
     return Math.abs(value) < 1e-12 ? 0 : value;
 }
 
-function hasCpuDeformationData(mesh: MeshInternal): boolean {
+function hasCpuDeformationData(mesh: Mesh): boolean {
     const morph = mesh.morphTargets;
     const skeleton = mesh.skeleton;
     return (!!morph?.targets && !!morph.weights) || (!!skeleton?.boneMatrices && !!skeleton.joints && !!skeleton.weights);
 }
 
 /** Möller-Trumbore ray-triangle intersection with Babylon.js Ray epsilon semantics.
- *  Returns { t, u, v } or null if no intersection.
+ *  Returns `{ t, u, v }` or null if no intersection.
  *  u and v are Möller weights for vertices 1 and 2; BJS exposes (1 - u - v, u). */
 function rayTriangleIntersect(
     ox: number,

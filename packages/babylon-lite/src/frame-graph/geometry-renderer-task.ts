@@ -36,7 +36,7 @@
 
 import type { Camera } from "../camera/camera.js";
 import { getViewMatrix, getViewProjectionMatrix } from "../camera/camera.js";
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { RenderTargetMrt } from "../engine/render-target-mrt.js";
@@ -53,10 +53,11 @@ import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { ensureSceneLightState } from "../render/lights-ubo.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
 import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -198,8 +199,8 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
 /** Create a geometry-renderer task. All GPU resources are allocated lazily
  *  during the first `record()` call (when the frame graph is built). */
 export function createGeometryRendererTask(config: GeometryRendererTaskConfig, engine: EngineContext, scene: SceneContext): GeometryRendererTask {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
+    const eng = engine as EngineContext;
+    const sc = scene as SceneContext;
     if (config.textureDescriptions.length === 0) {
         throw new Error("GeometryRendererTask: textureDescriptions must contain at least one entry.");
     }
@@ -268,7 +269,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     const sceneBGL = getSceneBindGroupLayout(eng);
     const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
     const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
-    const sceneBG = eng.device.createBindGroup({
+    const sceneBG = eng._device.createBindGroup({
         layout: sceneBGL,
         entries: [
             { binding: 0, resource: { buffer: sceneUBO } },
@@ -378,7 +379,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
 
 // ─── Record ────────────────────────────────────────────────────────────────
 
-function recordTask(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContextInternal, sc: SceneContextInternal): void {
+function recordTask(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
     buildRenderTargetMrt(task._mrt, eng);
     task._ownedDepth = !config.depthTexture;
 
@@ -402,7 +403,7 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
     }
 
     const lightsUBO = ensureSceneLightState(eng, sc)._buffer;
-    task._sceneBG = eng.device.createBindGroup({
+    task._sceneBG = eng._device.createBindGroup({
         layout: getSceneBindGroupLayout(eng),
         entries: [
             { binding: 0, resource: { buffer: task._sceneUBO } },
@@ -509,7 +510,7 @@ function rebuildRenderPassDescriptor(task: GeometryRendererTaskInternal, config:
 
 // ─── Execute ───────────────────────────────────────────────────────────────
 
-function executeTask(task: GeometryRendererTaskInternal, eng: EngineContextInternal, sc: SceneContextInternal, config: GeometryRendererTaskConfig): number {
+function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext, config: GeometryRendererTaskConfig): number {
     const camera = config.camera ?? sc.camera;
     if (!camera) {
         return 0;
@@ -560,35 +561,35 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContextInter
     return draws;
 }
 
-function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContextInternal, camera: Camera, aspect: number, flipY: boolean): void {
+function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContext, camera: Camera, aspect: number, flipY: boolean): void {
     const data = task._sceneData;
     data.fill(0);
     const viewProj = getViewProjectionMatrix(camera, aspect);
     const viewMat = getViewMatrix(camera);
-    data.set(viewProj, 0);
+    packMat4IntoF32(data, viewProj, 0);
     if (flipY) {
         data[1] = -data[1]!;
         data[5] = -data[5]!;
         data[9] = -data[9]!;
         data[13] = -data[13]!;
     }
-    data.set(viewMat, 16);
+    packMat4IntoF32(data, viewMat, 16);
     const wm = camera.worldMatrix;
     data[32] = wm[12]!;
     data[33] = wm[13]!;
     data[34] = wm[14]!;
     task._viewProjectionScratch.set(data.subarray(0, 16));
-    eng.device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
+    eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
-function writeParamsUBO(task: GeometryRendererTaskInternal, eng: EngineContextInternal, camera: Camera): void {
+function writeParamsUBO(task: GeometryRendererTaskInternal, eng: EngineContext, camera: Camera): void {
     const data = task._paramsData!;
     data.set(task._previousViewProjection, 0);
     data[16] = camera.nearPlane;
     data[17] = camera.farPlane;
     data[18] = 0;
     data[19] = 0;
-    eng.device.queue.writeBuffer(task._paramsUBO!, 0, data as Float32Array<ArrayBuffer>);
+    eng._device.queue.writeBuffer(task._paramsUBO!, 0, data as Float32Array<ArrayBuffer>);
 }
 
 function patchClearValues(task: GeometryRendererTaskInternal, camera: Camera): void {

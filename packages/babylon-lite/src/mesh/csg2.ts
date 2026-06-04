@@ -1,9 +1,8 @@
 import type { Manifold, ManifoldToplevel, Mesh as ManifoldMesh } from "manifold-3d";
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import type { Material } from "../material/material.js";
 import type { Mat4 } from "../math/types.js";
-import type { Mesh, MeshInternal } from "./mesh.js";
+import type { Mesh } from "./mesh.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { normalizeVec3 } from "../math/normalize-vec3.js";
 import { createMeshFromData } from "./mesh-factories.js";
@@ -12,12 +11,12 @@ declare const csg2SolidBrand: unique symbol;
 
 const MATERIAL_ID_RESERVE_COUNT = 65536;
 
+/** A manifold-3d backed CSG solid for high-precision boolean mesh operations. */
 export interface Csg2Solid {
     readonly [csg2SolidBrand]: true;
-}
-
-interface Csg2SolidInternal extends Csg2Solid {
+    /** @internal */
     _manifold: Manifold | null;
+    /** @internal */
     readonly _numProp: number;
 }
 
@@ -37,10 +36,12 @@ interface GeometryBuffers {
 let csg2Runtime: Csg2Runtime | null = null;
 let csg2RuntimePromise: Promise<Csg2Runtime> | null = null;
 
+/** Returns whether the manifold-3d runtime has finished loading and CSG2 is usable. */
 export function isCsg2Ready(): boolean {
     return csg2Runtime !== null;
 }
 
+/** Loads the manifold-3d WASM runtime. Must be awaited once before any CSG2 operation. */
 export async function initializeCsg2Async(): Promise<void> {
     await getRuntimeAsync();
 }
@@ -78,12 +79,8 @@ function requireRuntime(): Csg2Runtime {
     return csg2Runtime;
 }
 
-function internalSolid(solid: Csg2Solid): Csg2SolidInternal {
-    return solid as Csg2SolidInternal;
-}
-
 function requireSolidManifold(solid: Csg2Solid, operation: string): Manifold {
-    const manifold = internalSolid(solid)._manifold;
+    const manifold = solid._manifold;
     if (!manifold) {
         throw new Error(`${operation} cannot use a disposed CSG2 solid.`);
     }
@@ -91,7 +88,7 @@ function requireSolidManifold(solid: Csg2Solid, operation: string): Manifold {
 }
 
 function solidFromManifold(manifold: Manifold, numProp: number): Csg2Solid {
-    return { _manifold: manifold, _numProp: numProp } as unknown as Csg2SolidInternal;
+    return { _manifold: manifold, _numProp: numProp } as unknown as Csg2Solid;
 }
 
 function transformPoint(m: Mat4, x: number, y: number, z: number): [number, number, number] {
@@ -106,24 +103,29 @@ function transformNormal(m: Mat4, inv: Mat4 | null, x: number, y: number, z: num
 }
 
 function requireCpuGeometry(mesh: Mesh): GeometryBuffers {
-    const internal = mesh as MeshInternal;
-    if (!internal._cpuPositions) {
+    if (!mesh._cpuPositions) {
         throw new Error(`createCsg2FromMesh("${mesh.name}") requires CPU positions. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    if (!internal._cpuIndices) {
+    if (!mesh._cpuIndices) {
         throw new Error(`createCsg2FromMesh("${mesh.name}") requires CPU indices. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    if (!internal._cpuNormals) {
+    if (!mesh._cpuNormals) {
         throw new Error(`createCsg2FromMesh("${mesh.name}") requires CPU normals. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
     return {
-        positions: internal._cpuPositions,
-        normals: internal._cpuNormals,
-        indices: internal._cpuIndices,
-        uvs: internal._cpuUvs,
+        positions: mesh._cpuPositions,
+        normals: mesh._cpuNormals,
+        indices: mesh._cpuIndices,
+        uvs: mesh._cpuUvs,
     };
 }
 
+/**
+ * Builds a {@link Csg2Solid} from a mesh's CPU geometry, baking its world transform.
+ * @param mesh - Source mesh; must retain CPU positions, normals, and indices.
+ * @param materialSlot - Material slot index (0 to 65535) tagged onto the solid's triangles.
+ * @returns A CSG2 solid; call {@link disposeCsg2} when finished to free WASM memory.
+ */
 export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     const runtime = requireRuntime();
     if (materialSlot < 0 || materialSlot >= MATERIAL_ID_RESERVE_COUNT || !Number.isInteger(materialSlot)) {
@@ -178,31 +180,32 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
 
 function runBooleanOperation(operation: "difference" | "intersection" | "union", a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     const runtime = requireRuntime();
-    const ai = internalSolid(a);
-    const bi = internalSolid(b);
-    if (ai._numProp !== bi._numProp) {
+    if (a._numProp !== b._numProp) {
         throw new Error("CSG2 operations require solids with the same vertex property layout.");
     }
-    return solidFromManifold(runtime.Manifold[operation](requireSolidManifold(a, `csg2 ${operation}`), requireSolidManifold(b, `csg2 ${operation}`)), ai._numProp);
+    return solidFromManifold(runtime.Manifold[operation](requireSolidManifold(a, `csg2 ${operation}`), requireSolidManifold(b, `csg2 ${operation}`)), a._numProp);
 }
 
+/** Returns the boolean difference (`a` − `b`) of two solids as a new solid. */
 export function csg2Subtract(a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     return runBooleanOperation("difference", a, b);
 }
 
+/** Returns the boolean intersection (`a` ∩ `b`) of two solids as a new solid. */
 export function csg2Intersect(a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     return runBooleanOperation("intersection", a, b);
 }
 
+/** Returns the boolean union (`a` ∪ `b`) of two solids as a new solid. */
 export function csg2Add(a: Csg2Solid, b: Csg2Solid): Csg2Solid {
     return runBooleanOperation("union", a, b);
 }
 
+/** Frees the WASM memory backing a solid. The solid must not be used afterwards. */
 export function disposeCsg2(solid: Csg2Solid): void {
-    const internal = internalSolid(solid);
-    if (internal._manifold) {
-        internal._manifold.delete();
-        internal._manifold = null;
+    if (solid._manifold) {
+        solid._manifold.delete();
+        solid._manifold = null;
     }
 }
 
@@ -236,30 +239,31 @@ function createMeshFromOutput(engine: EngineContext, name: string, output: { pos
     if (output.positions.length === 0) {
         throw new Error(`Unable to build CSG2 mesh "${name}". Manifold has 0 vertices for this output.`);
     }
-    return createMeshFromData(
-        engine as EngineContextInternal,
-        name,
-        new Float32Array(output.positions),
-        new Float32Array(output.normals),
-        new Uint32Array(output.indices),
-        new Float32Array(output.uvs)
-    );
+    return createMeshFromData(engine, name, new Float32Array(output.positions), new Float32Array(output.normals), new Uint32Array(output.indices), new Float32Array(output.uvs));
 }
 
+/**
+ * Triangulates a {@link Csg2Solid} into a single renderable mesh.
+ * @param name - Name for the created mesh.
+ */
 export function createMeshFromCsg2(engine: EngineContext, solid: Csg2Solid, name = "csg2"): Mesh {
     requireRuntime();
-    const internal = internalSolid(solid);
     const mesh = requireSolidManifold(solid, `createMeshFromCsg2("${name}")`).getMesh();
     const output = { positions: [] as number[], normals: [] as number[], uvs: [] as number[], indices: [] as number[] };
     for (let i = 0; i < mesh.triVerts.length; i += 3) {
-        appendTriangle(output, mesh, mesh.triVerts, internal._numProp, i);
+        appendTriangle(output, mesh, mesh.triVerts, solid._numProp, i);
     }
     return createMeshFromOutput(engine, name, output);
 }
 
+/**
+ * Triangulates a {@link Csg2Solid} into one mesh per material slot.
+ * @param materials - Materials indexed by the material slots assigned during construction.
+ * @param name - Base name; each sub-mesh is suffixed with its slot index.
+ * @returns One mesh per distinct material slot, each assigned its corresponding material.
+ */
 export function createMeshesFromCsg2(engine: EngineContext, solid: Csg2Solid, materials: readonly Material[], name = "csg2"): Mesh[] {
     const runtime = requireRuntime();
-    const internal = internalSolid(solid);
     const mesh = requireSolidManifold(solid, `createMeshesFromCsg2("${name}")`).getMesh();
     const outputs: Array<{ materialSlot: number; positions: number[]; normals: number[]; uvs: number[]; indices: number[] }> = [];
 
@@ -275,7 +279,7 @@ export function createMeshesFromCsg2(engine: EngineContext, solid: Csg2Solid, ma
         const start = mesh.runIndex[run] ?? 0;
         const end = mesh.runIndex[run + 1] ?? mesh.triVerts.length;
         for (let i = start; i < end; i += 3) {
-            appendTriangle(output, mesh, mesh.triVerts, internal._numProp, i);
+            appendTriangle(output, mesh, mesh.triVerts, solid._numProp, i);
         }
     }
 

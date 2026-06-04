@@ -4,13 +4,13 @@
  *  no shared MR image). Scene1 (BoomBox) and any vanilla-PBR glTF skip this
  *  module entirely. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { cloneTexture2D } from "../texture/texture-2d.js";
-import type { PbrMaterialProps, PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData } from "./gltf-material.js";
-import { linearToSrgbByte } from "../color/color.js";
+import { linearToSrgbByte } from "../math/color.js";
 import type { TextureWrapFn, GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import { uploadTex } from "./gltf-pbr-builder.js";
 
@@ -40,7 +40,7 @@ function wrapTexCoord(tex: Texture2D, texInfo: unknown): Texture2D {
  *  default texture building but honors per-textureInfo wrapping so
  *  KHR_texture_transform can attach per-texture UV state. */
 export function buildDefaultPbrTexturesExt(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
@@ -87,7 +87,7 @@ export function buildDefaultPbrTexturesExt(
 }
 
 /** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props. */
-export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialPropsInternal {
+export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
     const ef = mat._emissiveFactor;
     const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
     // Precompute UV-transform presence so the renderer doesn't scan 5 textures
@@ -104,6 +104,7 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         normalTexture: tex.normalTexture,
         ormTexture: tex.ormTexture,
         emissiveTexture: tex.emissiveTexture,
+        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._occlusionTexCoord ? { occlusionTexCoord: mat._occlusionTexCoord } : undefined),
@@ -115,8 +116,13 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : undefined),
         ...(hasAnyUvTx ? { _hasUvTx: true } : undefined),
+        ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
-    } as PbrMaterialPropsInternal;
+    } as PbrMaterialProps;
+}
+
+function isDefaultBaseColorFactor(f: readonly number[]): boolean {
+    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }

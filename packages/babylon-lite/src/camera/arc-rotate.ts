@@ -3,9 +3,11 @@ import type { Vec3, Mat4 } from "../math/types.js";
 import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import type { Mat4Storage } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 /** ArcRotateCamera — orbits around a target point.
  *  Uses Babylon.js convention: left-handed, alpha=rotation around Y, beta=elevation.
@@ -40,6 +42,29 @@ export interface ArcRotateCamera extends Camera, IWorldMatrixProvider, IParentab
     inertialPanningX: number;
     inertialPanningY: number;
 
+    /**
+     * Optional orbit limits enforced by {@link attachControl}'s per-frame loop.
+     * `undefined` means unbounded on that side. Set these via {@link setCameraLimits}
+     * so the current pose is clamped immediately (and inertia zeroed at the wall),
+     * avoiding any overshoot-then-snap jiggle. Angles are in radians.
+     */
+    lowerAlphaLimit?: number;
+    upperAlphaLimit?: number;
+    lowerBetaLimit?: number;
+    upperBetaLimit?: number;
+    lowerRadiusLimit?: number;
+    upperRadiusLimit?: number;
+
+    /** @internal Self-clamp hook installed by {@link setCameraLimits}. The
+     *  alpha/beta/radius setters invoke it immediately after every mutation, so
+     *  the camera is never observably out of its orbit limits — at any point a
+     *  per-frame callback (e.g. a camera-pinned skybox) reads it. This is what
+     *  makes a direct pinch write or inertial overshoot snap to the wall in the
+     *  same statement that caused it, with no one-frame "blink". Undefined until
+     *  limits are set, so cameras that never call setCameraLimits carry none of
+     *  the clamp code and the setters' `?.()` call is a single dead check. */
+    _clampToLimits?: () => void;
+
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
@@ -62,11 +87,31 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         };
     }
 
+    // Reusable local-world matrix.
+    const _localMat: Mat4 = allocateMat4();
+
     function cameraLocalWorldMatrix(): Mat4 {
         const eye = localEyePosition();
         const v = mat4LookAtLH(eye, cam.target, Vec3Up);
+        const m = _localMat as unknown as Mat4Storage;
         // Transpose upper 3×3 of view = camera-to-world rotation; translation = eye.
-        return new Float32Array([v[0]!, v[4]!, v[8]!, 0, v[1]!, v[5]!, v[9]!, 0, v[2]!, v[6]!, v[10]!, 0, eye.x, eye.y, eye.z, 1]) as Mat4;
+        m[0] = v[0]!;
+        m[1] = v[4]!;
+        m[2] = v[8]!;
+        m[3] = 0;
+        m[4] = v[1]!;
+        m[5] = v[5]!;
+        m[6] = v[9]!;
+        m[7] = 0;
+        m[8] = v[2]!;
+        m[9] = v[6]!;
+        m[10] = v[10]!;
+        m[11] = 0;
+        m[12] = eye.x;
+        m[13] = eye.y;
+        m[14] = eye.z;
+        m[15] = 1;
+        return _localMat;
     }
 
     const wm = createWorldMatrixState(cameraLocalWorldMatrix);
@@ -92,6 +137,13 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
         inertialPanningX: 0,
         inertialPanningY: 0,
 
+        // Matrix caches use the process-global allocator — F32 by default,
+        // F64 after an HPM engine is created. Same backing as the camera world
+        // matrix above, so the camera's storage precision is uniform.
+        _viewCache: allocateMat4() as unknown as Mat4Storage,
+        _projCache: allocateMat4() as unknown as Mat4Storage,
+        _vpCache: allocateMat4() as unknown as Mat4Storage,
+
         get parent() {
             return wm.parent;
         },
@@ -114,12 +166,20 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
                 if (scalars[key] !== v) {
                     scalars[key] = v;
                     onDirty();
+                    // Self-clamp into orbit limits the instant a value changes, so
+                    // no caller (pinch direct-write, inertia, auto-rotate) can leave
+                    // the camera transiently out of bounds for any per-frame reader.
+                    // No-op (and no clamp code bundled) until setCameraLimits runs.
+                    cam._clampToLimits?.();
                 }
             },
             configurable: true,
             enumerable: true,
         });
     }
+
+    // Tag so children parented to this camera get push invalidation (O(1) reads).
+    attachWorldMatrixState(cam, wm);
 
     return cam;
 }

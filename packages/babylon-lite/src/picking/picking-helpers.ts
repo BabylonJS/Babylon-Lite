@@ -1,10 +1,10 @@
 import type { PickingInfo } from "./picking-info.js";
-import type { MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import { normalizeVec3 } from "../math/normalize-vec3.js";
 
 /**
  * Get the interpolated normal at the picked point.
- * Requires detailed picking (faceId >= 0) and mesh._cpuNormals.
+ * Requires detailed picking (`faceId >= 0`) and mesh._cpuNormals.
  * @param useWorldCoordinates - if true, transform normal by world matrix (default: false)
  */
 export function getPickedNormal(info: PickingInfo, useWorldCoordinates = false): [number, number, number] | null {
@@ -15,7 +15,7 @@ export function getPickedNormal(info: PickingInfo, useWorldCoordinates = false):
         return info.pickedNormal;
     }
 
-    const mi = info.pickedMesh as MeshInternal | undefined;
+    const mi = info.pickedMesh as Mesh | undefined;
     if (info.faceId < 0 || !mi || !mi._cpuNormals || !mi._cpuIndices) {
         return null;
     }
@@ -58,10 +58,10 @@ export function getPickedFaceNormal(info: PickingInfo, useWorldCoordinates = fal
 
 /**
  * Get the interpolated UV coordinates at the picked point.
- * Requires detailed picking (faceId >= 0) and mesh._cpuUvs.
+ * Requires detailed picking (`faceId >= 0`) and mesh._cpuUvs.
  */
 export function getPickedUV(info: PickingInfo): [number, number] | null {
-    const mi = info.pickedMesh as MeshInternal | undefined;
+    const mi = info.pickedMesh as Mesh | undefined;
     if (info.faceId < 0 || !mi || !mi._cpuUvs || !mi._cpuIndices) {
         return null;
     }

@@ -15,7 +15,7 @@
  */
 
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
 
 // ── Basis transcoder format IDs (match BinomialLLC basis_transcoder.js) ─────
@@ -205,7 +205,7 @@ function pickTarget(device: GPUDevice, sourceHasAlpha: boolean): BasisTargetForm
  * @returns A Texture2D.
  */
 export async function loadBasisTexture2D(engine: EngineContext, url: string, opts: Texture2DOptions = {}): Promise<Texture2D> {
-    const device = (engine as EngineContextInternal).device;
+    const device = engine._device;
 
     const [mod, buffer] = await Promise.all([loadBasisModule(), fetch(url).then((r) => r.arrayBuffer())]);
 
@@ -264,7 +264,7 @@ export async function loadBasisTexture2D(engine: EngineContext, url: string, opt
         const magF = opts.magFilter ?? "linear";
         const mipF: GPUMipmapFilterMode = mips.length > 1 ? "linear" : "nearest";
         const allLinear = minF === "linear" && magF === "linear" && mipF === "linear";
-        const sampler = getOrCreateSampler(engine as EngineContextInternal, {
+        const sampler = getOrCreateSampler(engine, {
             addressModeU: opts.addressModeU ?? "repeat",
             addressModeV: opts.addressModeV ?? "repeat",
             minFilter: minF,

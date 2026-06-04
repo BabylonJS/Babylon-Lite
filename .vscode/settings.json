@@ -15,5 +15,8 @@
     },
     "[json]": {
         "editor.defaultFormatter": "esbenp.prettier-vscode"
-    }
+    },
+    "vitest.rootConfig": "./vitest.config.ts",
+    "vitest.workspaceConfig": "./vitest.config.ts",
+    "vitest.disableWorkspaceWarning": true
 }

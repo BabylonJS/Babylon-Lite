@@ -10,7 +10,6 @@
 
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
 import { loadTexture2D } from "./texture-2d.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
 import { getCompressedFormat, suffixToFeature } from "./compressed-formats.js";
@@ -129,8 +128,8 @@ function parseKtx1(buffer: ArrayBuffer): KtxParseResult {
 
 // ── GPU upload ──────────────────────────────────────────────────────
 
-function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
-    const device = engine.device;
+function uploadCompressed(engine: EngineContext, parsed: KtxParseResult, opts: Texture2DOptions): Texture2D {
+    const device = engine._device;
     const fmt = parsed.format;
     const texture = device.createTexture({
         size: { width: parsed.width, height: parsed.height },
@@ -143,7 +142,14 @@ function uploadCompressed(engine: EngineContextInternal, parsed: KtxParseResult,
         const mip = parsed.mips[i]!;
         const blocksPerRow = Math.ceil(mip.width / fmt.blockW);
         const rowBytes = blocksPerRow * fmt.blockBytes;
-        device.queue.writeTexture({ texture, mipLevel: i }, mip.data as Uint8Array<ArrayBuffer>, { bytesPerRow: rowBytes }, { width: mip.width, height: mip.height });
+        // WebGPU requires the copy extent for compressed textures to be the
+        // block-padded (physical) size, not the logical mip size. Tail mips
+        // smaller than the block (e.g. 2×2, 1×1 for a 4×4 block) must be copied
+        // as one full block, otherwise WebGPU rejects copySize as not a multiple
+        // of the block width/height.
+        const copyW = blocksPerRow * fmt.blockW;
+        const copyH = Math.ceil(mip.height / fmt.blockH) * fmt.blockH;
+        device.queue.writeTexture({ texture, mipLevel: i }, mip.data as Uint8Array<ArrayBuffer>, { bytesPerRow: rowBytes }, { width: copyW, height: copyH });
     }
 
     const minF = opts.minFilter ?? "linear";
@@ -201,7 +207,7 @@ function rewriteUrl(baseUrl: string, suffix: string): string {
  * @returns A Texture2D (same interface whether compressed or fallback).
  */
 export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, suffixes: string[], opts: Texture2DOptions = {}): Promise<Texture2D> {
-    const device = (engine as EngineContextInternal).device;
+    const device = engine._device;
 
     // Collect all suffixes whose feature the device supports
     const supported: string[] = [];
@@ -221,7 +227,7 @@ export async function loadKtxTexture2D(engine: EngineContext, baseUrl: string, s
                 throw new Error(`KTX fetch failed: ${resp.status}`);
             }
             const parsed = parseKtx1(await resp.arrayBuffer());
-            return uploadCompressed(engine as EngineContextInternal, parsed, opts);
+            return uploadCompressed(engine, parsed, opts);
         } catch (e) {
             console.warn(`KTX load failed for suffix "${suffix}":`, e);
         }

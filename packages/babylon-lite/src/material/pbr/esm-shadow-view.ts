@@ -6,7 +6,9 @@ import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 
 export interface PbrEsmShadowMaterialView extends MaterialView {
+    /** @internal */
     readonly _esmShadowParamsUBO: GPUBuffer;
+    /** @internal */
     readonly _esmShadowDepthCode: string;
 }
 

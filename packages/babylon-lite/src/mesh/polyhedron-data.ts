@@ -1,6 +1,6 @@
 /** Babylon MeshBuilder polyhedron tables - 15 preset types, indices match
- *  the type parameter in createPolyhedronData({type}).
- *  Copied from @babylonjs/core/Meshes/Builders/polyhedronBuilder.js. */
+ *  the type parameter in `createPolyhedronData({type})`.
+ *  Copied from `@babylonjs/core/Meshes/Builders/polyhedronBuilder.js`. */
 
 export interface PolyhedronSpec {
     vertex: number[][];

@@ -3,7 +3,7 @@
  *  TransformNode is now a pure type alias for SceneNode, giving all scene entities
  *  a common base. createTransformNode delegates to createSceneNode. */
 
-import type { Mesh, MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import type { SceneNode } from "./scene-node.js";
 import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
@@ -44,13 +44,12 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
             clone.children.push(childClone);
         } else if ("_gpu" in child) {
             const mesh = child as unknown as Mesh;
-            const mi = mesh as MeshInternal;
             const meshClone = {
                 ...mesh,
                 name: mesh.name + "_clone",
                 _materialDirty: false,
-                _gpu: { ...mi._gpu },
-            } as unknown as MeshInternal;
+                _gpu: { ...mesh._gpu },
+            };
             initMeshTransform(
                 meshClone,
                 mesh.position.x,

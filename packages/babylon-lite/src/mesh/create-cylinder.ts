@@ -19,6 +19,7 @@ export interface CylinderData {
     indices: Uint32Array;
 }
 
+/** Options for `createCylinderData`. Subset of Babylon's CreateCylinder. */
 export interface CylinderOptions {
     height?: number;
     diameter?: number;

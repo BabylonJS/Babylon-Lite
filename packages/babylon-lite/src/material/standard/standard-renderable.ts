@@ -4,10 +4,9 @@
  *  per-mesh work to `buildSingleStandardRenderable`. The same single-mesh
  *  function is reused by the material-swap path. */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
-import type { SceneContext, SceneContextInternal } from "../../scene/scene.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshInternal } from "../../mesh/mesh.js";
 import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -21,13 +20,14 @@ import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
  *  every Standard renderable since binding updates are single-threaded per frame. */
 const _stdMatScratch = new Float32Array(24);
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
-type ThinInstanceSync = (engine: EngineContextInternal, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
+type ThinInstanceSync = (engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
 
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
@@ -40,8 +40,8 @@ export interface StdFragmentFactories {
  *  The `rebuildSingle` closure is reused later (via `_rebuildSingle` on the group
  *  builder) for material swaps + per-pass material overrides. */
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine;
+    const device = engine._device;
     const { tiSync, tiFragment, shadowFragment } = factories;
 
     // Collect per-light shadow info.
@@ -105,7 +105,8 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const meshShadowGens = receiveShadows ? shadowLights.map((sl) => sl.gen) : [];
 
         const meshUboData = new Float32Array(bindings._composed._meshUboSpec._totalBytes / 4);
-        meshUboData.set(mesh.worldMatrix, 0);
+        const _packMeshWorld = engine._makePackMeshWorld?.(s as SceneContext) ?? packMat4IntoF32;
+        _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
         const meshUBO = createUniformBuffer(engine, meshUboData);
         const textureLevel = (features & NEEDS_UV) !== 0 ? 1.0 : 0;
@@ -142,7 +143,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        (s as SceneContextInternal)._meshDisposables.set(mesh, [
+        s._meshDisposables.set(mesh, [
             () => {
                 for (const t of boundTextures) {
                     releaseTexture(t);
@@ -153,15 +154,16 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
         const sortCenter = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number];
-        const update = (): void => {
-            if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+        const _baseUpdate = (): void => {
+            const worldVersion = mesh.worldMatrixVersion;
+            if (worldVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
                 sortCenter[0] = mesh.worldMatrix[12]!;
                 sortCenter[1] = mesh.worldMatrix[13]!;
                 sortCenter[2] = mesh.worldMatrix[14]!;
-                meshUboData.set(mesh.worldMatrix, 0);
+                _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
-                _lastWorldVersion = mesh.worldMatrixVersion;
+                _lastWorldVersion = worldVersion;
                 _lastLightsCount = s.lights.length;
             }
             const uboVersion = mat._uboVersion;
@@ -172,6 +174,15 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 device.queue.writeBuffer(materialUBO, 0, _stdMatScratch.buffer, 0, 96);
             }
         };
+        // FO-version wrapper applied only when the engine has floating-origin
+        // on. The wrapper lives in the dynamic-imported `floating-origin.ts`
+        // module and is the sole owner of `_lastFoVersion` tracking. For
+        // non-LWR engines `_wrapRenderableForFO` is undefined and `update`
+        // is the bare closure — no FO bytes in the closure body.
+        const _invalidate = (): void => {
+            _lastWorldVersion = -1;
+        };
+        const update = engine._wrapRenderableForFO?.(_baseUpdate, s as SceneContext, _invalidate) ?? _baseUpdate;
 
         const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
             // For per-pass material overrides, skip the mesh.material === mat guard
@@ -179,15 +190,16 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             if (!isOverride && mesh.material !== mat) {
                 return 0;
             }
-            const g = (mesh as MeshInternal)._gpu;
+            const g = mesh._gpu;
             let slot = 0;
-            pass.setVertexBuffer(slot++, g.positionBuffer);
-            pass.setVertexBuffer(slot++, g.normalBuffer);
+            const vb = g._vbLayout;
+            pass.setVertexBuffer(slot++, g.positionBuffer, vb?._p?._offset);
+            pass.setVertexBuffer(slot++, g.normalBuffer, vb?._n?._offset);
             if (needsUV) {
-                pass.setVertexBuffer(slot++, g.uvBuffer);
+                pass.setVertexBuffer(slot++, g.uvBuffer, vb?._u?._offset);
             }
             if (needsUV2 && g.uv2Buffer) {
-                pass.setVertexBuffer(slot++, g.uv2Buffer);
+                pass.setVertexBuffer(slot++, g.uv2Buffer, vb?._u2?._offset);
             }
 
             const ti = hasThinInstances ? mesh.thinInstances : null;
@@ -215,7 +227,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             bind(eng, sig) {
                 return {
                     renderable: r,
-                    pipeline: getOrCreateStandardPipeline(eng as EngineContextInternal, sig, bindings),
+                    pipeline: getOrCreateStandardPipeline(eng as EngineContext, sig, bindings),
                     update,
                     draw,
                 };
@@ -228,7 +240,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
-    (scene as SceneContextInternal)._disposables.push(
+    scene._disposables.push(
         () => clearStandardPipelineCache(),
         () => clearSamplerCache(engine)
     );

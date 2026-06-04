@@ -25,12 +25,12 @@
  *  — scenes that do not use the geometry renderer task pay zero bytes for it.
  */
 
-import type { EngineContext, EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
-import type { Mesh, MeshInternal } from "../../mesh/mesh.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGroupBuilder, Renderable } from "../../render/renderable.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
-import type { SceneContext, SceneContextInternal } from "../../scene/scene-core.js";
+import type { SceneContext } from "../../scene/scene-core.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
@@ -101,8 +101,8 @@ function _variantKey(meshFeatures: number): number {
 /** Build a {@link Renderable} for one mesh drawn through a Standard geometry view.
  *  Reuses or creates per-(view, mesh-variant) shared resources on `view._geometry`. */
 export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh, view: StandardGeometryMaterialView): Renderable {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine as EngineContext;
+    const device = engine._device;
     const source = view.source as StandardMaterialProps;
     // Geometry pass has no receiver path — pass receiveShadows=false.
     const meshFeatures = _computeMeshFeatures(mesh, false);
@@ -125,8 +125,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     for (const t of boundTextures) {
         acquireTexture(t);
     }
-    const prevDisposables = (scene as SceneContextInternal)._meshDisposables.get(mesh) ?? [];
-    (scene as SceneContextInternal)._meshDisposables.set(mesh, [
+    const prevDisposables = (scene as SceneContext)._meshDisposables.get(mesh) ?? [];
+    (scene as SceneContext)._meshDisposables.set(mesh, [
         ...prevDisposables,
         () => {
             for (const t of boundTextures) {
@@ -170,7 +170,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             return 0;
         }
         pass.setBindGroup(1, bg);
-        const g = (mesh as MeshInternal)._gpu;
+        const g = (mesh as Mesh)._gpu;
         let slot = 0;
         pass.setVertexBuffer(slot++, g.positionBuffer);
         pass.setVertexBuffer(slot++, g.normalBuffer);
@@ -200,7 +200,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             return {
                 renderable: r,
-                pipeline: _getOrCreateGeometryPipeline(eng as EngineContextInternal, sig, view, res),
+                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res),
                 update,
                 draw,
             };
@@ -212,7 +212,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 
 // ─── Shared per-view resources ─────────────────────────────────────────────
 
-function _ensureViewResources(view: StandardGeometryMaterialView, engine: EngineContextInternal, meshFeatures: number, variantKey: number): StandardGeometryViewResources {
+function _ensureViewResources(view: StandardGeometryMaterialView, engine: EngineContext, meshFeatures: number, variantKey: number): StandardGeometryViewResources {
     let cache = view._geometry as Map<number, StandardGeometryViewResources> | undefined;
     if (!cache) {
         cache = new Map();
@@ -261,7 +261,7 @@ function _ensureViewResources(view: StandardGeometryMaterialView, engine: Engine
     }
 
     const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor);
-    const device = engine.device;
+    const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     // Pipeline layout: scene BG (group 0) + mesh BG (group 1). Geometry pass
     // has no shadow receiver group.
@@ -331,7 +331,7 @@ function _ensureViewResources(view: StandardGeometryMaterialView, engine: Engine
 }
 
 function _createGeometryMeshBindGroup(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     view: StandardGeometryMaterialView,
     res: StandardGeometryViewResources,
     _mesh: Mesh,
@@ -362,11 +362,11 @@ function _createGeometryMeshBindGroup(
     if (view._gpUBO) {
         entries.push({ binding: nextBinding++, resource: { buffer: view._gpUBO } });
     }
-    return engine.device.createBindGroup({ layout: res._meshBGL, entries });
+    return engine._device.createBindGroup({ layout: res._meshBGL, entries });
 }
 
 function _getOrCreateGeometryPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     sig: RenderTargetSignature,
     view: StandardGeometryMaterialView,
     res: StandardGeometryViewResources
@@ -376,7 +376,7 @@ function _getOrCreateGeometryPipeline(
     if (cached) {
         return cached;
     }
-    const device = engine.device;
+    const device = engine._device;
     const formats = (sig as RenderTargetSignature & { _colorFormats?: readonly GPUTextureFormat[] })._colorFormats ?? (sig._colorFormat ? [sig._colorFormat] : []);
     if (formats.length === 0) {
         throw new Error("standard-geometry: render target has no color attachments");

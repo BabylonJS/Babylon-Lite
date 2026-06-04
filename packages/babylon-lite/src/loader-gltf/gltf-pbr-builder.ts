@@ -2,14 +2,14 @@
  *  Used by both the core loader (`load-gltf.ts`) and the variants loader
  *  (`gltf-variants.ts`) so they can't drift. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { PbrMaterialProps, PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { mipLevelCount } from "../texture/mip-count.js";
-import { linearToSrgbByte } from "../color/color.js";
+import { linearToSrgbByte } from "../math/color.js";
 
 /** Texture post-processor composed from every active feature's `wrapTexture`
  *  hook. Identity when no feature contributes one (common case). Kept simple
@@ -17,17 +17,17 @@ import { linearToSrgbByte } from "../color/color.js";
 export type TextureWrapFn = (tex: Texture2D, texInfo: unknown) => Texture2D;
 export const identityTexWrap: TextureWrapFn = (tex) => tex;
 
-export type GenerateMipmapsFn = (engine: EngineContextInternal, texture: GPUTexture, face?: number) => void;
+export type GenerateMipmapsFn = (engine: EngineContext, texture: GPUTexture, face?: number) => void;
 
 export function uploadTex(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     bitmap: ImageBitmap | null,
     srgb: boolean,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
     fallback?: Uint8Array
 ): Texture2D {
-    const device = engine.device;
+    const device = engine._device;
     const w = bitmap?.width ?? 1;
     const h = bitmap?.height ?? 1;
     const fmt: GPUTextureFormat = srgb ? "rgba8unorm-srgb" : "rgba8unorm";
@@ -55,7 +55,7 @@ export function uploadTex(
     return result;
 }
 
-/** Assemble a PbrMaterialPropsInternal from parsed glTF material data + already-uploaded
+/** Assemble a PbrMaterialProps from parsed glTF material data + already-uploaded
  *  textures + per-ext fragment overrides. Fast-path: no wrapTex, no occlusionOnUv2,
  *  no occlusionTexture. Slow-path additions live in gltf-pbr-builder-ext.ts. */
 export function assemblePbrProps(
@@ -65,7 +65,7 @@ export function assemblePbrProps(
     normalTexture: Texture2D | undefined,
     emissiveTexture: Texture2D | undefined,
     extLayers: Partial<PbrMaterialProps> | undefined
-): PbrMaterialPropsInternal {
+): PbrMaterialProps {
     const ef = mat._emissiveFactor;
     const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
     return {
@@ -73,6 +73,7 @@ export function assemblePbrProps(
         normalTexture,
         ormTexture,
         emissiveTexture,
+        ...(mat._baseColorImage && !isDefaultBaseColorFactor(mat._baseColorFactor) ? { baseColorFactor: mat._baseColorFactor } : undefined),
         doubleSided: mat._doubleSided,
         occlusionStrength: mat._occlusionImage ? 1.0 : 0,
         ...(mat._normalScale !== 1 ? { normalTextureScale: mat._normalScale } : undefined),
@@ -81,17 +82,22 @@ export function assemblePbrProps(
         enableSpecularAA: true,
         ...(mat._alphaMode === "BLEND" ? { alphaBlend: true, alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : undefined),
+        ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
         _buildGroup: pbrGroupBuilder,
         _uboVersion: 0,
-    } as PbrMaterialPropsInternal;
+    } as PbrMaterialProps;
+}
+
+function isDefaultBaseColorFactor(f: readonly number[]): boolean {
+    return f[0] === 1 && f[1] === 1 && f[2] === 1 && f[3] === 1;
 }
 
 /** Build the always-present default textures (base color + ORM) from a parsed glTF material.
  *  Fast-path version: no wrapTex, no occlusion-on-uv2 handling. The slow path lives
  *  in gltf-pbr-builder-ext.ts and is lazy-loaded only when needed. */
 export function buildDefaultPbrTextures(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,

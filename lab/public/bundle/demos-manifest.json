@@ -1,0 +1,38 @@
+{
+  "torus-states": {
+    "rawKB": 24.5,
+    "gzipKB": 8.4
+  },
+  "doom": {
+    "rawKB": 123.1,
+    "gzipKB": 40.8
+  },
+  "quake": {
+    "rawKB": 124.8,
+    "gzipKB": 45
+  },
+  "minecraft": {
+    "rawKB": 104.5,
+    "gzipKB": 37.4
+  },
+  "offscreen": {
+    "rawKB": 177.6,
+    "gzipKB": 72.8
+  },
+  "freeciv": {
+    "rawKB": 50.9,
+    "gzipKB": 20
+  },
+  "mosquito-amber": {
+    "rawKB": 101.3,
+    "gzipKB": 39.4
+  },
+  "littlest-tokyo": {
+    "rawKB": 57,
+    "gzipKB": 22
+  },
+  "bath-day": {
+    "rawKB": 174.8,
+    "gzipKB": 59.5
+  }
+}

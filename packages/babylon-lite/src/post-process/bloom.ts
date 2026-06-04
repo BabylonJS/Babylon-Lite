@@ -1,12 +1,13 @@
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
 import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskSettings } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import { createBlurPostProcessTask, type BlurPostProcessTask } from "./blur.js";
 import { createExtractHighlightsPostProcessTask, type ExtractHighlightsPostProcessTask } from "./extract-highlights.js";
 
+/** Configuration for `createBloomPostProcessTask`: highlight `threshold`/`exposure`, blur `kernel`, merge `weight`, and `bloomScale`. */
 export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     weight?: number;
     kernel?: number;
@@ -15,6 +16,7 @@ export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
     bloomScale?: number;
 }
 
+/** A composite post-process task that extracts highlights, blurs them, and merges the glow back over the source image. */
 export interface BloomPostProcessTask extends Task, PostProcessTaskSettings {
     readonly name: string;
     sourceTexture: RenderTarget;
@@ -25,6 +27,7 @@ export interface BloomPostProcessTask extends Task, PostProcessTaskSettings {
     threshold: number;
     exposure: number;
     readonly bloomScale: number;
+    /** Recompute and upload the uniforms of all sub-passes (extract, blur X/Y, merge) from current settings. */
     updateUniforms(): void;
 }
 
@@ -47,9 +50,15 @@ const BLOOM_MERGE_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->v
 
 const scaledKernel = (kernel: number, scale: number): number => kernel * scale;
 
-export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BloomPostProcessTask {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
+/**
+ * Create a bloom post-process task by chaining highlight extraction, separable blur, and a merge pass.
+ * @param config - Bloom parameters and source/target settings.
+ * @param engine - The owning engine.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
+ * @returns The bloom post-process task.
+ */
+export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BloomPostProcessTask {
+    const eng = engine as EngineContext;
     const params = {
         sourceTexture: config.sourceTexture,
         targetTexture: config.targetTexture ?? null,
@@ -132,7 +141,7 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
     const task: BloomTaskInternal = {
         name,
         engine: eng,
-        scene: sc,
+        scene,
         _passes: [],
         sourceTexture: params.sourceTexture,
         sourceSamplingMode: params.sourceSamplingMode,
@@ -257,7 +266,7 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
     return task;
 }
 
-function createScaledBloomTarget(label: string, source: RenderTarget, scale: number, engine: EngineContextInternal): RenderTarget {
+function createScaledBloomTarget(label: string, source: RenderTarget, scale: number, engine: EngineContext): RenderTarget {
     const srcDesc = source._descriptor;
     if (!srcDesc.colorFormat) {
         throw new Error(`BloomPostProcessTask "${label}": sourceTexture must have a colorFormat.`);
@@ -274,7 +283,7 @@ function createScaledBloomTarget(label: string, source: RenderTarget, scale: num
     });
 }
 
-function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number, engine: EngineContextInternal): void {
+function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number, engine: EngineContext): void {
     const colorFormat = source._descriptor.colorFormat;
     if (!colorFormat) {
         throw new Error(`BloomPostProcessTask "${target._descriptor.label ?? "target"}": sourceTexture must have a colorFormat.`);
@@ -287,7 +296,7 @@ function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, sca
     };
 }
 
-function resolveSourceSize(source: RenderTarget, engine: EngineContextInternal): { width: number; height: number } {
+function resolveSourceSize(source: RenderTarget, engine: EngineContext): { width: number; height: number } {
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }

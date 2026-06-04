@@ -49,6 +49,8 @@ export const PBR2_HAS_UV_TRANSFORM = 1 << 9;
 export const PBR2_HAS_REFLECTANCE_FACTORS = 1 << 10;
 /** Material samples occlusion from TEXCOORD_1 when the mesh provides UV2. */
 export const PBR2_HAS_UV2 = 1 << 11;
+/** Material multiplies textured albedo by a non-default glTF baseColorFactor. */
+export const PBR2_HAS_BASE_COLOR_FACTOR = 1 << 12;
 /** Material has a sheen texture with a KHR_texture_transform. Sheen owns its
  *  own `sheenUVm`/`sheenUVt` UBO fields and applies txfUV locally. */
 export const PBR2_HAS_SHEEN_UV_TX = 1 << 13;
@@ -58,3 +60,12 @@ export const PBR2_LINEAR_IMAGE_PROCESSING = 1 << 14;
 export const PBR2_NO_COLOR_OUTPUT = 1 << 15;
 /** Material view runs discard/clip logic and writes exponential shadow-map color. */
 export const PBR2_ESM_SHADOW_OUTPUT = 1 << 16;
+/** Material has native PBR iridescence enabled. */
+export const PBR2_HAS_IRIDESCENCE = 1 << 17;
+/** Iridescence intensity texture (R channel). */
+export const PBR2_HAS_IRIDESCENCE_MAP = 1 << 18;
+/** Iridescence thickness texture (G channel). */
+export const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
+/** Material has KHR_materials_dispersion (per-channel chromatic refraction).
+ *  Implies PBR2_HAS_VOLUME (the extension requires KHR_materials_volume). */
+export const PBR2_HAS_DISPERSION = 1 << 20;

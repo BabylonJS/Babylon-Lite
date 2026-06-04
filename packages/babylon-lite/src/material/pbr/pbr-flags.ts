@@ -16,32 +16,41 @@ export type PbrExtPhase = "vertex" | "base-tex" | "ibl" | "fragment";
 
 /** @internal Fragment creation context threaded through `PbrExt.frag`. */
 export interface _PbrFragCtx {
+    /** @internal */
     readonly _features: number;
+    /** @internal */
     readonly _features2: number;
-    /** Mesh feature bits, separate from material feature bits. */
+    /** @internal Mesh feature bits, separate from material feature bits. */
     readonly _meshFeatures: number;
+    /** @internal */
     readonly _hasIbl: boolean;
+    /** @internal */
     readonly _hasAnyNormal: boolean;
+    /** @internal */
     readonly _hasSpecularAA: boolean;
-    /** Aniso bent-normal WGSL (IBL only). */
+    /** @internal Aniso bent-normal WGSL (IBL only). */
     readonly _anisoBentNormalCode?: string;
-    /** Pre-baked skybox WGSL (IBL only). */
+    /** @internal Pre-baked skybox WGSL (IBL only). */
     readonly _iblSkyboxCalc?: string;
 }
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
 export interface _PbrBindCtx {
-    readonly _engine: import("../../engine/engine.js").EngineContextInternal;
+    /** @internal */
+    readonly _engine: import("../../engine/engine.js").EngineContext;
+    /** @internal */
     readonly _features: number;
+    /** @internal */
     readonly _features2: number;
-    /** Mesh feature bits, separate from material feature bits. */
+    /** @internal Mesh feature bits, separate from material feature bits. */
     readonly _meshFeatures: number;
+    /** @internal */
     readonly _material: unknown;
-    /** Populated for "vertex" phase (skeleton, morph). */
+    /** @internal Populated for "vertex" phase (skeleton, morph). */
     readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null };
-    /** Populated for "ibl" phase. */
+    /** @internal Populated for "ibl" phase. */
     readonly _env?: { brdfLutView: GPUTextureView; brdfSampler: GPUSampler; specularCubeView: GPUTextureView; cubeSampler: GPUSampler } | null;
-    /** Per-render-task scene-color snapshot for transmissive RTT refraction. */
+    /** @internal Per-render-task scene-color snapshot for transmissive RTT refraction. */
     readonly _refractionTexture?: Texture2D | null;
 }
 
@@ -52,7 +61,7 @@ export interface _PbrBindCtx {
 export interface PbrExt {
     readonly id: string;
     readonly phase: PbrExtPhase;
-    /** Contribute feature bits for a given material. Returns {f,f2} to OR in. */
+    /** Contribute feature bits for a given material. Returns `{f,f2}` to OR in. */
     detect?(mat: unknown): { f: number; f2: number };
     /** Contribute a ShaderFragment (null if gated off for this variant). */
     frag?(ctx: _PbrFragCtx): ShaderFragment | null;

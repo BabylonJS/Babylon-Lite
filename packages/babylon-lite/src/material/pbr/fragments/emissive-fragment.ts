@@ -14,7 +14,7 @@ import { PBR_HAS_EMISSIVE_COLOR, PBR_HAS_EMISSIVE } from "../pbr-flag-bits.js";
 
 /**
  * Create an emissive-color fragment.
- * @param hasEmissiveTexture Whether the material also has an emissive texture.
+ * @param hasEmissiveTexture - Whether the material also has an emissive texture.
  */
 export function createEmissiveColorFragment(hasEmissiveTexture: boolean): ShaderFragment {
     return {
@@ -44,7 +44,7 @@ export function writeEmissiveUBO(data: Float32Array, material: PbrMaterialProps,
     data[off + 2] = material.emissiveColor[2]!;
 }
 
-export const emissiveColorExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "emissive-color",
     phase: "fragment",
     frag(ctx) {

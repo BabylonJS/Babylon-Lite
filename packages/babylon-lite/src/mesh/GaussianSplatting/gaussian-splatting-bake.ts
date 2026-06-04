@@ -57,6 +57,12 @@ function quatMultiply(ax: number, ay: number, az: number, aw: number, bx: number
     return [aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz];
 }
 
+/**
+ * Bakes a transform matrix directly into a mesh's splat vertices, rewriting each splat's
+ * position, scale, and orientation so the mesh renders identically with an identity transform.
+ * @param mesh - Gaussian Splatting mesh to modify in place.
+ * @param transform - World-space transform to bake into the splat data.
+ */
 export function bakeTransformIntoVertices(mesh: GaussianSplattingMesh, transform: Mat4): void {
     const arrayBuffer = mesh.splatsData;
     const newBuffer = arrayBuffer.slice(0);
@@ -117,6 +123,11 @@ export function bakeTransformIntoVertices(mesh: GaussianSplattingMesh, transform
     mesh.updateData(newBuffer);
 }
 
+/**
+ * Bakes the mesh's current world matrix into its splat vertices, then resets the mesh's
+ * position, rotation, and scaling to identity so the visual result is unchanged.
+ * @param mesh - Gaussian Splatting mesh to modify in place.
+ */
 export function bakeCurrentTransformIntoVertices(mesh: GaussianSplattingMesh): void {
     const transform = mesh.worldMatrix;
     bakeTransformIntoVertices(mesh, transform);

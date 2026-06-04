@@ -1,6 +1,9 @@
-/** Compose TRS directly into a Float32Array at offset (zero allocation). */
+import type { Mat4Storage } from "./types.js";
+
+/** Compose TRS directly into a Mat4 storage view at offset (zero allocation).
+ *  Storage may be F32- or F64-backed. */
 export function mat4ComposeInto(
-    dst: Float32Array,
+    dst: Mat4Storage,
     off: number,
     tx: number,
     ty: number,

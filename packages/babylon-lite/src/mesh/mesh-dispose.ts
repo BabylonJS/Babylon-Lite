@@ -1,14 +1,16 @@
-import type { Mesh, MeshInternal } from "./mesh.js";
+import type { Mesh } from "./mesh.js";
 
 /** Destroy all GPU resources owned by a mesh (vertex buffers, skeleton, morph targets). */
 export function disposeMeshGpu(mesh: Mesh): void {
-    const g = (mesh as MeshInternal)._gpu;
+    const g = mesh._gpu;
     g.positionBuffer.destroy();
     g.normalBuffer.destroy();
     g.uvBuffer.destroy();
     g.indexBuffer.destroy();
     g.tangentBuffer?.destroy();
     g.uv2Buffer?.destroy();
+    mesh.thinInstances?._gpuBuffer?.destroy();
+    mesh.thinInstances?._colorGpuBuffer?.destroy();
     const sk = mesh.skeleton;
     if (sk) {
         sk.boneTexture.destroy();

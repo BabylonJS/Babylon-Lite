@@ -13,7 +13,7 @@ Pick the next available scene number (e.g., `23`) and a descriptive slug:
 
 ### 2. Create the Lite Scene
 
-**`lab/sceneN.html`**
+**`lab/lite/sceneN.html`**
 
 ```html
 <!DOCTYPE html>
@@ -41,12 +41,12 @@ Pick the next available scene number (e.g., `23`) and a descriptive slug:
     <body>
         <canvas id="renderCanvas"></canvas>
         <script src="/loader.js"></script>
-        <script type="module" src="/src/lite/sceneN.ts"></script>
+        <script type="module" src="/lite/src/lite/sceneN.ts"></script>
     </body>
 </html>
 ```
 
-**`lab/src/lite/sceneN.ts`**
+**`lab/lite/src/lite/sceneN.ts`**
 
 ```typescript
 import { createEngine, createSceneContext, createDefaultCamera, attachControl, registerScene, startEngine } from "babylon-lite";
@@ -69,11 +69,11 @@ async function main(): Promise<void> {
 main().catch(console.error);
 ```
 
-> **Tip:** Study existing scenes in `lab/src/lite/` for patterns. If a similar feature already exists (e.g., DDS skybox in scene14, animation in scene7), reuse its approach.
+> **Tip:** Study existing scenes in `lab/lite/src/lite/` for patterns. If a similar feature already exists (e.g., DDS skybox in scene14, animation in scene7), reuse its approach.
 
 ### 3. Create the Babylon.js Reference
 
-**`lab/babylon-ref-sceneN.html`**
+**`lab/lite/babylon-ref-sceneN.html`**
 
 ```html
 <!DOCTYPE html>
@@ -100,16 +100,16 @@ main().catch(console.error);
     </head>
     <body>
         <canvas id="renderCanvas"></canvas>
-        <script type="module" src="/src/bjs/sceneN.ts"></script>
+        <script type="module" src="/lite/src/bjs/sceneN.ts"></script>
     </body>
 </html>
 ```
 
-**`lab/src/bjs/sceneN.ts`** — Implement the same scene using `@babylonjs/core` APIs. This is the pixel-perfect reference. Set `canvas.dataset.ready = "true"` once rendered.
+**`lab/lite/src/bjs/sceneN.ts`** — Implement the same scene using `@babylonjs/core` APIs. This is the pixel-perfect reference. Set `canvas.dataset.ready = "true"` once rendered.
 
 ### 4. Vite Config (Auto-Detected)
 
-HTML files in `lab/` are **auto-detected** by `vite.config.ts` — no manual entry needed.
+HTML files in `lab/lite/` are **auto-detected** by `vite.config.ts` — no manual entry needed.
 
 ### 5. Capture the Golden Reference
 
@@ -126,7 +126,7 @@ npx tsx scripts/capture-golden.ts --scene N
 Or manually screenshot the canvas at `http://localhost:5174/babylon-ref-sceneN.html` and save as:
 
 ```
-reference/sceneN-my-feature/babylon-ref-golden.png
+reference/lite/sceneN-my-feature/babylon-ref-golden.png
 ```
 
 Also copy as thumbnail:
@@ -156,7 +156,7 @@ Add an entry to **`scene-config.json`**:
 
 ### 7. Create the Parity Test
 
-**`tests/parity/scenes/sceneN-my-feature.spec.ts`**
+**`tests/lite/parity/scenes/sceneN-my-feature.spec.ts`**
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -164,7 +164,7 @@ import * as path from "path";
 import { captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(23);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../reference/scene23-my-feature");
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene23-my-feature");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
 test("Scene 23 — My Feature matches Babylon.js reference", async ({ page }) => {
@@ -189,7 +189,7 @@ test("Scene 23 — My Feature matches Babylon.js reference", async ({ page }) =>
 
 ```bash
 # Run the parity test for your scene
-npx playwright test tests/parity/scenes/sceneN-my-feature.spec.ts
+npx playwright test tests/lite/parity/scenes/sceneN-my-feature.spec.ts
 
 # Run the full suite to check for regressions
 pnpm test
@@ -197,14 +197,14 @@ pnpm test
 
 ### Checklist
 
-- [ ] `lab/sceneN.html` created
-- [ ] `lab/src/lite/sceneN.ts` created
-- [ ] `lab/babylon-ref-sceneN.html` created
-- [ ] `lab/src/bjs/sceneN.ts` created
-- [ ] `reference/sceneN-slug/babylon-ref-golden.png` captured
+- [ ] `lab/lite/sceneN.html` created
+- [ ] `lab/lite/src/lite/sceneN.ts` created
+- [ ] `lab/lite/babylon-ref-sceneN.html` created
+- [ ] `lab/lite/src/bjs/sceneN.ts` created
+- [ ] `reference/lite/sceneN-slug/babylon-ref-golden.png` captured
 - [ ] `lab/public/thumbnails/sceneN.png` copied
 - [ ] `scene-config.json` entry added
-- [ ] `tests/parity/scenes/sceneN-slug.spec.ts` created
+- [ ] `tests/lite/parity/scenes/sceneN-slug.spec.ts` created
 - [ ] Parity test passes locally
 - [ ] All existing tests still pass (`pnpm test`)
 
@@ -215,8 +215,8 @@ pnpm test
 Plumbing tests validate engine internals (dispose, material-swap, etc.) using Playwright + WebGPU.
 
 1. Create a test page in `lab/` (HTML + TS)
-2. Create the spec in `tests/plumbing/`
-3. Run: `npx playwright test tests/plumbing/my-test.spec.ts`
+2. Create the spec in `tests/lite/plumbing/`
+3. Run: `npx playwright test tests/lite/plumbing/my-test.spec.ts`
 
 > **Note:** CI uses Chrome's SwiftShader Vulkan backend for WebGPU — no real GPU needed.
 
@@ -224,7 +224,7 @@ Plumbing tests validate engine internals (dispose, material-swap, etc.) using Pl
 
 For pure logic (shader composition, math) that doesn't need a browser:
 
-1. Create `tests/unit/my-feature.test.ts`
+1. Create `tests/lite/unit/my-feature.test.ts`
 2. Use vitest: `describe`, `it`, `expect`
 3. Run: `npx vitest run`
 
@@ -234,19 +234,3 @@ For pure logic (shader composition, math) that doesn't need a browser:
 - Prefix intentionally unused variables with `_` (e.g., `_light`, `_cam`)
 - Use `import type` for type-only imports
 - Never raise bundle-size ceilings or MAD thresholds without explicit approval
-
----
-
-## Reserved Test Scene Numbers
-
-Certain scene number ranges are reserved for specific feature areas. When adding a new scene, pick an ID from the appropriate reserved range (or from the unreserved pool if your scene doesn't belong to a reserved category).
-
-| Range   | Feature Area         | Notes                                                       |
-| ------- | -------------------- | ----------------------------------------------------------- |
-| 1–39    | General (unreserved) | Rendering, materials, lighting, loaders, etc.               |
-| 40–49   | Physics              | Havok V2, rigid bodies, constraints, ragdolls               |
-| 120–129 | Gaussian Splatting   | PLY splat clouds, splat renderers, sort workers             |
-| 130–139 | Particle scenes      | Particles                                                   |
-| 140–149 | Frame Graphs         | Frame Graph related features                                |
-| 150–158 | Animations           | Top-level/manual animation API, weights, blending, additive |
-| 170–179 | Navigation           | Navmesh and crowds                                          |

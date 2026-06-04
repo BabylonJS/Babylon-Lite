@@ -26,7 +26,7 @@
  *  so Lite reproduces the BJS SH direction by computing
  *  `inverseMat3(worldRot) · (worldPos − eye)` and then negating `.y`. */
 
-import type { EngineContextInternal, EngineContext } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Renderable, DrawBinding } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
@@ -291,8 +291,8 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
 `;
 }
 
-function getOrCreateShPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, shDegree: number, fragments?: readonly GsShaderFragment[]): PipelineEntry {
-    const device = engine.device;
+function getOrCreateShPipeline(engine: EngineContext, sig: RenderTargetSignature, shDegree: number, fragments?: readonly GsShaderFragment[]): PipelineEntry {
+    const device = engine._device;
     if (!_cache || _cache.device !== device) {
         _cache = { device, modules: new Map(), entries: new Map() };
     }
@@ -363,8 +363,8 @@ function getOrCreateShPipeline(engine: EngineContextInternal, sig: RenderTargetS
  *  Mirrors `buildGaussianSplattingRenderable` but adds eyePosition to the UBO
  *  and binds the SH textures. */
 export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: GaussianSplattingMesh, fragments?: readonly GsShaderFragment[]): Renderable {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine;
+    const device = engine._device;
 
     // 3 mat4 + 8 floats (viewport,focal,dataSize,alpha,pad) + 4 floats (eyePosition + pad) = 240 bytes.
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4 + 4 * 4;
@@ -485,7 +485,7 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
         order: 200,
         isTransparent: true,
         bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
-            const entry = getOrCreateShPipeline(eng as EngineContextInternal, sig, mesh.shDegree, fragments);
+            const entry = getOrCreateShPipeline(eng as EngineContext, sig, mesh.shDegree, fragments);
             const bindGroup = getBindGroup(entry);
             return {
                 renderable: r,
@@ -511,8 +511,8 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
  *  the `rgba32uint` SH textures (1..5 depending on degree), patches
  *  `mesh._gs` in place, and installs the SH renderable. */
 export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: GaussianSplattingMesh, shFlat: Uint8Array, fragments?: readonly GsShaderFragment[]): void {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine;
+    const device = engine._device;
     const shDegree = mesh.shDegree;
     const shVectorCount = (shDegree + 1) * (shDegree + 1) - 1;
     const shCoefficientCount = shVectorCount * 3;

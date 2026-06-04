@@ -4,7 +4,7 @@
  * Advanced F0 computation with metallicReflectanceTexture and/or reflectanceTexture.
  * Only bundled when a scene uses these textures.
  *
- * Provides: UBO fields (occlusionStrength, metallicF0Factor, metallicReflectanceColor),
+ * Provides: UBO fields (occlusionStrength, metallicF0Factor, specularWeight, metallicReflectanceColor),
  * conditional texture bindings, F0 computation, and occlusion handling.
  */
 
@@ -17,7 +17,7 @@ import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_
 const STAGE_FRAGMENT = 0x2;
 
 /** Write the reflectance-extension material-UBO slice
- *  (occlusionStrength, metallicF0Factor, metallicReflectanceColor).
+ *  (occlusionStrength, metallicF0Factor, specularWeight, metallicReflectanceColor).
  *  Gated by the presence of the `occlusionStrength` field in the UBO spec,
  *  which is added only when a metallic-reflectance or reflectance texture
  *  is in use. */
@@ -28,6 +28,7 @@ export function writeReflectanceUBO(data: Float32Array, material: PbrMaterialPro
     const off = offsets.get("occlusionStrength")! / 4;
     data[off] = material.occlusionStrength ?? 1.0;
     data[off + 1] = material.metallicF0Factor ?? 1.0;
+    data[off + 2] = material.specularWeight ?? material.metallicF0Factor ?? 1.0;
     const mrc = material.metallicReflectanceColor;
     data[off + 4] = mrc ? mrc[0]! : 1.0;
     data[off + 5] = mrc ? mrc[1]! : 1.0;
@@ -36,9 +37,9 @@ export function writeReflectanceUBO(data: Float32Array, material: PbrMaterialPro
 
 /**
  * Create a metallic reflectance fragment.
- * @param hasMetallicReflectanceMap Whether the material has a metallicReflectanceTexture.
- * @param hasReflectanceMap Whether the material has a reflectanceTexture.
- * @param useAlphaOnlyMR Whether to use only the alpha channel from the metallic reflectance map.
+ * @param hasMetallicReflectanceMap - Whether the material has a metallicReflectanceTexture.
+ * @param hasReflectanceMap - Whether the material has a reflectanceTexture.
+ * @param useAlphaOnlyMR - Whether to use only the alpha channel from the metallic reflectance map.
  */
 export function createReflectanceFragment(
     hasMetallicReflectanceMap: boolean,
@@ -61,7 +62,8 @@ export function createReflectanceFragment(
     }
 
     // Build F0 computation code
-    let f0Code = `var mrFactors = vec4<f32>(material.metallicReflectanceColor, material.metallicF0Factor);`;
+    let f0Code = `var mrFactors = vec4<f32>(material.metallicReflectanceColor, material.metallicF0Factor);
+var specularWeight = material.specularWeight;`;
     if (hasReflectanceMap) {
         f0Code += `
 { let rSample = textureSample(reflectanceMap, reflectanceMapSampler, input.uv);
@@ -73,11 +75,13 @@ export function createReflectanceFragment(
             f0Code += `
 { let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, input.uv);
   let mrLinear = pow(mrSample.rgb, vec3<f32>(2.2));
-  mrFactors = vec4<f32>(mrFactors.rgb * mrLinear, mrFactors.a * mrSample.a); }`;
+  mrFactors = vec4<f32>(mrFactors.rgb * mrLinear, mrFactors.a * mrSample.a);
+  specularWeight *= mrSample.a; }`;
         } else {
             f0Code += `
 { let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, input.uv);
-  mrFactors = vec4<f32>(mrFactors.rgb, mrFactors.a * mrSample.a); }`;
+  mrFactors = vec4<f32>(mrFactors.rgb, mrFactors.a * mrSample.a);
+  specularWeight *= mrSample.a; }`;
         }
     }
     f0Code += `
@@ -86,7 +90,7 @@ let surfaceReflectivityColor = mrFactors.rgb;
 let dielectricColorF0 = vec3<f32>(dielectricF0) * surfaceReflectivityColor;
 let metallicColorF0 = baseColor;
 var colorF0 = mix(dielectricColorF0, metallicColorF0, metallic);
-let colorF90 = vec3<f32>(mrFactors.a);
+let colorF90 = vec3<f32>(mix(specularWeight, 1.0, metallic));
 let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surfaceReflectivityColor) * (1.0 - metallic);`;
 
     return {
@@ -95,7 +99,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
         _uboFields: [
             { _name: "occlusionStrength", _type: "f32" },
             { _name: "metallicF0Factor", _type: "f32" },
-            { _name: "_mrPad0", _type: "f32" },
+            { _name: "specularWeight", _type: "f32" },
             { _name: "_mrPad1", _type: "f32" },
             { _name: "metallicReflectanceColor", _type: "vec3<f32>" },
             { _name: "_mrPad2", _type: "f32" },
@@ -113,7 +117,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 }
 
 /** Create the reflectance PBR extension (group 1, fragment phase). */
-export const reflectanceExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "reflectance",
     phase: "fragment",
     detect(mat) {

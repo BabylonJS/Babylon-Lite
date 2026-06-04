@@ -1,6 +1,6 @@
 /** RGBD decoder — decodes Babylon BRDF PNG and .env cubemap faces into rgba16float. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 
 const WGSL = `override f:bool=false;@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var o:texture_storage_2d<rgba16float,write>;@compute @workgroup_size(8,8)fn main(@builtin(global_invocation_id)g:vec3u){let d=textureDimensions(t);if(any(g.xy>=d)){return;}let c=textureLoad(t,vec2u(g.x,select(g.y,d.y-1u-g.y,f)),0);textureStore(o,g.xy,vec4f(pow(c.rgb,vec3f(2.2))/max(c.a,1.0/255.0),1));}`;
 
@@ -50,9 +50,9 @@ function encodeDispatch(encoder: GPUCommandEncoder, pipeline: GPUComputePipeline
     pass.end();
 }
 
-/** Decode a single RGBD PNG (e.g. BRDF LUT) -> rgba16float 2D texture. No Y-flip. */
-export function decodeBrdfPng(engine: EngineContextInternal, image: ImageBitmap): GPUTexture {
-    const device = engine.device;
+/** Decode a single RGBD PNG (e.g. BRDF LUT) `->` rgba16float 2D texture. No Y-flip. */
+export function decodeBrdfPng(engine: EngineContext, image: ImageBitmap): GPUTexture {
+    const device = engine._device;
     const pipeline = getPipeline(device, false);
     const w = image.width;
     const h = image.height;
@@ -77,8 +77,8 @@ export function decodeBrdfPng(engine: EngineContextInternal, image: ImageBitmap)
 
 /** Decode and upload a RGBD cubemap (6 faces × N mips) → rgba16float cube texture.
  *  Y-flipped on read (BJS uploads cubemap faces with invertY=true). */
-export function uploadCubemapRGBD(engine: EngineContextInternal, images: ImageBitmap[], width: number, mipCount: number): GPUTexture {
-    const device = engine.device;
+export function uploadCubemapRGBD(engine: EngineContext, images: ImageBitmap[], width: number, mipCount: number): GPUTexture {
+    const device = engine._device;
     const pipeline = getPipeline(device, true);
 
     const texture = device.createTexture({

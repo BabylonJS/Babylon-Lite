@@ -21,7 +21,7 @@
  *  The pipeline has no blending and `depthWriteEnabled = true`, so the
  *  closest-splat wins at each pick pixel (matching BJS GPU picker behaviour). */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { applyGsFragments } from "../mesh/GaussianSplatting/gaussian-splatting-pipeline.js";
 import { gsGpuPickingFragment, encodeIdToColor } from "../mesh/GaussianSplatting/gs-gpu-picking-fragment.js";
@@ -186,8 +186,8 @@ fn fs(in: VOut) -> FsOut {
     return applyGsFragments(wgsl, [gsGpuPickingFragment]);
 }
 
-function getCache(engine: EngineContextInternal): GsPickingCache {
-    const device = engine.device;
+function getCache(engine: EngineContext): GsPickingCache {
+    const device = engine._device;
     if (_cache && _cache.device === device) {
         return _cache;
     }
@@ -238,9 +238,9 @@ function getCache(engine: EngineContextInternal): GsPickingCache {
 }
 
 /** Write a 4x4 pickMatrix into the shared scene UBO and bind group 0 on `pass`. */
-export function gsPickWritePickMatrixAndBind(pass: GPURenderPassEncoder, engine: EngineContextInternal, pickMatrix: Float32Array): void {
+export function gsPickWritePickMatrixAndBind(pass: GPURenderPassEncoder, engine: EngineContext, pickMatrix: Float32Array): void {
     const cache = getCache(engine);
-    engine.device.queue.writeBuffer(cache.pickMatrixUbo, 0, pickMatrix.buffer, pickMatrix.byteOffset, pickMatrix.byteLength);
+    engine._device.queue.writeBuffer(cache.pickMatrixUbo, 0, pickMatrix.buffer, pickMatrix.byteOffset, pickMatrix.byteLength);
     pass.setBindGroup(0, cache.sceneBG);
 }
 
@@ -260,8 +260,8 @@ export interface GsPickMeshResources {
     pickingCpu: Float32Array;
 }
 
-export function createGsPickMeshResources(engine: EngineContextInternal, mesh: GaussianSplattingMesh): GsPickMeshResources {
-    const device = engine.device;
+export function createGsPickMeshResources(engine: EngineContext, mesh: GaussianSplattingMesh): GsPickMeshResources {
+    const device = engine._device;
     const cache = getCache(engine);
 
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4;
@@ -306,7 +306,7 @@ export function disposeGsPickMeshResources(res: GsPickMeshResources): void {
  *  24-bit pick id assigned by the picker. */
 export function drawGsForPicking(
     pass: GPURenderPassEncoder,
-    engine: EngineContextInternal,
+    engine: EngineContext,
     scene: SceneContext,
     mesh: GaussianSplattingMesh,
     res: GsPickMeshResources,
@@ -337,7 +337,7 @@ export function drawGsForPicking(
     cpu[48 + 2] = size.width * 0.5 * proj[0]!;
     cpu[48 + 3] = size.height * 0.5 * proj[5]!;
     // dataSize/alpha already written at construction.
-    engine.device.queue.writeBuffer(res.meshUbo, 0, cpu.buffer, 0, cpu.byteLength);
+    engine._device.queue.writeBuffer(res.meshUbo, 0, cpu.buffer, 0, cpu.byteLength);
 
     // ── Picking-color UBO ───────────────────────────────────────────
     const [r, g, b] = encodeIdToColor(pickId);
@@ -345,7 +345,7 @@ export function drawGsForPicking(
     res.pickingCpu[1] = g;
     res.pickingCpu[2] = b;
     res.pickingCpu[3] = 0;
-    engine.device.queue.writeBuffer(res.pickingUbo, 0, res.pickingCpu.buffer, 0, 16);
+    engine._device.queue.writeBuffer(res.pickingUbo, 0, res.pickingCpu.buffer, 0, 16);
 
     pass.setPipeline(cache.pipeline);
     pass.setBindGroup(1, res.meshBG);

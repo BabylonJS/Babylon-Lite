@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "./gpu-pool.js";
 
 const _trilinearAnisotropicDesc: GPUSamplerDescriptor = {
@@ -11,6 +11,6 @@ const _trilinearAnisotropicDesc: GPUSamplerDescriptor = {
     maxAnisotropy: 4,
 };
 
-export function getTrilinearAnisotropicSampler(engine: EngineContextInternal): GPUSampler {
+export function getTrilinearAnisotropicSampler(engine: EngineContext): GPUSampler {
     return getOrCreateSampler(engine, _trilinearAnisotropicDesc);
 }

@@ -1,37 +1,22 @@
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
-import type { BillboardBlendMode, BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
+import type { BillboardDepthMode, BillboardOrientation, BillboardSpriteSystem } from "./billboard-sprite.js";
+import type { SpriteLayerFx } from "./custom-shader-core.js";
+import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 import { BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
 
 export interface BillboardPipelineDeviceCache {
+    /** @internal */
     _shaderModules: Map<string, GPUShaderModule>;
+    /** @internal */
     _pipelines: Map<string, GPURenderPipeline>;
 }
 
 export interface BillboardPipelineCache {
+    /** @internal */
     _devices: WeakMap<GPUDevice, BillboardPipelineDeviceCache>;
 }
-
-const BLEND_MODE_TABLE: Readonly<Record<BillboardBlendMode, { index: number; descriptor?: GPUBlendState }>> = {
-    alpha: {
-        index: 0,
-        descriptor: {
-            color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-        },
-    },
-    premultiplied: {
-        index: 1,
-        descriptor: {
-            color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-        },
-    },
-    cutout: {
-        index: 2,
-    },
-};
 
 const DEPTH_MODE_TABLE: Readonly<Record<BillboardDepthMode, { index: number; writeEnabled: boolean }>> = {
     transparent: { index: 0, writeEnabled: false },
@@ -51,21 +36,22 @@ const BILLBOARD_SYSTEM_UBO_FLOATS = BILLBOARD_SYSTEM_UBO_BYTES / 4;
 export const BILLBOARD_INDEX_DATA: Readonly<Uint16Array> = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
 export interface BillboardInstanceSortScratch {
+    /** @internal */
     _capacity: number;
+    /** @internal */
     _sortedInstanceData: Float32Array;
+    /** @internal */
     _sortIndices: Uint32Array;
+    /** @internal */
     _sortDepths: Float32Array;
-}
-
-function getBlendModeEntry(blendMode: BillboardBlendMode): (typeof BLEND_MODE_TABLE)[BillboardBlendMode] {
-    return BLEND_MODE_TABLE[blendMode];
 }
 
 function getDepthModeEntry(depthMode: BillboardDepthMode): (typeof DEPTH_MODE_TABLE)[BillboardDepthMode] {
     return DEPTH_MODE_TABLE[depthMode];
 }
 
-function makeBillboardBasisWgsl(orientation: BillboardOrientation): string {
+/** @internal Shared by the optional billboard custom-shader composer. */
+export function makeBillboardBasisWgsl(orientation: BillboardOrientation): string {
     switch (orientation) {
         case "facing":
             return `struct BillboardBasis {
@@ -169,7 +155,7 @@ export function resetBillboardPipelineCache(cache: BillboardPipelineCache): void
 }
 
 export function getOrCreateBillboardPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: BillboardPipelineCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
@@ -178,9 +164,9 @@ export function getOrCreateBillboardPipeline(
     sceneBindGroupLayout: GPUBindGroupLayout
 ): GPURenderPipeline {
     const deviceCache = getBillboardPipelineDeviceCache(engine, cache);
-    const blendEntry = getBlendModeEntry(system.blendMode);
     const depthEntry = getDepthModeEntry(system._depthMode);
-    const key = `${format}:${sampleCount}:${system._orientation}:${blendEntry.index}:${depthEntry.index}:${depthStencilFormat}`;
+    const customKey = _getBillboardFxHook()?.pipelineKeyPart(system) ?? "";
+    const key = `${format}:${sampleCount}:${system._orientation}:${system.blendMode._key}:${depthEntry.index}:${depthStencilFormat}:${customKey}`;
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
@@ -300,7 +286,7 @@ function ensureBillboardInstanceSortScratch(scratch: BillboardInstanceSortScratc
 
 export function buildBillboardSystemUbo(system: BillboardSpriteSystem, ubo: Float32Array): void {
     const opacity = system.opacity;
-    if (system.blendMode === "premultiplied") {
+    if (system.blendMode._premultipliedOpacity) {
         ubo[0] = opacity;
         ubo[1] = opacity;
         ubo[2] = opacity;
@@ -333,39 +319,57 @@ export function writeBillboardSystemUboIfDirty(device: GPUDevice, uniformBuffer:
     }
 }
 
-export function createBillboardSystemBindGroup(engine: EngineContextInternal, pipeline: GPURenderPipeline, system: BillboardSpriteSystem, uniformBuffer: GPUBuffer): GPUBindGroup {
+export function createBillboardSystemBindGroup(
+    engine: EngineContext,
+    pipeline: GPURenderPipeline,
+    system: BillboardSpriteSystem,
+    uniformBuffer: GPUBuffer,
+    fx?: SpriteLayerFx | null
+): GPUBindGroup {
     const texture = system.atlas.texture;
-    return engine.device.createBindGroup({
+    const entries: GPUBindGroupEntry[] = [
+        { binding: 0, resource: { buffer: uniformBuffer } },
+        { binding: 1, resource: texture.view },
+        { binding: 2, resource: texture.sampler },
+    ];
+    if (fx) {
+        for (const entry of _getBillboardFxHook()!.bindEntries(fx, 3)) {
+            entries.push(entry);
+        }
+    }
+    return engine._device.createBindGroup({
         layout: pipeline.getBindGroupLayout(1),
-        entries: [
-            { binding: 0, resource: { buffer: uniformBuffer } },
-            { binding: 1, resource: texture.view },
-            { binding: 2, resource: texture.sampler },
-        ],
+        entries,
     });
 }
 
-function getBillboardPipelineDeviceCache(engine: EngineContextInternal, cache: BillboardPipelineCache): BillboardPipelineDeviceCache {
-    let deviceCache = cache._devices.get(engine.device);
+function getBillboardPipelineDeviceCache(engine: EngineContext, cache: BillboardPipelineCache): BillboardPipelineDeviceCache {
+    let deviceCache = cache._devices.get(engine._device);
     if (!deviceCache) {
         deviceCache = { _shaderModules: new Map(), _pipelines: new Map() };
-        cache._devices.set(engine.device, deviceCache);
+        cache._devices.set(engine._device, deviceCache);
     }
     return deviceCache;
 }
 
-function getShaderModule(engine: EngineContextInternal, cache: BillboardPipelineDeviceCache, orientation: BillboardOrientation, depthMode: BillboardDepthMode): GPUShaderModule {
+function getShaderModule(engine: EngineContext, cache: BillboardPipelineDeviceCache, system: BillboardSpriteSystem): GPUShaderModule {
+    const orientation = system._orientation;
+    const depthMode = system._depthMode;
+    const customModule = _getBillboardFxHook()?.shaderModule(engine, system);
+    if (customModule) {
+        return customModule;
+    }
     const key = `${orientation}:${getDepthModeEntry(depthMode).index}`;
     let module = cache._shaderModules.get(key);
     if (!module) {
-        module = engine.device.createShaderModule({ code: makeBillboardWgsl(orientation, depthMode) });
+        module = engine._device.createShaderModule({ code: makeBillboardWgsl(orientation, depthMode) });
         cache._shaderModules.set(key, module);
     }
     return module;
 }
 
 function buildBillboardPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     cache: BillboardPipelineDeviceCache,
     format: GPUTextureFormat,
     sampleCount: 1 | 4,
@@ -373,17 +377,21 @@ function buildBillboardPipeline(
     depthStencilFormat: GPUTextureFormat,
     sceneBindGroupLayout: GPUBindGroupLayout
 ): GPURenderPipeline {
-    const device = engine.device;
-    const blendEntry = getBlendModeEntry(system.blendMode);
+    const device = engine._device;
     const depthEntry = getDepthModeEntry(system._depthMode);
-    const shaderModule = getShaderModule(engine, cache, system._orientation, system._depthMode);
-    const billboardBindGroupLayout = device.createBindGroupLayout({
-        entries: [
-            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
-        ],
-    });
+    const shaderModule = getShaderModule(engine, cache, system);
+    const layoutEntries: GPUBindGroupLayoutEntry[] = [
+        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+    ];
+    const extraLayoutEntries = _getBillboardFxHook()?.layoutEntries(system, 3);
+    if (extraLayoutEntries) {
+        for (const entry of extraLayoutEntries) {
+            layoutEntries.push(entry);
+        }
+    }
+    const billboardBindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
     return device.createRenderPipeline({
         label: `${system._orientation}-billboard-sprite-pipeline`,
         layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBindGroupLayout, billboardBindGroupLayout] }),
@@ -409,7 +417,7 @@ function buildBillboardPipeline(
         fragment: {
             module: shaderModule,
             entryPoint: "fs",
-            targets: [blendEntry.descriptor ? { format, blend: blendEntry.descriptor, writeMask: GPUColorWrite.ALL } : { format, writeMask: GPUColorWrite.ALL }],
+            targets: [system.blendMode._descriptor ? { format, blend: system.blendMode._descriptor, writeMask: GPUColorWrite.ALL } : { format, writeMask: GPUColorWrite.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         depthStencil: { format: depthStencilFormat, depthCompare: "greater-equal", depthWriteEnabled: depthEntry.writeEnabled },

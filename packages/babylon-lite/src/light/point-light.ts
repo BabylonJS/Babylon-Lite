@@ -4,8 +4,10 @@
 
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { mat4Translation } from "../math/mat4-translation.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
+import type { Mat4 } from "../math/types.js";
+import type { Mat4Storage } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface PointLight extends LightBase {
     readonly lightType: "point";
@@ -16,8 +18,25 @@ export interface PointLight extends LightBase {
     range: number;
 }
 
+/**
+ * Creates a point light that emits in all directions from `position` with distance falloff.
+ * @param position - World-space position of the light.
+ * @param intensity - Scalar multiplier applied to the light's diffuse and specular contribution.
+ * @returns Plain `PointLight` data to be added to a scene via `addToScene`.
+ */
 export function createPointLight(position: [number, number, number], intensity = 1.0): PointLight {
-    const { wm, onDirty, lvs } = createLightBase(() => mat4Translation(light.position.x, light.position.y, light.position.z));
+    const m = allocateMat4() as unknown as Mat4Storage;
+    m[0] = 1;
+    m[5] = 1;
+    m[10] = 1;
+    m[15] = 1;
+    const _localMatrix = m as unknown as Mat4;
+    const { wm, onDirty, lvs } = createLightBase(() => {
+        m[12] = light.position.x;
+        m[13] = light.position.y;
+        m[14] = light.position.z;
+        return _localMatrix;
+    });
 
     const light = applyWorldMatrixAccessors<PointLight>(
         {

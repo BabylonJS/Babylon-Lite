@@ -2,7 +2,9 @@
 import type { BillboardIndexHandleHooks, BillboardSpriteInit, BillboardSpriteSystem } from "./billboard-sprite.js";
 import { addBillboardSpriteIndex, removeBillboardSpriteIndex, setBillboardSpriteFrameIndex, updateBillboardSpriteIndex } from "./billboard-sprite.js";
 
+/** Stable identity for a single billboard sprite that survives swap-remove reindexing. */
 export interface BillboardSpriteHandle {
+    /** @internal */
     readonly _entityType: "billboard-sprite-handle";
     readonly system: BillboardSpriteSystem;
     readonly id: number;
@@ -107,6 +109,12 @@ function requireIndex(handle: BillboardSpriteHandle, caller: string): number {
     return index;
 }
 
+/**
+ * Adds a billboard sprite to the system and returns a stable handle to it.
+ * @param system - Billboard system to add the sprite to.
+ * @param init - Initial sprite properties.
+ * @returns A handle that stays valid as sprites are added and removed.
+ */
 export function addBillboardSprite(system: BillboardSpriteSystem, init: BillboardSpriteInit): BillboardSpriteHandle {
     const index = addBillboardSpriteIndex(system, init);
     const state = getOrCreateState(system);
@@ -116,10 +124,20 @@ export function addBillboardSprite(system: BillboardSpriteSystem, init: Billboar
     return { _entityType: "billboard-sprite-handle", system, id };
 }
 
+/**
+ * Updates the properties of the billboard sprite referenced by `handle`.
+ * @param handle - Handle of the sprite to update.
+ * @param patch - Partial set of properties to overwrite.
+ * @throws If the handle has already been removed.
+ */
 export function updateBillboardSprite(handle: BillboardSpriteHandle, patch: Partial<BillboardSpriteInit>): void {
     updateBillboardSpriteIndex(handle.system, requireIndex(handle, "updateBillboardSprite"), patch);
 }
 
+/**
+ * Removes the billboard sprite referenced by `handle`. Does nothing if it is already gone.
+ * @param handle - Handle of the sprite to remove.
+ */
 export function removeBillboardSprite(handle: BillboardSpriteHandle): void {
     const index = lookupIndex(handle);
     if (index === null) {
@@ -128,14 +146,30 @@ export function removeBillboardSprite(handle: BillboardSpriteHandle): void {
     removeBillboardSpriteIndex(handle.system, index);
 }
 
+/**
+ * Sets the atlas frame of the billboard sprite referenced by `handle`, preserving its world size and flip state.
+ * @param handle - Handle of the sprite to update.
+ * @param frame - Atlas frame index.
+ * @throws If the handle has already been removed.
+ */
 export function setBillboardSpriteFrame(handle: BillboardSpriteHandle, frame: number): void {
     setBillboardSpriteFrameIndex(handle.system, requireIndex(handle, "setBillboardSpriteFrame"), frame);
 }
 
+/**
+ * Resolves the current instance index of the sprite referenced by `handle`.
+ * @param handle - Handle of the sprite to resolve.
+ * @returns The current instance index in the system's buffers.
+ * @throws If the handle has already been removed.
+ */
 export function getBillboardSpriteHandleIndex(handle: BillboardSpriteHandle): number {
     return requireIndex(handle, "getBillboardSpriteHandleIndex");
 }
 
+/**
+ * Returns `true` if the sprite referenced by `handle` is still present in its system.
+ * @param handle - Handle to test.
+ */
 export function isBillboardSpriteHandleAlive(handle: BillboardSpriteHandle): boolean {
     return lookupIndex(handle) !== null;
 }

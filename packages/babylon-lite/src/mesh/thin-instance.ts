@@ -6,37 +6,53 @@
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
 
+/** CPU-side data backing a thin-instanced mesh: world matrices, optional colors, and GPU sync state. */
 export interface ThinInstanceData {
-    /** CPU-side instance world matrices (16 floats per instance). */
-    matrices: Float32Array;
+    /** CPU-side instance world matrices (16 floats per instance). Storage may
+     *  be Float32Array (default) or Float64Array (after an HPM engine is
+     *  constructed; the caller built the slab via `allocateMat4()`). The GPU
+     *  upload path in thin-instance-gpu.ts handles both (REQ-API-3, D5). */
+    matrices: Float32Array | Float64Array;
     /** Active instance count. */
     count: number;
-    /** Allocated capacity (in instances). */
+    /** @internal Allocated capacity (in instances). */
     _capacity: number;
-    /** Version counter — bumped by helpers, checked by render system. */
+    /** @internal Version counter — bumped by helpers, checked by render system. */
     _version: number;
-    /** GPU buffer — created and managed by render system, not user. */
+    /** @internal GPU buffer — created and managed by render system, not user. */
     _gpuBuffer: GPUBuffer | null;
-    /** Last version uploaded to GPU. */
+    /** @internal Whether the current matrix GPU buffer was created with STORAGE usage. */
+    _gpuBufferStorage: boolean;
+    /** @internal Last version uploaded to GPU. */
     _gpuVersion: number;
 
-    /** Min dirty instance index (inclusive). */
+    /** @internal Min dirty instance index (inclusive). */
     _dirtyMin: number;
-    /** Max dirty instance index (exclusive). */
+    /** @internal Max dirty instance index (exclusive). */
     _dirtyMax: number;
 
     /** Optional per-instance RGBA colors (4 floats per instance). */
     colors?: Float32Array | null;
-    /** Color version counter — independent of matrix version. */
+    /** @internal Color version counter — independent of matrix version. */
     _colorVersion: number;
-    /** GPU buffer for per-instance colors. */
+    /** @internal GPU buffer for per-instance colors. */
     _colorGpuBuffer: GPUBuffer | null;
-    /** Last color version uploaded to GPU. */
+    /** @internal Whether the current color GPU buffer was created with STORAGE usage. */
+    _colorGpuBufferStorage: boolean;
+    /** @internal Last color version uploaded to GPU. */
     _colorGpuVersion: number;
+
+    /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
+     *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct
+     *  writeBuffer fast-path. Sized in floats = `_capacity * 16`. */
+    _uploadF32?: Float32Array;
+
+    /** @internal Opt-in flag for GPU frustum culling + indirect drawing. */
+    _gpuCullingEnabled: boolean;
 }
 
 /** Set all instances from a pre-built matrix array. */
-export function setThinInstances(mesh: Mesh, matrices: Float32Array, count: number): void {
+export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Array, count: number): void {
     if (!mesh.thinInstances) {
         mesh.thinInstances = {
             matrices,
@@ -44,12 +60,15 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array, count: numb
             _capacity: count,
             _version: 1,
             _gpuBuffer: null,
+            _gpuBufferStorage: false,
             _gpuVersion: 0,
             _dirtyMin: 0,
             _dirtyMax: count,
             _colorVersion: 0,
             _colorGpuBuffer: null,
+            _colorGpuBufferStorage: false,
             _colorGpuVersion: 0,
+            _gpuCullingEnabled: false,
         };
     } else {
         mesh.thinInstances.matrices = matrices;
@@ -74,12 +93,15 @@ export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
             _capacity: capacity,
             _version: 1,
             _gpuBuffer: null,
+            _gpuBufferStorage: false,
             _gpuVersion: 0,
             _dirtyMin: 0,
             _dirtyMax: 1,
             _colorVersion: 0,
             _colorGpuBuffer: null,
+            _colorGpuBufferStorage: false,
             _colorGpuVersion: 0,
+            _gpuCullingEnabled: false,
         };
         return 0;
     }
@@ -136,4 +158,23 @@ export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void {
     const ti = mesh.thinInstances!;
     ti.colors = colors;
     ti._colorVersion++;
+}
+
+/** Enable or disable GPU frustum culling for an existing thin-instanced mesh.
+ *
+ * Call this after `setThinInstances()`/`addThinInstance()` and before `registerScene()`.
+ * The render system keeps the feature opt-in so non-culled thin-instance scenes do not
+ * fetch the compute-culling module or allocate compacted visible-instance buffers.
+ */
+export function enableThinInstanceGpuCulling(mesh: Mesh, enabled = true): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        throw new Error("enableThinInstanceGpuCulling requires mesh.thinInstances");
+    }
+    if (ti._gpuCullingEnabled === enabled) {
+        return;
+    }
+    ti._gpuCullingEnabled = enabled;
+    ti._gpuVersion = -1;
+    ti._colorGpuVersion = -1;
 }

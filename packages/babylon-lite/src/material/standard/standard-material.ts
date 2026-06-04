@@ -71,7 +71,7 @@ export interface StandardMaterialProps extends Material {
     opacityLevel: number;
     /** When true, derive opacity from RGB luminance instead of .a channel. Default false. */
     opacityFromRGB: boolean;
-    /** Alpha test cutoff. Fragments with alpha < alphaCutOff are discarded. Default 0 (no alpha test). */
+    /** Alpha test cutoff. Fragments with `alpha < alphaCutOff` are discarded. Default 0 (no alpha test). */
     alphaCutOff: number;
     /** Optional reflection texture (2D spherical map). Null = no reflection. */
     reflectionTexture: Texture2D | null;
@@ -88,9 +88,6 @@ export interface StandardMaterialProps extends Material {
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */
     disableLighting: boolean;
 }
-
-/** @internal Extended StandardMaterialProps with internal build group. */
-export interface StandardMaterialPropsInternal extends StandardMaterialProps {}
 
 /** @internal Compute Standard material-only feature bits. Mesh/pass bits are added by the renderable. */
 export function _computeStandardMaterialFeatures(m: StandardMaterialProps): number {

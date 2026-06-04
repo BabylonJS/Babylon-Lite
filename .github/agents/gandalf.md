@@ -59,7 +59,7 @@ All Playwright parity tests must pass. No MAD regressions.
 
 #### Check 3: Bundle-Size Ceilings Unchanged
 ```
-git diff tests/bundle-size.test.ts
+git diff tests/lite/parity/bundle-size.spec.ts
 ```
 Einstein must NOT have modified bundle-size ceiling values.
 If the diff shows ceiling changes, this is a **hard failure** — ask the user
@@ -67,7 +67,7 @@ for explicit approval before allowing any ceiling increase.
 
 #### Check 4: No Golden Reference Changes
 ```
-git diff reference/
+git diff reference/lite/
 ```
 Golden reference screenshots (`babylon-ref-golden.png`) must NOT be modified
 unless the user explicitly requested it.
@@ -120,8 +120,8 @@ You MUST:
 1. Run `pnpm run lint:fix` && `pnpm run lint` — must pass.
 2. Run `pnpm test` — all tests must pass.
 3. Run `pnpm test:parity` — all parity tests must pass.
-4. Confirm you did NOT modify `tests/bundle-size.test.ts` ceilings.
-5. Confirm you did NOT modify any `reference/**/babylon-ref-golden.png`.
+4. Confirm you did NOT modify `tests/lite/parity/bundle-size.spec.ts` ceilings.
+5. Confirm you did NOT modify any `reference/lite/**/babylon-ref-golden.png`.
 6. Report the status of each check.
 ```
 

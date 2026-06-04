@@ -4,13 +4,12 @@
  *  up to MAX_LIGHTS × LightEntry (4 × vec4 = 64 bytes each).
  *  Default total: 16 + 16 × 64 = 1040 bytes. */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { LightBase } from "../light/types.js";
-import type { LightBaseInternal } from "../light/types.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
-import type { SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { UboField } from "../shader/fragment-types.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.
@@ -36,7 +35,7 @@ export function getLightsUboSize(): number {
 function computeLightsVersion(lights: readonly LightBase[]): number {
     let v = 0;
     for (const light of lights) {
-        v += (light as LightBaseInternal)._lightVersion ?? 0;
+        v += light._lightVersion ?? 0;
     }
     return v;
 }
@@ -50,11 +49,10 @@ function fillLightsData(data: Float32Array, lights: readonly LightBase[]): void 
         if (count >= MAX_LIGHTS) {
             break;
         }
-        const li = light as LightBaseInternal;
-        if (!li._writeLightUbo) {
+        if (!light._writeLightUbo) {
             continue;
         }
-        li._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS);
+        light._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS);
         count++;
     }
     // Write count as u32 bit pattern into the first float slot (zero allocation)
@@ -64,15 +62,20 @@ function fillLightsData(data: Float32Array, lights: readonly LightBase[]): void 
 
 /** @internal */
 export interface SceneLightGpuState {
+    /** @internal */
     _buffer: GPUBuffer;
+    /** @internal */
     _scratch: Float32Array;
+    /** @internal */
     _version: number;
+    /** @internal */
     _lightCount: number;
+    /** @internal */
     _byteSize: number;
 }
 
 /** @internal */
-export function ensureSceneLightState(engine: EngineContextInternal, scene: SceneContextInternal): SceneLightGpuState {
+export function ensureSceneLightState(engine: EngineContext, scene: SceneContext): SceneLightGpuState {
     let state = scene._lightGpuState;
     const byteSize = getLightsUboSize();
     if (state && state._byteSize === byteSize) {
@@ -100,14 +103,14 @@ export function ensureSceneLightState(engine: EngineContextInternal, scene: Scen
 }
 
 /** @internal */
-export function refreshSceneLightsUBO(engine: EngineContextInternal, scene: SceneContextInternal): GPUBuffer {
+export function refreshSceneLightsUBO(engine: EngineContext, scene: SceneContext): GPUBuffer {
     const state = ensureSceneLightState(engine, scene);
     const version = computeLightsVersion(scene.lights);
     if (version !== state._version || scene.lights.length !== state._lightCount) {
         state._version = version;
         state._lightCount = scene.lights.length;
         fillLightsData(state._scratch, scene.lights);
-        engine.device.queue.writeBuffer(state._buffer, 0, state._scratch as Float32Array<ArrayBuffer>);
+        engine._device.queue.writeBuffer(state._buffer, 0, state._scratch as Float32Array<ArrayBuffer>);
     }
     return state._buffer;
 }
@@ -134,7 +137,7 @@ function affectsMesh(light: LightBase, mesh: Mesh): boolean {
 
 /** @internal
  * Writes mesh light indices when data is provided. Return encoding:
- * 0 = no lights, N > 0 = one light at index N - 1, N < 0 = -affectedCount. */
+ * 0 = no lights, `N > 0` = one light at index N - 1, `N < 0` = -affectedCount. */
 export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[], data?: Float32Array): number {
     const u32 = data ? new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4) : null;
     let count = 0;
@@ -144,7 +147,7 @@ export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[]
         if (pi >= MAX_LIGHTS) {
             break;
         }
-        if (!(light as LightBaseInternal)._writeLightUbo) {
+        if (!light._writeLightUbo) {
             continue;
         }
         if (affectsMesh(light, mesh)) {

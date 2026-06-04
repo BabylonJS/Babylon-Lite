@@ -1,6 +1,5 @@
 import type { FreeCamera } from "./free-camera.js";
-import type { FreeCameraInternal } from "./free-camera.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
+import type { SceneContext } from "../scene/scene.js";
 
 /**
  * Attach keyboard + mouse controls to a FreeCamera.
@@ -71,7 +70,6 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
 
     // ─── Per-frame update (receives deltaMs from engine render loop) ─────
     function update(deltaMs: number): void {
-        const fc = camera as FreeCameraInternal;
         // BJS speed formula: speed * sqrt(deltaTime / (fps * 100))
         // Simplified: fps ≈ 1000/deltaMs, so deltaTime/(fps*100) = deltaMs^2 / 100000
         const dt = Math.max(deltaMs, 1);
@@ -102,18 +100,18 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
         const hasRotation = crX !== 0 || crY !== 0;
 
         if (hasRotation) {
-            fc._yaw += crY;
-            fc._pitch -= crX;
+            camera._yaw += crY;
+            camera._pitch -= crX;
             const maxPitch = Math.PI / 2 - 0.01;
-            fc._pitch = Math.max(-maxPitch, Math.min(maxPitch, fc._pitch));
+            camera._pitch = Math.max(-maxPitch, Math.min(maxPitch, camera._pitch));
         }
 
         if (hasMovement) {
             // Transform local direction → world space using camera orientation
-            const cosY = Math.cos(fc._yaw);
-            const sinY = Math.sin(fc._yaw);
-            const cosP = Math.cos(fc._pitch);
-            const sinP = Math.sin(fc._pitch);
+            const cosY = Math.cos(camera._yaw);
+            const sinY = Math.sin(camera._yaw);
+            const cosP = Math.cos(camera._pitch);
+            const sinP = Math.sin(camera._pitch);
             // Forward/back moves in the camera's look direction (includes pitch)
             camera.position.x += sinY * cosP * cdZ + cosY * cdX;
             camera.position.y += sinP * cdZ + cdY;
@@ -122,10 +120,10 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
 
         // Update target from yaw/pitch only when camera moved or rotated
         if (hasMovement || hasRotation) {
-            const cosY = Math.cos(fc._yaw);
-            const sinY = Math.sin(fc._yaw);
-            const cosP = Math.cos(fc._pitch);
-            camera.target.set(camera.position.x + sinY * cosP, camera.position.y + Math.sin(fc._pitch), camera.position.z + cosY * cosP);
+            const cosY = Math.cos(camera._yaw);
+            const sinY = Math.sin(camera._yaw);
+            const cosP = Math.cos(camera._pitch);
+            camera.target.set(camera.position.x + sinY * cosP, camera.position.y + Math.sin(camera._pitch), camera.position.z + cosY * cosP);
         }
 
         // Apply inertia (decay accumulators)
@@ -157,7 +155,7 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
 
     // ─── Register / cleanup ──────────────────────────────────────────────
     if (scene) {
-        (scene as SceneContextInternal)._beforeRender.push(update);
+        scene._beforeRender.push(update);
     }
 
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -172,9 +170,9 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
 
     return () => {
         if (scene) {
-            const idx = (scene as SceneContextInternal)._beforeRender.indexOf(update);
+            const idx = scene._beforeRender.indexOf(update);
             if (idx >= 0) {
-                (scene as SceneContextInternal)._beforeRender.splice(idx, 1);
+                scene._beforeRender.splice(idx, 1);
             }
         }
         canvas.removeEventListener("pointerdown", onPointerDown);

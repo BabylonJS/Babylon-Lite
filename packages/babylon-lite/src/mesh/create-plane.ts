@@ -12,6 +12,7 @@ export interface PlaneData {
     indices: Uint32Array;
 }
 
+/** Options for `createPlaneData`. Subset of Babylon's CreatePlane. */
 export interface PlaneOptions {
     size?: number;
     width?: number;

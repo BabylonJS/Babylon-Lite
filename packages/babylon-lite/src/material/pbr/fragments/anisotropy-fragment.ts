@@ -86,7 +86,7 @@ let R_raw = reflect(-V, anisoBentNormal);`;
 
 /** Anisotropy extension — template-only (contributes no ShaderFragment or bindings);
  *  present solely to write its material-UBO slice through the unified ext registry. */
-export const anisotropyExt: PbrExt = {
+export const pbrExt: PbrExt = {
     id: "anisotropy",
     phase: "fragment",
     writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {

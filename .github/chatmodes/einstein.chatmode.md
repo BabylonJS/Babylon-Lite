@@ -64,12 +64,12 @@ pnpm test:parity
 All Playwright parity tests must pass. No MAD regressions allowed.
 
 ### 4. ✅ Bundle-Size Ceilings Untouched
-Verify you did **NOT** modify any ceiling values in `tests/bundle-size.test.ts`.
+Verify you did **NOT** modify any ceiling values in `tests/lite/parity/bundle-size.spec.ts`.
 If your changes cause a ceiling to be exceeded, report the numbers and **stop** —
 do not raise the ceiling yourself.
 
 ### 5. ✅ Golden References Untouched
-Verify you did **NOT** modify any `reference/**/babylon-ref-golden.png` files
+Verify you did **NOT** modify any `reference/lite/**/babylon-ref-golden.png` files
 unless the user explicitly requested it.
 
 ---

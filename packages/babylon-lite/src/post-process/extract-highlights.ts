@@ -2,11 +2,13 @@ import type { EngineContext } from "../engine/engine.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskConfig } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 
+/** Configuration for `createExtractHighlightsPostProcessTask`: luminance `threshold` and `exposure` applied before thresholding. */
 export interface ExtractHighlightsPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     threshold?: number;
     exposure?: number;
 }
 
+/** A post-process task that keeps only pixels whose luminance exceeds `threshold` and zeroes the rest. */
 export interface ExtractHighlightsPostProcessTask extends PostProcessTask {
     threshold: number;
     exposure: number;
@@ -19,10 +21,17 @@ const EXTRACT_HIGHLIGHTS_UNIFORM_WGSL = `struct ExtractHighlightsParams{threshol
 
 const EXTRACT_HIGHLIGHTS_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let luma=dot(vec3f(0.2126,0.7152,0.0722),color.rgb*extractHighlightsParams.exposure);return vec4f(step(extractHighlightsParams.threshold,luma)*color.rgb,color.a);}`;
 
+/**
+ * Create a post-process task that isolates bright highlights above a luminance threshold (used as the first stage of bloom).
+ * @param config - Threshold/exposure parameters and source/target settings.
+ * @param engine - The owning engine.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
+ * @returns The extract-highlights post-process task.
+ */
 export function createExtractHighlightsPostProcessTask(
     config: ExtractHighlightsPostProcessTaskConfig,
     engine: EngineContext,
-    scene: SceneContext
+    scene?: SceneContext
 ): ExtractHighlightsPostProcessTask {
     const params = {
         threshold: config.threshold ?? 0.9,

@@ -5,12 +5,9 @@
  *  work to `buildSinglePbrRenderable`. Both initial build and material-swap
  *  rebuilds go through the same single-mesh function. */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { SceneContextInternal } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshInternal } from "../../mesh/mesh.js";
-import type { LightBaseInternal } from "../../light/types.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
@@ -32,6 +29,7 @@ import {
     PBR_HAS_TONEMAP,
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
+import type { PbrExt } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
 import { _computePbrMaterialFeatures } from "./pbr-material.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
@@ -41,6 +39,7 @@ import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
+import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
 interface SingleLightWgslModule {
@@ -50,8 +49,8 @@ interface SingleLightWgslModule {
 
 /** Build PBR Renderable(s) + a SceneUniformUpdater from PBR meshes. */
 export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined): Promise<MeshGroupBuildResult> {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine;
+    const device = engine._device;
     // Per-size scratch buffers for material UBO re-writes (zero allocation per frame).
     const materialScratch = new Map<number, Float32Array>();
     const hasEnv = !!envTextures;
@@ -89,6 +88,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasMetallicReflectance = false;
     let hasClearcoat = false;
     let hasSheen = false;
+    let hasIridescence = false;
     let hasAnyAnisotropy = false;
     let hasAnySubsurface = false;
     let hasAlphaTest = false;
@@ -104,12 +104,12 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
-        const mi = m as MeshInternal;
         const refractionIntensity = mat.subsurface?.refraction?.intensity ?? 0;
         hasSkybox ||= !!mat.skyboxMode;
         hasMetallicReflectance ||= !!(mat.metallicReflectanceTexture || mat.reflectanceTexture || mat._hasReflExt);
         hasClearcoat ||= !!mat.clearCoat?.isEnabled;
         hasSheen ||= !!mat.sheen?.isEnabled;
+        hasIridescence ||= !!mat.iridescence?.isEnabled;
         hasAnyAnisotropy ||= !!mat.anisotropy?.isEnabled;
         hasAnySubsurface ||= !!mat.subsurface?.translucency;
         hasAlphaTest ||= mat.alphaCutOff! > 0;
@@ -121,8 +121,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasAnyUnlit ||= !!mat.unlit;
         hasAnyUvTransform ||= !!mat._hasUvTx;
         // UV2 only counts when occlusion samples texcoord 1.
-        hasAnyUv2 ||= !!mi._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
-        hasAnyVertexColor ||= !!mi._gpu.colorBuffer;
+        hasAnyUv2 ||= !!m._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
+        hasAnyVertexColor ||= !!m._gpu.colorBuffer;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
@@ -131,7 +131,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let _iblSkyboxCalc = "";
     if (hasEnv) {
         const mod = await import("./fragments/ibl-fragment.js");
-        _registerPbrExt(mod.iblExt);
+        _registerPbrExt(mod.pbrExt);
         if (hasSkybox) {
             // Skybox-mode WGSL is only loaded when at least one mesh in the scene needs it.
             const sky = await import("./fragments/ibl-skybox-wgsl.js");
@@ -165,55 +165,41 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     }
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
-    // Inline `if` blocks (rather than a descriptor array) keep the awaited `import()`
-    // sites literal AND let terser shorten each block independently, saving ~1 KB
-    // in scene1's pbr-renderable chunk. Registration runs sequentially in source
-    // order, which is the iteration order consumed by `_getPbrExts().values()` on
-    // the hot paths (composePbr, writeMaterialData, collectPbrBoundTextures).
-    if (hasAlphaTest) {
-        const mod = await import("./fragments/alpha-test-fragment.js");
-        _registerPbrExt(mod.alphaTestExt);
-    }
-    if (hasMetallicReflectance) {
-        const mod = await import("./fragments/reflectance-fragment.js");
-        _registerPbrExt(mod.reflectanceExt);
-    }
-    if (hasClearcoat) {
-        const mod = await import("./fragments/clearcoat-fragment.js");
-        _registerPbrExt(mod.clearcoatExt);
-    }
-    if (hasSheen) {
-        const mod = await import("./fragments/sheen-fragment.js");
-        _registerPbrExt(mod.sheenExt);
-    }
-    if (hasAnySubsurface) {
-        const mod = await import("./fragments/subsurface-fragment.js");
-        _registerPbrExt(mod.subsurfaceExt);
-    }
+    // Each optional PBR fragment module exports a uniform `pbrExt`, so registration
+    // collapses to a single data-driven loop over [flag, loader] pairs. The `import()`
+    // specifiers stay literal (required for Vite code-splitting) and the shared
+    // `_registerPbrExt((await load()).pbrExt)` glue is emitted once instead of per
+    // feature, keeping this management layer small as features are added.
+    // Registration order is the iteration order consumed by `_getPbrExts().values()`
+    // on the hot paths (composePbr, writeMaterialData, collectPbrBoundTextures).
+    type PbrExtLoad = () => Promise<{ pbrExt: PbrExt }>;
+    const _drainPbrExts = async (loaders: Array<readonly [boolean, PbrExtLoad]>) => {
+        for (const [flag, load] of loaders) {
+            if (flag) {
+                _registerPbrExt((await load()).pbrExt);
+            }
+        }
+    };
+
+    await _drainPbrExts([
+        [hasAlphaTest, () => import("./fragments/alpha-test-fragment.js")],
+        [hasMetallicReflectance, () => import("./fragments/reflectance-fragment.js")],
+        [hasClearcoat, () => import("./fragments/clearcoat-fragment.js")],
+        [hasSheen, () => import("./fragments/sheen-fragment.js")],
+        [hasIridescence, () => import("./fragments/iridescence-fragment.js")],
+        [hasAnySubsurface, () => import("./fragments/subsurface-fragment.js")],
+    ]);
     if (hasTransmissionRefraction) {
         const mod = await import("./pbr-refraction.js");
-        await mod.registerPbrRefraction(scene as SceneContextInternal, engine, _registerPbrExt);
+        await mod.registerPbrRefraction(scene as SceneContext, engine, _registerPbrExt);
     }
-    if (needsEmissiveColor) {
-        const mod = await import("./fragments/emissive-fragment.js");
-        _registerPbrExt(mod.emissiveColorExt);
-    }
-    if (hasAnyUnlit) {
-        const mod = await import("./fragments/unlit-fragment.js");
-        _registerPbrExt(mod.unlitExt);
-    }
-    if (hasSomeSkeletons) {
-        const mod = await import("./fragments/skeleton-fragment.js");
-        _registerPbrExt(mod.skeletonExt);
-    }
-    if (hasSomeMorphs) {
-        const mod = await import("./fragments/morph-fragment.js");
-        _registerPbrExt(mod.morphExt);
-    }
-    if (hasAnyUvTransform) {
-        const mod = await import("./fragments/uv-transform-fragment.js");
-        _registerPbrExt(mod.uvTransformExt);
-    }
+    await _drainPbrExts([
+        [needsEmissiveColor, () => import("./fragments/emissive-fragment.js")],
+        [hasAnyUnlit, () => import("./fragments/unlit-fragment.js")],
+        [hasSomeSkeletons, () => import("./fragments/skeleton-fragment.js")],
+        [hasSomeMorphs, () => import("./fragments/morph-fragment.js")],
+        [hasAnyUvTransform, () => import("./fragments/uv-transform-fragment.js")],
+    ]);
 
     // Anisotropy needs its module reference retained (for ANISO_BRDF_FUNCTIONS /
     // makeAnisotropyTBBlock / ANISO_DIRECT_DG / ANISO_BENT_NORMAL strings consumed
@@ -221,7 +207,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null = null;
     if (hasAnyAnisotropy) {
         _anisoExt = await import("./fragments/anisotropy-fragment.js");
-        _registerPbrExt(_anisoExt.anisotropyExt);
+        _registerPbrExt(_anisoExt.pbrExt);
     }
 
     // Lazy-load pbr-template-ext when any advanced features are present.
@@ -234,7 +220,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
-        | ((engine: EngineContextInternal, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
         | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
@@ -283,7 +269,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const mat = materialInput;
         const renderFeatures = (mat._renderFeatures ??= _computePbrMaterialFeatures(mat)) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const mi = mesh as MeshInternal;
+        const mi = mesh;
 
         const lr = writeMeshLightSelection(mesh, s.lights);
         const lightCount = lr > 0 ? 1 : -lr;
@@ -296,12 +282,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
         const esmShadowDepthCode = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0 ? (mat as PbrMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
 
-        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode);
-        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}`);
+        // Genuine GPU interleaving. Tight meshes have `_vbLayout` undefined → vbKey ""
+        // → composed shader, bindings, and pipeline cache keys are byte-identical to
+        // today. Interleaved meshes carry a precomputed vbKey from the loader module.
+        const vbLayout = mi._gpu._vbLayout;
+        const vbKey = mi._gpu._vbKey ?? "";
+
+        const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey);
+        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}${vbKey}`);
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
         const meshUboData = new Float32Array(composed._meshUboSpec._totalBytes / 4);
-        meshUboData.set(mesh.worldMatrix, 0);
+        const _packMeshWorld = engine._makePackMeshWorld?.(s as SceneContext) ?? packMat4IntoF32;
+        _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
         const meshUBO = createUniformBuffer(engine, meshUboData);
 
@@ -338,7 +331,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        (s as SceneContextInternal)._meshDisposables.set(mesh, [
+        s._meshDisposables.set(mesh, [
             () => {
                 meshUBO.destroy();
                 materialUBO.destroy();
@@ -359,20 +352,21 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const hasTI = (meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0;
         const hasTIColor = (meshFeatures & MSH_HAS_INSTANCE_COLOR) !== 0;
 
-        let _lastWorldVersion = -1;
+        let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;
         const sortCenter = isTransparent || needsTaskRefraction ? ([mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!] as [number, number, number]) : null;
-        const update = (): void => {
-            if (mesh.worldMatrixVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
+        const _baseUpdate = (): void => {
+            const worldVersion = mesh.worldMatrixVersion;
+            if (worldVersion !== _lastWorldVersion || s.lights.length !== _lastLightsCount) {
                 if (sortCenter) {
                     sortCenter[0] = mesh.worldMatrix[12]!;
                     sortCenter[1] = mesh.worldMatrix[13]!;
                     sortCenter[2] = mesh.worldMatrix[14]!;
                 }
-                meshUboData.set(mesh.worldMatrix, 0);
+                _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
                 writeMeshLightSelection(mesh, s.lights, meshUboData);
                 device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
-                _lastWorldVersion = mesh.worldMatrixVersion;
+                _lastWorldVersion = worldVersion;
                 _lastLightsCount = s.lights.length;
             }
             const uboVersion = mat._uboVersion;
@@ -389,6 +383,12 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 device.queue.writeBuffer(materialUBO, 0, data.buffer, 0, data.byteLength);
             }
         };
+        // FO-version wrapper applied only when the engine has floating-origin
+        // on (see standard-renderable for the rationale).
+        const _invalidate = (): void => {
+            _lastWorldVersion = -1;
+        };
+        const update = engine._wrapRenderableForFO?.(_baseUpdate, s as SceneContext, _invalidate) ?? _baseUpdate;
 
         const drawWith = (pass: GPURenderPassEncoder | GPURenderBundleEncoder, materialBindGroup: GPUBindGroup): number => {
             if (!isOverride && mesh.material !== materialInput) {
@@ -400,17 +400,18 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 pass.setBindGroup(2, shadowBindGroup);
             }
             let slot = 0;
-            pass.setVertexBuffer(slot++, gpu.positionBuffer);
-            pass.setVertexBuffer(slot++, gpu.normalBuffer);
+            const vb = gpu._vbLayout;
+            pass.setVertexBuffer(slot++, gpu.positionBuffer, vb?._p?._offset);
+            pass.setVertexBuffer(slot++, gpu.normalBuffer, vb?._n?._offset);
             if (hasNormalMap && gpu.tangentBuffer) {
-                pass.setVertexBuffer(slot++, gpu.tangentBuffer);
+                pass.setVertexBuffer(slot++, gpu.tangentBuffer, vb?._t?._offset);
             }
-            pass.setVertexBuffer(slot++, gpu.uvBuffer);
+            pass.setVertexBuffer(slot++, gpu.uvBuffer, vb?._u?._offset);
             if (hasUV2 && gpu.uv2Buffer) {
-                pass.setVertexBuffer(slot++, gpu.uv2Buffer);
+                pass.setVertexBuffer(slot++, gpu.uv2Buffer, vb?._u2?._offset);
             }
             if (hasVertexColor && gpu.colorBuffer) {
-                pass.setVertexBuffer(slot++, gpu.colorBuffer);
+                pass.setVertexBuffer(slot++, gpu.colorBuffer, vb?._c?._offset);
             }
             if (mesh.skeleton) {
                 pass.setVertexBuffer(slot++, mesh.skeleton.jointsBuffer);
@@ -442,7 +443,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             _transmissive: needsTaskRefraction,
             mesh,
             bind(eng, sig) {
-                const pipeline = getOrCreatePbrPipeline(eng as EngineContextInternal, sig, bindings);
+                const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings);
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;
@@ -463,7 +464,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
-    (scene as SceneContextInternal)._disposables.push(
+    scene._disposables.push(
         () => clearPbrPipelineCache(),
         () => clearSamplerCache(engine)
     );
@@ -478,7 +479,7 @@ function toSingleLightType(type: string): SingleLightType {
 function getPackedSingleLightType(lights: SceneContext["lights"], packedIndex: number): SingleLightType {
     let packed = 0;
     for (const light of lights) {
-        if (!(light as LightBaseInternal)._writeLightUbo) {
+        if (!light._writeLightUbo) {
             continue;
         }
         if (packed === packedIndex) {
@@ -510,6 +511,15 @@ function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec:
     data[1] = material.directIntensity ?? 1.0;
     data[2] = material.reflectance ?? 0.04;
     data[3] = material.alpha ?? 1.0;
+    const baseColorFactorOffset = spec._offsets.get("baseColorFactor");
+    if (baseColorFactorOffset !== undefined) {
+        const off = baseColorFactorOffset / 4;
+        const factor = material.baseColorFactor;
+        data[off] = factor ? factor[0]! : 1.0;
+        data[off + 1] = factor ? factor[1]! : 1.0;
+        data[off + 2] = factor ? factor[2]! : 1.0;
+        data[off + 3] = factor ? factor[3]! : 1.0;
+    }
     if (spec._offsets.has("metallicFactor")) {
         const off = spec._offsets.get("metallicFactor")! / 4;
         data[off] = material.metallicFactor ?? 1.0;

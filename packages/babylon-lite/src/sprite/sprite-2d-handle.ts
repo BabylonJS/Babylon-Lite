@@ -2,7 +2,9 @@
 import type { Sprite2DIndexHandleHooks, Sprite2DLayer, Sprite2DProps } from "./sprite-2d.js";
 import { addSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex, updateSprite2DIndex } from "./sprite-2d.js";
 
+/** Stable identity for a single 2D sprite that survives swap-remove reindexing. */
 export interface Sprite2DHandle {
+    /** @internal */
     readonly _entityType: "sprite-2d-handle";
     readonly layer: Sprite2DLayer;
     readonly id: number;
@@ -107,6 +109,12 @@ function requireIndex(handle: Sprite2DHandle, caller: string): number {
     return index;
 }
 
+/**
+ * Adds a sprite to the layer and returns a stable handle to it.
+ * @param layer - Sprite layer to add the sprite to.
+ * @param props - Initial sprite properties.
+ * @returns A handle that stays valid as sprites are added and removed.
+ */
 export function addSprite2D(layer: Sprite2DLayer, props: Sprite2DProps): Sprite2DHandle {
     const index = addSprite2DIndex(layer, props);
     const state = getOrCreateState(layer);
@@ -116,10 +124,20 @@ export function addSprite2D(layer: Sprite2DLayer, props: Sprite2DProps): Sprite2
     return { _entityType: "sprite-2d-handle", layer, id };
 }
 
+/**
+ * Updates the properties of the sprite referenced by `handle`.
+ * @param handle - Handle of the sprite to update.
+ * @param patch - Partial set of properties to overwrite.
+ * @throws If the handle has already been removed.
+ */
 export function updateSprite2D(handle: Sprite2DHandle, patch: Partial<Sprite2DProps>): void {
     updateSprite2DIndex(handle.layer, requireIndex(handle, "updateSprite2D"), patch);
 }
 
+/**
+ * Removes the sprite referenced by `handle`. Does nothing if it is already gone.
+ * @param handle - Handle of the sprite to remove.
+ */
 export function removeSprite2D(handle: Sprite2DHandle): void {
     const index = lookupIndex(handle);
     if (index === null) {
@@ -128,14 +146,30 @@ export function removeSprite2D(handle: Sprite2DHandle): void {
     removeSprite2DIndex(handle.layer, index);
 }
 
+/**
+ * Sets the atlas frame of the sprite referenced by `handle`.
+ * @param handle - Handle of the sprite to update.
+ * @param frame - Atlas frame index.
+ * @throws If the handle has already been removed.
+ */
 export function setSprite2DFrame(handle: Sprite2DHandle, frame: number): void {
     setSprite2DFrameIndex(handle.layer, requireIndex(handle, "setSprite2DFrame"), frame);
 }
 
+/**
+ * Resolves the current instance index of the sprite referenced by `handle`.
+ * @param handle - Handle of the sprite to resolve.
+ * @returns The current instance index in the layer's buffers.
+ * @throws If the handle has already been removed.
+ */
 export function getSprite2DHandleIndex(handle: Sprite2DHandle): number {
     return requireIndex(handle, "getSprite2DHandleIndex");
 }
 
+/**
+ * Returns `true` if the sprite referenced by `handle` is still present in its layer.
+ * @param handle - Handle to test.
+ */
 export function isSprite2DHandleAlive(handle: Sprite2DHandle): boolean {
     return lookupIndex(handle) !== null;
 }

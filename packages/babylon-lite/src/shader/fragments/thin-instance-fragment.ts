@@ -12,7 +12,7 @@ import type { ShaderFragment } from "../fragment-types.js";
 
 /**
  * Create a thin-instance fragment.
- * @param hasInstanceColor Whether meshes have per-instance color data.
+ * @param hasInstanceColor - Whether meshes have per-instance color data.
  */
 export function createThinInstanceFragment(hasInstanceColor: boolean): ShaderFragment {
     const attrs = [

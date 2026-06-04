@@ -23,6 +23,7 @@ export interface TorusData {
     indices: Uint32Array;
 }
 
+/** Options for `createTorusData`. Subset of Babylon's CreateTorus. */
 export interface TorusOptions {
     diameter?: number;
     thickness?: number;

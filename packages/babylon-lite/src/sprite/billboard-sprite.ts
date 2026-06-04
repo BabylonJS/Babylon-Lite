@@ -6,10 +6,20 @@
  */
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
-import type { SpriteBlendMode } from "./sprite-2d.js";
+import type { BillboardCustomShader } from "./billboard-custom-shader.js";
+import type { BillboardBlendDescriptor } from "./billboard-blend.js";
+import { billboardBlendAlpha } from "./billboard-blend.js";
+import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 
-export type BillboardBlendMode = Extract<SpriteBlendMode, "alpha" | "premultiplied" | "cutout">;
+/**
+ * Blend mode for a billboard sprite system — a pure-data descriptor value. Import one of
+ * `billboardBlendAlpha` (default), `billboardBlendPremultiplied`, or `billboardBlendCutout`
+ * and pass it as `BillboardSpriteSystemOptions.blendMode`. (Type alias of
+ * {@link BillboardBlendDescriptor}.)
+ */
+export type BillboardBlendMode = BillboardBlendDescriptor;
 
+/** Optional configuration for a billboard sprite system. */
 export interface BillboardSpriteSystemOptions {
     capacity?: number;
     blendMode?: BillboardBlendMode;
@@ -17,12 +27,17 @@ export interface BillboardSpriteSystemOptions {
     opacity?: number;
     visible?: boolean;
     order?: number;
+    /** Optional opt-in custom fragment shader (from `createBillboardCustomShader`). */
+    customShader?: BillboardCustomShader;
 }
 
+/** How a billboard orients itself: `facing` always faces the camera, `axis-locked` rotates only around a fixed axis. */
 export type BillboardOrientation = "facing" | "axis-locked";
+/** Depth/blend pipeline path used by a billboard system: alpha-blended `transparent` or alpha-tested `cutout`. */
 export type BillboardDepthMode = "transparent" | "cutout";
 
 export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation = BillboardOrientation> {
+    /** @internal */
     readonly _entityType: "billboard-sprite-system";
     readonly atlas: SpriteAtlas;
     readonly blendMode: BillboardBlendMode;
@@ -56,6 +71,13 @@ export interface BillboardSpriteSystem<TOrientation extends BillboardOrientation
     _dirtyMax: number;
     /** @internal Optional hooks installed by the opt-in handle module. */
     _handleHooks?: BillboardIndexHandleHooks;
+    /** @internal Optional custom fragment shader for this system. Absent on plain systems. */
+    readonly _customShader?: BillboardCustomShader;
+    /**
+     * Per-system custom-shader params (`fx.params`); set via `setBillboardShaderParams`.
+     * **Absent** on plain systems (only allocated for custom-shader systems, or lazily by the setter).
+     */
+    shaderParams?: [number, number, number, number];
 }
 
 /** @internal Lazy hooks used by the opt-in Handle API to track swap-removes. */
@@ -64,9 +86,12 @@ export interface BillboardIndexHandleHooks {
     readonly clear: () => void;
 }
 
+/** A camera-facing billboard sprite system. */
 export type FacingBillboardSpriteSystem = BillboardSpriteSystem<"facing">;
+/** A billboard sprite system that rotates only around a fixed world axis. */
 export type AxisLockedBillboardSpriteSystem = BillboardSpriteSystem<"axis-locked">;
 
+/** Initial properties for a single billboard sprite. */
 export interface BillboardSpriteInit {
     position: [number, number, number];
     sizeWorld: [number, number];
@@ -105,14 +130,24 @@ function resolveOpacity(opts: BillboardSpriteSystemOptions): number {
     return opacity;
 }
 
-function resolveBillboardDepthMode(blendMode: BillboardBlendMode): BillboardDepthMode {
-    return blendMode === "cutout" ? "cutout" : "transparent";
-}
-
+/**
+ * Creates a camera-facing billboard sprite system backed by the given atlas.
+ * @param atlas - Sprite atlas supplying frames.
+ * @param opts - Optional capacity, blend, and appearance settings.
+ * @returns The new facing billboard system.
+ */
 export function createFacingBillboardSystem(atlas: SpriteAtlas, opts: BillboardSpriteSystemOptions = {}): FacingBillboardSpriteSystem {
     return createBillboardSystem(atlas, "facing", [0, 0, 0], opts);
 }
 
+/**
+ * Creates a billboard sprite system whose quads rotate only around a fixed world axis.
+ * @param atlas - Sprite atlas supplying frames.
+ * @param axis - Lock axis; normalized internally and must be non-zero and finite.
+ * @param opts - Optional capacity, blend, and appearance settings.
+ * @returns The new axis-locked billboard system.
+ * @throws If `axis` has non-finite components or is the zero vector.
+ */
 export function createAxisLockedBillboardSystem(
     atlas: SpriteAtlas,
     axis: readonly [number, number, number],
@@ -136,11 +171,11 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
     axis: readonly [number, number, number],
     opts: BillboardSpriteSystemOptions
 ): BillboardSpriteSystem<TOrientation> {
-    const blendMode = opts.blendMode ?? "alpha";
-    const depthMode = resolveBillboardDepthMode(blendMode);
+    const blendMode = opts.blendMode ?? billboardBlendAlpha;
+    const depthMode = blendMode._depthMode;
     const capacity = Math.max(1, opts.capacity ?? DEFAULT_CAPACITY);
     const instanceData = new Float32Array(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
-    return {
+    const system: BillboardSpriteSystem<TOrientation> = {
         _entityType: "billboard-sprite-system",
         atlas,
         blendMode,
@@ -161,6 +196,23 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
         _dirtyMin: 0,
         _dirtyMax: 0,
     };
+    // Zero-default-init discipline: the base system never names `_customShader` / `shaderParams`.
+    // The registered hook copies them on only when a custom shader was supplied; the impl lives in
+    // the tree-shaken `billboard-custom-shader` module, so plain scenes ship none of it.
+    _getBillboardFxHook()?.initSystem(system, opts);
+    return system;
+}
+
+/**
+ * Set the custom-shader `fx.params` vec4 for a billboard system created with a `customShader`.
+ * No-op effect on systems without one (the value is simply stored). Read in WGSL as `fx.params`.
+ */
+export function setBillboardShaderParams(system: BillboardSpriteSystem, params: readonly [number, number, number, number]): void {
+    const target = (system.shaderParams ??= [0, 0, 0, 0]);
+    target[0] = params[0];
+    target[1] = params[1];
+    target[2] = params[2];
+    target[3] = params[3];
 }
 
 function growCapacity(system: BillboardSpriteSystem, minCapacity: number): void {
@@ -232,14 +284,26 @@ function writeInstance(system: BillboardSpriteSystem, slotIndex: number, props: 
         uvMaxX = prev![7]!;
         uvMaxY = prev![8]!;
     }
-    const wantsFlipX = props.flipX ?? (!isAdd && prev![5]! > prev![7]!);
-    const wantsFlipY = props.flipY ?? (!isAdd && prev![6]! > prev![8]!);
-    if (uvMinX > uvMaxX !== wantsFlipX) {
+    // Flip currently baked into the (possibly preserved) UV endpoints.
+    const currentFlipX = uvMinX > uvMaxX;
+    const currentFlipY = uvMinY > uvMaxY;
+    // Flip carried over from the previous instance (used when the flag is omitted,
+    // so a frame change keeps the existing flip).
+    const prevFlipX = !isAdd && prev![5]! > prev![7]!;
+    const prevFlipY = !isAdd && prev![6]! > prev![8]!;
+    // Resolve the desired flip. The explicit `=== true` test (rather than a
+    // `boolean !== flag` XOR) keeps both operands genuine booleans so terser's
+    // `booleans_as_integers` pass cannot turn the flag into a number and break the
+    // strict comparison (a boolean is never `!==`-equal to the integer 0/1 it maps
+    // a flag onto).
+    const wantsFlipX = props.flipX !== undefined ? props.flipX === true : prevFlipX;
+    const wantsFlipY = props.flipY !== undefined ? props.flipY === true : prevFlipY;
+    if (currentFlipX !== wantsFlipX) {
         const previousMinX = uvMinX;
         uvMinX = uvMaxX;
         uvMaxX = previousMinX;
     }
-    if (uvMinY > uvMaxY !== wantsFlipY) {
+    if (currentFlipY !== wantsFlipY) {
         const previousMinY = uvMinY;
         uvMinY = uvMaxY;
         uvMaxY = previousMinY;
@@ -289,6 +353,13 @@ function markDirty(system: BillboardSpriteSystem, dirtyMin: number, dirtyMax: nu
     system._version = (system._version + 1) | 0;
 }
 
+/**
+ * Appends a billboard sprite to the system and returns its instance index.
+ * @param system - Billboard system to add to.
+ * @param props - Sprite properties; `position` and `sizeWorld` are required.
+ * @returns The new sprite's instance index.
+ * @throws If `position` or `sizeWorld` is missing.
+ */
 export function addBillboardSpriteIndex(system: BillboardSpriteSystem, props: BillboardSpriteInit): number {
     if (props.position === undefined) {
         throw new Error("addBillboardSpriteIndex: props.position is required.");
@@ -306,6 +377,13 @@ export function addBillboardSpriteIndex(system: BillboardSpriteSystem, props: Bi
     return index;
 }
 
+/**
+ * Updates the billboard sprite at the given instance index.
+ * @param system - Billboard system that owns the sprite.
+ * @param index - Instance index to update.
+ * @param patch - Partial set of properties to overwrite.
+ * @throws If `index` is out of range.
+ */
 export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index: number, patch: Partial<BillboardSpriteInit>): void {
     if (index < 0 || index >= system.count) {
         throw new Error(`updateBillboardSpriteIndex: index ${index} out of range [0, ${system.count})`);
@@ -316,6 +394,12 @@ export function updateBillboardSpriteIndex(system: BillboardSpriteSystem, index:
     markDirty(system, index, index + 1);
 }
 
+/**
+ * Removes the billboard sprite at the given instance index using swap-remove with the last sprite.
+ * @param system - Billboard system that owns the sprite.
+ * @param index - Instance index to remove.
+ * @throws If `index` is out of range.
+ */
 export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index: number): void {
     if (index < 0 || index >= system.count) {
         throw new Error(`removeBillboardSpriteIndex: index ${index} out of range [0, ${system.count})`);
@@ -340,6 +424,10 @@ export function removeBillboardSpriteIndex(system: BillboardSpriteSystem, index:
     markDirty(system, index, index + 1);
 }
 
+/**
+ * Removes every sprite from the system, resetting its count to zero.
+ * @param system - Billboard system to clear.
+ */
 export function clearBillboardSprites(system: BillboardSpriteSystem): void {
     const count = system.count;
     system._dirtyMin = 0;
@@ -353,6 +441,14 @@ export function clearBillboardSprites(system: BillboardSpriteSystem): void {
     system._version = (system._version + 1) | 0;
 }
 
+/**
+ * Update only the frame UVs for one billboard sprite.
+ *
+ * The sprite keeps its explicit `sizeWorld`/saved size. Pixel frame dimensions
+ * do not imply a world-space resize; call `updateBillboardSpriteIndex` with
+ * both `frame` and `sizeWorld` when that is desired. Existing flip state is
+ * preserved for non-degenerate UV ranges.
+ */
 export function setBillboardSpriteFrameIndex(system: BillboardSpriteSystem, index: number, frame: number): void {
     if (index < 0 || index >= system.count) {
         throw new Error(`setBillboardSpriteFrameIndex: index ${index} out of range [0, ${system.count})`);

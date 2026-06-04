@@ -2,8 +2,7 @@
  *  Loads backgroundSkybox.dds and renders it with BJS image processing. */
 
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
-import type { Mat4 } from "../../math/types.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/gpu-pool.js";
 import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
@@ -16,7 +15,7 @@ import ddsSkyboxFragSrc from "../../../shaders/skybox-dds.fragment.wgsl?raw";
 const SKY_DDS_UNIFORM_SIZE = 96;
 const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 
-function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
     // prettier-ignore
     const positions = new Float32Array([
      S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
@@ -39,8 +38,8 @@ function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuf
     };
 }
 
-function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
-    const world = new Float32Array(16) as Mat4;
+function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Float32Array {
+    const world = new Float32Array(16);
     world[0] = 1;
     world[5] = 1;
     world[10] = 1;
@@ -60,7 +59,7 @@ export async function buildDdsSkyboxRenderable(
     skyboxTextureUrl?: string,
     enableNoise = true
 ): Promise<Renderable> {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
 
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 
@@ -78,7 +77,7 @@ export async function buildDdsSkyboxRenderable(
         bind(eng, sig) {
             return {
                 renderable: r,
-                pipeline: mat.getPipeline(eng as EngineContextInternal, sig),
+                pipeline: mat.getPipeline(eng as EngineContext, sig),
                 draw(pass) {
                     pass.setBindGroup(1, bindGroup);
                     pass.setVertexBuffer(0, skyBufs.posBuffer);
@@ -94,7 +93,7 @@ export async function buildDdsSkyboxRenderable(
 
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────
 
-function createDdsMeshUBO(engine: EngineContextInternal, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
+function createDdsMeshUBO(engine: EngineContext, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
     const data = new Float32Array(SKY_DDS_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];
@@ -110,8 +109,8 @@ function createDdsMeshUBO(engine: EngineContextInternal, world: Float32Array, pr
 /** Load a DDS cube texture (rgba16float) and return a cube texture view + sampler.
  *  Uploads only mip 0 from the DDS file and generates remaining mipmaps on the
  *  GPU so that cube face edges blend seamlessly — matching BJS's behaviour. */
-async function loadDdsCube(engine: EngineContextInternal, url: string): Promise<{ cubeView: GPUTextureView; sampler: GPUSampler }> {
-    const device = engine.device;
+async function loadDdsCube(engine: EngineContext, url: string): Promise<{ cubeView: GPUTextureView; sampler: GPUSampler }> {
+    const device = engine._device;
     const buf = await (await fetch(url)).arrayBuffer();
     const header = new Int32Array(buf, 0, 32);
     const width = header[3]!;

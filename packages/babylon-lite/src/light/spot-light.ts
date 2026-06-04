@@ -7,6 +7,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
 import type { Mat4 } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface SpotLight extends LightBase {
     readonly lightType: "spot";
@@ -22,11 +23,20 @@ export interface SpotLight extends LightBase {
     range: number;
 }
 
+/**
+ * Creates a spot light: a cone of light from `position` aimed along `direction`.
+ * @param position - World-space position of the light.
+ * @param direction - World-space direction the cone points along.
+ * @param angle - Full cone angle in radians.
+ * @param exponent - Falloff exponent; higher values produce a sharper edge.
+ * @param intensity - Scalar multiplier applied to the light's diffuse and specular contribution.
+ * @returns Plain `SpotLight` data to be added to a scene via `addToScene`.
+ */
 export function createSpotLight(position: [number, number, number], direction: [number, number, number], angle: number, exponent: number, intensity = 1.0): SpotLight {
-    const _localMatrix = new Float32Array(16) as Mat4;
-    const { wm, onDirty, lvs } = createLightBase(() =>
-        localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix)
-    );
+    const _localMatrix: Mat4 = allocateMat4();
+    const { wm, onDirty, lvs } = createLightBase(() => {
+        return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z, _localMatrix);
+    });
 
     // Pre-compute cosHalfAngle; updated via Object.defineProperty when angle changes
     let _angle = angle;

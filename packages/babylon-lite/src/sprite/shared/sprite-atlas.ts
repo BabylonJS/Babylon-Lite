@@ -10,7 +10,7 @@
  * TexturePacker JSON loader in a later PR.
  *
  * NOT YET IMPLEMENTED (intentionally omitted, see
- * `docs/sprites/pr1-pure-2d-sprites-scope.md`):
+ * `docs/lite/sprites/pr1-pure-2d-sprites-scope.md`):
  *   - `SpriteClip` / `clips` field on the atlas (animation playback). Will
  *     land as an additive change to `SpriteAtlas` in a follow-up PR.
  */

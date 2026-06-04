@@ -37,11 +37,11 @@
  */
 
 import type { NormalizedViewport } from "../camera/camera.js";
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
 export interface CopyToTextureTaskConfig {
@@ -185,8 +185,8 @@ function resetCache(device: GPUDevice): void {
 }
 
 export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine: EngineContext, scene: SceneContext): CopyToTextureTask {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
+    const eng = engine as EngineContext;
+    const sc = scene as SceneContext;
     if (!config.targetTexture && !config.resolveTexture) {
         throw new Error(`CopyToTextureTask "${config.name ?? "copy-to-texture"}": either targetTexture or resolveTexture must be provided.`);
     }
@@ -324,7 +324,7 @@ function buildResolvePath(task: CopyToTextureTaskInternal, source: RenderTarget,
     task._resolve = { _swapAsResolve: swapAsResolve };
 }
 
-function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget, target: RenderTarget, _engine: EngineContextInternal): boolean {
+function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget, target: RenderTarget, _engine: EngineContext): boolean {
     if (task.viewport !== undefined) {
         return false;
     }
@@ -370,8 +370,8 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     return true;
 }
 
-function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, target: RenderTarget, engine: EngineContextInternal): void {
-    resetCache(engine.device);
+function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, target: RenderTarget, engine: EngineContext): void {
+    resetCache(engine._device);
     const targetFormat = effectiveTargetFormat(target, engine);
     const targetSamples = target._descriptor.sampleCount ?? 1;
     const multisampledSource = (source._descriptor.sampleCount ?? 1) > 1;
@@ -384,7 +384,7 @@ function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, ta
               { binding: 0, resource: source._colorView! },
               { binding: 1, resource: task.lodLevel > 0 ? getTrilinearSampler(engine) : getBilinearSampler(engine) },
           ];
-    const bindGroup = engine.device.createBindGroup({ label: `${task.name}-bg`, layout: bgl, entries });
+    const bindGroup = engine._device.createBindGroup({ label: `${task.name}-bg`, layout: bgl, entries });
 
     // Color attachment view setup. Three cases for `view`:
     //   - Offscreen target: view = target._colorView (stable).
@@ -463,14 +463,14 @@ function buildBlitPath(task: CopyToTextureTaskInternal, source: RenderTarget, ta
 }
 
 function getOrCreateCopyPipeline(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     targetFormat: GPUTextureFormat,
     targetSamples: number,
     multisampledSource: boolean,
     lodLevel: number,
     flipY: boolean
 ): GPURenderPipeline {
-    const device = engine.device;
+    const device = engine._device;
     const pipelineKey = `${targetFormat}|t${targetSamples}|${multisampledSource ? "m" : "s"}|l${lodLevel}|${flipY ? "f" : "n"}`;
     let pipeline = _pipelines!.get(pipelineKey);
     if (pipeline) {
@@ -513,7 +513,7 @@ function getOrCreateCopyPipeline(
     return pipeline;
 }
 
-function effectiveTargetFormat(target: RenderTarget, engine: EngineContextInternal): GPUTextureFormat {
+function effectiveTargetFormat(target: RenderTarget, engine: EngineContext): GPUTextureFormat {
     if (target._descriptor.resolveToSwapchain) {
         return engine.format;
     }

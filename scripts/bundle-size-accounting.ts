@@ -67,12 +67,23 @@ export function findIgnoredBundleModules(bundleInfoDir: string, scene: string, r
 }
 
 export function summarizeRuntimeBundle(payloads: RuntimeJsPayload[], bundleInfoDir: string, scene: string): RuntimeBundleSummary {
-    const fetchedRawBytes = payloads.reduce((sum, payload) => sum + payload.body.length, 0);
-    const gzipBytes = payloads.reduce((sum, payload) => sum + gzipSync(payload.body, { level: 9 }).length, 0);
+    // A single chunk can be fetched more than once during a page load (e.g. requested
+    // by multiple importers). Deduplicate by file so the raw/gzip sums reflect the
+    // distinct chunk bytes — matching the deduplicated chunk list — instead of
+    // double-counting re-fetched chunks.
+    const uniquePayloads = new Map<string, RuntimeJsPayload>();
+    for (const payload of payloads) {
+        if (!uniquePayloads.has(payload.file)) {
+            uniquePayloads.set(payload.file, payload);
+        }
+    }
+    const dedupedPayloads = Array.from(uniquePayloads.values());
+    const fetchedRawBytes = dedupedPayloads.reduce((sum, payload) => sum + payload.body.length, 0);
+    const gzipBytes = dedupedPayloads.reduce((sum, payload) => sum + gzipSync(payload.body, { level: 9 }).length, 0);
     const ignoredModules = findIgnoredBundleModules(
         bundleInfoDir,
         scene,
-        payloads.map((payload) => payload.file)
+        dedupedPayloads.map((payload) => payload.file)
     );
     const ignoredRawBytes = ignoredModules.reduce((sum, module) => sum + module.bytes, 0);
     return {

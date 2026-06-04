@@ -9,7 +9,7 @@ import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Identity } from "../math/mat4-identity.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
-import { createWorldMatrixState } from "./world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "./world-matrix-state.js";
 
 // ─── EulerProxy ──────────────────────────────────────────────────────
 
@@ -24,6 +24,7 @@ export interface EulerProxy {
 
 // ─── SceneNode ───────────────────────────────────────────────────────
 
+/** Common base for all scene entities: TRS transform, parent/children hierarchy, and a cached world matrix. */
 export interface SceneNode {
     name: string;
     children: SceneNode[];
@@ -151,5 +152,6 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
     if (matrix) {
         node._localMatrix = matrix;
     }
+    attachWorldMatrixState(node, wm);
     return node;
 }

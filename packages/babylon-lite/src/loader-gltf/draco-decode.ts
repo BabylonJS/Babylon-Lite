@@ -86,9 +86,9 @@ async function getDracoModule(): Promise<DracoModule> {
 
 /**
  * Decode a KHR_draco_mesh_compression primitive.
- * @param compressed The raw bytes of the bufferView referenced by the extension.
- * @param attributeMap Map of glTF attribute name (POSITION, NORMAL, ...) to Draco unique id.
- * @param accessorTypes Map of glTF attribute name to component count (3 for VEC3, 2 for VEC2, 4 for VEC4).
+ * @param compressed - The raw bytes of the bufferView referenced by the extension.
+ * @param attributeMap - Map of glTF attribute name (POSITION, NORMAL, ...) to Draco unique id.
+ * @param accessorTypes - Map of glTF attribute name to component count (3 for VEC3, 2 for VEC2, 4 for VEC4).
  */
 export async function decodeDracoPrimitive(compressed: Uint8Array, attributeMap: Record<string, number>, accessorTypes: Record<string, number>): Promise<DecodedPrimitive> {
     const module = await getDracoModule();

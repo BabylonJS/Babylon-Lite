@@ -1,4 +1,4 @@
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { GaussianSplattingMesh, GsShaderFragment } from "./gaussian-splatting-mesh.js";
 import { createGaussianSplattingMesh } from "./gaussian-splatting-mesh.js";
@@ -6,6 +6,15 @@ import { buildSplatGeometry, type ParsedSplat } from "../../loader-splat/splat-d
 import { attachGaussianSplattingMesh } from "./gaussian-splatting-pipeline.js";
 import SplatSortWorker from "../../loader-splat/splat-sort-worker.ts?worker&inline";
 
+/**
+ * Creates a Gaussian Splatting mesh with `splatCount` placeholder splats and attaches
+ * it to the scene's render pipeline. Useful for procedurally filling splat data later.
+ * @param scene - Scene that owns and renders the mesh.
+ * @param name - Mesh name.
+ * @param splatCount - Number of splats to allocate.
+ * @param fragments - Optional custom shader fragments for the splat material.
+ * @returns The created, scene-attached Gaussian Splatting mesh.
+ */
 export function createProceduralGaussianSplattingMesh(scene: SceneContext, name: string, splatCount: number, fragments?: readonly GsShaderFragment[]): GaussianSplattingMesh {
     const ROW = 32;
     const buffer = new ArrayBuffer(ROW * splatCount);
@@ -20,7 +29,7 @@ export function createProceduralGaussianSplattingMesh(scene: SceneContext, name:
     const parsed: ParsedSplat = { data: buffer };
     const geom = buildSplatGeometry(parsed.data);
     const worker = new SplatSortWorker({ name: "babylon-lite-splat-sort" });
-    const eng = scene.engine as EngineContextInternal;
+    const eng = scene.engine as EngineContext;
     const mesh = createGaussianSplattingMesh(eng, name, geom, worker, parsed);
     attachGaussianSplattingMesh(scene, mesh, fragments);
     return mesh;

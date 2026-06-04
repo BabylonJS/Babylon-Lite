@@ -1,6 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import type { EngineContextInternal } from "../engine/engine.js";
-import type { Mesh, MeshInternal } from "./mesh.js";
+import type { Mesh } from "./mesh.js";
 import type { Mat4 } from "../math/types.js";
 import type { Material } from "../material/material.js";
 import { mat4Invert } from "../math/mat4-invert.js";
@@ -9,14 +8,14 @@ import { createMeshFromData } from "./mesh-factories.js";
 
 declare const csgSolidBrand: unique symbol;
 
+/** An immutable BSP-based CSG solid (set of polygons) for boolean mesh operations. */
 export interface CsgSolid {
     readonly [csgSolidBrand]: true;
-}
-
-interface CsgSolidInternal extends CsgSolid {
+    /** @internal */
     readonly _polygons: readonly CsgPolygon[];
 }
 
+/** @internal */
 interface CsgVertex {
     readonly x: number;
     readonly y: number;
@@ -28,6 +27,7 @@ interface CsgVertex {
     readonly v: number;
 }
 
+/** @internal */
 class CsgPlane {
     constructor(
         public nx: number,
@@ -48,6 +48,7 @@ class CsgPlane {
     }
 }
 
+/** @internal */
 class CsgPolygon {
     public plane: CsgPlane;
 
@@ -274,15 +275,11 @@ function splitPolygon(plane: CsgPlane, polygon: CsgPolygon, coplanarFront: CsgPo
 }
 
 function solidFromPolygons(polygons: CsgPolygon[]): CsgSolid {
-    return { _polygons: polygons } as unknown as CsgSolidInternal;
-}
-
-function internalSolid(solid: CsgSolid): CsgSolidInternal {
-    return solid as CsgSolidInternal;
+    return { _polygons: polygons } as unknown as CsgSolid;
 }
 
 function clonePolygons(solid: CsgSolid): CsgPolygon[] {
-    return internalSolid(solid)._polygons.map((p) => p.clone());
+    return solid._polygons.map((p) => p.clone());
 }
 
 function transformPoint(m: Mat4, x: number, y: number, z: number): [number, number, number] {
@@ -296,20 +293,25 @@ function transformNormal(m: Mat4, inv: Mat4 | null, x: number, y: number, z: num
     return normalizeVec3(m[0]! * x + m[4]! * y + m[8]! * z, m[1]! * x + m[5]! * y + m[9]! * z, m[2]! * x + m[6]! * y + m[10]! * z, 1e-20);
 }
 
-function requireCpuGeometry(mesh: Mesh): MeshInternal {
-    const internal = mesh as MeshInternal;
-    if (!internal._cpuPositions) {
+function requireCpuGeometry(mesh: Mesh): Mesh {
+    if (!mesh._cpuPositions) {
         throw new Error(`createCsgFromMesh("${mesh.name}") requires CPU positions. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    if (!internal._cpuIndices) {
+    if (!mesh._cpuIndices) {
         throw new Error(`createCsgFromMesh("${mesh.name}") requires CPU indices. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    if (!internal._cpuNormals) {
+    if (!mesh._cpuNormals) {
         throw new Error(`createCsgFromMesh("${mesh.name}") requires CPU normals. Use a Babylon Lite mesh factory or loader that retains CPU geometry.`);
     }
-    return internal;
+    return mesh;
 }
 
+/**
+ * Builds a {@link CsgSolid} from a mesh's CPU geometry, baking its world transform.
+ * @param mesh - Source mesh; must retain CPU positions, normals, and indices.
+ * @param materialSlot - Material slot index tagged onto every generated polygon.
+ * @returns A CSG solid usable with {@link csgUnion}, {@link csgSubtract}, and {@link csgIntersect}.
+ */
 export function createCsgFromMesh(mesh: Mesh, materialSlot = 0): CsgSolid {
     const internal = requireCpuGeometry(mesh);
     const positions = internal._cpuPositions!;
@@ -339,6 +341,10 @@ export function createCsgFromMesh(mesh: Mesh, materialSlot = 0): CsgSolid {
     return solidFromPolygons(polygons);
 }
 
+/**
+ * Returns the boolean union (`a` ∪ `b`) of two solids.
+ * @returns A new solid; inputs are not modified.
+ */
 export function csgUnion(a: CsgSolid, b: CsgSolid): CsgSolid {
     const an = new CsgNode(clonePolygons(a));
     const bn = new CsgNode(clonePolygons(b));
@@ -351,6 +357,10 @@ export function csgUnion(a: CsgSolid, b: CsgSolid): CsgSolid {
     return solidFromPolygons(an.allPolygons());
 }
 
+/**
+ * Returns the boolean difference (`a` − `b`) of two solids.
+ * @returns A new solid; inputs are not modified.
+ */
 export function csgSubtract(a: CsgSolid, b: CsgSolid): CsgSolid {
     const an = new CsgNode(clonePolygons(a));
     const bn = new CsgNode(clonePolygons(b));
@@ -365,6 +375,10 @@ export function csgSubtract(a: CsgSolid, b: CsgSolid): CsgSolid {
     return solidFromPolygons(an.allPolygons());
 }
 
+/**
+ * Returns the boolean intersection (`a` ∩ `b`) of two solids.
+ * @returns A new solid; inputs are not modified.
+ */
 export function csgIntersect(a: CsgSolid, b: CsgSolid): CsgSolid {
     const an = new CsgNode(clonePolygons(a));
     const bn = new CsgNode(clonePolygons(b));
@@ -396,15 +410,19 @@ function createMeshFromPolygons(engine: EngineContext, polygons: readonly CsgPol
         }
     }
 
-    return createMeshFromData(engine as EngineContextInternal, name, new Float32Array(positions), new Float32Array(normals), new Uint32Array(indices), new Float32Array(uvs));
+    return createMeshFromData(engine as EngineContext, name, new Float32Array(positions), new Float32Array(normals), new Uint32Array(indices), new Float32Array(uvs));
 }
 
+/**
+ * Triangulates a {@link CsgSolid} into a single renderable mesh.
+ * @param name - Name for the created mesh.
+ */
 export function createMeshFromCsg(engine: EngineContext, solid: CsgSolid, name = "csg"): Mesh {
-    return createMeshFromPolygons(engine, internalSolid(solid)._polygons, name);
+    return createMeshFromPolygons(engine, solid._polygons, name);
 }
 
 export function createMeshesFromCsg(engine: EngineContext, solid: CsgSolid, materials: readonly Material[], name = "csg"): Mesh[] {
-    const polygons = internalSolid(solid)._polygons;
+    const polygons = solid._polygons;
     const slots: number[] = [];
     for (const polygon of polygons) {
         if (!slots.includes(polygon.materialSlot)) {

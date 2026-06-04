@@ -10,39 +10,45 @@
  * view to be wired as a sampled texture before the frame graph is built.
  */
 
-import type { EngineContextInternal } from "./engine.js";
+import type { EngineContext } from "./engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 
 /** Signature of a render target's attachment set — enough to key a GPURenderPipeline. */
 export interface RenderTargetSignature {
+    /** @internal */
     readonly _colorFormat?: GPUTextureFormat;
+    /** @internal */
     readonly _depthStencilFormat?: GPUTextureFormat;
-    /** Depth compare for this target. Defaults to reverse-Z `"greater-equal"`. Shadow-map targets use standard-Z `"less-equal"`. */
+    /** @internal Depth compare for this target. Defaults to reverse-Z `"greater-equal"`. Shadow-map targets use standard-Z `"less-equal"`. */
     readonly _depthCompare?: GPUCompareFunction;
+    /** @internal */
     readonly _sampleCount: number;
     /** When true, the projection matrix's Y is flipped (offscreen RTT — see writePassSceneUBO).
      *  Pipelines must invert frontFace to keep back-face culling correct. */
+    /** @internal */
     readonly _flipY?: boolean;
-    /** Internal per-task refraction texture shared by transmissive material bindings. */
+    /** @internal Internal per-task refraction texture shared by transmissive material bindings. */
     readonly _transmissionTexture?: Texture2D | null;
 }
 
 /** Description of a render target — what to create, not the GPU objects themselves. */
 export const REVERSE_DEPTH_COMPARE = "greater-equal" as GPUCompareFunction;
 
+/** Describes a render target — what attachments to create, not the GPU objects
+ *  themselves. GPU textures are allocated later by `buildRenderTarget`. */
 export interface RenderTargetDescriptor {
     label?: string;
     colorFormat?: GPUTextureFormat;
     depthStencilFormat?: GPUTextureFormat;
-    /** Depth clear value. Defaults to reverse-Z far depth `0`. Shadow-map targets use standard-Z far depth `1`. */
+    /** @internal Depth clear value. Defaults to reverse-Z far depth `0`. Shadow-map targets use standard-Z far depth `1`. */
     _depthClearValue?: number;
-    /** Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
+    /** @internal Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
     _depthCompare?: GPUCompareFunction;
     sampleCount: number;
     /** 'canvas' means match the canvas pixel size. Otherwise explicit pixels. */
     size: "canvas" | { width: number; height: number };
     /** If true, the color attachment resolves to the swapchain texture. The RT still
-     *  owns the MSAA texture (when sampleCount > 1) and the depth texture; only the
+     *  owns the MSAA texture (when sampleCount \> 1) and the depth texture; only the
      *  final color is the swapchain view, acquired per frame and patched in at execute
      *  time. With sampleCount === 1 the RT owns no color texture (the swap view is the
      *  color attachment directly). */
@@ -64,16 +70,24 @@ export function targetSignatureKey(desc: RenderTargetSignature): string {
 
 /** Allocated GPU state for a render target. */
 export interface RenderTarget {
+    /** @internal */
     readonly _descriptor: RenderTargetDescriptor;
+    /** @internal */
     _colorTexture: GPUTexture | null;
+    /** @internal */
     _colorView: GPUTextureView | null;
+    /** @internal */
     _depthTexture: GPUTexture | null;
+    /** @internal */
     _depthView: GPUTextureView | null;
+    /** @internal */
     _width: number;
+    /** @internal */
     _height: number;
     /** True when textures were allocated eagerly (before frame graph build) —
      *  `buildRenderTarget` becomes a no-op so existing GPUTexture handles
      *  (e.g. exposed as SampledTexture) stay valid. */
+    /** @internal */
     _eager?: boolean;
 }
 
@@ -92,10 +106,10 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
 
 /** Allocate GPU textures for the render target. Idempotent for eager targets.
  *  For swapchain-resolved targets the color texture is only allocated when
- *  sampleCount > 1 (MSAA texture used as color attachment, swap view used as
+ *  sampleCount \> 1 (MSAA texture used as color attachment, swap view used as
  *  resolve target); with sampleCount === 1 the swap view is the color attachment
  *  directly so no color texture is owned. Depth is always owned by the RT. */
-export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInternal): void {
+export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void {
     if (rt._eager) {
         return;
     }
@@ -106,7 +120,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContextInterna
     rt._width = width;
     rt._height = height;
 
-    const device = engine.device;
+    const device = engine._device;
     const allocColor = !!desc.colorFormat && (!desc.resolveToSwapchain || desc.sampleCount > 1);
 
     if (allocColor) {
@@ -148,7 +162,7 @@ export function disposeRenderTarget(rt: RenderTarget): void {
     rt._height = 0;
 }
 
-function resolveSize(desc: RenderTargetDescriptor, engine: EngineContextInternal): { width: number; height: number } {
+function resolveSize(desc: RenderTargetDescriptor, engine: EngineContext): { width: number; height: number } {
     if (desc.size === "canvas") {
         return { width: engine.canvas.width, height: engine.canvas.height };
     }

@@ -7,6 +7,7 @@ export interface PostProcessVec2 {
     y: number;
 }
 
+/** Configuration for `createChromaticAberrationPostProcessTask`: shift `aberrationAmount`, `direction`, `radialIntensity`, and `centerPosition`. */
 export interface ChromaticAberrationPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     aberrationAmount?: number;
     direction?: PostProcessVec2;
@@ -14,6 +15,7 @@ export interface ChromaticAberrationPostProcessTaskConfig extends Omit<PostProce
     centerPosition?: PostProcessVec2;
 }
 
+/** A post-process task that offsets the red/green/blue channels to simulate lens chromatic aberration. */
 export interface ChromaticAberrationPostProcessTask extends PostProcessTask {
     aberrationAmount: number;
     direction: PostProcessVec2;
@@ -26,10 +28,17 @@ const CHROMATIC_ABERRATION_UNIFORM_WGSL = `struct ChromaticAberrationParams{chro
 
 const CHROMATIC_ABERRATION_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let centered=uv-chromaticAberrationParams.centerPosition;var dir=chromaticAberrationParams.direction;if(dir.x==0.0&&dir.y==0.0){dir=normalize(centered);}let radius=sqrt(dot(centered,centered));let amount=chromaticAberrationParams.chromatic_aberration*pow(radius,chromaticAberrationParams.radialIntensity);let shift=amount*dir/vec2f(chromaticAberrationParams.screen_width,chromaticAberrationParams.screen_height);let r=samplePostProcessSource(vec2f(uv.x+shift.x*-0.3,uv.y+shift.y*-0.3*0.5));let g=samplePostProcessSource(uv);let b=samplePostProcessSource(vec2f(uv.x+shift.x*0.3,uv.y+shift.y*0.3*0.5));return vec4f(r.r,g.g,b.b,clamp(r.a+g.a+b.a,0,1));}`;
 
+/**
+ * Create a post-process task that simulates chromatic aberration by shifting color channels outward from a center point.
+ * @param config - Aberration parameters and source/target settings.
+ * @param engine - The owning engine.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
+ * @returns The chromatic-aberration post-process task.
+ */
 export function createChromaticAberrationPostProcessTask(
     config: ChromaticAberrationPostProcessTaskConfig,
     engine: EngineContext,
-    scene: SceneContext
+    scene?: SceneContext
 ): ChromaticAberrationPostProcessTask {
     const params = {
         aberrationAmount: config.aberrationAmount ?? 30,

@@ -3,16 +3,19 @@
  */
 
 import type { Camera } from "../camera/camera.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
+import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 /** Write shadow generator state into a Float32Array(24) for UBO upload.
  *  Layout: [lightMatrix(16), depthValues.x, depthValues.y, 0, 0, shadowsInfo(4)] */
 export function writeShadowUboFields(out: Float32Array, sg: { _lightMatrix: Float32Array; _depthValues: Float32Array; _shadowsInfo: Float32Array }): void {
-    out.set(sg._lightMatrix, 0);
+    packMat4IntoF32(out, sg._lightMatrix, 0);
     out[16] = sg._depthValues[0]!;
     out[17] = sg._depthValues[1]!;
     out[18] = 0;
@@ -73,7 +76,7 @@ export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
 }
 
 /** Create the shared shadow-params UBO (32 bytes) holding bias/depthScale/depth-range fields. */
-export function createShadowParamsUBO(engine: EngineContextInternal, bias: number, depthScale: number): GPUBuffer {
+export function createShadowParamsUBO(engine: EngineContext, bias: number, depthScale: number): GPUBuffer {
     const data = new Float32Array(8);
     data[0] = bias;
     data[2] = depthScale;
@@ -107,7 +110,7 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
 
 /** Create the shared receiver-side shadow UBO (96 bytes), initialised from state. */
 export function createSharedShadowUBO(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     _lightMatrix: Float32Array,
     _depthValues: Float32Array,
     _shadowsInfo: Float32Array
@@ -127,13 +130,17 @@ export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
     return sum;
 }
 
-/** Create the light-owned camera facade used by shadow render tasks. */
+/** Create the light-owned camera facade used by shadow render tasks.
+ *  Caches are pre-allocated from the process-global allocator. */
 export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera {
     return {
         fov: 1,
         nearPlane: 1,
         farPlane: 1,
         children: [],
+        _viewCache: allocateMat4() as unknown as Mat4Storage,
+        _projCache: allocateMat4() as unknown as Mat4Storage,
+        _vpCache: allocateMat4() as unknown as Mat4Storage,
         get worldMatrix() {
             return sg._light.worldMatrix;
         },

@@ -17,7 +17,7 @@ import { createRequire } from "module";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "vite";
-import type { Plugin, ViteDevServer } from "vite";
+import type { Plugin } from "vite";
 
 type CoverageMode = "prod" | "dev";
 
@@ -91,7 +91,7 @@ const labDir = resolve(repoRoot, "lab");
 const labPublicDir = resolve(labDir, "public");
 const bundleDir = resolve(labPublicDir, "bundle");
 const liteSrcDir = resolve(repoRoot, "packages", "babylon-lite", "src");
-const labLiteSrcDir = resolve(labDir, "src", "lite");
+const labLiteSrcDir = resolve(labDir, "lite", "src", "lite");
 const require = createRequire(import.meta.url);
 
 function parseArgs(argv: string[]): CliOptions {
@@ -176,7 +176,7 @@ function parseArgs(argv: string[]): CliOptions {
 
 function normalizeSceneArg(sceneArg: string): { sceneName: string; query: string } {
     const [rawScene, rawQuery = ""] = sceneArg.split("?", 2);
-    const sceneName = /^\d+$/.test(rawScene) ? `scene${rawScene}` : rawScene || "scene1";
+    const sceneName = /^\d+$/.test(rawScene ?? "") ? `scene${rawScene}` : rawScene || "scene1";
     const query = rawQuery ? `?${rawQuery}` : "";
     return { sceneName, query };
 }
@@ -235,7 +235,12 @@ async function startStaticLabServer(): Promise<StartedServer> {
                 return;
             }
 
-            const candidates = [resolve(labDir, cleanPath), resolve(labPublicDir, cleanPath)];
+            const candidates = [
+                resolve(labDir, cleanPath),
+                resolve(labDir, "lite", cleanPath),
+                resolve(labPublicDir, cleanPath),
+                resolve(labPublicDir, cleanPath.replace(/^lite\//, "")),
+            ];
             for (const filePath of candidates) {
                 if (existsSync(filePath) && statSync(filePath).isFile()) {
                     res.writeHead(200, {
@@ -349,7 +354,7 @@ async function collectCoverage(page: Page, url: string, timeoutMs: number, settl
 }
 
 function stripQueryAndHash(value: string): string {
-    return value.split("#", 1)[0].split("?", 1)[0];
+    return value.split("#", 1)[0]!.split("?", 1)[0]!;
 }
 
 function normalizePathCase(value: string): string {
@@ -394,6 +399,9 @@ function pathFromCoverageUrl(rawUrl: string): string | null {
     if (pathname.startsWith("/bundle/")) {
         return resolve(labPublicDir, `.${pathname}`);
     }
+    if (pathname.startsWith("/lite/bundle/")) {
+        return resolve(labPublicDir, `.${pathname.slice("/lite".length)}`);
+    }
     return null;
 }
 
@@ -437,8 +445,8 @@ function mergePreciseUsedBytes(totalBytes: number, functions: CoverageFunction[]
 
     let usedBytes = 0;
     for (let i = 0; i < sortedPoints.length - 1; i++) {
-        const start = sortedPoints[i];
-        const end = sortedPoints[i + 1];
+        const start = sortedPoints[i]!;
+        const end = sortedPoints[i + 1]!;
         const covering = ranges
             .filter((range) => range.startOffset <= start && range.endOffset >= end)
             .sort((a, b) => a.endOffset - a.startOffset - (b.endOffset - b.startOffset))[0];

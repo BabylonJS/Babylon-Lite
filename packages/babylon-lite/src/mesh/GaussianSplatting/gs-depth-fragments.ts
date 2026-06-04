@@ -42,9 +42,11 @@ fn gsLinearDepth(ndcZ: f32) -> f32 {
  *  Matches BJS's `gaussianSplattingDepth.fragment.fx` default (no `ALPHA_BLENDED_DEPTH`)
  *  branch exactly:
  *
+ * ```
  *      // base WGSL has `let A = -dot(in.vPos, in.vPos);` and `in.vColor.a = splat.color.a * material.alpha`
  *      if (A < -in.vColor.a) { discard; }                  // ↔ if dot(vPos,vPos) > vColor.a
  *      finalColor = vec4(linearDepth, linearDepth, linearDepth, 1.0);
+ * ```
  *
  *  Per-splat α is used as a *squared-radius* threshold in the splat-local 2D
  *  quad coordinate (`vPos ∈ [-1,1]²`), so each splat clips to a disc of

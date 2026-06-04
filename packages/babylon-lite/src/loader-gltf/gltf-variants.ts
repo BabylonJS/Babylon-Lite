@@ -6,12 +6,12 @@
  */
 
 import type { Mesh } from "../mesh/mesh.js";
-import type { PbrMaterialPropsInternal } from "../material/pbr/pbr-material.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { runMatExts, uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap } from "./gltf-pbr-builder.js";
 import { buildDefaultPbrTexturesExt, assemblePbrPropsExt } from "./gltf-pbr-builder-ext.js";
@@ -27,7 +27,7 @@ export async function loadVariantMaterials(
     baseUrl: string,
     variantNames: string[],
     meshes: Mesh[],
-    engine: EngineContextInternal,
+    engine: EngineContext,
     exts: GltfFeature[],
     wrapTex: TextureWrapFn = identityTexWrap
 ): Promise<MaterialVariantData> {
@@ -68,8 +68,8 @@ export async function loadVariantMaterials(
         return p;
     };
 
-    const pbrCache = new Map<GltfMaterialData, Promise<PbrMaterialPropsInternal>>();
-    const getPbr = (gltfMat: GltfMaterialData): Promise<PbrMaterialPropsInternal> => {
+    const pbrCache = new Map<GltfMaterialData, Promise<PbrMaterialProps>>();
+    const getPbr = (gltfMat: GltfMaterialData): Promise<PbrMaterialProps> => {
         let p = pbrCache.get(gltfMat);
         if (!p) {
             p = (async () => {

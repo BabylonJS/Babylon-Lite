@@ -1,11 +1,13 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Five parallel jobs:
-#   1. Unit Tests       — vitest + plumbing (Playwright)
-#   2. Bundle Size      — ceiling checks
-#   3. Perf Regression  — Lite vs Stable on BrowserStack
-#   4. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
-#   5. Lint             — ESLint + TypeScript type-check
+# Runs on every PR targeting master. Seven parallel jobs:
+#   1. Release Markers  — breaking-change marker validation
+#   2. API Report       — public API diff comment + breaking-change validation
+#   3. Unit Tests       — vitest + plumbing (Playwright)
+#   4. Bundle Size      — ceiling checks
+#   5. Perf Regression  — Lite vs Stable on BrowserStack
+#   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
+#   7. Lint             — ESLint + TypeScript type-check
 #
 
 trigger: none
@@ -32,7 +34,78 @@ stages:
       displayName: "PR Validation"
       jobs:
           # ──────────────────────────────────────────────────────────────
-          # Job 1: Unit Tests
+          # Job 0: Release Marker Validation
+          # ──────────────────────────────────────────────────────────────
+          - job: ReleaseMarkers
+            displayName: "Release Markers"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm validate:release-markers
+                  displayName: "Validate breaking-change markers"
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "$(System.PullRequest.PullRequestNumber)"
+                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 1: API Report
+          # ──────────────────────────────────────────────────────────────
+          - job: ApiReport
+            displayName: "API Report"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  persistCredentials: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm report:api-changes
+                  displayName: "Generate API report diff"
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "$(System.PullRequest.PullRequestNumber)"
+                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post API changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      id: "$(System.PullRequest.PullRequestNumber)"
+                      comment: "$(API_COMMENT_BODY)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 2: Unit Tests
           # ──────────────────────────────────────────────────────────────
           - job: UnitTests
             displayName: "Unit Tests"
@@ -56,14 +129,19 @@ stages:
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
 
-                - script: npx vitest run
+                - script: npx vitest run --project unit
                   displayName: "Run vitest unit tests"
+                  env:
+                      CI: "true"
+
+                - script: npx vitest run --project build
+                  displayName: "Run vitest build-output tests"
 
                 - script: |
-                      npx playwright test tests/plumbing/dispose.spec.ts
-                      npx playwright test tests/plumbing/material-swap.spec.ts
-                      npx playwright test tests/plumbing/memory-leak.spec.ts
-                      npx playwright test tests/plumbing/picking.spec.ts
+                      npx playwright test tests/lite/plumbing/dispose.spec.ts
+                      npx playwright test tests/lite/plumbing/material-swap.spec.ts
+                      npx playwright test tests/lite/plumbing/memory-leak.spec.ts
+                      npx playwright test tests/lite/plumbing/picking.spec.ts
                   displayName: "Run plumbing tests"
                   env:
                       HEADLESS: "true"
@@ -83,7 +161,7 @@ stages:
                   displayName: "Report test results"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 2: Bundle Size
+          # Job 3: Bundle Size
           # ──────────────────────────────────────────────────────────────
           - job: BundleSize
             displayName: "Bundle Size"
@@ -120,7 +198,7 @@ stages:
                       SKIP_BJS: "true"
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
-                - script: npx playwright test tests/parity/bundle-size.spec.ts --reporter=junit
+                - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
                   env:
                       HEADLESS: "true"
@@ -165,7 +243,7 @@ stages:
                       siteName: "Lab"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 3: Performance Regression
+          # Job 4: Performance Regression
           # ──────────────────────────────────────────────────────────────
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
@@ -195,9 +273,28 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
-                # Resolve baseline ref SHA for cache key
+                # Resolve baseline ref SHA for cache key.
+                # Must mirror getBaselineRef() in scripts/build-perf-baseline.ts so the cache key
+                # matches the ref that pnpm build:perf-baseline will actually build from.
+                # NOTE: do NOT chain `git describe ... | xargs git rev-parse || fallback` — when
+                # `git describe` finds no tag it exits non-zero but xargs still runs `git rev-parse`
+                # with no args, which exits 0 with empty stdout, so the `||` fallbacks never fire
+                # and BASELINE_SHA silently becomes empty. That corrupts the cache key to a
+                # constant string shared across all builds.
                 - script: |
-                      BASELINE_SHA=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | xargs git rev-parse 2>/dev/null || git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
+                      set -u
+                      TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+                      if [ -n "$TAG" ]; then
+                          BASELINE_SHA=$(git rev-parse "$TAG")
+                          echo "Baseline ref: $TAG"
+                      else
+                          BASELINE_SHA=$(git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
+                          echo "Baseline ref: origin/master (no v* tag found)"
+                      fi
+                      if [ -z "$BASELINE_SHA" ]; then
+                          echo "##vso[task.logissue type=error]Failed to resolve baseline SHA — aborting to avoid poisoning the perf-baseline cache with an empty key."
+                          exit 1
+                      fi
                       echo "##vso[task.setvariable variable=BASELINE_SHA]$BASELINE_SHA"
                       echo "Baseline SHA: $BASELINE_SHA"
                       mkdir -p lab/public/bundle-baseline
@@ -221,9 +318,11 @@ stages:
                       const fs = require('fs');
                       const path = require('path');
                       const scenes = JSON.parse(fs.readFileSync('scene-config.json','utf8'));
+                      const outDir = path.join('lab','lite');
+                      fs.mkdirSync(outDir, { recursive: true });
                       for (const s of scenes) {
                         const html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style></head><body><canvas id=\"renderCanvas\"></canvas><script src=\"/loader.js\"></script><script type=\"module\" src=\"/bundle-baseline/scene'+s.id+'.js\"></script></body></html>';
-                        fs.writeFileSync(path.join('lab','bundle-baseline-scene'+s.id+'.html'), html);
+                        fs.writeFileSync(path.join(outDir,'bundle-baseline-scene'+s.id+'.html'), html);
                       }
                       console.log('Generated ' + scenes.length + ' baseline HTML pages');
                       "
@@ -262,10 +361,11 @@ stages:
                       reportType: perf
 
           # ──────────────────────────────────────────────────────────────
-          # Job 4: Parity (Cloud Browser)
+          # Job 5: Parity (Cloud Browser)
           # ──────────────────────────────────────────────────────────────
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
+            timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -320,7 +420,7 @@ stages:
                       reportType: parity
 
           # ──────────────────────────────────────────────────────────────
-          # Job 5: Lint
+          # Job 6: Lint
           # ──────────────────────────────────────────────────────────────
           - job: Lint
             displayName: "Lint & Type Check"
@@ -346,4 +446,12 @@ stages:
 
                 - script: |
                       npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
-                  displayName: "TypeScript type-check"
+                  displayName: "TypeScript type-check (package)"
+
+                - script: |
+                      npx tsc -p lab/tsconfig.typecheck.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (lab)"
+
+                - script: |
+                      npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (tests)"

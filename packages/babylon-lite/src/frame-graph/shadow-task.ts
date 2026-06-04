@@ -5,32 +5,31 @@
  * internal hooks, keeping this scheduler filter-agnostic.
  */
 
-import type { EngineContext, EngineContextInternal } from "../engine/engine.js";
-import type { SceneContext, SceneContextInternal } from "../scene/scene-core.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { Task } from "./task.js";
 import { _getShadowTaskCasterMeshes, _setShadowTaskInputPreloader } from "./shadow-inputs.js";
 
+/** Scene-owned frame-graph task that schedules shadow-map generation across the scene's shadow generators. */
 export interface ShadowTask extends Task {
     readonly name: "shadow";
 }
 
 /** @internal Create the scene-owned shadow scheduling adapter task. */
 export function createShadowTask(engine: EngineContext, scene: SceneContext): ShadowTask {
-    const eng = engine as EngineContextInternal;
-    const sc = scene as SceneContextInternal;
     const shadowGenerators = new Set<ShadowGenerator>();
     _setShadowTaskInputPreloader(preloadShadowTaskInput);
 
     const task: ShadowTask = {
         name: "shadow",
-        engine: eng,
-        scene: sc,
+        engine,
+        scene,
         _passes: [],
         async _preload(): Promise<void> {
             const loads: Promise<void>[] = [];
-            for (const light of sc.lights) {
+            for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
                 if (sg?._preloadShadowTask && casterMeshes) {
@@ -42,29 +41,29 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
         },
         record(): void {
             task._passes.length = 0;
-            for (const light of sc.lights) {
+            for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
                 if (sg?._ensureShadowTaskState && casterMeshes) {
                     shadowGenerators.add(sg);
-                    const state = sg._ensureShadowTaskState(eng, sc, casterMeshes);
+                    const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
                     state._task.record();
                 }
             }
         },
         execute(): number {
             let draws = 0;
-            for (const light of sc.lights) {
+            for (const light of scene.lights) {
                 const sg = light.shadowGenerator;
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
                 if (sg?._ensureShadowTaskState && sg._renderShadowMap && casterMeshes) {
                     shadowGenerators.add(sg);
                     const existing = sg._shadowTaskState ?? null;
-                    const state = sg._ensureShadowTaskState(eng, sc, casterMeshes);
+                    const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
                     if (!existing || existing._casterMeshes !== casterMeshes) {
                         state._task.record();
                     }
-                    draws += sg._renderShadowMap(eng, state);
+                    draws += sg._renderShadowMap(engine, state);
                 }
             }
             return draws;

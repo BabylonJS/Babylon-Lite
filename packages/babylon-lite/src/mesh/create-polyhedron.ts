@@ -21,6 +21,7 @@ export interface PolyhedronData {
     indices: Uint32Array;
 }
 
+/** Options for `createPolyhedronData`. Subset of Babylon's CreatePolyhedron. */
 export interface PolyhedronOptions {
     /** Preset index 0-14. 0=Tetrahedron, 1=Octahedron, 2=Dodecahedron,
      *  3=Icosahedron, 4=Rhombicuboctahedron, 5=TriangularPrism, 6=PentagonalPrism,

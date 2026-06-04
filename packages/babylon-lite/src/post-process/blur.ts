@@ -7,11 +7,13 @@ export interface PostProcessVec2 {
     y: number;
 }
 
+/** Configuration for `createBlurPostProcessTask`; `direction` is the blur axis and `kernel` the sample-window size in pixels. */
 export interface BlurPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
     direction?: PostProcessVec2;
     kernel?: number;
 }
 
+/** A separable Gaussian blur post-process pass along a single `direction`. */
 export interface BlurPostProcessTask extends PostProcessTask {
     direction: PostProcessVec2;
     kernel: number;
@@ -25,10 +27,6 @@ const BLUR_UNIFORM_WGSL = `struct BlurParams{delta:vec2f,p0:f32,p1:f32}
 interface BlurSample {
     offset: number;
     weight: number;
-}
-
-interface BlurPostProcessTaskInternal extends BlurPostProcessTask {
-    readonly _shader: PostProcessShaderConfig;
 }
 
 function nearestBestKernel(kernel: number): number {
@@ -106,7 +104,14 @@ function updateBlurShader(shader: PostProcessShaderConfig, kernel: number): void
     shader.fragmentWrapperWGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
 }
 
-export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene: SceneContext): BlurPostProcessTask {
+/**
+ * Create a separable Gaussian blur post-process task. Apply twice (horizontal then vertical) for a full 2D blur.
+ * @param config - Blur direction, kernel size, and source/target settings.
+ * @param engine - The owning engine.
+ * @param scene - Optional owning scene. Omit for scene-less standalone frame graphs.
+ * @returns The blur post-process task.
+ */
+export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BlurPostProcessTask {
     const params = { direction: config.direction ?? { x: 1, y: 0 }, kernel: config.kernel ?? 9 };
     const shader: PostProcessShaderConfig = {
         uniformWGSL: BLUR_UNIFORM_WGSL,
@@ -133,7 +138,7 @@ export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, eng
         },
         engine,
         scene
-    ) as BlurPostProcessTaskInternal;
+    ) as BlurPostProcessTask;
     const baseUpdateUniforms = task.updateUniforms;
     let shaderKernel = params.kernel;
     task.updateUniforms = () => {

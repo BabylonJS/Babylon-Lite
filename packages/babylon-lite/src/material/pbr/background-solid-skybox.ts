@@ -6,7 +6,7 @@
  *  pay for the shader module or cube geometry. */
 
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Mat4 } from "../../math/types.js";
 import type { Renderable } from "../../render/renderable.js";
@@ -23,7 +23,7 @@ import { createSingleUniformBGL } from "../../shader/bgl-helpers.js";
 
 const SKY_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad
 
-function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
+function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
     // prettier-ignore
     const positions = new Float32Array([
      S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
@@ -46,8 +46,8 @@ function createSkyboxBuffers(engine: EngineContextInternal, S: number): { posBuf
     };
 }
 
-function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
-    const world = new Float32Array(16) as Mat4;
+function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Float32Array {
+    const world = new Float32Array(16);
     world[0] = 1;
     world[5] = 1;
     world[10] = 1;
@@ -59,8 +59,8 @@ function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4 {
 }
 
 interface SkyboxMaterial {
-    getPipeline(engine: EngineContextInternal, sig: RenderTargetSignature): GPURenderPipeline;
-    createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
+    getPipeline(engine: EngineContext, sig: RenderTargetSignature): GPURenderPipeline;
+    createBindGroup(engine: EngineContext, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
 }
 
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
@@ -71,8 +71,8 @@ let _skyLayout: GPUBindGroupLayout | null = null;
 let _skyCachedDevice: GPUDevice | null = null;
 
 function createSkyboxMaterial(): SkyboxMaterial {
-    function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
-        const device = engine.device;
+    function getLayout(engine: EngineContext): GPUBindGroupLayout {
+        const device = engine._device;
         if (_skyLayout && _skyCachedDevice === device) {
             return _skyLayout;
         }
@@ -82,7 +82,7 @@ function createSkyboxMaterial(): SkyboxMaterial {
 
     return {
         getPipeline(_engine, sig) {
-            const device = _engine.device;
+            const device = _engine._device;
             if (_skyCachedDevice !== device) {
                 _skyPipelines.clear();
                 _skyLayout = null;
@@ -117,7 +117,7 @@ function createSkyboxMaterial(): SkyboxMaterial {
         },
 
         createBindGroup(engine, meshUBO, _env) {
-            const device = engine.device;
+            const device = engine._device;
             return device.createBindGroup({
                 layout: getLayout(engine),
                 entries: [{ binding: 0, resource: { buffer: meshUBO } }],
@@ -133,14 +133,14 @@ export function buildSolidSkyboxRenderable(
     rootPosition: [number, number, number],
     primaryColor: [number, number, number]
 ): Renderable {
-    const engine = scene.engine as EngineContextInternal;
+    const engine = scene.engine;
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
     const cc = scene.clearColor;
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);
 
     const skyMat = createSkyboxMaterial();
     const skyOutputColor: [number, number, number] = [cc.r, cc.g, cc.b];
-    const skyUBO = createSkyMeshUBO(engine, skyboxWorld, primaryColor, skyOutputColor);
+    const skyUBO = createSkyMeshUBO(engine, skyboxWorld as unknown as Mat4, primaryColor, skyOutputColor);
     const skyBG = skyMat.createBindGroup(engine, skyUBO, envTextures);
 
     const r: Renderable = {
@@ -149,7 +149,7 @@ export function buildSolidSkyboxRenderable(
         bind(eng, sig) {
             return {
                 renderable: r,
-                pipeline: skyMat.getPipeline(eng as EngineContextInternal, sig),
+                pipeline: skyMat.getPipeline(eng as EngineContext, sig),
                 draw(pass) {
                     pass.setBindGroup(1, skyBG);
                     pass.setVertexBuffer(0, skyBufs.posBuffer);
@@ -163,7 +163,7 @@ export function buildSolidSkyboxRenderable(
     return r;
 }
 
-function createSkyMeshUBO(engine: EngineContextInternal, world: Mat4, primaryColor: [number, number, number], skyOutputColor: [number, number, number]): GPUBuffer {
+function createSkyMeshUBO(engine: EngineContext, world: Mat4, primaryColor: [number, number, number], skyOutputColor: [number, number, number]): GPUBuffer {
     const data = new Float32Array(SKY_MESH_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];

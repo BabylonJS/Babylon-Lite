@@ -23,7 +23,7 @@
  * single-attachment API.
  */
 
-import type { EngineContextInternal } from "./engine.js";
+import type { EngineContext } from "./engine.js";
 
 /** Description of a multi-render-target — what to create, not the GPU objects themselves. */
 export interface RenderTargetMrtDescriptor {
@@ -69,7 +69,7 @@ export function createRenderTargetMrt(descriptor: RenderTargetMrtDescriptor): Re
 }
 
 /** Allocate GPU textures for an MRT render target. */
-export function buildRenderTargetMrt(rt: RenderTargetMrt, engine: EngineContextInternal): void {
+export function buildRenderTargetMrt(rt: RenderTargetMrt, engine: EngineContext): void {
     disposeRenderTargetMrt(rt);
 
     const desc = rt._descriptor;
@@ -77,7 +77,7 @@ export function buildRenderTargetMrt(rt: RenderTargetMrt, engine: EngineContextI
     rt._width = width;
     rt._height = height;
 
-    const device = engine.device;
+    const device = engine._device;
     const formats = desc.colorFormats;
     const samples = desc.sampleCount;
     const useResolve = samples > 1;
@@ -155,7 +155,7 @@ export function getSampledColorTexture(rt: RenderTargetMrt, i: number): GPUTextu
     return rt._resolveColorTextures[i] ?? rt._colorTextures[i]!;
 }
 
-function resolveSize(desc: RenderTargetMrtDescriptor, engine: EngineContextInternal): { width: number; height: number } {
+function resolveSize(desc: RenderTargetMrtDescriptor, engine: EngineContext): { width: number; height: number } {
     if (desc.size === "canvas") {
         return { width: engine.canvas.width, height: engine.canvas.height };
     }

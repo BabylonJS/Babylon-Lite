@@ -1,6 +1,6 @@
-/** Combined loader for the four glTF extensions commonly used together for
+/** Combined loader for the glTF extensions commonly used together for
  *  dielectric / glass-like materials — KHR_materials_ior, _specular,
- *  _transmission, and _volume.
+ *  _transmission, _volume, and _dispersion.
  *
  *  All four are consolidated into a single ext so:
  *   - the three that populate `subsurface` (ior + volume + transmission)
@@ -45,7 +45,8 @@ const ext: GltfFeature = {
         const eSp = exts.KHR_materials_specular;
         const eVol = exts.KHR_materials_volume;
         const eTx = exts.KHR_materials_transmission;
-        if (!eIor && !eSp && !eVol && !eTx) {
+        const eDisp = exts.KHR_materials_dispersion;
+        if (!eIor && !eSp && !eVol && !eTx && !eDisp) {
             return null;
         }
 
@@ -68,6 +69,7 @@ const ext: GltfFeature = {
             // default IOR. Only write when the factor meaningfully differs.
             if (ior !== 1.5) {
                 out.metallicF0Factor = ((ior - 1) / (ior + 1)) ** 2 / 0.04;
+                out.specularWeight = 1.0;
                 (out as { _hasReflExt?: boolean })._hasReflExt = true;
             }
             subsurface.refraction = { indexOfRefraction: ior };
@@ -79,9 +81,11 @@ const ext: GltfFeature = {
             if (typeof eSp.specularFactor === "number") {
                 if (Math.abs(eSp.specularFactor - 1) > 1e-6) {
                     out.metallicF0Factor = eSp.specularFactor;
+                    out.specularWeight = eSp.specularFactor;
                     (out as { _hasReflExt?: boolean })._hasReflExt = true;
                 } else {
                     delete out.metallicF0Factor;
+                    delete out.specularWeight;
                 }
             }
             if (Array.isArray(eSp.specularColorFactor) && eSp.specularColorFactor.length === 3) {
@@ -116,6 +120,13 @@ const ext: GltfFeature = {
                     ...(color ? { color } : undefined),
                     ...(atDistance !== undefined ? { atDistance } : undefined),
                 };
+            } else if (subsurface.thickness) {
+                // KHR_materials_volume without attenuation: spec defaults to white at
+                // infinite distance (no absorption), but the thickness is a real local
+                // depth that must engage the volume path so it is world-scaled (else it
+                // overshoots on non-unit-scaled models, e.g. MosquitoInAmber). White tint
+                // gives volumeParams = log(1)/dist = 0 → ab = exp(0) = 1 (no tint).
+                subsurface.tint = { color: [1, 1, 1], atDistance: 1 };
             }
         }
 
@@ -131,6 +142,15 @@ const ext: GltfFeature = {
                 };
                 subsurface.refraction = refraction;
             }
+        }
+
+        // KHR_materials_dispersion: per-channel chromatic refraction. Only meaningful on
+        // a volumetric transmissive material (the extension requires KHR_materials_volume).
+        // The shader spread uses Babylon's empirical dispersion strength with a fixed Abbe
+        // number of 20, so the glTF dispersion value maps to strength = 20 / dispersion
+        // (larger glTF dispersion ⇒ larger Abbe ⇒ weaker chromatic spread).
+        if (eDisp && typeof eDisp.dispersion === "number" && eDisp.dispersion > 0 && subsurface.refraction && subsurface.thickness) {
+            subsurface.refraction = { ...subsurface.refraction, dispersion: 20.0 / eDisp.dispersion };
         }
 
         if (Object.keys(subsurface).length > 0) {

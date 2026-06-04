@@ -13,6 +13,12 @@ import { mat4Invert } from "../math/mat4-invert.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
 import type { Mat4 } from "../math/types.js";
 
+/**
+ * Reparents `child` while preserving its current world-space transform, mirroring
+ * Babylon.js `TransformNode.setParent()`.
+ * @param child - The mesh to reparent.
+ * @param parent - The new parent (any world-matrix provider), or `null` to detach to world space.
+ */
 export function setParent(child: Mesh, parent: IWorldMatrixProvider | null): void {
     // 1. Snapshot child's current world matrix
     const childWorld: Mat4 = child.worldMatrix;

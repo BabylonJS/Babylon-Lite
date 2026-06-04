@@ -17,15 +17,15 @@ const screenX = process.env.SCREEN_X;
 const headless = process.env.HEADLESS === "true";
 const isCI = !!process.env.CI;
 
+// Tests run their OWN isolated Vite dev server on a dedicated port — NOT the
+// interactive lab (5174). Sharing that server made the lab unresponsive during
+// test runs (its single Node event loop was busy transforming/serving scene
+// modules to the headless test browsers). Override with LAB_TEST_PORT if needed.
+const labTestPort = Number(process.env.LAB_TEST_PORT ?? 5179);
+
 // SwiftShader flags — only in CI (locally we use the real GPU)
 const swiftShaderArgs = isCI
-    ? [
-          "--enable-features=Vulkan",
-          "--use-vulkan=swiftshader",
-          "--use-angle=swiftshader",
-          "--disable-vulkan-fallback-to-gl-for-testing",
-          "--ignore-gpu-blocklist",
-      ]
+    ? ["--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-angle=swiftshader", "--disable-vulkan-fallback-to-gl-for-testing", "--ignore-gpu-blocklist"]
     : [];
 
 export default defineConfig({
@@ -39,18 +39,14 @@ export default defineConfig({
         headless,
         viewport: { width: 1280, height: 720 },
         launchOptions: {
-            args: [
-                "--force-color-profile=srgb",
-                "--enable-unsafe-webgpu",
-                ...swiftShaderArgs,
-                ...(screenX ? [`--window-position=${screenX},0`] : []),
-            ],
+            args: ["--force-color-profile=srgb", "--enable-unsafe-webgpu", ...swiftShaderArgs, ...(screenX ? [`--window-position=${screenX},0`] : [])],
         },
     },
     webServer: {
-        command: "pnpm --filter lab dev",
-        port: 5174,
+        command: "pnpm --filter @babylon-lite/lab dev",
+        port: labTestPort,
+        env: { LAB_DEV_PORT: String(labTestPort) },
         reuseExistingServer: true,
-        timeout: 15_000,
+        timeout: 30_000,
     },
 });

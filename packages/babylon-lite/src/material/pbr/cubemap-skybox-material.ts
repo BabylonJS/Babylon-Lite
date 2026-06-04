@@ -1,7 +1,7 @@
 /** Shared cubemap skybox material factory — used by DDS and HDR skyboxes.
  *  BGL: binding 0 = uniform buffer, binding 1 = cube texture, binding 2 = sampler. */
 
-import type { EngineContextInternal } from "../../engine/engine.js";
+import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
@@ -9,8 +9,8 @@ import { targetSignatureKey } from "../../engine/render-target.js";
 const SKYBOX_POS_BUFFER: GPUVertexBufferLayout[] = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as GPUVertexFormat }] }];
 
 export interface CubemapSkyboxMaterial {
-    getPipeline(engine: EngineContextInternal, sig: RenderTargetSignature): GPURenderPipeline;
-    createBindGroup(engine: EngineContextInternal, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
+    getPipeline(engine: EngineContext, sig: RenderTargetSignature): GPURenderPipeline;
+    createBindGroup(engine: EngineContext, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
 }
 
 /** Module-global pipeline + layout caches shared across all cubemap-skybox instances.
@@ -20,8 +20,8 @@ const _cmLayouts = new Map<string, GPUBindGroupLayout>();
 let _cmCachedDevice: GPUDevice | null = null;
 
 export function createCubemapSkyboxMaterial(label: string, vertCode: string, fragCode: string): CubemapSkyboxMaterial {
-    function getLayout(engine: EngineContextInternal): GPUBindGroupLayout {
-        const device = engine.device;
+    function getLayout(engine: EngineContext): GPUBindGroupLayout {
+        const device = engine._device;
         if (_cmCachedDevice !== device) {
             _cmPipelines.clear();
             _cmLayouts.clear();
@@ -45,7 +45,7 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
 
     return {
         getPipeline(_engine, sig) {
-            const device = _engine.device;
+            const device = _engine._device;
             if (_cmCachedDevice !== device) {
                 _cmPipelines.clear();
                 _cmLayouts.clear();
@@ -80,7 +80,7 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
         },
 
         createBindGroup(engine, meshUBO, cubeView, cubeSampler) {
-            const device = engine.device;
+            const device = engine._device;
             return device.createBindGroup({
                 layout: getLayout(engine),
                 entries: [

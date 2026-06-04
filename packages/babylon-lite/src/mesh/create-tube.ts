@@ -14,15 +14,21 @@ import type { Vec3 } from "../math/types.js";
 import { computePath3D } from "./path3d.js";
 import { createRibbonData, type RibbonData } from "./create-ribbon.js";
 
+/** Cap mode: no caps on either end of the tube/extrusion. */
 export const CAP_NONE = 0;
+/** Cap mode: close only the start of the tube/extrusion. */
 export const CAP_START = 1;
+/** Cap mode: close only the end of the tube/extrusion. */
 export const CAP_END = 2;
+/** Cap mode: close both ends of the tube/extrusion. */
 export const CAP_ALL = 3;
 
+/** Options for `createTubeData`: a circular cross-section swept along a path. */
 export interface TubeOptions {
     path: Vec3[];
     radius?: number;
     tessellation?: number;
+    /** Per-point radius override; receives the point index and its distance along the path. */
     radiusFunction?: (i: number, distance: number) => number;
     cap?: number;
     arc?: number;

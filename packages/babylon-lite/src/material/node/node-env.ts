@@ -19,9 +19,13 @@ import type { SceneContext } from "../../scene/scene.js";
 
 export interface EnvEmit {
     readonly bindings: {
+        /** @internal */
         readonly _iblTexture: number;
+        /** @internal */
         readonly _iblSampler: number;
+        /** @internal */
         readonly _brdfLUT: number;
+        /** @internal */
         readonly _brdfSampler: number;
     };
     readonly wgslDecls: string;
@@ -60,6 +64,7 @@ export function emitEnv(startBinding: number): EnvEmit {
 /** Append env IBL texture/sampler entries to a bind-group entries array. */
 export function pushEnvBindGroupEntries(
     scene: SceneContext,
+    /** @internal */
     envBindings: { _iblTexture: number; _iblSampler: number; _brdfLUT: number; _brdfSampler: number },
     entries: GPUBindGroupEntry[]
 ): void {

@@ -1,7 +1,9 @@
 import type { Mat4 } from "./types.js";
+import type { Mat4Storage } from "./types.js";
 
 /** Compute inverse of a Mat4. Returns null if singular. */
-export function mat4Invert(m: Mat4): Mat4 | null {
+export function mat4Invert(input: Mat4): Mat4 | null {
+    const m = input as unknown as Mat4Storage;
     const a00 = m[0]!,
         a01 = m[1]!,
         a02 = m[2]!,
@@ -38,7 +40,7 @@ export function mat4Invert(m: Mat4): Mat4 | null {
     }
     det = 1 / det;
 
-    const out = new Float32Array(16) as Mat4;
+    const out = new Float32Array(16);
     out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
     out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
     out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
@@ -55,5 +57,5 @@ export function mat4Invert(m: Mat4): Mat4 | null {
     out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
     out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
     out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-    return out;
+    return out as unknown as Mat4;
 }

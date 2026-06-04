@@ -7,22 +7,22 @@
  *  creation time — no global registration needed. */
 
 import type { MorphTargetData } from "../animation/types.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 
 /** Create morph target GPU data from parsed glTF targets.
- *  @param engine       Engine context (provides GPU device)
- *  @param targets      Array of {positions, normals} deltas per target
- *  @param vertexCount  Number of vertices in the base mesh
- *  @param morphWeights Initial morph weights (one per target, may be null)
+ *  @param engine       - Engine context (provides GPU device)
+ *  @param targets      - Array of `{positions, normals}` deltas per target
+ *  @param vertexCount  - Number of vertices in the base mesh
+ *  @param morphWeights - Initial morph weights (one per target, may be null)
  */
 export function createMorphTargets(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     targets: { positions: Float32Array; normals: Float32Array | null }[],
     vertexCount: number,
     morphWeights: number[] | null
 ): MorphTargetData {
-    const device = engine.device;
+    const device = engine._device;
     const targetCount = Math.min(targets.length, 4); // max 4 (vec4 weights)
     const texWidth = Math.min(vertexCount, 2048);
     const rowsPerBand = Math.ceil(vertexCount / texWidth);
@@ -74,4 +74,19 @@ export function createMorphTargets(
     const weightsBuffer = createMappedBuffer(engine, new Uint8Array(uboData), GPUBufferUsage.UNIFORM);
 
     return { texture, count: targetCount, weightsBuffer, targets: targets.slice(0, targetCount), weights };
+}
+
+/** Update morph target weights on CPU and GPU.
+ *  Only the first four weights are used, matching the current morph target limit.
+ *  @param engine - Engine context that owns the morph target GPU buffer.
+ *  @param morphTargets - Morph target data returned by `createMorphTargets()`.
+ *  @param weights - New morph weights; missing slots are reset to 0.
+ */
+export function setMorphTargetWeights(engine: EngineContext, morphTargets: MorphTargetData, weights: ArrayLike<number>): void {
+    const count = Math.min(morphTargets.count, 4, weights.length);
+    morphTargets.weights.fill(0);
+    for (let i = 0; i < count; i++) {
+        morphTargets.weights[i] = weights[i] ?? 0;
+    }
+    engine._device.queue.writeBuffer(morphTargets.weightsBuffer, 0, morphTargets.weights);
 }

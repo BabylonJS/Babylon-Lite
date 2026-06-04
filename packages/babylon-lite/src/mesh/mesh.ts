@@ -1,7 +1,7 @@
 /** High-level Mesh — position/rotation/scaling + material + GPU geometry.
  *  Plain data (no scene reference). The scene collects meshes via addToScene(). */
 
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Identity } from "../math/mat4-identity.js";
@@ -10,11 +10,40 @@ import type { SkeletonData, MorphTargetData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { eulerToQuat, createEulerProxy } from "../scene/scene-node.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
+
+/** Per-attribute interleave override. When present, the attribute's GPU buffer
+ *  is a shared interleaved slice: the pipeline uses `_stride` as the vertex
+ *  buffer arrayStride and the draw binds the buffer at byte offset `_offset`.
+ *  Absent attributes use the canonical tight layout (own buffer, default stride,
+ *  offset 0) — byte-identical to non-interleaved meshes. */
+export interface MeshVbAttr {
+    /** @internal Vertex buffer arrayStride for this attribute's pipeline layout entry. */
+    readonly _stride: number;
+    /** @internal Byte offset passed to setVertexBuffer (bind offset into the shared buffer). */
+    readonly _offset: number;
+}
+
+/** Optional per-attribute interleave layout. Only set for meshes that source one
+ *  or more attributes from a strided (interleaved) glTF bufferView. */
+export interface MeshVbLayout {
+    /** @internal */
+    readonly _p?: MeshVbAttr;
+    /** @internal */
+    readonly _n?: MeshVbAttr;
+    /** @internal */
+    readonly _t?: MeshVbAttr;
+    /** @internal */
+    readonly _u?: MeshVbAttr;
+    /** @internal */
+    readonly _u2?: MeshVbAttr;
+    /** @internal */
+    readonly _c?: MeshVbAttr;
+}
 
 /** Opaque GPU geometry handle (user never touches these). */
 export interface MeshGPU {
@@ -31,6 +60,12 @@ export interface MeshGPU {
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
+    /** @internal Per-attribute interleave layout. Undefined → all attributes tight (default). */
+    readonly _vbLayout?: MeshVbLayout;
+    /** @internal Precomputed pipeline cache-key suffix for this mesh's interleave layout.
+     *  Built once by the interleave module so the hot render path never assembles
+     *  it. Undefined → tight mesh (empty suffix, byte-identical pipeline key). */
+    readonly _vbKey?: string;
 }
 
 // ─── Mesh ────────────────────────────────────────────────────────────
@@ -57,20 +92,28 @@ export interface Mesh extends SceneNode {
     thinInstances?: ThinInstanceData | null;
     // name, children, position, rotation, rotationQuaternion, scaling,
     // parent, worldMatrix, worldMatrixVersion — all inherited from SceneNode
-}
 
-/** @internal Mesh with internal GPU fields — for engine/renderable code only. Not re-exported from index.ts. */
-export interface MeshInternal extends Mesh {
+    /** @internal */
     _materialDirty: boolean;
+    /** @internal */
     _gpu: MeshGPU;
+    /** @internal */
     _cpuPositions?: Float32Array;
+    /** @internal */
     _cpuNormals?: Float32Array;
+    /** @internal */
     _cpuUvs?: Float32Array;
+    /** @internal */
     _cpuUv2s?: Float32Array | null;
+    /** @internal */
     _cpuTangents?: Float32Array | null;
+    /** @internal */
     _cpuColors?: Float32Array | null;
+    /** @internal */
     _cpuIndices?: Uint32Array;
+    /** @internal */
     _cpuGpuIndices?: Uint16Array | Uint32Array;
+    /** @internal */
     _cpuIndexFormat?: GPUIndexFormat;
 }
 
@@ -121,13 +164,14 @@ export function initMeshTransform(mesh: Mesh, px = 0, py = 0, pz = 0, rx = 0, ry
         configurable: true,
         enumerable: false,
     });
+    attachWorldMatrixState(mesh, wm);
 }
 
 // ─── GPU Geometry Upload ─────────────────────────────────────────────
 
 /** Upload typed arrays to GPU buffers and return a MeshGPU handle. */
 export function uploadMeshToGPU(
-    engine: EngineContextInternal,
+    engine: EngineContext,
     positions: Float32Array,
     normals: Float32Array,
     indices: Uint32Array,
@@ -136,7 +180,7 @@ export function uploadMeshToGPU(
     tangents?: Float32Array,
     colors?: Float32Array
 ): MeshGPU {
-    const device = engine.device;
+    const device = engine._device;
     const positionBuffer = createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX);
     const normalBuffer = createMappedBuffer(engine, normals, GPUBufferUsage.VERTEX);
     const indexBuffer = createMappedBuffer(engine, indices, GPUBufferUsage.INDEX);

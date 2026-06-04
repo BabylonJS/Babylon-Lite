@@ -8,43 +8,54 @@
  * registry in load-gltf.ts. This core file knows ZERO extension names.
  */
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { EngineContext } from "../engine/engine.js";
 import { getTextureImageIndex, resolveImage } from "./gltf-parser.js";
 
 /** Per-load context handed to each material extension's `applyMaterial()`. */
 export interface GltfMatExtCtx {
-    /** Internal engine access for dynamic-only texture extensions that must upload directly. */
-    _engine: EngineContextInternal;
+    /** @internal Internal engine access for dynamic-only texture extensions that must upload directly. */
+    _engine: EngineContext;
     /** Fetch + upload a texture from a glTF textureInfo object.
      *  Returns undefined if texInfo is null/undefined. */
+    /** @internal */
     _texture(texInfo: unknown, sRGB: boolean): Promise<Texture2D | undefined>;
-    /** Upload an arbitrary ImageBitmap (e.g. composited bitmap from an ext). */
+    /** @internal Upload an arbitrary ImageBitmap (e.g. composited bitmap from an ext). */
     _uploadImage(bitmap: ImageBitmap, sRGB: boolean): Texture2D;
 }
 
 /** Parsed core PBR material data. */
 export interface GltfMaterialData {
+    /** @internal */
     _baseColorFactor: [number, number, number, number];
+    /** @internal */
     _metallicFactor: number;
+    /** @internal */
     _roughnessFactor: number;
+    /** @internal */
     _emissiveFactor: [number, number, number];
+    /** @internal */
     _baseColorImage: ImageBitmap | null;
+    /** @internal */
     _metallicRoughnessImage: ImageBitmap | null;
+    /** @internal */
     _normalImage: ImageBitmap | null;
-    /** glTF normalTexture.scale (default 1.0). */
+    /** @internal glTF normalTexture.scale (default 1.0). */
     _normalScale: number;
-    /** glTF occlusionTexture.texCoord (default 0). */
+    /** @internal glTF occlusionTexture.texCoord (default 0). */
     _occlusionTexCoord: number;
+    /** @internal */
     _occlusionImage: ImageBitmap | null;
+    /** @internal */
     _emissiveImage: ImageBitmap | null;
-    /** Whether material is double-sided. */
+    /** @internal Whether material is double-sided. */
     _doubleSided: boolean;
-    /** glTF alphaMode: "OPAQUE" (default), "BLEND", or "MASK". */
+    /** @internal glTF alphaMode: "OPAQUE" (default), "BLEND", or "MASK". */
     _alphaMode: string;
-    /** glTF alphaCutoff for MASK mode (default 0.5). */
+    /** @internal glTF alphaCutoff for MASK mode (default 0.5). */
     _alphaCutoff: number;
     /** Raw glTF material definition. Always set so ext modules can read raw
      *  extension data + KHR_texture_transform from texture infos. */
+    /** @internal */
     _rawMatDef?: any;
 }
 

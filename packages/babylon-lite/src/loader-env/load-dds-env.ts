@@ -1,5 +1,5 @@
-import type { SceneContext, SceneContextInternal } from "../scene/scene.js";
-import type { EngineContextInternal } from "../engine/engine.js";
+import type { SceneContext } from "../scene/scene.js";
+import type { EngineContext } from "../engine/engine.js";
 import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
@@ -191,8 +191,8 @@ function computeSH(raw: Uint8Array, width: number, mipCount: number): Float32Arr
  * from mip 0 face data for irradiance lighting.
  */
 export async function loadDdsEnvironment(scene: SceneContext, url: string, options: { brdfUrl: string; skipSkybox?: boolean; skipGround?: boolean }): Promise<EnvironmentTextures> {
-    const engine = scene.engine as EngineContextInternal;
-    const device = engine.device;
+    const engine = scene.engine as EngineContext;
+    const device = engine._device;
 
     // Fetch DDS and BRDF PNG in parallel
     const ddsPromise = fetch(url).then((r) => r.arrayBuffer());
@@ -246,11 +246,11 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
     // ── Assemble result──────────────────────────────────────────────────────
     const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
 
-    (scene as SceneContextInternal)._envTextures = textures;
+    scene._envTextures = textures;
 
     acquireGPUTexture(specularCube);
     acquireGPUTexture(brdfLut);
-    (scene as SceneContextInternal)._disposables.push(() => {
+    scene._disposables.push(() => {
         releaseGPUTexture(specularCube);
         releaseGPUTexture(brdfLut);
     });

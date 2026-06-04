@@ -27,11 +27,11 @@ const swiftShaderArgs =
         : [];
 
 export default defineConfig({
-    testDir: "../tests/parity/scenes",
+    testDir: "../tests/lite/parity/scenes",
     timeout: 120_000,
     retries: 1,
     workers: 1,
-    outputDir: "../test-results",
+    outputDir: "../test-results/parity-artifacts",
     reporter: [["html", { outputFolder: "../test-results/parity-report", open: "never" }], ["junit", { outputFile: "../test-results/parity-junit.xml" }], ["list"]],
     use: {
         // When run via `browserstack-node-sdk`, the SDK patches browser launch
@@ -44,7 +44,7 @@ export default defineConfig({
         },
     },
     webServer: {
-        command: "pnpm --filter lab dev",
+        command: "pnpm --filter @babylon-lite/lab dev",
         port: 5174,
         reuseExistingServer: true,
         timeout: 15_000,

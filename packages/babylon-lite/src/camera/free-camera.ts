@@ -3,9 +3,11 @@ import type { Vec3, Mat4 } from "../math/types.js";
 import { mat4LookAtLH } from "../math/mat4-look-at-lh.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
-import { createWorldMatrixState } from "../scene/world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import type { Mat4Storage } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 /** FreeCamera — positioned in world space, looking at a target point.
  *  Matches Babylon.js FreeCamera: position + target, left-handed.
@@ -25,11 +27,9 @@ export interface FreeCamera extends Camera, IWorldMatrixProvider, IParentable {
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
-}
-
-/** @internal FreeCamera with internal yaw/pitch state. Not re-exported from index.ts. */
-export interface FreeCameraInternal extends FreeCamera {
+    /** @internal */
     _yaw: number;
+    /** @internal */
     _pitch: number;
 }
 
@@ -40,27 +40,29 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
     const dy = target.y - position.y;
     const dz = target.z - position.z;
 
-    const _localMat = new Float32Array(16) as Mat4;
+    // Reusable local-world matrix.
+    const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
         const view = mat4LookAtLH(cam.position, cam.target, Vec3Up);
+        const m = _localMat as unknown as Mat4Storage;
         // Camera-to-world = transpose upper 3×3 of view + eye position
-        _localMat[0] = view[0]!;
-        _localMat[1] = view[4]!;
-        _localMat[2] = view[8]!;
-        _localMat[3] = 0;
-        _localMat[4] = view[1]!;
-        _localMat[5] = view[5]!;
-        _localMat[6] = view[9]!;
-        _localMat[7] = 0;
-        _localMat[8] = view[2]!;
-        _localMat[9] = view[6]!;
-        _localMat[10] = view[10]!;
-        _localMat[11] = 0;
-        _localMat[12] = cam.position.x;
-        _localMat[13] = cam.position.y;
-        _localMat[14] = cam.position.z;
-        _localMat[15] = 1;
+        m[0] = view[0]!;
+        m[1] = view[4]!;
+        m[2] = view[8]!;
+        m[3] = 0;
+        m[4] = view[1]!;
+        m[5] = view[5]!;
+        m[6] = view[9]!;
+        m[7] = 0;
+        m[8] = view[2]!;
+        m[9] = view[6]!;
+        m[10] = view[10]!;
+        m[11] = 0;
+        m[12] = cam.position.x;
+        m[13] = cam.position.y;
+        m[14] = cam.position.z;
+        m[15] = 1;
         return _localMat;
     }
 
@@ -80,6 +82,11 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
         angularSensitivity: 2000,
         inertia: 0.9,
         children: [] as SceneNode[],
+
+        // Matrix caches use the process-global allocator.
+        _viewCache: allocateMat4() as unknown as Mat4Storage,
+        _projCache: allocateMat4() as unknown as Mat4Storage,
+        _vpCache: allocateMat4() as unknown as Mat4Storage,
 
         get parent() {
             return wm.parent;
@@ -122,6 +129,9 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
         configurable: true,
         enumerable: true,
     });
+
+    // Tag so children parented to this camera get push invalidation (O(1) reads).
+    attachWorldMatrixState(cam, wm);
 
     return cam;
 }

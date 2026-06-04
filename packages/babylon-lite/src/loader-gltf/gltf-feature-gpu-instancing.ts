@@ -15,13 +15,15 @@
  */
 
 import type { GltfFeature } from "./gltf-feature.js";
-import type { Mesh, MeshInternal } from "../mesh/mesh.js";
+import type { Mesh } from "../mesh/mesh.js";
 import { resolveAccessor } from "./gltf-parser.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
 import type { Mat4 } from "../math/types.js";
+import type { Mat4Storage } from "../math/types.js";
 import { setThinInstances } from "../mesh/thin-instance.js";
+import { getLoaderTmpInstance } from "./_loader-scratch.js";
 
 /** Collect every Mesh child (direct children only — matches buildNodeHierarchy). */
 function collectMeshesUnderNode(tn: { children?: unknown[] } | undefined): Mesh[] {
@@ -102,7 +104,7 @@ const ext: GltfFeature = {
             const nodeWorld = ctx._worldMatrixCache.get(nodeIdx);
             for (const mesh of meshesForNode) {
                 setThinInstances(mesh, matrices, count);
-                expandMeshAabbForInstances(mesh as MeshInternal, matrices, count, nodeWorld);
+                expandMeshAabbForInstances(mesh, matrices, count, nodeWorld);
             }
         }
         return {};
@@ -111,8 +113,10 @@ const ext: GltfFeature = {
 export default ext;
 
 /** Expand a mesh's world-space AABB to enclose all thin instances so that
- *  auto-framing cameras see the full instanced grid, not just the base mesh. */
-function expandMeshAabbForInstances(mesh: MeshInternal, matrices: Float32Array, count: number, nodeWorld: Mat4 | undefined): void {
+ *  auto-framing cameras see the full instanced grid, not just the base mesh.
+ *  Uses the module-level `getLoaderTmpInstance()` scratch for the per-iteration
+ *  instance world matrix — no per-call allocation. */
+function expandMeshAabbForInstances(mesh: Mesh, matrices: Float32Array, count: number, nodeWorld: Mat4 | undefined): void {
     const positions = mesh._cpuPositions;
     if (!positions || !nodeWorld || count === 0) {
         return;
@@ -155,10 +159,11 @@ function expandMeshAabbForInstances(mesh: MeshInternal, matrices: Float32Array, 
     let wMaxX = -Infinity,
         wMaxY = -Infinity,
         wMaxZ = -Infinity;
-    const instWorld = new Float32Array(16) as Mat4;
+    const instWorld = getLoaderTmpInstance();
+    const instBuf = instWorld as unknown as Mat4Storage;
     for (let i = 0; i < count; i++) {
         for (let k = 0; k < 16; k++) {
-            instWorld[k] = matrices[i * 16 + k]!;
+            instBuf[k] = matrices[i * 16 + k]!;
         }
         const combined = mat4Multiply(nodeWorld, instWorld);
         const [imin, imax] = computeAabb(corners, combined);

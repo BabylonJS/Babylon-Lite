@@ -53,16 +53,19 @@ return array<vec3<f32>, 2>(diff, s * L.vLightSpecular.rgb * a);
 `;
 
 export interface StandardTemplateConfig {
+    /** @internal */
     readonly _diffuse?: boolean;
-    /** UV coordinate channels used */
+    /** @internal UV coordinate channels used */
     readonly _needsUV: boolean;
+    /** @internal */
     readonly _needsUV2: boolean;
+    /** @internal */
     readonly _diffuseUsesUV2?: boolean;
-    /** Disable lighting (unlit material) */
+    /** @internal Disable lighting (unlit material) */
     readonly _disableLighting?: boolean;
-    /** Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
+    /** @internal Generate a fragment stage that runs discard/alpha-test logic and writes no color. */
     readonly _noColorOutput?: boolean;
-    /** Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
+    /** @internal Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
     readonly _esmShadowOutput?: boolean;
 }
 

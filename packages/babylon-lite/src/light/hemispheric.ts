@@ -6,6 +6,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
 import type { Mat4 } from "../math/types.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 export interface HemisphericLight extends LightBase {
     readonly lightType: "hemispheric";
@@ -19,8 +20,10 @@ export interface HemisphericLight extends LightBase {
 /** Create a hemispheric light. Returns plain data — caller adds to scene.
  *  Matches Babylon.js HemisphericLight behavior. */
 export function createHemisphericLight(direction: [number, number, number] = [0, 1, 0], intensity: number = 1.0): HemisphericLight {
-    const _localMatrix = new Float32Array(16) as Mat4;
-    const { wm, onDirty, lvs } = createLightBase(() => localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, 0, 0, 0, _localMatrix));
+    const _localMatrix: Mat4 = allocateMat4();
+    const { wm, onDirty, lvs } = createLightBase(() => {
+        return localMatrixFromDirection(light.direction.x, light.direction.y, light.direction.z, 0, 0, 0, _localMatrix);
+    });
 
     const light = applyWorldMatrixAccessors<HemisphericLight>(
         {

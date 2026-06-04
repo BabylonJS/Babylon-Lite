@@ -11,7 +11,7 @@
  *    [4..7]   version (u32 le, supported: 2 or 3)
  *    [8..11]  splat count (u32 le)
  *    [12]     SH degree
- *    [13]     fractional bits (signed 24-bit position scale = 1/(1<<frac))
+ *    [13]     fractional bits (signed 24-bit position scale = `1/(1<<frac)`)
  *    [14]     flags (bit 0 = trained with antialiasing)
  *    [15]     reserved (must be 0)
  *
