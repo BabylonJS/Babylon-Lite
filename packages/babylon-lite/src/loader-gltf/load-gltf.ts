@@ -29,6 +29,20 @@ function loadInterleave(): Promise<InterleaveModule> {
     return (_interleavePromise ??= import("./gltf-interleave.js"));
 }
 
+/** Repack a tightly-packed VEC4 (RGBA) float color buffer to a tight VEC3 (RGB) buffer.
+ *  The PBR/standard vertex pipelines bind vertex color as float32x3 (stride 12); a VEC4
+ *  source (stride 16) must be narrowed or every vertex misaligns. Alpha is dropped because
+ *  Lite shading multiplies only the rgb of vertex color into the base color. */
+function packVec4ToVec3(src: Float32Array, count: number): Float32Array {
+    const out = new Float32Array(count * 3);
+    for (let v = 0; v < count; v++) {
+        out[v * 3] = src[v * 4]!;
+        out[v * 3 + 1] = src[v * 4 + 1]!;
+        out[v * 3 + 2] = src[v * 4 + 2]!;
+    }
+    return out;
+}
+
 /** Parsed mesh data ready for GPU upload. */
 export interface GltfMeshData {
     /** @internal Tight CPU positions, or null when sourced from an interleaved
@@ -347,6 +361,16 @@ async function extractAllMeshes(
             const uv2Data = resolveAttr("TEXCOORD_1");
             const tanData = resolveAttr("TANGENT");
             const colorData = resolveAttr("COLOR_0");
+            // glTF COLOR_0 may be VEC3 or VEC4; the PBR/standard pipelines consume vertex
+            // color as vec3 (float32x3, stride 12). A VEC4 (RGBA) buffer has stride 16, so
+            // binding it to a stride-12 layout misaligns every vertex (garbage colors).
+            // Repack VEC4 float color to a tight VEC3 so the GPU stride matches the layout.
+            // Vertex-color alpha is unused by Lite shading, so dropping it changes no pixels.
+            const colors = colorData
+                ? colorData._componentCount === 4 && colorData._data instanceof Float32Array
+                    ? packVec4ToVec3(colorData._data as Float32Array, colorData._count)
+                    : (colorData._data as Float32Array)
+                : null;
             const idxData = decoded
                 ? { _data: decoded._indices, _count: decoded._indexCount, _componentCount: 1 }
                 : primitive.indices !== undefined
@@ -371,7 +395,7 @@ async function extractAllMeshes(
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
                 _uvs: uvData ? (uvData._data as Float32Array) : new Float32Array(posData._count * 2),
                 _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
-                _colors: colorData ? (colorData._data as Float32Array) : null,
+                _colors: colors,
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: idxData?._count ?? 0,
