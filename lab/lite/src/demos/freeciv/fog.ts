@@ -83,6 +83,11 @@ const FOG_FRAGMENT = `
 let wpx = in.tint.xy + in.uv * in.tint.zw;
 let tx = wpx.x / ${TILE_W}.0 + wpx.y / ${TILE_H}.0;
 let ty = wpx.y / ${TILE_H}.0 - wpx.x / ${TILE_W}.0;
+// Off the map the field sampler clamps to its edge texels (≈ charted haze), which would
+// smear fog across the void around the island. Discard fragments outside the tile grid so
+// fog stays confined to real tiles (mirrors the bounds clip in glints.ts). The ±0.5 margin
+// keeps each rim tile's full diamond — tile centre i spans tx ∈ [i-0.5, i+0.5].
+if (tx < -0.5 || tx > FOG_W - 0.5 || ty < -0.5 || ty > FOG_H - 0.5) { discard; }
 let fuv = vec2<f32>((tx + 0.5) / FOG_W, (ty + 0.5) / FOG_H);
 let haze = textureSampleLevel(fieldTex, fieldSamp, fuv, 0.0).r;
 if (haze <= 0.004) { discard; }

@@ -2,14 +2,16 @@
  * Day/night cycle + city lights for the Freeciv demo — a slow, looping sun cycle
  * that grades the whole map from bright noon → warm dusk → cool midnight → dawn,
  * while every city blooms a warm glow that fades in after sunset. Pure-2D sprite
- * path, no engine changes, no assets — it showcases the engine's blend modes:
+ * path, no engine changes, no assets:
  *
- *   • The grade is a single screen-space quad drawn with MULTIPLY blend, so its
- *     per-frame colour modulates everything beneath it (terrain, sea, clouds,
- *     backdrop) at once — a free full-screen colour-grade with one sprite.
+ *   • The grade is a single screen-space quad drawn with straight-alpha "over"
+ *     blending (the default mode). Each frame it fades a dark, cool-tinted wash in
+ *     over everything beneath it (terrain, sea, clouds, backdrop) at once — a free
+ *     full-screen night grade from one sprite. (An alpha wash, not a multiply: it
+ *     lays a translucent tint over the scene rather than multiplying its colour.)
  *   • The city lights are world-space quads drawn with ADDITIVE blend, so the warm
  *     glow *adds* light over the (now darkened) rooftops — reading as lit windows
- *     at night rather than a flat decal.
+ *     at night rather than a flat decal. This is the blend-mode showcase.
  *
  * Both layers sit above the clouds but below the vignette/minimap HUD. The grade is
  * pinned to the viewport (restretched to the canvas each frame); the lights are

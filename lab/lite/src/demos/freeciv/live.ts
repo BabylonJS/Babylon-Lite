@@ -3,18 +3,19 @@
  *
  * Pure-2D, no scene: a handful of sprites are mutated every animation frame to
  * make the static tilemap feel alive:
- *   - a roaming **scout** (explorer unit) that wanders the continent,
- *   - a **pulsing selection ring** cycling the four `unit.select*` frames on it, and
+ *   - a roaming **scout** (explorer unit) that wanders the continent (and, while
+ *     selected, gently blinks via its sprite alpha so the player can spot it), and
  *   - a few pieces of **roaming wildlife** from the animals sheet.
  *
  * Fog of war (which lifts as the scout and cities gain sight) lives in its own
- * module (`fog.ts`); it reads the scout's tile from here each frame.
+ * module (`fog.ts`); it reads the scout's tile from here each frame. The selection
+ * ring / destination marker / click-ping command feedback lives in `commandfx.ts`.
  *
  * Everything is seeded off the world so the demo replays identically.
  */
 
 import { addSprite2DIndex, updateSprite2DIndex } from "babylon-lite";
-import { DIR8, DIR_DELTA, TILE_H, TILE_W, isoCentre } from "./iso.js";
+import { DIR8, DIR_DELTA, TILE_H, isoCentre } from "./iso.js";
 import type { TileLayers, TileSheets } from "./tilemap.js";
 import type { GameMap } from "./worldgen.js";
 
@@ -66,8 +67,8 @@ export interface LiveSim {
     scoutWorld: () => [number, number];
     /** Whether the scout is mid-hop (moving) right now — emit dust only while it walks. */
     scoutMoving: () => boolean;
-    /** Mark the scout selected/deselected. While selected the scout sprite gently pulses
-     * (swells in and out) so the player can see it's the unit under their command. */
+    /** Mark the scout selected/deselected. While selected the scout sprite gently blinks
+     * (its alpha oscillates) so the player can see it's the unit under their command. */
     setScoutSelected: (selected: boolean) => void;
 }
 
@@ -90,8 +91,9 @@ function ease(t: number): number {
 
 /**
  * Spawn the moving sprites and return a `step` driver. Adds the scout to the
- * (otherwise static) unit layer, wildlife to the animals layer, and one ring to
- * the selection layer. Fog of war is handled separately (see `fog.ts`).
+ * (otherwise static) unit layer and wildlife to the animals layer. Fog of war
+ * (`fog.ts`) and the selection / command feedback FX (`commandfx.ts`) are handled
+ * in their own modules.
  */
 export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLayers): LiveSim {
     const { width, height } = world;

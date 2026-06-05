@@ -13,8 +13,14 @@
  * position* (`x/width`, `y/height`) plus a hash in `.z`. The shader reconstructs a
  * shared, map-wide caustic coordinate from that, so the wave fronts drift smoothly
  * across the whole sea rather than repeating identically per diamond. The diamond
- * mask + edge fade are computed from `in.uv`, so the shimmer never bleeds onto
- * neighbouring land, and the soft rim hides any residual per-tile seam.
+ * mask is computed from `in.uv` and pixel-snapped like the rest of the effect: a hard
+ * `select` confines the shimmer to the inner ~82% of the diamond and `discard`s past
+ * its edge, leaving a margin of bare water so the caustic never reaches the tile
+ * boundary (no bleed onto neighbouring land, and the overlay adds nothing along the
+ * tile seams). The cutoff is intentionally hard — not a soft fade — to match the
+ * chunky pixel-art look (pixel-snapped cells + hard alpha steps); any residual seam
+ * *between the ocean base tiles themselves* is handled by the demo's integer-zoom
+ * snapping, not by this overlay.
  *
  * Blending is plain alpha, so the caustic veins read as pale light playing over the
  * deep water rather than glare.

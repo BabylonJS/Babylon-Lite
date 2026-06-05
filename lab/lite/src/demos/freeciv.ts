@@ -118,9 +118,11 @@ async function main(): Promise<void> {
         "font:600 12px system-ui,-apple-system,'Segoe UI',sans-serif;pointer-events:none;display:none;";
     document.body.appendChild(hint);
     let unitSelected = false;
-    // The tile the scout is currently marching to (for the marching-ants marker); cleared
-    // when it arrives or is deselected. The command-FX layer is created after the renderer,
-    // so it is held in a forward `let` that the click handler closes over.
+    // The tile the scout is currently marching to (for the marching-ants marker), cleared
+    // once it arrives. Note the scout is deselected the instant an order is issued, so it
+    // marches while unselected — the marker intentionally persists through the whole march
+    // (it is NOT tied to selection). The command-FX layer is created after the renderer, so
+    // this is held in a forward `let` that the click handler closes over.
     let scoutDest: [number, number] | null = null;
     let commandFx: CommandFx | null = null;
     const setArmed = (on: boolean): void => {
@@ -194,9 +196,10 @@ async function main(): Promise<void> {
     // fades behind the moving unit (below the unit/city sprites, above terrain).
     const dust = createDust(engine, sr);
 
-    // Command feedback FX: a pulsing glow selection ring on the scout, a marching-ants
-    // marker on its destination tile, and a click-ping ripple. Assigned to the forward
-    // `commandFx` declared above so the click handler can fire pings.
+    // Command feedback FX: a marching-ants ring on the scout's destination tile and a
+    // click-ping ripple acknowledging each order. (The selected-unit indicator is the
+    // scout's own alpha blink, driven from live.ts — not this layer.) Assigned to the
+    // forward `commandFx` declared above so the click handler can fire pings.
     commandFx = createCommandFx(engine, sr);
 
     // Slow day/night cycle: a full-screen multiply grade plus warm additive city
