@@ -148,7 +148,7 @@ export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
-export { loadTexture2D } from "./texture/texture-2d.js";
+export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
@@ -201,7 +201,8 @@ export { mat4Translation } from "./math/mat4-translation.js";
 export { mat4Identity } from "./math/mat4-identity.js";
 export { mat4Scale } from "./math/mat4-scale.js";
 export { mat4Compose } from "./math/mat4-compose.js";
-export type { Vec3, Vec3Tuple } from "./math/types.js";
+export { mat4Invert } from "./math/mat4-invert.js";
+export type { Vec3, Vec3Tuple, Mat4 } from "./math/types.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────
 export {
