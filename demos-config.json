@@ -48,7 +48,7 @@
     {
         "slug": "tetris",
         "name": "3D Tetris",
-        "description": "A playable Tetris built on Babylon Lite. The 10×20 well renders Kenney's CC0 Cube Pets as the falling pieces — thin-instanced, one mesh per piece color — inside a stone-wall frame, keeping the whole playfield at a handful of draw calls; press M to toggle a classic arcade style (chamfered enamel cubes). Standard 7-bag randomizer, ghost piece, soft/hard drop, wall kicks, line clears and level-based gravity. Pure Lite, no BJS.",
+        "description": "A playable Tetris built on Babylon Lite. The 10×20 well renders Kenney's CC0 Cube Pets as the falling pieces — thin-instanced, one mesh per piece color — inside a stone-wall frame, keeping the whole playfield at a handful of draw calls; press M to cycle the block style between smooth rounded enamel cubes (default), classic chamfered arcade cubes, and the Cube Pets. Standard 7-bag randomizer, ghost piece, soft/hard drop, wall kicks, line clears and level-based gravity.",
         "tags": ["game", "showcase"],
         "mobile": false
     },

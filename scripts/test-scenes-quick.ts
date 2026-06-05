@@ -11,6 +11,7 @@ const publicDir = join(labDir, 'public');
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.js': 'application/javascript',
   '.json': 'application/json', '.png': 'image/png',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
 };
 
 function startServer(): Promise<{ server: Server; port: number }> {

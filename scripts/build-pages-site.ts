@@ -9,7 +9,7 @@
  *   - demo-<slug>.html ...... each demo page (script src made relative)
  *   - bundle/demos/*.js ..... production demo bundles (doom WAD fetch made relative)
  *   - doom/* ................ Freedoom IWAD + license files (DOOM demo data)
- *   - thumbnails/*.png ...... demo card thumbnails
+ *   - thumbnails/*.jpg ...... demo card thumbnails
  *   - babylon-logo.svg ...... brand logo (dimmed page background + header)
  *
  * Cards are generated from demos-config.json; size badges from the committed
@@ -70,7 +70,7 @@ function renderCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
     return [
         `<a class="card" href="./demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<div class="card-image">`,
-        `<img src="thumbnails/demo-${demo.slug}.png" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `<img src="thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
         `<div class="card-body">`,
         `<h2>${escapeHtml(demo.name)}</h2>`,
@@ -232,9 +232,9 @@ async function main(): Promise<void> {
     const thumbsOut = resolve(SITE, "thumbnails");
     mkdirSync(thumbsOut, { recursive: true });
     for (const demo of demos) {
-        const thumb = resolve(THUMBS_SRC, `demo-${demo.slug}.png`);
+        const thumb = resolve(THUMBS_SRC, `demo-${demo.slug}.jpg`);
         if (existsSync(thumb)) {
-            cpSync(thumb, resolve(thumbsOut, `demo-${demo.slug}.png`));
+            cpSync(thumb, resolve(thumbsOut, `demo-${demo.slug}.jpg`));
         }
     }
 

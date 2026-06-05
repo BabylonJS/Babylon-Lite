@@ -221,6 +221,8 @@ const MIME: Record<string, string> = {
     ".js": "application/javascript",
     ".json": "application/json",
     ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
     ".wasm": "application/wasm",
 };
 

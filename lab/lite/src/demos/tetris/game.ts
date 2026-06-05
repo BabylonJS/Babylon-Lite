@@ -20,6 +20,12 @@ export const BOARD_ROWS = 20;
 /** 0 = empty, 1..7 = locked block of that piece color. */
 export type Cellv = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+/** Outcome sounds emitted by the rules layer, drained + played by the wiring
+ *  layer each frame. Kept here (not in sound.ts) so the game logic stays free
+ *  of any audio dependency — the audio module imports this type, never the
+ *  reverse. */
+export type GameSound = "lock" | "clear" | "tetris" | "levelUp" | "gameOver";
+
 export interface ActivePiece {
     type: PieceType;
     rotation: 0 | 1 | 2 | 3;
@@ -48,6 +54,10 @@ export interface GameState {
      *  renderer drains this queue each frame to spawn particle bursts and
      *  trigger camera shake. */
     pendingClears: Array<{ row: number; colors: Cellv[] }>;
+    /** Outcome sounds queued since the wiring layer last drained them. Mirrors
+     *  the `pendingClears` pattern: the rules push event tags here, the wiring
+     *  layer (tetris.ts) drains + plays them once per frame. */
+    pendingSounds: GameSound[];
 }
 
 export function createGame(): GameState {
@@ -65,6 +75,7 @@ export function createGame(): GameState {
         lastClear: 0,
         version: 0,
         pendingClears: [],
+        pendingSounds: [],
     };
     state.next = drawFromBag(state);
     spawnNext(state);
@@ -83,6 +94,7 @@ export function restartGame(g: GameState): void {
     g.gravityAcc = 0;
     g.lastClear = 0;
     g.pendingClears.length = 0;
+    g.pendingSounds.length = 0;
     g.next = drawFromBag(g);
     spawnNext(g);
     g.version++;
@@ -108,6 +120,7 @@ function spawnNext(g: GameState): void {
     if (collides(g, piece)) {
         g.active = null;
         g.over = true;
+        g.pendingSounds.push("gameOver");
         g.version++;
         return;
     }
@@ -247,6 +260,7 @@ function lockActive(g: GameState): void {
         if (y < 0) {
             g.over = true;
             g.active = null;
+            g.pendingSounds.push("gameOver");
             g.version++;
             return;
         }
@@ -257,7 +271,21 @@ function lockActive(g: GameState): void {
     g.lastClear = cleared;
     g.lines += cleared;
     g.score += scoreFor(cleared, g.level);
+    const prevLevel = g.level;
     g.level = 1 + Math.floor(g.lines / 10);
+    // Exactly one outcome sound per lock: a Tetris (4), a line clear (1–3), or
+    // a plain landing thud. A level-up chime stacks on top when the threshold
+    // is crossed.
+    if (cleared >= 4) {
+        g.pendingSounds.push("tetris");
+    } else if (cleared > 0) {
+        g.pendingSounds.push("clear");
+    } else {
+        g.pendingSounds.push("lock");
+    }
+    if (g.level > prevLevel) {
+        g.pendingSounds.push("levelUp");
+    }
     spawnNext(g);
     g.version++;
 }

@@ -107,7 +107,7 @@ function renderCard(demo: DemoConfigEntry, size: DemoManifestEntry | undefined):
     return [
         `<a class="card" href="./demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<div class="card-image">`,
-        `<img src="thumbnails/demo-${demo.slug}.png" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `<img src="thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
         `<div class="card-body">`,
         `<h2>${escapeHtml(demo.name)}</h2>`,
@@ -147,9 +147,9 @@ function copyDemoIndexAssets(demos: DemoConfigEntry[]): void {
     rmSync(thumbsOut, { recursive: true, force: true });
     mkdirSync(thumbsOut, { recursive: true });
     for (const demo of demos) {
-        const thumb = resolve(THUMBS_SRC, `demo-${demo.slug}.png`);
+        const thumb = resolve(THUMBS_SRC, `demo-${demo.slug}.jpg`);
         if (existsSync(thumb)) {
-            cpSync(thumb, resolve(thumbsOut, `demo-${demo.slug}.png`));
+            cpSync(thumb, resolve(thumbsOut, `demo-${demo.slug}.jpg`));
         }
     }
 }

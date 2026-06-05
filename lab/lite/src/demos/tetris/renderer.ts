@@ -46,10 +46,12 @@ import { BOARD_COLS, BOARD_ROWS, ghostRow, type GameState } from "./game.js";
 import { TetrisParticles } from "./particles.js";
 import { PIECE_COLORS, PIECE_ROTATIONS } from "./pieces.js";
 import { createChamferedBoxData } from "./chamfered-box.js";
+import { createRoundedBoxData } from "./rounded-box.js";
 
-/** Block style: cute Kenney Cube Pets ("pets") or classic chamfered enamel
- *  cubes ("arcade"). Toggled at runtime via the renderer's `toggleMode`. */
-export type TetrisMode = "pets" | "arcade";
+/** Block style: cute Kenney Cube Pets ("pets"), classic chamfered enamel cubes
+ *  ("arcade"), or the same blocks with smoothly rounded edges ("smooth").
+ *  Cycled at runtime via the renderer's `toggleMode`. */
+export type TetrisMode = "pets" | "arcade" | "smooth";
 
 const BLOCK_SIZE = 0.92;
 /** Pet instances are normalised to a unit cube, so a scale of ~1 fills a cell. */
@@ -273,7 +275,7 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // strong directional key positioned just behind-and-above the resting
     // camera so its specular highlight reflects straight back off the glossy
     // front faces — i.e. the player sees a bright reflective glint on every
-    // block at the initial camera angle, not just on the chamfered edges.
+    // block at the initial camera angle, not just on the bevelled edges.
     addToScene(scene, createHemisphericLight([0, 1, 0.25], 0.75));
     const sun = createDirectionalLight([0.22, -0.5, -0.84], 2.2);
     addToScene(scene, sun);
@@ -318,8 +320,8 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // top/bottom rows sit upright while the left/right columns are rotated 90°
     // about Z so the rounded edge faces outward, forming a continuous stone frame.
     // All 66 segments are one thin-instanced mesh (one draw call, built once).
-    const frameGeo = await loadGeometryFromUrl("/tetris-frame.json", "wall");
-    const frameColormap = await loadTexture2D(engine, "/textures/tetris-frame-colormap.png", {
+    const frameGeo = await loadGeometryFromUrl("/tetris/tetris-frame.json", "wall");
+    const frameColormap = await loadTexture2D(engine, "/tetris/tetris-frame-colormap.png", {
         srgb: true,
         invertY: false,
         mipMaps: false,
@@ -363,8 +365,8 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // Kenney Cube Pets pack, baked offline into a single merged mesh per type
     // (scripts/bake-tetris-pets.mjs). All pets share one palette texture, so a
     // single PBR material serves every type; per-type geometry is thin-instanced
-    // across the board exactly like the old chamfered cubes.
-    const petGeometries = await loadPetGeometries("/tetris-pets.json");
+    // across the board exactly like the box-style arcade/smooth cubes.
+    const petGeometries = await loadPetGeometries("/tetris/tetris-pets.json");
     // Pets are coloured by baked per-vertex colours (sampled offline from the
     // palette atlas), not by sampling the atlas at render time. The atlas' tiny
     // eye/nose swatches are smaller than a screen pixel at cell size, so texture
@@ -412,22 +414,33 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         doubleSided: true,
     });
 
-    // ── Classic "arcade" blocks (chamfered enamel cubes) ─────────────────
-    // The alternative block style: a single chamfered-cube geometry (the bevels
-    // catch a specular glint along every edge, reading as a manufactured plastic
-    // chip) thin-instanced per piece colour, each with its own glossy, lightly
-    // emissive PBR material tinted by PIECE_COLORS so line-clear bursts + the HUD
-    // preview still match. Built alongside the pets and toggled at runtime.
-    const boxData = createChamferedBoxData(1, 0.08);
-    const boxGeo: PetGeometry = {
-        positions: boxData.positions,
-        normals: boxData.normals,
-        uvs: boxData.uvs,
-        indices: boxData.indices,
+    // ── Classic "arcade" + "smooth" blocks (enamel cubes) ────────────────
+    // Two restyled block geometries, both thin-instanced per piece colour and
+    // sharing the same glossy, lightly emissive PBR materials (tinted by
+    // ARCADE_COLORS so line-clear bursts + the HUD preview still match):
+    //   • "arcade" — a chamfered cube; flat 45° bevels catch a crisp specular
+    //     glint along every edge, reading as a manufactured plastic chip.
+    //   • "smooth" — a rounded cube; generously filleted edges + corners sweep
+    //     that glint smoothly around every silhouette line.
+    // Both are built alongside the pets and cycled at runtime.
+    const chamferData = createChamferedBoxData(1, 0.08);
+    const chamferGeo: PetGeometry = {
+        positions: chamferData.positions,
+        normals: chamferData.normals,
+        uvs: chamferData.uvs,
+        indices: chamferData.indices,
         colors: new Float32Array(0),
     };
-    // Classic-arcade boxes get a vivid palette that mirrors each Cube Pet's hue
-    // (so the two modes feel like the same pieces, just restyled) but cranked up
+    const roundedData = createRoundedBoxData(1, 0.2, 3);
+    const roundedGeo: PetGeometry = {
+        positions: roundedData.positions,
+        normals: roundedData.normals,
+        uvs: roundedData.uvs,
+        indices: roundedData.indices,
+        colors: new Float32Array(0),
+    };
+    // Both box styles share a vivid palette that mirrors each Cube Pet's hue
+    // (so every mode feels like the same pieces, just restyled) but cranked up
     // in saturation — the raw pet body colours are deliberately pastel, so these
     // are punchy versions in the same I,O,T,S,Z,J,L order:
     // pig, panda, bunny, crab, chick, cat, caterpillar.
@@ -501,11 +514,12 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
 
     const sets: Record<TetrisMode, RenderSet> = {
         pets: buildRenderSet("tetris_pet", (c) => petGeometries[c] ?? petGeometries[0]!, () => petMaterial, PET_SIZE),
-        arcade: buildRenderSet("tetris_box", () => boxGeo, (c) => arcadeMaterials[c]!, BLOCK_SIZE),
+        arcade: buildRenderSet("tetris_box", () => chamferGeo, (c) => arcadeMaterials[c]!, BLOCK_SIZE),
+        smooth: buildRenderSet("tetris_round", () => roundedGeo, (c) => arcadeMaterials[c]!, BLOCK_SIZE),
     };
-    // Both sets start with degenerate (invisible) instances; sync only ever
-    // writes real matrices into the active set, so the inactive set stays hidden.
-    let currentMode: TetrisMode = "pets";
+    // All sets start with degenerate (invisible) instances; sync only ever
+    // writes real matrices into the active set, so inactive sets stay hidden.
+    let currentMode: TetrisMode = "smooth";
 
     // ── Particle system ──────────────────────────────────────────────────
     const particles = new TetrisParticles(engine, scene);
@@ -544,8 +558,11 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
         return currentMode;
     }
 
+    // Cycle pets → arcade (chamfered) → smooth (rounded) → pets.
+    const MODE_CYCLE: readonly TetrisMode[] = ["pets", "arcade", "smooth"];
     function toggleMode(): TetrisMode {
-        return setMode(currentMode === "pets" ? "arcade" : "pets");
+        const next = MODE_CYCLE[(MODE_CYCLE.indexOf(currentMode) + 1) % MODE_CYCLE.length]!;
+        return setMode(next);
     }
 
     function sync(game: GameState, dtMs: number): void {
@@ -571,7 +588,7 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
                 for (let x = 0; x < BOARD_COLS; x++) {
                     const v = colors[x]!;
                     if (v === 0) continue;
-                    const col = (currentMode === "arcade" ? ARCADE_COLORS : PIECE_COLORS)[v - 1]!;
+                    const col = (currentMode === "pets" ? PIECE_COLORS : ARCADE_COLORS)[v - 1]!;
                     particles.burst(cellWorldX(x), cellWorldY(row), 0, col);
                 }
             }

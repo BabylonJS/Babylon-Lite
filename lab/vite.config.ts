@@ -34,7 +34,7 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
     return [
         `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<div class="card-image">`,
-        `<img src="/thumbnails/demo-${demo.slug}.png" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
+        `<img src="/thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
         `<div class="card-body">`,
         `<h2>${escapeHtml(demo.name)}</h2>`,
@@ -162,7 +162,7 @@ function serveReferenceImages(): Plugin {
                 if (url.startsWith("/lite/thumbnails/")) {
                     const filePath = resolve(__dirname, "public", url.slice("/lite/".length));
                     if (existsSync(filePath) && statSync(filePath).isFile()) {
-                        res.setHeader("Content-Type", "image/png");
+                        res.setHeader("Content-Type", filePath.endsWith(".png") ? "image/png" : "image/jpeg");
                         res.setHeader("Cache-Control", "no-cache");
                         createReadStream(filePath).pipe(res);
                         return;

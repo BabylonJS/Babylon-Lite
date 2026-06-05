@@ -22,6 +22,7 @@ import {
 import { createGame, hardDrop, moveLeft, moveRight, restartGame, rotateCCW, rotateCW, softDrop, tickGame, togglePause } from "./tetris/game.js";
 import { createTetrisRenderer } from "./tetris/renderer.js";
 import { createTetrisHud } from "./tetris/hud.js";
+import { createTetrisAudio } from "./tetris/sound.js";
 
 // A studio HDR environment drives the IBL — reflections + ambient on every PBR
 // material. The visible background is a *blurred* PBR skybox box that samples
@@ -84,8 +85,10 @@ async function main(): Promise<void> {
     const game = createGame();
     const renderer = await createTetrisRenderer(engine, scene);
     const hud = createTetrisHud(document.body);
+    const audio = createTetrisAudio();
 
     hud.onRestart(() => {
+        audio.resume();
         restartGame(game);
     });
 
@@ -94,11 +97,21 @@ async function main(): Promise<void> {
     }
     hud.onToggleMode(toggleMode);
 
+    function toggleMute(): void {
+        audio.resume();
+        hud.setMuted(audio.toggleMuted());
+    }
+    hud.onToggleMute(toggleMute);
+    hud.setMuted(audio.muted);
+    hud.setMode(renderer.mode);
+
     const left: RepeatState = { keyDown: false, next: 0 };
     const right: RepeatState = { keyDown: false, next: 0 };
     const down: RepeatState = { keyDown: false, next: 0 };
 
     function keyHandler(e: KeyboardEvent): void {
+        // First key press is a user gesture — safe to (re)start the AudioContext.
+        audio.resume();
         if (e.repeat) {
             e.preventDefault();
             return;
@@ -107,36 +120,52 @@ async function main(): Promise<void> {
             case "ArrowLeft":
                 left.keyDown = true;
                 left.next = performance.now() + DAS_DELAY;
-                moveLeft(game);
+                if (moveLeft(game)) {
+                    audio.play("move");
+                }
                 e.preventDefault();
                 break;
             case "ArrowRight":
                 right.keyDown = true;
                 right.next = performance.now() + DAS_DELAY;
-                moveRight(game);
+                if (moveRight(game)) {
+                    audio.play("move");
+                }
                 e.preventDefault();
                 break;
             case "ArrowDown":
                 down.keyDown = true;
                 down.next = performance.now() + SOFT_DROP_REPEAT;
-                softDrop(game);
+                if (softDrop(game)) {
+                    audio.play("softDrop");
+                }
                 e.preventDefault();
                 break;
             case "ArrowUp":
             case "KeyX":
-                rotateCW(game);
+                if (rotateCW(game)) {
+                    audio.play("rotate");
+                }
                 e.preventDefault();
                 break;
             case "KeyZ":
-                rotateCCW(game);
+                if (rotateCCW(game)) {
+                    audio.play("rotate");
+                }
                 e.preventDefault();
                 break;
-            case "Space":
+            case "Space": {
+                const hadPiece = game.active !== null;
                 hardDrop(game);
+                if (hadPiece && !game.paused) {
+                    audio.play("hardDrop");
+                }
                 e.preventDefault();
                 break;
+            }
             case "KeyP":
                 togglePause(game);
+                audio.play("pause");
                 e.preventDefault();
                 break;
             case "KeyR":
@@ -145,6 +174,10 @@ async function main(): Promise<void> {
                 break;
             case "KeyM":
                 toggleMode();
+                e.preventDefault();
+                break;
+            case "KeyS":
+                toggleMute();
                 e.preventDefault();
                 break;
         }
@@ -166,6 +199,7 @@ async function main(): Promise<void> {
 
     window.addEventListener("keydown", keyHandler);
     window.addEventListener("keyup", keyUpHandler);
+    window.addEventListener("pointerdown", () => audio.resume());
     document.addEventListener("visibilitychange", () => {
         if (document.hidden && !game.over && !game.paused) {
             togglePause(game);
@@ -175,19 +209,34 @@ async function main(): Promise<void> {
     onBeforeRender(scene, (deltaMs: number) => {
         const now = performance.now();
         if (left.keyDown && now >= left.next) {
-            moveLeft(game);
+            if (moveLeft(game)) {
+                audio.play("move");
+            }
             left.next = now + DAS_REPEAT;
         }
         if (right.keyDown && now >= right.next) {
-            moveRight(game);
+            if (moveRight(game)) {
+                audio.play("move");
+            }
             right.next = now + DAS_REPEAT;
         }
         if (down.keyDown && now >= down.next) {
-            softDrop(game);
+            if (softDrop(game)) {
+                audio.play("softDrop");
+            }
             down.next = now + SOFT_DROP_REPEAT;
         }
 
         tickGame(game, deltaMs);
+
+        // Drain rules-layer outcome sounds (lock / clear / level-up / game-over).
+        if (game.pendingSounds.length > 0) {
+            for (const sound of game.pendingSounds) {
+                audio.play(sound);
+            }
+            game.pendingSounds.length = 0;
+        }
+
         renderer.sync(game, deltaMs);
         hud.render(game);
     });

@@ -6,8 +6,8 @@
  * the material's KHR_texture_transform to the UVs, normalise the result to a
  * unit cube centred at the origin, and emit one geometry blob per piece type.
  *
- * Output: lab/public/tetris-pets.json  (7 pets, in piece-type order)
- *         lab/public/textures/tetris-pets-colormap.png  (shared palette)
+ * Output: lab/public/tetris/tetris-pets.json  (7 pets, in piece-type order)
+ *         lab/public/tetris/tetris-pets-colormap.png  (shared palette)
  *
  * Source GLBs come from the CC0 Kenney Cube Pets pack, extracted under
  * scratch/kenney/cube-pets/. Re-run after re-downloading that pack.
@@ -30,10 +30,10 @@ const GLB_DIR = path.join(ROOT, "scratch/kenney/cube-pets/Models/GLB format");
 const GRAVE_DIR = path.join(ROOT, "scratch/kenney/graveyard-kit/Models/GLB format");
 const TEX_SRC = path.join(GLB_DIR, "Textures/colormap.png");
 const GRAVE_TEX_SRC = path.join(GRAVE_DIR, "Textures/colormap.png");
-const OUT_JSON = path.join(ROOT, "lab/public/tetris-pets.json");
-const OUT_TEX = path.join(ROOT, "lab/public/textures/tetris-pets-colormap.png");
-const OUT_FRAME = path.join(ROOT, "lab/public/tetris-frame.json");
-const OUT_FRAME_TEX = path.join(ROOT, "lab/public/textures/tetris-frame-colormap.png");
+const OUT_JSON = path.join(ROOT, "lab/public/tetris/tetris-pets.json");
+const OUT_TEX = path.join(ROOT, "lab/public/tetris/tetris-pets-colormap.png");
+const OUT_FRAME = path.join(ROOT, "lab/public/tetris/tetris-frame.json");
+const OUT_FRAME_TEX = path.join(ROOT, "lab/public/tetris/tetris-frame-colormap.png");
 
 // Piece order: I, O, T, S, Z, J, L  →  one cute animal each, chosen for
 // maximally distinct colours: pig (pink), panda (black/white), bunny (brown),

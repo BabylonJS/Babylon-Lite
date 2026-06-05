@@ -182,7 +182,7 @@ When a parity diff exists on specific meshes:
     2. Add the entry to `lab/vite.config.ts` rollup inputs
     3. Add a Playwright parity test in `tests/lite/parity/scenes/sceneN-*.spec.ts`
     4. Add a reference screenshot to `reference/lite/sceneN-*/babylon-ref-golden.png`
-    5. Copy the reference to `lab/public/thumbnails/sceneN.png`
+    5. Save a downscaled JPG thumbnail (≤720p, e.g. 1280×720) of the golden to `lab/public/thumbnails/sceneN.jpg`
     6. Add a card to `lab/index.html` (the scene gallery)
     7. Add a bundle-size ceiling test in `tests/lite/parity/bundle-size.spec.ts`
     8. Add an entry to `scene-config.json` with `id`, `slug`, `name`, and `maxMad`
@@ -194,8 +194,20 @@ When a parity diff exists on specific meshes:
 - **Golden reference:** `babylon-ref-golden.png` (every scene, no exceptions).
 - **Test actual output:** `test-actual.png` (written by the parity test).
 - **Live reference (optional):** `live-ref.png` (captured at test time from Babylon.js; falls back to golden if capture fails).
-- **Thumbnail:** Copy the golden to `lab/public/thumbnails/sceneN.png`.
+- **Thumbnail:** A downscaled JPG of the golden lives at `lab/public/thumbnails/sceneN.jpg` — see **§2b″ Thumbnail Convention**.
 - Parity specs define `REFERENCE_DIR = path.resolve(__dirname, '../../../../reference/lite/sceneN-<slug>')` and resolve all images relative to it.
+
+### 2b″. Thumbnail Convention (Mandatory)
+
+Gallery thumbnails are presentation assets for the lab/pages cards — **not** parity ground truth. The lossless PNGs under `reference/lite/**` are reserved for pixel-diffing and must never be served to cards.
+
+- **Format:** JPG only. **Never commit a PNG to `lab/public/thumbnails/`.**
+- **Resolution:** exactly **1280×720** (720p). This is "far enough" for how cards display them and keeps the repo lean. Cover-crop (center, fill, crop overflow) rather than letterbox — gallery cards are 16:9 `object-fit: cover`, so anything taller/wider is cropped at render time anyway. Quality ≈ 78 (raise selectively only if a flat/dark image shows banding; keep files well under ~250 KB).
+- **Naming:** `sceneN.jpg` for scenes, `demo-<slug>.jpg` for demos.
+- **Source:** scene thumbnails are a downscaled JPG of that scene's `babylon-ref-golden.png`; demo thumbnails are a JPG of a representative in-app screenshot.
+- **Cards load thumbnails, not reference images.** Both the scene gallery and the demo gallery `<img src>` point at `/lite/thumbnails/…jpg` and hide on error (`onerror`). Do **not** point cards at `reference/lite/**` or `test-actual.png`.
+- **Every static-server MIME map must map `.jpg`/`.jpeg`** (`lab/vite.config.ts`, `scripts/bundle-scenes-core.ts`, `scripts/coverage-scene.ts`, `scripts/test-scenes-quick.ts`). Adding a new server? Add the JPEG MIME entries.
+- This convention is distinct from the **request-shared screenshots** rule in §1 (JPG, quality ≤ 60, < 1 MB) which governs images attached to a chat turn, not committed thumbnails.
 
 ### 2b′. Scene Config — MAD Thresholds (Mandatory)
 

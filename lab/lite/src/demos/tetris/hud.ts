@@ -16,7 +16,11 @@ export interface TetrisHud {
     /** Wire up the block-style toggle (button click). */
     onToggleMode(cb: () => void): void;
     /** Reflect the active block style on the toggle button label. */
-    setMode(mode: "pets" | "arcade"): void;
+    setMode(mode: "pets" | "arcade" | "smooth"): void;
+    /** Wire up the sound mute toggle (button click). */
+    onToggleMute(cb: () => void): void;
+    /** Reflect the mute state on the sound button label. */
+    setMuted(muted: boolean): void;
 }
 
 export function createTetrisHud(root: HTMLElement): TetrisHud {
@@ -115,6 +119,23 @@ export function createTetrisHud(root: HTMLElement): TetrisHud {
     ].join(";");
     panel.appendChild(modeBtn);
 
+    // Sound mute toggle.
+    const soundBtn = document.createElement("button");
+    soundBtn.style.cssText = [
+        "margin-top:8px",
+        "width:100%",
+        "padding:8px 10px",
+        "font:600 0.8rem/1 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif",
+        "letter-spacing:0.08em",
+        "color:#f4ece9",
+        "background:rgba(255,255,255,0.06)",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "border-radius:8px",
+        "cursor:pointer",
+        "pointer-events:auto",
+    ].join(";");
+    panel.appendChild(soundBtn);
+
     const help = document.createElement("div");
     help.style.cssText = [
         "position:absolute",
@@ -135,7 +156,8 @@ export function createTetrisHud(root: HTMLElement): TetrisHud {
         "<div>Z &nbsp;&nbsp; rotate CCW</div>",
         "<div>↓ &nbsp;&nbsp; soft drop</div>",
         "<div>Space &nbsp;&nbsp; hard drop</div>",
-        "<div>M &nbsp;&nbsp; pets / arcade</div>",
+        "<div>M &nbsp;&nbsp; pets / arcade / smooth</div>",
+        "<div>S &nbsp;&nbsp; sound on / off</div>",
         "<div>P &nbsp;&nbsp; pause &nbsp;·&nbsp; R &nbsp;&nbsp; restart</div>",
     ].join("");
     wrap.appendChild(help);
@@ -191,10 +213,27 @@ export function createTetrisHud(root: HTMLElement): TetrisHud {
         }
     });
 
-    function setMode(mode: "pets" | "arcade"): void {
-        modeBtn.textContent = mode === "pets" ? "STYLE: PETS" : "STYLE: ARCADE";
+    let toggleMuteCb: (() => void) | null = null;
+    soundBtn.addEventListener("click", () => {
+        if (toggleMuteCb) {
+            toggleMuteCb();
+        }
+    });
+
+    const MODE_LABEL: Record<"pets" | "arcade" | "smooth", string> = {
+        pets: "STYLE: PETS",
+        arcade: "STYLE: ARCADE",
+        smooth: "STYLE: SMOOTH",
+    };
+    function setMode(mode: "pets" | "arcade" | "smooth"): void {
+        modeBtn.textContent = MODE_LABEL[mode];
     }
-    setMode("pets");
+    setMode("smooth");
+
+    function setMuted(muted: boolean): void {
+        soundBtn.textContent = muted ? "SOUND: OFF" : "SOUND: ON";
+    }
+    setMuted(false);
 
     let lastVersion = -1;
     let lastOver = false;
@@ -252,5 +291,9 @@ export function createTetrisHud(root: HTMLElement): TetrisHud {
         toggleModeCb = cb;
     }
 
-    return { render, onRestart, onToggleMode, setMode };
+    function onToggleMute(cb: () => void): void {
+        toggleMuteCb = cb;
+    }
+
+    return { render, onRestart, onToggleMode, setMode, onToggleMute, setMuted };
 }
