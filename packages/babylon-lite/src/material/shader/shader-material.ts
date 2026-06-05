@@ -1,6 +1,7 @@
 import type { Material } from "../material.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { Mat4 } from "../../math/types.js";
 import { shaderGroupBuilder } from "./shader-group-builder.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. */
@@ -331,7 +332,10 @@ export function setShaderVector3(material: ShaderMaterial, name: string, value: 
     setShaderUniform(material, name, value);
 }
 
-/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`. */
-export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array): void {
-    setShaderUniform(material, name, value);
+/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`.
+ *  Accepts a raw `Float32Array` or the engine's branded `Mat4` (e.g. the result of
+ *  `getViewProjectionMatrix()` / `mat4Invert()`), so camera/math matrices can be fed
+ *  straight into a matrix uniform without laundering through a typed array. */
+export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array | Mat4): void {
+    setShaderUniform(material, name, value instanceof Float32Array ? value : Array.from(value));
 }
