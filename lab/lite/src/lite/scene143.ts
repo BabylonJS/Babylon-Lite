@@ -5,6 +5,7 @@ import {
     attachControl,
     createArcRotateCamera,
     createBlurPostProcessTask,
+    createChromaticAberrationPostProcessTask,
     createEngine,
     createRenderTarget,
     createRenderTask,
@@ -13,7 +14,6 @@ import {
     registerScene,
     startEngine,
 } from "babylon-lite";
-import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const initStart = performance.now();
