@@ -309,8 +309,11 @@ scene graph — and gives the demo real game structure.
 
 - **19. Controller rumble + better touch controls ✅ (S).** Gamepad haptics on
   hit/stomp; larger, nicer on-screen buttons for mobile.
-- **20. Title & attract screen ✅ (S) — ⭐ COMMITTED.** A proper start screen with an animated
-  logo (reuse the star shader) and an idle attract loop.
+- **20. Title & attract screen ✅ DONE.** A "COSMIC RUN" start screen: a rainbow
+  **shimmer** logo (CSS gradient animation echoing the star power) + a blinking
+  "PRESS ENTER · TAP Ⓐ" prompt over a live **attract loop** — the camera slowly
+  ping-pongs across the overworld behind the title, flaunting the parallax + level.
+  Enter starts a fresh run; game over returns here.
 - **21. Accessibility ✅ (S).** Reduced-motion mode (calm the parallax/flashing),
   remappable keys, colorblind-friendly power-up shapes.
 

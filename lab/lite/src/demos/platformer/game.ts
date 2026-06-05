@@ -280,7 +280,7 @@ interface Debris {
     slot: number;
 }
 
-type Phase = "ready" | "playing" | "warping" | "dying" | "complete" | "gameover";
+type Phase = "title" | "ready" | "playing" | "warping" | "dying" | "complete" | "gameover";
 
 export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext): Promise<void> {
     const level = buildLevel();
@@ -773,7 +773,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     };
 
     // ── Run-state ─────────────────────────────────────────────────────────────
-    const game = { phase: "ready" as Phase, score: 0, coins: 0, lives: 3, time: START_TIME, timer: 1.6, flagAnimT: 0, world: "1-1", combo: 0 };
+    const game = { phase: "title" as Phase, score: 0, coins: 0, lives: 3, time: START_TIME, timer: 1.6, flagAnimT: 0, world: "1-1", combo: 0 };
 
     // Warp / area state. `inCave` drives the dark backdrop + flag-goal guard; `warp`
     // runs the iris-wipe transition and teleports the player at its darkest point.
@@ -792,12 +792,16 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const sfx: Sfx = createSfx();
     const input: InputController = createInput(document.body);
     const hud: Hud = createHud(document.body);
-    hud.banner("WORLD 1-1", "Get ready!");
     const resumeAudio = (): void => sfx.resume();
     window.addEventListener("pointerdown", resumeAudio, { once: false });
     window.addEventListener("keydown", resumeAudio, { once: false });
 
     const cam = { x: 0, y: 0 };
+    // Attract-screen auto-pan accumulator (seconds). The title camera ping-pongs
+    // across the overworld to show off the parallax + level while idle.
+    let titleT = 0;
+    const TITLE_PAN_SPEED = 0.03;
+    hud.title(true); // start on the attract screen
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     const addScore = (n: number): void => {
@@ -1371,9 +1375,17 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         const ch = canvas.height || 1;
         const scale = ch / worldH;
         const viewW = cw / scale;
-        // Camera follows the player, clamped to the level.
-        const targetX = player.box.x + player.box.w / 2 - viewW / 2;
-        cam.x = Math.max(0, Math.min(worldW - viewW, targetX));
+        if (game.phase === "title") {
+            // Attract loop: slowly ping-pong the camera across the overworld (out to
+            // the flag, never into the far-right cave) to flaunt the parallax + level.
+            const span = Math.max(1, (level.flag.cx + 6) * TILE - viewW);
+            const tri = Math.abs(((titleT * TITLE_PAN_SPEED + 1) % 2) - 1); // 0→1→0
+            cam.x = tri * span;
+        } else {
+            // Camera follows the player, clamped to the level.
+            const targetX = player.box.x + player.box.w / 2 - viewW / 2;
+            cam.x = Math.max(0, Math.min(worldW - viewW, targetX));
+        }
         cam.y = 0;
 
         const sx = (wx: number): number => (wx - cam.x) * scale;
@@ -1610,7 +1622,12 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
 
         // Player — or, during a pipe warp, a front-facing sprite sliding through the
         // pipe on pipeTravelLayer (BEHIND the pipe, so the pipe occludes it).
-        if (warp.active) {
+        if (game.phase === "title") {
+            // Attract screen: no player on the level (the camera is touring the world).
+            updateSprite2DIndex(playerLayer, playerSlot, { visible: false });
+            updateSprite2DIndex(pipeTravelLayer, pipeTravelSlot, { visible: false });
+            setSprite2DShaderParams(playerLayer, [0, 0, 0, 0]);
+        } else if (warp.active) {
             updateSprite2DIndex(playerLayer, playerSlot, { visible: false });
             setSprite2DShaderParams(playerLayer, [0, 0, 0, 0]);
             if (trailHist.length > 0) {
@@ -1728,6 +1745,16 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         player.animT += dt;
 
         switch (game.phase) {
+            case "title":
+                titleT += dt;
+                if (input.state.startPressed) {
+                    hud.title(false);
+                    game.phase = "ready";
+                    game.timer = 1.4;
+                    hud.banner("WORLD 1-1", "Get ready!");
+                    sfx.coin();
+                }
+                break;
             case "ready":
                 game.timer -= dt;
                 if (game.timer <= 0) {
@@ -1767,7 +1794,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                     game.lives -= 1;
                     if (game.lives <= 0) {
                         game.phase = "gameover";
-                        hud.banner("GAME OVER", "Press Enter / tap A to retry");
+                        hud.banner("GAME OVER", "Press Enter / tap A");
                     } else {
                         resetWorld();
                     }
@@ -1778,7 +1805,14 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 player.box.x += 120 * dt; // stroll off
                 break;
             case "gameover":
-                if (input.state.startPressed) restartLevel();
+                if (input.state.startPressed) {
+                    // Fresh game, but return to the attract screen first.
+                    restartLevel();
+                    game.phase = "title";
+                    hud.banner(null);
+                    hud.title(true);
+                    titleT = 0;
+                }
                 break;
         }
 

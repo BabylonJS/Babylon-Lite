@@ -17,6 +17,8 @@ export interface Hud {
     update: (m: HudModel) => void;
     /** Show a centred banner; pass null to clear it. */
     banner: (text: string | null, sub?: string) => void;
+    /** Show/hide the title (attract) screen; hides the score bar while visible. */
+    title: (visible: boolean) => void;
     dispose: () => void;
 }
 
@@ -57,7 +59,38 @@ export function createHud(host: HTMLElement): Hud {
     bannerSub.style.cssText = "font:600 18px system-ui,sans-serif;color:#ffd36b;text-shadow:0 2px 0 #000;";
     bannerEl.append(bannerMain, bannerSub);
 
-    host.append(bar, bannerEl);
+    // ── Title / attract screen ────────────────────────────────────────────────
+    // Keyframes for the rainbow logo shimmer + the blinking "press start" prompt.
+    const style = document.createElement("style");
+    style.textContent =
+        "@keyframes pf-shimmer{0%{background-position:0% 0}100%{background-position:200% 0}}" +
+        "@keyframes pf-blink{0%,49%{opacity:1}50%,100%{opacity:.05}}" +
+        "@keyframes pf-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}";
+    document.head.appendChild(style);
+
+    const titleEl = document.createElement("div");
+    titleEl.style.cssText =
+        "position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;" +
+        "gap:10px;z-index:30;pointer-events:none;text-align:center;" +
+        "background:radial-gradient(120% 80% at 50% 38%,rgba(0,0,0,0) 40%,rgba(0,0,0,.35) 100%);";
+    const titleLogo = document.createElement("div");
+    titleLogo.textContent = "COSMIC RUN";
+    titleLogo.style.cssText =
+        "font:900 clamp(40px,9vw,82px) system-ui,sans-serif;letter-spacing:.04em;line-height:1;" +
+        "background:linear-gradient(90deg,#ff5d5d,#ffd95d,#7dff5d,#5dd0ff,#b15dff,#ff5d5d);background-size:200% 100%;" +
+        "-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-stroke:2px rgba(0,0,0,.5);" +
+        "filter:drop-shadow(0 6px 0 rgba(0,0,0,.45));animation:pf-shimmer 3s linear infinite,pf-bob 3.2s ease-in-out infinite;";
+    const titleSub = document.createElement("div");
+    titleSub.textContent = "Babylon Lite \u00B7 WebGPU";
+    titleSub.style.cssText = "font:700 clamp(13px,2.2vw,20px) system-ui,sans-serif;color:#fff;text-shadow:0 2px 0 #000;letter-spacing:.22em;";
+    const titlePrompt = document.createElement("div");
+    titlePrompt.textContent = "PRESS ENTER \u00B7 TAP \u24B6";
+    titlePrompt.style.cssText =
+        "margin-top:28px;font:800 clamp(15px,2.6vw,24px) system-ui,sans-serif;color:#ffd36b;" +
+        "text-shadow:0 2px 0 #000;animation:pf-blink 1.1s steps(1,end) infinite;";
+    titleEl.append(titleLogo, titleSub, titlePrompt);
+
+    host.append(bar, bannerEl, titleEl);
 
     return {
         update(m: HudModel): void {
@@ -76,9 +109,15 @@ export function createHud(host: HTMLElement): Hud {
             bannerSub.textContent = sub;
             bannerEl.style.display = "flex";
         },
+        title(visible: boolean): void {
+            titleEl.style.display = visible ? "flex" : "none";
+            bar.style.display = visible ? "none" : "flex";
+        },
         dispose(): void {
             bar.remove();
             bannerEl.remove();
+            titleEl.remove();
+            style.remove();
         },
     };
 }
