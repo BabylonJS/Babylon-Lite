@@ -43,6 +43,7 @@ import {
 } from "babylon-lite";
 
 import { BOARD_COLS, BOARD_ROWS, ghostRow, type GameState } from "./game.js";
+import { demoAssetUrl } from "../demo-asset-url.js";
 import { TetrisParticles } from "./particles.js";
 import { PIECE_COLORS, PIECE_ROTATIONS } from "./pieces.js";
 import { createChamferedBoxData } from "./chamfered-box.js";
@@ -320,8 +321,8 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // top/bottom rows sit upright while the left/right columns are rotated 90°
     // about Z so the rounded edge faces outward, forming a continuous stone frame.
     // All 66 segments are one thin-instanced mesh (one draw call, built once).
-    const frameGeo = await loadGeometryFromUrl("/tetris/tetris-frame.json", "wall");
-    const frameColormap = await loadTexture2D(engine, "/tetris/tetris-frame-colormap.png", {
+    const frameGeo = await loadGeometryFromUrl(demoAssetUrl("./tetris/tetris-frame.json", import.meta.url), "wall");
+    const frameColormap = await loadTexture2D(engine, demoAssetUrl("./tetris/tetris-frame-colormap.png", import.meta.url), {
         srgb: true,
         invertY: false,
         mipMaps: false,
@@ -366,7 +367,7 @@ export async function createTetrisRenderer(engine: EngineContext, scene: SceneCo
     // (scripts/bake-tetris-pets.mjs). All pets share one palette texture, so a
     // single PBR material serves every type; per-type geometry is thin-instanced
     // across the board exactly like the box-style arcade/smooth cubes.
-    const petGeometries = await loadPetGeometries("/tetris/tetris-pets.json");
+    const petGeometries = await loadPetGeometries(demoAssetUrl("./tetris/tetris-pets.json", import.meta.url));
     // Pets are coloured by baked per-vertex colours (sampled offline from the
     // palette atlas), not by sampling the atlas at render time. The atlas' tiny
     // eye/nose swatches are smaller than a screen pixel at cell size, so texture

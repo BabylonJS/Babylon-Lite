@@ -22,7 +22,7 @@ import {
     startEngine,
     type RenderTask,
 } from "babylon-lite";
-import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
+import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 
 const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
         scene,
     );
 
-    await configureDemoDracoBase(import.meta.url);
+    await configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, MODEL_URL).then((asset) => addToScene(scene, asset)),

@@ -30,7 +30,7 @@ import {
     type EngineContext,
     type RenderCanvas,
 } from "babylon-lite";
-import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
+import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 
 // Same CDN assets used by the existing Flight Helmet scene (lab scene 14):
 // PBR model, .env IBL, DDS skybox and a reflective ground texture.
@@ -49,7 +49,7 @@ export const BRDF_ASSET = demoAssetUrl("./brdf-lut.png", import.meta.url);
  *   (resolved against the document) so it loads correctly inside a worker.
  */
 export async function startOffscreenScene(canvas: RenderCanvas, brdfUrl: string = BRDF_ASSET): Promise<EngineContext> {
-    await configureDemoDracoBase(import.meta.url);
+    await configureDemoDecoderBases(import.meta.url);
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);

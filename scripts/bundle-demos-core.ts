@@ -46,6 +46,7 @@ const LIBREQUAKE_SRC = resolve(labDir, "public/librequake");
 const MINECRAFT_SRC = resolve(labDir, "public/minecraft");
 const FREECIV_SRC = resolve(labDir, "public/freeciv");
 const LITTLEST_TOKYO_SRC = resolve(labDir, "public/littlest-tokyo");
+const TETRIS_SRC = resolve(labDir, "public/tetris");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 interface DemoConfigEntry {
@@ -199,7 +200,18 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         }
     }
 
-    for (const file of [...DRACO_FILES, "brdf-lut.png"]) {
+    if (demos.some((demo) => demo.slug === "tetris")) {
+        // Tetris geometry/texture assets (consolidated under lab/public/tetris/)
+        // plus its local studio HDR environment, copied flat so the demo resolves
+        // them relative to its own module (subpath-safe).
+        copyRequiredDir(TETRIS_SRC, resolve(demosDir, "tetris"), "Tetris");
+        const env = resolve(labDir, "public", "textures", "environment.env");
+        if (existsSync(env)) {
+            cpSync(env, resolve(demosDir, "environment.env"));
+        }
+    }
+
+    for (const file of [...DRACO_FILES, "meshopt_decoder.js", "brdf-lut.png"]) {
         const src = resolve(labDir, "public", file);
         if (existsSync(src)) {
             cpSync(src, resolve(demosDir, file));
@@ -359,4 +371,40 @@ export async function buildDemoBundles(): Promise<void> {
     writeDemoHtml(demos, manifest);
 
     console.log(`✓ Demo bundles, manifest, and HTML built to ${demosDir}`);
+}
+
+/**
+ * Build all demo bundles and write the flat, self-contained demo site (demo
+ * HTML, runtime assets, landing index) into lab/public/bundle/demos/ — the same
+ * artifact `build:bundle-demos` deploys — but WITHOUT the Playwright size
+ * measurement. Size badges come from the committed demos-manifest.json if
+ * present. Returns the output directory.
+ *
+ * Used by build:pages-site so that build stays browser-free; build:bundle-demos
+ * uses buildDemoBundles() instead (which also measures sizes).
+ */
+export async function buildFlatDemoSite(): Promise<string> {
+    const demos = loadDemosConfig();
+    if (demos.length === 0) {
+        throw new Error("No demos configured in demos-config.json");
+    }
+    await fetchDemoAssets(demos);
+
+    // Clean rebuild so removed demos / stale chunks never linger in the output.
+    rmSync(demosDir, { recursive: true, force: true });
+    mkdirSync(demosDir, { recursive: true });
+
+    for (const demo of demos) {
+        console.log(`Building demo ${demo.slug}...`);
+        await buildDemo(demo.slug);
+    }
+    await buildDemoSupportBundles();
+
+    const manifest: Record<string, DemoManifestEntry> = existsSync(DEMOS_MANIFEST_FILE)
+        ? (JSON.parse(readFileSync(DEMOS_MANIFEST_FILE, "utf-8")) as Record<string, DemoManifestEntry>)
+        : {};
+    writeDemoHtml(demos, manifest);
+
+    console.log(`✓ Flat demo site built to ${demosDir}`);
+    return demosDir;
 }

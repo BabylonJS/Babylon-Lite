@@ -33,7 +33,7 @@ import {
     type RenderTask,
 } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
-import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
+import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 
 const ENV_URL = "https://playground.babylonjs.com/textures/environment.dds";
@@ -61,8 +61,8 @@ async function main(): Promise<void> {
     scene.imageProcessing.toneMappingEnabled = true;
     scene.imageProcessing.toneMappingType = "aces";
 
-    // Draco-compressed glTF — point the decoder at the demo-local wasm/js.
-    await configureDemoDracoBase(import.meta.url);
+    // Draco-compressed glTF — point the decoders at the demo-local wasm/js.
+    await configureDemoDecoderBases(import.meta.url);
 
     // Load the model + DDS cubemap environment in parallel (same env as Scene 26).
     await Promise.all([

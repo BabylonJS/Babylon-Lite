@@ -14,7 +14,7 @@
 import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadGltf, onBeforeRender, playAnimation, rebuildMaterial, registerScene, setCameraLimits, startEngine } from "babylon-lite";
 import type { PbrMaterialProps } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
-import { demoAssetUrl } from "./demo-asset-url.js";
+import { demoAssetUrl, configureDemoDecoderBases } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 
 // Same environment cube as Scene 26 — used for both IBL and the visible skybox.
@@ -69,6 +69,10 @@ async function main(): Promise<void> {
         },
         scene,
     );
+
+    // Point the glTF decoders at the demo-local files so they resolve under any
+    // base path (e.g. /lite-demos/) rather than the site root.
+    await configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, demoAssetUrl("./littlest-tokyo/LittlestTokyo.glb", import.meta.url)).then((asset) => {

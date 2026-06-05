@@ -23,14 +23,16 @@ import { createGame, hardDrop, moveLeft, moveRight, restartGame, rotateCCW, rota
 import { createTetrisRenderer } from "./tetris/renderer.js";
 import { createTetrisHud } from "./tetris/hud.js";
 import { createTetrisAudio } from "./tetris/sound.js";
+import { demoAssetUrl } from "./demo-asset-url.js";
 
 // A studio HDR environment drives the IBL — reflections + ambient on every PBR
 // material. The visible background is a *blurred* PBR skybox box that samples
 // this same environment along the view ray (see renderer.ts), giving a soft
 // photographic backdrop with real lighting variation rather than a flat colour.
-// Stored locally under lab/public so it loads same-origin.
-const ENV_URL = "/textures/environment.env";
-const BRDF_URL = "/brdf-lut.png";
+// Stored locally under lab/public so it loads same-origin. Resolved relative to
+// this demo module so it works under any base path (e.g. /lite-demos/).
+const ENV_URL = demoAssetUrl("./environment.env", import.meta.url);
+const BRDF_URL = demoAssetUrl("./brdf-lut.png", import.meta.url);
 
 // Repeat rates for held arrow keys (ms).
 const DAS_DELAY = 170;
