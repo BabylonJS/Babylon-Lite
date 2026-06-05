@@ -18,6 +18,7 @@ export {
     unregisterScene,
 } from "./scene/scene.js";
 export type { SceneContextOptions } from "./scene/scene.js";
+export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // Subtree visibility toggle (used to hide a node before deferring its disposal,

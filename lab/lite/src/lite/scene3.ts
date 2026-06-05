@@ -1,6 +1,6 @@
 // Scene 3: Fog + Boxes — matches Babylon #7G0IQW
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPointLight, createBox, createStandardMaterial, loadSkybox, attachControl, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createPointLight, createBox, createStandardMaterial, loadSkybox, attachControl, registerScene, setFog } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
 
     addToScene(scene, createPointLight([10, 50, 50]));
 
-    scene.fog = { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.85] };
+    setFog(scene, { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.85] });
 
     const boxMat = createStandardMaterial();
     boxMat.diffuseColor = [1, 1, 0];

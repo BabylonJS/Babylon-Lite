@@ -4,6 +4,7 @@ import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 import { shToPolynomial } from "../math/spherical-harmonics.js";
+import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 
 // ─── Float16 Conversion ─────────────────────────────────────────────────────
 
@@ -247,6 +248,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
     const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
 
     scene._envTextures = textures;
+    registerEnvSceneUniforms(scene);
 
     acquireGPUTexture(specularCube);
     acquireGPUTexture(brdfLut);

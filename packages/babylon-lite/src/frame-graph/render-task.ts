@@ -532,32 +532,20 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
         data[34] = wm[14]!;
     }
 
-    if (fog) {
-        data[80] = fog.mode;
-        data[81] = fog.start;
-        data[82] = fog.end;
-        data[83] = fog.density;
-        data[84] = fog.color[0]!;
-        data[85] = fog.color[1]!;
-        data[86] = fog.color[2]!;
-    }
     data[87] = eng.canvas.width;
 
     data[36] = envRotationY;
-    if (envTextures?.sphericalHarmonics) {
-        data.set(envTextures.sphericalHarmonics, 40);
-    }
 
     data[76] = img.exposure;
     data[77] = img.contrast;
     data[78] = envTextures?.lodGenerationScale ?? 0.8;
     data[79] = +img.toneMappingEnabled;
     data[37] = eng.canvas.height;
-    if (scene.clipPlane) {
-        data[88] = scene.clipPlane[0];
-        data[89] = scene.clipPlane[1];
-        data[90] = scene.clipPlane[2];
-        data[91] = scene.clipPlane[3];
+    const contribs = scene._sceneUboContributors;
+    if (contribs) {
+        for (const c of contribs) {
+            c(data, scene);
+        }
     }
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }

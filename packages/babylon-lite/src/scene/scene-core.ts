@@ -78,6 +78,9 @@ export interface SceneContext extends RenderingContext {
     _gsMeshes: GaussianSplattingMesh[];
     /** @internal Scene uniform updaters (one per shared UBO). */
     _uniformUpdaters: SceneUniformUpdater[];
+    /** @internal Opt-in feature writers for the SceneUniforms UBO (fog, clip plane, env SH).
+     *  Populated lazily via the scene-ubo-extras seam; run by the render task. */
+    _sceneUboContributors?: ((data: Float32Array, scene: SceneContext) => void)[];
     /** @internal Per-frame callbacks run before rendering (animation, physics, etc.). */
     _beforeRender: ((deltaMs: number) => void)[];
     /** @internal Deferred builders — registered by loaders/factories, run once at startEngine(). */
