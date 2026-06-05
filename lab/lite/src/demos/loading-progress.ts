@@ -68,6 +68,10 @@ export function installFetchProgress(canvas: HTMLElement, options: InstallFetchP
     let raf = 0;
     let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
     let preparing = false;
+    // Highest percentage shown so far. The bar is strictly monotonic — it only
+    // ever moves forward — so multi-wave loads (download → CPU prep → download)
+    // never visibly restart.
+    let shownPct = 0;
 
     const render = (): void => {
         raf = 0;
@@ -88,18 +92,27 @@ export function installFetchProgress(canvas: HTMLElement, options: InstallFetchP
         const displayTotal = Math.max(estimate, knownTotal, totalLoaded);
         const haveSize = displayTotal > 0 && (estimate > 0 || knownTotal > 0);
 
-        if (preparing) {
-            canvas.dataset.progress = "100";
-            canvas.dataset.loadingDetail = "Preparing scene…";
-            return;
-        }
-
         if (haveSize) {
-            const pct = Math.min(99, Math.round((totalLoaded / displayTotal) * 100));
-            canvas.dataset.progress = String(pct);
-            if (started > 0) {
+            const raw = Math.min(99, Math.round((totalLoaded / displayTotal) * 100));
+            // Monotonic clamp: a later download wave grows the known total (which
+            // would otherwise drop the ratio) and CPU-bound "preparing" gaps
+            // interleave with streaming. Without this the bar slides backwards and
+            // visibly restarts between phases. The label may toggle between
+            // "Downloading" and "Preparing", but the bar itself only advances and
+            // never jumps to 100% until loading is actually finished (see done()).
+            if (raw > shownPct) {
+                shownPct = raw;
+            }
+            canvas.dataset.progress = String(shownPct);
+            if (preparing) {
+                canvas.dataset.loadingDetail = "Preparing scene…";
+            } else if (started > 0) {
                 canvas.dataset.loadingDetail = "Downloading assets…";
             }
+        } else if (preparing) {
+            // Quiet CPU-bound phase before any sized download (e.g. world gen):
+            // keep the spinner indeterminate but describe the phase.
+            canvas.dataset.loadingDetail = "Preparing scene…";
         } else if (started > 0) {
             // No size headers and no estimate: at least state how many assets are loading.
             delete canvas.dataset.progress;

@@ -23,6 +23,7 @@ import { createGame, hardDrop, moveLeft, moveRight, restartGame, rotateCCW, rota
 import { createTetrisRenderer } from "./tetris/renderer.js";
 import { createTetrisHud } from "./tetris/hud.js";
 import { createTetrisAudio } from "./tetris/sound.js";
+import { installFetchProgress } from "./loading-progress.js";
 import { demoAssetUrl } from "./demo-asset-url.js";
 
 // A studio HDR environment drives the IBL — reflections + ambient on every PBR
@@ -47,6 +48,10 @@ interface RepeatState {
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
+    // Instrument asset downloads (HDR environment, BRDF LUT, frame geometry +
+    // colormap, pet geometries ≈ 1 MB) so the loading overlay shows a determinate
+    // progress bar. Restored via progress.done() once everything is fetched.
+    const progress = installFetchProgress(canvas, { estimatedBytes: 1_050_000 });
     // 2× supersample for crisp edges. The engine sizes its swapchain to
     // `clientWidth * devicePixelRatio`, so doubling the reported DPR causes
     // the scene to render at 4× the pixel count and the browser does the
@@ -243,6 +248,7 @@ async function main(): Promise<void> {
         hud.render(game);
     });
 
+    progress.done();
     await registerScene(engine, scene);
     await startEngine(engine);
     canvas.dataset.ready = "true";
