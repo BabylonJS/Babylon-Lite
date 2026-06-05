@@ -8,11 +8,11 @@
  *  - interactive `blocks` (?-blocks, bricks) with their hidden contents,
  *  - `coins`, `enemies`, `hazards`, the player spawn, and the flag goal.
  *
- * One cohesive CC0 art style throughout (Kenney "Platformer Pack Remastered").
+ * One cohesive CC0 art style throughout (Kenney "Platformer Art Deluxe").
  */
 
 export type BlockKind = "brick" | "coin-block" | "mushroom-block" | "star-block";
-export type EnemyKind = "slime" | "snail";
+export type EnemyKind = "slime" | "snail" | "fly" | "piranha";
 
 export interface Cell {
     cx: number;
@@ -32,6 +32,25 @@ export interface EnemySpawn extends Cell {
     kind: EnemyKind;
 }
 
+/** A rectangular molten-lava pool (tile coordinates) — an animated underground hazard. */
+export interface LavaRect extends Cell {
+    /** Footprint size in tiles. */
+    w: number;
+    h: number;
+}
+
+/** A moving (kinematic) platform that carries the player. Travels along one axis and ping-pongs. */
+export interface MoverSpec extends Cell {
+    /** Platform width in tiles. */
+    w: number;
+    /** Travel axis. */
+    axis: "x" | "y";
+    /** Travel distance in tiles from the start cell. */
+    range: number;
+    /** Speed in tiles per second. */
+    speed: number;
+}
+
 /** A warp pipe linking the overworld to the underground bonus chamber (or back). */
 export interface Pipe {
     /** Top-left tile of the pipe sprite + its solid collision footprint. */
@@ -47,17 +66,27 @@ export interface Pipe {
     toCave: boolean;
     /** HUD world label to show after warping (e.g. "1-2"). */
     worldLabel: string;
+    /** Decorative pipes are solid + drawn but are NOT warp triggers (e.g. piranha pipes). */
+    decorative?: boolean;
 }
 
 export interface Level {
     cols: number;
     rows: number;
     solid: Uint8Array;
+    /** One-way platforms: pass up through, land on top (parallel to `solid`). */
+    oneway: Uint8Array;
     terrain: TerrainTile[];
     blocks: BlockSpawn[];
     coins: Cell[];
     enemies: EnemySpawn[];
     hazards: Cell[];
+    /** Molten-lava pools (underground): animated visuals + an instant-death hazard. */
+    lava: LavaRect[];
+    /** Wall-torch cells lighting the underground (light sources for the lantern effect). */
+    torches: Cell[];
+    /** Moving platforms that carry the player (overworld pit-crosser + cave elevators). */
+    movers: MoverSpec[];
     playerSpawn: Cell;
     flag: Cell;
     /** World tile column where falling below the map kills the player. */
@@ -71,12 +100,12 @@ const ROWS = 14;
 /** y of the top ground surface row (shared by the overworld and the cave floor). */
 const GROUND_TOP = 12;
 
-// ── Underground bonus chamber (a sealed stone room reached by warp pipes) ──
+// ── Underground cavern (a large sealed area reached by warp pipes) ──
 /** Left / right solid wall columns of the cave; the interior lies between them.
  *  Placed well past the overworld (a wide void gap) so the two areas are never
  *  on screen together — the camera can't show overworld grass from inside the cave. */
 const CAVE_X0 = 140;
-const CAVE_X1 = 163;
+const CAVE_X1 = 195;
 /** Solid ceiling row of the cave. */
 const CAVE_CEIL = 3;
 /** Where the player lands when warping into the cave. */
@@ -87,7 +116,7 @@ const OVERWORLD_RETURN = { cx: 48, cy: GROUND_TOP - 1 };
 /** Full grid width: the overworld, a void gap, then the cave chamber + margin. */
 const COLS = CAVE_X1 + 3;
 
-type Glyph = " " | "#" | "=" | "B" | "?" | "M" | "S" | "o" | "g" | "n" | "^" | "F" | "p";
+type Glyph = " " | "#" | "=" | "B" | "?" | "M" | "S" | "o" | "g" | "n" | "f" | "^" | "F" | "p";
 
 export function buildLevel(): Level {
     const grid: Glyph[][] = Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => " " as Glyph));
@@ -145,6 +174,10 @@ export function buildLevel(): Level {
     set(72, GROUND_TOP - 1, "g");
     set(73, GROUND_TOP - 1, "g");
     set(96, GROUND_TOP - 1, "n");
+    // Flying enemies (bob through the air; stompable from above).
+    set(38, GROUND_TOP - 4, "f");
+    set(70, GROUND_TOP - 5, "f");
+    set(108, GROUND_TOP - 4, "f");
 
     // ── A spike pit hazard run ────────────────────────────────────────────────
     for (let c = 64; c <= 67; c++) set(c, GROUND_TOP - 1, "^");
@@ -177,11 +210,13 @@ export function buildLevel(): Level {
 
     // ── Compile to Level ──────────────────────────────────────────────────────
     const solid = new Uint8Array(COLS * ROWS);
+    const oneway = new Uint8Array(COLS * ROWS);
     const terrain: TerrainTile[] = [];
     const blocks: BlockSpawn[] = [];
     const coins: Cell[] = [];
     const enemies: EnemySpawn[] = [];
     const hazards: Cell[] = [];
+    const movers: MoverSpec[] = [];
     let playerSpawn: Cell = { cx: 3, cy: GROUND_TOP - 1 };
     let flag: Cell = { cx: flagCol, cy: GROUND_TOP - 9 };
 
@@ -230,6 +265,9 @@ export function buildLevel(): Level {
                 case "n":
                     enemies.push({ cx, cy, kind: "snail" });
                     break;
+                case "f":
+                    enemies.push({ cx, cy, kind: "fly" });
+                    break;
                 case "^":
                     hazards.push({ cx, cy });
                     break;
@@ -245,29 +283,83 @@ export function buildLevel(): Level {
         }
     }
 
-    // ── Underground bonus chamber ─────────────────────────────────────────────
-    // A sealed stone room appended to the same tile grid (past a void gap), reached
-    // only by warp pipe. Built directly into solid/terrain (bypassing the glyph grid)
-    // with explicit stone frames; the existing terrain + coin systems draw it as-is.
+    // ── Underground cavern ────────────────────────────────────────────────────
+    // A large sealed cavern appended to the same tile grid (past a void gap), reached
+    // only by warp pipe. Built directly into solid/terrain/lava (bypassing the glyph
+    // grid) with explicit stone frames: two molten LAVA channels crossed on stone
+    // stepping-stones, a raised bonus ledge with reward blocks, and wall torches that
+    // light the gloom. The existing terrain/coin/block systems draw it as-is.
     const caveSolid = (cx: number, cy: number, name: string): void => {
         solid[cy * COLS + cx] = 1;
         terrain.push({ cx, cy, name });
     };
-    for (let cx = CAVE_X0; cx <= CAVE_X1; cx++) {
-        caveSolid(cx, GROUND_TOP, "stoneMid"); // floor surface
-        caveSolid(cx, GROUND_TOP + 1, "stoneCenter"); // floor body
-        caveSolid(cx, CAVE_CEIL, "stoneCenter"); // ceiling
-    }
-    for (let cy = CAVE_CEIL + 1; cy < GROUND_TOP; cy++) {
-        caveSolid(CAVE_X0, cy, "stoneCenter"); // left wall
-        caveSolid(CAVE_X1, cy, "stoneCenter"); // right wall
-    }
-    // Bonus coins: two easy rows the player hops to collect.
-    for (const row of [GROUND_TOP - 3, GROUND_TOP - 2]) {
-        for (let cx = CAVE_X0 + 4; cx <= CAVE_X1 - 5; cx += 2) {
-            coins.push({ cx, cy: row });
+    const caveBlock = (cx: number, cy: number, kind: BlockKind): void => {
+        solid[cy * COLS + cx] = 1;
+        blocks.push({ cx, cy, kind });
+    };
+    const lava: LavaRect[] = [];
+    const torches: Cell[] = [];
+    const col = (c: number): number => CAVE_X0 + c; // interior column offset → absolute
+    const W = CAVE_X1 - CAVE_X0; // interior span in columns (0 = left wall, W = right wall)
+    // Lava channels (relative column ranges): the floor is omitted here and the gap
+    // filled with molten lava; stone stepping-stones let the player hop across.
+    const lavaChannels: ReadonlyArray<readonly [number, number]> = [
+        [13, 21],
+        [35, 42],
+    ];
+    const inLavaChannel = (c: number): boolean => lavaChannels.some(([a, b]) => c >= a && c <= b);
+
+    // Ceiling everywhere; floor everywhere except over the lava channels.
+    for (let c = 0; c <= W; c++) {
+        caveSolid(col(c), CAVE_CEIL, "stoneCenter");
+        if (!inLavaChannel(c)) {
+            caveSolid(col(c), GROUND_TOP, "stoneMid");
+            caveSolid(col(c), GROUND_TOP + 1, "stoneCenter");
         }
     }
+    // Side walls (full height).
+    for (let cy = CAVE_CEIL + 1; cy <= GROUND_TOP + 1; cy++) {
+        caveSolid(CAVE_X0, cy, "stoneCenter");
+        caveSolid(CAVE_X1, cy, "stoneCenter");
+    }
+    // Molten lava filling each channel (rows GROUND_TOP..+1). The first channel is
+    // crossed on stone stepping-stones; the second on a horizontal moving platform.
+    lavaChannels.forEach(([a, b], idx) => {
+        lava.push({ cx: col(a), cy: GROUND_TOP, w: b - a + 1, h: 2 });
+        if (idx === 0) {
+            for (let c = a; c + 1 <= b; c += 3) {
+                caveSolid(col(c), GROUND_TOP - 2, "stoneMid"); // 2-wide stepping platform
+                caveSolid(col(c + 1), GROUND_TOP - 2, "stoneMid");
+                coins.push({ cx: col(c), cy: GROUND_TOP - 4 }); // a coin reward above each
+                coins.push({ cx: col(c + 1), cy: GROUND_TOP - 4 });
+            }
+        } else {
+            movers.push({ cx: col(a), cy: GROUND_TOP - 1, w: 3, axis: "x", range: b - a - 2, speed: 2.3 });
+            for (let c = a + 1; c <= b - 1; c += 2) coins.push({ cx: col(c), cy: GROUND_TOP - 3 });
+        }
+    });
+    // Left entry chamber: a few ground coins to greet the player.
+    for (let c = 3; c <= 11; c += 2) coins.push({ cx: col(c), cy: GROUND_TOP - 1 });
+    // Mid chamber raised bonus ledge with reward blocks the player bumps from below.
+    for (let c = 24; c <= 30; c++) caveSolid(col(c), GROUND_TOP - 4, "stoneMid");
+    caveBlock(col(26), GROUND_TOP - 6, "mushroom-block");
+    caveBlock(col(28), GROUND_TOP - 6, "star-block");
+    coins.push({ cx: col(24), cy: GROUND_TOP - 6 });
+    coins.push({ cx: col(30), cy: GROUND_TOP - 6 });
+    // Right chamber: a small coin hoard before the exit pipe.
+    for (let c = 44; c <= 49; c += 2) {
+        coins.push({ cx: col(c), cy: GROUND_TOP - 1 });
+        coins.push({ cx: col(c), cy: GROUND_TOP - 2 });
+    }
+    // A little underground life: slimes patrolling the entry + right chambers.
+    enemies.push({ cx: col(8), cy: GROUND_TOP - 1, kind: "slime" });
+    enemies.push({ cx: col(46), cy: GROUND_TOP - 1, kind: "slime" });
+    // Wall/ledge torches (underground light sources): corner braziers + ledge torches.
+    torches.push({ cx: col(1), cy: GROUND_TOP - 1 }); // entry corner, on the floor
+    torches.push({ cx: col(25), cy: GROUND_TOP - 5 }); // on the mid bonus ledge
+    torches.push({ cx: col(29), cy: GROUND_TOP - 5 }); // on the mid bonus ledge
+    torches.push({ cx: col(W - 1), cy: GROUND_TOP - 1 }); // exit corner, on the floor
+
     // ── Warp pipes (duck on top to enter) ─────────────────────────────────────
     const pipes: Pipe[] = [];
     const addPipe = (cx: number, cy: number, w: number, h: number, toCx: number, toCy: number, toCave: boolean, worldLabel: string): void => {
@@ -278,10 +370,42 @@ export function buildLevel(): Level {
     };
     // Overworld pipe on the ground at col 50 → into the cave.
     addPipe(50, GROUND_TOP - 2, 2, 2, CAVE_ENTRY.cx, CAVE_ENTRY.cy, true, "1-2");
-    // Cave exit pipe on the cave floor at the right → back to the overworld.
-    addPipe(CAVE_X1 - 3, GROUND_TOP - 2, 2, 2, OVERWORLD_RETURN.cx, OVERWORLD_RETURN.cy, false, "1-1");
+    // Cave exit pipe on the cave floor near the right wall → back to the overworld.
+    addPipe(col(51), GROUND_TOP - 2, 2, 2, OVERWORLD_RETURN.cx, OVERWORLD_RETURN.cy, false, "1-1");
 
-    return { cols: COLS, rows: ROWS, solid, terrain, blocks, coins, enemies, hazards, playerSpawn, flag, deathRow: ROWS + 1, pipes };
+    // Decorative (non-warp) pipes that house piranha plants. Solid + drawn, but not warps.
+    const addPiranhaPipe = (cx: number): void => {
+        for (let x = cx; x < cx + 2; x++) {
+            for (let y = GROUND_TOP - 2; y <= GROUND_TOP - 1; y++) solid[y * COLS + x] = 1;
+        }
+        pipes.push({ cx, cy: GROUND_TOP - 2, w: 2, h: 2, toCx: 0, toCy: 0, toCave: false, worldLabel: "", decorative: true });
+        // Piranha centred over the pipe, emerging from its lip (row GROUND_TOP-2).
+        enemies.push({ cx: cx + 0.5, cy: GROUND_TOP - 3, kind: "piranha" });
+    };
+    addPiranhaPipe(80);
+
+    // ── One-way (jump-through) platforms ──────────────────────────────────────
+    // Thin grass ledges you can hop up through and land on; drawn auto-edged.
+    const addOneWay = (cx0: number, cx1: number, cy: number): void => {
+        for (let cx = cx0; cx <= cx1; cx++) {
+            oneway[cy * COLS + cx] = 1;
+            const name = cx0 === cx1 ? "grassHalf" : cx === cx0 ? "grassHalfLeft" : cx === cx1 ? "grassHalfRight" : "grassHalfMid";
+            terrain.push({ cx, cy, name });
+        }
+    };
+    addOneWay(31, 35, GROUND_TOP - 3); // over the first pit — an upper route
+    for (let i = 0; i < 5; i++) coins.push({ cx: 31 + i, cy: GROUND_TOP - 4 });
+    addOneWay(84, 88, GROUND_TOP - 4); // after the piranha pipe
+    for (let i = 0; i < 5; i++) coins.push({ cx: 84 + i, cy: GROUND_TOP - 5 });
+
+    // ── Moving platforms (kinematic; carry the player) ────────────────────────
+    // Horizontal ferry across the second pit (cols 57-59).
+    movers.push({ cx: 56, cy: GROUND_TOP - 1, w: 3, axis: "x", range: 4, speed: 2.4 });
+    // Vertical elevator up to a high coin stash past the third pit.
+    movers.push({ cx: 92, cy: GROUND_TOP - 1, w: 3, axis: "y", range: 5, speed: 2.2 });
+    for (let i = 0; i < 3; i++) coins.push({ cx: 92 + i, cy: GROUND_TOP - 7 });
+
+    return { cols: COLS, rows: ROWS, solid, oneway, terrain, blocks, coins, enemies, hazards, lava, torches, movers, playerSpawn, flag, deathRow: ROWS + 1, pipes };
 }
 
 /** Pick a grass/dirt ground-sheet frame for a solid ground cell based on neighbours. */

@@ -19,6 +19,7 @@ import {
     registerSpriteRenderer,
     setSprite2DShaderParams,
     spriteBlendAdditive,
+    spriteBlendMultiply,
     startEngine,
     updateSprite2DIndex,
     type EngineContext,
@@ -33,7 +34,10 @@ import { createHud, type Hud } from "./hud.js";
 import { buildLevel, type BlockKind, type Level, type Pipe } from "./level.js";
 import { createParallax } from "./parallax.js";
 import { makeFireballDataUrl, makeFireFlowerDataUrl } from "./fire.js";
+import { makeSparkDataUrl } from "./juice.js";
 import { IRIS_FRAGMENT, makeCaveBackdropDataUrl, makePipeTextureDataUrl, makeWhiteTextureDataUrl } from "./portal.js";
+import { LAVA_FRAGMENT } from "./lava.js";
+import { LANTERN_FRAGMENT, makeGlowDataUrl } from "./lantern.js";
 import { moveAndCollide, overlaps, type AABB, type CollisionMap } from "./physics.js";
 
 const SKY = { r: 0.38, g: 0.62, b: 0.95, a: 1 } as const;
@@ -50,12 +54,30 @@ const STAR_TRAIL_GAP = 3;
 // bottom), and a tight hitbox feels better than a roomy one — so each sprite is
 // DRAWN larger than its box, scaled to read ~1 tile like the ?-blocks. The
 // bottom-centre pivot keeps the feet grounded as the sprite grows.
-/** Player sprite draw size, small (un-grown) and big (mushroom) states. */
-const PLAYER_DRAW_SMALL = { w: TILE * 0.88, h: TILE * 1.25 };
-const PLAYER_DRAW_BIG = { w: TILE * 1.05, h: TILE * 2.0 };
-/** Enemy sprite draw scale over its collision box (per axis). */
-const ENEMY_DRAW_W_MUL = 1.4;
-const ENEMY_DRAW_H_MUL = 1.95;
+/** Player target *visible* height (small, un-grown / big, mushroom). Deluxe
+ *  alien frames are tightly cropped (art reaches the frame edges), so the
+ *  sprite is scaled by its stand-frame height to hit these heights; other poses
+ *  (jump/duck/walk) keep their natural aspect. Big reads ~2 tiles (SMB-style). */
+const PLAYER_VIS_SMALL = TILE * 1.3;
+const PLAYER_VIS_BIG = TILE * 2.0;
+/** Enemy sprite scale over its natural (tightly-cropped) frame size. */
+const ENEMY_VIS_SCALE = 1.45;
+/** Flying-enemy tuning: horizontal drift, vertical bob amplitude / frequency. */
+const FLY_SPEED = 70;
+const FLY_AMP = TILE * 1.3;
+const FLY_FREQ = 2.2;
+/** Piranha-plant emerge/retract cycle (seconds) and how far it rises (px). */
+const PIRANHA_CYCLE = 3.4;
+const PIRANHA_RISE = TILE * 1.45;
+/** Piranha emergence 0..1 (hidden → rising → up → retracting) from its cycle phase (s). */
+function piranhaEmerge(phase: number): number {
+    const t = (((phase % PIRANHA_CYCLE) + PIRANHA_CYCLE) % PIRANHA_CYCLE) / PIRANHA_CYCLE;
+    if (t < 0.12) return 0;
+    if (t < 0.32) return (t - 0.12) / 0.2; // rising
+    if (t < 0.62) return 1; // fully up
+    if (t < 0.82) return 1 - (t - 0.62) / 0.2; // retracting
+    return 0; // hidden in the pipe
+}
 // Items (coins, power-ups) use near-square 128×128 frames, but the art carries
 // generous transparent padding (~50–62% fill), so the DRAWN cell must be larger
 // than the visible item for it to read ~0.85 tile vs the 1-tile ?-blocks. The
@@ -87,12 +109,33 @@ const PICKUP_FOOT: Partial<Record<PickupState["kind"], number>> = {
 
 // Fireball projectiles (fire power-up). Travel along the ground, bounce, and pop
 // enemies on contact; drawn as additive glows.
-const FIREBALL_SPEED = 520;
+const FIREBALL_SPEED = 600;
 const FIREBALL_BOUNCE = 360;
 const FIREBALL_LIFE = 2.4;
 const FIREBALL_MAX = 2;
 const FIRE_COOLDOWN = 0.28;
 const FIREBALL_DRAW = TILE * 0.7;
+
+// "Juice": additive sparkle bursts + floating score popups on coin / stomp.
+/** Additive spark particle pool size + per-burst count. */
+const SPARK_MAX = 40;
+const SPARK_PER_BURST = 8;
+const SPARK_LIFE = 0.45;
+const SPARK_DRAW = TILE * 0.5;
+/** Score-popup pool: each popup lays out up to MAX_DIGITS floating digit sprites. */
+const POPUP_MAX = 6;
+const POPUP_DIGITS = 4;
+const POPUP_LIFE = 0.8;
+const POPUP_RISE = TILE * 1.4; // world px the popup floats up over its life
+const POPUP_DIGIT_DRAW = TILE * 0.62;
+/** Tint colours for sparkle bursts. */
+const SPARK_GOLD: readonly [number, number, number] = [1, 0.86, 0.4];
+const SPARK_WHITE: readonly [number, number, number] = [1, 1, 1];
+
+// Brick-break debris: four spinning chunks fly out when a big player smashes a brick.
+const DEBRIS_MAX = 16;
+const DEBRIS_LIFE = 1.1;
+const DEBRIS_DRAW = TILE * 0.42;
 
 /**
  * Player invincibility fragment: an animated rainbow palette-cycle + sparkle pulse,
@@ -140,7 +183,7 @@ interface BlockState {
 }
 
 interface EnemyState {
-    kind: "slime" | "snail";
+    kind: "slime" | "snail" | "fly" | "piranha";
     box: AABB;
     vx: number;
     vy: number;
@@ -153,6 +196,27 @@ interface EnemyState {
     dying: number; // >0 = death animation countdown
     slot: number;
     animT: number;
+    /** fly: vertical bob centre (world px). piranha: pipe-mouth top Y (world px). */
+    homeY: number;
+    /** fly: sine phase. piranha: emerge/retract cycle phase (seconds). */
+    phase: number;
+}
+
+/** A kinematic moving platform that ping-pongs along one axis and carries the rider. */
+interface MovingPlatform {
+    box: AABB;
+    axis: "x" | "y";
+    /** Travel bounds along the axis (world px). */
+    min: number;
+    max: number;
+    /** Speed in world px/sec, and the current travel direction. */
+    speed: number;
+    dir: 1 | -1;
+    /** This frame's movement delta (used to carry the rider). */
+    dx: number;
+    dy: number;
+    /** Sprite slots, one per platform tile (left → right). */
+    slots: number[];
 }
 
 interface PickupState {
@@ -178,6 +242,44 @@ interface Fireball {
     slot: number;
 }
 
+/** An additive sparkle particle for coin/stomp bursts. */
+interface Spark {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    life: number;
+    maxLife: number;
+    active: boolean;
+    slot: number;
+    color: readonly [number, number, number];
+}
+
+/** A floating score popup (e.g. "100") rendered from HUD digit sprites. */
+interface Popup {
+    x: number;
+    y: number;
+    life: number;
+    active: boolean;
+    /** Digit frame indices (left to right) for the value's text. */
+    digits: number[];
+    /** This popup's digit sprite slots on the digit layer (fixed run). */
+    slots: number[];
+}
+
+/** A spinning brick chunk thrown out when a brick is smashed. */
+interface Debris {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    rot: number;
+    spin: number;
+    life: number;
+    active: boolean;
+    slot: number;
+}
+
 type Phase = "ready" | "playing" | "warping" | "dying" | "complete" | "gameover";
 
 export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext): Promise<void> {
@@ -185,15 +287,18 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const worldW = level.cols * TILE;
     const worldH = level.rows * TILE;
 
-    // ── Load art (one cohesive CC0 Kenney set) ────────────────────────────────
-    const [players, enemies, items, tiles, ground] = await Promise.all([
+    // ── Load art (Kenney "Platformer Art Deluxe", CC0) ──────────────────────
+    // Deluxe puts grass/dirt/stone/castle terrain AND the box/brick blocks in ONE
+    // tiles sheet (no separate "ground" sheet), so terrain + blocks share it.
+    const [players, enemies, items, tiles, hud2d] = await Promise.all([
         loadPlatformerSheet(engine, `${ASSET_BASE}/players`),
         loadPlatformerSheet(engine, `${ASSET_BASE}/enemies`),
         loadPlatformerSheet(engine, `${ASSET_BASE}/items`),
-        // Tile + ground sheets tessellate edge-to-edge, so use nearest filtering:
+        // The tiles sheet tessellates edge-to-edge, so use nearest filtering:
         // linear bleeds a dark fringe at frame edges → thin black seams.
         loadPlatformerSheet(engine, `${ASSET_BASE}/tiles`, { filter: "nearest" }),
-        loadPlatformerSheet(engine, `${ASSET_BASE}/ground`, { filter: "nearest" }),
+        // HUD sheet supplies the digit glyphs (hud_0..hud_9) for floating score popups.
+        loadPlatformerSheet(engine, `${ASSET_BASE}/hud`),
     ]);
 
     // ── Parallax background (multi-band, uvScroll) ────────────────────────────
@@ -203,29 +308,40 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const parallax = await createParallax(engine, 0);
 
     // ── Portal textures (warp pipe, cave backdrop, iris-wipe quad) ────────────
-    const [pipeTex, caveTex, whiteTex, fireFlowerTex, fireballTex] = await Promise.all([
+    const [pipeTex, caveTex, whiteTex, fireFlowerTex, fireballTex, sparkTex, glowTex] = await Promise.all([
         loadTexture2D(engine, makePipeTextureDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
         loadTexture2D(engine, makeCaveBackdropDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
         loadTexture2D(engine, makeWhiteTextureDataUrl(), { invertY: false, mipMaps: false }),
         loadTexture2D(engine, makeFireFlowerDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
         loadTexture2D(engine, makeFireballDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
+        loadTexture2D(engine, makeSparkDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
+        loadTexture2D(engine, makeGlowDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
     ]);
     const pipeAtlas = createGridSpriteAtlas(pipeTex, { cellWidthPx: pipeTex.width, cellHeightPx: pipeTex.height });
     const caveAtlas = createGridSpriteAtlas(caveTex, { cellWidthPx: caveTex.width, cellHeightPx: caveTex.height });
     const whiteAtlas = createGridSpriteAtlas(whiteTex, { cellWidthPx: whiteTex.width, cellHeightPx: whiteTex.height });
+    const sparkAtlas = createGridSpriteAtlas(sparkTex, { cellWidthPx: sparkTex.width, cellHeightPx: sparkTex.height });
     const fireFlowerAtlas = createGridSpriteAtlas(fireFlowerTex, { cellWidthPx: fireFlowerTex.width, cellHeightPx: fireFlowerTex.height });
     const fireballAtlas = createGridSpriteAtlas(fireballTex, { cellWidthPx: fireballTex.width, cellHeightPx: fireballTex.height });
+    const glowAtlas = createGridSpriteAtlas(glowTex, { cellWidthPx: glowTex.width, cellHeightPx: glowTex.height });
 
     // ── Gameplay layers (back → front) ────────────────────────────────────────
     // Frame indices are atlas-specific, so each sheet needs its own layer(s).
     // Dark cave backdrop: full-screen panel shown only underground, behind terrain.
     const caveBackLayer = createSprite2DLayer(caveAtlas, { capacity: 1, order: 4, pivot: [0, 0] });
-    const terrainLayer = createSprite2DLayer(ground.atlas, { capacity: level.terrain.length + 4, order: 5, pivot: [0, 0] });
+    // Molten lava pools: procedural custom-shader quads (reuse the 1×1 white atlas),
+    // drawn just in front of the cave backdrop and behind the stone terrain + player.
+    const lavaShader = createSprite2DCustomShader({ fragment: LAVA_FRAGMENT });
+    const lavaLayer = createSprite2DLayer(whiteAtlas, { capacity: Math.max(1, level.lava.length), order: 4.5, customShader: lavaShader, pivot: [0, 0] });
+    const terrainLayer = createSprite2DLayer(tiles.atlas, { capacity: level.terrain.length + 4, order: 5, pivot: [0, 0] });
     const pipeLayer = createSprite2DLayer(pipeAtlas, { capacity: Math.max(1, level.pipes.length), order: 6, pivot: [0, 0] });
+    // Moving platforms (kinematic): drawn as bridge tiles, in front of terrain/pipes.
+    const moverTileCount = level.movers.reduce((n, m) => n + m.w, 0);
+    const moverLayer = createSprite2DLayer(tiles.atlas, { capacity: Math.max(1, moverTileCount), order: 6.5, pivot: [0, 0] });
     const blockLayer = createSprite2DLayer(tiles.atlas, { capacity: level.blocks.length + 32, order: 7, pivot: [0, 0] });
     const itemLayer = createSprite2DLayer(items.atlas, { capacity: level.coins.length + 40, order: 8, pivot: [0.5, 0.5] });
-    // Mushrooms come from the *tiles* sheet, so they need a centre-pivot tiles layer.
-    const shroomLayer = createSprite2DLayer(tiles.atlas, { capacity: 8, order: 9, pivot: [0.5, 0.5] });
+    // Mushrooms come from the *items* sheet, so they need a centre-pivot items layer.
+    const shroomLayer = createSprite2DLayer(items.atlas, { capacity: 8, order: 9, pivot: [0.5, 0.5] });
     // Fire flowers (procedural texture) get their own centre-pivot layer.
     const fireFlowerLayer = createSprite2DLayer(fireFlowerAtlas, { capacity: 4, order: 9, pivot: [0.5, 0.5] });
     const enemyLayer = createSprite2DLayer(enemies.atlas, { capacity: level.enemies.length + 4, order: 10, pivot: [0.5, 1] });
@@ -238,31 +354,76 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const playerLayer = createSprite2DLayer(players.atlas, { capacity: 2, order: 12, customShader: starShader, pivot: [0.5, 1] });
     // Fireball projectiles: additive glow layer, in front of the player.
     const fireballLayer = createSprite2DLayer(fireballAtlas, { capacity: FIREBALL_MAX + 1, order: 13, blendMode: spriteBlendAdditive, pivot: [0.5, 0.5] });
+    // Coin/stomp "juice": additive sparkle bursts + floating score-digit popups.
+    const sparkLayer = createSprite2DLayer(sparkAtlas, { capacity: SPARK_MAX, order: 14, blendMode: spriteBlendAdditive, pivot: [0.5, 0.5] });
+    const digitLayer = createSprite2DLayer(hud2d.atlas, { capacity: POPUP_MAX * POPUP_DIGITS, order: 15, pivot: [0.5, 0.5] });
+    // Brick-break debris: spinning brick chunks from the *items* sheet (centre pivot to rotate).
+    const debrisLayer = createSprite2DLayer(items.atlas, { capacity: DEBRIS_MAX, order: 16, pivot: [0.5, 0.5] });
+    // Wall torches (the tiles "torch" frame), drawn in front of the cave walls.
+    const torchLayer = createSprite2DLayer(tiles.atlas, { capacity: Math.max(1, level.torches.length), order: 9.5, pivot: [0.5, 1] });
+    // Underground "lantern": a full-screen multiply-darkness pool that follows the player (#8).
+    const lanternShader = createSprite2DCustomShader({ fragment: LANTERN_FRAGMENT });
+    const lanternLayer = createSprite2DLayer(whiteAtlas, { capacity: 1, order: 17, pivot: [0, 0], customShader: lanternShader, blendMode: spriteBlendMultiply });
+    // Torch glows: additive warm haloes in front of the darkness so torches shine through.
+    const torchGlowLayer = createSprite2DLayer(glowAtlas, { capacity: Math.max(1, level.torches.length + level.lava.length), order: 17.5, pivot: [0.5, 0.5], blendMode: spriteBlendAdditive });
     // Fullscreen iris-wipe transition (custom-shader quad), on top of everything.
     const irisShader = createSprite2DCustomShader({ fragment: IRIS_FRAGMENT });
     const irisLayer = createSprite2DLayer(whiteAtlas, { capacity: 1, order: 20, pivot: [0, 0], customShader: irisShader });
 
     const renderer = createSpriteRenderer(engine, {
-        layers: [...parallax.layers, caveBackLayer, terrainLayer, pipeLayer, blockLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, trailLayer, playerLayer, fireballLayer, irisLayer],
+        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeLayer, moverLayer, blockLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, torchLayer, trailLayer, playerLayer, fireballLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
         clearValue: SKY,
     });
     registerSpriteRenderer(renderer);
 
     // Cave backdrop, warp-pipe, and iris sprite slots.
     const caveBackSlot = addSprite2DIndex(caveBackLayer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
+    // Lava pools: one quad each; `color` carries the pool's tile dims for the shader.
+    const lavaSlots = level.lava.map((lv) => addSprite2DIndex(lavaLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [lv.w, lv.h, 0, 1], visible: false }));
+    // Lantern darkness quad + wall torches (sprite + additive glow), hidden until underground.
+    const lanternSlot = addSprite2DIndex(lanternLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1.77, 0, 0, 1], visible: false });
+    const torchFrame = tiles.frameOf("torch");
+    const torchSlots = level.torches.map(() => addSprite2DIndex(torchLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: torchFrame, visible: false }));
+    const torchGlowSlots = level.torches.map(() => addSprite2DIndex(torchGlowLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1, 0.72, 0.32, 0.9], visible: false }));
+    const lavaGlowSlots = level.lava.map(() => addSprite2DIndex(torchGlowLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1, 0.5, 0.16, 0.85], visible: false }));
     const pipeSlots = level.pipes.map((p) => addSprite2DIndex(pipeLayer, { positionPx: [0, 0], sizePx: [p.w * TILE, p.h * TILE], frame: 0 }));
     const irisSlot = addSprite2DIndex(irisLayer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
 
+    // ── Moving platforms (kinematic; carry the player) ────────────────────────
+    const MOVER_H = TILE * 0.6; // platform thickness (top surface at the spec row)
+    const bridgeFrame = tiles.frameOf("bridge");
+    const movers: MovingPlatform[] = level.movers.map((m) => {
+        const w = m.w * TILE;
+        const x0 = m.cx * TILE;
+        const y0 = m.cy * TILE;
+        // x: travel right from the start; y: travel UP from the start (then back).
+        const min = m.axis === "x" ? x0 : y0 - m.range * TILE;
+        const max = m.axis === "x" ? x0 + m.range * TILE : y0;
+        const slots: number[] = [];
+        for (let i = 0; i < m.w; i++) slots.push(addSprite2DIndex(moverLayer, { positionPx: [0, 0], sizePx: [TILE, MOVER_H], frame: bridgeFrame }));
+        return {
+            box: { x: x0, y: y0, w, h: MOVER_H },
+            axis: m.axis,
+            min,
+            max,
+            speed: m.speed * TILE,
+            dir: (m.axis === "x" ? 1 : -1) as 1 | -1,
+            dx: 0,
+            dy: 0,
+            slots,
+        };
+    });
+
     // ── Static terrain sprites (frame fixed; position re-projected each frame) ─
     const terrainSlots = level.terrain.map((t) =>
-        addSprite2DIndex(terrainLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: ground.frameOf(t.name) }),
+        addSprite2DIndex(terrainLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: tiles.frameOf(t.name) }),
     );
 
     // ── Interactive blocks ────────────────────────────────────────────────────
     const blockFrame = (kind: BlockKind): number => {
         switch (kind) {
             case "brick":
-                return tiles.frameOf("brickBrown");
+                return tiles.frameOf("brickWall");
             case "coin-block":
                 return tiles.frameOf("boxItem");
             case "mushroom-block":
@@ -281,7 +442,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const poleSlots: number[] = [];
     for (let cy = level.flag.cy + 1; cy < level.rows; cy++) {
         if (level.solid[cy * level.cols + flagX]) break;
-        poleSlots.push(addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: tiles.frameOf("chain") }));
+        poleSlots.push(addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: items.frameOf("chain") }));
     }
 
     // ── Coins (floating, collectible) ─────────────────────────────────────────
@@ -294,7 +455,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     }));
 
     // Flag (animated) on the items layer.
-    const flagSlot = addSprite2DIndex(itemLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: items.frameOf("flagGreen1"), visible: true });
+    const flagSlot = addSprite2DIndex(itemLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: items.frameOf("flagGreen"), visible: true });
 
     // Pickup pools. coin-pops and stars come from the items sheet; mushrooms from
     // the tiles sheet, so each kind lives on a pool bound to the matching atlas.
@@ -314,7 +475,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         }
     };
     makePool(8, "coin-pop", itemLayer, coinFrame);
-    makePool(4, "mushroom", shroomLayer, tiles.frameOf("mushroomRed"));
+    makePool(4, "mushroom", shroomLayer, items.frameOf("mushroomRed"));
     makePool(4, "star", itemLayer, items.frameOf("star"));
     makePool(2, "fire-flower", fireFlowerLayer, 0);
 
@@ -331,6 +492,155 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         });
     }
     let fireCooldown = 0;
+
+    // ── Juice pools: additive sparkle bursts + floating score popups ──────────
+    const sparks: Spark[] = [];
+    for (let i = 0; i < SPARK_MAX; i++) {
+        sparks.push({
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            life: 0,
+            maxLife: SPARK_LIFE,
+            active: false,
+            color: SPARK_WHITE,
+            slot: addSprite2DIndex(sparkLayer, { positionPx: [0, 0], sizePx: [SPARK_DRAW, SPARK_DRAW], frame: 0, visible: false }),
+        });
+    }
+    /** Emit a ring of additive sparks at a world point, tinted gold (coins) or white (stomps). */
+    const burstSparks = (x: number, y: number, color: readonly [number, number, number], count = SPARK_PER_BURST): void => {
+        for (let i = 0; i < count; i++) {
+            const s = sparks.find((q) => !q.active);
+            if (!s) break;
+            const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+            const spd = TILE * (2 + Math.random() * 2.4);
+            s.active = true;
+            s.x = x;
+            s.y = y;
+            s.vx = Math.cos(a) * spd;
+            s.vy = Math.sin(a) * spd - TILE * 1.5; // bias upward
+            s.life = SPARK_LIFE;
+            s.maxLife = SPARK_LIFE;
+            s.color = color;
+            updateSprite2DIndex(sparkLayer, s.slot, { visible: true });
+        }
+    };
+    const killSpark = (s: Spark): void => {
+        s.active = false;
+        updateSprite2DIndex(sparkLayer, s.slot, { visible: false });
+    };
+    const updateSpark = (s: Spark, dt: number): void => {
+        s.life -= dt;
+        if (s.life <= 0) {
+            killSpark(s);
+            return;
+        }
+        s.vy += PHYS.gravity * 0.5 * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+    };
+
+    // Score popups: each owns a fixed run of POPUP_DIGITS digit slots on the digit layer.
+    const popups: Popup[] = [];
+    for (let i = 0; i < POPUP_MAX; i++) {
+        const slots: number[] = [];
+        for (let d = 0; d < POPUP_DIGITS; d++) {
+            slots.push(addSprite2DIndex(digitLayer, { positionPx: [0, 0], sizePx: [POPUP_DIGIT_DRAW, POPUP_DIGIT_DRAW], frame: 0, visible: false }));
+        }
+        popups.push({ x: 0, y: 0, life: 0, active: false, digits: [], slots });
+    }
+    const digitFrame = (d: number): number => hud2d.frameOf(`hud_${d}`);
+    /** Float a score value (e.g. 100) upward from a world point. */
+    const spawnPopup = (value: number, x: number, y: number): void => {
+        const p = popups.find((q) => !q.active);
+        if (!p) return;
+        p.active = true;
+        p.x = x;
+        p.y = y;
+        p.life = POPUP_LIFE;
+        const text = value.toString().slice(0, POPUP_DIGITS);
+        p.digits = text.split("").map((ch) => digitFrame(Number(ch)));
+    };
+    const hidePopup = (p: Popup): void => {
+        p.active = false;
+        for (const slot of p.slots) updateSprite2DIndex(digitLayer, slot, { visible: false });
+    };
+
+    /** One-shot juice at a world point: a sparkle burst + a floating score popup. */
+    const juicePop = (x: number, y: number, value: number, color: readonly [number, number, number]): void => {
+        burstSparks(x, y, color);
+        spawnPopup(value, x, y);
+    };
+
+    // Brick-break debris pool: spinning chunks from the items sheet's brick-particle frames.
+    const debris: Debris[] = [];
+    const particleFrames = ["particleBrick1a", "particleBrick1b", "particleBrick2a", "particleBrick2b"].map((n) => items.frameOf(n));
+    for (let i = 0; i < DEBRIS_MAX; i++) {
+        debris.push({
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            rot: 0,
+            spin: 0,
+            life: 0,
+            active: false,
+            slot: addSprite2DIndex(debrisLayer, { positionPx: [0, 0], sizePx: [DEBRIS_DRAW, DEBRIS_DRAW], frame: particleFrames[0]!, visible: false }),
+        });
+    }
+    /** Throw four brick chunks out of a smashed brick at tile (cx, cy). */
+    const burstDebris = (cx: number, cy: number): void => {
+        const x = cx * TILE + TILE / 2;
+        const y = cy * TILE + TILE / 2;
+        // Classic 4-chunk spray: two inner (slower) + two outer (faster), up + out.
+        const shots: readonly [number, number][] = [
+            [-TILE * 2.0, -TILE * 7.5],
+            [TILE * 2.0, -TILE * 7.5],
+            [-TILE * 4.2, -TILE * 6.0],
+            [TILE * 4.2, -TILE * 6.0],
+        ];
+        for (const [vx, vy] of shots) {
+            const d = debris.find((q) => !q.active);
+            if (!d) break;
+            d.active = true;
+            d.x = x;
+            d.y = y;
+            d.vx = vx;
+            d.vy = vy;
+            d.rot = Math.random() * Math.PI;
+            d.spin = (vx < 0 ? -1 : 1) * (6 + Math.random() * 4);
+            d.life = DEBRIS_LIFE;
+            updateSprite2DIndex(debrisLayer, d.slot, { frame: particleFrames[Math.floor(Math.random() * particleFrames.length)]!, visible: true });
+        }
+    };
+    const killDebris = (d: Debris): void => {
+        d.active = false;
+        updateSprite2DIndex(debrisLayer, d.slot, { visible: false });
+    };
+    const updateDebris = (d: Debris, dt: number): void => {
+        d.life -= dt;
+        if (d.life <= 0) {
+            killDebris(d);
+            return;
+        }
+        d.vy += PHYS.gravity * dt;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        d.rot += d.spin * dt;
+        if (d.y > worldH + TILE) killDebris(d);
+    };
+
+    /** Advance sparks + popups (runs every frame, independent of game phase). */
+    const updateJuice = (dt: number): void => {
+        for (const s of sparks) if (s.active) updateSpark(s, dt);
+        for (const d of debris) if (d.active) updateDebris(d, dt);
+        for (const p of popups) {
+            if (!p.active) continue;
+            p.life -= dt;
+            if (p.life <= 0) hidePopup(p);
+        }
+    };
 
     const spawnPickup = (kind: PickupState["kind"], cx: number, cy: number): void => {
         const p = pickups.find((q) => !q.active && q.kind === kind);
@@ -370,16 +680,21 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // ── Enemies ───────────────────────────────────────────────────────────────
     // Collision-box dims per enemy kind (kept tight); the drawn sprite is scaled up
     // from these by ENEMY_DRAW_* so enemies read ~1 tile like the ?-blocks.
-    const enemyBoxDims = (kind: EnemyState["kind"]): { w: number; h: number } => ({
-        w: TILE * 0.82,
-        h: kind === "snail" ? TILE * 0.66 : TILE * 0.58,
-    });
+    const enemyBoxDims = (kind: EnemyState["kind"]): { w: number; h: number } => {
+        if (kind === "snail") return { w: TILE * 0.82, h: TILE * 0.66 };
+        if (kind === "fly") return { w: TILE * 0.74, h: TILE * 0.5 };
+        if (kind === "piranha") return { w: TILE * 0.55, h: TILE * 1.4 };
+        return { w: TILE * 0.82, h: TILE * 0.58 };
+    };
     const enemyList: EnemyState[] = level.enemies.map((e) => {
         const { w, h } = enemyBoxDims(e.kind);
-        const slot = addSprite2DIndex(enemyLayer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(e.kind === "snail" ? "snail_move" : "slimeGreen_move"), visible: false });
+        const startFrame =
+            e.kind === "fly" ? "bee" : e.kind === "piranha" ? "snakeSlime" : e.kind === "snail" ? "snail_walk" : "slimeGreen_walk";
+        const boxY = (e.cy + 1) * TILE - h;
+        const slot = addSprite2DIndex(enemyLayer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(startFrame), visible: false });
         return {
             kind: e.kind,
-            box: { x: e.cx * TILE + (TILE - w) / 2, y: (e.cy + 1) * TILE - h, w, h },
+            box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h },
             vx: -PHYS.enemySpeed,
             vy: 0,
             dir: -1,
@@ -389,12 +704,14 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             dying: 0,
             slot,
             animT: 0,
+            homeY: boxY,
+            phase: Math.random() * Math.PI * 2,
         };
     });
 
     // ── Player ────────────────────────────────────────────────────────────────
     const smallSize = { w: TILE * 0.62, h: TILE * 0.92 };
-    const bigSize = { w: TILE * 0.68, h: TILE * 1.7 };
+    const bigSize = { w: TILE * 0.68, h: TILE * 1.5 };
     const player = {
         box: { x: 0, y: 0, w: smallSize.w, h: smallSize.h } as AABB,
         vx: 0,
@@ -411,7 +728,11 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         animT: 0,
         alive: true,
     };
-    const playerSlot = addSprite2DIndex(playerLayer, { positionPx: [0, 0], sizePx: [PLAYER_DRAW_SMALL.w, PLAYER_DRAW_SMALL.h], frame: players.frameOf(PLAYER_FRAMES.stand) });
+    // Per-color stand-frame heights drive natural-frame scaling (green = small/big body, yellow = fire).
+    const greenStandH = players.sizeOf(PLAYER_FRAMES.stand)[1];
+    const yellowStandH = players.sizeOf(PLAYER_FIRE_FRAMES.stand)[1];
+    const [standW0] = players.sizeOf(PLAYER_FRAMES.stand);
+    const playerSlot = addSprite2DIndex(playerLayer, { positionPx: [0, 0], sizePx: [standW0 * (PLAYER_VIS_SMALL / greenStandH), PLAYER_VIS_SMALL], frame: players.frameOf(PLAYER_FRAMES.stand) });
 
     // Star afterimage slots (hidden until invincible) + the rolling pose history they sample.
     const trailSlots: number[] = [];
@@ -440,10 +761,15 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (cy < 0 || cy >= level.rows) return false;
         return level.solid[cy * level.cols + cx] === 1;
     };
-    const collision: CollisionMap = { cols: level.cols, rows: level.rows, isSolid };
+    const collision: CollisionMap = {
+        cols: level.cols,
+        rows: level.rows,
+        isSolid,
+        isOneWay: (cx, cy) => cx >= 0 && cx < level.cols && cy >= 0 && cy < level.rows && level.oneway[cy * level.cols + cx] === 1,
+    };
 
     // ── Run-state ─────────────────────────────────────────────────────────────
-    const game = { phase: "ready" as Phase, score: 0, coins: 0, lives: 3, time: START_TIME, timer: 1.6, flagAnimT: 0, world: "1-1" };
+    const game = { phase: "ready" as Phase, score: 0, coins: 0, lives: 3, time: START_TIME, timer: 1.6, flagAnimT: 0, world: "1-1", combo: 0 };
 
     // Warp / area state. `inCave` drives the dark backdrop + flag-goal guard; `warp`
     // runs the iris-wipe transition and teleports the player at its darkest point.
@@ -465,6 +791,20 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // ── Helpers ───────────────────────────────────────────────────────────────
     const addScore = (n: number): void => {
         game.score += n;
+    };
+    // Escalating stomp-combo points (chain enemies mid-air without landing). The 8th
+    // consecutive stomp grants a 1-up, then the chain resets — classic SMB cadence.
+    const COMBO_PTS = [100, 200, 400, 800, 1000, 2000, 4000, 8000] as const;
+    const comboStomp = (x: number, y: number): void => {
+        const pts = COMBO_PTS[Math.min(game.combo, COMBO_PTS.length - 1)]!;
+        game.combo++;
+        addScore(pts);
+        juicePop(x, y, pts, SPARK_WHITE);
+        if (game.combo >= COMBO_PTS.length) {
+            game.lives += 1;
+            sfx.oneUp();
+            game.combo = 0;
+        }
     };
     const gainCoin = (): void => {
         game.coins += 1;
@@ -542,7 +882,11 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         f.life = FIREBALL_LIFE;
         f.box.x = player.box.x + player.box.w / 2 - f.box.w / 2;
         f.box.y = player.box.y + player.box.h * 0.35;
-        f.vx = player.facing * FIREBALL_SPEED;
+        // Add the player's FORWARD speed so the ball always pulls ahead by exactly
+        // FIREBALL_SPEED relative to the player — otherwise running (maxRun > base
+        // speed) lets the player overtake their own fireball.
+        const forward = Math.max(0, player.vx * player.facing);
+        f.vx = player.facing * (FIREBALL_SPEED + forward);
         f.vy = 140;
         sfx.fireball();
         updateSprite2DIndex(fireballLayer, f.slot, { visible: true });
@@ -572,8 +916,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             if (overlaps(f.box, e.box)) {
                 e.dying = 0.4;
                 e.vy = -360;
-                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(e.kind === "snail" ? "snail_move" : "slimeGreen_dead"), flipY: true });
+                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(e.kind === "snail" ? "snail_walk" : "slimeGreen_dead"), flipY: true });
                 addScore(200);
+                juicePop(e.box.x + e.box.w / 2, e.box.y, 200, SPARK_WHITE);
                 sfx.kick();
                 killFireball(f);
                 return;
@@ -610,7 +955,10 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 level.solid[cy * level.cols + cx] = 0;
                 updateSprite2DIndex(blockLayer, b.slot, { visible: false });
                 addScore(50);
-                sfx.bump();
+                // Juice: spray four spinning brick chunks + a little dust sparkle.
+                burstDebris(cx, cy);
+                burstSparks(cx * TILE + TILE / 2, cy * TILE + TILE / 2, SPARK_WHITE, 5);
+                sfx.breakBlock();
             } else {
                 sfx.bump();
             }
@@ -625,6 +973,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (b.kind === "coin-block") {
             spawnPickup("coin-pop", cx, cy - 1);
             gainCoin();
+            juicePop(cx * TILE + TILE / 2, (cy - 1) * TILE, 200, SPARK_GOLD);
         } else if (b.kind === "mushroom-block") {
             // Mushroom when small (grow first); a fire flower once already big — classic progression.
             if (!player.big) spawnPickup("mushroom", cx, cy - 1);
@@ -637,6 +986,23 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     };
 
     // ── Per-frame update ──────────────────────────────────────────────────────
+    const updateMovers = (dt: number): void => {
+        for (const mp of movers) {
+            const prevX = mp.box.x;
+            const prevY = mp.box.y;
+            const step = mp.speed * dt * mp.dir;
+            if (mp.axis === "x") {
+                mp.box.x += step;
+                if (mp.box.x <= mp.min) { mp.box.x = mp.min; mp.dir = 1; } else if (mp.box.x >= mp.max) { mp.box.x = mp.max; mp.dir = -1; }
+            } else {
+                mp.box.y += step;
+                if (mp.box.y <= mp.min) { mp.box.y = mp.min; mp.dir = 1; } else if (mp.box.y >= mp.max) { mp.box.y = mp.max; mp.dir = -1; }
+            }
+            mp.dx = mp.box.x - prevX;
+            mp.dy = mp.box.y - prevY;
+        }
+    };
+
     const updatePlaying = (dt: number): void => {
         const s = input.state;
         // Timers
@@ -649,6 +1015,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (player.invuln > 0) player.invuln -= dt;
         if (player.star > 0) player.star -= dt;
         if (warp.cooldown > 0) warp.cooldown -= dt;
+
+        // Advance moving platforms first, so the rider-carry below uses fresh positions.
+        updateMovers(dt);
 
         // Fire power: shoot a fireball on the fire button (run / B), rate-limited.
         if (fireCooldown > 0) fireCooldown -= dt;
@@ -706,10 +1075,39 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         player.onGround = res.onGround;
         if (res.hitCeiling && res.ceilingCell) bumpBlock(res.ceilingCell.cx, res.ceilingCell.cy);
 
+        // Ride moving platforms: land on / be carried by a kinematic platform when
+        // standing on its top (not while jumping up through it). Runs before the pit
+        // check so a player riding a platform over a pit isn't counted as fallen.
+        for (const mp of movers) {
+            const feet = player.box.y + player.box.h;
+            const overlapX = player.box.x + player.box.w > mp.box.x + 2 && player.box.x < mp.box.x + mp.box.w - 2;
+            if (overlapX && player.vy >= -1 && feet >= mp.box.y - 8 && feet <= mp.box.y + 16) {
+                player.box.y = mp.box.y - player.box.h;
+                player.box.x += mp.dx; // carry horizontally with the platform
+                player.vy = 0;
+                player.onGround = true;
+            }
+        }
+
         // Fell into a pit
         if (player.box.y > worldH + TILE) {
             killPlayer();
             return;
+        }
+
+        // Touched molten lava → instant death (underground hazard). A small inset keeps
+        // standing on the channel lip / stepping-stones safe; only dipping in is fatal.
+        for (const lv of level.lava) {
+            const lx = lv.cx * TILE;
+            const ly = lv.cy * TILE;
+            if (
+                player.box.x + player.box.w > lx + TILE * 0.12 &&
+                player.box.x < lx + lv.w * TILE - TILE * 0.12 &&
+                player.box.y + player.box.h > ly + TILE * 0.2
+            ) {
+                killPlayer();
+                return;
+            }
         }
 
         // Pipe warp: duck while standing on a pipe's top edge.
@@ -717,6 +1115,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const cxw = player.box.x + player.box.w / 2;
             const feet = player.box.y + player.box.h;
             for (const pipe of level.pipes) {
+                if (pipe.decorative) continue; // piranha pipes aren't warps
                 const left = pipe.cx * TILE;
                 const right = (pipe.cx + pipe.w) * TILE;
                 if (cxw >= left && cxw <= right && Math.abs(feet - pipe.cy * TILE) < TILE * 0.5) {
@@ -726,7 +1125,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             }
         }
 
-        // Enemies
+        // Enemies. The stomp-combo resets once the player is back on solid footing
+        // (it only escalates while chaining mid-air bounces between enemies).
+        if (player.onGround) game.combo = 0;
         for (const e of enemyList) {
             if (!e.alive) continue;
             updateEnemy(e, dt);
@@ -753,6 +1154,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 c.collected = true;
                 updateSprite2DIndex(itemLayer, c.slot, { visible: false });
                 gainCoin();
+                juicePop(c.x, c.y - TILE * 0.2, 200, SPARK_GOLD);
             }
         }
 
@@ -760,10 +1162,17 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (!inCave && player.box.x + player.box.w * 0.5 >= flagX * TILE) {
             game.phase = "complete";
             game.timer = 3.5;
+            // End-of-area tally: convert remaining time into bonus points.
+            const bonus = Math.floor(game.time) * 50;
+            addScore(bonus);
             sfx.complete();
-            hud.banner("LEVEL COMPLETE", "Thanks for playing!");
+            hud.banner("LEVEL COMPLETE", `TIME BONUS  ${bonus}`);
         }
     };
+
+    // Death/"hit" frame for each enemy kind (snail has no _dead → use _hit).
+    const deadFrame = (kind: EnemyState["kind"]): string =>
+        kind === "snail" ? "snail_hit" : kind === "fly" ? "bee_dead" : kind === "piranha" ? "snakeSlime_dead" : "slimeGreen_dead";
 
     const updateEnemy = (e: EnemyState, dt: number): void => {
         e.animT += dt;
@@ -773,6 +1182,26 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 e.alive = false;
                 updateSprite2DIndex(enemyLayer, e.slot, { visible: false });
             }
+            return;
+        }
+
+        // Flying enemy: horizontal drift (bounce off walls) + a vertical sine bob.
+        if (e.kind === "fly") {
+            e.phase += dt;
+            const res = moveAndCollide(e.box, e.dir * FLY_SPEED, 0, dt, collision);
+            if (res.hitWall !== 0) e.dir = (-e.dir) as -1 | 1;
+            e.box.y = e.homeY + Math.sin(e.phase * FLY_FREQ) * FLY_AMP;
+            return;
+        }
+
+        // Piranha plant: rises from / retracts into its pipe on a timed cycle. It
+        // freezes (stays hidden) while the player stands right over the pipe, so it
+        // never pops up "unfairly" into a player standing on the mouth.
+        if (e.kind === "piranha") {
+            const emerge = piranhaEmerge(e.phase);
+            const nearPlayer = Math.abs(player.box.x + player.box.w / 2 - (e.box.x + e.box.w / 2)) < TILE * 1.6;
+            if (!(emerge < 0.02 && nearPlayer)) e.phase += dt;
+            e.box.y = e.homeY + (1 - piranhaEmerge(e.phase)) * PIRANHA_RISE;
             return;
         }
 
@@ -816,7 +1245,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 if (overlaps(e.box, o.box)) {
                     o.dying = 0.4;
                     o.vy = -360;
-                    updateSprite2DIndex(enemyLayer, o.slot, { frame: enemies.frameOf(o.kind === "snail" ? "snail_move" : "slimeGreen_dead"), flipY: true });
+                    updateSprite2DIndex(enemyLayer, o.slot, { frame: enemies.frameOf(deadFrame(o.kind)), flipY: true });
                     addScore(200);
                     sfx.kick();
                 }
@@ -833,9 +1262,16 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (player.star > 0) {
             e.dying = 0.4;
             e.vy = -360;
-            updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(e.kind === "snail" ? "snail_move" : "slimeGreen_dead"), flipY: true });
+            updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(deadFrame(e.kind)), flipY: true });
             addScore(200);
+            juicePop(e.box.x + e.box.w / 2, e.box.y, 200, SPARK_WHITE);
             sfx.kick();
+            return;
+        }
+
+        // Piranha plants can't be stomped — touching one always hurts (fireballs kill them).
+        if (e.kind === "piranha") {
+            hurtPlayer();
             return;
         }
 
@@ -848,7 +1284,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 e.box.h = TILE * 0.5;
                 e.box.y = (Math.floor((e.box.y + e.box.h) / TILE) + 1) * TILE - e.box.h;
                 updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf("snail_shell"), sizePx: [e.box.w, e.box.h] });
-                addScore(100);
+                comboStomp(e.box.x + e.box.w / 2, e.box.y);
                 sfx.stomp();
             } else if (e.kind === "snail" && e.shell) {
                 // Kick a resting shell, or stop a moving one.
@@ -857,8 +1293,8 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 sfx.kick();
             } else {
                 e.dying = 0.35;
-                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf("slimeGreen_dead"), sizePx: [e.box.w, e.box.h * 0.6] });
-                addScore(100);
+                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(deadFrame(e.kind)), sizePx: [e.box.w, e.box.h * 0.6] });
+                comboStomp(e.box.x + e.box.w / 2, e.box.y);
                 sfx.stomp();
             }
             return;
@@ -944,6 +1380,57 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         // Cave backdrop: full-screen dark panel, shown only while underground.
         updateSprite2DIndex(caveBackLayer, caveBackSlot, inCave ? { positionPx: [0, 0], sizePx: [cw, ch], visible: true } : { visible: false });
 
+        // Molten lava pools (world-space; only the cave has them, shown while underground).
+        for (let i = 0; i < lavaSlots.length; i++) {
+            const lv = level.lava[i]!;
+            if (!inCave) {
+                updateSprite2DIndex(lavaLayer, lavaSlots[i]!, { visible: false });
+                updateSprite2DIndex(torchGlowLayer, lavaGlowSlots[i]!, { visible: false });
+                continue;
+            }
+            const x0 = Math.round(sx(lv.cx * TILE));
+            const y0 = Math.round(sy(lv.cy * TILE));
+            const x1 = Math.round(sx((lv.cx + lv.w) * TILE));
+            const y1 = Math.round(sy((lv.cy + lv.h) * TILE));
+            updateSprite2DIndex(lavaLayer, lavaSlots[i]!, { positionPx: [x0, y0], sizePx: [x1 - x0, y1 - y0], visible: true });
+            // Warm additive glow rising off the pool so the molten lava lights the dark.
+            const lflick = 0.8 + 0.2 * Math.sin(game.flagAnimT * 7 + i * 2.1);
+            updateSprite2DIndex(torchGlowLayer, lavaGlowSlots[i]!, {
+                positionPx: [sx((lv.cx + lv.w / 2) * TILE), sy((lv.cy + 0.1) * TILE)],
+                sizePx: [ss(lv.w * TILE * 1.15), ss(TILE * 4) * lflick],
+                color: [1, 0.5, 0.16, 0.8 * lflick],
+                visible: true,
+            });
+        }
+
+        // Wall torches + their additive warm glows, and the player-following lantern (cave only).
+        for (let i = 0; i < torchSlots.length; i++) {
+            const tc = level.torches[i]!;
+            if (!inCave) {
+                updateSprite2DIndex(torchLayer, torchSlots[i]!, { visible: false });
+                updateSprite2DIndex(torchGlowLayer, torchGlowSlots[i]!, { visible: false });
+                continue;
+            }
+            updateSprite2DIndex(torchLayer, torchSlots[i]!, { positionPx: [sx((tc.cx + 0.5) * TILE), sy((tc.cy + 1) * TILE)], sizePx: [ss(TILE), ss(TILE)], visible: true });
+            const flick = 0.82 + 0.18 * Math.sin(game.flagAnimT * 9 + i * 1.7);
+            const gsize = ss(TILE * 3.0) * flick;
+            updateSprite2DIndex(torchGlowLayer, torchGlowSlots[i]!, {
+                positionPx: [sx((tc.cx + 0.5) * TILE), sy((tc.cy + 0.3) * TILE)],
+                sizePx: [gsize, gsize],
+                color: [1, 0.72, 0.32, 0.85 * flick],
+                visible: true,
+            });
+        }
+        // Lantern: a multiply-darkness pool centred on the player.
+        if (inCave) {
+            const lpx = sx(player.box.x + player.box.w / 2) / cw;
+            const lpy = sy(player.box.y + player.box.h * 0.4) / ch;
+            setSprite2DShaderParams(lanternLayer, [lpx, lpy, 0.46, 0.2]);
+            updateSprite2DIndex(lanternLayer, lanternSlot, { positionPx: [0, 0], sizePx: [cw, ch], color: [cw / ch, 0, 0, 1], visible: true });
+        } else {
+            updateSprite2DIndex(lanternLayer, lanternSlot, { visible: false });
+        }
+
         // Warp pipes (world-space; naturally off-screen when their area isn't in view).
         for (let i = 0; i < level.pipes.length; i++) {
             const pp = level.pipes[i]!;
@@ -952,6 +1439,16 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const y0 = Math.round(sy(pp.cy * TILE));
             const y1 = Math.round(sy((pp.cy + pp.h) * TILE));
             updateSprite2DIndex(pipeLayer, pipeSlots[i]!, { positionPx: [x0, y0], sizePx: [x1 - x0, y1 - y0] });
+        }
+
+        // Moving platforms: lay each platform's bridge tiles at its current position.
+        for (const mp of movers) {
+            for (let i = 0; i < mp.slots.length; i++) {
+                const tx0 = Math.round(sx(mp.box.x + i * TILE));
+                const tx1 = Math.round(sx(mp.box.x + (i + 1) * TILE));
+                const ty0 = Math.round(sy(mp.box.y));
+                updateSprite2DIndex(moverLayer, mp.slots[i]!, { positionPx: [tx0, ty0], sizePx: [tx1 - tx0, ss(mp.box.h)] });
+            }
         }
 
         // Terrain
@@ -984,7 +1481,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         // Flag wave. The flag sprite's pole runs up its far-left edge (centre at
         // ~0.07 of the sprite width), so with a centre pivot we shift right by
         // ~0.43·TILE to sit the pole over the centred chain column.
-        const flagName = Math.floor(game.flagAnimT * 6) % 2 === 0 ? "flagGreen1" : "flagGreen2";
+        const flagName = Math.floor(game.flagAnimT * 6) % 2 === 0 ? "flagGreen" : "flagGreen2";
         updateSprite2DIndex(itemLayer, flagSlot, {
             positionPx: [sx(flagX * TILE + TILE * 0.93), sy(level.flag.cy * TILE + TILE * 0.5)],
             sizePx: [ss(TILE), ss(TILE)],
@@ -1016,19 +1513,82 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             });
         }
 
+        // Sparkle bursts (additive): shrink + fade with age via tint alpha.
+        for (const s of sparks) {
+            if (!s.active) continue;
+            const t = s.life / s.maxLife; // 1 → 0
+            const sz = SPARK_DRAW * (0.4 + 0.6 * t);
+            updateSprite2DIndex(sparkLayer, s.slot, {
+                positionPx: [sx(s.x), sy(s.y)],
+                sizePx: [ss(sz), ss(sz)],
+                color: [s.color[0], s.color[1], s.color[2], t],
+                visible: true,
+            });
+        }
+
+        // Brick-break debris: spinning chunks falling with gravity.
+        for (const d of debris) {
+            if (!d.active) continue;
+            updateSprite2DIndex(debrisLayer, d.slot, {
+                positionPx: [sx(d.x), sy(d.y)],
+                sizePx: [ss(DEBRIS_DRAW), ss(DEBRIS_DRAW)],
+                rotation: d.rot,
+                visible: true,
+            });
+        }
+
+        // Score popups: lay out the value's digits, floating up + fading with age.
+        for (const p of popups) {
+            if (!p.active) {
+                continue;
+            }
+            const t = p.life / POPUP_LIFE; // 1 → 0
+            const rise = (1 - t) * POPUP_RISE;
+            const alpha = Math.min(1, t * 1.6); // hold bright, fade at the end
+            const n = p.digits.length;
+            const stepW = POPUP_DIGIT_DRAW * 0.62; // digit glyphs overlap-pack tighter than their cell
+            const startX = p.x - ((n - 1) * stepW) / 2;
+            for (let d = 0; d < p.slots.length; d++) {
+                if (d < n) {
+                    updateSprite2DIndex(digitLayer, p.slots[d]!, {
+                        positionPx: [sx(startX + d * stepW), sy(p.y - rise)],
+                        sizePx: [ss(POPUP_DIGIT_DRAW), ss(POPUP_DIGIT_DRAW)],
+                        frame: p.digits[d]!,
+                        color: [1, 1, 1, alpha],
+                        visible: true,
+                    });
+                } else {
+                    updateSprite2DIndex(digitLayer, p.slots[d]!, { visible: false });
+                }
+            }
+        }
+
         // Enemies
         for (const e of enemyList) {
             if (!e.alive) continue;
-            let frame: number;
-            if (e.shell) frame = enemies.frameOf("snail_shell");
-            else if (e.kind === "snail") frame = enemies.frameOf(Math.floor(e.animT * 6) % 2 === 0 ? "snail_move" : "snail");
-            else frame = enemies.frameOf(Math.floor(e.animT * 6) % 2 === 0 ? "slimeGreen_move" : "slimeGreen");
+            // Piranha is hidden inside its pipe while fully retracted.
+            if (e.kind === "piranha" && e.dying <= 0 && piranhaEmerge(e.phase) < 0.04) {
+                updateSprite2DIndex(enemyLayer, e.slot, { visible: false });
+                continue;
+            }
+            const flap = Math.floor(e.animT * (e.kind === "fly" ? 12 : 6)) % 2 === 0;
+            let name: string;
+            if (e.dying > 0) name = deadFrame(e.kind);
+            else if (e.shell) name = "snail_shell";
+            else if (e.kind === "snail") name = flap ? "snail_walk" : "snail";
+            else if (e.kind === "fly") name = flap ? "bee" : "bee_fly";
+            else if (e.kind === "piranha") name = flap ? "snakeSlime" : "snakeSlime_ani";
+            else name = flap ? "slimeGreen_walk" : "slimeGreen";
+            const [efw, efh] = enemies.sizeOf(name);
+            // The piranha (tall snake) draws at its natural height so it isn't oversized.
+            const escale = e.kind === "piranha" ? 1.0 : ENEMY_VIS_SCALE;
             updateSprite2DIndex(enemyLayer, e.slot, {
                 positionPx: [sx(e.box.x + e.box.w / 2), sy(e.box.y + e.box.h)],
-                sizePx: [ss(e.box.w * ENEMY_DRAW_W_MUL), ss(e.box.h * ENEMY_DRAW_H_MUL)],
-                frame,
+                sizePx: [ss(efw * escale), ss(efh * escale)],
+                frame: enemies.frameOf(name),
                 visible: true,
-                flipX: e.dir > 0,
+                flipX: e.kind !== "piranha" && e.dir > 0,
+                flipY: e.dying > 0,
             });
         }
 
@@ -1049,9 +1609,11 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
 
         const playerCx = player.box.x + player.box.w / 2;
         const playerFeet = player.box.y + player.box.h;
-        const pdraw = player.big ? PLAYER_DRAW_BIG : PLAYER_DRAW_SMALL;
-        const playerDrawW = pdraw.w;
-        const playerDrawH = pdraw.h;
+        const standH = player.fire ? yellowStandH : greenStandH;
+        const psc = (player.big ? PLAYER_VIS_BIG : PLAYER_VIS_SMALL) / standH;
+        const [pfw, pfh] = players.sizeOf(pf);
+        const playerDrawW = pfw * psc;
+        const playerDrawH = pfh * psc;
         const playerFrame = players.frameOf(pf);
         updateSprite2DIndex(playerLayer, playerSlot, {
             positionPx: [sx(playerCx), sy(playerFeet)],
@@ -1162,6 +1724,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                             updateSprite2DIndex(p.layer, p.slot, { visible: false });
                         }
                         for (const f of fireballs) killFireball(f);
+                        for (const s of sparks) killSpark(s);
+                        for (const d of debris) killDebris(d);
+                        for (const p of popups) hidePopup(p);
                         updateSprite2DIndex(playerLayer, playerSlot, { frame: players.frameOf(PLAYER_FRAMES.stand) });
                         hud.banner("WORLD 1-1", "Get ready!");
                     }
@@ -1176,6 +1741,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 break;
         }
 
+        updateJuice(dt);
         project();
         hud.update({ score: game.score, coins: game.coins, lives: game.lives, time: game.time, world: game.world });
         input.endFrame();
@@ -1186,7 +1752,8 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         const src = level.enemies.find((_, i) => enemyList[i] === e);
         if (!src) return;
         const { w, h } = enemyBoxDims(src.kind);
-        e.box = { x: src.cx * TILE + (TILE - w) / 2, y: (src.cy + 1) * TILE - h, w, h };
+        const boxY = (src.cy + 1) * TILE - h;
+        e.box = { x: src.cx * TILE + (TILE - w) / 2, y: boxY, w, h };
         e.alive = true;
         e.shell = false;
         e.shellDir = 0;
@@ -1194,6 +1761,8 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         e.dir = -1;
         e.vx = -PHYS.enemySpeed;
         e.vy = 0;
+        e.homeY = boxY;
+        e.phase = src.kind === "fly" ? Math.random() * Math.PI * 2 : 0;
     };
 
     const restartLevel = (): void => {
@@ -1225,6 +1794,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             updateSprite2DIndex(p.layer, p.slot, { visible: false });
         }
         for (const f of fireballs) killFireball(f);
+        for (const s of sparks) killSpark(s);
+        for (const d of debris) killDebris(d);
+        for (const p of popups) hidePopup(p);
         updateSprite2DIndex(playerLayer, playerSlot, { frame: players.frameOf(PLAYER_FRAMES.stand) });
         hud.banner("WORLD 1-1", "Get ready!");
     };

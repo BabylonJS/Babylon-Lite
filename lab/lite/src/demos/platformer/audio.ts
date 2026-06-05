@@ -25,6 +25,8 @@ export interface Sfx {
     warp: () => void;
     /** Short "pew" when throwing a fireball. */
     fireball: () => void;
+    /** Crunchy shatter when a big player smashes a brick. */
+    breakBlock: () => void;
     /** Resume the context after a user gesture; safe to call repeatedly. */
     resume: () => void;
     dispose: () => void;
@@ -151,6 +153,14 @@ export function createSfx(): Sfx {
             if (!ensure()) return;
             // Quick upward "pew".
             tone(620, 0.09, "square", now(), 0.4, 1040);
+        },
+        breakBlock(): void {
+            if (!ensure()) return;
+            const t = now();
+            // Crunchy shatter: noise burst + a short descending thunk.
+            noise(0.16, t, 0.5);
+            tone(240, 0.12, "square", t, 0.5, 90);
+            tone(360, 0.08, "triangle", t + 0.02, 0.3, 140);
         },
         dispose(): void {
             if (ctx) void ctx.close();

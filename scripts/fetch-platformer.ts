@@ -1,11 +1,17 @@
 /**
- * fetch-platformer.ts — curate the CC0 Kenney "Platformer Pack Remastered"
- * (the modern successor to "Platformer Pack Redux") sprite assets used by the
- * platformer demo.
+ * fetch-platformer.ts — curate the CC0 Kenney "Platformer Art Deluxe" sprite
+ * assets used by the platformer demo.
  *
  * Kenney's assets (https://kenney.nl) are released under Creative Commons Zero
  * (CC0, public-domain dedication): free to use, modify and redistribute, with
  * attribution appreciated but not required.
+ *
+ * Platformer Art Deluxe is the larger "classic" Kenney platformer pack (930
+ * files): it has richly-themed tilesets (grass / dirt / stone / snow / castle
+ * with full edge + corner variety — great for an underground level), themed
+ * background images, and the modern flat "alien" character sheets. We curate a
+ * small XML-spritesheet subset; the demo's atlas loader parses the TexturePacker
+ * XML directly.
  *
  * Unlike the voxel/freeciv demos, the platformer's curated subset is COMMITTED to
  * the repo (it is small and CC0, so there is no licensing reason to keep it out of
@@ -18,7 +24,11 @@
  * bundled art is CC0.
  *
  * Usage:  pnpm tsx scripts/fetch-platformer.ts
- * No third-party deps: the release ZIP is parsed with Node's built-in zlib.
+ * The release ZIP is parsed with Node's built-in zlib. After extraction, one
+ * NON-DESTRUCTIVE post-process runs (scripts/bleed-platformer-alpha.ts, via the
+ * dev-dependency `pngjs`): it "alpha-bleeds" the linear-filtered sheets so they
+ * don't render with a dark edge fringe. It only recolours pixels whose alpha is
+ * already 0, so every visible pixel stays byte-identical.
  */
 
 import { createHash } from "node:crypto";
@@ -26,35 +36,36 @@ import { inflateRawSync } from "node:zlib";
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bleedPlatformerAlpha } from "./bleed-platformer-alpha.ts";
 
-const PACK_VERSION = "remastered";
-const ZIP_URL = "https://kenney.nl/media/pages/assets/platformer-pack-remastered/cee5812394-1774772013/kenney_platformer-pack-remastered.zip";
-/** SHA-256 of kenney_platformer-pack-remastered.zip, verified after download. */
-const ZIP_SHA256 = "abbe0800c68d5ceeb3b5bb411125dab7d56768232b3b4500a456b36ce5b7dada";
+const PACK_VERSION = "deluxe";
+const ZIP_URL = "https://kenney.nl/media/pages/assets/platformer-art-deluxe/cb30f83169-1677696393/kenney_platformer-art-deluxe.zip";
+/** SHA-256 of kenney_platformer-art-deluxe.zip, verified after download. */
+const ZIP_SHA256 = "232c5644858287181ff5b20107b1969064a2833dd4ab51a6a4c5997889d2720d";
 
 /**
  * Curated subset to extract — `zip entry path` → `destination (relative to OUT_DIR)`.
- * We take the per-category TexturePacker spritesheets (PNG + XML) rather than the
- * hundreds of loose PNGs or the 966 KB combined sheet, plus a couple of parallax
- * backgrounds and the CC0 license file.
+ * We take the modern combined alien character sheet + the extra-enemies sheet (both
+ * TexturePacker XML), the Base-pack tiles / items / HUD sheets, and a few themed
+ * backgrounds. The Base-pack tiles sheet holds grass/dirt/stone/castle terrain AND
+ * the box / brick blocks, so there is no separate "ground" sheet (the demo binds the
+ * terrain and block layers to the same tiles atlas).
  */
 const WANTED: ReadonlyArray<readonly [string, string]> = [
-    ["Spritesheets/spritesheet_players.png", "players.png"],
-    ["Spritesheets/spritesheet_players.xml", "players.xml"],
-    ["Spritesheets/spritesheet_enemies.png", "enemies.png"],
-    ["Spritesheets/spritesheet_enemies.xml", "enemies.xml"],
-    ["Spritesheets/spritesheet_items.png", "items.png"],
-    ["Spritesheets/spritesheet_items.xml", "items.xml"],
-    ["Spritesheets/spritesheet_tiles.png", "tiles.png"],
-    ["Spritesheets/spritesheet_tiles.xml", "tiles.xml"],
-    ["Spritesheets/spritesheet_ground.png", "ground.png"],
-    ["Spritesheets/spritesheet_ground.xml", "ground.xml"],
-    ["Spritesheets/spritesheet_hud.png", "hud.png"],
-    ["Spritesheets/spritesheet_hud.xml", "hud.xml"],
-    ["PNG/Backgrounds/colored_grass.png", "backgrounds/colored_grass.png"],
-    ["PNG/Backgrounds/colored_desert.png", "backgrounds/colored_desert.png"],
-    ["PNG/Backgrounds/blue_grass.png", "backgrounds/blue_grass.png"],
-    ["License.txt", "License.txt"],
+    ["Extra animations and enemies/Spritesheets/aliens.png", "players.png"],
+    ["Extra animations and enemies/Spritesheets/aliens.xml", "players.xml"],
+    ["Extra animations and enemies/Spritesheets/enemies.png", "enemies.png"],
+    ["Extra animations and enemies/Spritesheets/enemies.xml", "enemies.xml"],
+    ["Base pack/Items/items_spritesheet.png", "items.png"],
+    ["Base pack/Items/items_spritesheet.xml", "items.xml"],
+    ["Base pack/Tiles/tiles_spritesheet.png", "tiles.png"],
+    ["Base pack/Tiles/tiles_spritesheet.xml", "tiles.xml"],
+    ["Base pack/HUD/hud_spritesheet.png", "hud.png"],
+    ["Base pack/HUD/hud_spritesheet.xml", "hud.xml"],
+    ["Mushroom expansion/Backgrounds/bg_grasslands.png", "backgrounds/bg_grasslands.png"],
+    ["Mushroom expansion/Backgrounds/bg_castle.png", "backgrounds/bg_castle.png"],
+    ["Mushroom expansion/Backgrounds/bg_shroom.png", "backgrounds/bg_shroom.png"],
+    ["license.txt", "License.txt"],
 ];
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -122,6 +133,7 @@ function extractEntry(buf: Buffer, entry: ZipEntry): Buffer {
     throw new Error(`platformer pack zip: unsupported compression method ${entry.method} for ${entry.name}`);
 }
 
+
 export async function fetchPlatformer(): Promise<void> {
     mkdirSync(OUT_DIR, { recursive: true });
 
@@ -170,6 +182,8 @@ export async function fetchPlatformer(): Promise<void> {
         console.log(`Extracted ${zipPath} → ${dest} (${(bytes.length / 1024).toFixed(0)} KB)`);
     }
 
+    // Non-destructive edge dilation so linear-filtered sheets don't fringe (see module docs).
+    bleedPlatformerAlpha(OUT_DIR);
     console.log("Done. The curated platformer assets are COMMITTED to the repo (CC0); no runtime fetch is needed.");
 }
 

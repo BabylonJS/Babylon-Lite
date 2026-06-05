@@ -1,5 +1,5 @@
 /**
- * Loads a Kenney "Platformer Pack Remastered" spritesheet (`.png`) plus its
+ * Loads a Kenney "Platformer Art Deluxe" spritesheet (`.png`) plus its
  * TexturePacker `.xml` descriptor into a single Lite `SpriteAtlas`, and exposes a
  * `name → frame index` lookup.
  *

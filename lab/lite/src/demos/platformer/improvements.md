@@ -5,10 +5,14 @@ genuinely fun to play **and** a showcase for what Babylon **Lite** + WebGPU can
 do in a tiny, tree-shaken, pure-2D bundle (no scene, camera, or mesh — just the
 sprite path).
 
-> **Iterate fast:** rebuild only this demo with
-> `pnpm build:bundle-demo platformer` (add `--measure` to refresh the bundle-size
-> badge), then reload `/demo-platformer.html` in `pnpm dev:lab`. The full
-> `pnpm build:bundle-demos` rebuilds every demo and is much slower.
+> **Run it locally:** `pnpm build:bundle-demo platformer` (build the bundle the
+> page loads), then `pnpm --filter @babylon-lite/lab dev` and open
+> `http://localhost:<port>/demo-platformer.html` (WebGPU browser required; the
+> CC0 assets are committed, no fetch needed). **Iterate:** re-run
+> `pnpm build:bundle-demo platformer` after edits and refresh — no server
+> restart. Add `--measure` to refresh the bundle-size badge. `pnpm dev:lab`
+> rebuilds **every** scene + demo first (slower); `pnpm build:bundle-demos`
+> rebuilds all demos.
 
 ---
 
@@ -32,8 +36,19 @@ Each idea is tagged with how much engine support it needs **today**:
 
 What ships today, so we know what we're building on:
 
-- **One level** — World 1-1, scrolling left→right to a flagpole goal. No
-  sub-areas or warps yet.
+- **Art pack** — the curated CC0 Kenney **"Platformer Art Deluxe"** subset
+  (committed under `lab/public/platformer/`): one combined `tiles` sheet
+  (grass/dirt/stone/castle/snow terrain **and** the box/brick blocks), `items`,
+  combined alien character sheets (the player is the green/yellow **astronaut**),
+  `enemies`, `hud`, and themed backgrounds. One cohesive classic look throughout.
+- **World 1-1** — a scrolling level (left→right) to a flagpole goal, **plus** a
+  warp pipe down to a **large lava-lit underground cavern** (`1-2`) and back.
+  Run/jump physics, coyote-time + jump-buffer, ?-blocks & breakable bricks, pits,
+  hazards, moving-ground edges.
+- **Underground cavern** — ✅ **DONE.** A multi-section cave: entry chamber, two
+  molten **lava** channels (instant-death) crossed on stone stepping-stones, a
+  bonus ledge with reward blocks, all lit by a player-following **lantern** + wall
+  **torches**. See [#7](#visual-fx)/[#8](#visual-fx)/[#9](#visual-fx).
 - **Star invincibility** — ✅ **DONE.** A per-layer custom fragment shader on the
   player (rainbow palette-cycle + sparkle pulse via `fx.time`, intensity driven
   by `setSprite2DShaderParams`) plus a 6-ghost **additive** afterimage trail on a
@@ -47,13 +62,29 @@ What ships today, so we know what we're building on:
 - **Power-ups** — mushroom (grow), ✅ **fire flower** (shoot fireballs), and star
   (invincibility). Block progression is classic: a mushroom-block gives a mushroom
   when small, a fire flower once big. See [#4](#visual-fx).
-- **Enemies** — stompable shells with kick/bump behaviour.
+- **Enemies** — stompable slimes + snails (snails shell on stomp, then kick), a
+  sine-flying **bee**, and a **pipe-plant** that rises from a decorative pipe.
+  Fireballs and the star also pop them; a **stomp combo** escalates the score.
+- **Platforms** — ✅ **DONE.** **One-way** grass ledges (jump up through, land on
+  top) and **moving** platforms (a horizontal pit-ferry, a vertical elevator, and a
+  cave platform over lava) that carry the player. See [#13](#gameplay--content).
 - **Pipes** — ✅ **DONE.** A green warp pipe in the overworld now teleports the
   player (duck on top) through an iris-wipe transition to a sealed underground
   **bonus coin room** (`1-2`), with a return pipe back to `1-1`. See
   [#3](#3-several-scenes--pipe-warps--sub-areas-).
+- **Juice** — ✅ **DONE.** Additive sparkle bursts + floating HUD-digit score
+  popups on coin/stomp/kill, and a 4-chunk spinning **brick-break debris** spray
+  when a big player smashes a brick. See [#6](#visual-fx).
+- **Sprite sizing** — ✅ **DONE.** Visual draw sizes are decoupled from the
+  (tighter) collision boxes so the player, enemies, and items read at ~1 tile
+  like the ?-blocks, and big-player growth reads as a clear ~2-tile jump. The
+  Deluxe character/enemy frames are tightly cropped at varying sizes, so the
+  player and enemies are **natural-frame scaled** (each frame drawn at its own
+  size × a target-height factor, feet-anchored via a bottom pivot); the still-
+  padded item frames keep per-kind draw cells.
 - **HUD** — DOM overlay (score, coins, time, lives). **Audio** — clean-room
-  chiptune SFX. **Input** — keyboard / gamepad / touch.
+  chiptune SFX (jump, coin, stomp, power-up, warp, fireball, break, …).
+  **Input** — keyboard / gamepad / touch (with a fire button).
 
 ---
 
@@ -138,9 +169,15 @@ with additive atmosphere. Big visual payoff, tiny code.
 > transition is a single fullscreen `createSprite2DCustomShader` quad — **no
 > engine post-process needed** (see the corrected note in #A below).
 >
-> **Not yet** done from the wishlist below: multiple distinct areas beyond the one
-> cave, per-area music, and the final castle approach — the area model is a simple
-> two-region split today, not a general `loadArea` system. Easy to extend.
+> **Expanded.** The underground is now a **large multi-section cavern** (not a tiny
+> bonus box): a left entry chamber, two molten **lava channels** crossed on stone
+> stepping-stones, a raised bonus ledge with reward blocks, and **torch**-lit gloom
+> with a player-following **lantern** (see #7/#8/#9). **Not yet** done: multiple
+> *distinct* areas beyond this one cavern, per-area music, and the final castle
+> approach — the area model is still a two-region split (overworld + cavern appended
+> to one grid), not a general `loadArea(area)` system. The cavern delivers the
+> "bigger underground" payoff; a full `loadArea` teardown/refill refactor is a larger,
+> lower-urgency follow-up.
 
 **What.** Turn the single level into a small **world** of connected areas:
 overworld → enter a pipe → underground coin room → exit pipe back out (or to a
@@ -185,19 +222,29 @@ scene graph — and gives the demo real game structure.
   from one base sheet recolored by a **palette-remap custom shader** with an
   extra LUT texture (`createSprite2DCustomShader({ extraTextures: [palette] })`)
   — the same technique as parity scenes 93/95. One sheet, many looks.
-- **6. Coin & stomp juice ✅ (S).** Additive sparkle bursts on coin collect and
-  enemy stomp, plus floating "+100" score popups (sprite digits or DOM). Cheap,
-  hugely satisfying.
-- **7. Animated water / lava bands ✅ (M).** A `uvScroll` water/lava strip with a
-  **multiply**-blended caustics overlay; optional gentle wave distortion via a
-  custom shader sampling a scrolling noise texture.
-- **8. Underground "lantern" lighting 🟡 (M).** Darken cave areas with a
-  **multiply**-blend vignette sprite and a soft radial light that follows the
-  player. Works now as a sprite trick; a real 2D light system would be cleaner
-  (engine ask).
-- **9. Heat-haze / underwater wobble 🟡 (M).** Per-layer custom shader offsetting
-  UVs by a scrolling noise texture for a wobble on lava/water areas. Per-layer
-  works today; a **fullscreen** version needs a post pass (engine ask).
+- **6. Coin & stomp juice ✅ DONE.** Additive **sparkle bursts** (procedural
+  4-point star, [`juice.ts`](juice.ts)) on coin-collect (gold) and enemy-stomp /
+  fireball-kill (white), plus floating **score popups** built from the Kenney HUD
+  digit glyphs (`hud0`–`hud9`) that rise and fade. Pooled sprites on two new
+  layers (additive sparks + alpha digits). **Bonus:** smashing a brick as big now
+  sprays **four spinning brick chunks** (rotating tile-sprite debris with gravity)
+  plus a dust sparkle and a crunchy `breakBlock()` SFX.
+- **7. Animated lava bands ✅ DONE.** The expanded underground has molten **lava
+  pools** ([`lava.ts`](lava.ts)): a per-pool custom-shader quad generating flowing,
+  glowing magma entirely from `fx.time` + `in.uv` (no texture — it reuses the 1×1
+  white atlas, like the GPU-water trick), with a shimmering surface crest. Touching
+  lava is instant death; stone stepping-stones let you hop across. Each pool also
+  casts a warm **additive glow** so it lights the dark.
+- **8. Underground "lantern" lighting ✅ DONE.** ([`lantern.ts`](lantern.ts)) A
+  full-screen **multiply**-darkness quad whose fragment carves a soft radial pool of
+  light that follows the player (params drive its screen position / radius / ambient),
+  plus wall/ledge **torches** with flickering additive glows. The cave reads as a
+  lantern-lit explore. (A real 2D light system would still be a cleaner engine ask.)
+- **9. Heat-haze / underwater wobble 🟡 (per-layer DONE).** The lava surface
+  **wobbles** its sample UVs with a scrolling sine in [`lava.ts`](lava.ts) — the
+  per-layer heat-haze from this idea, applied to the lava itself. A **fullscreen**
+  heat-haze that distorts the whole frame still needs the engine offscreen-RT hook
+  (ask A) and is deliberately left for later.
 - **10. Weather & time-of-day ✅/🔴 (M).** Rain/snow as additive particle sprites
   and a day→dusk→night sky gradient. Sprite-based version ✅; a true fullscreen
   graded sky / color-grade wants a post pass 🔴.
@@ -206,13 +253,25 @@ scene graph — and gives the demo real game structure.
 
 - **11. Checkpoints & a tiny world map ✅ (M).** Flag checkpoints mid-level and a
   between-areas map screen — reinforces the multi-area system from #3.
-- **12. More enemy types ✅ (M).** A flyer, a shell-kicker, a piranha plant rising
-  from pipes (ties into #3), and a simple **boss** built from a few composited
-  sprites at the castle.
-- **13. Moving & one-way platforms ✅ (S–M).** Named in the blurb, not yet built;
-  great for platforming variety and exercises the swept-AABB collider.
-- **14. Combo / scoring system ✅ (S).** Stomp chains, coin streaks, end-of-area
-  bonus tally — gives players a reason to replay.
+- **12. More enemy types ✅ DONE.** Added a **flying bee** (sine-bobbing through the
+  air, stompable from above) and a **pipe-plant** (the tall green `snakeSlime` that
+  rises from / retracts into a decorative pipe on a timed cycle, freezing while the
+  player stands over it; contact hurts, fireballs kill it). They reuse the shared
+  enemy update/stomp/fireball paths — flyers stomp like slimes, the plant can't be
+  stomped. Joins the existing slimes + shell-kicking snails. (A castle boss is still
+  open.)
+- **13. Moving & one-way platforms ✅ DONE.** **One-way platforms** (thin grass
+  ledges) you jump up *through* and land on top of — a `isOneWay` oracle in the
+  swept-AABB collider only blocks a downward move whose feet were above the platform.
+  **Moving platforms** (kinematic `bridge` tiles) ferry the player along X or Y and
+  **carry** them (horizontal drift + vertical follow), with a per-frame delta applied
+  to the rider: a horizontal ferry over an overworld pit, a vertical elevator to a
+  coin stash, and a cave platform riding over a **lava** channel.
+- **14. Combo / scoring system ✅ DONE.** A **stomp combo** escalates points for
+  chaining enemies mid-air without landing (100 → 200 → 400 → 800 → 1000 → 2000 →
+  4000 → 8000 → **1-up**, then resets), shown via the floating score popups; the
+  chain resets the moment you touch solid ground. Reaching the flag now awards an
+  **end-of-area time bonus** (remaining time × 50) shown in the completion banner.
 
 ### Tech showcase / "flex"
 
@@ -277,7 +336,12 @@ A high-impact, all-✅ starting batch that needs zero engine changes:
 3. **#3 area system + one underground room** — ✅ **DONE** (pipe warp + iris + cave
    `1-2`, all overlay-side; no engine post-process needed).
 4. **#6 coin/stomp juice** + **#4 fireballs** — gameplay-feel polish.
-   (#4 fire flower + fireballs ✅ **DONE**; #6 coin/stomp juice **← next**).
+   (#4 fire flower + fireballs ✅ **DONE**; #6 coin/stomp juice + brick-break
+   debris ✅ **DONE**).
+
+Next natural step is the **CRT/scanline post-process (#17)** — the first effect
+that genuinely needs the engine offscreen-RT hook (ask A), or more gameplay
+content (#11 checkpoints, #12 more enemy types, #13 moving platforms).
 
 Then the **CRT/scanline post-process (#17)** is the natural next showcase — it's
 the first effect that genuinely needs the engine hook (ask A above), and would

@@ -22,6 +22,8 @@ export interface CollisionMap {
     rows: number;
     /** True if the tile cell `(cx, cy)` blocks movement. */
     isSolid: (cx: number, cy: number) => boolean;
+    /** True if `(cx, cy)` is a one-way platform (solid only when landed on from above). */
+    isOneWay?: (cx: number, cy: number) => boolean;
 }
 
 export interface MoveResult {
@@ -77,7 +79,15 @@ export function moveAndCollide(box: AABB, vx: number, vy: number, dt: number, ma
         const x0 = cellOf(box.x + 0.001);
         const x1 = cellOf(box.x + box.w - 0.001);
         for (let cx = x0; cx <= x1; cx++) {
-            if (map.isSolid(cx, cy)) {
+            let blocked = map.isSolid(cx, cy);
+            // One-way platforms only stop a downward move whose feet were above the
+            // platform top before this step (so you pass up through, land on top).
+            if (!blocked && dir > 0 && map.isOneWay?.(cx, cy)) {
+                const platformTop = cy * TILE;
+                const prevBottom = box.y - dy + box.h;
+                if (prevBottom <= platformTop + 1) blocked = true;
+            }
+            if (blocked) {
                 if (dir > 0) {
                     box.y = cy * TILE - box.h;
                     result.onGround = true;

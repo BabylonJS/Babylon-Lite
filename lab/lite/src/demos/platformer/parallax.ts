@@ -75,6 +75,58 @@ function makeCtx(w: number, h: number): CanvasRenderingContext2D {
     return ctx;
 }
 
+/**
+ * "Alpha bleed" (edge dilation) for a transparent canvas before it is uploaded as
+ * a linear-filtered texture. Canvas 2D stores straight alpha, and fully-transparent
+ * pixels are RGB (0,0,0); when the texture is bilinear-sampled and scaled up, the
+ * filter interpolates the sprite's edge between an opaque colour and a transparent
+ * BLACK texel, leaving a faint dark fringe (visible along the hill crests / cloud
+ * edges). Spreading the opaque colour `passes` pixels into the transparent region
+ * makes the kernel interpolate colour↔colour instead. NON-DESTRUCTIVE: only the RGB
+ * of pixels whose alpha is already 0 changes; alpha and every visible pixel are
+ * untouched, so the composited result is unchanged — only the filtered edge is fixed.
+ */
+function dilateAlpha(ctx: CanvasRenderingContext2D, passes = 3): void {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const known = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) known[i] = d[i * 4 + 3]! > 0 ? 1 : 0;
+    for (let p = 0; p < passes; p++) {
+        const fills: { i: number; r: number; g: number; b: number }[] = [];
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = y * w + x;
+                if (known[i]) continue;
+                let r = 0, g = 0, b = 0, n = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                        const j = ny * w + nx;
+                        if (!known[j]) continue;
+                        r += d[j * 4]!;
+                        g += d[j * 4 + 1]!;
+                        b += d[j * 4 + 2]!;
+                        n++;
+                    }
+                }
+                if (n > 0) fills.push({ i, r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) });
+            }
+        }
+        if (fills.length === 0) break;
+        for (const f of fills) {
+            d[f.i * 4] = f.r;
+            d[f.i * 4 + 1] = f.g;
+            d[f.i * 4 + 2] = f.b;
+            known[f.i] = 1; // alpha (d[i*4+3]) left at 0 — pixel stays invisible
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
 /** Vertical sky gradient (deep blue → pale horizon haze). */
 function drawSky(w: number, h: number): string {
     const ctx = makeCtx(w, h);
@@ -117,6 +169,7 @@ function drawClouds(w: number, h: number): string {
             }
         }
     }
+    dilateAlpha(ctx); // spread white into the transparent surround so edges don't fringe dark
     return ctx.canvas.toDataURL("image/png");
 }
 
@@ -154,6 +207,7 @@ function drawHills(
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.stroke();
+    dilateAlpha(ctx); // spread the crest colour up into the transparent sky so the edge doesn't fringe dark
     return ctx.canvas.toDataURL("image/png");
 }
 

@@ -2,7 +2,7 @@
  * Shared world constants and Kenney frame-name helpers for the platformer demo.
  *
  * The level is laid out on a uniform tile grid; `TILE` is the world-pixel size of
- * one cell. The art is the curated CC0 "Platformer Pack Remastered" subset under
+ * one cell. The art is the curated CC0 "Platformer Art Deluxe" subset under
  * `lab/public/platformer/`.
  */
 
@@ -43,8 +43,7 @@ export const PLAYER_FRAMES = {
     walk2: `${PLAYER}_walk2`,
     jump: `${PLAYER}_jump`,
     duck: `${PLAYER}_duck`,
-    hit: `${PLAYER}_hit`,
-    front: `${PLAYER}_front`,
+    hit: `${PLAYER}_hurt`,
 } as const;
 
 /** Player frame names for the fire power-up state (yellow alien, same suffixes). */
@@ -54,6 +53,5 @@ export const PLAYER_FIRE_FRAMES = {
     walk2: `${PLAYER_FIRE}_walk2`,
     jump: `${PLAYER_FIRE}_jump`,
     duck: `${PLAYER_FIRE}_duck`,
-    hit: `${PLAYER_FIRE}_hit`,
-    front: `${PLAYER_FIRE}_front`,
+    hit: `${PLAYER_FIRE}_hurt`,
 } as const;

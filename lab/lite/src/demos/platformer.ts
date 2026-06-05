@@ -14,7 +14,7 @@
  * HUD, and Web Audio SFX) are hand-rolled clean-room in the `platformer/` module
  * folder — explicitly allowed for the demos, which exist to showcase the renderer.
  *
- * Assets are a curated CC0 subset of Kenney's "Platformer Pack Remastered",
+ * Assets are a curated CC0 subset of Kenney's "Platformer Art Deluxe",
  * committed under `lab/public/platformer/` (CC0 — no attribution required, no
  * network fetch).
  */
