@@ -73,4 +73,6 @@ build-timeline.json
 lab/public/api-docs/
 lab/public/lite/api-docs/
 
+# Kenney asset source GLBs (CC0) - bake outputs are committed under lab/public
+scratch/
 playwright-report/
