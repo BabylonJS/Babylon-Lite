@@ -18,6 +18,7 @@ import {
     createRenderTask,
     createSceneContext,
     GeometryTextureType,
+    loadEnvironment,
     loadGltf,
     registerScene,
     startEngine,
@@ -43,6 +44,9 @@ async function main(): Promise<void> {
     attachFreeControl(camera, canvas, scene);
 
     addToScene(scene, await loadGltf(engine, SPONZA_URL));
+    await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/environmentSpecular.env", {
+        brdfUrl: "/brdf-lut.png",
+    });
 
     const samples = engine.msaaSamples as 1 | 4;
 

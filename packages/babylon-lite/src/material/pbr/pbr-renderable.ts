@@ -301,7 +301,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // Material UBO.
         const materialSpec = composed._materialUboSpec!;
         const matInitData = new Float32Array(materialSpec._totalBytes / 4);
-        writeMaterialData(matInitData, mat, materialSpec);
+        _writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
 
         const needsTaskRefraction = !!mat.transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
@@ -379,7 +379,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 } else {
                     data.fill(0);
                 }
-                writeMaterialData(data, mat, materialSpec);
+                _writeMaterialData(data, mat, materialSpec);
                 device.queue.writeBuffer(materialUBO, 0, data.buffer, 0, data.byteLength);
             }
         };
@@ -464,12 +464,46 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
+    // Stash the per-scene PBR context on the scene so the PBR geometry-renderer
+    // path can reuse the same composer / env / shadow setup without re-running
+    // the scene-wide scan above. Stored on the scene (not on pbrGroupBuilder)
+    // to avoid a static cycle: pbrGroupBuilder lives in pbr-material.ts which
+    // already dynamic-imports this module.
+    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = {
+        _composePbr: composePbr,
+        _sceneFeatures: sceneFeatures,
+        _envTextures: envTextures ?? null,
+        _shadowLights: shadowLights,
+        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
+    };
+
     scene._disposables.push(
         () => clearPbrPipelineCache(),
         () => clearSamplerCache(engine)
     );
 
     return { renderables, rebuildSingle };
+}
+
+/** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`
+ *  after `buildPbrRenderables` runs. Consumed by the PBR geometry-renderer
+ *  module — the only way to reuse the per-scene `composePbr` closure (env,
+ *  shadows, lights, anisotropy, sub-features) without duplicating the heavy
+ *  scene-wide dep-gathering scan. Overwritten on each scene build, matching
+ *  the same pattern used for `_rebuildSingle`. */
+export interface _PbrGeometryContext {
+    /** @internal */
+    readonly _composePbr: ReturnType<typeof createPbrComposer>;
+    /** @internal */
+    readonly _sceneFeatures: number;
+    /** @internal */
+    readonly _envTextures: EnvironmentTextures | null;
+    /** @internal */
+    readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf"; readonly gen: ShadowGenerator }[];
+    /** @internal */
+    readonly _syncThinInstanceBuffers:
+        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | null;
 }
 
 function toSingleLightType(type: string): SingleLightType {
@@ -503,10 +537,10 @@ async function importSingleLightWgsl(type: SingleLightType): Promise<SingleLight
     return import("./fragments/singlelight-point-wgsl.js");
 }
 
-/** Write material properties into a pre-allocated Float32Array.
+/** @internal Write material properties into a pre-allocated Float32Array.
  *  Core fields only; per-extension slices are contributed by registered
- *  writers. */
-function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec: import("../../shader/fragment-types.js").UboSpec): void {
+ *  writers. Exported for the PBR geometry-renderer path. */
+export function _writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec: import("../../shader/fragment-types.js").UboSpec): void {
     data[0] = material.environmentIntensity ?? 1.0;
     data[1] = material.directIntensity ?? 1.0;
     data[2] = material.reflectance ?? 0.04;

@@ -11,6 +11,8 @@ import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import "@babylonjs/core/Loading/loadingScreen";
 import { SceneLoader } from "@babylonjs/core/Loading/sceneLoader";
+import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
@@ -22,52 +24,72 @@ import { FrameGraphObjectRendererTask } from "@babylonjs/core/FrameGraph/Tasks/R
 import { FrameGraphCopyToTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToTextureTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import { WebGPURenderItemViewport } from "@babylonjs/core/Engines/WebGPU/webgpuBundleList";
+import "@babylonjs/core/Engines/WebGPU/extensions/engine.debugging";
+import { Engine } from "@babylonjs/core/Engines/engine";
 
 const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Sponza/glTF/";
 
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, {
-        antialias: true,
-        adaptToDeviceRatio: true,
-        deviceDescriptor: { requiredLimits: { maxColorAttachmentBytesPerSample: 128 } },
-    });
-    await engine.initAsync();
+    const useWebGPU = true;
+
+    let engine: Engine | WebGPUEngine;
+    if (useWebGPU) {
+        engine = new WebGPUEngine(canvas, {
+            antialias: true,
+            adaptToDeviceRatio: true,
+            deviceDescriptor: { requiredLimits: { maxColorAttachmentBytesPerSample: 128 } },
+            enableGPUDebugMarkers: true,
+        });
+        await engine.initAsync();
+    } else {
+        engine = new Engine(canvas, true);
+    }
 
     engine.useReverseDepthBuffer = true;
 
     // BJS 9.5.0 FrameGraphObjectRendererTask unconditionally constructs ThinDepthPeelingRenderer,
     // which calls engine.buildTextureLayout() — a WebGL-only API. Stub it (OIT is not used here).
-    (engine as unknown as { buildTextureLayout: (formats: unknown[]) => unknown[] }).buildTextureLayout = (formats: unknown[]) => formats.map(() => true);
+    if (engine.isWebGPU) {
+        (engine as unknown as { buildTextureLayout: (formats: unknown[]) => unknown[] }).buildTextureLayout = (formats: unknown[]) => formats.map(() => true);
 
-    // Mirror the viewport-rounding patch from scene 145 — same parity rationale.
-    const engPatch = engine as unknown as {
-        _viewportCached: { x: number; y: number; z: number; w: number };
-        _currentRenderTarget: unknown;
-        getRenderHeight: (useScreen?: boolean) => number;
-        _getCurrentRenderPass: () => GPURenderPassEncoder;
-        _applyViewport: (bundleList?: { addItem: (item: unknown) => void }) => void;
-    };
-    engPatch._applyViewport = function (bundleList) {
-        const vc = engPatch._viewportCached;
-        const x = Math.floor(vc.x);
-        const w = Math.floor(vc.x + vc.z) - x;
-        let y = Math.floor(vc.y);
-        const h = Math.floor(vc.y + vc.w) - y;
-        if (!engPatch._currentRenderTarget) {
-            y = engPatch.getRenderHeight(true) - y - h;
-        }
-        if (bundleList) {
-            bundleList.addItem(new WebGPURenderItemViewport(x, y, w, h));
-        } else {
-            engPatch._getCurrentRenderPass().setViewport(x, y, w, h, 0, 1);
-        }
-    };
+        // Mirror the viewport-rounding patch from scene 145 — same parity rationale.
+        const engPatch = engine as unknown as {
+            _viewportCached: { x: number; y: number; z: number; w: number };
+            _currentRenderTarget: unknown;
+            getRenderHeight: (useScreen?: boolean) => number;
+            _getCurrentRenderPass: () => GPURenderPassEncoder;
+            _applyViewport: (bundleList?: { addItem: (item: unknown) => void }) => void;
+        };
+        engPatch._applyViewport = function (bundleList) {
+            const vc = engPatch._viewportCached;
+            const x = Math.floor(vc.x);
+            const w = Math.floor(vc.x + vc.z) - x;
+            let y = Math.floor(vc.y);
+            const h = Math.floor(vc.y + vc.w) - y;
+            if (!engPatch._currentRenderTarget) {
+                y = engPatch.getRenderHeight(true) - y - h;
+            }
+            if (bundleList) {
+                bundleList.addItem(new WebGPURenderItemViewport(x, y, w, h));
+            } else {
+                engPatch._getCurrentRenderPass().setViewport(x, y, w, h, 0, 1);
+            }
+        };
+    }
 
     const scene = new Scene(engine);
     scene.useRightHandedSystem = false;
     scene.skipPointerMovePicking = true;
+    scene.environmentTexture = new CubeTexture("https://assets.babylonjs.com/environments/environmentSpecular.env", scene);
+
+    // Mirror Lite's loadEnvironment() image-processing setup so the main forward-rendered
+    // view matches: tone mapping (STANDARD), exposure 0.8, contrast 1.2.
+    scene.imageProcessingConfiguration.toneMappingEnabled = true;
+    scene.imageProcessingConfiguration.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_STANDARD;
+    scene.imageProcessingConfiguration.exposure = 0.8;
+    scene.imageProcessingConfiguration.contrast = 1.2;
 
     (window as any).scene = scene;
 

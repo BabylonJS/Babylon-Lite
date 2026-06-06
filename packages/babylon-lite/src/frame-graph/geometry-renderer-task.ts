@@ -35,19 +35,18 @@
  */
 
 import type { Camera } from "../camera/camera.js";
-import { getViewMatrix, getViewProjectionMatrix } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { RenderTargetMrt } from "../engine/render-target-mrt.js";
 import { buildRenderTargetMrt, createRenderTargetMrt, disposeRenderTargetMrt, getSampledColorTexture, getSampledColorView } from "../engine/render-target-mrt.js";
 import type { Mesh } from "../mesh/mesh.js";
-import type { Material } from "../material/material.js";
+import type { Material, MaterialRenderFeatures } from "../material/material.js";
 import { getMaterialSource } from "../material/material-view.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
-import { _computeStandardMaterialFeatures } from "../material/standard/standard-material.js";
-import { createStandardGeometryMaterialView } from "../material/standard/geometry-view.js";
-import type { StandardGeometryMaterialView } from "../material/standard/geometry-view.js";
+import type { StandardGeometryMaterialView, StandardGeometryViewConfig } from "../material/standard/geometry-view.js";
+import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import type { PbrGeometryMaterialView, PbrGeometryViewConfig } from "../material/pbr/pbr-geometry-view.js";
 import type { DrawBinding, Renderable } from "../render/renderable.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -57,7 +56,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
 import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
-import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -154,7 +153,7 @@ interface AttachmentInfo {
 interface BoundMesh {
     readonly _mesh: Mesh;
     readonly _binding: DrawBinding;
-    readonly _view: StandardGeometryMaterialView;
+    readonly _view: StandardGeometryMaterialView | PbrGeometryMaterialView;
 }
 
 interface GeometryRendererTaskInternal extends GeometryRendererTask {
@@ -162,8 +161,8 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
      *  and (when no external depth was supplied) the depth attachment. */
     _mrt: RenderTargetMrt;
     _attachments: AttachmentInfo[];
-    /** One view per unique source Standard material. */
-    _views: Map<StandardMaterialProps, StandardGeometryMaterialView>;
+    /** One view per unique source material (Standard or PBR). */
+    _views: Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView>;
     /** Render bindings — opaque first then alpha-blended (sorted in record()). */
     _bound: BoundMesh[];
     _wrapperTargets: (RenderTarget | null)[];
@@ -192,6 +191,13 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
      *  every MRT slot, while `_colorFormats` is the array the geometry renderable consumes
      *  to build `fragment.targets`. */
     _signature: { _colorFormat: string; _colorFormats: GPUTextureFormat[]; _depthStencilFormat?: GPUTextureFormat; _depthCompare?: GPUCompareFunction; _sampleCount: number };
+    /** Lazily-loaded material-family bridges. Each is populated by `_preload`
+     *  only when at least one mesh resolves to that family, so a Standard-only
+     *  scene never pays for the PBR runtime chunk (and vice-versa). */
+    _createStandardGeometryView: ((src: StandardMaterialProps, cfg: StandardGeometryViewConfig) => StandardGeometryMaterialView) | null;
+    _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
+    _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
+    _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────
@@ -362,6 +368,44 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _needsVelocity: needsVelocity,
         _needsParams: needsParams,
         _signature: signature,
+        _createStandardGeometryView: null,
+        _computeStandardFeatures: null,
+        _createPbrGeometryView: null,
+        _computePbrFeatures: null,
+
+        async _preload(): Promise<void> {
+            const meshes = (config.meshes ?? sc.meshes) as readonly Mesh[];
+            let hasStandard = false;
+            let hasPbr = false;
+            for (const mesh of meshes) {
+                const family = resolveMaterialFamily(mesh.material);
+                if (family === "standard") {
+                    hasStandard = true;
+                } else if (family === "pbr") {
+                    hasPbr = true;
+                }
+            }
+            const loads: Promise<void>[] = [];
+            if (hasStandard) {
+                loads.push(
+                    (async () => {
+                        const [viewMod, matMod] = await Promise.all([import("../material/standard/geometry-view.js"), import("../material/standard/standard-material.js")]);
+                        task._createStandardGeometryView = viewMod.createStandardGeometryMaterialView;
+                        task._computeStandardFeatures = matMod._computeStandardMaterialFeatures;
+                    })()
+                );
+            }
+            if (hasPbr) {
+                loads.push(
+                    (async () => {
+                        const [viewMod, matMod] = await Promise.all([import("../material/pbr/pbr-geometry-view.js"), import("../material/pbr/pbr-material.js")]);
+                        task._createPbrGeometryView = viewMod.createPbrGeometryMaterialView;
+                        task._computePbrFeatures = matMod._computePbrMaterialFeatures;
+                    })()
+                );
+            }
+            await Promise.all(loads);
+        },
 
         record(): void {
             recordTask(task, config, eng, sc);
@@ -418,13 +462,13 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
     const meshes = (config.meshes ?? sc.meshes) as readonly Mesh[];
     const attachmentTypes = task._attachments.map((a) => a._type);
     for (const mesh of meshes) {
-        const sourceMat = resolveSourceStandardMaterial(mesh.material);
-        if (!sourceMat) {
+        const resolved = resolveSourceMaterial(task, mesh.material);
+        if (!resolved) {
             continue;
         }
-        const view = ensureView(task, sourceMat, attachmentTypes, config);
-        // Natural dispatch — view._buildGroup is the standard geometry builder,
-        // its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
+        const view = ensureView(task, resolved, attachmentTypes, config);
+        // Natural dispatch — view._buildGroup is the standard or PBR geometry
+        // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
         const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view);
         const binding = renderable.bind(eng, task._signature as unknown as RenderTargetSignature);
         task._bound.push({ _mesh: mesh, _binding: binding, _view: view });
@@ -441,23 +485,36 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
     rebuildRenderPassDescriptor(task, config);
 }
 
+interface ResolvedMaterial {
+    _mat: StandardMaterialProps | PbrMaterialProps;
+    _family: "standard" | "pbr";
+}
+
 function ensureView(
     task: GeometryRendererTaskInternal,
-    sourceMat: StandardMaterialProps,
+    resolved: ResolvedMaterial,
     attachmentTypes: readonly GeometryTextureType[],
     config: GeometryRendererTaskConfig
-): StandardGeometryMaterialView {
-    const cached = task._views.get(sourceMat);
+): StandardGeometryMaterialView | PbrGeometryMaterialView {
+    const cached = task._views.get(resolved._mat as Material);
     if (cached) {
         return cached;
     }
-    const view = createStandardGeometryMaterialView(sourceMat, {
-        attachments: attachmentTypes,
-        emitColor: config.targetTexture !== undefined,
-        gpUBO: task._paramsUBO,
-        reverseCulling: config.reverseCulling,
-    });
-    task._views.set(sourceMat, view);
+    const view =
+        resolved._family === "standard"
+            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, {
+                  attachments: attachmentTypes,
+                  emitColor: config.targetTexture !== undefined,
+                  gpUBO: task._paramsUBO,
+                  reverseCulling: config.reverseCulling,
+              })
+            : task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, {
+                  attachments: attachmentTypes,
+                  emitColor: config.targetTexture !== undefined,
+                  gpUBO: task._paramsUBO,
+                  reverseCulling: config.reverseCulling,
+              });
+    task._views.set(resolved._mat as Material, view);
     return view;
 }
 
@@ -519,7 +576,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
         return 0;
     }
     const aspect = mrt._width / mrt._height;
-    writeSceneUBO(task, eng, camera, aspect);
+    writeSceneUBO(task, eng, sc, camera, aspect);
     if (task._needsParams) {
         writeParamsUBO(task, eng, camera);
     }
@@ -560,17 +617,9 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     return draws;
 }
 
-function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContext, camera: Camera, aspect: number): void {
+function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext, camera: Camera, aspect: number): void {
     const data = task._sceneData;
-    data.fill(0);
-    const viewProj = getViewProjectionMatrix(camera, aspect);
-    const viewMat = getViewMatrix(camera);
-    packMat4IntoF32(data, viewProj, 0);
-    packMat4IntoF32(data, viewMat, 16);
-    const wm = camera.worldMatrix;
-    data[32] = wm[12]!;
-    data[33] = wm[13]!;
-    data[34] = wm[14]!;
+    _packSceneUniforms(data, eng, sc, camera, aspect);
     task._viewProjectionScratch.set(data.subarray(0, 16));
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
@@ -610,20 +659,41 @@ function disposeTask(task: GeometryRendererTaskInternal): void {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function resolveSourceStandardMaterial(material: Material | null | undefined): StandardMaterialProps | null {
+/** Resolve a mesh's material family without importing any family runtime —
+ *  reads only the build-group tag. Used by `_preload` to decide which family
+ *  bridges to dynamically import. */
+function resolveMaterialFamily(material: Material | null | undefined): "standard" | "pbr" | null {
+    if (!material) {
+        return null;
+    }
+    const family = getMaterialSource(material)._buildGroup?._materialFamily;
+    return family === "standard" || family === "pbr" ? family : null;
+}
+
+function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Material | null | undefined): ResolvedMaterial | null {
     if (!material) {
         return null;
     }
     const src = getMaterialSource(material) as Material & { _renderFeatures?: { features: number } };
     const buildGroup = src._buildGroup;
-    if (!buildGroup || buildGroup._materialFamily !== "standard") {
+    if (!buildGroup) {
         return null;
     }
-    const mat = src as StandardMaterialProps;
-    if (!mat._renderFeatures) {
-        mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) };
+    if (buildGroup._materialFamily === "standard") {
+        const mat = src as StandardMaterialProps;
+        if (!mat._renderFeatures) {
+            mat._renderFeatures = { features: task._computeStandardFeatures!(mat) };
+        }
+        return { _mat: mat, _family: "standard" };
     }
-    return mat;
+    if (buildGroup._materialFamily === "pbr") {
+        const mat = src as PbrMaterialProps;
+        if (!mat._renderFeatures) {
+            mat._renderFeatures = task._computePbrFeatures!(mat);
+        }
+        return { _mat: mat, _family: "pbr" };
+    }
+    return null;
 }
 
 /** Build a wrapper RenderTarget that aliases one MRT attachment as a regular

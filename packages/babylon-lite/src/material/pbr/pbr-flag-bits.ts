@@ -69,3 +69,7 @@ export const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
 /** Material has KHR_materials_dispersion (per-channel chromatic refraction).
  *  Implies PBR2_HAS_VOLUME (the extension requires KHR_materials_volume). */
 export const PBR2_HAS_DISPERSION = 1 << 20;
+/** Material view emits multi-attachment geometry-textures instead of a single
+ *  colour. Consumed only by the geometry-renderer task; PBR scenes without
+ *  geometry rendering never set this bit. */
+export const PBR2_GEOMETRY_OUTPUT = 1 << 21;

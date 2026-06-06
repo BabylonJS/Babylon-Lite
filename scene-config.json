@@ -1083,7 +1083,7 @@
         "slug": "scene145-geometry-renderer",
         "name": "Scene 145 — Geometry Renderer Task",
         "maxMad": 0.5,
-        "maxRawKB": 86,
+        "maxRawKB": 92,
         "description": "HillValley rendered through the new frame-graph geometry renderer task with six geometry-texture impostors copied along the top edge. Per-material MaterialViews reuse the regular Standard fragment shader so ALBEDO / REFLECTIVITY / VIEW_NORMAL / WORLD_NORMAL all match BJS pixel-for-pixel.",
         "tags": ["frame-graph", "geometry-renderer", "mrt", "babylon"],
         "skipPerf": true
@@ -1092,12 +1092,12 @@
         "id": 146,
         "slug": "scene146-pbr-geometry-renderer",
         "name": "Scene 146 — PBR Geometry Renderer (Sponza)",
-        "maxMad": 15,
-        "maxRawKB": 200,
+        "maxMad": 0.6,
+        "maxRawKB": 130,
         "description": "Khronos Sponza glTF rendered through the frame-graph geometry renderer task with the same eleven geometry-texture impostors as Scene 145. Sponza is fully PBR so this exercises the PBR geometry-output path. Camera is positioned inside the model.",
         "tags": ["frame-graph", "geometry-renderer", "mrt", "pbr", "gltf"],
         "skipPerf": true,
-        "skipParity": true
+        "skipParity": false
     },
     {
         "id": 150,
