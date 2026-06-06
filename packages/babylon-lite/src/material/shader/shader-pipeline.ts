@@ -119,19 +119,20 @@ function buildBindGroupLayoutEntries(samplers: readonly ShaderSamplerDecl[], has
         entries.push({ binding: nextBinding++, visibility: SHADER_STAGE_ALL, buffer: { type: "uniform" } });
     }
     for (const sampler of samplers) {
-        const sampleType = sampler.sampleType ?? "float";
+        const isArray = sampler.viewDimension === "2d-array";
+        const sampleType = sampler.comparison === true ? "depth" : (sampler.sampleType ?? "float");
         entries.push({
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
             texture: {
                 sampleType,
-                viewDimension: "2d",
+                viewDimension: isArray ? "2d-array" : "2d",
             },
         });
         entries.push({
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
-            sampler: { type: sampleType === "float" ? "filtering" : "non-filtering" },
+            sampler: { type: sampler.comparison === true ? "comparison" : sampleType === "float" ? "filtering" : "non-filtering" },
         });
     }
     return entries;
@@ -167,9 +168,12 @@ ${customSpec._structBody}
     }
     let nextBinding = customSpec ? 2 : 1;
     for (const sampler of material.samplerDecls) {
-        const texType = sampler.sampleType === "depth" ? "texture_depth_2d" : "texture_2d<f32>";
+        const isArray = sampler.viewDimension === "2d-array";
+        const isDepth = sampler.comparison === true || sampler.sampleType === "depth";
+        const texType = isDepth ? (isArray ? "texture_depth_2d_array" : "texture_depth_2d") : isArray ? "texture_2d_array<f32>" : "texture_2d<f32>";
+        const samplerType = sampler.comparison === true ? "sampler_comparison" : "sampler";
         wgsl += `@group(1) @binding(${nextBinding++}) var ${sampler.name}: ${texType};
-@group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: sampler;
+@group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: ${samplerType};
 `;
     }
     for (const define of material.defines) {

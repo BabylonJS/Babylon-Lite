@@ -54,6 +54,12 @@ export interface ShaderUniformDecl {
 export interface ShaderSamplerDecl {
     readonly name: string;
     readonly sampleType?: "float" | "unfilterable-float" | "depth";
+    /** Texture view dimension. Default "2d". Use "2d-array" for layered maps such as
+     *  cascaded-shadow (CSM) depth arrays. */
+    readonly viewDimension?: "2d" | "2d-array";
+    /** Bind a hardware comparison sampler (`sampler_comparison`) for depth compare / PCF
+     *  filtering. Implies a depth texture. Default false. */
+    readonly comparison?: boolean;
 }
 
 /** A resolved WGSL preprocessor define (name + value). */
@@ -181,7 +187,15 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const samplerDecls: ShaderSamplerDecl[] = [];
     const textureSlots = new Map<string, ShaderTextureSlot>();
     for (const opt of options.samplers ?? []) {
-        const decl = typeof opt === "string" ? { name: opt, sampleType: "float" as const } : { name: opt.name, sampleType: opt.sampleType ?? "float" };
+        const decl: ShaderSamplerDecl =
+            typeof opt === "string"
+                ? { name: opt, sampleType: "float" }
+                : {
+                      name: opt.name,
+                      sampleType: opt.sampleType ?? (opt.comparison ? "depth" : "float"),
+                      viewDimension: opt.viewDimension ?? "2d",
+                      comparison: opt.comparison ?? false,
+                  };
         assertIdentifier("sampler", decl.name);
         assertUniqueName(usedNames, "sampler", decl.name);
         assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
@@ -309,7 +323,7 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
     }
     if (texture) {
-        const expectsDepth = slot.decl.sampleType === "depth";
+        const expectsDepth = slot.decl.sampleType === "depth" || slot.decl.comparison === true;
         const isDepthTexture = texture._sampleType === "depth";
         if (expectsDepth && !isDepthTexture) {
             throw new Error(`ShaderMaterial: sampler "${name}" expects a depth Texture2D.`);
