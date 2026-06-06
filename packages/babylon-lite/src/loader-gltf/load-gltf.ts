@@ -342,7 +342,7 @@ async function extractAllMeshes(
                 return idx !== undefined ? resolveAccessor(json, binChunk, idx) : null;
             };
             const posData = resolveAttr("POSITION")!;
-            const normData = resolveAttr("NORMAL")!;
+            const normData = resolveAttr("NORMAL");
             const uvData = resolveAttr("TEXCOORD_0");
             const uv2Data = resolveAttr("TEXCOORD_1");
             const tanData = resolveAttr("TANGENT");
@@ -372,9 +372,15 @@ async function extractAllMeshes(
             // Fire material fetch without awaiting — all materials load in parallel
             matPromises.push(getMat(primitive.material));
 
+            // Smooth-normal generation is lazily imported on first need — assets that
+            // always provide NORMAL (the common case) never bundle or fetch this code.
+            const normals = normData
+                ? (normData._data as Float32Array)
+                : (await import("./gltf-normals.js")).computeSmoothNormals(posData._data as Float32Array, indices, posData._count);
+
             partials.push({
                 _positions: posData._data as Float32Array,
-                _normals: normData._data as Float32Array,
+                _normals: normals,
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
                 _uvs: uvData ? (uvData._data as Float32Array) : new Float32Array(posData._count * 2),
                 _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
