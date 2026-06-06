@@ -8,6 +8,7 @@
 
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Material } from "../material.js";
+import type { MaterialPlugin } from "../plugin/material-plugin.js";
 import {
     AMBIENT_USES_UV2,
     DIFFUSE_USES_UV2,
@@ -33,6 +34,10 @@ import {
 
 /** StandardMaterial properties — plain data. */
 export interface StandardMaterialProps extends Material {
+    /** Optional opt-in material plugins (custom WGSL + uniforms + samplers layered
+     *  on top of the built-in Standard pipeline). Attach via `material.plugins = [plugin]`,
+     *  then call `enableMaterialPlugins(scene)` before `registerScene`. */
+    plugins?: MaterialPlugin[];
     diffuseColor: [number, number, number];
     alpha: number;
     specularColor: [number, number, number];

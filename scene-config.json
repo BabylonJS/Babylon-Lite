@@ -1431,5 +1431,15 @@
         "description": "A receding row of 10 gold PBR boxes fades into linear fog whose colour matches the background, validating that PBR materials apply fog identically to Babylon.js — the fog is mixed into the linear HDR colour before the tonemap/image-processing chain, using the PBR-specific linearised fog factor (toLinearSpace(fog) = pow(fog, 2.2)). Hemispheric light, arc-rotate camera, no environment.",
         "tags": ["pbr", "fog"],
         "skipPerf": true
+    },
+    {
+        "id": 217,
+        "slug": "scene217-material-plugin",
+        "name": "Scene 217 — Material Plugin (BlackAndWhite)",
+        "maxMad": 0.4,
+        "maxRawKB": 80,
+        "description": "Opt-in MaterialPlugin support (the BJS MaterialPluginBase equivalent): a PBR sphere and a Standard box each carry a stateless BlackAndWhite grayscale plugin that injects custom WGSL at CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR (Lite slot BC, after tonemap+gamma). The full built-in PBR/Standard lighting pipeline is preserved; only the final color is converted to luminance. Proves per-instance plugin attach (material.plugins = [plugin]) on both material families with zero bundle-size impact for plugin-free scenes.",
+        "tags": ["material", "plugin", "pbr", "standard"],
+        "skipPerf": true
     }
 ]
