@@ -164,7 +164,7 @@ async function main(): Promise<void> {
             sourceSamplingMode: "linear",
             aberrationAmount: 70,
             radialIntensity: 0,
-            direction: { x: 0.707, y: 0.707 },
+            direction: { x: 0.707, y: -0.707 },
             viewport: { x: 0.5, y: 0, width: 0.5, height: 0.5 },
             clear: false,
         },
