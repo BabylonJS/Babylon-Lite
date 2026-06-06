@@ -110,6 +110,7 @@ export function ensureCsmShadowTaskState(
             _width: cfg._mapSize,
             _height: cfg._mapSize,
             _eager: true,
+            _ownsDepthTexture: false, // borrowed: the shared CSM depth array is owned by the generator
         };
         const camera = createShadowCamera(sg);
         const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera }, engine, scene);

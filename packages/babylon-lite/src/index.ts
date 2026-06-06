@@ -84,6 +84,7 @@ export { createPointLight } from "./light/point-light.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export type { ClusteredLightContainer, ClusteredLightContainerOptions, ClusteredPointLight, ClusteredPointLightOptions } from "./light/clustered.js";
+export { createClusteredLightContainer, createClusteredPointLight, addClusteredLightContainer } from "./light/clustered.js";
 export type { LightBase } from "./light/types.js";
 export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 

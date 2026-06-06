@@ -105,6 +105,9 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
         _width: mapSize,
         _height: mapSize,
         _eager: true,
+        // Borrowed: the depth map is the generator's shared shadow map (persists for the generator's
+        // lifetime); per-task render-target disposal must NOT destroy it (it's reused after rebuilds).
+        _ownsDepthTexture: false,
     };
 }
 
