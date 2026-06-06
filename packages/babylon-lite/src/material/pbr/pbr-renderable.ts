@@ -27,6 +27,7 @@ import {
     PBR2_HAS_UV2,
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
+    PBR_HAS_FOG,
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
@@ -240,6 +241,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _acesTonemapCall = acesMod.ACES_TONEMAP_CALL_WGSL;
     }
 
+    // Fog WGSL is dynamically imported only when the scene has fog, so non-fog PBR scenes
+    // bundle zero fog bytes (a static import would defeat tree-shaking — see pbr-fog-wgsl.ts).
+    let _fogHelper = "";
+    let _fogBlock = "";
+    if (scene.fog) {
+        const fogMod = await import("./pbr-fog-wgsl.js");
+        _fogHelper = fogMod.PBR_FOG_HELPER;
+        _fogBlock = fogMod.PBR_FOG_BLOCK;
+    }
+
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,
@@ -247,6 +258,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _multiLightLoop,
         _acesHelpers,
         _acesTonemapCall,
+        _fogHelper,
+        _fogBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
@@ -255,7 +268,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createThinInstanceFragment,
     });
 
-    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0);
+    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     // Shadow bind group cache — within one scene build, all receiving meshes share the
     // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();

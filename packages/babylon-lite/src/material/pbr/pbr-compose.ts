@@ -25,6 +25,7 @@ import {
     PBR_HAS_EMISSIVE,
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
+    PBR_HAS_FOG,
     PBR_HAS_SPEC_GLOSS,
     PBR_HAS_OCCLUSION,
     PBR_HAS_SKYBOX,
@@ -49,6 +50,10 @@ interface PbrComposerDeps {
     readonly _multiLightLoop: string;
     readonly _acesHelpers: string;
     readonly _acesTonemapCall: string;
+    /** Fog WGSL (calcFogFactor helper + blend block), dynamically loaded by pbr-renderable only
+     *  when scene.fog is set; "" otherwise so non-fog scenes bundle zero fog bytes. */
+    readonly _fogHelper: string;
+    readonly _fogBlock: string;
     readonly _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null;
     readonly _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null;
     readonly _iblSkyboxCalc: string;
@@ -80,6 +85,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _multiLightLoop,
         _acesHelpers,
         _acesTonemapCall,
+        _fogHelper,
+        _fogBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
@@ -150,6 +157,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
             _hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),
             _hasTonemap: hasScene(PBR_HAS_TONEMAP),
+            _fogHelper: hasScene(PBR_HAS_FOG) ? _fogHelper : "",
+            _fogBlock: hasScene(PBR_HAS_FOG) ? _fogBlock : "",
             _acesHelpers: _acesHelpers,
             _acesTonemapCall: _acesTonemapCall,
             _hasAlphaBlend: has(PBR_HAS_ALPHA_BLEND),

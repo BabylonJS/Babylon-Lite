@@ -1421,5 +1421,15 @@
         "description": "PBR counterpart of scene214: a deterministic field of 200 green PBR torus-knot casters drops cascaded shadows onto a large PBR ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). Proves CSM works on PBR-material receivers, not just Standard. Caster transforms come from a seeded PRNG so Lite and the Babylon.js CSM oracle place every knot identically; cascade Z bounds auto-fit the caster AABB (autoCalcShadowZBounds).",
         "tags": ["shadows", "csm", "pbr", "directional"],
         "skipPerf": true
+    },
+    {
+        "id": 216,
+        "slug": "scene216-pbr-fog",
+        "name": "Scene 216 — PBR Fog",
+        "maxMad": 0.05,
+        "maxRawKB": 54,
+        "description": "A receding row of 10 gold PBR boxes fades into linear fog whose colour matches the background, validating that PBR materials apply fog identically to Babylon.js — the fog is mixed into the linear HDR colour before the tonemap/image-processing chain, using the PBR-specific linearised fog factor (toLinearSpace(fog) = pow(fog, 2.2)). Hemispheric light, arc-rotate camera, no environment.",
+        "tags": ["pbr", "fog"],
+        "skipPerf": true
     }
 ]
