@@ -86,7 +86,7 @@ export function createHud(host: HTMLElement): Hud {
     titleSub.textContent = "Babylon Lite \u00B7 WebGPU";
     titleSub.style.cssText = "font:700 clamp(13px,2.2vw,20px) system-ui,sans-serif;color:#fff;text-shadow:0 2px 0 #000;letter-spacing:.22em;";
     const titlePrompt = document.createElement("div");
-    titlePrompt.textContent = "PRESS ENTER \u00B7 TAP \u24B6";
+    titlePrompt.textContent = "PRESS SPACE \u00B7 TAP \u24B6";
     titlePrompt.style.cssText =
         "margin-top:28px;font:800 clamp(15px,2.6vw,24px) system-ui,sans-serif;color:#ffd36b;" +
         "text-shadow:0 2px 0 #000;animation:pf-blink 1.1s steps(1,end) infinite;";

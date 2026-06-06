@@ -12,8 +12,8 @@
  *
  * The top is a **bubbly, undulating surface silhouette** carved with alpha (the quad
  * is transparent above the wavy molten line), so the pool reads as organic lava
- * rather than a glowing rectangular slab; the deepest band sinks toward near-black so
- * it recedes into the rock instead of floating, and faint **embers** rise from below.
+ * rather than a glowing rectangular slab; the deepest band settles toward a dark red
+ * so it recedes into the rock instead of floating, and faint **embers** rise from below.
  *
  * Per-sprite sizing is uniform across pools of different widths by encoding the
  * pool's tile span in the sprite `color`: the fragment reads `in.tint.x` as the
@@ -79,9 +79,10 @@ let py = fract(ey) - 0.5;
 let mote = smoothstep(0.13, 0.0, sqrt(px * px + py * py)) * step(0.86, cellHash);
 rgb = rgb + vec3<f32>(1.0, 0.6, 0.2) * mote * (0.35 + 0.5 * depth);
 
-// Sink the deepest band toward near-black so the pool recedes into the rock
-// (instead of reading as a glowing bar floating in the cave).
-rgb = rgb * (1.0 - 0.55 * smoothstep(0.62, 1.0, depth));
+// Settle the deepest band toward a DARK RED (not black) so the pool reads as molten
+// depth receding into the rock, rather than a black void at the bottom.
+let deepRed = vec3<f32>(0.22, 0.02, 0.015);
+rgb = mix(rgb, deepRed, 0.72 * smoothstep(0.6, 1.0, depth));
 
 // Slow whole-pool emissive pulse.
 rgb = rgb * (0.92 + 0.10 * sin(t * 2.2 + u * 1.3));

@@ -52,12 +52,6 @@ export function makePipeTextureDataUrl(size = 128): string {
     ctx.strokeStyle = "#16531a";
     ctx.strokeRect(rimInset, 0, s - rimInset * 2, rimH);
 
-    // Dark opening inside the rim.
-    ctx.fillStyle = "#0f2f0e";
-    const oX = s * 0.2;
-    const oW = s - oX * 2;
-    ctx.fillRect(oX, rimH * 0.18, oW, rimH * 0.5);
-
     return ctx.canvas.toDataURL("image/png");
 }
 

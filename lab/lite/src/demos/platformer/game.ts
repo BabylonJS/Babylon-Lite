@@ -207,6 +207,9 @@ interface EnemyState {
     shellDir: -1 | 0 | 1;
     dying: number; // >0 = death animation countdown
     slot: number;
+    /** The layer this enemy's sprite lives on. Piranhas use a layer BEHIND the pipes so
+     *  they emerge from / retract into the pipe mouth; all others use the front enemy layer. */
+    layer: Sprite2DLayer;
     animT: number;
     /** fly: vertical bob centre (world px). piranha: pipe-mouth top Y (world px). */
     homeY: number;
@@ -379,6 +382,10 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // Player sprite while travelling through a pipe: a dedicated layer just BEHIND the
     // pipe (order 5.5 < pipeLayer's 6) so the player slides in/out occluded by the pipe.
     const pipeTravelLayer = createSprite2DLayer(players.atlas, { capacity: 1, order: 5.5, pivot: [0.5, 1] });
+    // Piranha plants emerge from pipe mouths: drawn BEHIND the pipe (order 5.7 < pipe 6)
+    // so the plant rises above the rim and sinks back behind it (instead of hovering in
+    // front of the pipe). Shares the enemies atlas, but its own layer for the depth sort.
+    const piranhaLayer = createSprite2DLayer(enemies.atlas, { capacity: maxOf((a) => a.enemies.filter((e) => e.kind === "piranha").length), order: 5.7, pivot: [0.5, 1] });
     const pipeLayer = createSprite2DLayer(pipeAtlas, { capacity: maxOf((a) => a.pipes.length), order: 6, pivot: [0, 0] });
     // Moving platforms (kinematic): drawn as bridge tiles, in front of terrain/pipes.
     const moverLayer = createSprite2DLayer(tiles.atlas, { capacity: maxOf((a) => a.movers.reduce((n, m) => n + m.w, 0)), order: 6.5, pivot: [0, 0] });
@@ -421,7 +428,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const irisLayer = createSprite2DLayer(whiteAtlas, { capacity: 1, order: 20, pivot: [0, 0], customShader: irisShader });
 
     const renderer = createSpriteRenderer(engine, {
-        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeTravelLayer, pipeLayer, moverLayer, blockLayer, coinLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, bossLayer, torchLayer, trailLayer, playerLayer, fireballLayer, bossProjLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
+        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeTravelLayer, piranhaLayer, pipeLayer, moverLayer, blockLayer, coinLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, bossLayer, torchLayer, trailLayer, playerLayer, fireballLayer, bossProjLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
         clearValue: SKY,
     });
     registerSpriteRenderer(renderer);
@@ -447,8 +454,14 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const bridgeFrame = tiles.frameOf("bridge");
     const coinFrame = items.frameOf("coinGold");
     const flagFrame = items.frameOf("flagGreen");
-    const chainFrame = items.frameOf("chain");
-    const MOVER_H = TILE * 0.6; // moving-platform thickness
+    // The flag POLE is drawn on the (tiles-atlas) block layer, so it must use a tiles
+    // frame — the vertical rope reads as a clean flagpole. (Using the items "chain"
+    // index here mapped to a random tiles cell — the "! cube" the pole used to show.)
+    const poleFrame = tiles.frameOf("ropeVertical");
+    const MOVER_H = TILE * 0.6; // moving-platform collision thickness
+    // The Kenney "bridge" frame fills only the bottom ~29% of its cell; this is the
+    // transparent top padding, used to seat the visible plank on the collision surface.
+    const BRIDGE_TOP_PAD = 0.714;
 
     const blockFrame = (kind: BlockKind): number => {
         switch (kind) {
@@ -818,6 +831,16 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const WARP_SLIDE = TILE * 1.8;
     const warp = { active: false, t: 0, teleported: false, cooldown: 0, toArea: world.start, toEntry: "start", label: "1-1", srcX: 0, srcTopY: 0, dstX: 0, dstTopY: 0 };
 
+    // Flagpole finish (Mario-style), run during the "complete" phase. The flag sits at the
+    // BOTTOM of the pole during play; on reaching the goal the player grabs the pole, the
+    // flag RISES to the top + expands, the player SLIDES down to the floor, then strolls
+    // off to the castle. The timeline is driven by `game.timer` counting down COMPLETE_DUR→0.
+    const FLAG_RAISE_DUR = 0.9; // flag travels up the pole (player clinging at top)
+    const FLAG_SLIDE_DUR = 0.9; // player slides down the pole
+    const FLAG_WALK_DUR = 1.7; // stroll to the castle
+    const COMPLETE_DUR = FLAG_RAISE_DUR + FLAG_SLIDE_DUR + FLAG_WALK_DUR;
+    const flagSeq = { poleX: 0, topFeetY: 0, bottomFeetY: 0 };
+
     const sfx: Sfx = createSfx();
     const input: InputController = createInput(document.body);
     const hud: Hud = createHud(document.body);
@@ -848,6 +871,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         clearSprite2DLayer(coinLayer);
         clearSprite2DLayer(moverLayer);
         clearSprite2DLayer(enemyLayer);
+        clearSprite2DLayer(piranhaLayer);
         clearSprite2DLayer(lavaLayer);
         clearSprite2DLayer(torchLayer);
         clearSprite2DLayer(torchGlowLayer);
@@ -879,7 +903,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (level.flag) {
             for (let cy = level.flag.cy + 1; cy < level.rows; cy++) {
                 if (level.solid[cy * level.cols + flagX]) break;
-                poleSlots.push(addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: chainFrame }));
+                poleSlots.push(addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: poleFrame }));
             }
         }
         // Coins (coinLayer), then the flag sprite LAST (stable slot after the coins).
@@ -920,12 +944,14 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         for (const p of level.pipes) {
             pipeSlots.push(addSprite2DIndex(pipeLayer, { positionPx: [0, 0], sizePx: [p.w * TILE, p.h * TILE], frame: 0 }));
         }
-        // Enemies (enemyLayer).
+        // Enemies. Piranha plants live on the behind-pipe layer; everything else on the
+        // front enemy layer. Each enemy stores its layer so updates target the right one.
         for (const e of level.enemies) {
             const { w, h } = enemyBoxDims(e.kind);
             const boxY = (e.cy + 1) * TILE - h;
-            const slot = addSprite2DIndex(enemyLayer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(enemyStartFrame(e.kind)), visible: false });
-            enemyList.push({ kind: e.kind, box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h }, vx: -PHYS.enemySpeed, vy: 0, dir: -1, alive: true, shell: false, shellDir: 0, dying: 0, slot, animT: 0, homeY: boxY, phase: Math.random() * Math.PI * 2 });
+            const layer = e.kind === "piranha" ? piranhaLayer : enemyLayer;
+            const slot = addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(enemyStartFrame(e.kind)), visible: false });
+            enemyList.push({ kind: e.kind, box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h }, vx: -PHYS.enemySpeed, vy: 0, dir: -1, alive: true, shell: false, shellDir: 0, dying: 0, slot, layer, animT: 0, homeY: boxY, phase: Math.random() * Math.PI * 2 });
         }
 
         // Boss (castle only). Stand it on its spawn cell; reset hp/state, hide projectiles.
@@ -1095,7 +1121,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             if (overlaps(f.box, e.box)) {
                 e.dying = 0.4;
                 e.vy = -360;
-                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(e.kind === "snail" ? "snail_walk" : "slimeGreen_dead"), flipY: true });
+                updateSprite2DIndex(e.layer, e.slot, { frame: enemies.frameOf(e.kind === "snail" ? "snail_walk" : "slimeGreen_dead"), flipY: true });
                 addScore(200);
                 juicePop(e.box.x + e.box.w / 2, e.box.y, 200, SPARK_WHITE);
                 sfx.kick();
@@ -1345,18 +1371,28 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const cb: AABB = { x: c.x - COIN_PICK_HALF, y: c.y - COIN_PICK_HALF, w: COIN_PICK_HALF * 2, h: COIN_PICK_HALF * 2 };
             if (overlaps(player.box, cb)) {
                 c.collected = true;
-                updateSprite2DIndex(itemLayer, c.slot, { visible: false });
+                updateSprite2DIndex(coinLayer, c.slot, { visible: false });
                 gainCoin();
                 juicePop(c.x, c.y - TILE * 0.2, 200, SPARK_GOLD);
             }
         }
 
-        // Goal: reach the flag column (only areas with a flag goal) → on to the castle.
+        // Goal: reach the flag column (only areas with a flag goal) → flagpole finish.
         // The flag sits on a solid pedestal, so trigger when the player reaches its base
         // (right edge at the flag column) rather than requiring the centre to pass it.
-        if (hasFlag && player.box.x + player.box.w >= flagX * TILE) {
+        if (hasFlag && level.flag && player.box.x + player.box.w >= flagX * TILE) {
+            // Set up the Mario-style flagpole sequence: capture the floor the player is on
+            // (slide target), grab the pole near the top, and run the "complete" timeline.
+            flagSeq.poleX = flagX * TILE + TILE / 2;
+            flagSeq.bottomFeetY = player.box.y + player.box.h; // current ground level
+            flagSeq.topFeetY = (level.flag.cy + 2) * TILE; // cling height near the flag
+            player.box.x = flagX * TILE + (TILE - player.box.w) / 2; // snap onto the pole
+            player.box.y = flagSeq.topFeetY - player.box.h;
+            player.vx = 0;
+            player.vy = 0;
+            player.star = 0;
             game.phase = "complete";
-            game.timer = 3.0;
+            game.timer = COMPLETE_DUR;
             // End-of-area tally: convert remaining time into bonus points.
             const bonus = Math.floor(game.time) * 50;
             addScore(bonus);
@@ -1375,7 +1411,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             e.dying -= dt;
             if (e.dying <= 0) {
                 e.alive = false;
-                updateSprite2DIndex(enemyLayer, e.slot, { visible: false });
+                updateSprite2DIndex(e.layer, e.slot, { visible: false });
             }
             return;
         }
@@ -1429,7 +1465,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         // Pit death
         if (e.box.y > worldH + TILE) {
             e.alive = false;
-            updateSprite2DIndex(enemyLayer, e.slot, { visible: false });
+            updateSprite2DIndex(e.layer, e.slot, { visible: false });
             return;
         }
 
@@ -1440,7 +1476,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 if (overlaps(e.box, o.box)) {
                     o.dying = 0.4;
                     o.vy = -360;
-                    updateSprite2DIndex(enemyLayer, o.slot, { frame: enemies.frameOf(deadFrame(o.kind)), flipY: true });
+                    updateSprite2DIndex(o.layer, o.slot, { frame: enemies.frameOf(deadFrame(o.kind)), flipY: true });
                     addScore(200);
                     sfx.kick();
                 }
@@ -1457,7 +1493,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (player.star > 0) {
             e.dying = 0.4;
             e.vy = -360;
-            updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(deadFrame(e.kind)), flipY: true });
+            updateSprite2DIndex(e.layer, e.slot, { frame: enemies.frameOf(deadFrame(e.kind)), flipY: true });
             addScore(200);
             juicePop(e.box.x + e.box.w / 2, e.box.y, 200, SPARK_WHITE);
             sfx.kick();
@@ -1478,7 +1514,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 e.shellDir = 0;
                 e.box.h = TILE * 0.5;
                 e.box.y = (Math.floor((e.box.y + e.box.h) / TILE) + 1) * TILE - e.box.h;
-                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf("snail_shell"), sizePx: [e.box.w, e.box.h] });
+                updateSprite2DIndex(e.layer, e.slot, { frame: enemies.frameOf("snail_shell"), sizePx: [e.box.w, e.box.h] });
                 comboStomp(e.box.x + e.box.w / 2, e.box.y);
                 sfx.stomp();
             } else if (e.kind === "snail" && e.shell) {
@@ -1488,7 +1524,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 sfx.kick();
             } else {
                 e.dying = 0.35;
-                updateSprite2DIndex(enemyLayer, e.slot, { frame: enemies.frameOf(deadFrame(e.kind)), sizePx: [e.box.w, e.box.h * 0.6] });
+                updateSprite2DIndex(e.layer, e.slot, { frame: enemies.frameOf(deadFrame(e.kind)), sizePx: [e.box.w, e.box.h * 0.6] });
                 comboStomp(e.box.x + e.box.w / 2, e.box.y);
                 sfx.stomp();
             }
@@ -1765,12 +1801,17 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         }
 
         // Moving platforms: lay each platform's bridge tiles at its current position.
+        // The Kenney "bridge" frame fills only the bottom ~29% of its cell (transparent
+        // above), so draw it a full tile tall and shift it UP by that top padding — that
+        // puts the visible plank's top edge exactly on the platform's collision surface
+        // (mp.box.y), instead of ~0.43 tile below it (which made the player look like it
+        // was hovering above the platform).
         for (const mp of movers) {
+            const ty0 = Math.round(sy(mp.box.y) - BRIDGE_TOP_PAD * ss(TILE));
             for (let i = 0; i < mp.slots.length; i++) {
                 const tx0 = Math.round(sx(mp.box.x + i * TILE));
                 const tx1 = Math.round(sx(mp.box.x + (i + 1) * TILE));
-                const ty0 = Math.round(sy(mp.box.y));
-                updateSprite2DIndex(moverLayer, mp.slots[i]!, { positionPx: [tx0, ty0], sizePx: [tx1 - tx0, ss(mp.box.h)] });
+                updateSprite2DIndex(moverLayer, mp.slots[i]!, { positionPx: [tx0, ty0], sizePx: [tx1 - tx0, ss(TILE)] });
             }
         }
 
@@ -1803,15 +1844,23 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             if (c.collected) continue;
             updateSprite2DIndex(coinLayer, c.slot, { positionPx: [sx(c.x), sy(c.y + bob)], sizePx: [ss(COIN_DRAW), ss(COIN_DRAW)], visible: true });
         }
-        // Flag wave. The flag sprite's pole runs up its far-left edge (centre at
-        // ~0.07 of the sprite width), so with a centre pivot we shift right by
-        // ~0.43·TILE to sit the pole over the centred chain column.
+        // Flag: rests at the BOTTOM of the pole during play, then rises to the top and
+        // expands during the completion sequence (Mario-style). flagAnimT drives the wave;
+        // its little pole runs up the sprite's left edge so we offset right by ~0.43·width
+        // to seat it over the centred rope pole.
         if (hasFlag && level.flag) {
+            const raiseK = game.phase === "complete" ? Math.max(0, Math.min(1, (COMPLETE_DUR - game.timer) / FLAG_RAISE_DUR)) : 0;
+            const ease = raiseK * raiseK * (3 - 2 * raiseK);
+            const downCenterY = (level.flag.cy + poleSlots.length) * TILE; // near the pedestal
+            const upCenterY = (level.flag.cy + 0.5) * TILE; // near the top of the pole
+            const flagCenterY = downCenterY + ease * (upCenterY - downCenterY);
+            const fdraw = TILE * (1 + 0.4 * ease); // "expands" as it reaches the top
             const flagName = Math.floor(game.flagAnimT * 6) % 2 === 0 ? "flagGreen" : "flagGreen2";
             updateSprite2DIndex(coinLayer, flagSlot, {
-                positionPx: [sx(flagX * TILE + TILE * 0.93), sy(level.flag.cy * TILE + TILE * 0.5)],
-                sizePx: [ss(TILE), ss(TILE)],
+                positionPx: [sx(flagX * TILE + TILE * 0.5 + fdraw * 0.43), sy(flagCenterY)],
+                sizePx: [ss(fdraw), ss(fdraw)],
                 frame: items.frameOf(flagName),
+                visible: true,
             });
         }
 
@@ -1895,7 +1944,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             if (!e.alive) continue;
             // Piranha is hidden inside its pipe while fully retracted.
             if (e.kind === "piranha" && e.dying <= 0 && piranhaEmerge(e.phase) < 0.04) {
-                updateSprite2DIndex(enemyLayer, e.slot, { visible: false });
+                updateSprite2DIndex(e.layer, e.slot, { visible: false });
                 continue;
             }
             const flap = Math.floor(e.animT * (e.kind === "fly" ? 12 : 6)) % 2 === 0;
@@ -1909,7 +1958,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const [efw, efh] = enemies.sizeOf(name);
             // The piranha (tall snake) draws at its natural height so it isn't oversized.
             const escale = e.kind === "piranha" ? 1.0 : ENEMY_VIS_SCALE;
-            updateSprite2DIndex(enemyLayer, e.slot, {
+            updateSprite2DIndex(e.layer, e.slot, {
                 positionPx: [sx(e.box.x + e.box.w / 2), sy(e.box.y + e.box.h)],
                 sizePx: [ss(efw * escale), ss(efh * escale)],
                 frame: enemies.frameOf(name),
@@ -1955,6 +2004,51 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             updateSprite2DIndex(playerLayer, playerSlot, { visible: false });
             updateSprite2DIndex(pipeTravelLayer, pipeTravelSlot, { visible: false });
             setSprite2DShaderParams(playerLayer, [0, 0, 0, 0]);
+        } else if (game.phase === "complete") {
+            // Flagpole finish: cling to the pole (climb frames) while the flag raises, slide
+            // down to the floor, then hand off to a right-facing walk toward the castle.
+            updateSprite2DIndex(pipeTravelLayer, pipeTravelSlot, { visible: false });
+            setSprite2DShaderParams(playerLayer, [0, 0, 0, 0]);
+            if (trailHist.length > 0) {
+                trailHist.length = 0;
+                for (let i = 0; i < STAR_TRAIL; i++) updateSprite2DIndex(trailLayer, trailSlots[i]!, { visible: false });
+            }
+            const pframes = player.fire ? PLAYER_FIRE_FRAMES : PLAYER_FRAMES;
+            const standH = player.fire ? yellowStandH : greenStandH;
+            const elapsed = COMPLETE_DUR - game.timer;
+            const slideEnd = FLAG_RAISE_DUR + FLAG_SLIDE_DUR;
+            let pf: string;
+            let cx: number;
+            let feetY: number;
+            let flip: boolean;
+            if (elapsed < slideEnd) {
+                // On the pole: climbing pose, facing the pole. Held at the top while the flag
+                // rises, then slides down (eased) to the captured floor level.
+                pf = Math.floor(elapsed * 9) % 2 === 0 ? pframes.climb1 : pframes.climb2;
+                cx = flagSeq.poleX;
+                if (elapsed < FLAG_RAISE_DUR) {
+                    feetY = flagSeq.topFeetY;
+                } else {
+                    const k = (elapsed - FLAG_RAISE_DUR) / FLAG_SLIDE_DUR;
+                    feetY = flagSeq.topFeetY + k * k * (3 - 2 * k) * (flagSeq.bottomFeetY - flagSeq.topFeetY);
+                }
+                flip = true; // face left, toward the pole
+            } else {
+                // Off the pole, walking right to the castle (player.box.x advances in the tick).
+                pf = Math.floor(elapsed * 10) % 2 === 0 ? pframes.walk1 : pframes.walk2;
+                cx = player.box.x + player.box.w / 2;
+                feetY = flagSeq.bottomFeetY;
+                flip = false;
+            }
+            const [pfw, pfh] = players.sizeOf(pf);
+            const psc = (player.big ? PLAYER_VIS_BIG : PLAYER_VIS_SMALL) / standH;
+            updateSprite2DIndex(playerLayer, playerSlot, {
+                positionPx: [sx(cx), sy(feetY)],
+                sizePx: [ss(pfw * psc), ss(pfh * psc)],
+                frame: players.frameOf(pf),
+                flipX: flip,
+                visible: true,
+            });
         } else if (warp.active) {
             updateSprite2DIndex(playerLayer, playerSlot, { visible: false });
             setSprite2DShaderParams(playerLayer, [0, 0, 0, 0]);
@@ -1963,21 +2057,26 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 for (let i = 0; i < STAR_TRAIL; i++) updateSprite2DIndex(trailLayer, trailSlots[i]!, { visible: false });
             }
             const ease = (p: number): number => p * p * (3 - 2 * p);
-            const wf = player.fire ? PLAYER_FIRE_FRAMES.stand : PLAYER_FRAMES.stand;
+            // Front frame matches the player's current power state: yellow (fire), or the
+            // green front frame drawn at big or small scale (mushroom vs base).
+            const wf = player.fire ? PLAYER_FIRE_FRAMES.front : PLAYER_FRAMES.front;
             const wStandH = player.fire ? yellowStandH : greenStandH;
-            const wsc = PLAYER_VIS_SMALL / wStandH; // always small so the 2-tile pipe fully hides it
+            const wsc = (player.big ? PLAYER_VIS_BIG : PLAYER_VIS_SMALL) / wStandH;
             const [wfw, wfh] = players.sizeOf(wf);
+            // Sink far enough that even a 2-tile-tall big player fully disappears behind the
+            // 2-tile pipe (the pipe layer is in front of pipeTravelLayer).
+            const wslide = Math.max(WARP_SLIDE, wfh * wsc);
             let travelX = warp.srcX;
             let travelFeet = warp.srcTopY;
             let travelShow = true;
             if (warp.t < WARP_DESCEND) {
                 travelX = warp.srcX;
-                travelFeet = warp.srcTopY + ease(warp.t / WARP_DESCEND) * WARP_SLIDE; // sink down
+                travelFeet = warp.srcTopY + ease(warp.t / WARP_DESCEND) * wslide; // sink down
             } else if (warp.t < WARP_DESCEND + WARP_IRIS) {
                 travelShow = false; // fully sunk + hidden behind the iris during the teleport
             } else {
                 travelX = warp.dstX;
-                travelFeet = warp.dstTopY + (1 - ease((warp.t - WARP_DESCEND - WARP_IRIS) / WARP_EMERGE)) * WARP_SLIDE; // rise up
+                travelFeet = warp.dstTopY + (1 - ease((warp.t - WARP_DESCEND - WARP_IRIS) / WARP_EMERGE)) * wslide; // rise up
             }
             updateSprite2DIndex(
                 pipeTravelLayer,
@@ -2075,7 +2174,34 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         switch (game.phase) {
             case "title":
                 titleT += dt;
-                if (input.state.startPressed) {
+                // Keep the level alive (and correctly posed) while the attract camera tours
+                // it: animate the purely-visual enemy cycles. Without this, enemies are frozen
+                // at spawn — the piranha sits stuck EMERGED above its pipe, and a slime that
+                // spawns above the ground hangs in mid-air. Flies bob, piranhas run their
+                // emerge/retract cycle, and ground walkers fall to rest on the floor.
+                for (const e of enemyList) {
+                    if (!e.alive) continue;
+                    e.animT += dt;
+                    if (e.kind === "fly") {
+                        e.phase += dt;
+                        e.box.y = e.homeY + Math.sin(e.phase * FLY_FREQ) * FLY_AMP;
+                    } else if (e.kind === "piranha") {
+                        e.phase += dt;
+                        e.box.y = e.homeY + (1 - piranhaEmerge(e.phase)) * PIRANHA_RISE;
+                    } else {
+                        // Ground walkers (slime/snail): let gravity settle them onto the floor
+                        // so one that SPAWNS above the ground (e.g. the col-44 slime, which
+                        // normally falls onto the floor at the start of play) rests on the
+                        // ground here instead of hanging in the air. No horizontal motion, so
+                        // they don't wander off the attract view or shift their start position.
+                        e.vy = Math.min(PHYS.maxFall, e.vy + PHYS.gravity * dt);
+                        const res = moveAndCollide(e.box, 0, e.vy, dt, collision);
+                        e.vy = res.vy;
+                    }
+                }
+                // Start on the jump key (Space) — the game's primary action button —
+                // or Enter / the on-screen A button (both set startPressed).
+                if (input.state.startPressed || input.state.jumpPressed) {
                     hud.title(false);
                     game.phase = "ready";
                     game.timer = 1.4;
@@ -2118,7 +2244,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                     game.lives -= 1;
                     if (game.lives <= 0) {
                         game.phase = "gameover";
-                        hud.banner("GAME OVER", "Press Enter / tap A");
+                        hud.banner("GAME OVER", "Press Space / tap A");
                     } else {
                         resetWorld();
                     }
@@ -2126,7 +2252,11 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 break;
             case "complete":
                 game.timer -= dt;
-                player.box.x += 120 * dt; // stroll off toward the castle
+                // The flag-raise + pole-slide happen first (player held on the pole by the
+                // renderer); only stroll toward the castle once the player is off the pole.
+                if (COMPLETE_DUR - game.timer >= FLAG_RAISE_DUR + FLAG_SLIDE_DUR) {
+                    player.box.x += 150 * dt; // stroll off toward the castle
+                }
                 if (game.timer <= 0) {
                     // Cut to the castle finale (keep the run going: score, coins, lives, time).
                     loadArea("castle", "start");
@@ -2152,7 +2282,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 }
                 break;
             case "gameover":
-                if (input.state.startPressed) {
+                if (input.state.startPressed || input.state.jumpPressed) {
                     // Fresh game, but return to the attract screen first.
                     restartLevel();
                     game.phase = "title";

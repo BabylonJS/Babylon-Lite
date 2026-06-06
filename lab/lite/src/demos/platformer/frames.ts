@@ -44,6 +44,11 @@ export const PLAYER_FRAMES = {
     jump: `${PLAYER}_jump`,
     duck: `${PLAYER}_duck`,
     hit: `${PLAYER}_hurt`,
+    /** Front-facing frame (no suffix), used while travelling through a pipe. */
+    front: `${PLAYER}`,
+    /** Pole-climb frames, used for the flagpole slide. */
+    climb1: `${PLAYER}_climb1`,
+    climb2: `${PLAYER}_climb2`,
 } as const;
 
 /** Player frame names for the fire power-up state (yellow alien, same suffixes). */
@@ -54,4 +59,7 @@ export const PLAYER_FIRE_FRAMES = {
     jump: `${PLAYER_FIRE}_jump`,
     duck: `${PLAYER_FIRE}_duck`,
     hit: `${PLAYER_FIRE}_hurt`,
+    front: `${PLAYER_FIRE}`,
+    climb1: `${PLAYER_FIRE}_climb1`,
+    climb2: `${PLAYER_FIRE}_climb2`,
 } as const;
