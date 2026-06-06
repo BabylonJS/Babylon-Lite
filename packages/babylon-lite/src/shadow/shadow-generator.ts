@@ -47,6 +47,11 @@ export interface ShadowGenerator {
     _version: number;
     /** @internal */
     _shadowTaskState?: ShadowTaskInternalState;
+    /** @internal Optional callbacks invoked each frame the receiver UBO is (re)written, after the
+     *  GPU upload and before the shadow map / main pass render. Used by custom ShaderMaterial
+     *  receivers (e.g. CSM) to mirror the fresh transforms into their own uniforms without a
+     *  one-frame lag. Registered via the public `onCsmReceiverUpdate()`. */
+    _onReceiverData?: ((data: Float32Array) => void)[];
     /** @internal Dynamically imports and prepares the shadow-map render task for the given caster meshes. */
     _preloadShadowTask?(casterMeshes: readonly import("../mesh/mesh.js").Mesh[]): Promise<void>;
     /** @internal Lazily creates (or returns the cached) shadow-task state for rendering the shadow map this frame. */

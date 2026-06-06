@@ -177,6 +177,20 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
     sg._version++;
     engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData as Float32Array<ArrayBuffer>);
 
+    // Notify custom receivers (e.g. a ShaderMaterial that mirrors the cascade transforms into
+    // its own uniforms) with this frame's freshly-computed receiver UBO. This fires inside the
+    // shadow task — after the transforms are finalized but before the shadow map and main pass
+    // render — so such receivers stay in lock-step with the depth map. Syncing from a
+    // `onBeforeRender` callback instead would read the previous frame's transforms (a one-frame
+    // lag that makes those shadows swim while the camera moves). The built-in standard/PBR/node
+    // receivers don't need this: they bind `sg._shadowUBO` directly.
+    const receiverCbs = sg._onReceiverData;
+    if (receiverCbs) {
+        for (let i = 0; i < receiverCbs.length; i++) {
+            receiverCbs[i]!(state._uboData);
+        }
+    }
+
     state._cameraVersion++;
     for (let i = 0; i < cascades._transforms.length; i++) {
         const cam = state._cameras[i]!;

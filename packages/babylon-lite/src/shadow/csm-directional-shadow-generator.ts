@@ -124,3 +124,36 @@ export function createCsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     sg._renderShadowMap = (eng, state) => renderCsmShadowMap(eng, sg, state as CsmTaskState, csmCfg);
     return sg;
 }
+
+/**
+ * Register a callback fired each frame the CSM cascades are recomputed, right after the receiver
+ * UBO is updated and uploaded — and before the shadow map and main pass are rendered.
+ *
+ * Custom `ShaderMaterial` receivers that mirror the cascade transforms into their own uniforms
+ * (rather than binding the generator's receiver UBO directly, as the built-in standard/PBR/node
+ * receivers do) MUST sync from inside this callback. Syncing from an `onBeforeRender` callback
+ * reads the *previous* frame's transforms — a one-frame lag that makes those shadows visibly swim
+ * while the camera moves (the cascade window can slide many texels per frame during a zoom).
+ *
+ * Multiple receivers may register on the same generator; every registered callback is invoked each
+ * frame. The callback receives the 80-float receiver UBO (layout: four `mat4x4` cascade transforms,
+ * `viewFrustumZ`, `frustumLengths`, `shadowsInfo`, `csmParams` — see the cascaded-shadow
+ * architecture doc). The array is reused each frame; copy what you need.
+ *
+ * @param sg - A cascaded-shadow generator from {@link createCsmDirectionalShadowGenerator}.
+ * @param cb - Receiver-sync callback.
+ * @returns A disposer that unregisters this callback.
+ */
+export function onCsmReceiverUpdate(sg: ShadowGenerator, cb: (data: Float32Array) => void): () => void {
+    (sg._onReceiverData ??= []).push(cb);
+    return () => {
+        const list = sg._onReceiverData;
+        if (!list) {
+            return;
+        }
+        const i = list.indexOf(cb);
+        if (i >= 0) {
+            list.splice(i, 1);
+        }
+    };
+}
