@@ -22,15 +22,15 @@ The owner has committed to these four items — once they land, this demo is
 considered **done**. (A **polish pass** comes first, driven by play-testing, before
 any of these are built.)
 
-1. **Title / attract screen — [#20](#polish).**
-2. **`loadArea` area system — [#3](#3-several-scenes--pipe-warps--sub-areas-).**
-   The real teardown/refill area model (not today's two-region split).
+1. **Title / attract screen — [#20](#polish).** ✅ **DONE.**
+2. **`loadArea` area system — [#3](#3-several-scenes--pipe-warps--sub-areas-).** ✅ **DONE.**
+   Real discrete-area teardown/refill (overworld + cave today; castle next).
 3. **CRT / scanline post-process — [#17](#tech-showcase--flex).** Needs the engine
    offscreen-RT hook (ask A) — the collaborative engine piece.
 4. **Castle finale + boss — [#12](#gameplay--content).**
 
-> **Status:** queued. **Next up = a play-test-driven polish pass** (owner plays,
-> calls out issues, we fix) — _then_ the four items above.
+> **Status:** title ✅ + `loadArea` ✅ done; **castle/boss (#12)** and **CRT (#17)**
+> remaining. Also done: full **world reset on death**.
 
 ---
 
@@ -177,27 +177,24 @@ with additive atmosphere. Big visual payoff, tiny code.
 
 ---
 
-### 3. Several "scenes" — pipe warps & sub-areas ✅ DONE / ⭐ COMMITTED (full `loadArea`)
+### 3. Several "scenes" — pipe warps & sub-areas ✅ DONE (full `loadArea`)
 
-> **Shipped.** Implemented across [`level.ts`](level.ts) (a sealed stone cave
-> chamber appended to the same tile grid past a wide void gap, with bonus-coin
-> rows and two warp pipes), [`portal.ts`](portal.ts) (procedural pipe + cave
-> backdrop textures and the fullscreen **iris-wipe** WGSL), [`game.ts`](game.ts)
-> (a `warping` phase that runs the iris and teleports the player at its darkest
-> point, an `inCave` flag driving the dark backdrop + flag-goal guard, plus the
-> duck-on-pipe trigger), and [`audio.ts`](audio.ts) (a `warp()` whoosh). The
-> transition is a single fullscreen `createSprite2DCustomShader` quad — **no
-> engine post-process needed** (see the corrected note in #A below).
+> **Shipped — now a real `loadArea` area system.** The world is modelled as
+> **discrete `LevelArea`s** in [`level.ts`](level.ts), each a self-contained little
+> level on its **own tile grid** (own `solid`/`oneway` collider, terrain, blocks,
+> coins, enemies, lava, torches, movers, pipes, named entry points + optional flag).
+> `buildWorld()` returns `{ areas, start }`; the runtime keeps a `level` pointer to
+> the **current** area. `loadArea(areaId, entry)` in [`game.ts`](game.ts) **tears
+> down** the pooled sprite layers (`clearSprite2DLayer`) and **refills** them for the
+> new area, rebuilds the collider, and stands the player on the named `entry` cell —
+> so areas differ freely in size/theme with **no shared mega-grid**. Pipes warp by
+> naming a destination `toArea` + `toEntry`; the player slides down the source pipe,
+> the area swaps under the iris, then emerges from the destination pipe. A **death**
+> reloads the start area (full reset) keeping score/coins/lives. Verified in-browser:
+> overworld ⇄ cave bidirectional warps with full teardown/refill, no leaks, no errors.
 >
-> **Expanded.** The underground is now a **large multi-section cavern** (not a tiny
-> bonus box): a left entry chamber, two molten **lava channels** crossed on stone
-> stepping-stones, a raised bonus ledge with reward blocks, and **torch**-lit gloom
-> with a player-following **lantern** (see #7/#8/#9). **Not yet** done: multiple
-> *distinct* areas beyond this one cavern, per-area music, and the final castle
-> approach — the area model is still a two-region split (overworld + cavern appended
-> to one grid), not a general `loadArea(area)` system. The cavern delivers the
-> "bigger underground" payoff; a full `loadArea` teardown/refill refactor is a larger,
-> lower-urgency follow-up.
+> **Areas today:** `overworld` (1-1) + `cave` (1-2). The **castle** finale is the
+> next area to drop in (see #12). **Not yet:** per-area music.
 
 **What.** Turn the single level into a small **world** of connected areas:
 overworld → enter a pipe → underground coin room → exit pipe back out (or to a

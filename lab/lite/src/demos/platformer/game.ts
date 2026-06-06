@@ -11,6 +11,7 @@
 
 import {
     addSprite2DIndex,
+    clearSprite2DLayer,
     createGridSpriteAtlas,
     createSprite2DCustomShader,
     createSprite2DLayer,
@@ -31,7 +32,7 @@ import { PHYS, PLAYER_FIRE_FRAMES, PLAYER_FRAMES, TILE } from "./frames.js";
 import { createInput, type InputController } from "./input.js";
 import { createSfx, type Sfx } from "./audio.js";
 import { createHud, type Hud } from "./hud.js";
-import { buildLevel, type BlockKind, type Level, type Pipe } from "./level.js";
+import { buildWorld, type AreaId, type BlockKind, type LevelArea, type Pipe, type World } from "./level.js";
 import { createParallax } from "./parallax.js";
 import { makeFireballDataUrl, makeFireFlowerDataUrl } from "./fire.js";
 import { makeSparkDataUrl } from "./juice.js";
@@ -283,8 +284,12 @@ interface Debris {
 type Phase = "title" | "ready" | "playing" | "warping" | "dying" | "complete" | "gameover";
 
 export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext): Promise<void> {
-    const level = buildLevel();
-    const worldW = level.cols * TILE;
+    const world: World = buildWorld();
+    const allAreas = Object.values(world.areas);
+    // Pool capacities are sized to the largest area so loadArea can refill any area.
+    const maxOf = (pick: (a: LevelArea) => number): number => allAreas.reduce((m, a) => Math.max(m, pick(a)), 1);
+    let level: LevelArea = world.areas[world.start];
+    let worldW = level.cols * TILE;
     const worldH = level.rows * TILE;
 
     // ── Load art (Kenney "Platformer Art Deluxe", CC0) ──────────────────────
@@ -332,22 +337,24 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // Molten lava pools: procedural custom-shader quads (reuse the 1×1 white atlas),
     // drawn just in front of the cave backdrop and behind the stone terrain + player.
     const lavaShader = createSprite2DCustomShader({ fragment: LAVA_FRAGMENT });
-    const lavaLayer = createSprite2DLayer(whiteAtlas, { capacity: Math.max(1, level.lava.length), order: 4.5, customShader: lavaShader, pivot: [0, 0] });
-    const terrainLayer = createSprite2DLayer(tiles.atlas, { capacity: level.terrain.length + 4, order: 5, pivot: [0, 0] });
+    const lavaLayer = createSprite2DLayer(whiteAtlas, { capacity: maxOf((a) => a.lava.length), order: 4.5, customShader: lavaShader, pivot: [0, 0] });
+    const terrainLayer = createSprite2DLayer(tiles.atlas, { capacity: maxOf((a) => a.terrain.length) + 4, order: 5, pivot: [0, 0] });
     // Player sprite while travelling through a pipe: a dedicated layer just BEHIND the
     // pipe (order 5.5 < pipeLayer's 6) so the player slides in/out occluded by the pipe.
     const pipeTravelLayer = createSprite2DLayer(players.atlas, { capacity: 1, order: 5.5, pivot: [0.5, 1] });
-    const pipeLayer = createSprite2DLayer(pipeAtlas, { capacity: Math.max(1, level.pipes.length), order: 6, pivot: [0, 0] });
+    const pipeLayer = createSprite2DLayer(pipeAtlas, { capacity: maxOf((a) => a.pipes.length), order: 6, pivot: [0, 0] });
     // Moving platforms (kinematic): drawn as bridge tiles, in front of terrain/pipes.
-    const moverTileCount = level.movers.reduce((n, m) => n + m.w, 0);
-    const moverLayer = createSprite2DLayer(tiles.atlas, { capacity: Math.max(1, moverTileCount), order: 6.5, pivot: [0, 0] });
-    const blockLayer = createSprite2DLayer(tiles.atlas, { capacity: level.blocks.length + 32, order: 7, pivot: [0, 0] });
-    const itemLayer = createSprite2DLayer(items.atlas, { capacity: level.coins.length + 40, order: 8, pivot: [0.5, 0.5] });
+    const moverLayer = createSprite2DLayer(tiles.atlas, { capacity: maxOf((a) => a.movers.reduce((n, m) => n + m.w, 0)), order: 6.5, pivot: [0, 0] });
+    const blockLayer = createSprite2DLayer(tiles.atlas, { capacity: maxOf((a) => a.blocks.length) + 16, order: 7, pivot: [0, 0] });
+    // Area coins + flag (cleared/refilled per area by loadArea).
+    const coinLayer = createSprite2DLayer(items.atlas, { capacity: maxOf((a) => a.coins.length) + 2, order: 8, pivot: [0.5, 0.5] });
+    // Global pickup pool (coin-pops, stars) — persistent, NOT cleared by loadArea.
+    const itemLayer = createSprite2DLayer(items.atlas, { capacity: 16, order: 8.1, pivot: [0.5, 0.5] });
     // Mushrooms come from the *items* sheet, so they need a centre-pivot items layer.
     const shroomLayer = createSprite2DLayer(items.atlas, { capacity: 8, order: 9, pivot: [0.5, 0.5] });
     // Fire flowers (procedural texture) get their own centre-pivot layer.
     const fireFlowerLayer = createSprite2DLayer(fireFlowerAtlas, { capacity: 4, order: 9, pivot: [0.5, 0.5] });
-    const enemyLayer = createSprite2DLayer(enemies.atlas, { capacity: level.enemies.length + 4, order: 10, pivot: [0.5, 1] });
+    const enemyLayer = createSprite2DLayer(enemies.atlas, { capacity: maxOf((a) => a.enemies.length) + 2, order: 10, pivot: [0.5, 1] });
     // Star-power afterimage trail: additive ghosts of the player (glow stacks), drawn
     // just behind the player and hidden unless invincible.
     const trailLayer = createSprite2DLayer(players.atlas, { capacity: STAR_TRAIL, order: 11, blendMode: spriteBlendAdditive, pivot: [0.5, 1] });
@@ -363,103 +370,67 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // Brick-break debris: spinning brick chunks from the *items* sheet (centre pivot to rotate).
     const debrisLayer = createSprite2DLayer(items.atlas, { capacity: DEBRIS_MAX, order: 16, pivot: [0.5, 0.5] });
     // Wall torches (the tiles "torch" frame), drawn in front of the cave walls.
-    const torchLayer = createSprite2DLayer(tiles.atlas, { capacity: Math.max(1, level.torches.length), order: 9.5, pivot: [0.5, 1] });
+    const torchLayer = createSprite2DLayer(tiles.atlas, { capacity: maxOf((a) => a.torches.length), order: 9.5, pivot: [0.5, 1] });
     // Underground "lantern": a full-screen multiply-darkness pool that follows the player (#8).
     const lanternShader = createSprite2DCustomShader({ fragment: LANTERN_FRAGMENT });
     const lanternLayer = createSprite2DLayer(whiteAtlas, { capacity: 1, order: 17, pivot: [0, 0], customShader: lanternShader, blendMode: spriteBlendMultiply });
     // Torch glows: additive warm haloes in front of the darkness so torches shine through.
-    const torchGlowLayer = createSprite2DLayer(glowAtlas, { capacity: Math.max(1, level.torches.length + level.lava.length), order: 17.5, pivot: [0.5, 0.5], blendMode: spriteBlendAdditive });
+    const torchGlowLayer = createSprite2DLayer(glowAtlas, { capacity: maxOf((a) => a.torches.length + a.lava.length), order: 17.5, pivot: [0.5, 0.5], blendMode: spriteBlendAdditive });
     // Fullscreen iris-wipe transition (custom-shader quad), on top of everything.
     const irisShader = createSprite2DCustomShader({ fragment: IRIS_FRAGMENT });
     const irisLayer = createSprite2DLayer(whiteAtlas, { capacity: 1, order: 20, pivot: [0, 0], customShader: irisShader });
 
     const renderer = createSpriteRenderer(engine, {
-        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeTravelLayer, pipeLayer, moverLayer, blockLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, torchLayer, trailLayer, playerLayer, fireballLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
+        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeTravelLayer, pipeLayer, moverLayer, blockLayer, coinLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, torchLayer, trailLayer, playerLayer, fireballLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
         clearValue: SKY,
     });
     registerSpriteRenderer(renderer);
 
-    // Cave backdrop, warp-pipe, and iris sprite slots.
+    // Persistent single-slot overlays, reused across areas (repositioned/hidden).
     const caveBackSlot = addSprite2DIndex(caveBackLayer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
-    // Lava pools: one quad each; `color` carries the pool's tile dims for the shader.
-    const lavaSlots = level.lava.map((lv) => addSprite2DIndex(lavaLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [lv.w, lv.h, 0, 1], visible: false }));
-    // Lantern darkness quad + wall torches (sprite + additive glow), hidden until underground.
     const lanternSlot = addSprite2DIndex(lanternLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1.77, 0, 0, 1], visible: false });
-    const torchFrame = tiles.frameOf("torch");
-    const torchSlots = level.torches.map(() => addSprite2DIndex(torchLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: torchFrame, visible: false }));
-    const torchGlowSlots = level.torches.map(() => addSprite2DIndex(torchGlowLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1, 0.72, 0.32, 0.9], visible: false }));
-    const lavaGlowSlots = level.lava.map(() => addSprite2DIndex(torchGlowLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1, 0.5, 0.16, 0.85], visible: false }));
-    const pipeSlots = level.pipes.map((p) => addSprite2DIndex(pipeLayer, { positionPx: [0, 0], sizePx: [p.w * TILE, p.h * TILE], frame: 0 }));
     const pipeTravelSlot = addSprite2DIndex(pipeTravelLayer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
     const irisSlot = addSprite2DIndex(irisLayer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
-
-    // ── Moving platforms (kinematic; carry the player) ────────────────────────
-    const MOVER_H = TILE * 0.6; // platform thickness (top surface at the spec row)
+    const torchFrame = tiles.frameOf("torch");
     const bridgeFrame = tiles.frameOf("bridge");
-    const movers: MovingPlatform[] = level.movers.map((m) => {
-        const w = m.w * TILE;
-        const x0 = m.cx * TILE;
-        const y0 = m.cy * TILE;
-        // x: travel right from the start; y: travel UP from the start (then back).
-        const min = m.axis === "x" ? x0 : y0 - m.range * TILE;
-        const max = m.axis === "x" ? x0 + m.range * TILE : y0;
-        const slots: number[] = [];
-        for (let i = 0; i < m.w; i++) slots.push(addSprite2DIndex(moverLayer, { positionPx: [0, 0], sizePx: [TILE, MOVER_H], frame: bridgeFrame }));
-        return {
-            box: { x: x0, y: y0, w, h: MOVER_H },
-            axis: m.axis,
-            min,
-            max,
-            speed: m.speed * TILE,
-            dir: (m.axis === "x" ? 1 : -1) as 1 | -1,
-            dx: 0,
-            dy: 0,
-            slots,
-        };
-    });
+    const coinFrame = items.frameOf("coinGold");
+    const flagFrame = items.frameOf("flagGreen");
+    const chainFrame = items.frameOf("chain");
+    const MOVER_H = TILE * 0.6; // moving-platform thickness
 
-    // ── Static terrain sprites (frame fixed; position re-projected each frame) ─
-    const terrainSlots = level.terrain.map((t) =>
-        addSprite2DIndex(terrainLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: tiles.frameOf(t.name) }),
-    );
-
-    // ── Interactive blocks ────────────────────────────────────────────────────
     const blockFrame = (kind: BlockKind): number => {
         switch (kind) {
             case "brick":
                 return tiles.frameOf("brickWall");
             case "coin-block":
-                return tiles.frameOf("boxItem");
             case "mushroom-block":
-                return tiles.frameOf("boxItem");
             case "star-block":
                 return tiles.frameOf("boxItem");
         }
     };
-    const blocks: BlockState[] = level.blocks.map((b) => {
-        const slot = addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: blockFrame(b.kind) });
-        return { cx: b.cx, cy: b.cy, kind: b.kind, used: false, broken: false, slot, bump: 0 };
-    });
 
-    // Flag pole: a column of chain tiles from the flag down to the ground.
-    const flagX = level.flag.cx;
-    const poleSlots: number[] = [];
-    for (let cy = level.flag.cy + 1; cy < level.rows; cy++) {
-        if (level.solid[cy * level.cols + flagX]) break;
-        poleSlots.push(addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: items.frameOf("chain") }));
+    // ── Per-area collections, emptied + refilled by loadArea() ────────────────
+    // These are mutated IN PLACE (never reassigned) so the many closures below keep
+    // a stable reference. loadArea() clears the per-area layers, then repopulates.
+    interface CoinState {
+        x: number;
+        y: number;
+        collected: boolean;
+        slot: number;
     }
-
-    // ── Coins (floating, collectible) ─────────────────────────────────────────
-    const coinFrame = items.frameOf("coinGold");
-    const coins = level.coins.map((c) => ({
-        x: c.cx * TILE + TILE / 2,
-        y: c.cy * TILE + TILE / 2,
-        collected: false,
-        slot: addSprite2DIndex(itemLayer, { positionPx: [0, 0], sizePx: [COIN_DRAW, COIN_DRAW], frame: coinFrame, visible: false }),
-    }));
-
-    // Flag (animated) on the items layer.
-    const flagSlot = addSprite2DIndex(itemLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: items.frameOf("flagGreen"), visible: true });
+    const lavaSlots: number[] = [];
+    const torchSlots: number[] = [];
+    const torchGlowSlots: number[] = [];
+    const lavaGlowSlots: number[] = [];
+    const pipeSlots: number[] = [];
+    const movers: MovingPlatform[] = [];
+    const terrainSlots: number[] = [];
+    const blocks: BlockState[] = [];
+    const poleSlots: number[] = [];
+    const coins: CoinState[] = [];
+    let flagX = -1;
+    let flagSlot = -1;
+    let hasFlag = false;
 
     // Pickup pools. coin-pops and stars come from the items sheet; mushrooms from
     // the tiles sheet, so each kind lives on a pool bound to the matching atlas.
@@ -690,28 +661,10 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (kind === "piranha") return { w: TILE * 0.55, h: TILE * 1.4 };
         return { w: TILE * 0.82, h: TILE * 0.58 };
     };
-    const enemyList: EnemyState[] = level.enemies.map((e) => {
-        const { w, h } = enemyBoxDims(e.kind);
-        const startFrame =
-            e.kind === "fly" ? "bee" : e.kind === "piranha" ? "snakeSlime" : e.kind === "snail" ? "snail_walk" : "slimeGreen_walk";
-        const boxY = (e.cy + 1) * TILE - h;
-        const slot = addSprite2DIndex(enemyLayer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(startFrame), visible: false });
-        return {
-            kind: e.kind,
-            box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h },
-            vx: -PHYS.enemySpeed,
-            vy: 0,
-            dir: -1,
-            alive: true,
-            shell: false,
-            shellDir: 0,
-            dying: 0,
-            slot,
-            animT: 0,
-            homeY: boxY,
-            phase: Math.random() * Math.PI * 2,
-        };
-    });
+    const enemyStartFrame = (kind: EnemyState["kind"]): string =>
+        kind === "fly" ? "bee" : kind === "piranha" ? "snakeSlime" : kind === "snail" ? "snail_walk" : "slimeGreen_walk";
+    // Refilled by loadArea() from the current area's enemy spawns (mutated in place).
+    const enemyList: EnemyState[] = [];
 
     // ── Player ────────────────────────────────────────────────────────────────
     const smallSize = { w: TILE * 0.62, h: TILE * 0.92 };
@@ -787,7 +740,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const WARP_EMERGE = 0.55;
     const WARP_TOTAL = WARP_DESCEND + WARP_IRIS + WARP_EMERGE;
     const WARP_SLIDE = TILE * 1.8;
-    const warp = { active: false, t: 0, teleported: false, cooldown: 0, toCx: 0, toCy: 0, toCave: false, label: "1-1", srcX: 0, srcTopY: 0, dstX: 0, dstTopY: 0 };
+    const warp = { active: false, t: 0, teleported: false, cooldown: 0, toArea: world.start, toEntry: "start", label: "1-1", srcX: 0, srcTopY: 0, dstX: 0, dstTopY: 0 };
 
     const sfx: Sfx = createSfx();
     const input: InputController = createInput(document.body);
@@ -802,6 +755,115 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     let titleT = 0;
     const TITLE_PAN_SPEED = 0.03;
     hud.title(true); // start on the attract screen
+
+    // ── Area loading: tear down + refill the per-area sprite layers ───────────
+    /** Switch to `areaId`, rebuild every per-area entity/slot, and stand the player
+     *  on the named entry cell. Pooled layers are cleared then repopulated, so areas
+     *  can differ freely in size/theme with no shared mega-grid. */
+    const loadArea = (areaId: AreaId, entryName: string): void => {
+        level = world.areas[areaId];
+        worldW = level.cols * TILE;
+        inCave = level.theme === "cave";
+        game.world = level.worldLabel;
+
+        // Tear down per-area layers (persistent overlay layers are untouched).
+        clearSprite2DLayer(terrainLayer);
+        clearSprite2DLayer(blockLayer);
+        clearSprite2DLayer(coinLayer);
+        clearSprite2DLayer(moverLayer);
+        clearSprite2DLayer(enemyLayer);
+        clearSprite2DLayer(lavaLayer);
+        clearSprite2DLayer(torchLayer);
+        clearSprite2DLayer(torchGlowLayer);
+        clearSprite2DLayer(pipeLayer);
+        // Empty the JS collections (kept as the SAME array refs so closures still work).
+        terrainSlots.length = 0;
+        blocks.length = 0;
+        poleSlots.length = 0;
+        coins.length = 0;
+        movers.length = 0;
+        enemyList.length = 0;
+        lavaSlots.length = 0;
+        lavaGlowSlots.length = 0;
+        torchSlots.length = 0;
+        torchGlowSlots.length = 0;
+        pipeSlots.length = 0;
+
+        // Terrain.
+        for (const t of level.terrain) {
+            terrainSlots.push(addSprite2DIndex(terrainLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: tiles.frameOf(t.name) }));
+        }
+        // Interactive blocks (blockLayer), then the flag pole's chain column (also blockLayer).
+        for (const b of level.blocks) {
+            const slot = addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: blockFrame(b.kind) });
+            blocks.push({ cx: b.cx, cy: b.cy, kind: b.kind, used: false, broken: false, slot, bump: 0 });
+        }
+        hasFlag = level.flag !== null;
+        flagX = level.flag ? level.flag.cx : -1;
+        if (level.flag) {
+            for (let cy = level.flag.cy + 1; cy < level.rows; cy++) {
+                if (level.solid[cy * level.cols + flagX]) break;
+                poleSlots.push(addSprite2DIndex(blockLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: chainFrame }));
+            }
+        }
+        // Coins (coinLayer), then the flag sprite LAST (stable slot after the coins).
+        for (const c of level.coins) {
+            coins.push({
+                x: c.cx * TILE + TILE / 2,
+                y: c.cy * TILE + TILE / 2,
+                collected: false,
+                slot: addSprite2DIndex(coinLayer, { positionPx: [0, 0], sizePx: [COIN_DRAW, COIN_DRAW], frame: coinFrame, visible: false }),
+            });
+        }
+        flagSlot = hasFlag ? addSprite2DIndex(coinLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: flagFrame, visible: true }) : -1;
+
+        // Moving platforms (moverLayer).
+        for (const m of level.movers) {
+            const w = m.w * TILE;
+            const x0 = m.cx * TILE;
+            const y0 = m.cy * TILE;
+            const min = m.axis === "x" ? x0 : y0 - m.range * TILE;
+            const max = m.axis === "x" ? x0 + m.range * TILE : y0;
+            const slots: number[] = [];
+            for (let i = 0; i < m.w; i++) slots.push(addSprite2DIndex(moverLayer, { positionPx: [0, 0], sizePx: [TILE, MOVER_H], frame: bridgeFrame }));
+            movers.push({ box: { x: x0, y: y0, w, h: MOVER_H }, axis: m.axis, min, max, speed: m.speed * TILE, dir: (m.axis === "x" ? 1 : -1) as 1 | -1, dx: 0, dy: 0, slots });
+        }
+        // Lava pools (lavaLayer).
+        for (const lv of level.lava) {
+            lavaSlots.push(addSprite2DIndex(lavaLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [lv.w, lv.h, 0, 1], visible: false }));
+        }
+        // Torches + their glows; torch glow i aligns with torch i, then lava glows.
+        for (let i = 0; i < level.torches.length; i++) {
+            torchSlots.push(addSprite2DIndex(torchLayer, { positionPx: [0, 0], sizePx: [TILE, TILE], frame: torchFrame, visible: false }));
+            torchGlowSlots.push(addSprite2DIndex(torchGlowLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1, 0.72, 0.32, 0.9], visible: false }));
+        }
+        for (let i = 0; i < level.lava.length; i++) {
+            lavaGlowSlots.push(addSprite2DIndex(torchGlowLayer, { positionPx: [0, 0], sizePx: [1, 1], color: [1, 0.5, 0.16, 0.85], visible: false }));
+        }
+        // Pipes (pipeLayer).
+        for (const p of level.pipes) {
+            pipeSlots.push(addSprite2DIndex(pipeLayer, { positionPx: [0, 0], sizePx: [p.w * TILE, p.h * TILE], frame: 0 }));
+        }
+        // Enemies (enemyLayer).
+        for (const e of level.enemies) {
+            const { w, h } = enemyBoxDims(e.kind);
+            const boxY = (e.cy + 1) * TILE - h;
+            const slot = addSprite2DIndex(enemyLayer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(enemyStartFrame(e.kind)), visible: false });
+            enemyList.push({ kind: e.kind, box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h }, vx: -PHYS.enemySpeed, vy: 0, dir: -1, alive: true, shell: false, shellDir: 0, dying: 0, slot, animT: 0, homeY: boxY, phase: Math.random() * Math.PI * 2 });
+        }
+
+        // Stand the player on the named entry cell (occupies-cell convention: centre at
+        // (cx+0.5)·TILE, feet at the bottom of the cell).
+        const entry = level.entries[entryName] ?? level.playerSpawn;
+        player.box.x = entry.cx * TILE + (TILE - player.box.w) / 2;
+        player.box.y = (entry.cy + 1) * TILE - player.box.h;
+        player.vx = 0;
+        player.vy = 0;
+        player.onGround = true;
+    };
+
+    // Build the starting area now so the first frame has content.
+    loadArea(world.start, "start");
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     const addScore = (n: number): void => {
@@ -942,23 +1004,22 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (f.box.y > worldH + TILE) killFireball(f);
     };
 
-    // Begin a pipe warp: freeze the player and run the iris transition; the teleport
-    // itself happens at the darkest point (see the "warping" phase in the tick).
+    // Begin a pipe warp: freeze the player and run the iris transition; the area swap
+    // (loadArea) + emerge happen at the darkest point (see the "warping" phase in the tick).
     const startWarp = (pipe: Pipe): void => {
+        if (!pipe.toArea || !pipe.toEntry) return; // decorative pipe, not a warp
         game.phase = "warping";
         warp.active = true;
         warp.t = 0;
         warp.teleported = false;
-        warp.toCx = pipe.toCx;
-        warp.toCy = pipe.toCy;
-        warp.toCave = pipe.toCave;
-        warp.label = pipe.worldLabel;
-        // Source pipe (slide down here) + destination pipe (emerge up there). Both
-        // warp pipes are 2 tiles wide, so the centre is one tile right of `cx`.
+        warp.toArea = pipe.toArea;
+        warp.toEntry = pipe.toEntry;
+        // Source pipe to slide DOWN behind (2 tiles wide → centre one tile right of `cx`).
         warp.srcX = (pipe.cx + pipe.w / 2) * TILE;
         warp.srcTopY = pipe.cy * TILE;
-        warp.dstX = (pipe.toCx + 1) * TILE;
-        warp.dstTopY = pipe.toCy * TILE;
+        // Destination is computed after loadArea repositions the player (see the tick).
+        warp.dstX = warp.srcX;
+        warp.dstTopY = warp.srcTopY;
         player.vx = 0;
         player.vy = 0;
         sfx.warp();
@@ -1135,7 +1196,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const cxw = player.box.x + player.box.w / 2;
             const feet = player.box.y + player.box.h;
             for (const pipe of level.pipes) {
-                if (pipe.decorative) continue; // piranha pipes aren't warps
+                if (!pipe.toArea) continue; // decorative / piranha / emerge pipes aren't warps
                 const left = pipe.cx * TILE;
                 const right = (pipe.cx + pipe.w) * TILE;
                 if (cxw >= left && cxw <= right && Math.abs(feet - pipe.cy * TILE) < TILE * 0.5) {
@@ -1178,8 +1239,8 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             }
         }
 
-        // Goal: reach the flag column (overworld only — the cave reuses far-right columns).
-        if (!inCave && player.box.x + player.box.w * 0.5 >= flagX * TILE) {
+        // Goal: reach the flag column (only areas with a flag goal).
+        if (hasFlag && player.box.x + player.box.w * 0.5 >= flagX * TILE) {
             game.phase = "complete";
             game.timer = 3.5;
             // End-of-area tally: convert remaining time into bonus points.
@@ -1378,7 +1439,8 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         if (game.phase === "title") {
             // Attract loop: slowly ping-pong the camera across the overworld (out to
             // the flag, never into the far-right cave) to flaunt the parallax + level.
-            const span = Math.max(1, (level.flag.cx + 6) * TILE - viewW);
+            const flagCx = level.flag ? level.flag.cx : level.cols - 6;
+            const span = Math.max(1, (flagCx + 6) * TILE - viewW);
             const tri = Math.abs(((titleT * TITLE_PAN_SPEED + 1) % 2) - 1); // 0→1→0
             cam.x = tri * span;
         } else {
@@ -1493,28 +1555,32 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const s = snapTile(b.cx, b.cy, b.bump * scale);
             updateSprite2DIndex(blockLayer, b.slot, { positionPx: s.pos, sizePx: s.size });
         }
-        // Flag pole
-        for (let i = 0; i < poleSlots.length; i++) {
-            const cy = level.flag.cy + 1 + i;
-            const s = snapTile(flagX, cy);
-            updateSprite2DIndex(blockLayer, poleSlots[i]!, { positionPx: s.pos, sizePx: s.size });
+        // Flag pole + flag wave (only in areas that have a flag goal).
+        if (hasFlag && level.flag) {
+            for (let i = 0; i < poleSlots.length; i++) {
+                const cy = level.flag.cy + 1 + i;
+                const s = snapTile(flagX, cy);
+                updateSprite2DIndex(blockLayer, poleSlots[i]!, { positionPx: s.pos, sizePx: s.size });
+            }
         }
 
         // Coins (bob)
         const bob = Math.sin(game.flagAnimT * 6) * TILE * 0.06;
         for (const c of coins) {
             if (c.collected) continue;
-            updateSprite2DIndex(itemLayer, c.slot, { positionPx: [sx(c.x), sy(c.y + bob)], sizePx: [ss(COIN_DRAW), ss(COIN_DRAW)], visible: true });
+            updateSprite2DIndex(coinLayer, c.slot, { positionPx: [sx(c.x), sy(c.y + bob)], sizePx: [ss(COIN_DRAW), ss(COIN_DRAW)], visible: true });
         }
         // Flag wave. The flag sprite's pole runs up its far-left edge (centre at
         // ~0.07 of the sprite width), so with a centre pivot we shift right by
         // ~0.43·TILE to sit the pole over the centred chain column.
-        const flagName = Math.floor(game.flagAnimT * 6) % 2 === 0 ? "flagGreen" : "flagGreen2";
-        updateSprite2DIndex(itemLayer, flagSlot, {
-            positionPx: [sx(flagX * TILE + TILE * 0.93), sy(level.flag.cy * TILE + TILE * 0.5)],
-            sizePx: [ss(TILE), ss(TILE)],
-            frame: items.frameOf(flagName),
-        });
+        if (hasFlag && level.flag) {
+            const flagName = Math.floor(game.flagAnimT * 6) % 2 === 0 ? "flagGreen" : "flagGreen2";
+            updateSprite2DIndex(coinLayer, flagSlot, {
+                positionPx: [sx(flagX * TILE + TILE * 0.93), sy(level.flag.cy * TILE + TILE * 0.5)],
+                sizePx: [ss(TILE), ss(TILE)],
+                frame: items.frameOf(flagName),
+            });
+        }
 
         // Pickups
         for (const p of pickups) {
@@ -1768,15 +1834,11 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             case "warping": {
                 warp.t += dt;
                 if (!warp.teleported && warp.t >= WARP_DESCEND + WARP_IRIS * 0.5) {
-                    // Teleport at the iris's darkest point so the camera jump is hidden;
-                    // the player lands standing on the destination pipe's top.
-                    player.box.x = warp.dstX - player.box.w / 2;
-                    player.box.y = warp.dstTopY - player.box.h;
-                    player.vx = 0;
-                    player.vy = 0;
-                    player.onGround = true;
-                    inCave = warp.toCave;
-                    game.world = warp.label;
+                    // At the iris's darkest point: swap to the destination area (loadArea
+                    // stands the player on the entry pipe), then drive the emerge from there.
+                    loadArea(warp.toArea, warp.toEntry);
+                    warp.dstX = player.box.x + player.box.w / 2;
+                    warp.dstTopY = player.box.y + player.box.h;
                     warp.teleported = true;
                 }
                 if (warp.t >= WARP_TOTAL) {
@@ -1823,60 +1885,21 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         requestAnimationFrame(tick);
     };
 
-    const respawnEnemy = (e: EnemyState): void => {
-        const src = level.enemies.find((_, i) => enemyList[i] === e);
-        if (!src) return;
-        const { w, h } = enemyBoxDims(src.kind);
-        const boxY = (src.cy + 1) * TILE - h;
-        e.box = { x: src.cx * TILE + (TILE - w) / 2, y: boxY, w, h };
-        e.alive = true;
-        e.shell = false;
-        e.shellDir = 0;
-        e.dying = 0;
-        e.dir = -1;
-        e.vx = -PHYS.enemySpeed;
-        e.vy = 0;
-        e.homeY = boxY;
-        e.phase = src.kind === "fly" ? Math.random() * Math.PI * 2 : 0;
-    };
-
-    // Full reset of the LEVEL to its initial state — blocks (incl. broken bricks),
-    // coins, enemies, moving platforms, all particles, and the player at spawn. Does
-    // NOT touch score / coins-collected / lives, so a death restores the world while
-    // keeping the run's totals (classic SMB). Shared by death-respawn + full restart.
+    // Full reset of the WORLD to its initial state — reloads the start area (which
+    // rebuilds blocks incl. broken bricks, coins, enemies, platforms fresh) and clears
+    // every cross-area particle pool, with the player back at spawn. Does NOT touch
+    // score / coins-collected / lives, so a death restores the world while keeping the
+    // run's totals (classic SMB). Shared by death-respawn + full restart.
     const resetWorld = (): void => {
         game.phase = "ready";
         game.timer = 1.4;
         game.time = START_TIME;
         game.combo = 0;
-        resetPlayer();
-        inCave = false;
-        game.world = "1-1";
         warp.active = false;
         warp.cooldown = 0;
-        for (const b of blocks) {
-            b.used = false;
-            b.broken = false;
-            b.bump = 0;
-            level.solid[b.cy * level.cols + b.cx] = 1; // every block (brick + ?-block) starts solid
-            updateSprite2DIndex(blockLayer, b.slot, { frame: blockFrame(b.kind), visible: true });
-        }
-        for (const c of coins) {
-            c.collected = false;
-            updateSprite2DIndex(itemLayer, c.slot, { visible: true });
-        }
-        for (const e of enemyList) respawnEnemy(e);
-        for (const mp of movers) {
-            if (mp.axis === "x") {
-                mp.box.x = mp.min;
-                mp.dir = 1;
-            } else {
-                mp.box.y = mp.max;
-                mp.dir = -1;
-            }
-            mp.dx = 0;
-            mp.dy = 0;
-        }
+        resetPlayer(); // reset size/power BEFORE loadArea positions the box
+        loadArea(world.start, "start"); // rebuild the start area + place the player
+        // Clear the cross-area (persistent) pools.
         for (const p of pickups) {
             p.active = false;
             updateSprite2DIndex(p.layer, p.slot, { visible: false });
@@ -1901,4 +1924,4 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
 }
 
 // Keep an explicit reference so unused-import linters see the sheet types.
-export type { PlatformerSheet, Level, Sprite2DLayer };
+export type { PlatformerSheet, World, LevelArea, Sprite2DLayer };
