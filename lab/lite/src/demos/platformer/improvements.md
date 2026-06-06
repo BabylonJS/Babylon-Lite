@@ -25,12 +25,15 @@ any of these are built.)
 1. **Title / attract screen — [#20](#polish).** ✅ **DONE.**
 2. **`loadArea` area system — [#3](#3-several-scenes--pipe-warps--sub-areas-).** ✅ **DONE.**
    Real discrete-area teardown/refill (overworld + cave today; castle next).
-3. **CRT / scanline post-process — [#17](#tech-showcase--flex).** Needs the engine
-   offscreen-RT hook (ask A) — the collaborative engine piece.
+3. **CRT / scanline post-process — [#17](#tech-showcase--flex).** ✅ **DONE.**
+   Default ON (toggle with **C**). Uses a new opt-in, tree-shakable engine hook —
+   `createRenderTexture2D` + `setSpriteRendererTarget` — to render the scene into an
+   offscreen texture, then presents it through a curved-glass CRT fragment
+   (barrel curvature + scanlines + aperture mask + chromatic aberration + vignette).
 4. **Castle finale + boss — [#12](#gameplay--content).** ✅ **DONE.**
 
-> **Status:** title ✅ + `loadArea` ✅ + castle/boss ✅ done; **CRT (#17)** remaining
-> (the engine offscreen-RT hook). Also done: full **world reset on death**.
+> **Status:** title ✅ + `loadArea` ✅ + castle/boss ✅ + **CRT ✅** — the committed
+> roadmap is **complete**. Also done: full **world reset on death**.
 
 ---
 
@@ -299,8 +302,12 @@ scene graph — and gives the demo real game structure.
   coins/particles to flaunt WebGPU instancing throughput while staying smooth.
 - **16. Live debug HUD ✅ (S).** Optional overlay: sprite count, draw calls, frame
   time, and the demo's gzip bundle size — makes the "tiny + fast" story explicit.
-- **17. Retro CRT / scanline filter 🔴 (M) — ⭐ COMMITTED.** A full-screen scanline + slight
-  barrel/vignette pass for arcade flavour. Needs a **fullscreen post pass** (engine ask A).
+- **17. Retro CRT / scanline filter ✅ DONE (M) — ⭐ COMMITTED.** A full-screen CRT pass
+  (barrel curvature + scanlines + aperture mask + chromatic aberration + vignette),
+  default ON, toggle with **C**. Shipped the engine **fullscreen post pass** hook
+  (ask A): `createRenderTexture2D` + `setSpriteRendererTarget` let the scene
+  `SpriteRenderer` render into an offscreen texture; a second present
+  `SpriteRenderer` samples it through the CRT custom shader. See `crt.ts`.
 - **18. Smooth integer-scale pixel zoom 🔴 (M).** Crisp pixel-art scaling at
   fractional window sizes via **render-to-texture** at integer scale, then blit.
   Needs RTT/framegraph.
@@ -337,7 +344,7 @@ Consolidated from the 🟡/🔴 ideas above — to discuss before committing.
 
 | # | Feature | Unlocks | Status |
 |---|---------|---------|--------|
-| A | **SpriteRenderer → offscreen target + post pass** | CRT/scanline (#17), fullscreen heat-haze (#9), graded day/night sky (#10), screen-wide flashes | Building blocks exist (render targets, effect renderer, frame graph). Need to let the SpriteRenderer target an offscreen RT, then run an effect pass over it. The CRT effect (#17) is the ideal first user. |
+| A | **SpriteRenderer → offscreen target + post pass** ✅ **SHIPPED** | CRT/scanline (#17 ✅), fullscreen heat-haze (#9), graded day/night sky (#10), screen-wide flashes | Done: `createRenderTexture2D` (renderable+sampleable `Texture2D`) + `setSpriteRendererTarget(sr, view\|null)` (defaults to the swapchain, so zero impact on existing scenes; tree-shaken when unused). The platformer CRT (#17) is the first user — scene renders into an RT, a present `SpriteRenderer` samples it through a custom shader. |
 | B | **Render-to-texture at integer scale + blit** | Crisp integer-scale pixel zoom (#18) | Same RT building blocks; needs an integer-scale resolve/blit path. |
 | C | **2D sprite cutout (alpha-test) blend** | Hard-edged depth-sorted sprites (foliage/grates) if we ever go 2.5D | Billboard cutout already ships; 2D-sprite cutout is still TODO. Low priority for this demo. |
 | D | **(Nice-to-have) lightweight 2D light/normal system** | Cleaner underground lighting (#8) | Fully fakeable with multiply sprites today; only worth it if multiple demos want real 2D lighting. |

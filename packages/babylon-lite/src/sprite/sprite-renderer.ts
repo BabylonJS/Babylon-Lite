@@ -99,6 +99,9 @@ export interface SpriteRenderer extends RenderingContext {
     _disposed: boolean;
     /** @internal Whether this pass clears the swapchain before drawing. False for HUD overlays. */
     _clear: boolean;
+    /** @internal Offscreen color-attachment view to render into; null = the swapchain.
+     *  Set via {@link setSpriteRendererTarget} for render-to-texture / post-process. */
+    _targetView: GPUTextureView | null;
 }
 
 /** @internal Per-layer GPU resources owned by the renderer. */
@@ -241,6 +244,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
         _targetHeight: targetSize.height,
         _disposed: false,
         _clear: opts.clear ?? true,
+        _targetView: null,
         _beforeUpdate: [],
         _disposeCallbacks: [],
         layers,
@@ -330,9 +334,10 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
     assertSpriteRendererLayers(rr.layers);
     const eng = rr._engine;
     const encoder = eng._currentEncoder;
-    const swapView = eng._swapchainView;
+    const swapView = rr._targetView ?? eng._swapchainView;
 
-    // Open a sampleCount=1 render pass directly on the swapchain. This keeps HUD
+    // Open a sampleCount=1 render pass on the target view (the swapchain by default, or an
+    // offscreen render texture when one is set via setSpriteRendererTarget). This keeps HUD
     // sprites from resolving a fresh MSAA target over the already-rendered scene.
     const pass = encoder.beginRenderPass({
         colorAttachments: [
@@ -421,6 +426,19 @@ export function removeSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLay
 /** Push the renderer onto its engine's `_renderingContexts`. Idempotent — a second call is a no-op. */
 export function registerSpriteRenderer(sr: SpriteRenderer): void {
     registerRenderingContext(sr._engine, sr);
+}
+
+/**
+ * Redirect a sprite renderer's output to an offscreen color-attachment `view` (for
+ * render-to-texture / post-processing), or pass `null` to render to the swapchain (the
+ * default). The view's texture must be a `RENDER_ATTACHMENT` of the engine's swapchain
+ * format and the renderer's target size — pair with {@link createRenderTexture2D}. A
+ * second renderer can then sample that texture (e.g. a fullscreen custom-shader layer)
+ * and present it. Renderers registered later run later, so register the offscreen scene
+ * pass before the presenting pass.
+ */
+export function setSpriteRendererTarget(sr: SpriteRenderer, view: GPUTextureView | null): void {
+    sr._targetView = view;
 }
 
 /** Splice the renderer out of its engine's `_renderingContexts`. No-op if not present. */

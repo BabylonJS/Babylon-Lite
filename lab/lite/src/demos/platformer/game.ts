@@ -28,6 +28,7 @@ import {
 } from "babylon-lite";
 
 import { loadPlatformerSheet, type PlatformerSheet } from "./atlas.js";
+import { createCrtPostProcess } from "./crt.js";
 import { PHYS, PLAYER_FIRE_FRAMES, PLAYER_FRAMES, TILE } from "./frames.js";
 import { createInput, type InputController } from "./input.js";
 import { createSfx, type Sfx } from "./audio.js";
@@ -424,6 +425,18 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         clearValue: SKY,
     });
     registerSpriteRenderer(renderer);
+
+    // CRT / scanline post-process (#17). Redirects the scene renderer into an
+    // offscreen texture and presents it through a curved-glass CRT shader. Default
+    // ON; press "C" to toggle. Driven once per frame from the main loop via crt.sync().
+    const crt = createCrtPostProcess(engine, renderer, true);
+    window.addEventListener("keydown", (e) => {
+        if ((e.key === "c" || e.key === "C") && !e.repeat) {
+            const nowOn = crt.toggle();
+            hud.banner(nowOn ? "CRT ON" : "CRT OFF");
+            window.setTimeout(() => hud.banner(null), 700);
+        }
+    });
 
     // Persistent single-slot overlays, reused across areas (repositioned/hidden).
     const caveBackSlot = addSprite2DIndex(caveBackLayer, { positionPx: [0, 0], sizePx: [1, 1], visible: false });
@@ -2152,6 +2165,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
 
         updateJuice(dt);
         project();
+        crt.sync(canvas.width, canvas.height);
         hud.update({ score: game.score, coins: game.coins, lives: game.lives, time: game.time, world: game.world });
         input.endFrame();
         requestAnimationFrame(tick);

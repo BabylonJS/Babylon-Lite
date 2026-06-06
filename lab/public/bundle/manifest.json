@@ -754,7 +754,7 @@
     "bjsGzipKB": 198.3
   },
   "scene52": {
-    "rawKB": 56,
+    "rawKB": 56.1,
     "gzipKB": 22.2,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -2021,19 +2021,10 @@
     ]
   },
   "scene143": {
-    "rawKB": 66.3,
-    "gzipKB": 26,
+    "rawKB": 42.7,
+    "gzipKB": 15.5,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene143-generate-mipmaps-BHg7ig5Q.js",
-      "scene143-normal-map-fragment-vZfuB--u.js",
-      "scene143-point-light-CHHO5fr1.js",
-      "scene143-standard-renderable-ClI-IE0y.js",
-      "scene143-std-ambient-fragment-DfNksGf2.js",
-      "scene143-std-opacity-fragment-WkUvUjcf.js",
-      "scene143-std-reflection-fragment-BwP7HuHT.js",
-      "scene143-std-specular-fragment-Dz_UTmZm.js",
-      "scene143-wgsl-helpers-CwHFFXvt.js",
       "scene143.js"
     ]
   },

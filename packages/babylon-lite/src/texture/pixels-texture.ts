@@ -69,3 +69,46 @@ export function createTexture2DFromPixels(engine: EngineContext, data: Uint8Arra
     acquireTexture(tex);
     return tex;
 }
+
+/** Sampler / format overrides for `createRenderTexture2D()`. */
+export interface RenderTexture2DOptions {
+    /** Address mode U. Default 'clamp-to-edge'. */
+    addressModeU?: GPUAddressMode;
+    /** Address mode V. Default 'clamp-to-edge'. */
+    addressModeV?: GPUAddressMode;
+    /** Min filter. Default 'linear'. */
+    minFilter?: GPUFilterMode;
+    /** Mag filter. Default 'linear'. */
+    magFilter?: GPUFilterMode;
+    /** Color format. Default `engine.format` so it can be sampled and presented. */
+    format?: GPUTextureFormat;
+}
+
+/**
+ * Create an empty `Texture2D` usable as **both a render target and a sampled texture**
+ * (`RENDER_ATTACHMENT | TEXTURE_BINDING`). This is the building block for offscreen
+ * render-to-texture: render a pass into `tex.view`, then sample `tex` in a later pass
+ * (e.g. a fullscreen post-process). Defaults to the engine's swapchain format + a
+ * linear sampler so the result can be presented directly.
+ */
+export function createRenderTexture2D(engine: EngineContext, width: number, height: number, options: RenderTexture2DOptions = {}): Texture2D {
+    if (width < 1 || height < 1) {
+        throw new Error(`createRenderTexture2D: width/height must be >= 1 (got ${width}x${height})`);
+    }
+    const device = engine._device;
+    const format = options.format ?? engine.format;
+    const texture = device.createTexture({
+        size: { width, height },
+        format,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
+    });
+    const sampler = getOrCreateSampler(engine, {
+        addressModeU: options.addressModeU ?? "clamp-to-edge",
+        addressModeV: options.addressModeV ?? "clamp-to-edge",
+        minFilter: options.minFilter ?? "linear",
+        magFilter: options.magFilter ?? "linear",
+    });
+    const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    acquireTexture(tex);
+    return tex;
+}
