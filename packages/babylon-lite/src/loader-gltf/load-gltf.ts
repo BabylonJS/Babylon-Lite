@@ -29,42 +29,12 @@ function loadInterleave(): Promise<InterleaveModule> {
     return (_interleavePromise ??= import("./gltf-interleave.js"));
 }
 
-/** Normalize a glTF COLOR_0 attribute to a tight float32 VEC3 (RGB) buffer.
- *
- *  The PBR/standard vertex pipelines bind vertex color as a single format: `float32x3`
- *  (stride 12). glTF COLOR_0 is far more permissive — it may be VEC3 or VEC4, and its
- *  component type may be float OR normalized unsigned byte/short. Binding any other layout
- *  to the stride-12 float pipeline misaligns every vertex (garbage / black colors). So we
- *  always convert here: integer types are normalized to [0,1] (per the glTF spec, integer
- *  COLOR_0 is always normalized), VEC4 alpha is dropped (Lite shading multiplies only the
- *  rgb of vertex color into the base color), and the result is a tight Float32Array RGB.
- *
- *  `data` is the resolved accessor view (Float32Array | Uint8Array | Uint16Array), `count`
- *  the vertex count, and `comps` the component count (3 or 4). */
-function normalizeColorToVec3(data: ArrayBufferView, count: number, comps: number): Float32Array {
-    const out = new Float32Array(count * 3);
-    if (data instanceof Float32Array) {
-        for (let v = 0; v < count; v++) {
-            out[v * 3] = data[v * comps]!;
-            out[v * 3 + 1] = data[v * comps + 1]!;
-            out[v * 3 + 2] = data[v * comps + 2]!;
-        }
-    } else if (data instanceof Uint16Array) {
-        const inv = 1 / 65535;
-        for (let v = 0; v < count; v++) {
-            out[v * 3] = data[v * comps]! * inv;
-            out[v * 3 + 1] = data[v * comps + 1]! * inv;
-            out[v * 3 + 2] = data[v * comps + 2]! * inv;
-        }
-    } else if (data instanceof Uint8Array) {
-        const inv = 1 / 255;
-        for (let v = 0; v < count; v++) {
-            out[v * 3] = data[v * comps]! * inv;
-            out[v * 3 + 1] = data[v * comps + 1]! * inv;
-            out[v * 3 + 2] = data[v * comps + 2]! * inv;
-        }
-    }
-    return out;
+/** Dynamically-imported COLOR_0 normalization module — loaded only when an asset
+ *  actually contains a COLOR_0 vertex attribute, so colorless scenes pay zero cost. */
+type ColorNormalizeModule = typeof import("./gltf-color-normalize.js");
+let _colorNormalizePromise: Promise<ColorNormalizeModule> | undefined;
+function loadColorNormalize(): Promise<ColorNormalizeModule> {
+    return (_colorNormalizePromise ??= import("./gltf-color-normalize.js"));
 }
 
 /** Parsed mesh data ready for GPU upload. */
@@ -389,7 +359,8 @@ async function extractAllMeshes(
             // ushort components, but the PBR/standard pipelines bind vertex color as a single
             // float32x3 layout. Normalize any source to a tight float32 RGB buffer so the GPU
             // stride matches the layout (otherwise every vertex misaligns -> garbage/black).
-            const colors = colorData ? normalizeColorToVec3(colorData._data, colorData._count, colorData._componentCount) : null;
+            // The normalizer is imported lazily on first need — colorless assets never fetch it.
+            const colors = colorData ? (await loadColorNormalize()).normalizeColorToVec3(colorData._data, colorData._count, colorData._componentCount) : null;
             const idxData = decoded
                 ? { _data: decoded._indices, _count: decoded._indexCount, _componentCount: 1 }
                 : primitive.indices !== undefined
