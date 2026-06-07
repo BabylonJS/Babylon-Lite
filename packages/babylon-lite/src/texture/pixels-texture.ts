@@ -97,6 +97,6 @@ export function updateTexture2DFromPixels(engine: EngineContext, tex: Texture2D,
         { texture: tex.texture, origin: { x, y } },
         data as Uint8Array<ArrayBuffer>,
         { bytesPerRow: width * 4, rowsPerImage: height },
-        { width, height },
+        { width, height }
     );
 }
