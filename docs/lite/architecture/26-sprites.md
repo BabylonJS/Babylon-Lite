@@ -371,7 +371,7 @@ export interface RenderTexture2DOptions {
     addressModeV?: GPUAddressMode; // default 'clamp-to-edge'
     minFilter?: GPUFilterMode;     // default 'linear'
     magFilter?: GPUFilterMode;     // default 'linear'
-    format?: GPUTextureFormat;     // default engine.format (so it can be presented)
+    format?: GPUTextureFormat;     // default engine.format (REQUIRED for a SpriteRenderer target)
 }
 /** An empty Texture2D usable as BOTH a render target and a sampled texture
  *  (RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_DST). */
@@ -386,6 +386,13 @@ Both default to the swapchain / swapchain format, so **every existing scene and
 demo is byte-for-byte unaffected**, and the whole capability tree-shakes away when
 unused (`createRenderTexture2D` is a separate import; `_targetView` defaults to
 `null`).
+
+> **Format constraint:** a `SpriteRenderer` target must use `engine.format`. Sprite
+> pipelines are created with that format, and WebGPU rejects a render pass whose color
+> attachment format differs from the bound pipeline (validation error at pass begin).
+> So leave `RenderTexture2DOptions.format` at its default for any texture you pass to
+> `setSpriteRendererTarget`; a custom format is only for offscreen targets driven by a
+> different pass (e.g. an `EffectRenderer`).
 
 The render-to-texture pattern is two registered renderers, ordered:
 

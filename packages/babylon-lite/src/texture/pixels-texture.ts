@@ -80,7 +80,16 @@ export interface RenderTexture2DOptions {
     minFilter?: GPUFilterMode;
     /** Mag filter. Default 'linear'. */
     magFilter?: GPUFilterMode;
-    /** Color format. Default `engine.format` so it can be sampled and presented. */
+    /**
+     * Color format. Default `engine.format` so it can be sampled and presented.
+     *
+     * ⚠️ Only the default `engine.format` is compatible with a `SpriteRenderer`
+     * target (`setSpriteRendererTarget`): sprite pipelines are created with
+     * `engine.format`, and a render pass whose color attachment format differs from
+     * the bound pipeline fails WebGPU validation at pass begin. Override this **only**
+     * for offscreen targets you render into by some OTHER means (a custom pass /
+     * `EffectRenderer`), never as a sprite-render target.
+     */
     format?: GPUTextureFormat;
 }
 
@@ -90,6 +99,11 @@ export interface RenderTexture2DOptions {
  * render-to-texture: render a pass into `tex.view`, then sample `tex` in a later pass
  * (e.g. a fullscreen post-process). Defaults to the engine's swapchain format + a
  * linear sampler so the result can be presented directly.
+ *
+ * To use the result as a `SpriteRenderer` target (via `setSpriteRendererTarget`), leave
+ * `format` at its default `engine.format` — sprite pipelines bake in that format, so a
+ * differently-formatted target trips WebGPU validation at render-pass begin. A custom
+ * `format` is for offscreen targets driven by some other pass, not the sprite renderer.
  */
 export function createRenderTexture2D(engine: EngineContext, width: number, height: number, options: RenderTexture2DOptions = {}): Texture2D {
     if (width < 1 || height < 1) {

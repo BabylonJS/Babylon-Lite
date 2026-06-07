@@ -432,10 +432,11 @@ export function registerSpriteRenderer(sr: SpriteRenderer): void {
  * Redirect a sprite renderer's output to an offscreen color-attachment `view` (for
  * render-to-texture / post-processing), or pass `null` to render to the swapchain (the
  * default). The view's texture must be a `RENDER_ATTACHMENT` of the engine's swapchain
- * format and the renderer's target size — pair with {@link createRenderTexture2D}. A
- * second renderer can then sample that texture (e.g. a fullscreen custom-shader layer)
- * and present it. Renderers registered later run later, so register the offscreen scene
- * pass before the presenting pass.
+ * format and the renderer's target size — pair with {@link createRenderTexture2D} at its
+ * default format. Sprite pipelines are baked with `engine.format`, so a target of any
+ * OTHER format fails WebGPU validation at render-pass begin. A second renderer can then
+ * sample that texture (e.g. a fullscreen custom-shader layer) and present it. Renderers
+ * registered later run later, so register the offscreen scene pass before the presenting pass.
  */
 export function setSpriteRendererTarget(sr: SpriteRenderer, view: GPUTextureView | null): void {
     sr._targetView = view;
