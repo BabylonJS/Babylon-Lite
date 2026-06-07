@@ -17,8 +17,6 @@ import { type PickupState } from "./entities.js";
 export const SKY = { r: 0.38, g: 0.62, b: 0.95, a: 1 } as const;
 /** Starting level time (counts down; converted to a bonus at the goal). */
 export const START_TIME = 300;
-/** Base URL of the curated Kenney spritesheets under `lab/public/`. */
-export const ASSET_BASE = "/platformer";
 
 /** Number of afterimage ghosts in the star-power trail. */
 export const STAR_TRAIL = 6;

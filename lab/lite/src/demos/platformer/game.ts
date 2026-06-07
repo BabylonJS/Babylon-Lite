@@ -41,6 +41,7 @@ import { IRIS_FRAGMENT, makePipeTextureDataUrl, makeWhiteTextureDataUrl } from "
 import { LAVA_FRAGMENT } from "./lava.js";
 import { LANTERN_FRAGMENT, makeGlowDataUrl } from "./lantern.js";
 import { moveAndCollide, overlaps, type AABB, type CollisionMap } from "./physics.js";
+import { demoAssetUrl } from "../demo-asset-url.js";
 
 import type {
     BlockState,
@@ -57,7 +58,6 @@ import type {
     TrailPose,
 } from "./entities.js";
 import {
-    ASSET_BASE,
     BOSS_H,
     BOSS_HURT_TIME,
     BOSS_MAX_HP,
@@ -106,6 +106,13 @@ import {
     STAR_TRAIL,
     STAR_TRAIL_GAP,
 } from "./constants.js";
+
+// Resolve the committed Kenney sprite sheets relative to THIS demo's bundle module,
+// so they load under any deploy base path (the demos site serves ONLY the bundle dir,
+// where copyDemoRuntimeAssets places `platformer/`). A root-absolute `/platformer/...`
+// would 404 there.
+const ASSET_BASE = demoAssetUrl("./platformer", import.meta.url);
+
 export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext): Promise<void> {
     const world: World = buildWorld();
     const allAreas = Object.values(world.areas);
@@ -138,7 +145,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     // ── Portal textures (warp pipe, cave backdrop, iris-wipe quad) ────────────
     const [pipeTex, backdropTex, whiteTex, fireFlowerTex, fireballTex, sparkTex, glowTex] = await Promise.all([
         loadTexture2D(engine, makePipeTextureDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
-        loadTexture2D(engine, "/platformer/backgrounds/bg_castle.png", { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
+        loadTexture2D(engine, demoAssetUrl("./platformer/backgrounds/bg_castle.png", import.meta.url), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
         loadTexture2D(engine, makeWhiteTextureDataUrl(), { invertY: false, mipMaps: false }),
         loadTexture2D(engine, makeFireFlowerDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),
         loadTexture2D(engine, makeFireballDataUrl(), { invertY: false, addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge", mipMaps: false, minFilter: "linear", magFilter: "linear" }),

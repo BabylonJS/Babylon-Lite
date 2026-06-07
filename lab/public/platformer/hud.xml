@@ -19,7 +19,7 @@
 	<SubTexture name="hud_heartHalf.png" x="0" y="0" width="53" height="45"/>
 	<SubTexture name="hud_keyBlue.png" x="146" y="147" width="44" height="40"/>
 	<SubTexture name="hud_keyBlue_disabled.png" x="150" y="38" width="44" height="40"/>
-	<SubTexture name="hud_keyGreem_disabled.png" x="104" y="38" width="44" height="40"/>
+	<SubTexture name="hud_keyGreen_disabled.png" x="104" y="38" width="44" height="40"/>
 	<SubTexture name="hud_keyGreen.png" x="192" y="122" width="44" height="40"/>
 	<SubTexture name="hud_keyRed.png" x="193" y="80" width="44" height="40"/>
 	<SubTexture name="hud_keyRed_disabled.png" x="192" y="164" width="44" height="40"/>

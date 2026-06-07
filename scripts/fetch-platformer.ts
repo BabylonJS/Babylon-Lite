@@ -33,7 +33,7 @@
 
 import { createHash } from "node:crypto";
 import { inflateRawSync } from "node:zlib";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bleedPlatformerAlpha } from "./bleed-platformer-alpha.ts";
@@ -147,9 +147,11 @@ export async function fetchPlatformer(): Promise<void> {
     const cachedZip = join(CACHE_DIR, `kenney_platformer-pack-${PACK_VERSION}.zip`);
 
     let zipBuf: Buffer;
+    let fromCache = false;
     if (existsSync(cachedZip)) {
         console.log(`Using cached ${cachedZip}`);
         zipBuf = readFileSync(cachedZip);
+        fromCache = true;
     } else {
         console.log(`Downloading ${ZIP_URL} …`);
         const res = await fetch(ZIP_URL);
@@ -164,8 +166,21 @@ export async function fetchPlatformer(): Promise<void> {
     const sha = createHash("sha256").update(zipBuf).digest("hex");
     const expected = ZIP_SHA256.replace(/\s+/g, "");
     if (expected && sha !== expected) {
-        console.warn(
-            `WARNING: Platformer pack zip SHA-256 mismatch.\n  expected ${expected}\n  actual   ${sha}\nProceeding, but verify the source. Update ZIP_SHA256 if this is an intentional version bump.`
+        // Fail fast: a hash mismatch means the bytes are NOT the pinned, vetted pack — a
+        // corrupted cache, a changed/compromised upstream, or an un-bumped version. Extracting
+        // anyway would defeat the script's provenance/reproducibility guarantee, so we refuse.
+        // A stale/corrupt CACHED zip is deleted so the next run re-downloads cleanly.
+        if (fromCache) {
+            rmSync(cachedZip, { force: true });
+        }
+        throw new Error(
+            `Platformer pack zip SHA-256 mismatch — refusing to extract.\n` +
+                `  expected ${expected}\n` +
+                `  actual   ${sha}\n` +
+                (fromCache
+                    ? `The cached zip was corrupt or stale and has been deleted; re-run this script to re-download.\n`
+                    : `The freshly downloaded zip does not match the pinned hash — verify the source before trusting it.\n`) +
+                `If this is an INTENTIONAL upstream version bump, update ZIP_URL + ZIP_SHA256 together.`
         );
     }
 

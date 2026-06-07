@@ -47,6 +47,7 @@ const MINECRAFT_SRC = resolve(labDir, "public/minecraft");
 const FREECIV_SRC = resolve(labDir, "public/freeciv");
 const LITTLEST_TOKYO_SRC = resolve(labDir, "public/littlest-tokyo");
 const TETRIS_SRC = resolve(labDir, "public/tetris");
+const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 interface DemoConfigEntry {
@@ -187,6 +188,13 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
 
     if (demos.some((demo) => demo.slug === "freeciv")) {
         copyRequiredDir(FREECIV_SRC, resolve(demosDir, "freeciv"), "Freeciv");
+    }
+
+    if (demos.some((demo) => demo.slug === "platformer")) {
+        // Committed CC0 Kenney sprite sheets + backgrounds, copied under the demo's own
+        // subpath (the demo resolves them via `demoAssetUrl("./platformer/...")`), so the
+        // deployed demos site (which serves ONLY lab/public/bundle/demos/) finds them.
+        copyRequiredDir(PLATFORMER_SRC, resolve(demosDir, "platformer"), "Platformer");
     }
 
     if (demos.some((demo) => demo.slug === "littlest-tokyo")) {
