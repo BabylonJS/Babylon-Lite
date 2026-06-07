@@ -83,6 +83,10 @@ export interface RenderTarget {
      *  (e.g. exposed as SampledTexture) stay valid. */
     /** @internal */
     _eager?: boolean;
+    /** @internal When false, `disposeRenderTarget` will NOT destroy `_depthTexture` — the depth
+     *  attachment is BORROWED (owned by something else, e.g. a ShadowGenerator's shared shadow map)
+     *  and must outlive this render target. Defaults to owning (destroys on dispose). */
+    _ownsDepthTexture?: boolean;
 }
 
 /** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
@@ -148,7 +152,11 @@ export function disposeRenderTarget(rt: RenderTarget): void {
         rt._colorView = null;
     }
     if (rt._depthTexture) {
-        rt._depthTexture.destroy();
+        // Only destroy depth we own — borrowed depth (e.g. a ShadowGenerator's shared shadow map,
+        // marked `_ownsDepthTexture: false`) must outlive per-task render targets that render into it.
+        if (rt._ownsDepthTexture !== false) {
+            rt._depthTexture.destroy();
+        }
         rt._depthTexture = null;
         rt._depthView = null;
     }

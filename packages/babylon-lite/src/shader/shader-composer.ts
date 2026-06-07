@@ -93,7 +93,10 @@ function bglEntry(binding: number, decl: BindingDecl): GPUBindGroupLayoutEntry {
             break;
         case "texture": {
             const def = decl._type._textureType === "texture_depth_2d" ? "depth" : decl._type._textureType === "texture_2d<u32>" ? "uint" : "float";
-            e.texture = { sampleType: (decl._type._sampleType ?? def) as GPUTextureSampleType, viewDimension: decl._type._textureType.includes("cube") ? "cube" : "2d" };
+            e.texture = {
+                sampleType: (decl._type._sampleType ?? def) as GPUTextureSampleType,
+                viewDimension: decl._type._textureType.includes("array") ? "2d-array" : decl._type._textureType.includes("cube") ? "cube" : "2d",
+            };
             break;
         }
         case "sampler":

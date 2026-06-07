@@ -7,6 +7,7 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Material } from "../material.js";
+import type { MaterialPlugin } from "../plugin/material-plugin.js";
 import {
     _getPbrExts,
     PBR2_HAS_BASE_COLOR_FACTOR,
@@ -44,6 +45,10 @@ pbrGroupBuilder._materialFamily = "pbr";
  *  Optional sub-feature objects (clearcoat, sheen, anisotropy, subsurface) are
  *  only bundled when referenced. */
 export interface PbrMaterialProps extends Material {
+    /** Optional opt-in material plugins (custom WGSL + uniforms + samplers layered
+     *  on top of the built-in PBR pipeline). Attach via `material.plugins = [plugin]`,
+     *  then call `enableMaterialPlugins(scene)` before `registerScene`. */
+    plugins?: MaterialPlugin[];
     baseColorTexture?: Texture2D;
     /** Linear RGB/A factor multiplied with the base-color texture (glTF baseColorFactor). Default [1,1,1,1]. */
     baseColorFactor?: [number, number, number, number];

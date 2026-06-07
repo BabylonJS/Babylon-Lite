@@ -1,6 +1,7 @@
 import type { Material } from "../material.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { Mat4 } from "../../math/types.js";
 import { shaderGroupBuilder } from "./shader-group-builder.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. */
@@ -53,6 +54,12 @@ export interface ShaderUniformDecl {
 export interface ShaderSamplerDecl {
     readonly name: string;
     readonly sampleType?: "float" | "unfilterable-float" | "depth";
+    /** Texture view dimension. Default "2d". Use "2d-array" for layered maps such as
+     *  cascaded-shadow (CSM) depth arrays. */
+    readonly viewDimension?: "2d" | "2d-array";
+    /** Bind a hardware comparison sampler (`sampler_comparison`) for depth compare / PCF
+     *  filtering. Implies a depth texture. Default false. */
+    readonly comparison?: boolean;
 }
 
 /** A resolved WGSL preprocessor define (name + value). */
@@ -180,7 +187,15 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const samplerDecls: ShaderSamplerDecl[] = [];
     const textureSlots = new Map<string, ShaderTextureSlot>();
     for (const opt of options.samplers ?? []) {
-        const decl = typeof opt === "string" ? { name: opt, sampleType: "float" as const } : { name: opt.name, sampleType: opt.sampleType ?? "float" };
+        const decl: ShaderSamplerDecl =
+            typeof opt === "string"
+                ? { name: opt, sampleType: "float" }
+                : {
+                      name: opt.name,
+                      sampleType: opt.sampleType ?? (opt.comparison ? "depth" : "float"),
+                      viewDimension: opt.viewDimension ?? "2d",
+                      comparison: opt.comparison ?? false,
+                  };
         assertIdentifier("sampler", decl.name);
         assertUniqueName(usedNames, "sampler", decl.name);
         assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
@@ -308,7 +323,7 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
     }
     if (texture) {
-        const expectsDepth = slot.decl.sampleType === "depth";
+        const expectsDepth = slot.decl.sampleType === "depth" || slot.decl.comparison === true;
         const isDepthTexture = texture._sampleType === "depth";
         if (expectsDepth && !isDepthTexture) {
             throw new Error(`ShaderMaterial: sampler "${name}" expects a depth Texture2D.`);
@@ -331,7 +346,10 @@ export function setShaderVector3(material: ShaderMaterial, name: string, value: 
     setShaderUniform(material, name, value);
 }
 
-/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`. */
-export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array): void {
-    setShaderUniform(material, name, value);
+/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`.
+ *  Accepts a raw `Float32Array` or the engine's branded `Mat4` (e.g. the result of
+ *  `getViewProjectionMatrix()` / `mat4Invert()`), so camera/math matrices can be fed
+ *  straight into a matrix uniform without laundering through a typed array. */
+export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array | Mat4): void {
+    setShaderUniform(material, name, value instanceof Float32Array ? value : Array.from(value));
 }

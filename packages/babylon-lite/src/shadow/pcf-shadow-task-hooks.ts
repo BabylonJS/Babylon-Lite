@@ -169,7 +169,7 @@ function biasViewProjection(viewProj: Float32Array, bias: number): Float32Array 
     return biased;
 }
 
-function getNoColorView(material: Material, cache: Map<Material, MaterialView>): MaterialView {
+export function getNoColorView(material: Material, cache: Map<Material, MaterialView>): MaterialView {
     const cached = cache.get(material);
     if (cached) {
         return cached;

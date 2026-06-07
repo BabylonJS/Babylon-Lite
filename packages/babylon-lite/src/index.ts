@@ -84,6 +84,7 @@ export { createPointLight } from "./light/point-light.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export type { ClusteredLightContainer, ClusteredLightContainerOptions, ClusteredPointLight, ClusteredPointLightOptions } from "./light/clustered.js";
+export { createClusteredLightContainer, createClusteredPointLight, addClusteredLightContainer } from "./light/clustered.js";
 export type { LightBase } from "./light/types.js";
 export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 
@@ -92,6 +93,7 @@ export {
     createSphere,
     createBox,
     createTorus,
+    createTorusKnot,
     createGround,
     createGroundFromHeightMap,
     createCylinder,
@@ -106,6 +108,8 @@ export {
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
+export { createTorusKnotData } from "./mesh/create-torus-knot.js";
+export type { TorusKnotData, TorusKnotOptions } from "./mesh/create-torus-knot.js";
 export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromCsg } from "./mesh/csg.js";
 export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
@@ -132,6 +136,8 @@ export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
+export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -148,7 +154,7 @@ export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
-export { loadTexture2D } from "./texture/texture-2d.js";
+export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
@@ -168,6 +174,8 @@ export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
+export { createCsmDirectionalShadowGenerator } from "./shadow/csm-directional-shadow-generator.js";
+export { onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
 export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
@@ -201,7 +209,8 @@ export { mat4Translation } from "./math/mat4-translation.js";
 export { mat4Identity } from "./math/mat4-identity.js";
 export { mat4Scale } from "./math/mat4-scale.js";
 export { mat4Compose } from "./math/mat4-compose.js";
-export type { Vec3, Vec3Tuple } from "./math/types.js";
+export { mat4Invert } from "./math/mat4-invert.js";
+export type { Vec3, Vec3Tuple, Mat4 } from "./math/types.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────
 export {
@@ -262,6 +271,7 @@ export type { ShadowGenerator } from "./shadow/shadow-generator.js";
 export type { EsmDirectionalShadowGeneratorConfig } from "./shadow/esm-directional-shadow-generator.js";
 export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-shadow-generator.js";
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
+export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";

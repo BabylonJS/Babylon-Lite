@@ -139,7 +139,9 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         const defaultIdx = options.shadowGenerators.map((_, i) => i);
         const indices = options.shadowLightIndices ?? defaultIdx;
         for (let i = 0; i < options.shadowGenerators.length; i++) {
-            shadowLightsPre.push({ lightIndex: indices[i]!, shadowType: options.shadowGenerators[i]!._shadowType });
+            // v1: CSM is a Standard-material-only receiver. Node materials never have a CSM light in any
+            // current scene, so the cast is safe and keeps this block byte-identical to baseline.
+            shadowLightsPre.push({ lightIndex: indices[i]!, shadowType: options.shadowGenerators[i]!._shadowType as "esm" | "pcf" });
         }
     }
 

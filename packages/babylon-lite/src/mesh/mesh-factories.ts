@@ -14,6 +14,8 @@ import type { SphereOptions } from "./create-sphere.js";
 import { createBoxData } from "./create-box.js";
 import { createTorusData } from "./create-torus.js";
 import type { TorusOptions } from "./create-torus.js";
+import { createTorusKnotData } from "./create-torus-knot.js";
+import type { TorusKnotOptions } from "./create-torus-knot.js";
 import { createFlatGroundData, createGroundFromHeightMap as createGroundCPU } from "./create-ground.js";
 import type { GroundOptions } from "./create-ground.js";
 import { createCylinderData } from "./create-cylinder.js";
@@ -92,6 +94,12 @@ export function createBox(engine: EngineContext, size = 1): Mesh {
 export function createTorus(engine: EngineContext, options?: TorusOptions): Mesh {
     const data = createTorusData(options);
     return createMeshFromData(engine as EngineContext, "torus", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a torus-knot mesh. Caller must assign material. */
+export function createTorusKnot(engine: EngineContext, options?: TorusKnotOptions): Mesh {
+    const data = createTorusKnotData(options);
+    return createMeshFromData(engine as EngineContext, "torusKnot", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a ground mesh from a heightmap URL. Caller must assign material. */

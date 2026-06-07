@@ -342,11 +342,18 @@ async function extractAllMeshes(
                 return idx !== undefined ? resolveAccessor(json, binChunk, idx) : null;
             };
             const posData = resolveAttr("POSITION")!;
-            const normData = resolveAttr("NORMAL")!;
+            const normData = resolveAttr("NORMAL");
             const uvData = resolveAttr("TEXCOORD_0");
             const uv2Data = resolveAttr("TEXCOORD_1");
             const tanData = resolveAttr("TANGENT");
             const colorData = resolveAttr("COLOR_0");
+            // glTF COLOR_0 may be VEC3 or VEC4 with float, normalized ubyte, or normalized
+            // ushort components, but the PBR/standard pipelines bind vertex color as a single
+            // float32x3 layout. Normalize any source to a tight float32 RGB buffer so the GPU
+            // stride matches the layout (otherwise every vertex misaligns -> garbage/black).
+            // The normalizer is imported lazily on first need — colorless assets never fetch it
+            // (the runtime caches the module, so the per-primitive import() resolves instantly).
+            const colors = colorData ? (await import("./gltf-color-normalize.js")).normalizeColorToVec3(colorData._data, colorData._count, colorData._componentCount) : null;
             const idxData = decoded
                 ? { _data: decoded._indices, _count: decoded._indexCount, _componentCount: 1 }
                 : primitive.indices !== undefined
@@ -365,13 +372,19 @@ async function extractAllMeshes(
             // Fire material fetch without awaiting — all materials load in parallel
             matPromises.push(getMat(primitive.material));
 
+            // Smooth-normal generation is lazily imported on first need — assets that
+            // always provide NORMAL (the common case) never bundle or fetch this code.
+            const normals = normData
+                ? (normData._data as Float32Array)
+                : (await import("./gltf-normals.js")).computeSmoothNormals(posData._data as Float32Array, indices, posData._count);
+
             partials.push({
                 _positions: posData._data as Float32Array,
-                _normals: normData._data as Float32Array,
+                _normals: normals,
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
                 _uvs: uvData ? (uvData._data as Float32Array) : new Float32Array(posData._count * 2),
                 _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
-                _colors: colorData ? (colorData._data as Float32Array) : null,
+                _colors: colors,
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: idxData?._count ?? 0,

@@ -66,36 +66,68 @@ export function quatToEulerXYZ(qx: number, qy: number, qz: number, qw: number): 
     return [rx, ry, rz];
 }
 
-/** Create a live bidirectional EulerProxy backed by the given ObservableQuat. */
+/** Create a live bidirectional EulerProxy backed by the given ObservableQuat.
+ *
+ *  Euler⇄quaternion is many-to-one and `quatToEulerXYZ` is unstable at gimbal lock
+ *  (e.g. yaw near ±π/2), so re-deriving Euler from the quaternion on every read makes
+ *  per-axis updates (`node.rotation.x = …; node.rotation.y = …`) lossy and can flip the
+ *  node. To stay stable, the proxy caches the Euler triple it last applied and reuses it
+ *  while the quaternion is unchanged; it only re-derives from the quaternion when the
+ *  quaternion was written externally (detected via its version counter). */
 export function createEulerProxy(rq: ObservableQuat): EulerProxy {
-    const e = () => quatToEulerXYZ(rq.x, rq.y, rq.z, rq.w);
-    const s = (x: number, y: number, z: number) => {
+    let ex = 0;
+    let ey = 0;
+    let ez = 0;
+    // Snapshot of rq.version at the last sync. -1 forces an initial derive.
+    let syncedVersion = -1;
+
+    const sync = (): void => {
+        if (rq.version !== syncedVersion) {
+            const e = quatToEulerXYZ(rq.x, rq.y, rq.z, rq.w);
+            ex = e[0];
+            ey = e[1];
+            ez = e[2];
+            syncedVersion = rq.version;
+        }
+    };
+
+    const apply = (x: number, y: number, z: number): void => {
+        ex = x;
+        ey = y;
+        ez = z;
         const [a, b, c, d] = eulerToQuat(x, y, z);
         rq.set(a, b, c, d);
+        // The cached Euler is authoritative for this quaternion value, so adopt the
+        // version we just produced — avoids an immediate lossy re-derive on next read.
+        syncedVersion = rq.version;
     };
+
     return {
         get x() {
-            return e()[0];
+            sync();
+            return ex;
         },
         set x(v: number) {
-            const r = e();
-            s(v, r[1], r[2]);
+            sync();
+            apply(v, ey, ez);
         },
         get y() {
-            return e()[1];
+            sync();
+            return ey;
         },
         set y(v: number) {
-            const r = e();
-            s(r[0], v, r[2]);
+            sync();
+            apply(ex, v, ez);
         },
         get z() {
-            return e()[2];
+            sync();
+            return ez;
         },
         set z(v: number) {
-            const r = e();
-            s(r[0], r[1], v);
+            sync();
+            apply(ex, ey, v);
         },
-        set: s,
+        set: apply,
     };
 }
 

@@ -65,7 +65,7 @@ export type BindingKind =
           /** @internal */
           readonly _kind: "texture";
           /** @internal */
-          readonly _textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_2d<u32>";
+          readonly _textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_depth_2d_array" | "texture_2d<u32>";
           /** @internal */
           readonly _sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
       }
