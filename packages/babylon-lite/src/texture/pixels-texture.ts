@@ -69,3 +69,34 @@ export function createTexture2DFromPixels(engine: EngineContext, data: Uint8Arra
     acquireTexture(tex);
     return tex;
 }
+
+/**
+ * Update a rectangular region of an existing `Texture2D` from a tightly-packed RGBA8 byte buffer.
+ *
+ * The texture must have been created with `COPY_DST` usage (as `createTexture2DFromPixels` does).
+ * This is the runtime counterpart to `createTexture2DFromPixels` — for data textures the app mutates
+ * each frame / on demand (e.g. a terrain carve heightmap stamped by a dig tool).
+ *
+ * @param engine - Engine context.
+ * @param tex - Target texture (from `createTexture2DFromPixels`).
+ * @param data - `width * height * 4` bytes for the sub-region, row-major, straight alpha.
+ * @param x - Destination origin X in texels (default 0).
+ * @param y - Destination origin Y in texels (default 0).
+ * @param width - Region width in texels (default `tex.width`).
+ * @param height - Region height in texels (default `tex.height`).
+ */
+export function updateTexture2DFromPixels(engine: EngineContext, tex: Texture2D, data: Uint8Array, x = 0, y = 0, width = tex.width, height = tex.height): void {
+    if (width < 1 || height < 1) {
+        throw new Error(`updateTexture2DFromPixels: width/height must be >= 1 (got ${width}x${height})`);
+    }
+    const expected = width * height * 4;
+    if (data.length < expected) {
+        throw new Error(`updateTexture2DFromPixels: data too short — need ${expected} bytes for ${width}x${height} RGBA, got ${data.length}`);
+    }
+    engine._device.queue.writeTexture(
+        { texture: tex.texture, origin: { x, y } },
+        data as Uint8Array<ArrayBuffer>,
+        { bytesPerRow: width * 4, rowsPerImage: height },
+        { width, height },
+    );
+}
