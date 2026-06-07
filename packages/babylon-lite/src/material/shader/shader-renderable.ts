@@ -15,19 +15,24 @@ import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
 
-interface ShaderPacket {
+/** @internal Exported as a type only (zero runtime bytes) for the dynamically-imported
+ *  thin-instance builder. */
+export interface ShaderPacket {
     readonly mesh: Mesh;
     readonly systemUBO: GPUBuffer;
     readonly systemData: Float32Array;
+    /** @internal */
     _bindGroup: GPUBindGroup;
+    /** @internal */
     _lastResourceVersion: number;
+    /** @internal */
     _boundTextures: Texture2D[];
-    /** Set when the owning mesh is removed and this packet's GPU resources are
+    /** @internal Set when the owning mesh is removed and this packet's GPU resources are
      *  destroyed. A combined (multi-mesh) renderable keeps every packet in its
      *  closure, so update()/draw() must skip disposed packets to avoid writing to
      *  or submitting an already-destroyed systemUBO / vertex buffer. */
     _disposed?: boolean;
-    /** Back-reference to the combined renderable's packet array, so disposal can
+    /** @internal Back-reference to the combined renderable's packet array, so disposal can
      *  splice this packet out and stop retaining/iterating dead chunk state every
      *  frame (set only for merged opaque renderables). */
     _owner?: ShaderPacket[];
@@ -41,7 +46,8 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomVersion?: number;
 }
 
-type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
+/** @internal */
+export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[]): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
@@ -66,6 +72,32 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     }
 
     return { renderables, rebuildSingle };
+}
+
+/** Async group entry point. Non-instanced ShaderMaterial scenes (the common case)
+ *  take the synchronous fast path and pull in zero instancing code. When at least
+ *  one mesh uses thin instances, the instancing module is dynamically imported and
+ *  the renderable helpers it needs are handed to it as positional arguments — NOT
+ *  module exports — so those helpers keep their mangled names in this chunk (an
+ *  export would de-mangle them, growing every ShaderMaterial scene's bundle). */
+export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Promise<MeshGroupBuildResult> {
+    if (!meshes.some((m) => !!m.thinInstances)) {
+        return buildShaderMaterialRenderables(scene, meshes);
+    }
+    const mod = await import("./shader-thin-instance.js");
+    const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
+    return mod.buildShaderRenderablesWithInstancing(
+        scene,
+        meshes,
+        buildShaderMaterialRenderables,
+        createPacket,
+        updatePacket,
+        updateCustomUbo,
+        getAttrBuffer,
+        getOrCreateShaderPipeline,
+        getOrCreateShaderPipelineBindings,
+        cull
+    );
 }
 
 function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean): Renderable {

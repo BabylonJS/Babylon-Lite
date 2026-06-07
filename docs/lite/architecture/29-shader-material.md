@@ -85,6 +85,35 @@ export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangen
 
 The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers, matching NodeMaterial behavior. `position` is required for normal mesh rendering.
 
+### Thin instances and GPU culling
+
+A ShaderMaterial mesh can be hardware-instanced via the standard thin-instance API (`setThinInstances`, `setThinInstanceColors`, `enableThinInstanceGpuCulling` — see `17-thin-instances.md`). No new ShaderMaterial option is required: when a mesh has `thinInstances`, the renderer builds a per-mesh **instance pipeline variant** and auto-injects extra attributes into the generated `VertexInput` struct, appended after the declared attributes (so at `@location(attributes.length)` onward):
+
+```wgsl
+@location(N)   world0: vec4<f32>,   // instance world matrix columns
+@location(N+1) world1: vec4<f32>,
+@location(N+2) world2: vec4<f32>,
+@location(N+3) world3: vec4<f32>,
+@location(N+4) instanceColor: vec4<f32>,   // only when setThinInstanceColors() was called
+```
+
+The user shader composes the instance transform itself (matching Babylon.js `instancesVertex`):
+
+```wgsl
+let iw = mat4x4<f32>(input.world0, input.world1, input.world2, input.world3);
+out.position = shaderSystem.viewProjection * (shaderSystem.world * iw) * vec4<f32>(input.position, 1.0);
+// out.vColor = input.instanceColor;  // when instance colors are present
+```
+
+The `world` system uniform stays the **mesh** world matrix; for thin instances the effective world is `world * iw`. The baked `worldViewProjection` / `worldView` system uniforms are **not** instance-aware — instanced shaders must use `viewProjection` (+ `world`) and compose with `iw` themselves.
+
+Implementation notes (bundle discipline):
+
+- The instance vertex-buffer layouts, the prelude attribute lines, and the per-mesh instanced renderable live in `material/shader/shader-thin-instance.ts`, **dynamically imported** via `shader-group-builder.ts` → `buildShaderGroup` only when `meshes.some(m => m.thinInstances)`. Non-instanced ShaderMaterial scenes route through the unchanged synchronous `buildShaderMaterialRenderables`.
+- The expensive bindings (`group1BGL`, `systemSpec`, `customSpec`) are shared between the non-instanced and instanced variants — instancing is vertex data, not bind groups. Only the vertex buffer layouts and the `VertexInput` struct differ, so `getOrCreateShaderPipeline()` keys instanced pipelines on a variant suffix (`|ti1c{0|1}`).
+- Instanced ShaderMaterial meshes render as **one `_direct` renderable per mesh** (not merged), so per-mesh instance buffers are re-bound fresh each frame (avoiding stale render-bundle references when instance capacity grows).
+- **Opt-in GPU frustum culling** is wired via the shared `mesh/thin-instance-cull-binding.ts` helper (same as Standard/PBR): when `enableThinInstanceGpuCulling(mesh)` is set, the compute cull pass runs in the binding `update()` and the draw becomes `drawIndexedIndirect`. Opaque instanced ShaderMaterial only; transparent instanced meshes use the normal (non-culled) instanced draw.
+
 ### Uniform declarations
 
 ```typescript

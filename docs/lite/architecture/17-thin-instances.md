@@ -1,9 +1,11 @@
 # Module: Thin Instances
-> Package path: `packages/babylon-lite/src/mesh/` (data + GPU sync), `packages/babylon-lite/src/material/standard/` + `packages/babylon-lite/src/material/pbr/` (rendering)
+> Package path: `packages/babylon-lite/src/mesh/` (data + GPU sync + GPU culling), `packages/babylon-lite/src/material/standard/`, `packages/babylon-lite/src/material/pbr/`, and `packages/babylon-lite/src/material/shader/` (rendering)
 
 ## Purpose
 
 Thin instances allow a single mesh to be drawn thousands of times with unique per-instance world matrices and optional per-instance RGBA colors, using a single instanced draw call. This is the primary mechanism for rendering large crowds, particle-like effects, and procedural grids. The system is split into three layers — CPU data model, GPU buffer sync, and material integration — designed so that **scenes that don't use thin instances pay zero bundle-size cost**.
+
+Thin instances are supported by all three mesh material families: **Standard**, **PBR**, and **ShaderMaterial** (custom user-WGSL). For ShaderMaterial integration specifics (auto-injected `world0..world3` / `instanceColor` vertex attributes and the user-shader contract) see `29-shader-material.md`.
 
 ---
 
@@ -195,12 +197,14 @@ Returns the updated `slot` number — the next free vertex buffer slot after all
 
 ## Optional GPU Frustum Culling (`thin-instance-gpu-culling.ts`)
 
-GPU culling is opt-in through `enableThinInstanceGpuCulling(mesh)`. The helper only flips state on existing `ThinInstanceData`; the compute module is dynamically imported by Standard/PBR group builders only when at least one mesh in that material family has `_gpuCullingEnabled === true`.
+GPU culling is opt-in through `enableThinInstanceGpuCulling(mesh)`. The helper only flips state on existing `ThinInstanceData`; the compute module is dynamically imported (via the shared `thin-instance-cull-binding.ts` lifecycle helper) by the Standard, PBR, and ShaderMaterial group builders only when at least one mesh in that material family has `_gpuCullingEnabled === true`.
+
+The per-binding cull lifecycle is factored into one shared module, `packages/babylon-lite/src/mesh/thin-instance-cull-binding.ts`, used identically by all three material families. Its `tryBind()` seam is called from each renderable's `bind()`: it gates on opt-in + opaque-only, marks the renderable `_direct`, creates the per-binding `ThinInstanceGpuCullState`, registers its disposal, and returns a `TiCullBinding` whose `update()` dispatches the compute cull pass and whose `draw()` issues `drawIndexedIndirect` (or falls back to a normal instanced draw when culling did not run).
 
 ### Scope
 
-- Supported in v1: opaque Standard and opaque PBR thin instances.
-- Excluded in v1: transparent thin instances, transmissive PBR surfaces, and arbitrary non-instanced meshes.
+- Supported: opaque Standard, opaque PBR, and opaque ShaderMaterial thin instances.
+- Excluded: transparent thin instances, transmissive PBR surfaces (`needsTaskRefraction`), and arbitrary non-instanced meshes.
 - The helper must be called before `registerScene()` so the material group builder can import the culling module and mark the renderable as direct-drawn.
 
 ### Per-Binding State

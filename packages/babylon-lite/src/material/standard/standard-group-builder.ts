@@ -22,11 +22,13 @@ const _STD_MAT_EXTS: ReadonlyArray<readonly [keyof StandardMaterialProps, () => 
 
 export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     const hasTI = meshes.some((m) => !!m.thinInstances);
+    const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
     const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
 
     let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
     let tiFragment: any;
     let shadowFragment: any;
+    let cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
 
     const imports: Promise<any>[] = [];
     if (hasTI) {
@@ -38,6 +40,15 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
                 tiFragment = m.createThinInstanceFragment;
             })
         );
+        // GPU culling helper — fetched only when a thin-instance mesh opted in, so
+        // non-culling scenes never load it (and its compute-cull dependency chain).
+        if (hasCulling) {
+            imports.push(
+                import("../../mesh/thin-instance-cull-binding.js").then((m) => {
+                    cull = m;
+                })
+            );
+        }
     }
     if (hasShadow) {
         imports.push(
@@ -56,11 +67,7 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     }
 
     const renderableMod = await import("./standard-renderable.js");
-    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, {
-        tiSync,
-        tiFragment,
-        shadowFragment,
-    });
+    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, cull });
     // Wire the per-mesh rebuild closure used by material swap + per-pass override.
     standardGroupBuilder._rebuildSingle = result.rebuildSingle;
     return result;

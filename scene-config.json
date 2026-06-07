@@ -1230,6 +1230,16 @@
         "skipPerf": true
     },
     {
+        "id": 165,
+        "slug": "scene165-shader-material-thin-instances",
+        "name": "Scene 165 - ShaderMaterial Thin Instances",
+        "maxMad": 0.01,
+        "maxRawKB": 44,
+        "description": "Custom WGSL ShaderMaterial rendered with thin instances + per-instance color: an 8×8×8 grid of unit cubes with a deterministic color ramp, fixed arc-rotate camera. Validates the auto-injected world0..3/instanceColor vertex attributes and the GPU-culling indirect-draw path.",
+        "tags": ["shader", "instances", "procedural"],
+        "skipPerf": true
+    },
+    {
         "id": 170,
         "slug": "scene170-navigation-basic",
         "name": "Scene 170 - Navigation Basic",

@@ -57,14 +57,27 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
     return bindings;
 }
 
-export function getOrCreateShaderPipeline(engine: EngineContext, sig: RenderTargetSignature, material: ShaderMaterial, bindings: ShaderPipelineBindings): GPURenderPipeline {
-    const key = targetSignatureKey(sig);
+export function getOrCreateShaderPipeline(
+    engine: EngineContext,
+    sig: RenderTargetSignature,
+    material: ShaderMaterial,
+    bindings: ShaderPipelineBindings,
+    variantKey = "",
+    vertexBuffers: readonly GPUVertexBufferLayout[] = bindings.vertexBuffers,
+    instanceAttrs = ""
+): GPURenderPipeline {
+    // `variantKey`, `vertexBuffers` and `instanceAttrs` default to the
+    // non-instanced pipeline — byte-for-byte identical behaviour to before
+    // instancing existed. The dynamically-imported thin-instance module is the
+    // only caller that passes non-default values, so no instancing logic runs
+    // for non-instanced scenes.
+    const key = `${targetSignatureKey(sig)}${variantKey}`;
     const cached = bindings.pipelines.get(key);
     if (cached) {
         return cached;
     }
     const device = engine._device;
-    const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec);
+    const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
     const fragModule = sig._colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
@@ -90,7 +103,7 @@ export function getOrCreateShaderPipeline(engine: EngineContext, sig: RenderTarg
     const pipeline = device.createRenderPipeline({
         label: `${material.name ?? "shader"}-pipeline`,
         layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), bindings.group1BGL] }),
-        vertex: { module: vertModule, entryPoint: "mainVertex", buffers: bindings.vertexBuffers },
+        vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
         ...(fragModule && colorTarget ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: [colorTarget] } } : {}),
         ...(sig._depthStencilFormat
             ? {
@@ -151,7 +164,7 @@ function attributeLayout(name: ShaderAttributeName, shaderLocation: number): GPU
     }
 }
 
-function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null): string {
+function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null, instanceAttrs = ""): string {
     let wgsl = `${SCENE_UBO_WGSL}
 struct ShaderSystemUniforms {
 ${systemSpec._structBody}
@@ -183,6 +196,7 @@ ${customSpec._structBody}
         wgsl += `@location(${i}) ${attr}: ${attributeWgslType(attr)},
 `;
     }
+    wgsl += instanceAttrs;
     wgsl += `};
 `;
     return wgsl;

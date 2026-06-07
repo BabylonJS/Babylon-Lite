@@ -27,13 +27,22 @@ import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 const _stdMatScratch = new Float32Array(24);
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
-type ThinInstanceSync = (engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number;
+type ThinInstanceSync = (
+    engine: EngineContext,
+    ti: any,
+    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+    slot: number,
+    hasColor: boolean,
+    drawBuffers?: import("../../mesh/thin-instance-gpu.js").ThinInstanceDrawBuffers | null
+) => number;
 
 /** Fragment factories passed from the async group builder. */
 export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
     shadowFragment?: (shadowLights: import("./fragments/std-shadow-fragment.js").ShadowLightSlot[]) => ShaderFragment;
+    /** Present only when the scene has at least one culling-enabled thin-instance mesh. */
+    cull?: typeof import("../../mesh/thin-instance-cull-binding.js");
 }
 
 /** Build Renderable(s) + a SceneUniformUpdater for a set of standard meshes.
@@ -42,7 +51,7 @@ export interface StdFragmentFactories {
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult {
     const engine = scene.engine;
     const device = engine._device;
-    const { tiSync, tiFragment, shadowFragment } = factories;
+    const { tiSync, tiFragment, shadowFragment, cull } = factories;
 
     // Collect per-light shadow info.
     const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf"; gen: ShadowGenerator }[] = [];
@@ -184,7 +193,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         };
         const update = engine._wrapRenderableForFO?.(_baseUpdate, s as SceneContext, _invalidate) ?? _baseUpdate;
 
-        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
+        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder, cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding): number => {
             // For per-pass material overrides, skip the mesh.material === mat guard
             // because the override material is intentionally not the mesh's current one.
             if (!isOverride && mesh.material !== mat) {
@@ -204,7 +213,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
 
             const ti = hasThinInstances ? mesh.thinInstances : null;
             if (ti && tiSync) {
-                slot = tiSync(engine, ti, pass, slot, hasInstanceColor);
+                slot = tiSync(engine, ti, pass, slot, hasInstanceColor, cullBinding?.cullDrawBufs);
             }
 
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
@@ -212,7 +221,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             if (receiveShadows && shadowBindGroup) {
                 pass.setBindGroup(2, shadowBindGroup);
             }
-            if (ti && ti.count > 0) {
+            if (cullBinding) {
+                cullBinding.draw(pass, g.indexCount, ti!.count);
+            } else if (ti && ti.count > 0) {
                 pass.drawIndexed(g.indexCount, ti.count);
             } else {
                 pass.drawIndexed(g.indexCount);
@@ -225,11 +236,14 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             isTransparent,
             mesh,
             bind(eng, sig) {
+                const pipeline = getOrCreateStandardPipeline(eng as EngineContext, sig, bindings);
+                // Opaque-only GPU culling (opt-in): tryBind gates on opt-in + transparency, returns the per-binding cull lifecycle.
+                const cb = cull?.tryBind(r, s, mesh, engine, hasInstanceColor, isTransparent, update);
                 return {
                     renderable: r,
-                    pipeline: getOrCreateStandardPipeline(eng as EngineContext, sig, bindings),
-                    update,
-                    draw,
+                    pipeline,
+                    update: cb ? cb.update : update,
+                    draw: (pass) => draw(pass, cb),
                 };
             },
         };

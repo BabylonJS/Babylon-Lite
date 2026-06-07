@@ -7,7 +7,7 @@ dist/
 *.py
 our-render*
 our-*
-test-actual.png
+test-actual*.png
 diff-map.png
 capture.json
 capture-full.json

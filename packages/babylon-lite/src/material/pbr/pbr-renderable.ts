@@ -97,6 +97,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
+    let hasCullingTI = false;
     let hasAnyUnlit = false;
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
@@ -118,6 +119,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
         hasSomeThinInstances ||= !!m.thinInstances;
+        hasCullingTI ||= !!m.thinInstances?._gpuCullingEnabled;
         hasAnyUnlit ||= !!mat.unlit;
         hasAnyUvTransform ||= !!mat._hasUvTx;
         // UV2 only counts when occlusion samples texcoord 1.
@@ -220,13 +222,24 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
-        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | ((
+              engine: EngineContext,
+              ti: ThinInstanceData,
+              pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+              slot: number,
+              hasColor: boolean,
+              drawBuffers?: import("../../mesh/thin-instance-gpu.js").ThinInstanceDrawBuffers | null
+          ) => number)
         | null = null;
+    let _cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
         const gpuMod = await import("../../mesh/thin-instance-gpu.js");
         _syncThinInstanceBuffers = gpuMod.syncThinInstanceBuffers;
+        if (hasCullingTI) {
+            _cull = await import("../../mesh/thin-instance-cull-binding.js");
+        }
     }
 
     // ACES tonemap WGSL is dynamically imported only when requested (keeps standard-tonemap bundles lean).
@@ -390,7 +403,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         };
         const update = engine._wrapRenderableForFO?.(_baseUpdate, s as SceneContext, _invalidate) ?? _baseUpdate;
 
-        const drawWith = (pass: GPURenderPassEncoder | GPURenderBundleEncoder, materialBindGroup: GPUBindGroup): number => {
+        const drawWith = (
+            pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+            materialBindGroup: GPUBindGroup,
+            cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding
+        ): number => {
             if (!isOverride && mesh.material !== materialInput) {
                 return 0;
             }
@@ -424,18 +441,19 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
             const ti = hasTI ? mesh.thinInstances : null;
             if (ti && syncThinInstanceBuffers) {
-                slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
+                slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor, cullBinding?.cullDrawBufs);
             }
 
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-            if (ti && ti.count > 0) {
+            if (cullBinding) {
+                cullBinding.draw(pass, gpu.indexCount, ti!.count);
+            } else if (ti && ti.count > 0) {
                 pass.drawIndexed(gpu.indexCount, ti.count);
             } else {
                 pass.drawIndexed(gpu.indexCount);
             }
             return 1;
         };
-        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => drawWith(pass, materialBindGroupStatic!);
 
         const r: Renderable = {
             order,
@@ -447,11 +465,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;
+                // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
+                const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update);
                 return {
                     renderable: r,
                     pipeline,
-                    update,
-                    draw: needsTaskRefraction ? (pass) => drawWith(pass, materialBindGroup) : draw,
+                    update: cb ? cb.update : update,
+                    draw: (pass) => drawWith(pass, materialBindGroup, cb),
                 };
             },
         };
