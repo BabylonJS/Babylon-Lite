@@ -378,6 +378,11 @@ function buildCastle(): LevelArea {
     for (let c = 5; c <= 9; c++) b.oneway[(GROUND_TOP - 4) * b.cols + c] = 1;
     // Reward coins above the ledge.
     for (let c = 5; c <= 9; c++) b.coins.push({ cx: c, cy: GROUND_TOP - 6 });
+    // A power-up box on the entry ledge: a mushroom if you arrive small, a fire flower
+    // if you're already big — so you can always gear up to fight the boss (fireballs +
+    // a spare hit) even if you reached the castle without fire.
+    b.solid[(GROUND_TOP - 7) * b.cols + 7] = 1;
+    b.blocks.push({ cx: 7, cy: GROUND_TOP - 7, kind: "mushroom-block" });
     // Atmosphere: wall torches.
     b.torches.push({ cx: 2, cy: GROUND_TOP - 1 });
     b.torches.push({ cx: W - 2, cy: GROUND_TOP - 1 });

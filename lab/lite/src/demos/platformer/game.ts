@@ -118,6 +118,8 @@ const PICKUP_FOOT: Partial<Record<PickupState["kind"], number>> = {
     star: 0.23,
     "fire-flower": 0.4,
 };
+/** Seconds the fire flower takes to rise out of its block (occluded reveal). */
+const FLOWER_EMERGE_DUR = 0.55;
 
 // Fireball projectiles (fire power-up). Travel along the ground, bounce, and pop
 // enemies on contact; drawn as additive glows.
@@ -205,6 +207,8 @@ interface EnemyState {
     shell: boolean;
     /** shell sliding speed sign, or 0 if idle. */
     shellDir: -1 | 0 | 1;
+    /** Seconds left of "just-kicked" immunity (a kicked shell passes through harmlessly). */
+    kickGrace: number;
     dying: number; // >0 = death animation countdown
     slot: number;
     /** The layer this enemy's sprite lives on. Piranhas use a layer BEHIND the pipes so
@@ -271,6 +275,12 @@ interface PickupState {
     slot: number;
     /** The layer this pool entry's sprite lives on (atlas-specific). */
     layer: Sprite2DLayer;
+    /** fire-flower only: seconds left of the box-emerge rise (0 = done / not emerging). */
+    emergeT: number;
+    /** fire-flower only: the box.y it settles at once fully emerged (sitting on the block). */
+    emergeEndY: number;
+    /** fire-flower only: its sprite slot on the behind-block emerge layer (-1 if unused). */
+    emergeSlot: number;
 }
 
 /** A fire-power projectile: bounces along the ground, pops enemies, drawn additive. */
@@ -398,6 +408,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const shroomLayer = createSprite2DLayer(items.atlas, { capacity: 8, order: 9, pivot: [0.5, 0.5] });
     // Fire flowers (procedural texture) get their own centre-pivot layer.
     const fireFlowerLayer = createSprite2DLayer(fireFlowerAtlas, { capacity: 4, order: 9, pivot: [0.5, 0.5] });
+    // Fire flowers EMERGING from a block draw on this layer (order 6.8), BEHIND the block
+    // layer (7), so the box occludes the flower's lower half as it rises out of the box.
+    const fireFlowerEmergeLayer = createSprite2DLayer(fireFlowerAtlas, { capacity: 2, order: 6.8, pivot: [0.5, 0.5] });
     const enemyLayer = createSprite2DLayer(enemies.atlas, { capacity: maxOf((a) => a.enemies.length) + 2, order: 10, pivot: [0.5, 1] });
     // Castle boss: a big enemy-atlas sprite (one slot) + its arcing projectiles (additive).
     const bossLayer = createSprite2DLayer(enemies.atlas, { capacity: 1, order: 10.2, pivot: [0.5, 1] });
@@ -428,7 +441,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const irisLayer = createSprite2DLayer(whiteAtlas, { capacity: 1, order: 20, pivot: [0, 0], customShader: irisShader });
 
     const renderer = createSpriteRenderer(engine, {
-        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeTravelLayer, piranhaLayer, pipeLayer, moverLayer, blockLayer, coinLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, bossLayer, torchLayer, trailLayer, playerLayer, fireballLayer, bossProjLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
+        layers: [...parallax.layers, caveBackLayer, lavaLayer, terrainLayer, pipeTravelLayer, piranhaLayer, pipeLayer, moverLayer, fireFlowerEmergeLayer, blockLayer, coinLayer, itemLayer, shroomLayer, fireFlowerLayer, enemyLayer, bossLayer, torchLayer, trailLayer, playerLayer, fireballLayer, bossProjLayer, sparkLayer, digitLayer, debrisLayer, lanternLayer, torchGlowLayer, irisLayer],
         clearValue: SKY,
     });
     registerSpriteRenderer(renderer);
@@ -511,6 +524,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 life: 0,
                 slot: addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [TILE * 0.7, TILE * 0.7], frame, visible: false }),
                 layer,
+                emergeT: 0,
+                emergeEndY: 0,
+                emergeSlot: kind === "fire-flower" ? addSprite2DIndex(fireFlowerEmergeLayer, { positionPx: [0, 0], sizePx: [TILE * 0.7, TILE * 0.7], frame, visible: false }) : -1,
             });
         }
     };
@@ -708,12 +724,18 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             p.vy = -420;
             updateSprite2DIndex(p.layer, p.slot, { sizePx: [PICKUP_DRAW[kind], PICKUP_DRAW[kind]], visible: true });
         } else {
-            // Fire flower: emerges and sits still on its block (classic, does not walk).
+            // Fire flower: rises OUT of the block (occluded by it) over FLOWER_EMERGE_DUR,
+            // then sits on top. cy is the cell above the block, so the block top is at
+            // (cy+1)*TILE: start a tile lower (inside the box) and rise to sit on the box top.
             p.box.w = p.box.h = TILE * 0.8;
             p.box.x = cx * TILE + (TILE - p.box.w) / 2;
             p.vx = 0;
-            p.vy = -260;
-            updateSprite2DIndex(p.layer, p.slot, { sizePx: [PICKUP_DRAW[kind], PICKUP_DRAW[kind]], visible: true });
+            p.vy = 0;
+            p.emergeT = FLOWER_EMERGE_DUR;
+            p.emergeEndY = (cy + 1) * TILE - p.box.h;
+            p.box.y = (cy + 2) * TILE - p.box.h;
+            updateSprite2DIndex(p.layer, p.slot, { visible: false });
+            updateSprite2DIndex(fireFlowerEmergeLayer, p.emergeSlot, { sizePx: [PICKUP_DRAW[kind], PICKUP_DRAW[kind]], visible: true });
         }
     };
 
@@ -839,7 +861,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     const FLAG_SLIDE_DUR = 0.9; // player slides down the pole
     const FLAG_WALK_DUR = 1.7; // stroll to the castle
     const COMPLETE_DUR = FLAG_RAISE_DUR + FLAG_SLIDE_DUR + FLAG_WALK_DUR;
-    const flagSeq = { poleX: 0, topFeetY: 0, bottomFeetY: 0 };
+    const flagSeq = { poleX: 0, grabFeetY: 0, baseFeetY: 0, walkFeetY: 0 };
 
     const sfx: Sfx = createSfx();
     const input: InputController = createInput(document.body);
@@ -951,7 +973,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             const boxY = (e.cy + 1) * TILE - h;
             const layer = e.kind === "piranha" ? piranhaLayer : enemyLayer;
             const slot = addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [w, h], frame: enemies.frameOf(enemyStartFrame(e.kind)), visible: false });
-            enemyList.push({ kind: e.kind, box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h }, vx: -PHYS.enemySpeed, vy: 0, dir: -1, alive: true, shell: false, shellDir: 0, dying: 0, slot, layer, animT: 0, homeY: boxY, phase: Math.random() * Math.PI * 2 });
+            enemyList.push({ kind: e.kind, box: { x: e.cx * TILE + (TILE - w) / 2, y: boxY, w, h }, vx: -PHYS.enemySpeed, vy: 0, dir: -1, alive: true, shell: false, shellDir: 0, kickGrace: 0, dying: 0, slot, layer, animT: 0, homeY: boxY, phase: Math.random() * Math.PI * 2 });
         }
 
         // Boss (castle only). Stand it on its spawn cell; reset hp/state, hide projectiles.
@@ -1381,13 +1403,24 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         // The flag sits on a solid pedestal, so trigger when the player reaches its base
         // (right edge at the flag column) rather than requiring the centre to pass it.
         if (hasFlag && level.flag && player.box.x + player.box.w >= flagX * TILE) {
-            // Set up the Mario-style flagpole sequence: capture the floor the player is on
-            // (slide target), grab the pole near the top, and run the "complete" timeline.
+            // Set up the Mario-style flagpole sequence. Pole base = first solid cell below
+            // the flag at the flag column (its pedestal); slide down to land on TOP of it.
+            let baseRow = level.flag.cy + 1;
+            while (baseRow < level.rows && !level.solid[baseRow * level.cols + flagX]) baseRow++;
+            const baseFeetY = baseRow * TILE; // top surface of the pedestal block
+            const topFeetY = (level.flag.cy + 1) * TILE; // highest grab point (just under the flag)
+            // Grab at the height the player ACTUALLY touched the pole, clamped to the span.
+            const grabFeetY = Math.max(topFeetY, Math.min(baseFeetY, player.box.y + player.box.h));
+            // Ground a couple tiles right of the pole = where the player strolls off to.
+            const probeX = Math.min(level.cols - 1, flagX + 2);
+            let groundRow = 0;
+            while (groundRow < level.rows && !level.solid[groundRow * level.cols + probeX]) groundRow++;
             flagSeq.poleX = flagX * TILE + TILE / 2;
-            flagSeq.bottomFeetY = player.box.y + player.box.h; // current ground level
-            flagSeq.topFeetY = (level.flag.cy + 2) * TILE; // cling height near the flag
+            flagSeq.grabFeetY = grabFeetY;
+            flagSeq.baseFeetY = baseFeetY;
+            flagSeq.walkFeetY = groundRow * TILE;
             player.box.x = flagX * TILE + (TILE - player.box.w) / 2; // snap onto the pole
-            player.box.y = flagSeq.topFeetY - player.box.h;
+            player.box.y = grabFeetY - player.box.h;
             player.vx = 0;
             player.vy = 0;
             player.star = 0;
@@ -1407,6 +1440,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
 
     const updateEnemy = (e: EnemyState, dt: number): void => {
         e.animT += dt;
+        if (e.kickGrace > 0) e.kickGrace -= dt;
         if (e.dying > 0) {
             e.dying -= dt;
             if (e.dying <= 0) {
@@ -1519,7 +1553,12 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 sfx.stomp();
             } else if (e.kind === "snail" && e.shell) {
                 // Kick a resting shell, or stop a moving one.
-                e.shellDir = e.shellDir === 0 ? (player.facing as -1 | 1) : 0;
+                if (e.shellDir === 0) {
+                    e.shellDir = (player.facing as -1 | 1);
+                    e.kickGrace = 0.3;
+                } else {
+                    e.shellDir = 0;
+                }
                 addScore(100);
                 sfx.kick();
             } else {
@@ -1534,10 +1573,14 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         // A resting shell that the player walks into gets kicked, not hurt.
         if (e.kind === "snail" && e.shell && e.shellDir === 0) {
             e.shellDir = player.box.x < e.box.x ? 1 : -1;
+            e.kickGrace = 0.3;
             addScore(100);
             sfx.kick();
             return;
         }
+
+        // A shell the player JUST kicked passes through harmlessly until its grace elapses.
+        if (e.kind === "snail" && e.shell && e.kickGrace > 0) return;
 
         hurtPlayer();
     };
@@ -1660,6 +1703,22 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
     };
 
     const updatePickup = (p: PickupState, dt: number): void => {
+        // Fire flower emerging from its block: rise (eased) from inside the box up to sitting
+        // on top, drawn on the behind-block layer. No physics / cannot be collected until out.
+        if (p.emergeT > 0) {
+            p.emergeT -= dt;
+            const k = Math.min(1, 1 - p.emergeT / FLOWER_EMERGE_DUR);
+            const ease = k * k * (3 - 2 * k);
+            p.box.y = p.emergeEndY + TILE - ease * TILE;
+            if (p.emergeT <= 0) {
+                p.emergeT = 0;
+                p.box.y = p.emergeEndY;
+                p.vy = 0;
+                updateSprite2DIndex(fireFlowerEmergeLayer, p.emergeSlot, { visible: false });
+                updateSprite2DIndex(p.layer, p.slot, { sizePx: [PICKUP_DRAW[p.kind], PICKUP_DRAW[p.kind]], visible: true });
+            }
+            return;
+        }
         if (p.kind === "coin-pop") {
             p.box.y += p.vy * dt;
             p.vy += PHYS.gravity * 1.4 * dt;
@@ -1872,7 +1931,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
             // Grounded pickups (mushroom/star/fire-flower) anchor by the feet so the big
             // sprite sits on the ground / emerges cleanly from its block; coin-pop stays centred.
             const cy = foot !== undefined ? p.box.y + p.box.h - draw * foot : p.box.y + p.box.h / 2;
-            updateSprite2DIndex(p.layer, p.slot, {
+            const tLayer = p.emergeT > 0 ? fireFlowerEmergeLayer : p.layer;
+            const tSlot = p.emergeT > 0 ? p.emergeSlot : p.slot;
+            updateSprite2DIndex(tLayer, tSlot, {
                 positionPx: [sx(p.box.x + p.box.w / 2), sy(cy)],
                 sizePx: [ss(draw), ss(draw)],
             });
@@ -2027,17 +2088,18 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                 pf = Math.floor(elapsed * 9) % 2 === 0 ? pframes.climb1 : pframes.climb2;
                 cx = flagSeq.poleX;
                 if (elapsed < FLAG_RAISE_DUR) {
-                    feetY = flagSeq.topFeetY;
+                    feetY = flagSeq.grabFeetY;
                 } else {
                     const k = (elapsed - FLAG_RAISE_DUR) / FLAG_SLIDE_DUR;
-                    feetY = flagSeq.topFeetY + k * k * (3 - 2 * k) * (flagSeq.bottomFeetY - flagSeq.topFeetY);
+                    feetY = flagSeq.grabFeetY + k * k * (3 - 2 * k) * (flagSeq.baseFeetY - flagSeq.grabFeetY);
                 }
                 flip = true; // face left, toward the pole
             } else {
-                // Off the pole, walking right to the castle (player.box.x advances in the tick).
+                // Off the pole: hop down from the pedestal to the ground, then walk right.
                 pf = Math.floor(elapsed * 10) % 2 === 0 ? pframes.walk1 : pframes.walk2;
                 cx = player.box.x + player.box.w / 2;
-                feetY = flagSeq.bottomFeetY;
+                const stepK = Math.min(1, (elapsed - slideEnd) / 0.3);
+                feetY = flagSeq.baseFeetY + stepK * stepK * (3 - 2 * stepK) * (flagSeq.walkFeetY - flagSeq.baseFeetY);
                 flip = false;
             }
             const [pfw, pfh] = players.sizeOf(pf);
@@ -2262,7 +2324,7 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
                     loadArea("castle", "start");
                     game.phase = "ready";
                     game.timer = 1.6;
-                    hud.banner("CASTLE", "Defeat the boss!");
+                    hud.banner("CASTLE", "Stomp the boss or blast it - 3 hits!");
                 }
                 break;
             case "won":
@@ -2318,7 +2380,9 @@ export async function startGame(canvas: HTMLCanvasElement, engine: EngineContext
         // Clear the cross-area (persistent) pools.
         for (const p of pickups) {
             p.active = false;
+            p.emergeT = 0;
             updateSprite2DIndex(p.layer, p.slot, { visible: false });
+            if (p.emergeSlot >= 0) updateSprite2DIndex(fireFlowerEmergeLayer, p.emergeSlot, { visible: false });
         }
         for (const f of fireballs) killFireball(f);
         for (const s of sparks) killSpark(s);

@@ -79,10 +79,11 @@ let py = fract(ey) - 0.5;
 let mote = smoothstep(0.13, 0.0, sqrt(px * px + py * py)) * step(0.86, cellHash);
 rgb = rgb + vec3<f32>(1.0, 0.6, 0.2) * mote * (0.35 + 0.5 * depth);
 
-// Settle the deepest band toward a DARK RED (not black) so the pool reads as molten
-// depth receding into the rock, rather than a black void at the bottom.
-let deepRed = vec3<f32>(0.22, 0.02, 0.015);
-rgb = mix(rgb, deepRed, 0.72 * smoothstep(0.6, 1.0, depth));
+// Settle the deepest band toward a warm DARK RED (not black) so the pool reads as
+// molten depth glowing in the rock, rather than a dark void at the bottom. Kept fairly
+// bright + only a partial mix so the deep stays clearly red-hot.
+let deepRed = vec3<f32>(0.5, 0.09, 0.04);
+rgb = mix(rgb, deepRed, 0.5 * smoothstep(0.6, 1.0, depth));
 
 // Slow whole-pool emissive pulse.
 rgb = rgb * (0.92 + 0.10 * sin(t * 2.2 + u * 1.3));
