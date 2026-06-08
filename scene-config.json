@@ -1093,7 +1093,7 @@
         "slug": "scene146-pbr-geometry-renderer",
         "name": "Scene 146 — PBR Geometry Renderer (Sponza)",
         "maxMad": 0.6,
-        "maxRawKB": 130,
+        "maxRawKB": 120,
         "description": "Khronos Sponza glTF rendered through the frame-graph geometry renderer task with the same eleven geometry-texture impostors as Scene 145. Sponza is fully PBR so this exercises the PBR geometry-output path. Camera is positioned inside the model.",
         "tags": ["frame-graph", "geometry-renderer", "mrt", "pbr", "gltf"],
         "skipPerf": true,
@@ -1118,6 +1118,17 @@
         "maxRawKB": 113,
         "description": "Depth-of-field post-process showcase ported from playground SUEU9U#120. The Babylon.js PowerPlant model (glb) is rendered through the frame-graph geometry renderer to produce a camera-space view-depth texture, which feeds the DepthOfField post-process (circle-of-confusion -> CoC-weighted blur pyramid -> merge). A near focus distance with a wide aperture keeps the foreground sharp while the rest of the plant blurs out. The colour pass is rendered at 4x MSAA and resolved (via the render task's resolveTarget) into a single-sample texture for the post-process; the geometry view-depth stays single-sample. Camera + lens params match the playground. The 0.18 MAD ceiling accommodates inherent cross-engine MSAA-resolve variance at silhouette edges (amplified by the CoC-weighted blur).",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "depth-of-field", "blur"],
+        "skipPerf": true,
+        "skipParity": false
+    },
+    {
+        "id": 149,
+        "slug": "scene149-node-geometry-renderer",
+        "name": "Scene 149 — Node-Material Geometry Renderer (PowerPlant)",
+        "maxMad": 0.16,
+        "maxRawKB": 120,
+        "description": "Babylon.js PowerPlant glb rendered through the frame-graph geometry renderer task, with every original material replaced by a NodeMaterial. One generic NME graph (sampling an albedo texture + computing world/local position, world/view normal and a constant reflectivity) is instantiated once per original material and feeds a new GeometryTextureOutputBlock terminal — the Lite analogue of BJS PrePassOutputBlock. Seven parity-matched geometry-texture impostors are shown on a single strip (viewNormal, worldNormal, worldPosition, reflectivity, localPosition, viewDepth, screenspaceDepth); no realColor tile (the node path does not implement the emitColor attachment).",
+        "tags": ["frame-graph", "geometry-renderer", "mrt", "node-material", "gltf"],
         "skipPerf": true,
         "skipParity": false
     },

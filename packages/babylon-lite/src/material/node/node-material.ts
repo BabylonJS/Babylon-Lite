@@ -61,6 +61,15 @@ export interface NodeMaterial extends Material {
     readonly _esmShadowDepthCode?: string;
     /** @internal ESM shadow params UBO buffer. */
     readonly _esmShadowParamsUBO?: GPUBuffer;
+    /** @internal Loaded block emitters (className → emitter). Retained so the
+     *  geometry-renderer pass can re-walk the graph from a
+     *  GeometryTextureOutputBlock terminal without re-loading emitters. */
+    readonly _emitters: ReadonlyMap<string, BlockEmitter>;
+    /** @internal Mesh capability flags captured at parse time, forwarded to the
+     *  geometry-pass re-emit so BonesBlock / InstancesBlock behave identically. */
+    readonly _hasSkeleton: boolean;
+    /** @internal */
+    readonly _hasInstances: boolean;
 }
 
 /** A live handle to one named Node Material input (uniform or texture). Set
@@ -292,6 +301,9 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,
         _envHelpers: envHelpers,
+        _emitters: emitters,
+        _hasSkeleton: options.hasSkeleton ?? false,
+        _hasInstances: options.hasInstances ?? false,
     };
     return material;
 }
@@ -326,11 +338,16 @@ async function resolvePbrMrHelpers(state: NodeBuildState): Promise<void> {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-function sanitize(name: string): string {
+/** @internal Exported only so the lazily-imported geometry renderable
+ *  (`node-geometry-renderable.ts`) can reuse it without re-bundling — already
+ *  retained here by the parser/UBO writers, so the export costs zero
+ *  always-loaded bytes. */
+export function sanitize(name: string): string {
     return name.replace(/[^A-Za-z0-9_]/g, "_");
 }
 
-function bjsTypeToNodeType(t: number): NodeValueType {
+/** @internal See {@link sanitize} — exported for the lazy geometry renderable. */
+export function bjsTypeToNodeType(t: number): NodeValueType {
     if (t === 0x1 || t === 0x2) {
         return "f32";
     }
@@ -349,7 +366,8 @@ function bjsTypeToNodeType(t: number): NodeValueType {
     throw new Error(`NodeMaterial: unsupported BJS connection point type 0x${t.toString(16)}`);
 }
 
-function floatCount(type: NodeValueType): number {
+/** @internal See {@link sanitize} — exported for the lazy geometry renderable. */
+export function floatCount(type: NodeValueType): number {
     switch (type) {
         case "f32":
             return 1;
@@ -373,7 +391,8 @@ function handleTypeOf(t: NodeValueType): NodeInputHandle["type"] {
     return t;
 }
 
-function extractDefault(raw: unknown, type: NodeValueType): number[] {
+/** @internal See {@link sanitize} — exported for the lazy geometry renderable. */
+export function extractDefault(raw: unknown, type: NodeValueType): number[] {
     const n = floatCount(type);
     if (typeof raw === "number") {
         return [raw];

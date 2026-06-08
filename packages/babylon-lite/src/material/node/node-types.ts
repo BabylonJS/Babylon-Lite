@@ -6,6 +6,7 @@
 
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { UboField, BindingDecl, VertexAttribute, Varying } from "../../shader/fragment-types.js";
+import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 
 // ─── Graph (parser output) ───────────────────────────────────────────
 
@@ -187,6 +188,13 @@ export interface NodeBuildState {
     /** When false (default), InstancesBlock passes through the uniform world
      *  matrix. Set to true when thin-instance attributes are bound. */
     hasInstances: boolean;
+    /** @internal Populated by {@link GeometryTextureOutputBlock} during a
+     *  geometry-pass re-emit (see node-geometry-view.ts). Maps each CONNECTED
+     *  geometry input to its already-resolved WGSL expression so the node
+     *  pipeline can write the multi-attachment `FragmentOutput`. Absent
+     *  (undefined) for the normal colour pass, keeping zero footprint on
+     *  non-geometry node scenes. */
+    _geometryInputs?: Map<GeometryTextureType, NodeExpr>;
 }
 
 export interface NodeTextureBinding {

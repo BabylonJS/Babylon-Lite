@@ -332,7 +332,7 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     return buf;
 }
 
-function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
+export function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
     switch (name) {
         case "position":
             return gpu.positionBuffer;
@@ -351,7 +351,7 @@ function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBu
     }
 }
 
-function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
+export function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
     const gpu = mesh._gpu;
     scratch[17] = gpu.hasUv === false ? 0 : 1;
     scratch[18] = gpu.hasTangent ? 1 : 0;

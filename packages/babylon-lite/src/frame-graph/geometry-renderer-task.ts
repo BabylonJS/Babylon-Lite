@@ -48,6 +48,8 @@ import type { StandardMaterialProps } from "../material/standard/standard-materi
 import type { StandardGeometryMaterialView, StandardGeometryViewConfig } from "../material/standard/geometry-view.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { PbrGeometryMaterialView, PbrGeometryViewConfig } from "../material/pbr/pbr-geometry-view.js";
+import type { NodeMaterial } from "../material/node/node-material.js";
+import type { NodeGeometryMaterialView, NodeGeometryViewConfig } from "../material/node/node-geometry-view.js";
 import type { DrawBinding, Renderable } from "../render/renderable.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
@@ -159,7 +161,7 @@ interface AttachmentInfo {
 interface BoundMesh {
     readonly _mesh: Mesh;
     readonly _binding: DrawBinding;
-    readonly _view: StandardGeometryMaterialView | PbrGeometryMaterialView;
+    readonly _view: StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView;
 }
 
 interface GeometryRendererTaskInternal extends GeometryRendererTask {
@@ -167,8 +169,8 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
      *  and (when no external depth was supplied) the depth attachment. */
     _mrt: RenderTargetMrt;
     _attachments: AttachmentInfo[];
-    /** One view per unique source material (Standard or PBR). */
-    _views: Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView>;
+    /** One view per unique source material (Standard, PBR or Node). */
+    _views: Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView>;
     /** Render bindings — opaque first then alpha-blended (sorted in record()). */
     _bound: BoundMesh[];
     _wrapperTargets: (RenderTarget | null)[];
@@ -204,6 +206,7 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
     _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
+    _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────
@@ -378,17 +381,21 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _computeStandardFeatures: null,
         _createPbrGeometryView: null,
         _computePbrFeatures: null,
+        _createNodeGeometryView: null,
 
         async _preload(): Promise<void> {
             const meshes = (config.meshes ?? sc.meshes) as readonly Mesh[];
             let hasStandard = false;
             let hasPbr = false;
+            let hasNode = false;
             for (const mesh of meshes) {
                 const family = resolveMaterialFamily(mesh.material);
                 if (family === "standard") {
                     hasStandard = true;
                 } else if (family === "pbr") {
                     hasPbr = true;
+                } else if (family === "node") {
+                    hasNode = true;
                 }
             }
             const loads: Promise<void>[] = [];
@@ -407,6 +414,14 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                         const [viewMod, matMod] = await Promise.all([import("../material/pbr/pbr-geometry-view.js"), import("../material/pbr/pbr-material.js")]);
                         task._createPbrGeometryView = viewMod.createPbrGeometryMaterialView;
                         task._computePbrFeatures = matMod._computePbrMaterialFeatures;
+                    })()
+                );
+            }
+            if (hasNode) {
+                loads.push(
+                    (async () => {
+                        const viewMod = await import("../material/node/node-geometry-view.js");
+                        task._createNodeGeometryView = viewMod.createNodeGeometryMaterialView;
                     })()
                 );
             }
@@ -492,8 +507,8 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
 }
 
 interface ResolvedMaterial {
-    _mat: StandardMaterialProps | PbrMaterialProps;
-    _family: "standard" | "pbr";
+    _mat: StandardMaterialProps | PbrMaterialProps | NodeMaterial;
+    _family: "standard" | "pbr" | "node";
 }
 
 function ensureView(
@@ -501,25 +516,23 @@ function ensureView(
     resolved: ResolvedMaterial,
     attachmentTypes: readonly GeometryTextureType[],
     config: GeometryRendererTaskConfig
-): StandardGeometryMaterialView | PbrGeometryMaterialView {
+): StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView {
     const cached = task._views.get(resolved._mat as Material);
     if (cached) {
         return cached;
     }
+    const viewConfig = {
+        attachments: attachmentTypes,
+        emitColor: config.targetTexture !== undefined,
+        gpUBO: task._paramsUBO,
+        reverseCulling: config.reverseCulling,
+    };
     const view =
         resolved._family === "standard"
-            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, {
-                  attachments: attachmentTypes,
-                  emitColor: config.targetTexture !== undefined,
-                  gpUBO: task._paramsUBO,
-                  reverseCulling: config.reverseCulling,
-              })
-            : task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, {
-                  attachments: attachmentTypes,
-                  emitColor: config.targetTexture !== undefined,
-                  gpUBO: task._paramsUBO,
-                  reverseCulling: config.reverseCulling,
-              });
+            ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, viewConfig)
+            : resolved._family === "pbr"
+              ? task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, viewConfig)
+              : task._createNodeGeometryView!(resolved._mat as NodeMaterial, viewConfig);
     task._views.set(resolved._mat as Material, view);
     return view;
 }
@@ -536,9 +549,7 @@ function rebuildRenderPassDescriptor(task: GeometryRendererTaskInternal, config:
         att.resolveTarget = mrt._resolveColorViews[a._index] ?? undefined;
         att.loadOp = "clear";
         att.storeOp = "store";
-        if (a._clearValue !== "maxViewZ") {
-            att.clearValue = a._clearValue;
-        }
+        att.clearValue = a._clearValue;
     }
     if (config.targetTexture) {
         const tail = task._colorAttachments[task._attachments.length]!;
@@ -586,7 +597,6 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     if (task._needsParams) {
         writeParamsUBO(task, eng, camera);
     }
-    patchClearValues(task, camera);
 
     // Pre-frame DrawBinding update (mesh UBO refresh, mat UBO version, etc.).
     const updateCtx = { targetWidth: mrt._width, targetHeight: mrt._height, _camera: camera };
@@ -640,15 +650,6 @@ function writeParamsUBO(task: GeometryRendererTaskInternal, eng: EngineContext, 
     eng._device.queue.writeBuffer(task._paramsUBO!, 0, data as Float32Array<ArrayBuffer>);
 }
 
-function patchClearValues(task: GeometryRendererTaskInternal, camera: Camera): void {
-    for (const a of task._attachments) {
-        if (a._clearValue === "maxViewZ") {
-            const att = task._colorAttachments[a._index]!;
-            att.clearValue = { r: camera.farPlane, g: 0, b: 0, a: 0 };
-        }
-    }
-}
-
 // ─── Dispose ───────────────────────────────────────────────────────────────
 
 function disposeTask(task: GeometryRendererTaskInternal): void {
@@ -668,12 +669,12 @@ function disposeTask(task: GeometryRendererTaskInternal): void {
 /** Resolve a mesh's material family without importing any family runtime —
  *  reads only the build-group tag. Used by `_preload` to decide which family
  *  bridges to dynamically import. */
-function resolveMaterialFamily(material: Material | null | undefined): "standard" | "pbr" | null {
+function resolveMaterialFamily(material: Material | null | undefined): "standard" | "pbr" | "node" | null {
     if (!material) {
         return null;
     }
     const family = getMaterialSource(material)._buildGroup?._materialFamily;
-    return family === "standard" || family === "pbr" ? family : null;
+    return family === "standard" || family === "pbr" || family === "node" ? family : null;
 }
 
 function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Material | null | undefined): ResolvedMaterial | null {
@@ -698,6 +699,11 @@ function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Mat
             mat._renderFeatures = task._computePbrFeatures!(mat);
         }
         return { _mat: mat, _family: "pbr" };
+    }
+    if (buildGroup._materialFamily === "node") {
+        // Node materials carry their own `_renderFeatures` (set at parse time)
+        // and own all geometry-shader emission, so no feature computation is needed.
+        return { _mat: src as NodeMaterial, _family: "node" };
     }
     return null;
 }
