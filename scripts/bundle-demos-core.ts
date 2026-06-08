@@ -47,6 +47,7 @@ const MINECRAFT_SRC = resolve(labDir, "public/minecraft");
 const FREECIV_SRC = resolve(labDir, "public/freeciv");
 const LITTLEST_TOKYO_SRC = resolve(labDir, "public/littlest-tokyo");
 const TETRIS_SRC = resolve(labDir, "public/tetris");
+const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 interface DemoConfigEntry {
@@ -189,6 +190,13 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(FREECIV_SRC, resolve(demosDir, "freeciv"), "Freeciv");
     }
 
+    if (demos.some((demo) => demo.slug === "platformer")) {
+        // Committed CC0 Kenney sprite sheets + backgrounds, copied under the demo's own
+        // subpath (the demo resolves them via `demoAssetUrl("./platformer/...")`), so the
+        // deployed demos site (which serves ONLY lab/public/bundle/demos/) finds them.
+        copyRequiredDir(PLATFORMER_SRC, resolve(demosDir, "platformer"), "Platformer");
+    }
+
     if (demos.some((demo) => demo.slug === "littlest-tokyo")) {
         copyRequiredDir(LITTLEST_TOKYO_SRC, resolve(demosDir, "littlest-tokyo"), "Littlest Tokyo");
     }
@@ -311,6 +319,61 @@ export async function buildDemoSupportBundles(): Promise<void> {
         console.log(`Building demo support bundle ${slug}...`);
         await buildDemo(slug);
     }
+}
+
+/**
+ * Build a SINGLE demo by slug — its bundle, runtime assets, and standalone
+ * HTML — without rebuilding the other demos. This is the fast iteration path
+ * while working on one demo (`pnpm build:bundle-demo <slug>`); the full
+ * `buildDemoBundles()` rebuilds and re-measures every configured demo.
+ *
+ * The headless size measurement (the slowest step, it needs a browser) is
+ * skipped by default. Pass `{ measure: true }` to measure this demo and refresh
+ * only its entry in demos-manifest.json.
+ */
+export async function buildSingleDemo(slug: string, options: { measure?: boolean } = {}): Promise<void> {
+    const demos = loadDemosConfig();
+    const demo = demos.find((d) => d.slug === slug);
+    if (!demo) {
+        throw new Error(`Unknown demo slug "${slug}". Known demos: ${demos.map((d) => d.slug).join(", ")}`);
+    }
+
+    // Ensure this demo's runtime assets are present (idempotent; a no-op for
+    // demos like the platformer that ship a committed asset subset).
+    await fetchDemoAssets([demo]);
+
+    mkdirSync(demosDir, { recursive: true });
+    console.log(`Building demo ${slug}...`);
+    await buildDemo(slug);
+    copyDemoRuntimeAssets([demo]);
+
+    const source = resolve(labDir, "lite", `demo-${slug}.html`);
+    if (existsSync(source)) {
+        writeFileSync(resolve(demosDir, `demo-${slug}.html`), rewriteDemoHtmlForBundle(readFileSync(source, "utf-8")));
+    }
+
+    if (options.measure) {
+        const { chromium } = await import("@playwright/test");
+        const { server, port } = await startStaticServer(labDir);
+        try {
+            const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
+            try {
+                const { rawKB, gzipKB } = await measurePage(browser, port, `demo-${slug}`, `lite/demo-${slug}.html`, "/bundle/demos/");
+                const manifest: Record<string, DemoManifestEntry> = existsSync(DEMOS_MANIFEST_FILE)
+                    ? (JSON.parse(readFileSync(DEMOS_MANIFEST_FILE, "utf-8")) as Record<string, DemoManifestEntry>)
+                    : {};
+                manifest[slug] = { rawKB, gzipKB };
+                writeFileSync(DEMOS_MANIFEST_FILE, JSON.stringify(manifest, null, 2));
+                console.log(`  measured ${slug}: ${rawKB} KB raw, ${gzipKB} KB gzip`);
+            } finally {
+                await browser.close();
+            }
+        } finally {
+            server.close();
+        }
+    }
+
+    console.log(`Demo "${slug}" ready → lab/public/bundle/demos/${slug}.js`);
 }
 
 export async function buildDemoBundles(): Promise<void> {
