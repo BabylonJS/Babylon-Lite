@@ -20,6 +20,7 @@ import { FrameGraphCopyToTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Te
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import { WebGPURenderItemViewport } from "@babylonjs/core/Engines/WebGPU/webgpuBundleList";
 import type { UniversalCamera } from "@babylonjs/core/Cameras/universalCamera";
+import "@babylonjs/core/Engines/WebGPU/extensions/engine.multirender";
 
 (async function () {
     const __initStart = performance.now();
@@ -32,10 +33,6 @@ import type { UniversalCamera } from "@babylonjs/core/Cameras/universalCamera";
     await engine.initAsync();
 
     engine.useReverseDepthBuffer = true;
-
-    // BJS 9.5.0 FrameGraphObjectRendererTask unconditionally constructs ThinDepthPeelingRenderer,
-    // which calls engine.buildTextureLayout() — a WebGL-only API. Stub it (OIT is not used here).
-    (engine as unknown as { buildTextureLayout: (formats: unknown[]) => unknown[] }).buildTextureLayout = (formats: unknown[]) => formats.map(() => true);
 
     // Monkey-patch BJS WebGPU viewport rounding to remove the 1-px gaps that
     // `webgpuEngine._applyViewport` produces. The original applies `Math.floor`

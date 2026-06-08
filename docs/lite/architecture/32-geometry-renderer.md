@@ -1,4 +1,5 @@
 # Module: Frame-Graph Geometry Renderer
+
 > Package paths: `packages/babylon-lite/src/frame-graph/`, `packages/babylon-lite/src/material/standard/standard-geometry-output-shader.ts`
 
 ## Purpose
@@ -41,7 +42,7 @@ export const enum GeometryTextureType {
     LINEAR_VELOCITY = 10,
 }
 
-export type GeometryClearValue = GPUColor | "maxViewZ";
+export type GeometryClearValue = GPUColor;
 
 export interface GeometryTextureDescription {
     readonly name: string;
@@ -85,10 +86,7 @@ export interface GeometryRendererTask extends Task {
     includeInVelocity(mesh: Mesh): void;
 }
 
-export function createGeometryRendererTask(
-    scene: SceneContext,
-    config: GeometryRendererTaskConfig,
-): GeometryRendererTask;
+export function createGeometryRendererTask(scene: SceneContext, config: GeometryRendererTaskConfig): GeometryRendererTask;
 
 export interface CopyToTextureTaskConfig {
     name?: string;
@@ -107,10 +105,7 @@ export interface CopyToTextureTask extends Task {
     readonly outputTexture: RenderTarget;
 }
 
-export function createCopyToTextureTask(
-    scene: SceneContext,
-    config: CopyToTextureTaskConfig,
-): CopyToTextureTask;
+export function createCopyToTextureTask(scene: SceneContext, config: CopyToTextureTaskConfig): CopyToTextureTask;
 ```
 
 ## Usage
@@ -129,11 +124,14 @@ const gbuffer = createGeometryRendererTask(scene, {
 addTask(scene, gbuffer);
 
 // Blit the depth attachment into a 256×144 strip at the top of the swapchain.
-addTask(scene, createCopyToTextureTask(scene, {
-    sourceTexture: gbuffer.geometryNormalizedViewDepthTexture!,
-    targetTexture: outputTarget,
-    viewport: { x: 0, y: 0, width: 0.2, height: 0.2 },
-}));
+addTask(
+    scene,
+    createCopyToTextureTask(scene, {
+        sourceTexture: gbuffer.geometryNormalizedViewDepthTexture!,
+        targetTexture: outputTarget,
+        viewport: { x: 0, y: 0, width: 0.2, height: 0.2 },
+    })
+);
 ```
 
 The task accepts up to 8 attachments (the WebGPU max). Each
@@ -228,13 +226,13 @@ output of `composeStandardShader` (the regular Standard composer):
    loop. None of this is re-implemented for the geometry pass.
 2. `composeStandardGeometryShader` (in `standard-geometry-output-shader.ts`)
    then string-patches the composed fragment WGSL:
-   - rewrites the entry-point return type from `-> @location(0) vec4<f32>`
-     to `-> FragmentOutput`,
-   - prepends a `struct FragmentOutput { @location(0) f0: vec4<f32>, ... };`
-     declaration sized to the requested attachment count, and
-   - replaces `return color;` with MRT writes computed from already-in-scope
-     variables (`normalW`, `baseColor`, `alpha`, `input.vp`, `scene.view`,
-     `gp.cameraNearFar`).
+    - rewrites the entry-point return type from `-> @location(0) vec4<f32>`
+      to `-> FragmentOutput`,
+    - prepends a `struct FragmentOutput { @location(0) f0: vec4<f32>, ... };`
+      declaration sized to the requested attachment count, and
+    - replaces `return color;` with MRT writes computed from already-in-scope
+      variables (`normalW`, `baseColor`, `alpha`, `input.vp`, `scene.view`,
+      `gp.cameraNearFar`).
 3. When any requested attachment needs `cameraNearFar` /
    `previousViewProjection` (NORMALIZED_VIEW_DEPTH, LINEAR_VELOCITY), a
    small `~geometry-params` ShaderFragment is appended to the fragment list

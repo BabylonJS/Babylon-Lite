@@ -48,7 +48,7 @@ export const enum GeometryTextureType {
 }
 
 /** Clear behaviour applied to a geometry attachment at the start of a geometry pass. */
-export type GeometryClearValue = GPUColor | "maxViewZ";
+export type GeometryClearValue = GPUColor;
 
 /** Per-type defaults for {@link GeometryTextureType}. Indexed by the enum value. */
 export interface GeometryTextureDescription {
@@ -56,7 +56,6 @@ export interface GeometryTextureDescription {
     readonly name: string;
     /** Default WebGPU color format for the attachment. Callers may override per attachment. */
     readonly defaultFormat: GPUTextureFormat;
-    /** Clear value. `"maxViewZ"` resolves to the active camera's `far` plane at execute time. */
     readonly clearValue: GeometryClearValue;
 }
 
@@ -72,7 +71,7 @@ export const GEOMETRY_TEXTURE_DESCRIPTIONS: readonly GeometryTextureDescription[
     { name: "WorldPosition", defaultFormat: "rgba16float", clearValue: ZERO },
     { name: "LocalPosition", defaultFormat: "rgba16float", clearValue: ZERO },
     { name: "Reflectivity", defaultFormat: "rgba8unorm", clearValue: ZERO },
-    { name: "ViewDepth", defaultFormat: "r32float", clearValue: "maxViewZ" },
+    { name: "ViewDepth", defaultFormat: "r32float", clearValue: ZERO },
     { name: "NormalizedViewDepth", defaultFormat: "r16float", clearValue: ONE },
     // Reverse-Z: clip-space Z maps far→0, near→1, so the background (no geometry)
     // clears to 0 (far). BJS clears this to 1, which is incorrect under reverse-Z.

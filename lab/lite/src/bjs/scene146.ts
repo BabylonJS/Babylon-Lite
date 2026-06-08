@@ -26,6 +26,7 @@ import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/
 import { WebGPURenderItemViewport } from "@babylonjs/core/Engines/WebGPU/webgpuBundleList";
 import "@babylonjs/core/Engines/WebGPU/extensions/engine.debugging";
 import { Engine } from "@babylonjs/core/Engines/engine";
+import "@babylonjs/core/Engines/WebGPU/extensions/engine.multirender";
 
 const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Sponza/glTF/";
 
@@ -49,11 +50,7 @@ const SPONZA_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-A
 
     engine.useReverseDepthBuffer = true;
 
-    // BJS 9.5.0 FrameGraphObjectRendererTask unconditionally constructs ThinDepthPeelingRenderer,
-    // which calls engine.buildTextureLayout() — a WebGL-only API. Stub it (OIT is not used here).
     if (engine.isWebGPU) {
-        (engine as unknown as { buildTextureLayout: (formats: unknown[]) => unknown[] }).buildTextureLayout = (formats: unknown[]) => formats.map(() => true);
-
         // Mirror the viewport-rounding patch from scene 145 — same parity rationale.
         const engPatch = engine as unknown as {
             _viewportCached: { x: number; y: number; z: number; w: number };

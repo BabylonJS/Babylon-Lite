@@ -24,6 +24,7 @@ import { FrameGraphObjectRendererTask } from "@babylonjs/core/FrameGraph/Tasks/R
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import { FrameGraphCircleOfConfusionTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/circleOfConfusionTask";
 import { WebGPURenderItemViewport } from "@babylonjs/core/Engines/WebGPU/webgpuBundleList";
+import "@babylonjs/core/Engines/WebGPU/extensions/engine.multirender";
 
 const POWERPLANT_URL = "https://assets.babylonjs.com/meshes/PowerPlant/powerplant.glb";
 
@@ -37,10 +38,6 @@ const POWERPLANT_URL = "https://assets.babylonjs.com/meshes/PowerPlant/powerplan
     await engine.initAsync();
 
     engine.useReverseDepthBuffer = true;
-
-    // BJS 9.5.0 FrameGraphObjectRendererTask unconditionally constructs ThinDepthPeelingRenderer,
-    // which calls engine.buildTextureLayout() — a WebGL-only API. Stub it (OIT is not used here).
-    (engine as unknown as { buildTextureLayout: (formats: unknown[]) => unknown[] }).buildTextureLayout = (formats: unknown[]) => formats.map(() => true);
 
     // Mirror the viewport-rounding patch from scenes 145/146 — same parity rationale.
     const engPatch = engine as unknown as {
