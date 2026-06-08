@@ -636,6 +636,14 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
 function writeSceneUBO(task: GeometryRendererTaskInternal, eng: EngineContext, sc: SceneContext, camera: Camera, aspect: number): void {
     const data = task._sceneData;
     _packSceneUniforms(data, eng, sc, camera, aspect);
+    // Run the opt-in fog/clip-plane/env-SH contributors so the geometry pass
+    // sees the same SceneUniforms state as the forward render task.
+    const contribs = sc._sceneUboContributors;
+    if (contribs) {
+        for (const c of contribs) {
+            c(data, sc);
+        }
+    }
     task._viewProjectionScratch.set(data.subarray(0, 16));
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }

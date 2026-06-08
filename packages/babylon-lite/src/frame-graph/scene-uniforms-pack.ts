@@ -13,9 +13,17 @@ import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 
-/** Pack the canonical SceneUniforms layout into `data` (length SCENE_UBO_BYTES/4).
- *  Zeroes the buffer first, then writes every field the PBR/Standard fragment
- *  shaders read. Pure — does not touch the GPU. */
+/** Pack the always-present SceneUniforms fields into `data` (length
+ *  SCENE_UBO_BYTES/4). Zeroes the buffer first, then writes the universal
+ *  camera / eye / env-rotation / image-processing fields every scene needs.
+ *
+ *  The opt-in fog (offsets 80–86), clip-plane (88–91) and IBL spherical-
+ *  harmonics (40–75) slices are NOT written here — they are owned by the
+ *  scene-UBO contributors registered through the {@link setFog}/{@link
+ *  setClipPlane}/env-loader seam. The forward {@link RenderTask} and the
+ *  {@link createGeometryRendererTask} run those contributors after this base
+ *  pack, so fog/clip/env code only ships in scenes that actually use them.
+ *  Pure — does not touch the GPU. */
 export function _packSceneUniforms(data: Float32Array, eng: EngineContext, scene: SceneContext, camera: Camera, aspect: number): void {
     data.fill(0);
 
@@ -41,24 +49,10 @@ export function _packSceneUniforms(data: Float32Array, eng: EngineContext, scene
         data[34] = wm[14]!;
     }
 
-    const fog = scene.fog;
-    if (fog) {
-        data[80] = fog.mode;
-        data[81] = fog.start;
-        data[82] = fog.end;
-        data[83] = fog.density;
-        data[84] = fog.color[0]!;
-        data[85] = fog.color[1]!;
-        data[86] = fog.color[2]!;
-    }
     data[87] = eng.canvas.width;
 
-    const envRotationY = scene.envRotationY || 0;
-    data[36] = envRotationY;
+    data[36] = scene.envRotationY || 0;
     const envTextures = scene._envTextures;
-    if (envTextures?.sphericalHarmonics) {
-        data.set(envTextures.sphericalHarmonics, 40);
-    }
 
     const img = scene.imageProcessing;
     data[76] = img.exposure;
@@ -66,11 +60,4 @@ export function _packSceneUniforms(data: Float32Array, eng: EngineContext, scene
     data[78] = envTextures?.lodGenerationScale ?? 0.8;
     data[79] = +img.toneMappingEnabled;
     data[37] = eng.canvas.height;
-
-    if (scene.clipPlane) {
-        data[88] = scene.clipPlane[0];
-        data[89] = scene.clipPlane[1];
-        data[90] = scene.clipPlane[2];
-        data[91] = scene.clipPlane[3];
-    }
 }
