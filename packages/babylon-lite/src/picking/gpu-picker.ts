@@ -113,9 +113,20 @@ function computePickVP(out: Float32Array, vp: Float32Array, px: number, py: numb
     }
 }
 
+/** Options for {@link pickAsync}. */
+export interface PickOptions {
+    /** Restrict the pick to a subset of the scene's meshes — return `true` for a mesh that may be picked,
+     *  `false` to ignore it entirely (it neither occludes nor is returned). Lets a caller provide its
+     *  "list of pickables" so decorative meshes (grass, foliage, particles, …) can't swallow a pick of a
+     *  structure behind/around them. When omitted, every mesh is pickable (previous behaviour). Applied
+     *  identically to the id-assignment and id-resolve passes so ids stay consistent. */
+    filter?: (mesh: Mesh) => boolean;
+}
+
 /** Pick the mesh at CSS-space canvas coordinates, matching Babylon.js Scene.pick. Returns a PickingInfo. */
-export async function pickAsync(picker: GpuPicker, x: number, y: number): Promise<PickingInfo> {
+export async function pickAsync(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
+    const pickFilter = options?.filter ?? null;
     const engine = scene.engine;
     const device = engine._device;
     const canvas = engine.canvas;
@@ -186,6 +197,9 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     const tempBuffers: GPUBuffer[] = [];
     for (let mi = 0; mi < meshCount; mi++) {
         const mesh = meshes[mi]!;
+        if (pickFilter && !pickFilter(mesh)) {
+            continue; // excluded from picking → not drawn AND not given an id (skipped identically below)
+        }
         const gpu = mesh._gpu;
         const ti = mesh.thinInstances;
 
@@ -288,6 +302,9 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     let scanId = 1;
     for (let mi = 0; mi < meshCount; mi++) {
         const mesh = meshes[mi]!;
+        if (pickFilter && !pickFilter(mesh)) {
+            continue; // skipped identically to the draw pass above so scanId stays aligned with the ids
+        }
         const ti = mesh.thinInstances;
         if (ti && ti.count > 0 && ti._gpuBuffer) {
             if (pickId >= scanId && pickId < scanId + ti.count) {
