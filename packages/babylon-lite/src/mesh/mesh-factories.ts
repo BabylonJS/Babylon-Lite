@@ -78,6 +78,105 @@ export function updateMeshPositions(engine: EngineContext, mesh: Mesh, positions
     engine._device.queue.writeBuffer(gpu.positionBuffer, vertexOffset * 3 * 4, positions.buffer as ArrayBuffer, positions.byteOffset, positions.byteLength);
 }
 
+/** Replace a mesh's GPU geometry IN PLACE with new (possibly larger or smaller) buffers, reusing the
+ *  same Mesh object so existing references to it (scene entries, shadow-caster lists, materials) stay
+ *  valid. Unlike `updateMeshPositions`, this REALLOCATES the GPU buffers, so it's the way to GROW a
+ *  dynamically-generated mesh past its original vertex/index capacity (e.g. an ever-larger bridge whose
+ *  box budget overflows). The old GPU buffers are destroyed to free device memory. Recomputes bounds. */
+export function resizeMeshGeometry(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void {
+    const old = mesh._gpu;
+    // A geometry REALLOCATION: any cached draw recording that captured raw buffer handles (e.g. the main
+    // opaque render bundle or the shadow task's bundle) must re-record, or it would keep binding the OLD
+    // buffers we're about to free. Resize is a structural (vertex-count) change — conceptually a scene
+    // mutation — so bump every registered scene's renderable version, which is exactly what the cached
+    // bundles already key off to know they must rebuild. (A mesh holds no scene reference per pillar 4b,
+    // so we can't target just its owner; bumping all registered scenes is a no-op for any without it.)
+    for (const ctx of engine._renderingContexts) {
+        const sc = ctx as { _renderableVersion?: number };
+        if (sc._renderableVersion !== undefined) {
+            sc._renderableVersion++;
+        }
+    }
+    // Allocate the NEW buffers and swap them in FIRST, so any subsequent frame records from the new
+    // geometry. The OLD buffers may still be referenced by a frame that was already submitted to the GPU
+    // this tick, so we must NOT destroy them synchronously — that hits the validation error
+    // "Buffer used in submit while destroyed". Defer their destruction until the GPU has drained the
+    // currently-submitted work (onSubmittedWorkDone), by which point nothing references them.
+    mesh._gpu = uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors);
+    const [min, max] = computeAabb(positions);
+    mesh.boundMin = isFinite(min[0]) ? min : undefined;
+    mesh.boundMax = isFinite(max[0]) ? max : undefined;
+
+    // Retain CPU geometry for detailed picking + device-loss recovery (mirror createMeshFromData).
+    mesh._cpuPositions = positions;
+    mesh._cpuNormals = normals;
+    mesh._cpuUvs = uvs;
+    mesh._cpuIndices = indices;
+    engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
+
+    void engine._device.queue
+        .onSubmittedWorkDone()
+        .then(() => {
+            try {
+                old.positionBuffer.destroy();
+                old.normalBuffer.destroy();
+                old.indexBuffer.destroy();
+                old.uvBuffer.destroy();
+                old.uv2Buffer?.destroy();
+                old.tangentBuffer?.destroy();
+                old.colorBuffer?.destroy();
+            } catch {
+                // Device may have been lost/disposed before the deferred destroy ran — nothing to free.
+            }
+        })
+        .catch(() => {});
+}
+
+/** Re-upload (part of) a mesh's NORMAL buffer — the twin of `updateMeshPositions` for dynamically
+ *  re-generated geometry whose per-vertex normals change (e.g. a swept tube re-fitted each rebuild).
+ *  No-op if the mesh was created without normals. Zero-allocation GPU upload only. */
+export function updateMeshNormals(engine: EngineContext, mesh: Mesh, normals: Float32Array, vertexOffset = 0): void {
+    const gpu = mesh._gpu;
+    if (!gpu.normalBuffer) {
+        return;
+    }
+    engine._device.queue.writeBuffer(gpu.normalBuffer, vertexOffset * 3 * 4, normals.buffer as ArrayBuffer, normals.byteOffset, normals.byteLength);
+}
+
+/** Re-upload (part of) a mesh's COLOR buffer — the twin of `updateMeshNormals`/`updateMeshPositions`
+ *  for dynamically re-generated geometry whose per-vertex colors change (e.g. a procedural mesh whose
+ *  parts are re-tinted each rebuild). The color attribute is vec4 (16 bytes/vertex). No-op if the mesh
+ *  was created without colors. Zero-allocation GPU upload only. */
+export function updateMeshColors(engine: EngineContext, mesh: Mesh, colors: Float32Array, vertexOffset = 0): void {
+    const gpu = mesh._gpu;
+    if (!gpu.colorBuffer) {
+        return;
+    }
+    engine._device.queue.writeBuffer(gpu.colorBuffer, vertexOffset * 4 * 4, colors.buffer as ArrayBuffer, colors.byteOffset, colors.byteLength);
+}
+
+/** Re-upload (part of) a mesh's UV buffer — the twin of `updateMeshNormals`/`updateMeshColors` for
+ *  dynamically re-generated geometry whose per-vertex UVs change (e.g. a procedural mesh whose parts
+ *  carry per-rebuild UV payloads). The uv attribute is vec2 (8 bytes/vertex). No-op if the mesh was
+ *  created without UVs. Zero-allocation GPU upload only. */
+export function updateMeshUvs(engine: EngineContext, mesh: Mesh, uvs: Float32Array, vertexOffset = 0): void {
+    const gpu = mesh._gpu;
+    if (!gpu.uvBuffer) {
+        return;
+    }
+    engine._device.queue.writeBuffer(gpu.uvBuffer, vertexOffset * 2 * 4, uvs.buffer as ArrayBuffer, uvs.byteOffset, uvs.byteLength);
+}
+
 /** Create a sphere mesh. Caller must assign material. */
 export function createSphere(engine: EngineContext, options?: SphereOptions): Mesh {
     const data = createSphereData(options);

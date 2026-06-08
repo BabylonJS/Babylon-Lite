@@ -107,6 +107,10 @@ export {
     createExtrudeShape,
     createMeshFromData,
     updateMeshPositions,
+    updateMeshNormals,
+    updateMeshColors,
+    updateMeshUvs,
+    resizeMeshGeometry,
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
@@ -302,7 +306,7 @@ export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
-export type { GpuPicker } from "./picking/gpu-picker.js";
+export type { GpuPicker, PickOptions } from "./picking/gpu-picker.js";
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";

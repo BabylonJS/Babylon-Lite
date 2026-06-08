@@ -20,6 +20,11 @@ export interface ShadowTask extends Task {
 /** @internal Create the scene-owned shadow scheduling adapter task. */
 export function createShadowTask(engine: EngineContext, scene: SceneContext): ShadowTask {
     const shadowGenerators = new Set<ShadowGenerator>();
+    // Last scene renderable-version each generator's render bundle was recorded at — re-record when the
+    // scene mutated (e.g. resizeMeshGeometry reallocated a caster's GPU buffers, bumping
+    // scene._renderableVersion), since the cached bundle binds raw buffer handles that would otherwise
+    // point at freed buffers.
+    const recordedVersion = new WeakMap<ShadowGenerator, number>();
     _setShadowTaskInputPreloader(preloadShadowTaskInput);
 
     const task: ShadowTask = {
@@ -60,8 +65,9 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
                     shadowGenerators.add(sg);
                     const existing = sg._shadowTaskState ?? null;
                     const state = sg._ensureShadowTaskState(engine, scene, casterMeshes);
-                    if (!existing || existing._casterMeshes !== casterMeshes) {
+                    if (!existing || existing._casterMeshes !== casterMeshes || recordedVersion.get(sg) !== scene._renderableVersion) {
                         state._task.record();
+                        recordedVersion.set(sg, scene._renderableVersion);
                     }
                     draws += sg._renderShadowMap(engine, state);
                 }
