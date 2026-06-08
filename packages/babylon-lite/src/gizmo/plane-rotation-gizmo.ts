@@ -55,6 +55,9 @@ export interface PlaneRotationGizmo {
     /** ShaderMaterial driving the rotation-sector camembert visual.  Exposed so
      *  callers can change the colour at runtime. */
     readonly rotationDisplayMaterial: ShaderMaterial;
+    /** @internal — rendered (visible) ring mesh whose material is swapped for
+     *  hover / colored / disabled.  Excludes the collider + camembert plane. */
+    _visibleMeshes: Mesh[];
     /** @internal */
     _meshes: Mesh[];
     /** @internal */
@@ -134,6 +137,7 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
         useLocalCoordinates: false,
         materials,
         rotationDisplayMaterial,
+        _visibleMeshes: [ring],
         _meshes: [root, ring, collider, rotationDisplayPlane],
         _disposePointer: () => undefined,
         _disposeFollow: () => undefined,

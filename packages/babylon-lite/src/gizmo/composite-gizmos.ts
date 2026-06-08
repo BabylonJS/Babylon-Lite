@@ -9,6 +9,10 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import type { Mesh } from "../mesh/mesh.js";
+import type { PointerDrag } from "./pointer-drag.js";
+import { setMeshesMaterial } from "./gizmo-core.js";
+import type { GizmoMaterialSet } from "./gizmo-core.js";
 import type { UtilityLayer } from "./utility-layer.js";
 import { createAxisDragGizmo, attachAxisDragGizmoToNode, disposeAxisDragGizmo } from "./axis-drag-gizmo.js";
 import type { AxisDragGizmo } from "./axis-drag-gizmo.js";
@@ -18,6 +22,43 @@ import { createPlaneRotationGizmo, attachPlaneRotationGizmoToNode, disposePlaneR
 import type { PlaneRotationGizmo } from "./plane-rotation-gizmo.js";
 import { createAxisScaleGizmo, attachAxisScaleGizmoToNode, disposeAxisScaleGizmo } from "./axis-scale-gizmo.js";
 import type { AxisScaleGizmo } from "./axis-scale-gizmo.js";
+
+/** The minimal shape a composite needs from each sub-gizmo to coordinate the
+ *  "grey out the other axes while one is dragged" affordance. */
+interface DisableableSubGizmo {
+    drag: PointerDrag;
+    materials: GizmoMaterialSet;
+    _visibleMeshes: Mesh[];
+}
+
+/** Wire BJS-style cross-axis disabling: while ANY sub-gizmo is being dragged,
+ *  every OTHER sub-gizmo of the same composite switches to its (grey,
+ *  semi-transparent) disabled material; on drag end they all restore.  Mirrors
+ *  BJS `Gizmo.GizmoAxisPointerObserver`, which greys non-active axes on
+ *  pointer-down and resets them on pointer-up.  The dispatcher suppresses hover
+ *  picking while a drag is active, so the greyed state survives the whole drag
+ *  without a stray hover event un-greying a sibling. */
+function wireCrossAxisDisable(gizmos: DisableableSubGizmo[]): void {
+    for (const g of gizmos) {
+        g.drag.onDragStart.add(() => {
+            for (const other of gizmos) {
+                if (other !== g) {
+                    setMeshesMaterial(other._visibleMeshes, other.materials.disabled);
+                }
+            }
+        });
+        g.drag.onDragEnd.add(() => {
+            for (const other of gizmos) {
+                if (other !== g) {
+                    // Enabled siblings return to their colour; a disabled sibling
+                    // stays greyed (matches BJS, where the disable material is
+                    // permanent while `dragBehavior.enabled` is false).
+                    setMeshesMaterial(other._visibleMeshes, other.drag.enabled ? other.materials.colored : other.materials.disabled);
+                }
+            }
+        });
+    }
+}
 
 // ─── PositionGizmo ───────────────────────────────────────────────────
 
@@ -51,6 +92,7 @@ export function createPositionGizmo(engine: EngineContext, layer: UtilityLayer, 
     const xPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 1, y: 0, z: 0 }, color: [1, 0, 0] }) : null;
     const yPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 1, z: 0 }, color: [0, 1, 0] }) : null;
     const zPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 1] }) : null;
+    wireCrossAxisDisable([xGizmo, yGizmo, zGizmo, ...(xPlaneGizmo ? [xPlaneGizmo] : []), ...(yPlaneGizmo ? [yPlaneGizmo] : []), ...(zPlaneGizmo ? [zPlaneGizmo] : [])]);
     return {
         xGizmo,
         yGizmo,
@@ -128,6 +170,7 @@ export function createRotationGizmo(engine: EngineContext, layer: UtilityLayer, 
     const xGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 1, y: 0, z: 0 }, color: [1, 0, 0], tessellation, thickness });
     const yGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 1, z: 0 }, color: [0, 1, 0], tessellation, thickness });
     const zGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 1], tessellation, thickness });
+    wireCrossAxisDisable([xGizmo, yGizmo, zGizmo]);
     return { xGizmo, yGizmo, zGizmo, attachedNode: null };
 }
 
@@ -180,6 +223,7 @@ export function createScaleGizmo(engine: EngineContext, layer: UtilityLayer, opt
     xGizmo.useLocalCoordinates = true;
     yGizmo.useLocalCoordinates = true;
     zGizmo.useLocalCoordinates = true;
+    wireCrossAxisDisable([xGizmo, yGizmo, zGizmo, uniformScaleGizmo]);
     return { xGizmo, yGizmo, zGizmo, uniformScaleGizmo, attachedNode: null };
 }
 

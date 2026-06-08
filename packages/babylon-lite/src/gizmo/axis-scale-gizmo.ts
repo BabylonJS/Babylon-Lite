@@ -22,10 +22,10 @@ import type { Vec3 } from "../math/types.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
-import { createBox, createCylinder } from "../mesh/mesh-factories.js";
+import { createBox, createCylinder, createPolyhedron } from "../mesh/mesh-factories.js";
 import { createGizmoMaterials, setMeshesMaterial, attachFollowTarget, GizmoObservable } from "./gizmo-core.js";
 import type { GizmoMaterialSet } from "./gizmo-core.js";
-import { lookAtQuat, normalizeVec3Obj, transformDirectionByWorld } from "./gizmo-math.js";
+import { directionToQuat, normalizeVec3Obj, quatMul, rotationQuatFromMatrix, transformDirectionByWorld } from "./gizmo-math.js";
 import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
@@ -53,6 +53,9 @@ export interface AxisScaleGizmo {
     /** Local-coord mode: drag axis rotates with the attached node. */
     useLocalCoordinates: boolean;
     readonly materials: GizmoMaterialSet;
+    /** @internal — rendered (visible) meshes whose material is swapped for
+     *  hover / colored / disabled (excludes the invisible root + colliders). */
+    _visibleMeshes: Mesh[];
     /** @internal */
     _meshes: Mesh[];
     /** @internal */
@@ -61,9 +64,15 @@ export interface AxisScaleGizmo {
     _disposeFollow: () => void;
 }
 
+/** Base `size` for the uniform-scale handle octahedron (vertices sit at
+ *  ≈1.414×size along each axis).  Tuned to match BJS ScaleGizmo's central
+ *  `CreatePolyhedron(type:1)` handle on screen. */
+const UNIFORM_OCTAHEDRON_SIZE = 0.028;
+
 /** Build the cube + line geometry for an axis-scale arrow.  When `centered`
- *  is true (uniform-scale handle), the cube sits at the gizmo origin and the
- *  tail is omitted — the handle becomes a centred grab box at the gizmo root. */
+ *  is true (uniform-scale handle), an octahedron sits at the gizmo origin and
+ *  the tail is omitted — the handle becomes a centred grab widget at the gizmo
+ *  root, matching BJS ScaleGizmo's central octahedron. */
 function buildScaleArrow(
     engine: EngineContext,
     utilityScene: SceneContext,
@@ -74,11 +83,10 @@ function buildScaleArrow(
     centered: boolean
 ): Mesh[] {
     if (centered) {
-        // Uniform-scale handle — a single box at the gizmo origin (no tail,
-        // no z offset).  Made slightly larger than an axis head so it reads
-        // clearly as the "scale uniformly" affordance.
-        const head = createBox(engine, 0.6 * (1 + (thickness - 1) / 4));
-        head.scaling.set(0.1, 0.1, 0.1);
+        // Uniform-scale handle — an octahedron at the gizmo origin (no tail, no
+        // z offset), mirroring BJS ScaleGizmo's central `CreatePolyhedron(type:1)`
+        // octahedron.  Kept world-aligned (identity root rotation) by the caller.
+        const head = createPolyhedron(engine, { type: 1, size: UNIFORM_OCTAHEDRON_SIZE * (1 + (thickness - 1) / 4) });
         head.material = material;
         head.position.set(0, 0, 0);
         head.parent = root;
@@ -135,8 +143,23 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
     root.visible = false;
     addToScene(utilityScene, root);
 
-    const q = lookAtQuat(dragAxis);
-    root.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+    // Baked local-frame orientation of the gizmo's +Z onto its drag axis,
+    // roll-zero (BJS `lookAt(dragAxis)` convention).  In local-coord mode the
+    // rendered root orientation is `Q_node ∘ qBake` — i.e. the node's world
+    // rotation applied ON TOP of this fixed local orientation, exactly like BJS
+    // which bakes the axis lookAt once then sets the gizmo root rotation to the
+    // attached node's quaternion.  Recomputing a world-frame lookAt each frame
+    // instead would give the (non-roll-symmetric) scale cube a different roll
+    // than the reference whenever the node is rotated.
+    const qBake = directionToQuat(localAxis);
+    // The uniform-scale (central octahedron) handle stays world-aligned, matching
+    // BJS where its custom mesh has `updateGizmoRotationToMatchAttachedMesh=false`
+    // and no axis lookAt.  The per-axis arrows orient their +Z onto the drag axis.
+    if (uniformScaling) {
+        root.rotationQuaternion.set(0, 0, 0, 1);
+    } else {
+        root.rotationQuaternion.set(qBake[0], qBake[1], qBake[2], qBake[3]);
+    }
     root.scaling.set(1 / 3, 1 / 3, 1 / 3);
 
     const visibleMeshes = buildScaleArrow(engine, utilityScene, materials.colored, root, thickness, false, uniformScaling);
@@ -154,6 +177,7 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
         attachedNode: null,
         useLocalCoordinates: false,
         materials,
+        _visibleMeshes: visibleMeshes,
         _meshes: [root, ...visibleMeshes, ...colliderMeshes],
         _disposePointer: () => undefined,
         _disposeFollow: () => undefined,
@@ -219,7 +243,10 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
                     dragOpt.y = worldAxis.y;
                     dragOpt.z = worldAxis.z;
                 }
-                const qr = lookAtQuat(worldAxis);
+                // Render orientation = node world rotation ∘ baked local lookAt,
+                // so the scale cube's roll tracks the node exactly as in BJS.
+                const qNode = rotationQuatFromMatrix(wm);
+                const qr = quatMul(qNode[0], qNode[1], qNode[2], qNode[3], qBake[0], qBake[1], qBake[2], qBake[3]);
                 root.rotationQuaternion.set(qr[0], qr[1], qr[2], qr[3]);
             } else if (dragAxis.x !== localAxis.x || dragAxis.y !== localAxis.y || dragAxis.z !== localAxis.z) {
                 dragAxis.x = localAxis.x;
@@ -231,8 +258,7 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
                     dragOpt.y = localAxis.y;
                     dragOpt.z = localAxis.z;
                 }
-                const qr = lookAtQuat(localAxis);
-                root.rotationQuaternion.set(qr[0], qr[1], qr[2], qr[3]);
+                root.rotationQuaternion.set(qBake[0], qBake[1], qBake[2], qBake[3]);
             }
         }
     );

@@ -16,10 +16,11 @@ export interface GizmoMaterialSet {
 }
 
 /** Build the three materials used by every gizmo: solid colored, yellow hover,
- *  grey/translucent disabled.  Materials are LIT (no `disableLighting`) so they
- *  benefit from the utility layer's hemispheric light — matches BJS gizmos
- *  where the arrow surfaces show shading rather than appearing as flat
- *  paint-by-numbers colour. */
+ *  grey/translucent disabled.  Materials are LIT (no `disableLighting`) so the
+ *  utility layer's hemispheric light (intensity 2, gray ground — matching BJS
+ *  `UtilityLayerRenderer._getSharedGizmoLight`) shades the arrow / ring / box
+ *  surfaces, exactly like the BJS reference gizmos.  The specular is dimmed to
+ *  `color − 0.1` (BJS's gizmo specular) to avoid an over-bright highlight. */
 export function createGizmoMaterials(
     color: [number, number, number],
     hoverColor: [number, number, number] = [1, 1, 0],
@@ -27,11 +28,9 @@ export function createGizmoMaterials(
 ): GizmoMaterialSet {
     const colored = createStandardMaterial();
     colored.diffuseColor = color;
-    // Match BJS gizmo materials: a dim, colour-matched specular (`color - 0.1`)
-    // instead of the StandardMaterial default white (1,1,1), which otherwise
-    // produces a bright "shiny" highlight that BJS doesn't have.  BJS sets no
-    // emissive — the utility layer's hemispheric light (intensity 2) keeps the
-    // colour readable, so we drop the emissive too to match the reference tone.
+    // BJS gizmo specular = diffuse − 0.1 (not the StandardMaterial default white,
+    // which produces a bright "shiny" highlight BJS doesn't have).  No emissive —
+    // the utility layer's hemispheric light keeps the colour readable.
     colored.specularColor = [Math.max(0, color[0] - 0.1), Math.max(0, color[1] - 0.1), Math.max(0, color[2] - 0.1)];
 
     const hover = createStandardMaterial();

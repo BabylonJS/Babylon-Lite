@@ -47,10 +47,20 @@ const LOCAL_DRAGS: DragStep[] = [
 ];
 
 const WORLD_DRAGS: DragStep[] = [
-    { name: "position-X-world", start: { x: 420, y: 352 }, end: { x: 458, y: 364 } },
-    { name: "rotation-Y-world", start: { x: 600, y: 272 }, end: { x: 565, y: 300 } },
-    // Scale gizmo stays local in both BJS and Lite — reuse the same coords.
-    { name: "scale-X-world", start: { x: 986, y: 374 }, end: { x: 1012, y: 388 } },
+    // The WORLD phase re-drags the position gizmo only.  In world-coord mode the
+    // +X arrow points along world +X (a long horizontal widget); dragging along
+    // it exercises the world-vs-local axis re-orientation.  Coordinates track the
+    // horizontal arrow (y≈348) so the gesture stays on the widget in both engines
+    // despite the gizmo having re-centred after the LOCAL drag.
+    //
+    // A world rotation re-drag is intentionally omitted: after the LOCAL rotation
+    // the world rings reproject to different screen positions in each engine, so a
+    // fixed-coord gesture lands on a ring in one engine but on empty space in the
+    // other — and a miss makes the camera controls grab the gesture and orbit,
+    // diverging the whole frame.  A world scale re-drag is likewise omitted: the
+    // ScaleGizmo has no world-coord mode (matches BJS — it always stays local), so
+    // re-dragging it in "world" mode adds no coverage while risking the same miss.
+    { name: "position-X-world", start: { x: 452, y: 348 }, end: { x: 492, y: 348 } },
 ];
 
 test.skip(!!sceneConfig.skipParity, "Scene 222 skipped via skipParity in scene-config.json");
@@ -65,18 +75,30 @@ async function performDrags(page: Page, steps: DragStep[]): Promise<void> {
         const sy = box.y + step.start.y;
         const ex = box.x + step.end.x;
         const ey = box.y + step.end.y;
+        // Hover the gizmo and WAIT long enough for the async GPU hover-pick to
+        // resolve before pressing.  Lite picks asynchronously; once the hover
+        // pick lands the gizmo is marked hovered, so (a) the camera controls
+        // defer to the gizmo instead of grabbing the gesture and (b) the
+        // subsequent pointer-down pick lands on a primed picker.  Without this
+        // settle the down-pick races the hover-pick on the shared GPU picker and
+        // the drag intermittently fails to grab.  BJS picks synchronously and is
+        // unaffected by the extra waits.
         await page.mouse.move(sx, sy);
-        await page.waitForTimeout(50);
-        await page.mouse.move(sx, sy);
+        await page.waitForTimeout(300);
         await page.mouse.down();
-        await page.waitForTimeout(100);
+        // Wait for the pointer-down pick to resolve and the gizmo to grab the
+        // drag before moving.
+        await page.waitForTimeout(250);
         await page.mouse.move(ex, ey, { steps: 8 });
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(150);
         await page.mouse.up();
-        await page.waitForTimeout(160);
+        await page.waitForTimeout(150);
+        // Park the cursor far off the gizmos BETWEEN drags so the hover state
+        // clears before the next interaction.
+        await page.mouse.move(box.x + 50, box.y + 50);
+        await page.waitForTimeout(300);
     }
-    // Park the cursor far off the gizmos so BJS's per-frame hover-pick clears
-    // before any subsequent screenshot.
+    // Final park so any per-frame hover-pick clears before the screenshot.
     await page.mouse.move(box.x + 50, box.y + 50);
     await page.waitForTimeout(250);
 }

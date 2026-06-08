@@ -23,12 +23,36 @@ import { addToScene, onBeforeRender } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { createBox, createCylinder } from "../mesh/mesh-factories.js";
 import { computeAabb } from "../math/compute-aabb.js";
+import { mat4FromQuat } from "../math/mat4-from-quat.js";
+import { mat4Multiply } from "../math/mat4-multiply.js";
+import type { Mat4 } from "../math/types.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { StandardMaterialProps } from "../material/standard/standard-material.js";
 import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 import { GizmoObservable } from "./gizmo-core.js";
-import { lookAtQuat, quatFromAxisAngle, quatMul, quatNormalize, signedAngleAroundNormal, worldDeltaToLocal, worldRotationToLocal } from "./gizmo-math.js";
+import {
+    lookAtQuat,
+    quatFromAxisAngle,
+    quatMul,
+    quatNormalize,
+    rotateVec3ByQuat,
+    rotationQuatFromMatrix,
+    signedAngleAroundNormal,
+    worldDeltaToLocal,
+    worldRotationToLocal,
+} from "./gizmo-math.js";
+
+/** A rotation quaternion as a 4-tuple `[x, y, z, w]`. */
+type Quat = readonly [number, number, number, number];
+
+const IDENTITY_QUAT: Quat = [0, 0, 0, 1];
+
+/** Rotate `p` by quaternion `q` (helper around rotateVec3ByQuat returning Vec3). */
+function rotatePoint(q: Quat, p: Vec3): Vec3 {
+    const [x, y, z] = rotateVec3ByQuat(q[0], q[1], q[2], q[3], p.x, p.y, p.z);
+    return { x, y, z };
+}
 
 export interface BoundingBoxGizmoOptions {
     /** RGB colour for the wireframe + handle materials. Defaults to grey. */
@@ -37,7 +61,8 @@ export interface BoundingBoxGizmoOptions {
     edgeThickness?: number;
     /** Side length of the 8 corner scale boxes (world units). Default 0.18. */
     scaleBoxSize?: number;
-    /** Side length of the 12 edge rotation anchors (world units). Default 0.12. */
+    /** Length of the 12 elongated edge rotation anchors (world units). Default
+     *  0.16; thickness is length/4 (BJS 1.6:0.4 ratio). */
     rotationAnchorSize?: number;
 }
 
@@ -78,7 +103,7 @@ const INFINITE_AABB: AabbBounds = {
  *  (which loaders / setParent do not always populate) with a parent-chain
  *  filter over `extraCandidates` so meshes added via `cube.parent = root`
  *  are still discovered. */
-function computeBoundsRecursive(root: SceneNode, extraCandidates?: readonly Mesh[]): AabbBounds {
+function computeBoundsRecursive(root: SceneNode, extraCandidates?: readonly Mesh[], preTransform?: Mat4): AabbBounds {
     let minX = Infinity,
         minY = Infinity,
         minZ = Infinity;
@@ -98,7 +123,11 @@ function computeBoundsRecursive(root: SceneNode, extraCandidates?: readonly Mesh
     const visit = (node: SceneNode): void => {
         const probe = node as unknown as { _gpu?: unknown; _cpuPositions?: Float32Array; worldMatrix?: Readonly<Float32Array> };
         if (probe._gpu && probe._cpuPositions && probe.worldMatrix) {
-            const aabb = computeAabb(probe._cpuPositions, probe.worldMatrix as never);
+            // When `preTransform` is supplied, fold it into the mesh's world
+            // matrix so the AABB is computed in that rotated frame (used to get
+            // the node's rotation-removed bounds for the OBB cage).
+            const m = preTransform ? mat4Multiply(preTransform, probe.worldMatrix as unknown as Mat4) : (probe.worldMatrix as never);
+            const aabb = computeAabb(probe._cpuPositions, m as never);
             if (Number.isFinite(aabb[0][0])) {
                 if (aabb[0][0] < minX) {
                     minX = aabb[0][0];
@@ -211,12 +240,43 @@ function buildEdge(engine: EngineContext, utilityScene: SceneContext, material: 
 }
 
 /** Build a small cube handle at world position `p`. Returned with no parent. */
-function buildHandle(engine: EngineContext, utilityScene: SceneContext, material: StandardMaterialProps, size: number): { mesh: Mesh; place: (p: Vec3) => void } {
+function buildHandle(engine: EngineContext, utilityScene: SceneContext, material: StandardMaterialProps, size: number): { mesh: Mesh; place: (p: Vec3, q: Quat) => void } {
     const mesh = createBox(engine, size);
     mesh.material = material;
     addToScene(utilityScene, mesh);
-    const place = (p: Vec3): void => {
+    const place = (p: Vec3, q: Quat): void => {
         mesh.position.set(p.x, p.y, p.z);
+        mesh.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+    };
+    return { mesh, place };
+}
+
+/** Build an elongated box rotation anchor for a bounding-box edge.  Mirrors BJS
+ *  BoundingBoxGizmo's rotate anchors — a `1.6 × 0.4 × 0.4` box scaled by
+ *  `rotationSphereSize` (0.1), i.e. a thin bar that runs ALONG the edge it sits
+ *  on (a ~4:1 length:thickness ratio), not a cube.  `axis` is the world-space
+ *  edge direction the bar is elongated along. */
+function buildEdgeAnchor(
+    engine: EngineContext,
+    utilityScene: SceneContext,
+    material: StandardMaterialProps,
+    axis: Vec3,
+    length: number,
+    thickness: number
+): { mesh: Mesh; place: (p: Vec3, q: Quat) => void } {
+    const mesh = createBox(engine, 1);
+    // Elongate along the dominant component of `axis`; thin on the other two.
+    const ax = Math.abs(axis.x),
+        ay = Math.abs(axis.y),
+        az = Math.abs(axis.z);
+    mesh.scaling.set(ax >= ay && ax >= az ? length : thickness, ay >= ax && ay >= az ? length : thickness, az >= ax && az >= ay ? length : thickness);
+    mesh.material = material;
+    addToScene(utilityScene, mesh);
+    // `p` is the bar's WORLD position; `q` orients the bar so its long axis runs
+    // along the (possibly rotated) edge.
+    const place = (p: Vec3, q: Quat): void => {
+        mesh.position.set(p.x, p.y, p.z);
+        mesh.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
     };
     return { mesh, place };
 }
@@ -234,7 +294,7 @@ function buildCornerHandle(
     size: number,
     armLen: number,
     axisSigns: [number, number, number]
-): { mesh: Mesh; meshes: Mesh[]; place: (p: Vec3) => void } {
+): { mesh: Mesh; meshes: Mesh[]; place: (p: Vec3, q: Quat) => void } {
     // Anchor "X" arm — the picker collider.  The two other arms (Y, Z) are
     // parented to this anchor so they move with it.
     const anchor = createBox(engine, 1);
@@ -266,10 +326,23 @@ function buildCornerHandle(
     yArm.parent = null;
     zArm.parent = null;
 
-    const place = (p: Vec3): void => {
-        anchor.position.set(p.x + (armLen * 0.5 - size * 0.5) * axisSigns[0], p.y, p.z);
-        yArm.position.set(p.x, p.y + (armLen * 0.5 - size * 0.5) * axisSigns[1], p.z);
-        zArm.position.set(p.x, p.y, p.z + (armLen * 0.5 - size * 0.5) * axisSigns[2]);
+    // Local-frame offset of each arm from the corner point (along its axis).
+    const offX = (armLen * 0.5 - size * 0.5) * axisSigns[0];
+    const offY = (armLen * 0.5 - size * 0.5) * axisSigns[1];
+    const offZ = (armLen * 0.5 - size * 0.5) * axisSigns[2];
+    // `p` is the corner's WORLD position; `q` is the OBB rotation.  Each arm's
+    // offset is rotated by `q` and each arm box is oriented by `q` so the L
+    // aligns with the (possibly rotated) bounding box.
+    const place = (p: Vec3, q: Quat): void => {
+        const oX = rotatePoint(q, { x: offX, y: 0, z: 0 });
+        anchor.position.set(p.x + oX.x, p.y + oX.y, p.z + oX.z);
+        anchor.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+        const oY = rotatePoint(q, { x: 0, y: offY, z: 0 });
+        yArm.position.set(p.x + oY.x, p.y + oY.y, p.z + oY.z);
+        yArm.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
+        const oZ = rotatePoint(q, { x: 0, y: 0, z: offZ });
+        zArm.position.set(p.x + oZ.x, p.y + oZ.y, p.z + oZ.z);
+        zArm.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
     };
     return { mesh: anchor, meshes: [anchor, yArm, zArm], place };
 }
@@ -301,8 +374,19 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     const color = options.color ?? [0.8, 0.8, 0.8];
     const edgeThickness = options.edgeThickness ?? 0.02;
     const scaleBoxSize = options.scaleBoxSize ?? 0.04;
-    const cornerArmLen = scaleBoxSize * 5;
-    const rotationAnchorSize = options.rotationAnchorSize ?? 0.08;
+    // Corner L-arm length — BJS uses a 1.6×0.4×0.4 bar scaled by 0.1 → 0.16
+    // long × 0.04 thick (a 4:1 ratio).  Match that so the corner resize handles
+    // aren't oversized relative to the reference.
+    const cornerArmLen = scaleBoxSize * 4;
+    // Rotation edge anchors are elongated bars (BJS rotate anchors): `length`
+    // along the edge, `thickness` (length/4, matching BJS 1.6:0.4) on the other
+    // two axes.
+    const rotationAnchorLength = options.rotationAnchorSize ?? 0.16;
+    const rotationAnchorThickness = rotationAnchorLength / 4;
+    // Face-centre single-axis scale cubes — BJS uses a unit box scaled by
+    // scaleBoxSize (0.1), so they read noticeably larger than the thin corner
+    // arms.  Match that size.
+    const faceBoxSize = 0.1;
     const utilityScene = layer.scene;
     const canvas = engine.canvas;
     const onChanged = new GizmoObservable<void>();
@@ -345,7 +429,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     // each corner which direction its arms extend INWARD toward the bbox
     // centre.  The picker collider is the X-arm; the other two arms render
     // alongside without participating in picking.
-    const corners: { mesh: Mesh; meshes: Mesh[]; place: (p: Vec3) => void }[] = [];
+    const corners: { mesh: Mesh; meshes: Mesh[]; place: (p: Vec3, q: Quat) => void }[] = [];
     for (let i = 0; i < 8; i++) {
         // Bit→axis mapping MUST match the placement loop in `layout`, which
         // iterates x (outer) → y → z (inner), so corner `i` sits at:
@@ -365,7 +449,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     }
 
     // ── 12 edge-midpoint handles (rotation), one per edge index ──
-    const rotators: { mesh: Mesh; place: (p: Vec3) => void; axis: Vec3 }[] = [];
+    const rotators: { mesh: Mesh; place: (p: Vec3, q: Quat) => void; axis: Vec3; localAxis: Vec3 }[] = [];
     // Axis perpendicular to each edge — matches BJS layout: first 4 rotate
     // around X (edges parallel to X), next 4 around Y, last 4 around Z.
     const rotationAxes: Vec3[] = [
@@ -386,9 +470,11 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         { x: 0, y: 0, z: 1 },
     ];
     for (let i = 0; i < 12; i++) {
-        const h = buildHandle(engine, utilityScene, material, rotationAnchorSize);
+        const h = buildEdgeAnchor(engine, utilityScene, material, rotationAxes[i]!, rotationAnchorLength, rotationAnchorThickness);
         h.mesh.name = `bbox-rot${i}`;
-        rotators.push({ mesh: h.mesh, place: h.place, axis: rotationAxes[i]! });
+        // `axis` is the CURRENT world rotation axis (updated each layout to
+        // Q·localAxis); `localAxis` is the un-rotated box axis.
+        rotators.push({ mesh: h.mesh, place: h.place, axis: { x: rotationAxes[i]!.x, y: rotationAxes[i]!.y, z: rotationAxes[i]!.z }, localAxis: rotationAxes[i]! });
     }
 
     // ── 6 face-centre handles (single-axis scale) ──
@@ -404,20 +490,22 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         { axis: { x: 0, y: 0, z: 1 }, comp: "z" },
         { axis: { x: 0, y: 0, z: -1 }, comp: "z" },
     ];
-    const faces: { mesh: Mesh; place: (p: Vec3) => void; axis: Vec3; comp: "x" | "y" | "z" }[] = [];
+    const faces: { mesh: Mesh; place: (p: Vec3, q: Quat) => void; axis: Vec3; comp: "x" | "y" | "z" }[] = [];
     for (let i = 0; i < 6; i++) {
-        const h = buildHandle(engine, utilityScene, material, scaleBoxSize * 2);
+        const h = buildHandle(engine, utilityScene, material, faceBoxSize);
         h.mesh.name = `bbox-face${i}`;
         faces.push({ mesh: h.mesh, place: h.place, axis: faceDefs[i]!.axis, comp: faceDefs[i]!.comp });
     }
 
     // ── Invisible body box (translate handle) ──
-    // A nearly-invisible large box covering the AABB volume — picks anywhere
-    // inside the bounding box to start a camera-plane translate drag.
+    // A fully transparent large box covering the box volume — picks anywhere
+    // inside the bounding box to start a camera-plane translate drag.  alpha=0
+    // makes it render nothing in the colour pass, while the GPU picker (a
+    // separate ID pass that ignores alpha/visibility, only honouring
+    // `pickable`) still hits it.
     const bodyMaterial = createStandardMaterial();
     bodyMaterial.diffuseColor = color;
-    bodyMaterial.emissiveColor = [0.1, 0.1, 0.1];
-    bodyMaterial.alpha = 0.05;
+    bodyMaterial.alpha = 0;
     bodyMaterial.disableLighting = true;
     const body = createBox(engine, 1);
     body.name = "bbox-body";
@@ -434,48 +522,60 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         _refresh: () => undefined,
     };
 
-    // ── Layout helper: position all edges + handles for the current AABB ──
-    let currentBounds: AabbBounds = INFINITE_AABB;
-    const layout = (b: AabbBounds): void => {
-        currentBounds = b;
+    // ── Layout helper: position all edges + handles for the current OBB ──
+    // `b` is the bounding box in the node's ROTATION-REMOVED frame (axis-aligned
+    // there); `q` is the node's world rotation.  Each handle's frame position is
+    // rotated by `q` into world space, and handle meshes are oriented by `q`, so
+    // the whole cage follows the attached node's rotation (an OBB, not an AABB).
+    let worldCenter: Vec3 = { x: 0, y: 0, z: 0 };
+    const layout = (b: AabbBounds, q: Quat): void => {
+        const toWorld = (fp: Vec3): Vec3 => rotatePoint(q, fp);
+        worldCenter = toWorld(b.centre);
         const xs = [b.min.x, b.max.x];
         const ys = [b.min.y, b.max.y];
         const zs = [b.min.z, b.max.z];
-        // 12 edges of an axis-aligned box.  Order: 4 X-parallel, 4 Y-parallel,
-        // 4 Z-parallel — matches the rotators' axis assignment.
-        // X-parallel edges (vary x, fixed y,z combinations)
+        // 12 edges of the box.  Order: 4 X-parallel, 4 Y-parallel, 4 Z-parallel
+        // — matches the rotators' axis assignment.
         let ei = 0;
         let ri = 0;
         for (const y of ys) {
             for (const z of zs) {
-                edges[ei]!.place({ x: xs[0]!, y, z }, { x: xs[1]!, y, z });
-                rotators[ri]!.place({ x: (xs[0]! + xs[1]!) * 0.5, y, z });
+                edges[ei]!.place(toWorld({ x: xs[0]!, y, z }), toWorld({ x: xs[1]!, y, z }));
+                rotators[ri]!.place(toWorld({ x: (xs[0]! + xs[1]!) * 0.5, y, z }), q);
                 ei++;
                 ri++;
             }
         }
         for (const x of xs) {
             for (const z of zs) {
-                edges[ei]!.place({ x, y: ys[0]!, z }, { x, y: ys[1]!, z });
-                rotators[ri]!.place({ x, y: (ys[0]! + ys[1]!) * 0.5, z });
+                edges[ei]!.place(toWorld({ x, y: ys[0]!, z }), toWorld({ x, y: ys[1]!, z }));
+                rotators[ri]!.place(toWorld({ x, y: (ys[0]! + ys[1]!) * 0.5, z }), q);
                 ei++;
                 ri++;
             }
         }
         for (const x of xs) {
             for (const y of ys) {
-                edges[ei]!.place({ x, y, z: zs[0]! }, { x, y, z: zs[1]! });
-                rotators[ri]!.place({ x, y, z: (zs[0]! + zs[1]!) * 0.5 });
+                edges[ei]!.place(toWorld({ x, y, z: zs[0]! }), toWorld({ x, y, z: zs[1]! }));
+                rotators[ri]!.place(toWorld({ x, y, z: (zs[0]! + zs[1]!) * 0.5 }), q);
                 ei++;
                 ri++;
             }
+        }
+        // Update each rotator's CURRENT world rotation axis (Q·localAxis) so the
+        // rotation drag rotates around the box's own axis even when rotated.
+        for (const r of rotators) {
+            const wa = rotatePoint(q, r.localAxis);
+            r.axis.x = wa.x;
+            r.axis.y = wa.y;
+            r.axis.z = wa.z;
         }
         // 8 corners
         let ci = 0;
         for (const x of xs) {
             for (const y of ys) {
                 for (const z of zs) {
-                    corners[ci]!.place({ x, y, z });
+                    corners[ci]!.place(toWorld({ x, y, z }), q);
                     ci++;
                 }
             }
@@ -484,29 +584,40 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         const cx = b.centre.x,
             cy = b.centre.y,
             cz = b.centre.z;
-        faces[0]!.place({ x: b.max.x, y: cy, z: cz });
-        faces[1]!.place({ x: b.min.x, y: cy, z: cz });
-        faces[2]!.place({ x: cx, y: b.max.y, z: cz });
-        faces[3]!.place({ x: cx, y: b.min.y, z: cz });
-        faces[4]!.place({ x: cx, y: cy, z: b.max.z });
-        faces[5]!.place({ x: cx, y: cy, z: b.min.z });
-        // Body box — fills the AABB but inset slightly so the surface handles
-        // (especially the face-centre scale boxes, which sit flush on each
-        // face) poke out in front of it and stay pickable by the GPU picker.
-        const inset = scaleBoxSize * 2;
-        body.position.set(b.centre.x, b.centre.y, b.centre.z);
+        faces[0]!.place(toWorld({ x: b.max.x, y: cy, z: cz }), q);
+        faces[1]!.place(toWorld({ x: b.min.x, y: cy, z: cz }), q);
+        faces[2]!.place(toWorld({ x: cx, y: b.max.y, z: cz }), q);
+        faces[3]!.place(toWorld({ x: cx, y: b.min.y, z: cz }), q);
+        faces[4]!.place(toWorld({ x: cx, y: cy, z: b.max.z }), q);
+        faces[5]!.place(toWorld({ x: cx, y: cy, z: b.min.z }), q);
+        // Body box — fills the box (rotated by `q`) but inset by the face-box
+        // size so the surface handles (especially the face-centre scale boxes,
+        // which sit flush on each face) poke out in front of it and stay
+        // pickable by the GPU picker.
+        const inset = faceBoxSize;
+        body.position.set(worldCenter.x, worldCenter.y, worldCenter.z);
+        body.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
         body.scaling.set(Math.max(0.001, b.size.x - inset), Math.max(0.001, b.size.y - inset), Math.max(0.001, b.size.z - inset));
     };
 
-    // ── Refresh: recompute AABB and re-layout ──
+    // ── Refresh: recompute the rotation-removed bounds + rotation, re-layout ──
     const refresh = (): void => {
         const node = gizmo.attachedNode;
+        if (!node) {
+            (gizmo as unknown as { _aabb: AabbBounds })._aabb = INFINITE_AABB;
+            layout(INFINITE_AABB, IDENTITY_QUAT);
+            return;
+        }
+        // Node world rotation (scale removed) and its inverse rotation matrix.
+        const q = rotationQuatFromMatrix(node.worldMatrix);
+        const rInv = mat4FromQuat(-q[0], -q[1], -q[2], q[3]);
+        // Bounds in the rotation-removed frame so the cage is a tight OBB.
         // Fall back to walking the main scene's meshes so descendants attached
         // via the `.parent` setter alone (not pushed into `.children`) are
         // still discovered.
-        const bounds = node ? computeBoundsRecursive(node, layer.mainScene.meshes) : INFINITE_AABB;
+        const bounds = computeBoundsRecursive(node, layer.mainScene.meshes, rInv);
         (gizmo as unknown as { _aabb: AabbBounds })._aabb = bounds;
-        layout(bounds);
+        layout(bounds, q);
     };
     gizmo._refresh = refresh;
 
@@ -518,24 +629,29 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     // ── Drag wiring: each corner → scale; each edge midpoint → rotate;
     //    body box → translate. ──
 
-    // Translate drag (body box).  Drag plane: camera-facing plane through
-    // the bounds centre.  Body is invisible-ish (alpha 0.05) and does NOT
-    // get a hover indicator — only the rendered handles (edges, corner
-    // arms, rotation anchors) tint on hover.
+    // Translate drag (body box).  Drag plane: a camera-facing (screen-parallel)
+    // plane, matching BJS's default PointerDragBehavior for the body.  The body
+    // is fully transparent and does NOT get a hover indicator — only the
+    // rendered handles (edges, corner arms, rotation anchors) tint on hover.
     const translateDrag = createPointerDrag({ dragPlaneNormal: { x: 0, y: 0, z: 1 }, moveAttached: false });
     translateDrag._colliders = [body];
-    translateDrag.onDragStart.add(() => {
-        // Set the drag plane normal to the camera forward direction so the
-        // user drags within the screen plane.
+    // Keep the drag plane normal aligned with the camera's forward axis every
+    // frame.  This MUST run per-frame (not in onDragStart): the pointer-drag
+    // dispatcher captures the plane normal at pointer-DOWN, which fires before
+    // onDragStart, so a drag-start-only update would be applied too late and the
+    // body would drag in a stale world-aligned plane instead of relative to the
+    // camera.
+    onBeforeRender(utilityScene, () => {
         const cam = utilityScene.camera;
-        if (cam) {
-            const cw = cam.worldMatrix;
-            const n = translateDrag.options.dragPlaneNormal;
-            if (n) {
-                n.x = cw[8]!;
-                n.y = cw[9]!;
-                n.z = cw[10]!;
-            }
+        if (!cam) {
+            return;
+        }
+        const cw = cam.worldMatrix;
+        const n = translateDrag.options.dragPlaneNormal;
+        if (n) {
+            n.x = cw[8]!;
+            n.y = cw[9]!;
+            n.z = cw[10]!;
         }
     });
     translateDrag.onDrag.add((event) => {
@@ -716,7 +832,11 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     // `worldRotationToLocal(dq) * node.rotationQuaternion`.
     for (let i = 0; i < 12; i++) {
         const r = rotators[i]!;
-        const drag = createPointerDrag({ dragPlaneNormal: { x: r.axis.x, y: r.axis.y, z: r.axis.z }, moveAttached: false });
+        // Bind the drag plane normal to the live `r.axis` object so it always
+        // reflects the rotator's CURRENT world axis (layout updates r.axis to
+        // Q·localAxis each frame).  The dispatcher reads this at pointer-down,
+        // so the drag plane stays correct even when the box is rotated.
+        const drag = createPointerDrag({ dragPlaneNormal: r.axis, moveAttached: false });
         drag._colliders = [r.mesh];
         let lastPoint: Vec3 | null = null;
         drag.onHoverStart.add(() => {
@@ -740,7 +860,9 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
             if (!node || !lastPoint) {
                 return;
             }
-            const c = currentBounds.centre;
+            // Rotate about the OBB's world centre, around the rotator's current
+            // world axis (`r.axis`, updated each layout to follow the box).
+            const c = worldCenter;
             const a: Vec3 = { x: lastPoint.x - c.x, y: lastPoint.y - c.y, z: lastPoint.z - c.z };
             const b: Vec3 = { x: event.dragPlanePoint.x - c.x, y: event.dragPlanePoint.y - c.y, z: event.dragPlanePoint.z - c.z };
             const angle = signedAngleAroundNormal(a, b, r.axis);

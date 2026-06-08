@@ -46,18 +46,28 @@ async function performDragSequences(page: Page): Promise<void> {
         const sy = box.y + seq.start.y;
         const ex = box.x + seq.end.x;
         const ey = box.y + seq.end.y;
+        // Hover the gizmo and WAIT long enough for Lite's async GPU hover-pick to
+        // resolve before pressing.  Once the hover pick lands the gizmo is marked
+        // hovered, so the subsequent pointer-down pick lands on a primed picker
+        // instead of racing the hover-pick on the shared GPU picker (which made
+        // the plane-rotation drag intermittently miss → cube stayed un-rotated,
+        // diverging from the BJS golden).  BJS picks synchronously and is
+        // unaffected by the extra waits.
         await page.mouse.move(sx, sy);
-        await page.waitForTimeout(50);
-        await page.mouse.move(sx, sy);
+        await page.waitForTimeout(300);
         await page.mouse.down();
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(250);
         await page.mouse.move(ex, ey, { steps: 8 });
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(150);
         await page.mouse.up();
         // Longer post-up wait so BJS's AxisScaleGizmo `resetGizmoMesh` (which
         // restores arrowMesh.position + arrowTail.scaling after drag) commits
         // before the next drag interrupts it.
         await page.waitForTimeout(160);
+        // Park the cursor far off the gizmos BETWEEN drags so the hover state
+        // clears before the next interaction.
+        await page.mouse.move(box.x + 50, box.y + 50);
+        await page.waitForTimeout(200);
     }
     // Park the cursor far off the gizmos so BJS's per-frame hover-pick clears
     // the hover material before the screenshot, then wait several frames so
@@ -102,16 +112,18 @@ async function performRotationMidDrag(page: Page): Promise<void> {
     const sy = box.y + 300;
     const ex = box.x + 540;
     const ey = box.y + 360;
+    // Hover-settle so Lite's async GPU hover-pick resolves before pressing —
+    // otherwise the down-pick races it and the rotation drag misses, leaving the
+    // cube un-rotated and the camembert hidden (BJS picks synchronously).
     await page.mouse.move(sx, sy);
-    await page.waitForTimeout(50);
-    await page.mouse.move(sx, sy);
+    await page.waitForTimeout(300);
     await page.mouse.down();
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(250);
     await page.mouse.move(ex, ey, { steps: 8 });
     // Hold (no mouse.up) so the rotation display plane stays enabled at
-    // screenshot time.  Two animation frames worth of wait so the GPU has
+    // screenshot time.  A couple of animation frames of wait so the GPU has
     // committed the latest uniform values.
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(200);
 }
 
 test("Scene 221 — Rotation gizmo camembert visible mid-drag", async ({ page }, testInfo) => {

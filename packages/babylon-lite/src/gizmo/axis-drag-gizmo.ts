@@ -54,6 +54,10 @@ export interface AxisDragGizmo {
     /** Material triplet (colored / hover / disabled).  Hover state is updated
      *  automatically during pointer-down on the collider. */
     readonly materials: GizmoMaterialSet;
+    /** @internal — rendered (visible) meshes whose material is swapped for
+     *  hover / colored / disabled.  Excludes the invisible root + colliders.
+     *  A composite gizmo greys these out while a sibling axis is dragged. */
+    _visibleMeshes: Mesh[];
     /** @internal — meshes to dispose. */
     _meshes: Mesh[];
     /** @internal — unregister pointer-drag dispatcher entry. */
@@ -147,6 +151,7 @@ export function createAxisDragGizmo(engine: EngineContext, layer: UtilityLayer, 
         attachedNode: null,
         useLocalCoordinates: false,
         materials,
+        _visibleMeshes: visibleMeshes,
         _meshes: [root, ...visibleMeshes, ...colliderMeshes],
         _disposePointer: () => undefined,
         _disposeFollow: () => undefined,

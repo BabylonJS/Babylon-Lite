@@ -35,6 +35,9 @@ export interface PlaneDragGizmo {
      *  (local-coord mode). When false, the normal stays world-aligned. */
     useLocalCoordinates: boolean;
     readonly materials: GizmoMaterialSet;
+    /** @internal — rendered (visible) plane mesh whose material is swapped for
+     *  hover / colored / disabled (excludes the invisible root). */
+    _visibleMeshes: Mesh[];
     /** @internal */
     _meshes: Mesh[];
     /** @internal */
@@ -85,6 +88,7 @@ export function createPlaneDragGizmo(engine: EngineContext, layer: UtilityLayer,
         attachedNode: null,
         useLocalCoordinates: false,
         materials,
+        _visibleMeshes: [plane],
         _meshes: [root, plane],
         _disposePointer: () => undefined,
         _disposeFollow: () => undefined,

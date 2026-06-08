@@ -180,7 +180,7 @@ export function worldDeltaToLocal(node: SceneNode, dx: number, dy: number, dz: n
 /** Extract a unit rotation quaternion from a 4×4 world matrix.  Removes scale
  *  by normalising each upper-3×3 column independently before applying the
  *  Shoemake quaternion-from-matrix conversion. */
-export function rotationQuatFromMatrix(m: Readonly<Float32Array>): [number, number, number, number] {
+export function rotationQuatFromMatrix(m: Mat4): [number, number, number, number] {
     const sx = Math.hypot(m[0]!, m[1]!, m[2]!) || 1;
     const sy = Math.hypot(m[4]!, m[5]!, m[6]!) || 1;
     const sz = Math.hypot(m[8]!, m[9]!, m[10]!) || 1;
@@ -216,7 +216,7 @@ export function rotationQuatFromMatrix(m: Readonly<Float32Array>): [number, numb
  *  the world rotation IS the local rotation.  Otherwise we conjugate by the
  *  parent's world rotation:  `localDq = inv(parentQ) * dq * parentQ`. */
 export function worldRotationToLocal(node: SceneNode, dqx: number, dqy: number, dqz: number, dqw: number): [number, number, number, number] {
-    const parent = (node as unknown as { parent?: { worldMatrix?: Readonly<Float32Array> } | null }).parent;
+    const parent = (node as unknown as { parent?: { worldMatrix?: Mat4 } | null }).parent;
     if (!parent || !parent.worldMatrix) {
         return [dqx, dqy, dqz, dqw];
     }

@@ -37,6 +37,9 @@ import { ScaleGizmo } from "@babylonjs/core/Gizmos/scaleGizmo";
     const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 3.5, 14, new Vector3(0, 0, 0), scene);
     camera.minZ = 0.1;
     camera.maxZ = 100;
+    // Allow orbiting the reference scene with the mouse (matches the Lite scene,
+    // which attaches arc-rotate controls that defer to gizmo interaction).
+    camera.attachControl(canvas, true);
 
     const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
     light.intensity = 0.9;

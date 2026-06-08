@@ -30,8 +30,11 @@ import type { UtilityLayer } from "./utility-layer.js";
 const CAMERA_BODY_SCALE = 0.05;
 
 /** Default camera-gizmo wireframe thickness in world units (independent of
- *  camera distance because the frustum geometry is in literal world space). */
-const FRUSTUM_EDGE_THICKNESS = 0.012;
+ *  camera distance because the frustum geometry is in literal world space).
+ *  Tuned (≈3× the original hairline) so the cylinder edges render at roughly
+ *  the same on-screen width as the BJS reference's antialiased frustum lines —
+ *  this minimises the scene-223 parity MAD (0.39 → 0.07 at this value). */
+const FRUSTUM_EDGE_THICKNESS = 0.036;
 
 export interface CameraGizmoOptions {
     /** RGB color for the camera body + frustum material.  Defaults to grey. */
