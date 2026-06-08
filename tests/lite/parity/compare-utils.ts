@@ -281,8 +281,22 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
     await bjsPage.goto(`/babylon-ref-scene${opts.sceneId}.html${urlParams}`);
 
-    // Wait for BJS scene ready
-    await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout });
+    // Wait for the BJS scene to signal ready — OR surface an explicit failure.
+    // The BJS reference sets canvas.dataset.error in its top-level catch; without
+    // checking it here, a reference that throws (e.g. a geometry-renderer / MRT
+    // incompatibility on a cloud browser) would silently hang until `timeout`,
+    // hiding the real cause behind an opaque "waitForFunction" timeout.
+    await bjsPage.waitForFunction(
+        () => {
+            const c = document.querySelector("canvas");
+            return c?.dataset.ready === "true" || !!c?.dataset.error;
+        },
+        { timeout }
+    );
+    const bjsError = await bjsPage.evaluate(() => document.querySelector("canvas")?.dataset.error);
+    if (bjsError) {
+        throw new Error(`captureGolden: BJS reference scene ${opts.sceneId} failed to initialize: ${bjsError}`);
+    }
 
     // For animated scenes, wait for animation freeze
     if (opts.seekTime !== undefined) {
