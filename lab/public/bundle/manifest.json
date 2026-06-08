@@ -2353,18 +2353,20 @@
     ]
   },
   "scene180": {
-    "rawKB": 27,
-    "gzipKB": 146.5,
-    "ignoredRawKB": 671.6,
+    "rawKB": 26.8,
+    "gzipKB": 10,
+    "ignoredRawKB": 671.8,
     "runtimeChunks": [
+      "scene180-text-shaper-Cie-Mnk-.js",
       "scene180.js"
     ]
   },
   "scene181": {
     "rawKB": 42.2,
-    "gzipKB": 152.6,
-    "ignoredRawKB": 671.8,
+    "gzipKB": 15.6,
+    "ignoredRawKB": 671.7,
     "runtimeChunks": [
+      "scene181-text-shaper-Cie-Mnk-.js",
       "scene181.js"
     ]
   },

@@ -1082,6 +1082,18 @@ export function isLiteBundleExternal(id: string): boolean {
     return VENDOR_RUNTIMES.some((runtime) => runtime.external(id));
 }
 
+/** Force certain modules into their own chunks so bundle-size accounting can isolate
+ *  them cleanly. Currently used to separate `text-shaper` (a 670 KB vendor shaping
+ *  library) so the gzip-bytes accounting can exclude it as a self-contained chunk
+ *  matching the ignored-module pattern in `bundle-size-accounting.ts`. */
+function liteManualChunks(id: string): string | undefined {
+    const clean = id.replace(/\\/g, "/").split("?")[0]!;
+    if (/(?:^|\/)text-shaper\//.test(clean)) {
+        return "text-shaper";
+    }
+    return undefined;
+}
+
 function readLiteSceneSource(scene: string): string {
     try {
         return readFileSync(liteSceneEntry(scene), "utf-8");
@@ -1160,6 +1172,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
                     entryFileNames: "[name].js",
                     chunkFileNames: `${scene}-[name]-[hash].js`,
                     banner: NAME_POLYFILL,
+                    manualChunks: liteManualChunks,
                 },
             },
         },
@@ -1265,6 +1278,7 @@ export async function buildBundleScenes(): Promise<void> {
                         entryFileNames: "[name].js",
                         chunkFileNames: `${scene}-[name]-[hash].js`,
                         banner: NAME_POLYFILL,
+                        ...(!isBjs && { manualChunks: liteManualChunks }),
                     },
                     ...(isBjs && {
                         treeshake: {
