@@ -19,6 +19,7 @@ import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-bu
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
 import type { Sprite2DLayer } from "./sprite-2d.js";
+import type { Texture2D } from "../texture/texture-2d.js";
 import {
     LAYER_UBO_BYTES,
     SHARED_SPRITE_INDEX_DATA,
@@ -99,6 +100,10 @@ export interface SpriteRenderer extends RenderingContext {
     _disposed: boolean;
     /** @internal Whether this pass clears the swapchain before drawing. False for HUD overlays. */
     _clear: boolean;
+    /** @internal Offscreen color-attachment view to render into; null = the swapchain.
+     *  Set via {@link setSpriteRendererTarget} (which takes a {@link Texture2D} target)
+     *  for render-to-texture / post-process. */
+    _targetView: GPUTextureView | null;
 }
 
 /** @internal Per-layer GPU resources owned by the renderer. */
@@ -241,6 +246,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
         _targetHeight: targetSize.height,
         _disposed: false,
         _clear: opts.clear ?? true,
+        _targetView: null,
         _beforeUpdate: [],
         _disposeCallbacks: [],
         layers,
@@ -330,9 +336,10 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
     assertSpriteRendererLayers(rr.layers);
     const eng = rr._engine;
     const encoder = eng._currentEncoder;
-    const swapView = eng._swapchainView;
+    const swapView = rr._targetView ?? eng._swapchainView;
 
-    // Open a sampleCount=1 render pass directly on the swapchain. This keeps HUD
+    // Open a sampleCount=1 render pass on the target view (the swapchain by default, or an
+    // offscreen render texture when one is set via setSpriteRendererTarget). This keeps HUD
     // sprites from resolving a fresh MSAA target over the already-rendered scene.
     const pass = encoder.beginRenderPass({
         colorAttachments: [
@@ -421,6 +428,20 @@ export function removeSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLay
 /** Push the renderer onto its engine's `_renderingContexts`. Idempotent — a second call is a no-op. */
 export function registerSpriteRenderer(sr: SpriteRenderer): void {
     registerRenderingContext(sr._engine, sr);
+}
+
+/**
+ * Redirect a sprite renderer's output to an offscreen render {@link Texture2D} `target` (for
+ * render-to-texture / post-processing), or pass `null` to render to the swapchain (the
+ * default). Pair with {@link createRenderTexture2D} at its default format and the renderer's
+ * target size. The target's texture must be the engine's swapchain format: sprite pipelines
+ * are baked with `engine.format`, so a target of any OTHER format fails WebGPU validation at
+ * render-pass begin. A second renderer can then sample that texture (e.g. a fullscreen
+ * custom-shader layer) and present it. Renderers registered later run later, so register the
+ * offscreen scene pass before the presenting pass.
+ */
+export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | null): void {
+    sr._targetView = target ? target.view : null;
 }
 
 /** Splice the renderer out of its engine's `_renderingContexts`. No-op if not present. */

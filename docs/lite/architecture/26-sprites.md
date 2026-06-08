@@ -316,6 +316,9 @@ export function removeSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLay
 export function registerSpriteRenderer(sr: SpriteRenderer): void;
 export function unregisterSpriteRenderer(sr: SpriteRenderer): void;
 export function disposeSpriteRenderer(sr: SpriteRenderer): void;
+/** Redirect output to an offscreen render texture (render-to-texture), or null = swapchain.
+ *  See "Offscreen render target" below. */
+export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | null): void;
 ```
 
 A `SpriteRenderer` does **not** own persistent color/depth attachments.
@@ -352,6 +355,60 @@ The `SpriteRenderer` is the single home for HUD/pure-2D sprite GPU draw
 logic. Depth-hosted Sprite2D layers (`depth: "test" | "test-write"`) do
 not go through it — they are drawn by an independent `Renderable`
 produced by `sprite-renderable.ts` (see "Caller 2" below).
+
+### Offscreen render target (render-to-texture)
+
+By default a `SpriteRenderer` records its pass on the per-frame swapchain view
+(`rr._targetView ?? eng._swapchainView`). Two small, **opt-in, tree-shakable**
+additions let a renderer draw into an offscreen texture instead, which is the
+building block for full-screen post-processing (the platformer demo's CRT/scanline
+effect is built entirely on these — no bespoke engine pass):
+
+```typescript
+// src/texture/pixels-texture.ts
+export interface RenderTexture2DOptions {
+    addressModeU?: GPUAddressMode; // default 'clamp-to-edge'
+    addressModeV?: GPUAddressMode; // default 'clamp-to-edge'
+    minFilter?: GPUFilterMode;     // default 'linear'
+    magFilter?: GPUFilterMode;     // default 'linear'
+    format?: GPUTextureFormat;     // default engine.format (REQUIRED for a SpriteRenderer target)
+}
+/** An empty Texture2D usable as BOTH a render target and a sampled texture
+ *  (RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_DST). */
+export function createRenderTexture2D(engine: EngineContext, width: number, height: number, options?: RenderTexture2DOptions): Texture2D;
+
+// src/sprite/sprite-renderer.ts
+/** Point a renderer at an offscreen render texture (`Texture2D`), or null for the swapchain (default). */
+export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | null): void;
+```
+
+Both default to the swapchain / swapchain format, so **every existing scene and
+demo is byte-for-byte unaffected**, and the whole capability tree-shakes away when
+unused (`createRenderTexture2D` is a separate import; `_targetView` defaults to
+`null`).
+
+> **Format constraint:** a `SpriteRenderer` target must use `engine.format`. Sprite
+> pipelines are created with that format, and WebGPU rejects a render pass whose color
+> attachment format differs from the bound pipeline (validation error at pass begin).
+> So leave `RenderTexture2DOptions.format` at its default for any texture you pass to
+> `setSpriteRendererTarget`; a custom format is only for offscreen targets driven by a
+> different pass (e.g. an `EffectRenderer`).
+
+The render-to-texture pattern is two registered renderers, ordered:
+
+1. **Scene pass** → `setSpriteRendererTarget(scene, rt)` so it draws into an
+   offscreen `rt = createRenderTexture2D(engine, w, h)` (sized to the canvas backing
+   store, swapchain format so it can be sampled and presented).
+2. **Present pass** → a second `SpriteRenderer` owning one full-screen layer whose
+   atlas IS `rt` (via `createGridSpriteAtlas`), drawn with a custom-shader fragment
+   (e.g. CRT curvature + scanlines). It targets the swapchain (`target = null`) and is
+   registered **after** the scene pass, so it runs second and samples the finished
+   frame. Toggling the effect off is `setSpriteRendererTarget(scene, null)` +
+   unregistering the present pass — restoring the direct path for zero overhead.
+
+The offscreen texture and present layer must be rebuilt on canvas resize (the RT is
+a fixed-size GPU texture). See `lab/lite/src/demos/platformer/crt.ts` for a complete,
+toggle-able implementation.
 
 ### Caller 1: pure-2D — no `SceneContext`
 

@@ -70,6 +70,63 @@ export function createTexture2DFromPixels(engine: EngineContext, data: Uint8Arra
     return tex;
 }
 
+/** Sampler / format overrides for `createRenderTexture2D()`. */
+export interface RenderTexture2DOptions {
+    /** Address mode U. Default 'clamp-to-edge'. */
+    addressModeU?: GPUAddressMode;
+    /** Address mode V. Default 'clamp-to-edge'. */
+    addressModeV?: GPUAddressMode;
+    /** Min filter. Default 'linear'. */
+    minFilter?: GPUFilterMode;
+    /** Mag filter. Default 'linear'. */
+    magFilter?: GPUFilterMode;
+    /**
+     * Color format. Default `engine.format` so it can be sampled and presented.
+     *
+     * ⚠️ Only the default `engine.format` is compatible with a `SpriteRenderer`
+     * target (`setSpriteRendererTarget`): sprite pipelines are created with
+     * `engine.format`, and a render pass whose color attachment format differs from
+     * the bound pipeline fails WebGPU validation at pass begin. Override this **only**
+     * for offscreen targets you render into by some OTHER means (a custom pass /
+     * `EffectRenderer`), never as a sprite-render target.
+     */
+    format?: GPUTextureFormat;
+}
+
+/**
+ * Create an empty `Texture2D` usable as **both a render target and a sampled texture**
+ * (`RENDER_ATTACHMENT | TEXTURE_BINDING`). This is the building block for offscreen
+ * render-to-texture: render a pass into `tex.view`, then sample `tex` in a later pass
+ * (e.g. a fullscreen post-process). Defaults to the engine's swapchain format + a
+ * linear sampler so the result can be presented directly.
+ *
+ * To use the result as a `SpriteRenderer` target (via `setSpriteRendererTarget`), leave
+ * `format` at its default `engine.format` — sprite pipelines bake in that format, so a
+ * differently-formatted target trips WebGPU validation at render-pass begin. A custom
+ * `format` is for offscreen targets driven by some other pass, not the sprite renderer.
+ */
+export function createRenderTexture2D(engine: EngineContext, width: number, height: number, options: RenderTexture2DOptions = {}): Texture2D {
+    if (width < 1 || height < 1) {
+        throw new Error(`createRenderTexture2D: width/height must be >= 1 (got ${width}x${height})`);
+    }
+    const device = engine._device;
+    const format = options.format ?? engine.format;
+    const texture = device.createTexture({
+        size: { width, height },
+        format,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
+    });
+    const sampler = getOrCreateSampler(engine, {
+        addressModeU: options.addressModeU ?? "clamp-to-edge",
+        addressModeV: options.addressModeV ?? "clamp-to-edge",
+        minFilter: options.minFilter ?? "linear",
+        magFilter: options.magFilter ?? "linear",
+    });
+    const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    acquireTexture(tex);
+    return tex;
+}
+
 /**
  * Update a rectangular region of an existing `Texture2D` from a tightly-packed RGBA8 byte buffer.
  *

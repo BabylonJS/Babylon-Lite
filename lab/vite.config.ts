@@ -230,6 +230,41 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
+                // Serve bundled demo runtime ASSETS (spritesheets, textures, game data, etc.)
+                // copied under lab/public/bundle/demos/<slug>/ by copyDemoRuntimeAssets. Same
+                // startup-cache staleness as the .js/.json blocks above: a demo whose assets
+                // were (re)generated after the server started would otherwise fall through to
+                // the SPA fallback (200 text/html) and fail to decode. Serve them from disk.
+                if (url.startsWith("/bundle/demos/") || url.startsWith("/lite/bundle/demos/")) {
+                    const ASSET_TYPES: Record<string, string> = {
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".gif": "image/gif",
+                        ".webp": "image/webp",
+                        ".svg": "image/svg+xml",
+                        ".xml": "application/xml",
+                        ".wasm": "application/wasm",
+                        ".bin": "application/octet-stream",
+                        ".glb": "model/gltf-binary",
+                        ".env": "application/octet-stream",
+                        ".wad": "application/octet-stream",
+                        ".txt": "text/plain; charset=utf-8",
+                        ".md": "text/markdown; charset=utf-8",
+                    };
+                    const ext = url.slice(url.lastIndexOf(".")).toLowerCase();
+                    const assetType = ASSET_TYPES[ext];
+                    if (assetType) {
+                        const bundlePath = url.startsWith("/lite/bundle/") ? url.slice("/lite/".length) : url.slice(1);
+                        const filePath = resolve(__dirname, "public", bundlePath);
+                        if (existsSync(filePath) && statSync(filePath).isFile()) {
+                            res.setHeader("Content-Type", assetType);
+                            res.setHeader("Cache-Control", "no-cache");
+                            createReadStream(filePath).pipe(res);
+                            return;
+                        }
+                    }
+                }
                 if (url === "/lab-api/signature") {
                     // Returns mtimes for current/master bundle and perf manifests plus per-scene parity images
                     // so the dashboard can auto-refresh only when data actually changes.

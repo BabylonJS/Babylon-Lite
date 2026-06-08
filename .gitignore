@@ -44,6 +44,7 @@ lab/public/minecraft/voxelpack/License.txt
 .voxelpack-cache/
 lab/public/freeciv/
 .freeciv-cache/
+.platformer-cache/
 lab/public/littlest-tokyo/*.bak
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
