@@ -55,7 +55,6 @@
         "@recast-navigation/core": "0.43.0",
         "@recast-navigation/generators": "0.43.0",
         "@recast-navigation/wasm": "0.43.0",
-        "draco3d": "^1.5.7",
         "manifold-3d": "3.4.0"
     }
 }
