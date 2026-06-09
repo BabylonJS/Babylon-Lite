@@ -109,8 +109,13 @@ function createPickingPipelineInternal(engine: EngineContext, opts: PickingPipel
         },
         primitive: {
             topology: "triangle-list",
-            cullMode: "back",
-            frontFace: "ccw",
+            // Pick the NEAREST surface regardless of facing (matches Babylon.js Scene.pick, which intersects
+            // both triangle sides). Culling back faces here would make any DOUBLE-SIDED mesh
+            // (material.backFaceCulling === false, e.g. foliage quads or a deck whose box winding isn't
+            // uniformly CCW) unpickable wherever the renderer shows its back face — scattered pick holes on a
+            // solid mesh. The reverse-Z depth test still resolves the front-most surface, so "none" is correct
+            // and also makes frontFace irrelevant (no winding assumption to get wrong).
+            cullMode: "none",
         },
         multisample: { count: 1 },
     });

@@ -6,7 +6,7 @@ import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Identity } from "../math/mat4-identity.js";
 import type { Material } from "../material/material.js";
-import type { SkeletonData, MorphTargetData } from "../animation/types.js";
+import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
@@ -83,6 +83,9 @@ export interface Mesh extends SceneNode {
     boundMax?: [number, number, number];
     /** Skeleton GPU data (skeletal animation). Type-only — no module dependency. */
     skeleton?: SkeletonData | null;
+    /** Baked vertex-animation (VAT) GPU data — replaces live skinning so the mesh thin-instances.
+     *  Mutually exclusive with live `skeleton` skinning. Type-only — no module dependency. */
+    vat?: VatData | null;
     /** Morph target GPU data. Type-only — no module dependency. */
     morphTargets?: MorphTargetData | null;
     /** User-controlled render order. Lower = drawn first within phase.

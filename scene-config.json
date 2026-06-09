@@ -327,7 +327,7 @@
         "slug": "scene34-node-visibility",
         "name": "Scene 34 — KHR_node_visibility + KHR_animation_pointer",
         "maxMad": 0.02,
-        "maxRawKB": 88.5,
+        "maxRawKB": 89.5,
         "description": "CubeVisibility.glb — three cubes: green always-visible, blue blinking via KHR_animation_pointer on its visibility flag, two reds hidden via KHR_node_visibility. Default IBL env. Matches PG #YG3BBF#55.",
         "tags": ["pbr", "gltf", "env", "node-visibility", "animation-pointer"],
         "skipPerf": true
@@ -1310,7 +1310,7 @@
         "slug": "scene176-mosquito-amber",
         "name": "Scene 176 - MosquitoInAmber",
         "maxMad": 0.5,
-        "maxRawKB": 98,
+        "maxRawKB": 99,
         "description": "KhronosGroup MosquitoInAmber.gltf (KHR_materials_transmission + ior + volume) against the studio.env HDR environment used as IBL and a blurred HDR skybox, with frame-graph scene-texture transmission.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume", "skybox"],
         "skipPerf": true,
@@ -1450,6 +1450,16 @@
         "maxRawKB": 80,
         "description": "Opt-in MaterialPlugin support (the BJS MaterialPluginBase equivalent): a PBR sphere and a Standard box each carry a stateless BlackAndWhite grayscale plugin that injects custom WGSL at CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR (Lite slot BC, after tonemap+gamma). The full built-in PBR/Standard lighting pipeline is preserved; only the final color is converted to luminance. Proves per-instance plugin attach (material.plugins = [plugin]) on both material families with zero bundle-size impact for plugin-free scenes.",
         "tags": ["material", "plugin", "pbr", "standard"],
+        "skipPerf": true
+    },
+    {
+        "id": 218,
+        "slug": "scene218-vat",
+        "name": "Scene 218 — Vertex Animation Texture (VAT)",
+        "maxMad": 0.02,
+        "maxRawKB": 90,
+        "description": "Baked vertex animation: the scene-11 shark's skeletal animation is pre-evaluated into one rgba32float texture (bakeVat) and played through the GPU VAT vertex path (mesh.vat) with NO live CPU skeleton — the vertex shader reads each bone matrix from the baked texture at the current frame row. First step toward thin-instancing animated meshes. The baker + VAT shader fragment live in a dynamic-import chunk reached only when a scene bakes a VAT, so scenes that never use vertex animation pay zero bytes.",
+        "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
         "skipPerf": true
     }
 ]

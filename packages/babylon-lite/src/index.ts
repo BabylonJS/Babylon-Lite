@@ -208,6 +208,8 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
+export { bakeVat, attachVat } from "./vat/vat-baker.js";
+export type { VatBakeResult, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";

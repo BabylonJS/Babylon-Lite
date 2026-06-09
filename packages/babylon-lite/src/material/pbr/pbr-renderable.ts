@@ -462,12 +462,14 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             if (hasVertexColor && gpu.colorBuffer) {
                 pass.setVertexBuffer(slot++, gpu.colorBuffer, vb?._c?._offset);
             }
-            if (mesh.skeleton) {
-                pass.setVertexBuffer(slot++, mesh.skeleton.jointsBuffer);
-                pass.setVertexBuffer(slot++, mesh.skeleton.weightsBuffer);
-                if (mesh.skeleton.joints1Buffer && mesh.skeleton.weights1Buffer) {
-                    pass.setVertexBuffer(slot++, mesh.skeleton.joints1Buffer);
-                    pass.setVertexBuffer(slot++, mesh.skeleton.weights1Buffer);
+            // Skinning vertex buffers: live skeleton OR baked VAT (same field names, mutually exclusive).
+            const skin = mesh.skeleton ?? mesh.vat;
+            if (skin) {
+                pass.setVertexBuffer(slot++, skin.jointsBuffer);
+                pass.setVertexBuffer(slot++, skin.weightsBuffer);
+                if (skin.joints1Buffer && skin.weights1Buffer) {
+                    pass.setVertexBuffer(slot++, skin.joints1Buffer);
+                    pass.setVertexBuffer(slot++, skin.weights1Buffer);
                 }
             }
 

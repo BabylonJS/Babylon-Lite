@@ -146,6 +146,25 @@ export interface SkeletonData {
     readonly weights1: Float32Array | null;
 }
 
+/** VAT (Vertex Animation Texture) GPU data — BAKED skinning. Attached to `mesh.vat` by vat/vat-baker.ts.
+ *  The skeletal animation is pre-evaluated into `texture` (one frame per row); the shader reads bone
+ *  matrices from the current frame's row instead of a live per-frame upload, so the mesh thin-instances.
+ *  Reuses the same joints/weights vertex-buffer field names as SkeletonData so the renderable binds either. */
+export interface VatData {
+    readonly boneCount: number;
+    /** Baked bone-matrix texture: rgba32float, (boneCount*4) × frameCount, one animation frame per row
+     *  (identical per-row layout to the live bone texture in skeleton/create-skeleton.ts). */
+    readonly texture: GPUTexture;
+    readonly frameCount: number;
+    /** UBO consumed by the VAT vertex fragment: `params` vec4 = (fromRow, toRow, frameOffset, fps);
+     *  `clock` vec4 .x = elapsed seconds. Advanced by the VAT manager (vat/vat-baker.ts). */
+    readonly settingsBuffer: GPUBuffer;
+    readonly jointsBuffer: GPUBuffer;
+    readonly weightsBuffer: GPUBuffer;
+    readonly joints1Buffer: GPUBuffer | null;
+    readonly weights1Buffer: GPUBuffer | null;
+}
+
 /** Morph target GPU data — delta texture + weights UBO.
  *  Created by createMorphTargets() in morph/create-morph-targets.ts.
  *  Attached to mesh.morphTargets. */
