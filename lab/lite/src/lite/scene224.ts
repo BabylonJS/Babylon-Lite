@@ -21,6 +21,7 @@ import {
     createStandardMaterial,
     createTransformNode,
     createUtilityLayer,
+    getViewProjectionMatrix,
     isGizmoInteracting,
     isGizmoDragging,
     isGizmoPickPending,
@@ -99,6 +100,16 @@ async function main(): Promise<void> {
         rootPos: () => ({ x: root.position.x, y: root.position.y, z: root.position.z }),
         rootQuat: () => ({ x: root.rotationQuaternion.x, y: root.rotationQuaternion.y, z: root.rotationQuaternion.z, w: root.rotationQuaternion.w }),
         rootScale: () => ({ x: root.scaling.x, y: root.scaling.y, z: root.scaling.z }),
+        // Directly drive the group root's TRS, bypassing pointer-drag entirely.
+        // Used by the parity spec to put BOTH engines at an identical post-edit
+        // pose so the rendered frame compares cleanly (only material / AA noise
+        // remains).  Avoids the pointer-drag plumbing gap that produces ~14%
+        // over-rotation / over-scale in Lite vs BJS for the same screen drag.
+        setRootTrs: (pos: { x: number; y: number; z: number }, q: { x: number; y: number; z: number; w: number }, scl: { x: number; y: number; z: number }) => {
+            root.position.set(pos.x, pos.y, pos.z);
+            root.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+            root.scaling.set(scl.x, scl.y, scl.z);
+        },
         aabb: () => {
             const b = (bbox as unknown as { _aabb: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number }; centre: { x: number; y: number; z: number }; size: { x: number; y: number; z: number } } })._aabb;
             return { min: { ...b.min }, max: { ...b.max }, centre: { ...b.centre }, size: { ...b.size } };
@@ -111,6 +122,25 @@ async function main(): Promise<void> {
                 visible: m.visible,
             }));
             return { count: meshes.length, meshes: meshes.slice(0, 14) };
+        },
+        // Project a world-space point to a canvas-relative CSS pixel
+        // coordinate using the active camera's view-projection matrix.  The
+        // parity spec uses this on BOTH engines to drive each drag by
+        // world-space anchors (corner / edge midpoint / body centre) rather
+        // than hard-coded screen pixels — so the simulated input actually
+        // hits the gizmo handles in each engine's projection.
+        worldToScreen: (p: { x: number; y: number; z: number }) => {
+            const aspect = canvas.clientWidth / canvas.clientHeight;
+            const vp = getViewProjectionMatrix(camera, aspect);
+            const clipX = vp[0]! * p.x + vp[4]! * p.y + vp[8]! * p.z + vp[12]!;
+            const clipY = vp[1]! * p.x + vp[5]! * p.y + vp[9]! * p.z + vp[13]!;
+            const clipW = vp[3]! * p.x + vp[7]! * p.y + vp[11]! * p.z + vp[15]!;
+            const ndcX = clipX / clipW;
+            const ndcY = clipY / clipW;
+            return {
+                x: (ndcX * 0.5 + 0.5) * canvas.clientWidth,
+                y: (1 - (ndcY * 0.5 + 0.5)) * canvas.clientHeight,
+            };
         },
     };
 

@@ -132,7 +132,19 @@ export function createAxisDragGizmo(engine: EngineContext, layer: UtilityLayer, 
     const visibleMeshes = buildArrow(engine, utilityScene, { material: materials.colored }, root, thickness, false);
     const colliderMeshes = buildArrow(engine, utilityScene, { material: materials.colored }, root, thickness + 4, true);
 
-    const drag = createPointerDrag({ dragAxis: { x: options.dragAxis.x, y: options.dragAxis.y, z: options.dragAxis.z }, moveAttached: false });
+    const drag = createPointerDrag({
+        dragAxis: { x: options.dragAxis.x, y: options.dragAxis.y, z: options.dragAxis.z },
+        moveAttached: false,
+        // BJS-faithful drag-plane anchor: pass through the attached node's
+        // world position (BJS `_updateDragPlanePosition` overrides
+        // `dragPlane.position` with `attachedNode.getAbsolutePosition()`).
+        // `root.position` is set every frame by `attachFollowTarget` to the
+        // attached node's world translation, so it IS the live world anchor.
+        // Without this the plane sits at the picked surface point — a deeper
+        // picked plane (e.g. the off-centre arrowhead) inflated the per-tick
+        // world delta vs. BJS.
+        getPlanePoint: () => ({ x: root.position.x, y: root.position.y, z: root.position.z }),
+    });
     // Both visible and invisible arrow parts trigger the drag — clicking
     // anywhere on the rendered arrow should start the interaction even when
     // the picker happens to hit the visible mesh before the larger invisible

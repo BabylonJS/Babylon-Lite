@@ -334,6 +334,18 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
 
 function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
     const active = state.active!;
+    // BJS-faithful: when the drag exposes a `getPlanePoint` callback, refresh
+    // the drag plane's anchor every move so it tracks the attached node as the
+    // gizmo drives it (BJS `_updateDragPlanePosition` overrides plane.position
+    // with `attachedNode.getAbsolutePosition()` per move, default
+    // `updateDragPlane = true`).  Keeps the screen-to-world ratio anchored at
+    // the node's depth — without this, Lite anchored the plane at the picked
+    // surface point (e.g. an off-centre corner), and a deeper picked plane
+    // inflated the per-tick world delta vs. BJS.
+    const livePlanePoint = active.drag.options.getPlanePoint?.();
+    if (livePlanePoint) {
+        active.planePoint = { x: livePlanePoint.x, y: livePlanePoint.y, z: livePlanePoint.z };
+    }
     const ray = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
     if (!ray) {
         return;
@@ -366,6 +378,15 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
 
     active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
     active.drag.onDrag.notify({ delta, dragPlanePoint: hit, dragDistance });
+
+    // BJS-faithful: with `updateDragPlane = true` (BJS default), the drag plane
+    // is refreshed AFTER the pick using the just-computed hit as the new
+    // reference point for the normal.  For axis mode this re-faces the plane
+    // toward the camera as it / the gizmo moves; for plane mode the normal is
+    // fixed (configured `dragPlaneNormal`) so we leave it alone.
+    if (active.drag.options.dragAxis) {
+        active.planeNormal = pickDragPlaneNormal(active.drag, state.layer.scene, hit);
+    }
 }
 
 function handlePointerUp(state: DispatcherState, event: PointerEvent): void {

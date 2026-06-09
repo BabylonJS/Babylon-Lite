@@ -80,6 +80,11 @@ export interface BoundingBoxGizmo {
     _disposers: (() => void)[];
     /** @internal — recompute the AABB and refresh handle positions. */
     _refresh: () => void;
+    /** @internal — local bounding diagonal length captured at attach time.
+     *  BJS uses `_boundingDimensions.length()` (the LOCAL, unscaled diag) as the
+     *  denominator in the rotation-drag heuristic; capturing once at attach
+     *  matches that. Updated again on (re)attach. */
+    _initialBoundingDiag: number;
 }
 
 interface AabbBounds {
@@ -520,6 +525,7 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         _meshes: [root, ...edges.map((e) => e.mesh), ...corners.flatMap((c) => c.meshes), ...rotators.map((r) => r.mesh), ...faces.map((f) => f.mesh), body],
         _disposers: [],
         _refresh: () => undefined,
+        _initialBoundingDiag: 1,
     };
 
     // ── Layout helper: position all edges + handles for the current OBB ──
@@ -704,7 +710,17 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     for (let i = 0; i < 8; i++) {
         const corner = corners[i]!;
         const oppositeCorner = corners[i ^ 0b111]!;
-        const drag = createPointerDrag({ dragAxis: { x: 1, y: 0, z: 0 }, moveAttached: false });
+        const drag = createPointerDrag({
+            dragAxis: { x: 1, y: 0, z: 0 },
+            moveAttached: false,
+            // BJS-faithful drag-plane anchor at the bbox centre (BJS
+            // `_updateDragPlanePosition` overrides plane.position with
+            // `attachedNode.getAbsolutePosition()` per move).  Without this,
+            // Lite anchored the plane at the picked corner — a deeper picked
+            // plane inflated the per-tick world delta vs. BJS, causing the
+            // corner-scale drag to over-shoot by ~14% for the same screen drag.
+            getPlanePoint: () => ({ x: worldCenter.x, y: worldCenter.y, z: worldCenter.z }),
+        });
         drag._colliders = [corner.mesh];
         let scaleAxis: Vec3 = { x: 1, y: 0, z: 0 };
         let dragSizeRef = 1;
@@ -749,7 +765,23 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
                 return;
             }
             const signed = event.delta.x * scaleAxis.x + event.delta.y * scaleAxis.y + event.delta.z * scaleAxis.z;
-            const f = 1 + (signed * 2) / dragSizeRef;
+            // BJS-faithful corner scale (BoundingBoxGizmo._createScaleBox):
+            //
+            //   relativeDragDistance = (event.dragDistance / _boundingDimensions.length())
+            //                        * _anchorMesh.scaling.length()
+            //   newScale = startScale + totalRelativeDragDistance  (additive per-axis)
+            //
+            // For uniform scaling (sx == sy == sz == s) this integrates to
+            // `s = s₀ * exp(scaleLen · D / boundingLen)` where scaleLen = √3·s
+            // (always, since the scaling stays uniform).  Lite applies the same
+            // factor multiplicatively per tick: `f = 1 + (signed · √3) / diag`
+            // → product over ticks → `s * exp(√3·D/diag)`.  Matches BJS.
+            //
+            // The previous Lite formula used `1 + 2·signed/dragSizeRef` (where
+            // dragSizeRef was the WORLD bbox diag at drag start) which made
+            // Lite ~2.6× more sensitive than BJS for the same screen drag.
+            const denom = gizmo._initialBoundingDiag > 1e-7 ? gizmo._initialBoundingDiag : dragSizeRef;
+            const f = 1 + (signed * Math.sqrt(3)) / denom;
             // Translate the pivot into node-relative coordinates, scale, then
             // translate node so the diagonally-opposite corner stays anchored.
             const wm = node.worldMatrix;
@@ -777,7 +809,12 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     for (let i = 0; i < 6; i++) {
         const face = faces[i]!;
         const oppFace = faces[i ^ 1]!;
-        const drag = createPointerDrag({ dragAxis: { x: face.axis.x, y: face.axis.y, z: face.axis.z }, moveAttached: false });
+        const drag = createPointerDrag({
+            dragAxis: { x: face.axis.x, y: face.axis.y, z: face.axis.z },
+            moveAttached: false,
+            // BJS-faithful drag-plane anchor — see corner-scale drag above.
+            getPlanePoint: () => ({ x: worldCenter.x, y: worldCenter.y, z: worldCenter.z }),
+        });
         drag._colliders = [face.mesh];
         let axisDir: Vec3 = { x: face.axis.x, y: face.axis.y, z: face.axis.z };
         let dragSizeRef = 1;
@@ -847,7 +884,12 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
         // reflects the rotator's CURRENT world axis (layout updates r.axis to
         // Q·localAxis each frame).  The dispatcher reads this at pointer-down,
         // so the drag plane stays correct even when the box is rotated.
-        const drag = createPointerDrag({ dragPlaneNormal: r.axis, moveAttached: false });
+        const drag = createPointerDrag({
+            dragPlaneNormal: r.axis,
+            moveAttached: false,
+            // BJS-faithful drag-plane anchor — see corner-scale drag above.
+            getPlanePoint: () => ({ x: worldCenter.x, y: worldCenter.y, z: worldCenter.z }),
+        });
         drag._colliders = [r.mesh];
         let lastPoint: Vec3 | null = null;
         drag.onHoverStart.add(() => {
@@ -871,16 +913,36 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
             if (!node || !lastPoint) {
                 return;
             }
-            // Rotate about the OBB's world centre, around the rotator's current
-            // world axis (`r.axis`, updated each layout to follow the box).
+            // BJS-faithful rotation-amount heuristic
+            // (BoundingBoxGizmo._createRotationAnchor):
+            //
+            //   projectDist = sign * |event.delta|
+            //   projectDist = (projectDist / _boundingDimensions.length())
+            //               * _anchorMesh.scaling.length()
+            //   angle (radians) = projectDist
+            //
+            // The denominator is the LOCAL (unscaled) bbox diag captured at
+            // attach (`_initialBoundingDiag`); the multiplier is the attached
+            // node's current scaling length, so larger meshes rotate more for
+            // the same screen drag.  Sign comes from the geometric direction
+            // around the axis (we use `signedAngleAroundNormal` for that
+            // since it's already plumbed in).
             const c = worldCenter;
             const a: Vec3 = { x: lastPoint.x - c.x, y: lastPoint.y - c.y, z: lastPoint.z - c.z };
             const b: Vec3 = { x: event.dragPlanePoint.x - c.x, y: event.dragPlanePoint.y - c.y, z: event.dragPlanePoint.z - c.z };
-            const angle = signedAngleAroundNormal(a, b, r.axis);
-            if (Math.abs(angle) < 1e-7) {
+            const signedGeoAngle = signedAngleAroundNormal(a, b, r.axis);
+            const dxw0 = event.dragPlanePoint.x - lastPoint.x;
+            const dyw0 = event.dragPlanePoint.y - lastPoint.y;
+            const dzw0 = event.dragPlanePoint.z - lastPoint.z;
+            const deltaLen = Math.hypot(dxw0, dyw0, dzw0);
+            if (deltaLen < 1e-7 || Math.abs(signedGeoAngle) < 1e-7) {
                 lastPoint = { x: event.dragPlanePoint.x, y: event.dragPlanePoint.y, z: event.dragPlanePoint.z };
                 return;
             }
+            const denom = gizmo._initialBoundingDiag > 1e-7 ? gizmo._initialBoundingDiag : 1;
+            const nodeScaleLen = Math.hypot(node.scaling.x, node.scaling.y, node.scaling.z);
+            const sign = signedGeoAngle < 0 ? -1 : 1;
+            const angle = (sign * deltaLen * nodeScaleLen) / denom;
             // 1. World-space rotation `dq` around the bbox centre `c`.
             const dq = quatFromAxisAngle(r.axis.x, r.axis.y, r.axis.z, angle);
             // 2. Rotate node's world position around `c`.  This is the
@@ -934,6 +996,21 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
 export function attachBoundingBoxGizmoToNode(gizmo: BoundingBoxGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     gizmo._refresh();
+    // Snapshot the LOCAL (pre-scale) bounding-box diagonal length now.  Lite's
+    // `_aabb` is computed in the rotation-removed frame and therefore reflects
+    // the current scale; dividing by `node.scaling` gives the local size that
+    // matches BJS's `_boundingDimensions`.  This is the denominator used by the
+    // BJS rotation-amount heuristic.
+    const aabb = (gizmo as unknown as { _aabb: AabbBounds })._aabb;
+    if (node && aabb && Number.isFinite(aabb.size.x)) {
+        const sx = node.scaling.x !== 0 ? aabb.size.x / Math.abs(node.scaling.x) : aabb.size.x;
+        const sy = node.scaling.y !== 0 ? aabb.size.y / Math.abs(node.scaling.y) : aabb.size.y;
+        const sz = node.scaling.z !== 0 ? aabb.size.z / Math.abs(node.scaling.z) : aabb.size.z;
+        const diag = Math.hypot(sx, sy, sz);
+        gizmo._initialBoundingDiag = diag > 1e-7 ? diag : 1;
+    } else {
+        gizmo._initialBoundingDiag = 1;
+    }
 }
 
 export function disposeBoundingBoxGizmo(gizmo: BoundingBoxGizmo, layer: UtilityLayer): void {

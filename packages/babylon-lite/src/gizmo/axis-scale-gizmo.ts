@@ -165,7 +165,12 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
     const visibleMeshes = buildScaleArrow(engine, utilityScene, materials.colored, root, thickness, false, uniformScaling);
     const colliderMeshes = buildScaleArrow(engine, utilityScene, materials.colored, root, thickness + 4, true, uniformScaling);
 
-    const drag = createPointerDrag({ dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z }, moveAttached: false });
+    const drag = createPointerDrag({
+        dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z },
+        moveAttached: false,
+        // BJS-faithful drag-plane anchor — see axis-drag-gizmo.ts for rationale.
+        getPlanePoint: () => ({ x: root.position.x, y: root.position.y, z: root.position.z }),
+    });
     drag._colliders = [...visibleMeshes, ...colliderMeshes];
 
     const onScaleChanged = new GizmoObservable<Vec3>();

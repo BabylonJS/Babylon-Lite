@@ -1446,7 +1446,7 @@
         "id": 224,
         "slug": "scene224-bounding-box-gizmo",
         "name": "Scene 224 — Bounding Box Gizmo",
-        "maxMad": 2.5,
+        "maxMad": 0.15,
         "maxRawKB": 90,
         "description": "5 cubes parented to a group root, with a BoundingBoxGizmo computing the encompassing AABB. Scripted pointer drags exercise scale (corner), rotation (edge anchor), and translation (body box) operations on the group.",
         "tags": ["std", "gizmo", "interactive", "bbox"],

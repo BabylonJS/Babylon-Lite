@@ -113,7 +113,12 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
     rotationDisplayPlane.parent = root;
     addToScene(utilityScene, rotationDisplayPlane);
 
-    const drag = createPointerDrag({ dragPlaneNormal: { x: options.planeNormal.x, y: options.planeNormal.y, z: options.planeNormal.z }, moveAttached: false });
+    const drag = createPointerDrag({
+        dragPlaneNormal: { x: options.planeNormal.x, y: options.planeNormal.y, z: options.planeNormal.z },
+        moveAttached: false,
+        // BJS-faithful drag-plane anchor — see axis-drag-gizmo.ts for rationale.
+        getPlanePoint: () => ({ x: root.position.x, y: root.position.y, z: root.position.z }),
+    });
     drag._colliders = [ring, collider];
 
     const onRotationChanged = new GizmoObservable<[number, number, number, number]>();

@@ -75,7 +75,12 @@ export function createPlaneDragGizmo(engine: EngineContext, layer: UtilityLayer,
     plane.parent = root;
     addToScene(utilityScene, plane);
 
-    const drag = createPointerDrag({ dragPlaneNormal: { x: options.dragPlaneNormal.x, y: options.dragPlaneNormal.y, z: options.dragPlaneNormal.z }, moveAttached: false });
+    const drag = createPointerDrag({
+        dragPlaneNormal: { x: options.dragPlaneNormal.x, y: options.dragPlaneNormal.y, z: options.dragPlaneNormal.z },
+        moveAttached: false,
+        // BJS-faithful drag-plane anchor — see axis-drag-gizmo.ts for rationale.
+        getPlanePoint: () => ({ x: root.position.x, y: root.position.y, z: root.position.z }),
+    });
     drag._colliders = [plane];
 
     const onPositionChanged = new GizmoObservable<Vec3>();

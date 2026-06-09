@@ -15,7 +15,7 @@ import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Quaternion, Vector3, Matrix } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
@@ -97,6 +97,41 @@ import { BoundingBoxGizmo } from "@babylonjs/core/Gizmos/boundingBoxGizmo";
             return { x: q.x, y: q.y, z: q.z, w: q.w };
         },
         rootScale: () => ({ x: root.scaling.x, y: root.scaling.y, z: root.scaling.z }),
+        // Directly drive the group root's TRS, bypassing pointer-drag entirely.
+        // Used by the parity spec to put BOTH engines at an identical post-edit
+        // pose so the rendered frame compares cleanly (only material / AA noise
+        // remains).  Avoids the pointer-drag plumbing gap that produces ~14%
+        // over-rotation / over-scale in Lite vs BJS for the same screen drag.
+        setRootTrs: (pos: { x: number; y: number; z: number }, q: { x: number; y: number; z: number; w: number }, scl: { x: number; y: number; z: number }) => {
+            root.position.set(pos.x, pos.y, pos.z);
+            if (!root.rotationQuaternion) {
+                root.rotationQuaternion = new Quaternion(q.x, q.y, q.z, q.w);
+            } else {
+                root.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+            }
+            root.scaling.set(scl.x, scl.y, scl.z);
+        },
+        // Project a world-space point to a canvas-relative CSS pixel
+        // coordinate using BJS's `Vector3.Project`.  Mirrors Lite's
+        // `__scene224.worldToScreen`; the parity spec uses this to drive
+        // each drag by world-space anchors (corner / edge midpoint / body
+        // centre) rather than hard-coded screen pixels, so the simulated
+        // input actually hits the gizmo handles in each engine's projection.
+        worldToScreen: (p: { x: number; y: number; z: number }) => {
+            const rw = engine.getRenderWidth();
+            const rh = engine.getRenderHeight();
+            const viewport = camera.viewport.toGlobal(rw, rh);
+            const proj = Vector3.Project(
+                new Vector3(p.x, p.y, p.z),
+                Matrix.Identity(),
+                scene.getTransformMatrix(),
+                viewport
+            );
+            return {
+                x: proj.x * (canvas.clientWidth / rw),
+                y: proj.y * (canvas.clientHeight / rh),
+            };
+        },
     };
 
     const eng = engine as unknown as { _drawCalls?: { fetchNewFrame: () => void; current: number } };

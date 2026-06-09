@@ -82,16 +82,17 @@ export interface PositionGizmo {
 }
 
 /** Build a composite position gizmo.  Colors match BJS PositionGizmo
- *  defaults: full-saturation red / green / blue along X / Y / Z. */
+ *  defaults: half-saturation red / green / blue along X / Y / Z
+ *  (`Color3.Red().scale(0.5)` etc.). */
 export function createPositionGizmo(engine: EngineContext, layer: UtilityLayer, options: PositionGizmoOptions = {}): PositionGizmo {
     const thickness = options.thickness ?? 1;
     const planarEnabled = options.planarEnabled ?? false;
-    const xGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [1, 0, 0], thickness });
-    const yGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 0, y: 1, z: 0 }, color: [0, 1, 0], thickness });
-    const zGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 0, y: 0, z: 1 }, color: [0, 0, 1], thickness });
-    const xPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 1, y: 0, z: 0 }, color: [1, 0, 0] }) : null;
-    const yPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 1, z: 0 }, color: [0, 1, 0] }) : null;
-    const zPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 1] }) : null;
+    const xGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], thickness });
+    const yGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0], thickness });
+    const zGizmo = createAxisDragGizmo(engine, layer, { dragAxis: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5], thickness });
+    const xPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0] }) : null;
+    const yPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0] }) : null;
+    const zPlaneGizmo = planarEnabled ? createPlaneDragGizmo(engine, layer, { dragPlaneNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5] }) : null;
     wireCrossAxisDisable([xGizmo, yGizmo, zGizmo, ...(xPlaneGizmo ? [xPlaneGizmo] : []), ...(yPlaneGizmo ? [yPlaneGizmo] : []), ...(zPlaneGizmo ? [zPlaneGizmo] : [])]);
     return {
         xGizmo,
@@ -167,9 +168,9 @@ export interface RotationGizmo {
 export function createRotationGizmo(engine: EngineContext, layer: UtilityLayer, options: RotationGizmoOptions = {}): RotationGizmo {
     const tessellation = options.tessellation ?? 32;
     const thickness = options.thickness ?? 1;
-    const xGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 1, y: 0, z: 0 }, color: [1, 0, 0], tessellation, thickness });
-    const yGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 1, z: 0 }, color: [0, 1, 0], tessellation, thickness });
-    const zGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 1], tessellation, thickness });
+    const xGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], tessellation, thickness });
+    const yGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0], tessellation, thickness });
+    const zGizmo = createPlaneRotationGizmo(engine, layer, { planeNormal: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5], tessellation, thickness });
     wireCrossAxisDisable([xGizmo, yGizmo, zGizmo]);
     return { xGizmo, yGizmo, zGizmo, attachedNode: null };
 }
@@ -210,12 +211,15 @@ export interface ScaleGizmo {
 
 export function createScaleGizmo(engine: EngineContext, layer: UtilityLayer, options: ScaleGizmoOptions = {}): ScaleGizmo {
     const thickness = options.thickness ?? 1;
-    const xGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [1, 0, 0], thickness });
-    const yGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 0, y: 1, z: 0 }, color: [0, 1, 0], thickness });
-    const zGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 0, y: 0, z: 1 }, color: [0, 0, 1], thickness });
+    const xGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], thickness });
+    const yGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 0, y: 1, z: 0 }, color: [0, 0.5, 0], thickness });
+    const zGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 0, y: 0, z: 1 }, color: [0, 0, 0.5], thickness });
     const uniformScaleGizmo = createAxisScaleGizmo(engine, layer, {
         dragAxis: { x: 0, y: 1, z: 0 },
-        color: [0.7, 0.7, 0.7],
+        // BJS uses Color3.Gray().scale(0.5) = (0.25, 0.25, 0.25) for the central
+        // uniform-scale handle; combined with the utility-layer hemispheric light
+        // (intensity 2, gray ground) this renders as ~light gray, not white.
+        color: [0.25, 0.25, 0.25],
         uniformScaling: true,
     });
     // The scale gizmo doesn't support world-coords mode in BJS — always local.

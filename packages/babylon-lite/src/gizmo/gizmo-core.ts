@@ -19,8 +19,10 @@ export interface GizmoMaterialSet {
  *  grey/translucent disabled.  Materials are LIT (no `disableLighting`) so the
  *  utility layer's hemispheric light (intensity 2, gray ground — matching BJS
  *  `UtilityLayerRenderer._getSharedGizmoLight`) shades the arrow / ring / box
- *  surfaces, exactly like the BJS reference gizmos.  The specular is dimmed to
- *  `color − 0.1` (BJS's gizmo specular) to avoid an over-bright highlight. */
+ *  surfaces, exactly like the BJS reference gizmos.  BJS sets specular only on
+ *  the colored material (`color − 0.1`, allowed to go negative for parity) and
+ *  leaves the hover / disabled specular at the StandardMaterial default
+ *  `(1, 1, 1)` — we mirror that here. */
 export function createGizmoMaterials(
     color: [number, number, number],
     hoverColor: [number, number, number] = [1, 1, 0],
@@ -28,18 +30,22 @@ export function createGizmoMaterials(
 ): GizmoMaterialSet {
     const colored = createStandardMaterial();
     colored.diffuseColor = color;
-    // BJS gizmo specular = diffuse − 0.1 (not the StandardMaterial default white,
-    // which produces a bright "shiny" highlight BJS doesn't have).  No emissive —
-    // the utility layer's hemispheric light keeps the colour readable.
-    colored.specularColor = [Math.max(0, color[0] - 0.1), Math.max(0, color[1] - 0.1), Math.max(0, color[2] - 0.1)];
+    // BJS: `coloredMaterial.specularColor = color.subtract(new Color3(0.1, 0.1, 0.1))`.
+    // Color3 doesn't clamp on subtract — components may be negative (e.g. for
+    // `(0.5, 0, 0)` the specular is `(0.4, -0.1, -0.1)`).  Matching BJS exactly
+    // means letting that bleed through unclamped or our composite gizmo colours
+    // won't pixel-match.
+    colored.specularColor = [color[0] - 0.1, color[1] - 0.1, color[2] - 0.1];
 
+    // BJS hover material: only `diffuseColor` is overridden; `specularColor`
+    // stays at the StandardMaterial default `(1, 1, 1)` (white).  No alpha.
     const hover = createStandardMaterial();
     hover.diffuseColor = hoverColor;
-    hover.specularColor = [Math.max(0, hoverColor[0] - 0.1), Math.max(0, hoverColor[1] - 0.1), Math.max(0, hoverColor[2] - 0.1)];
 
+    // BJS disable material: only `diffuseColor` + `alpha` are overridden;
+    // `specularColor` stays at the StandardMaterial default `(1, 1, 1)`.
     const disabled = createStandardMaterial();
     disabled.diffuseColor = disableColor;
-    disabled.specularColor = [Math.max(0, disableColor[0] - 0.1), Math.max(0, disableColor[1] - 0.1), Math.max(0, disableColor[2] - 0.1)];
     disabled.alpha = 0.4;
 
     return { colored, hover, disabled };
