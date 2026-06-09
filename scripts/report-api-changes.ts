@@ -1,10 +1,11 @@
 /// <reference types="node" />
 
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, resolve } from "path";
 import { Extractor, ExtractorConfig, ExtractorLogLevel } from "@microsoft/api-extractor";
+import { format as prettierFormat, resolveConfig as resolvePrettierConfig, type Options as PrettierOptions } from "prettier";
 
 type PullRequestInfo = {
     title: string;
@@ -134,6 +135,46 @@ function generateApiReport(projectRoot: string, outputDir: string): string {
     }
 
     return reportPath;
+}
+
+/**
+ * Run the TypeScript block inside the `.api.md` report through Prettier so the diff
+ * we feed to `breakingApiLines` and post on the PR reflects semantic changes only.
+ *
+ * API Extractor's `apiReport` writer occasionally emits formatting quirks — e.g. when
+ * trailing `@internal` members are trimmed from an interface, the closing `}` ends up
+ * glued to the previous member's `;` instead of on its own line. Without normalization,
+ * that whitespace-only change shows up as a removed public API line and trips the
+ * breaking-change gate. Routing both the current and target reports through the same
+ * Prettier config makes the comparison robust to any present or future formatting
+ * wobble in the report writer.
+ *
+ * Failure-safe: if the fenced block can't be located, or Prettier rejects the input,
+ * we leave the report untouched (and log a warning) so the script still produces a
+ * diff, just with the pre-fix behavior.
+ */
+const TS_FENCE_PATTERN = /```ts\r?\n([\s\S]*?)\r?\n```/;
+
+async function normalizeApiReport(reportPath: string, prettierConfig: PrettierOptions): Promise<void> {
+    const raw = readFileSync(reportPath, "utf-8");
+    const match = TS_FENCE_PATTERN.exec(raw);
+    if (!match) {
+        console.warn(`normalizeApiReport: no \`\`\`ts fence found in ${reportPath}; skipping normalization.`);
+        return;
+    }
+
+    let formatted: string;
+    try {
+        formatted = await prettierFormat(match[1]!, { ...prettierConfig, parser: "typescript" });
+    } catch (error) {
+        console.warn(`normalizeApiReport: Prettier failed on ${reportPath}; skipping normalization. ${error instanceof Error ? error.message : String(error)}`);
+        return;
+    }
+
+    const normalized = raw.slice(0, match.index) + "```ts\n" + formatted.trimEnd() + "\n```" + raw.slice(match.index + match[0].length);
+    if (normalized !== raw) {
+        writeFileSync(reportPath, normalized);
+    }
 }
 
 function createTargetWorktree(rootDir: string, targetRef: string): string {
@@ -414,14 +455,24 @@ async function main(): Promise<void> {
     mkdirSync(outputDir, { recursive: true });
 
     try {
+        // Resolve the Prettier config once, from a real file path inside the current repo, so
+        // both reports get normalized with identical options. Prettier's `resolveConfig` requires
+        // a file path (not a directory) — it starts the upward search at `dirname(path)`. We use
+        // this script itself as the anchor so the resolved config tracks the *current* branch,
+        // never the target worktree (otherwise a `.prettierrc` change between branches could
+        // reintroduce formatting-only diffs).
+        const prettierConfig = (await resolvePrettierConfig(resolve(__dirname, "report-api-changes.ts"))) ?? {};
+
         console.log("Building current branch package...");
         buildPackage(rootDir, { installDependencies: false });
         const currentReport = generateApiReport(rootDir, currentOutputDir);
+        await normalizeApiReport(currentReport, prettierConfig);
 
         console.log(`Building target branch package from origin/${targetBranch}...`);
         targetWorktree = createTargetWorktree(rootDir, targetBranch);
         buildPackage(targetWorktree, { installDependencies: true });
         const targetReport = generateApiReport(targetWorktree, targetOutputDir);
+        await normalizeApiReport(targetReport, prettierConfig);
 
         const diff = diffReports(rootDir, targetReport, currentReport);
         const breakingLines = breakingApiLines(diff);
