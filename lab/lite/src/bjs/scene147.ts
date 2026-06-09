@@ -24,7 +24,7 @@ import { FrameGraphObjectRendererTask } from "@babylonjs/core/FrameGraph/Tasks/R
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import { FrameGraphCircleOfConfusionTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/circleOfConfusionTask";
 import { WebGPURenderItemViewport } from "@babylonjs/core/Engines/WebGPU/webgpuBundleList";
-import "@babylonjs/core/Engines/WebGPU/extensions/engine.multirender";
+import "@babylonjs/core/Engines/WebGPU/Extensions/engine.multiRender";
 
 const POWERPLANT_URL = "https://assets.babylonjs.com/meshes/PowerPlant/powerplant.glb";
 

@@ -20,7 +20,7 @@ import { FrameGraphCopyToTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Te
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import { WebGPURenderItemViewport } from "@babylonjs/core/Engines/WebGPU/webgpuBundleList";
 import type { UniversalCamera } from "@babylonjs/core/Cameras/universalCamera";
-import "@babylonjs/core/Engines/WebGPU/extensions/engine.multirender";
+import "@babylonjs/core/Engines/WebGPU/Extensions/engine.multiRender";
 
 (async function () {
     const __initStart = performance.now();
