@@ -67,6 +67,11 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _uboData: Float32Array;
     /** @internal */
     _casterMeshes: readonly Mesh[];
+    /** @internal Scene renderable version the cascade material views were built against. A material
+     *  swap (plugin/receiver variant change) rebuilds the swapped mesh's renderable + UBOs but leaves
+     *  this task's cached no-color material views pointing at the now-destroyed UBOs, so we rebuild when
+     *  it changes — not only when the caster SET changes. */
+    _renderableVersion: number;
 }
 
 export const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
@@ -82,10 +87,28 @@ export function ensureCsmShadowTaskState(
 ): CsmTaskState {
     const existing = existingState as CsmTaskState | null;
     if (existing) {
-        if (existing._casterMeshes === casterMeshes) {
+        if (existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
             return existing;
         }
-        existing._task.dispose();
+        // The caster set OR a material changed (a material swap rebuilds a caster's renderable + UBOs but
+        // leaves our cached no-color material views dangling at the destroyed UBOs — this is the
+        // "Buffer used in submit while destroyed" flood seen when planting a shadow-casting fern/agave,
+        // whose foliage material swaps variant on first render). Rebuild the cascade tasks below with the
+        // casters' CURRENT materials and return the NEW state — the caller swaps to it, so the OLD task is
+        // never recorded again. Its GPU buffers may still be referenced by a frame already submitted this
+        // tick, so we must NOT dispose it synchronously; defer until the GPU drains the currently-submitted
+        // work (onSubmittedWorkDone). Mirrors resizeMeshGeometry.
+        const old = existing._task;
+        void engine._device.queue
+            .onSubmittedWorkDone()
+            .then(() => {
+                try {
+                    old.dispose();
+                } catch {
+                    // Device may have been lost/disposed before the deferred dispose ran — nothing to free.
+                }
+            })
+            .catch(() => {});
     }
 
     const materialViews = new Map<Material, MaterialView>();
@@ -154,6 +177,7 @@ export function ensureCsmShadowTaskState(
         _lastCamVersion: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
+        _renderableVersion: scene._renderableVersion,
     };
 }
 
