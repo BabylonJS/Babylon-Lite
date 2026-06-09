@@ -142,6 +142,7 @@ export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";

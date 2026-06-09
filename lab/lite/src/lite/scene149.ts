@@ -30,6 +30,7 @@ import {
     createSolidTexture2D,
     GeometryTextureType,
     loadGltf,
+    loadNodeBlockEmitterWithGeometry,
     parseNodeMaterialFromSnippet,
     registerScene,
     startEngine,
@@ -106,7 +107,7 @@ async function main(): Promise<void> {
         list.push(mesh);
     }
     for (const [origMat, meshes] of byMaterial) {
-        const nodeMat = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE149_NME_JSON });
+        const nodeMat = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE149_NME_JSON, blockLoader: loadNodeBlockEmitterWithGeometry });
         nodeMat.inputs.albedo!.texture = resolveAlbedo(engine, origMat);
         for (const mesh of meshes) {
             mesh.material = nodeMat;

@@ -35,8 +35,6 @@ function baseBlockLoader(key: string): BlockLoader | null {
             return () => import("./blocks/vector-merger.js");
         case "FragmentOutputBlock":
             return () => import("./blocks/fragment-output.js");
-        case "GeometryTextureOutputBlock":
-            return () => import("./blocks/geometry-texture-output.js");
         case "AddBlock":
             return () => import("./blocks/add-block.js");
         case "SubtractBlock":
