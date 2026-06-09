@@ -39,42 +39,66 @@ let wrapped = raw - floor(raw / span) * span;
 return i32(p.x + wrapped);
 }`;
 
-function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): string {
-    // Per-instance VAT reads each instance's (fromRow,toRow,offset,fps) from instanceTexture at
-    // column = instance_index; non-instanced VAT uses the shared settings UBO. The shared clock
-    // (vat.clock.x) drives both, so a per-instance offset just staggers each instance's phase.
-    const rowExpr = instanced
-        ? `let vatP = textureLoad(vatInstanceTex, vec2<i32>(i32(vatInstanceIndex), 0), 0);
-let vatRow = vatFrameRow(vatP, vat.clock.x);`
-        : `let vatRow = vatFrameRow(vat.params, vat.clock.x);`;
-    let code = `${rowExpr}
-var influence: mat4x4<f32> = readMatrixFromVat(vatSampler, f32(joints[0]), vatRow) * weights[0];
-influence = influence + readMatrixFromVat(vatSampler, f32(joints[1]), vatRow) * weights[1];
-influence = influence + readMatrixFromVat(vatSampler, f32(joints[2]), vatRow) * weights[2];
-influence = influence + readMatrixFromVat(vatSampler, f32(joints[3]), vatRow) * weights[3];`;
+/** WGSL summing the 4- (or 8-) bone skin matrix for one frame `row` into a new matrix var `dest`. */
+function vatSkinSum(dest: string, row: string, has8Bones: boolean): string {
+    let s = `var ${dest}: mat4x4<f32> = readMatrixFromVat(vatSampler, f32(joints[0]), ${row}) * weights[0];
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[1]), ${row}) * weights[1];
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[2]), ${row}) * weights[2];
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[3]), ${row}) * weights[3];`;
     if (has8Bones) {
-        code += `
-influence = influence + readMatrixFromVat(vatSampler, f32(joints1[0]), vatRow) * weights1[0];
-influence = influence + readMatrixFromVat(vatSampler, f32(joints1[1]), vatRow) * weights1[1];
-influence = influence + readMatrixFromVat(vatSampler, f32(joints1[2]), vatRow) * weights1[2];
-influence = influence + readMatrixFromVat(vatSampler, f32(joints1[3]), vatRow) * weights1[3];`;
+        s += `
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[0]), ${row}) * weights1[0];
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[1]), ${row}) * weights1[1];
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[2]), ${row}) * weights1[2];
+${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[3]), ${row}) * weights1[3];`;
     }
-    // Instanced: place the fully-posed prototype (mesh.world * skin) into the world by the per-instance
-    // matrix (world0-3) applied OUTERMOST, so grid/herd offsets are world-space and not scaled by the
-    // prototype's own transform. Non-instanced keeps the Stage-1 path (mesh.world * skin).
-    code += instanced
-        ? `\nlet vatInstWorld = mat4x4<f32>(world0, world1, world2, world3);
-finalWorld = vatInstWorld * mesh.world * influence;`
-        : `\nfinalWorld = mesh.world * influence;`;
-    return code;
+    return s;
+}
+
+// Place the fully-posed prototype (mesh.world * skin) into the world by the per-instance matrix
+// (world0-3) applied OUTERMOST, so grid/herd offsets are world-space and not scaled by the prototype's
+// own transform.
+const VAT_INSTANCE_PLACEMENT = `let vatInstWorld = mat4x4<f32>(world0, world1, world2, world3);
+finalWorld = vatInstWorld * mesh.world * influence;`;
+
+function makeVatSkinningCode(has8Bones: boolean, instanced: boolean, blend: boolean): string {
+    if (!instanced) {
+        // Non-instanced: shared settings UBO, single clip (Stage 1).
+        return `let vatRow = vatFrameRow(vat.params, vat.clock.x);
+${vatSkinSum("influence", "vatRow", has8Bones)}
+finalWorld = mesh.world * influence;`;
+    }
+    if (!blend) {
+        // Per-instance, single clip: one texel (fromRow,toRow,offset,fps) per instance, read by
+        // instance_index from instanceTexture; the shared clock drives the crowd, the offset staggers it.
+        return `let vatP = textureLoad(vatInstanceTex, vec2<i32>(i32(vatInstanceIndex), 0), 0);
+let vatRow = vatFrameRow(vatP, vat.clock.x);
+${vatSkinSum("influence", "vatRow", has8Bones)}
+${VAT_INSTANCE_PLACEMENT}`;
+    }
+    // Per-instance, dual-clip BLEND: two texels per instance — A=(fromRow,toRow,offset,fps),
+    // B=(fromRow,toRow,blend,fps), B sharing A's offset. Linearly blend the two clips' skin matrices by
+    // B.z, exactly reproducing a weighted gait cross-fade (a weighted sum of bone matrices). Costs 2x the
+    // bone reads, only in the blend variant.
+    return `let vatIdx = i32(vatInstanceIndex) * 2;
+let vatA = textureLoad(vatInstanceTex, vec2<i32>(vatIdx, 0), 0);
+let vatB = textureLoad(vatInstanceTex, vec2<i32>(vatIdx + 1, 0), 0);
+let vatRowA = vatFrameRow(vatA, vat.clock.x);
+let vatRowB = vatFrameRow(vec4<f32>(vatB.x, vatB.y, vatA.z, vatB.w), vat.clock.x);
+${vatSkinSum("vatInfA", "vatRowA", has8Bones)}
+${vatSkinSum("vatInfB", "vatRowB", has8Bones)}
+let vatBlend = vatB.z;
+var influence: mat4x4<f32> = vatInfA * (1.0 - vatBlend) + vatInfB * vatBlend;
+${VAT_INSTANCE_PLACEMENT}`;
 }
 
 /**
  * Create a VAT fragment.
  * @param has8Bones - Whether to use 8-bone skinning (joints1/weights1).
  * @param instanced - Whether each thin-instance plays its own frame (reads instanceTexture by instance_index).
+ * @param blend - Whether each instance blends TWO clips (2 texels/instance) for cross-fading (implies instanced).
  */
-export function createVatFragment(has8Bones: boolean, instanced: boolean): ShaderFragment {
+export function createVatFragment(has8Bones: boolean, instanced: boolean, blend: boolean): ShaderFragment {
     return {
         _id: "vat",
 
@@ -107,13 +131,13 @@ export function createVatFragment(has8Bones: boolean, instanced: boolean): Shade
         _vertexHelperFunctions: VAT_HELPERS,
 
         _vertexSlots: {
-            VW: makeVatSkinningCode(has8Bones, instanced),
+            VW: makeVatSkinningCode(has8Bones, instanced, blend),
         },
     };
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { MSH_VAT, MSH_HAS_SKELETON_8, MSH_VAT_INSTANCED } from "../../mesh-features.js";
+import { MSH_VAT, MSH_HAS_SKELETON_8, MSH_VAT_INSTANCED, MSH_VAT_INSTANCED_BLEND } from "../../mesh-features.js";
 
 export const pbrExt: PbrExt = {
     id: "vat",
@@ -122,7 +146,11 @@ export const pbrExt: PbrExt = {
         if (!(ctx._meshFeatures & MSH_VAT)) {
             return null;
         }
-        return createVatFragment((ctx._meshFeatures & MSH_HAS_SKELETON_8) !== 0, (ctx._meshFeatures & MSH_VAT_INSTANCED) !== 0);
+        return createVatFragment(
+            (ctx._meshFeatures & MSH_HAS_SKELETON_8) !== 0,
+            (ctx._meshFeatures & MSH_VAT_INSTANCED) !== 0,
+            (ctx._meshFeatures & MSH_VAT_INSTANCED_BLEND) !== 0
+        );
     },
     bind(ctx, entries, b) {
         const mesh = ctx._mesh as { vat?: { texture: GPUTexture; settingsBuffer: GPUBuffer; instanceTexture?: GPUTexture | null } } | undefined;

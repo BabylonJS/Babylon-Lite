@@ -169,6 +169,9 @@ export interface VatData {
      *  reads its frame row from this texture indexed by `@builtin(instance_index)` instead of the shared
      *  settings UBO. Set via the VatHandle returned by attachVat (vat/vat-baker.ts). */
     instanceTexture?: GPUTexture | null;
+    /** When true, instanceTexture holds TWO texels per instance and the VAT path blends both clips
+     *  (MSH_VAT_INSTANCED_BLEND) for smooth gait cross-fades; otherwise one texel/instance (single clip). */
+    instanceBlend?: boolean;
 }
 
 /** Morph target GPU data — delta texture + weights UBO.

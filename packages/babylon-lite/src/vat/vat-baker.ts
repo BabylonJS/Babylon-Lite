@@ -123,6 +123,11 @@ export interface VatHandle {
      *  which selects the MSH_VAT_INSTANCED shader variant; later calls re-upload in place. Use `clips` to look
      *  up each clip's fromRow/toRow/fps when building `params`. */
     setInstances(params: Float32Array): void;
+    /** PER-INSTANCE DUAL-CLIP VAT: like setInstances, but each instance carries TWO clips that are blended,
+     *  so gait cross-fades stay smooth. `params.length` must be `8 * instanceCount` — two vec4s per instance:
+     *  A = (fromRowA, toRowA, timeOffset, fpsA), B = (fromRowB, toRowB, blendWeight, fpsB), where blendWeight
+     *  in [0,1] lerps A→B and B reuses A's timeOffset. Selects the MSH_VAT_INSTANCED_BLEND shader variant. */
+    setInstancesBlend(params: Float32Array): void;
 }
 
 /**
@@ -165,9 +170,26 @@ export function attachVat(engine: EngineContext, mesh: Mesh, baked: VatBakeResul
 
     let time = 0;
     let instanceTex: GPUTexture | null = null;
-    let instanceCap = 0;
+    let instanceTexCap = 0; // capacity in TEXELS (= instances single-clip, 2*instances blend)
     const writeUbo = (): void => {
         device.queue.writeBuffer(settingsBuffer, 0, ubo.buffer, ubo.byteOffset, 32);
+    };
+    // Upload per-instance VAT params into a (texels x 1) rgba32float texture the VAT vertex path reads by
+    // instance_index. `blend` selects the dual-clip variant (2 texels/instance); single-clip is 1 texel.
+    const uploadInstances = (params: Float32Array, blend: boolean): void => {
+        const texels = Math.max(1, params.length >> 2); // 4 floats per texel
+        if (!instanceTex || texels > instanceTexCap) {
+            instanceTex?.destroy();
+            instanceTex = device.createTexture({
+                size: [texels, 1],
+                format: "rgba32float",
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            });
+            instanceTexCap = texels;
+            vat.instanceTexture = instanceTex;
+        }
+        vat.instanceBlend = blend;
+        device.queue.writeTexture({ texture: instanceTex }, params.buffer, { offset: params.byteOffset, bytesPerRow: texels * 16, rowsPerImage: 1 }, { width: texels, height: 1 });
     };
     const handle: VatHandle = {
         mesh,
@@ -189,23 +211,10 @@ export function attachVat(engine: EngineContext, mesh: Mesh, baked: VatBakeResul
             writeUbo();
         },
         setInstances(params) {
-            const count = Math.max(1, params.length >> 2);
-            if (!instanceTex || count > instanceCap) {
-                instanceTex?.destroy();
-                instanceTex = device.createTexture({
-                    size: [count, 1],
-                    format: "rgba32float",
-                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-                });
-                instanceCap = count;
-                vat.instanceTexture = instanceTex;
-            }
-            device.queue.writeTexture(
-                { texture: instanceTex },
-                params.buffer,
-                { offset: params.byteOffset, bytesPerRow: count * 16, rowsPerImage: 1 },
-                { width: count, height: 1 }
-            );
+            uploadInstances(params, false);
+        },
+        setInstancesBlend(params) {
+            uploadInstances(params, true);
         },
     };
     handle.play(clip ?? Object.keys(baked.clips)[0] ?? "");

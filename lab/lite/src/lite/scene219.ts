@@ -77,18 +77,27 @@ async function main(): Promise<void> {
         }
         setThinInstances(mesh, matrices, N);
 
-        // Per-instance VAT params: every instance swims at a different phase of the same baked clip.
+        // Per-instance DUAL-CLIP VAT: blend swimming<->circling, the blend weight sweeping across the grid
+        // columns (left column = pure swim, right = pure circle), each instance at its own phase. Proves
+        // smooth clip cross-fading under instancing — exactly what animal gait blending needs.
         const swim = baked.clips["swimming"]!;
-        const fromRow = swim.fromRow;
-        const toRow = swim.fromRow + swim.frameCount - 1;
-        const params = new Float32Array(N * 4);
+        const circ = baked.clips["circling"] ?? swim;
+        const params = new Float32Array(N * 8);
         for (let i = 0; i < N; i++) {
-            params[i * 4 + 0] = fromRow;
-            params[i * 4 + 1] = toRow;
-            params[i * 4 + 2] = Math.random() * swim.frameCount; // staggered phase
-            params[i * 4 + 3] = swim.fps;
+            const col = i % GRID;
+            const blend = GRID > 1 ? col / (GRID - 1) : 0;
+            const offset = Math.random() * swim.frameCount;
+            const o = i * 8;
+            params[o + 0] = swim.fromRow;
+            params[o + 1] = swim.fromRow + swim.frameCount - 1;
+            params[o + 2] = offset;
+            params[o + 3] = swim.fps;
+            params[o + 4] = circ.fromRow;
+            params[o + 5] = circ.fromRow + circ.frameCount - 1;
+            params[o + 6] = blend;
+            params[o + 7] = circ.fps;
         }
-        handle.setInstances(params);
+        handle.setInstancesBlend(params);
 
         canvas.dataset.instances = String(N);
         canvas.dataset.vatBones = String(baked.boneCount);
