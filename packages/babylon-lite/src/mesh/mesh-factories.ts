@@ -68,6 +68,20 @@ export function createMeshFromData(
     return mesh;
 }
 
+/** Force every registered scene's cached render + shadow bundles to RE-RECORD on the next frame, by bumping
+ *  each rendering context's `_renderableVersion` (the same signal a mesh add/remove or `resizeMeshGeometry`
+ *  emits). Use after an out-of-band GPU buffer REALLOCATION that the cached bundles can't otherwise notice —
+ *  e.g. growing a thin-instanced mesh's matrix buffer past its capacity (the bundle captured the old buffer
+ *  handle and would bind a freed buffer). A no-op-cheap version bump; the actual re-record happens lazily. */
+export function invalidateRenderBundles(engine: EngineContext): void {
+    for (const ctx of engine._renderingContexts) {
+        const sc = ctx as { _renderableVersion?: number };
+        if (sc._renderableVersion !== undefined) {
+            sc._renderableVersion++;
+        }
+    }
+}
+
 /** Update a mesh's GPU vertex positions in place (e.g. CPU vertex animation).
  *  `positions` must hold tightly-packed XYZ floats matching the mesh's vertex count.
  *  `vertexOffset` is the first vertex to overwrite (defaults to 0).
