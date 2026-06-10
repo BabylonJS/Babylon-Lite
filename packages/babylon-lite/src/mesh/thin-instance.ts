@@ -36,6 +36,11 @@ export interface ThinInstanceData {
     colors?: Float32Array | null;
     /** @internal Color version counter — independent of matrix version. */
     _colorVersion: number;
+    /** @internal Min dirty color instance index (inclusive) — mirrors the matrix dirty range so
+     *  per-instance color updates (setThinInstanceColor) upload only the touched span. */
+    _colorDirtyMin: number;
+    /** @internal Max dirty color instance index (exclusive). */
+    _colorDirtyMax: number;
     /** @internal GPU buffer for per-instance colors. */
     _colorGpuBuffer: GPUBuffer | null;
     /** @internal Whether the current color GPU buffer was created with STORAGE usage. */
@@ -66,6 +71,8 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Arr
             _dirtyMin: 0,
             _dirtyMax: count,
             _colorVersion: 0,
+            _colorDirtyMin: 0,
+            _colorDirtyMax: 0,
             _colorGpuBuffer: null,
             _colorGpuBufferStorage: false,
             _colorGpuVersion: 0,
@@ -117,6 +124,8 @@ export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
             _dirtyMin: 0,
             _dirtyMax: 1,
             _colorVersion: 0,
+            _colorDirtyMin: 0,
+            _colorDirtyMax: 0,
             _colorGpuBuffer: null,
             _colorGpuBufferStorage: false,
             _colorGpuVersion: 0,
@@ -177,6 +186,25 @@ export function setThinInstanceColors(mesh: Mesh, colors: Float32Array): void {
     const ti = mesh.thinInstances!;
     ti.colors = colors;
     ti._colorVersion++;
+    ti._colorDirtyMin = 0;
+    ti._colorDirtyMax = ti.count;
+}
+
+/** Update ONE instance's RGBA color in place — the color twin of `setThinInstanceMatrix`. Only the
+ *  touched span re-uploads (dirty-range), so per-instance color churn (e.g. streamed instances carrying
+ *  per-slot animation timestamps) stays cheap on large pools. Requires colors to have been set via
+ *  `setThinInstanceColors` first. */
+export function setThinInstanceColor(mesh: Mesh, index: number, r: number, g: number, b: number, a: number): void {
+    const ti = mesh.thinInstances!;
+    const c = ti.colors!;
+    const o = index * 4;
+    c[o] = r;
+    c[o + 1] = g;
+    c[o + 2] = b;
+    c[o + 3] = a;
+    ti._colorVersion++;
+    ti._colorDirtyMin = Math.min(ti._colorDirtyMin, index);
+    ti._colorDirtyMax = Math.max(ti._colorDirtyMax, index + 1);
 }
 
 /** Enable or disable GPU frustum culling for an existing thin-instanced mesh.

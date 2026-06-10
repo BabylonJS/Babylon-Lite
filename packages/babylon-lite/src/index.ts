@@ -248,6 +248,7 @@ export {
     setThinInstanceCount,
     flushThinInstances,
     setThinInstanceColors,
+    setThinInstanceColor,
     enableThinInstanceGpuCulling,
 } from "./mesh/thin-instance.js";
 export type { ThinInstanceData } from "./mesh/thin-instance.js";

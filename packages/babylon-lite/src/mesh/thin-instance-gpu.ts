@@ -66,6 +66,7 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
     if (hasColor && ti.colors) {
         if (ti._colorVersion !== ti._colorGpuVersion || ti._colorGpuBufferStorage !== needsStorage) {
             const colorByteSize = ti.count * 16;
+            let colorRecreated = false;
             if (!ti._colorGpuBuffer || ti._colorGpuBuffer.size < colorByteSize || ti._colorGpuBufferStorage !== needsStorage) {
                 ti._colorGpuBuffer?.destroy();
                 ti._colorGpuBuffer = device.createBuffer({
@@ -73,8 +74,16 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
                     usage: BU.VERTEX | BU.COPY_DST | (needsStorage ? BU.STORAGE : 0),
                 });
                 ti._colorGpuBufferStorage = needsStorage;
+                colorRecreated = true;
             }
-            device.queue.writeBuffer(ti._colorGpuBuffer, 0, ti.colors.buffer, ti.colors.byteOffset, colorByteSize);
+            // Upload only the dirty colour range (mirrors the matrix path) — full range on (re)create.
+            const cMin = colorRecreated ? 0 : ti._colorDirtyMin;
+            const cMax = colorRecreated ? ti.count : Math.min(ti._colorDirtyMax, ti.count);
+            if (cMax > cMin) {
+                device.queue.writeBuffer(ti._colorGpuBuffer, cMin * 16, ti.colors.buffer, ti.colors.byteOffset + cMin * 16, (cMax - cMin) * 16);
+            }
+            ti._colorDirtyMin = ti.count;
+            ti._colorDirtyMax = 0;
             ti._colorGpuVersion = ti._colorVersion;
         }
     }
