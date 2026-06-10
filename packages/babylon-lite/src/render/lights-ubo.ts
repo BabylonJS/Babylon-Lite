@@ -40,10 +40,11 @@ function computeLightsVersion(lights: readonly LightBase[]): number {
     return v;
 }
 
-/** Fill a Float32Array with standard light data. Reused by create and refresh paths.
- *  `foX/foY/foZ` is the floating-origin offset (active camera world position)
- *  subtracted from world-space light positions; 0 for non-LWR scenes. */
-function fillLightsData(data: Float32Array, lights: readonly LightBase[], foX = 0, foY = 0, foZ = 0): void {
+/** Fill a Float32Array with standard light data. Reused by create and refresh
+ *  paths. World-space light positions are written precision-only; under
+ *  floating origin the active-camera offset is subtracted afterwards by
+ *  `engine._applyLightFoOffset` (kept out of non-LWR bundles). */
+function fillLightsData(data: Float32Array, lights: readonly LightBase[]): void {
     data.fill(0);
     let count = 0;
     const headerFloats = 4; // count + 3 padding
@@ -54,29 +55,12 @@ function fillLightsData(data: Float32Array, lights: readonly LightBase[], foX = 
         if (!light._writeLightUbo) {
             continue;
         }
-        light._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS, foX, foY, foZ);
+        light._writeLightUbo(data, headerFloats + count * LIGHT_ENTRY_FLOATS);
         count++;
     }
     // Write count as u32 bit pattern into the first float slot (zero allocation)
     _countU32[0] = count;
     data[0] = _countF32[0]!;
-}
-
-const _foOffset = [0, 0, 0];
-
-/** Bake the active-camera floating-origin offset into `_foOffset` (left at 0
- *  when floating origin is off, so the light-position subtraction is a no-op)
- *  and return the camera `worldMatrixVersion` to fold into the UBO version.
- *  The offset is baked into every light position, so a camera move alone must
- *  force a re-upload even when no light property changed; returns 0 for non-LWR
- *  engines so the version is unaffected. */
-function readFoOffset(engine: EngineContext, scene: SceneContext): number {
-    const cam = engine.useFloatingOrigin ? scene.camera : undefined;
-    const w = cam?.worldMatrix;
-    _foOffset[0] = w ? w[12]! : 0;
-    _foOffset[1] = w ? w[13]! : 0;
-    _foOffset[2] = w ? w[14]! : 0;
-    return cam ? cam.worldMatrixVersion : 0;
 }
 
 /** @internal */
@@ -103,12 +87,12 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
     const registerDisposer = !state;
     state?._buffer.destroy();
     const scratch = new Float32Array(byteSize / 4);
-    const foVersion = readFoOffset(engine, scene);
-    fillLightsData(scratch, scene.lights, _foOffset[0], _foOffset[1], _foOffset[2]);
+    fillLightsData(scratch, scene.lights);
+    engine._applyLightFoOffset?.(scratch, scene);
     state = {
         _buffer: createUniformBuffer(engine, scratch),
         _scratch: scratch,
-        _version: computeLightsVersion(scene.lights) + foVersion,
+        _version: computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0),
         _lightCount: scene.lights.length,
         _byteSize: byteSize,
     };
@@ -125,11 +109,12 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
 /** @internal */
 export function refreshSceneLightsUBO(engine: EngineContext, scene: SceneContext): GPUBuffer {
     const state = ensureSceneLightState(engine, scene);
-    const version = computeLightsVersion(scene.lights) + readFoOffset(engine, scene);
+    const version = computeLightsVersion(scene.lights) + (engine._lightFoVersion?.(scene) ?? 0);
     if (version !== state._version || scene.lights.length !== state._lightCount) {
         state._version = version;
         state._lightCount = scene.lights.length;
-        fillLightsData(state._scratch, scene.lights, _foOffset[0], _foOffset[1], _foOffset[2]);
+        fillLightsData(state._scratch, scene.lights);
+        engine._applyLightFoOffset?.(state._scratch, scene);
         engine._device.queue.writeBuffer(state._buffer, 0, state._scratch as Float32Array<ArrayBuffer>);
     }
     return state._buffer;

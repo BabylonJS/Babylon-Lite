@@ -123,6 +123,19 @@ export interface EngineContext {
     _makePackMeshWorld?: (
         scene: import("../scene/scene-core.js").SceneContext
     ) => (view: Float32Array, mat: import("../math/types.js").Mat4 | Float32Array | Float64Array, offsetFloats: number, srcOffsetFloats: number) => void;
+
+    /** @internal Active-camera `worldMatrixVersion` for the lights UBO version,
+     *  and the floating-origin offset applier for positional light entries.
+     *  Both are set only when the engine was created with
+     *  `useFloatingOrigin: true` (dynamic-imported from
+     *  `large-world/floating-origin.js`). The lights UBO folds
+     *  `engine._lightFoVersion?.(scene) ?? 0` into its version and calls
+     *  `engine._applyLightFoOffset?.(scratch, scene)` after filling;
+     *  non-LWR engines leave both undefined so the FO offset code stays out of
+     *  their light bundles (mirrors `_makePackMeshWorld` for mesh worlds). */
+    _lightFoVersion?: (scene: import("../scene/scene-core.js").SceneContext) => number;
+    /** @internal See `_lightFoVersion`. */
+    _applyLightFoOffset?: (data: Float32Array, scene: import("../scene/scene-core.js").SceneContext) => void;
 }
 
 /**
@@ -297,13 +310,17 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // undefined. Tree-shakers drop the module from non-LWR bundles.
     let _wrapRenderableForFO: EngineContext["_wrapRenderableForFO"];
     let _makePackMeshWorld: EngineContext["_makePackMeshWorld"];
+    let _lightFoVersion: EngineContext["_lightFoVersion"];
+    let _applyLightFoOffset: EngineContext["_applyLightFoOffset"];
     if (useFO) {
-        const [{ wrapRenderableForFO }, { makePackMeshWorld }] = await Promise.all([
+        const [{ wrapRenderableForFO, lightFoVersion, applyLightFoOffset }, { makePackMeshWorld }] = await Promise.all([
             import("../large-world/floating-origin.js"),
             import("../large-world/pack-mat4-with-offset.js"),
         ]);
         _wrapRenderableForFO = wrapRenderableForFO;
         _makePackMeshWorld = makePackMeshWorld;
+        _lightFoVersion = lightFoVersion;
+        _applyLightFoOffset = applyLightFoOffset;
     }
 
     const engine: EngineContext = {
@@ -326,6 +343,8 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _cbs: [],
         _wrapRenderableForFO,
         _makePackMeshWorld,
+        _lightFoVersion,
+        _applyLightFoOffset,
     };
 
     resizeEngine(engine);

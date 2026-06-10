@@ -48,12 +48,12 @@ export function createPointLight(position: [number, number, number], intensity =
             intensity,
             range: Number.MAX_VALUE,
 
-            _writeLightUbo: (data: Float32Array, offset: number, foX = 0, foY = 0, foZ = 0) => {
+            _writeLightUbo: (data: Float32Array, offset: number) => {
                 const o = offset;
                 const w = light.worldMatrix;
-                data[o] = w[12]! - foX;
-                data[o + 1] = w[13]! - foY;
-                data[o + 2] = w[14]! - foZ;
+                data[o] = w[12]!;
+                data[o + 1] = w[13]!;
+                data[o + 2] = w[14]!;
                 data[o + 3] = 0;
                 data[o + 4] = light.diffuse[0] * light.intensity;
                 data[o + 5] = light.diffuse[1] * light.intensity;

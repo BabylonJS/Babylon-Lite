@@ -24,11 +24,10 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
     /** @internal Write this light's 64-byte entry into the shared lights UBO.
-     *  `foX/foY/foZ` are the floating-origin offset (active camera world
-     *  position) subtracted from world-space light positions when the engine
-     *  runs with `useFloatingOrigin: true`. They default to 0 (non-LWR engines
-     *  and direction-only lights ignore them). */
-    readonly _writeLightUbo?: ((data: Float32Array, offset: number, foX?: number, foY?: number, foZ?: number) => void) | undefined;
+     *  Positions are written precision-only (raw world space); under floating
+     *  origin the active-camera offset is subtracted afterwards by
+     *  `engine._applyLightFoOffset`, which is kept out of non-LWR bundles. */
+    readonly _writeLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
     /** @internal Monotonically increasing version — bumped when any UBO-relevant property changes. */
     readonly _lightVersion: number;
 }
