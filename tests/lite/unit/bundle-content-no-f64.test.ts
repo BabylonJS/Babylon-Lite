@@ -39,6 +39,7 @@ const BUILD_TAG = "@@MAT4_STORAGE_F64@@";
 const F64_MODULE_HINT = /_mat4-storage-f64/;
 const BUNDLE_DIR = resolve(__dirname, "..", "..", "..", "lab", "public", "bundle");
 const MANIFEST_PATH = join(BUNDLE_DIR, "manifest.json");
+const SCENE_CONFIG_PATH = resolve(__dirname, "..", "..", "..", "scene-config.json");
 
 interface BundleManifestEntry {
     rawKB?: number;
@@ -104,9 +105,18 @@ describe("bundle content: F64 storage tag absent from HPM-off bundles", () => {
     });
 
     it("every other HPM-off scene also lacks the F64 chunk in its runtimeChunks", () => {
-        // Defensive sweep across the whole manifest. HPM-on scenes (added in
-        // Phase 4.3) MAY load the F64 chunk — we whitelist them by slug.
-        const HPM_ON_SLUGS = new Set<string>(["scene200", "scene201"]);
+        // Defensive sweep across the whole manifest. HPM-on scenes legitimately
+        // load the F64 chunk (they create the engine with
+        // `useHighPrecisionMatrix: true` — e.g. the high-precision-jitter and
+        // floating-origin/LWR scenes). Derive that whitelist from
+        // scene-config.json (scenes tagged "hpm", minus the explicit hpm-off
+        // control) so it never goes stale as new HPM/floating-origin scenes are
+        // added — a hardcoded slug list silently rots when the manifest is
+        // regenerated after new HPM scenes land.
+        const sceneConfig = JSON.parse(readFileSync(SCENE_CONFIG_PATH, "utf-8")) as Array<{ id?: number; slug?: string; tags?: string[] }>;
+        const HPM_ON_SLUGS = new Set<string>(
+            sceneConfig.filter((s) => (s.tags ?? []).includes("hpm") && !(s.slug ?? "").includes("hpm-off") && s.id != null).map((s) => `scene${s.id}`)
+        );
         const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf-8")) as BundleManifest;
         const failures: string[] = [];
         for (const [sceneKey, entry] of Object.entries(manifest)) {
