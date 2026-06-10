@@ -68,6 +68,20 @@ export function createMeshFromData(
     return mesh;
 }
 
+/** Force every registered scene's cached render + shadow bundles to RE-RECORD on the next frame, by bumping
+ *  each rendering context's `_renderableVersion` (the same signal a mesh add/remove or `resizeMeshGeometry`
+ *  emits). Use after an out-of-band GPU buffer REALLOCATION that the cached bundles can't otherwise notice —
+ *  e.g. growing a thin-instanced mesh's matrix buffer past its capacity (the bundle captured the old buffer
+ *  handle and would bind a freed buffer). A no-op-cheap version bump; the actual re-record happens lazily. */
+export function invalidateRenderBundles(engine: EngineContext): void {
+    for (const ctx of engine._renderingContexts) {
+        const sc = ctx as { _renderableVersion?: number };
+        if (sc._renderableVersion !== undefined) {
+            sc._renderableVersion++;
+        }
+    }
+}
+
 /** Update a mesh's GPU vertex positions in place (e.g. CPU vertex animation).
  *  `positions` must hold tightly-packed XYZ floats matching the mesh's vertex count.
  *  `vertexOffset` is the first vertex to overwrite (defaults to 0).
@@ -175,6 +189,30 @@ export function updateMeshUvs(engine: EngineContext, mesh: Mesh, uvs: Float32Arr
         return;
     }
     engine._device.queue.writeBuffer(gpu.uvBuffer, vertexOffset * 2 * 4, uvs.buffer as ArrayBuffer, uvs.byteOffset, uvs.byteLength);
+}
+
+/** Re-upload (part of) a mesh's second UV buffer (uv2) — the twin of `updateMeshUvs` for dynamically
+ *  re-generated geometry whose per-vertex uv2 payload changes each rebuild (e.g. a procedural batch that
+ *  re-bakes per-vertex AO / gradient data). The uv2 attribute is vec2 (8 bytes/vertex). No-op if the mesh
+ *  was created without uv2. Zero-allocation GPU upload only. */
+export function updateMeshUv2(engine: EngineContext, mesh: Mesh, uvs2: Float32Array, vertexOffset = 0): void {
+    const gpu = mesh._gpu;
+    if (!gpu.uv2Buffer) {
+        return;
+    }
+    engine._device.queue.writeBuffer(gpu.uv2Buffer, vertexOffset * 2 * 4, uvs2.buffer as ArrayBuffer, uvs2.byteOffset, uvs2.byteLength);
+}
+
+/** Re-upload (part of) a mesh's TANGENT buffer — the twin of `updateMeshColors` for dynamically
+ *  re-generated geometry whose per-vertex tangent (vec4) payload changes each rebuild (e.g. a procedural
+ *  batch that streams a per-vertex coordinate frame / mask through the tangent slot). The tangent attribute
+ *  is vec4 (16 bytes/vertex). No-op if the mesh was created without tangents. Zero-allocation GPU upload only. */
+export function updateMeshTangents(engine: EngineContext, mesh: Mesh, tangents: Float32Array, vertexOffset = 0): void {
+    const gpu = mesh._gpu;
+    if (!gpu.tangentBuffer) {
+        return;
+    }
+    engine._device.queue.writeBuffer(gpu.tangentBuffer, vertexOffset * 4 * 4, tangents.buffer as ArrayBuffer, tangents.byteOffset, tangents.byteLength);
 }
 
 /** Create a sphere mesh. Caller must assign material. */

@@ -52,6 +52,9 @@ export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
 export { createRenderTargetTexture } from "./texture/rtt.js";
+// Pooled GPU samplers (same descriptor → same GPUSampler). Public so consumers building their own
+// sampled-texture wrappers around managed render targets don't have to reach into `engine._device`.
+export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
 export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
 export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
 
@@ -119,7 +122,10 @@ export {
     updateMeshNormals,
     updateMeshColors,
     updateMeshUvs,
+    updateMeshUv2,
+    updateMeshTangents,
     resizeMeshGeometry,
+    invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
@@ -236,6 +242,7 @@ export {
     removeThinInstance,
     setThinInstanceMatrix,
     setThinInstances,
+    setThinInstanceCount,
     flushThinInstances,
     setThinInstanceColors,
     enableThinInstanceGpuCulling,
@@ -358,7 +365,7 @@ export type { RenderTargetSignature } from "./engine/render-target.js";
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
 export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
-export { createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
+export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
 export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";

@@ -78,7 +78,7 @@ const LINE_ALLOWLIST = new Set<string>([
     // produces the same F32 bytes packMat4IntoF32 would write for offset 0.
     // TODO(HPM-followup): collapse into packMat4IntoF32 to fully retire the
     // opaque-Mat4-as-array-like dependency.
-    "packages/babylon-lite/src/mesh/thin-instance.ts:90",
+    "packages/babylon-lite/src/mesh/thin-instance.ts:108",
 ]);
 
 /** Variable-name heuristic: matrix-like identifiers. */

@@ -10,7 +10,7 @@ import { createDepthOfFieldBlurPostProcessTask, type DepthOfFieldBlurPostProcess
 import { createDepthOfFieldMergePostProcessTask, type DepthOfFieldMergePostProcessTask } from "./depth-of-field-merge.js";
 
 /** Quality of the depth-of-field blur. Models BJS `ThinDepthOfFieldEffectBlurLevel`. */
-export const enum DepthOfFieldBlurLevel {
+export enum DepthOfFieldBlurLevel {
     /** Subtle blur — 1 blur level, kernel 15. */
     Low = 0,
     /** Medium blur — 2 blur levels, kernel 31. */
