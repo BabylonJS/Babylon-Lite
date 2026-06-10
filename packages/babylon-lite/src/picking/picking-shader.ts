@@ -41,7 +41,18 @@ struct TIMeshUniforms { baseMeshPickId: u32 };
 @group(1) @binding(1) var<storage, read> instances: array<mat4x4f>;
 ${PICK_FS}
 @vertex fn vs(@location(0) position: vec3f, @builtin(instance_index) instanceIndex: u32) -> VsOut {
-let world = instances[instanceIndex];
+let m = instances[instanceIndex];
+// Treat the instance placement as an AFFINE transform: force the basis columns' homogeneous w to 0 and the
+// translation column's w to 1. Thin-instanced ShaderMaterials may pack per-instance data in those spare w
+// lanes (a sanctioned pattern — Lite injects world0..world3 and the app's own vertex shader zeroes them
+// before transforming, e.g. a frozen anchor Y in world0.w). Picking only needs the transform, so any packed
+// value left in w would corrupt clip.w → wrong depth/rasterisation → the pick returns the wrong instance.
+let world = mat4x4f(
+vec4f(m[0].xyz, 0.0),
+vec4f(m[1].xyz, 0.0),
+vec4f(m[2].xyz, 0.0),
+vec4f(m[3].xyz, 1.0),
+);
 var out: VsOut;
 out.position = scene.viewProjection * world * vec4f(position, 1.0);
 out.pickId = tiMesh.baseMeshPickId + instanceIndex;
