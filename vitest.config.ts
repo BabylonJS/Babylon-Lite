@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
     test: {
         environment: "node",
+        setupFiles: ["./tests/lite/unit/setup-webgpu-globals.ts"],
         reporters: process.env.CI ? ["default", "junit"] : ["default"],
         outputFile: {
             junit: "test-results/unit-junit.xml",

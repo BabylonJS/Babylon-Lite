@@ -1,3 +1,5 @@
+import { F32, U32, U16 } from "../engine/typed-arrays.js";
+import { BU, SS, CW } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
@@ -33,7 +35,7 @@ const BILLBOARD_COLOR_OFFSET_BYTES = 48;
 
 export const BILLBOARD_SYSTEM_UBO_BYTES = 32;
 const BILLBOARD_SYSTEM_UBO_FLOATS = BILLBOARD_SYSTEM_UBO_BYTES / 4;
-export const BILLBOARD_INDEX_DATA: Readonly<Uint16Array> = new Uint16Array([0, 1, 2, 0, 2, 3]);
+export const BILLBOARD_INDEX_DATA: Readonly<Uint16Array> = new U16([0, 1, 2, 0, 2, 3]);
 
 export interface BillboardInstanceSortScratch {
     /** @internal */
@@ -180,16 +182,16 @@ export function createBillboardInstanceBuffer(device: GPUDevice, system: Billboa
     return device.createBuffer({
         label,
         size: system._capacity * BILLBOARD_INSTANCE_STRIDE_BYTES,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        usage: BU.VERTEX | BU.COPY_DST,
     });
 }
 
 export function createBillboardInstanceSortScratch(): BillboardInstanceSortScratch {
     return {
         _capacity: 0,
-        _sortedInstanceData: new Float32Array(0),
-        _sortIndices: new Uint32Array(0),
-        _sortDepths: new Float32Array(0),
+        _sortedInstanceData: new F32(0),
+        _sortIndices: new U32(0),
+        _sortDepths: new F32(0),
     };
 }
 
@@ -279,9 +281,9 @@ function ensureBillboardInstanceSortScratch(scratch: BillboardInstanceSortScratc
         return;
     }
     scratch._capacity = count;
-    scratch._sortedInstanceData = new Float32Array(count * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
-    scratch._sortIndices = new Uint32Array(count);
-    scratch._sortDepths = new Float32Array(count);
+    scratch._sortedInstanceData = new F32(count * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
+    scratch._sortIndices = new U32(count);
+    scratch._sortDepths = new F32(count);
 }
 
 export function buildBillboardSystemUbo(system: BillboardSpriteSystem, ubo: Float32Array): void {
@@ -381,9 +383,9 @@ function buildBillboardPipeline(
     const depthEntry = getDepthModeEntry(system._depthMode);
     const shaderModule = getShaderModule(engine, cache, system);
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
-        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
-        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+        { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+        { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
+        { binding: 2, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
     ];
     const extraLayoutEntries = _getBillboardFxHook()?.layoutEntries(system, 3);
     if (extraLayoutEntries) {
@@ -417,7 +419,7 @@ function buildBillboardPipeline(
         fragment: {
             module: shaderModule,
             entryPoint: "fs",
-            targets: [system.blendMode._descriptor ? { format, blend: system.blendMode._descriptor, writeMask: GPUColorWrite.ALL } : { format, writeMask: GPUColorWrite.ALL }],
+            targets: [system.blendMode._descriptor ? { format, blend: system.blendMode._descriptor, writeMask: CW.ALL } : { format, writeMask: CW.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         depthStencil: { format: depthStencilFormat, depthCompare: "greater-equal", depthWriteEnabled: depthEntry.writeEnabled },

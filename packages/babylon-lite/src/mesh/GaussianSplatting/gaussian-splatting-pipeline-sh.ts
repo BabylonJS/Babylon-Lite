@@ -26,6 +26,8 @@
  *  so Lite reproduces the BJS SH direction by computing
  *  `inverseMat3(worldRot) · (worldPos − eye)` and then negating `.y`. */
 
+import { F32, U8 } from "../../engine/typed-arrays.js";
+import { TU, BU, SS, CW } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Renderable, DrawBinding } from "../../render/renderable.js";
@@ -311,15 +313,15 @@ function getOrCreateShPipeline(engine: EngineContext, sig: RenderTargetSignature
     }
     const shTextureCount = SH_TEXTURE_COUNT[shDegree]!;
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
-        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-        { binding: 1, visibility: GPUShaderStage.VERTEX, sampler: { type: "non-filtering" } },
-        { binding: 2, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-        { binding: 3, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-        { binding: 4, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-        { binding: 5, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
+        { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+        { binding: 1, visibility: SS.VERTEX, sampler: { type: "non-filtering" } },
+        { binding: 2, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+        { binding: 3, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+        { binding: 4, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+        { binding: 5, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
     ];
     for (let i = 0; i < shTextureCount; i++) {
-        layoutEntries.push({ binding: 6 + i, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "uint" } });
+        layoutEntries.push({ binding: 6 + i, visibility: SS.VERTEX, texture: { sampleType: "uint" } });
     }
     const meshBindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
     const pipeline = device.createRenderPipeline({
@@ -342,7 +344,7 @@ function getOrCreateShPipeline(engine: EngineContext, sig: RenderTargetSignature
                         color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
                         alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                     },
-                    writeMask: GPUColorWrite.ALL,
+                    writeMask: CW.ALL,
                 },
             ],
         },
@@ -370,9 +372,9 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4 + 4 * 4;
     const ubo = device.createBuffer({
         size: UBO_BYTES,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        usage: BU.UNIFORM | BU.COPY_DST,
     });
-    const cpu = new Float32Array(UBO_BYTES / 4);
+    const cpu = new F32(UBO_BYTES / 4);
 
     cpu[48 + 4] = mesh.textureWidth;
     cpu[48 + 5] = mesh.textureHeight;
@@ -472,9 +474,9 @@ export function buildGaussianSplattingRenderableSH(scene: SceneContext, mesh: Ga
         mesh._canPostToWorker = false;
         mesh._worker.postMessage(
             {
-                m: new Float32Array(world),
-                f: new Float32Array([cf0, cf1, cf2]),
-                c: new Float32Array([camPos.x, camPos.y, camPos.z]),
+                m: new F32(world),
+                f: new F32([cf0, cf1, cf2]),
+                c: new F32([camPos.x, camPos.y, camPos.z]),
                 d: mesh._depthMix,
             },
             [mesh._depthMix.buffer]
@@ -527,7 +529,7 @@ export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: Gaussia
     const views: GPUTextureView[] = [];
     const vertexCount = mesh.vertexCount;
     for (let t = 0; t < textureCount; t++) {
-        const dst = new Uint8Array(width * height * 16);
+        const dst = new U8(width * height * 16);
         const tBase = t * 16;
         const bytesThisTex = Math.min(16, shCoefficientCount - tBase);
         for (let i = 0; i < vertexCount; i++) {
@@ -540,7 +542,7 @@ export function attachGaussianSplattingMeshSH(scene: SceneContext, mesh: Gaussia
         const tex = device.createTexture({
             size: [width, height],
             format: "rgba32uint",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST,
         });
         device.queue.writeTexture({ texture: tex }, dst.buffer, { bytesPerRow: width * 16 }, { width, height });
         textures.push(tex);

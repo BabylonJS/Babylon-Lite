@@ -1,8 +1,8 @@
-// Scene 176 — MosquitoInAmber (KHR transmission + ior + volume)
+// MosquitoInAmber (KHR transmission + ior + volume)
 // Reproduces the Babylon.js sandbox view of the Khronos MosquitoInAmber model
 // against the studio.env HDR environment (used as both IBL and a visible HDR
 // skybox), with frame-graph scene-texture transmission for the translucent amber.
-// Static camera (no auto-rotation) for a deterministic golden.
+// Static camera (no auto-rotation).
 
 import {
     addToScene,
@@ -18,18 +18,19 @@ import {
     loadGltf,
     onBeforeRender,
     registerScene,
+    setCameraLimits,
     startEngine,
     type RenderTask,
 } from "babylon-lite";
-import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
+import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
+import { installFetchProgress } from "./loading-progress.js";
 
 const MODEL_URL = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/MosquitoInAmber/glTF/MosquitoInAmber.gltf";
 const ENV_URL = "https://assets.babylonjs.com/environments/studio.env";
 
 // Fixed camera pose framing the amber from the sandbox cameraPosition
 // (-0.14, 0.005, 0.03) relative to the auto-framed model centre. Hardcoded here
-// (and mirrored exactly in src/bjs/scene176.ts) so both renders use an identical
-// view independent of auto-framing.
+// so the render uses a consistent view independent of auto-framing.
 const CAM = {
     alpha: 1.9445,
     beta: 1.5454,
@@ -41,6 +42,7 @@ const CAM = {
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 24_500_000 });
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -54,7 +56,18 @@ async function main(): Promise<void> {
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
-    await configureDemoDracoBase(import.meta.url);
+    // Keep the inspect gesture sane: bound pinch/wheel zoom around the framed pose
+    // so the amber can't be zoomed inside-out or shrunk to a speck.
+    setCameraLimits(
+        cam,
+        {
+            lowerRadiusLimit: CAM.radius * 0.4,
+            upperRadiusLimit: CAM.radius * 2.5,
+        },
+        scene,
+    );
+
+    await configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, MODEL_URL).then((asset) => addToScene(scene, asset)),
@@ -97,6 +110,7 @@ async function main(): Promise<void> {
     addToScene(scene, skybox);
 
     await registerScene(engine, scene);
+    progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.camAlpha = String(cam.alpha);

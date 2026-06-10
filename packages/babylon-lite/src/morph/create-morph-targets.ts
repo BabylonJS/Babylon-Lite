@@ -6,6 +6,8 @@
  *  (shader/fragments/morph-fragment.ts) and composed at pipeline
  *  creation time — no global registration needed. */
 
+import { F32, U32, U8 } from "../engine/typed-arrays.js";
+import { TU, BU } from "../engine/gpu-flags.js";
 import type { MorphTargetData } from "../animation/types.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -30,7 +32,7 @@ export function createMorphTargets(
     const totalRows = targetCount * 2 * rowsPerBand;
 
     // Build tiled rgba32float texture
-    const texData = new Float32Array(texWidth * totalRows * 4);
+    const texData = new F32(texWidth * totalRows * 4);
     for (let t = 0; t < targetCount; t++) {
         const tgt = targets[t]!;
         const posBandRow = t * 2 * rowsPerBand;
@@ -56,14 +58,14 @@ export function createMorphTargets(
     const texture = device.createTexture({
         size: [texWidth, totalRows],
         format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
     device.queue.writeTexture({ texture }, texData.buffer, { bytesPerRow: texWidth * 16 }, { width: texWidth, height: totalRows });
 
     // Weights UBO: vec4 weights + count + texWidth + rowsPerBand + pad = 32 bytes
     const uboData = new ArrayBuffer(32);
-    const weights = new Float32Array(uboData, 0, 4);
-    const u32 = new Uint32Array(uboData, 16, 4);
+    const weights = new F32(uboData, 0, 4);
+    const u32 = new U32(uboData, 16, 4);
     for (let i = 0; i < targetCount; i++) {
         weights[i] = morphWeights?.[i] ?? 0;
     }
@@ -71,7 +73,7 @@ export function createMorphTargets(
     u32[1] = texWidth;
     u32[2] = rowsPerBand;
 
-    const weightsBuffer = createMappedBuffer(engine, new Uint8Array(uboData), GPUBufferUsage.UNIFORM);
+    const weightsBuffer = createMappedBuffer(engine, new U8(uboData), BU.UNIFORM);
 
     return { texture, count: targetCount, weightsBuffer, targets: targets.slice(0, targetCount), weights };
 }

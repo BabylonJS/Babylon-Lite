@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mesh } from "./mesh.js";
 import type { Mat4 } from "../math/types.js";
@@ -410,7 +411,7 @@ function createMeshFromPolygons(engine: EngineContext, polygons: readonly CsgPol
         }
     }
 
-    return createMeshFromData(engine as EngineContext, name, new Float32Array(positions), new Float32Array(normals), new Uint32Array(indices), new Float32Array(uvs));
+    return createMeshFromData(engine as EngineContext, name, new F32(positions), new F32(normals), new U32(indices), new F32(uvs));
 }
 
 /**

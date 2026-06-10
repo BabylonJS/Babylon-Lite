@@ -36,6 +36,30 @@ export interface SpriteAtlas {
     readonly textureSizePx: readonly [number, number];
     readonly frames: readonly SpriteFrame[];
     readonly premultipliedAlpha: boolean;
+    /** @internal Mutable shelf-pack cursor + parameters carried by atlases built via the runtime
+     *  packer (`createSpriteAtlasFromFrames`). `appendSpriteAtlasFrames` resumes packing into the
+     *  remaining capacity using this state. Absent on atlases built via `createGridSpriteAtlas` /
+     *  `loadSpriteAtlas` — those cannot be appended to. */
+    _packState?: SpriteAtlasPackState;
+    /** @internal Mutable alias of `frames` (same underlying array) for the runtime packer to
+     *  push new entries into without casting away `readonly`. Always set together with
+     *  `_packState` (i.e. only on atlases built via `createSpriteAtlasFromFrames`). */
+    _frames?: SpriteFrame[];
+}
+
+/** @internal Shelf-pack cursor + parameters for runtime atlas packing. Mutated by
+ *  `appendSpriteAtlasFrames` to track free space across calls. */
+export interface SpriteAtlasPackState {
+    /** Current shelf x-cursor (px). */
+    penX: number;
+    /** Current shelf y-cursor (px). */
+    penY: number;
+    /** Height of the current shelf (px); the next shelf will start at `penY + shelfHeight + padding`. */
+    shelfHeight: number;
+    /** Shelf wrap width (px); from `SpriteAtlasPackOptions.maxWidthPx`. */
+    maxWidth: number;
+    /** Gap between packed frames (px); from `SpriteAtlasPackOptions.paddingPx`. */
+    padding: number;
 }
 
 /** Options for `createGridSpriteAtlas`. */

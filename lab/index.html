@@ -2845,26 +2845,11 @@
                     .join("");
             }
 
-            function handleCardImageError(img) {
-                var fallbacks = ["/lite/reference/" + img.dataset.refSlug + "/babylon-ref-golden.png", "/lite/thumbnails/scene" + img.dataset.sceneId + ".png"];
-                var fallbackIndex = Number(img.dataset.fallbackIndex || "0");
-                if (fallbackIndex >= fallbacks.length) {
-                    img.onerror = null;
-                    return;
-                }
-                img.dataset.fallbackIndex = String(fallbackIndex + 1);
-                img.src = fallbacks[fallbackIndex];
-            }
-
             function renderSceneCardImage(s, priorityAttrs) {
                 return (
-                    '<img src="/lite/reference/' +
-                    s.slug +
-                    '/test-actual.png" data-ref-slug="' +
-                    s.slug +
-                    '" data-scene-id="' +
+                    '<img src="/lite/thumbnails/scene' +
                     s.id +
-                    '" data-fallback-index="0" onerror="handleCardImageError(this)" alt="' +
+                    '.jpg" onerror="this.style.display=\'none\'" alt="' +
                     s.name +
                     '"' +
                     priorityAttrs +
@@ -3185,7 +3170,7 @@
                             '<div class="card-image">' +
                             '<img src="/lite/thumbnails/demo-' +
                             d.slug +
-                            '.png" onerror="this.style.display=\'none\'" alt="' +
+                            '.jpg" onerror="this.style.display=\'none\'" alt="' +
                             escapeAttr(d.name) +
                             '" loading="lazy" decoding="async" />' +
                             "</div>" +
@@ -5908,7 +5893,7 @@
             function pitchThumbSrc(sceneNum) {
                 var img = document.querySelector('.card[href="/lite/scene' + sceneNum + '.html"] img');
                 if (img) return img.getAttribute("src");
-                return "/lite/thumbnails/scene" + sceneNum + ".png";
+                return "/lite/thumbnails/scene" + sceneNum + ".jpg";
             }
 
             function renderPitchTable(data) {

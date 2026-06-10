@@ -228,14 +228,21 @@ Render targets are pure-state descriptors plus owned GPU texture handles. `build
 
 ```typescript
 export interface RenderTargetSignature {
-    colorFormat: GPUTextureFormat;
-    depthStencilFormat?: GPUTextureFormat;
-    sampleCount: number;
-    flipY?: boolean;
+    readonly _colorFormat?: GPUTextureFormat;
+    readonly _depthStencilFormat?: GPUTextureFormat;
+    readonly _depthCompare?: GPUCompareFunction;
+    readonly _sampleCount: number;
+    readonly _flipY?: boolean;
 }
 ```
 
-Material pipelines are cached by target signature. Offscreen render targets set `flipY: true`, because their projection matrix is Y-flipped so the resulting texture samples upright in later passes. Pipeline builders must account for this signature bit when creating culling/front-face state.
+Material pipelines are cached by target signature. `_flipY` is derived at task creation from `desc.flipY ?? !resolveToSwapchain` — offscreen RTs render with a Y-flipped projection so their texture samples upright in later passes; swapchain RTs render upright directly. Pipeline builders flip `frontFace` (`"ccw"` → `"cw"`) when `_flipY` is set so back-face culling stays correct.
+
+`RenderTargetDescriptor.flipY` is a public override. Most scenes leave it unset and get the right convention from `resolveToSwapchain`. Known cases that set it:
+
+- **Shadow-map RTs** (`shadow-base.ts`): `flipY: false`. Shadow maps are sampled in light-space, not screen-space, so Y-flip would invert sampling.
+- **Transmission retargeting** (`transmission.ts`): forces `flipY = false` on the linear-offscreen color target so the transmission blit/sample chain stays upright through MSAA + image-processing.
+- **Pipelined post-process chains** with a directionally-Y-asymmetric pass (Scene 143's chromatic aberration): set `flipY: false` on the scene-source RT so the asymmetric shift is computed in screen-correct orientation rather than mirrored.
 
 ### Eager RTT Texture
 
@@ -414,7 +421,7 @@ Each `RenderTask` owns:
 
 The writer bails before touching scratch/GPU when camera, fog, aspect, environment rotation, exposure, and contrast are unchanged.
 
-Offscreen targets use `targetSignature.flipY` and negate the projection row so downstream texture sampling is upright. Swapchain targets do not flip.
+Offscreen targets use `targetSignature._flipY` and negate the projection row so downstream texture sampling is upright. Swapchain targets do not flip. See "Target Signature" above for the descriptor-side `flipY` override and the known overriding cases.
 
 ## Usage: Offscreen Pass Feeding a Material
 

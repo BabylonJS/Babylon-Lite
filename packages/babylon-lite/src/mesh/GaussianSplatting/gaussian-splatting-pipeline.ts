@@ -16,6 +16,8 @@
  *
  *  The pipeline is cached per `RenderTargetSignature`. */
 
+import { F32 } from "../../engine/typed-arrays.js";
+import { BU, SS, CW } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Renderable, DrawBinding } from "../../render/renderable.js";
@@ -132,12 +134,12 @@ function getOrCreatePipeline(engine: EngineContext, sig: RenderTargetSignature, 
     }
     const meshBindGroupLayout = device.createBindGroupLayout({
         entries: [
-            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.VERTEX, sampler: { type: "non-filtering" } },
-            { binding: 2, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-            { binding: 3, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-            { binding: 4, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-            { binding: 5, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 1, visibility: SS.VERTEX, sampler: { type: "non-filtering" } },
+            { binding: 2, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 3, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 4, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 5, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
         ],
     });
     const pipeline = device.createRenderPipeline({
@@ -169,7 +171,7 @@ function getOrCreatePipeline(engine: EngineContext, sig: RenderTargetSignature, 
                         color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
                         alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                     },
-                    writeMask: GPUColorWrite.ALL,
+                    writeMask: CW.ALL,
                 },
             ],
         },
@@ -196,9 +198,9 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4; // 3 mat4 + viewport,focal,dataSize,alpha,pad → 224 bytes
     const ubo = device.createBuffer({
         size: UBO_BYTES,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        usage: BU.UNIFORM | BU.COPY_DST,
     });
-    const cpu = new Float32Array(UBO_BYTES / 4);
+    const cpu = new F32(UBO_BYTES / 4);
 
     // dataSize is constant for the lifetime of this mesh; pre-write it.
     cpu[48 + 4] = mesh.textureWidth;
@@ -305,9 +307,9 @@ export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: Gaus
         mesh._canPostToWorker = false;
         mesh._worker.postMessage(
             {
-                m: new Float32Array(world),
-                f: new Float32Array([cf0, cf1, cf2]),
-                c: new Float32Array([camPos.x, camPos.y, camPos.z]),
+                m: new F32(world),
+                f: new F32([cf0, cf1, cf2]),
+                c: new F32([camPos.x, camPos.y, camPos.z]),
                 d: mesh._depthMix,
             },
             [mesh._depthMix.buffer]

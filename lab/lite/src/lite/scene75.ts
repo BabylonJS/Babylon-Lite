@@ -27,9 +27,9 @@ async function main(): Promise<void> {
     scene.clearColor = SCENE_CLEAR_COLOR;
 
     const { rt, texture } = createRenderTargetTexture(engine, {
-        label: "scene75-effect-rtt",
-        colorFormat: "rgba8unorm",
-        sampleCount: 1,
+        lbl: "scene75-effect-rtt",
+        format: "rgba8unorm",
+        samples: 1,
         size: { width: 512, height: 512 },
     });
 

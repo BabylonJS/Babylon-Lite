@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /**
  * CreatePlane — matches Babylon.js MeshBuilder.CreatePlane defaults.
  *
@@ -27,27 +28,27 @@ export function createPlaneData(options: PlaneOptions = {}): PlaneData {
     const hh = height / 2;
 
     // prettier-ignore
-    const positions = new Float32Array([
+    const positions = new F32([
         -hw, -hh, 0,
          hw, -hh, 0,
          hw,  hh, 0,
         -hw,  hh, 0,
     ]);
     // prettier-ignore
-    const normals = new Float32Array([
+    const normals = new F32([
         0, 0, -1,
         0, 0, -1,
         0, 0, -1,
         0, 0, -1,
     ]);
     // prettier-ignore
-    const uvs = new Float32Array([
+    const uvs = new F32([
         0, 0,
         1, 0,
         1, 1,
         0, 1,
     ]);
-    const indices = new Uint32Array([0, 1, 2, 0, 2, 3]);
+    const indices = new U32([0, 1, 2, 0, 2, 3]);
 
     return { positions, normals, uvs, indices };
 }

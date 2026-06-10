@@ -15,6 +15,7 @@
  * keeps spinning at full speed — the whole reason offscreen rendering exists.
  */
 import { BRDF_ASSET, startOffscreenScene } from "./offscreen-scene";
+import { installFetchProgress } from "./loading-progress.js";
 
 const DPR = (): number => globalThis.devicePixelRatio || 1;
 
@@ -34,6 +35,10 @@ async function main(): Promise<void> {
     const workerStatus = document.getElementById("workerStatus");
     const slowButton = document.getElementById("slowButton") as HTMLButtonElement | null;
 
+    // The main-thread (left) engine performs the real asset downloads (glTF +
+    // environment); the worker re-uses the warm HTTP cache. Report that download.
+    const progress = installFetchProgress(leftCanvas, { estimatedBytes: 55_700_000 });
+
     let leftReady = false;
     let rightReady = false;
     const markReadyIfDone = (): void => {
@@ -45,10 +50,12 @@ async function main(): Promise<void> {
     // ── LEFT: main-thread engine, rendered directly on the DOM canvas. ──
     void startOffscreenScene(leftCanvas, BRDF_URL)
         .then(() => {
+            progress.done();
             leftReady = true;
             markReadyIfDone();
         })
         .catch((err: unknown) => {
+            progress.done();
             leftCanvas.dataset.error = String(err);
         });
 

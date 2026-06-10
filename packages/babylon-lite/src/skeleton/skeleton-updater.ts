@@ -1,6 +1,7 @@
 // Per-frame skeleton animation — evaluates clips and uploads bone matrices.
 // Zero per-frame allocation: all scratch buffers pre-allocated at init.
 
+import { F32, I32, U8 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { AnimationClip, NodeRest, SkeletonBinding, AnimatedNodeTarget } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
@@ -11,11 +12,11 @@ import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
 
 // Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
-const _boneTmp = new Float32Array(16);
+const _boneTmp = new F32(16);
 
 // RH→LH root transform (same as load-gltf.ts): diag(-1, 1, 1, 1)
 // prettier-ignore
-const RH_TO_LH = new Float32Array([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
+const RH_TO_LH = new F32([-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]);
 
 /** TRS layout per node in the scratch buffer: 12 floats.
  *  [0..2] = translation, [3..6] = rotation (xyzw), [7..9] = scale, [10..11] = padding */
@@ -27,8 +28,8 @@ const S_OFF = 7;
 /** Compute topological order so parents are processed before children. */
 function computeTopoOrder(nodes: readonly { readonly parentIdx: number }[]): Int32Array {
     const n = nodes.length;
-    const order = new Int32Array(n);
-    const visited = new Uint8Array(n);
+    const order = new I32(n);
+    const visited = new U8(n);
     let cursor = 0;
 
     function visit(idx: number): void {
@@ -111,9 +112,9 @@ export function createAnimationController(
     }
 
     // Pre-allocate scratch buffers (once)
-    const currentTRS = new Float32Array(numNodes * TRS_STRIDE);
-    const localMat = new Float32Array(numNodes * 16);
-    const worldMat = new Float32Array(numNodes * 16);
+    const currentTRS = new F32(numNodes * TRS_STRIDE);
+    const localMat = new F32(numNodes * 16);
+    const worldMat = new F32(numNodes * 16);
     const topoOrder = computeTopoOrder(nodes);
 
     // Per-skeleton bone scratch
@@ -131,10 +132,10 @@ export function createAnimationController(
         arr.push(mb);
     }
     // Only write first 16 bytes (weights vec4) — count/texWidth/rowsPerBand are immutable
-    const morphUploadF32 = new Float32Array(4);
+    const morphUploadF32 = new F32(4);
     // Pointer-channel scratch (sized to largest registered pointer arity).
     // Current registered writers need at most 4 (quaternion/color4). Keep 16 for headroom.
-    const pointerScratch = new Float32Array(16);
+    const pointerScratch = new F32(16);
 
     let cachedEngine: EngineContext | undefined;
 

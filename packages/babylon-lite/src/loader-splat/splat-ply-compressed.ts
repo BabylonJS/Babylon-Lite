@@ -16,6 +16,7 @@
  *  Returns the same `ParsedSplat` contract as `convertPlyToSplat` (flat SH
  *  byte layout — see `splat-data.ts` for the exact convention). */
 
+import { F32, U8C, U8, DV } from "../engine/typed-arrays.js";
 import type { ParsedSplat } from "./splat-data.js";
 
 const SH_C0 = 0.28209479177387814;
@@ -67,7 +68,7 @@ function shDegreeForIndex(i: number): number {
 }
 
 function parseHeader(data: ArrayBuffer): PlyHeader | null {
-    const headerText = new TextDecoder().decode(new Uint8Array(data, 0, Math.min(data.byteLength, 1024 * 10)));
+    const headerText = new TextDecoder().decode(new U8(data, 0, Math.min(data.byteLength, 1024 * 10)));
     const headerEnd = "end_header\n";
     const idx = headerText.indexOf(headerEnd);
     if (idx < 0) {
@@ -309,7 +310,7 @@ export function convertCompressedPlyToParsedSplat(data: ArrayBuffer): ParsedSpla
     }
 
     const isCompressed = header.chunkCount > 0;
-    const dv = new DataView(data, header.dataStart);
+    const dv = new DV(data, header.dataStart);
     const out = new ArrayBuffer(ROW_OUTPUT_LENGTH * header.vertexCount);
 
     const tmpPos: [number, number, number] = [0, 0, 0];
@@ -320,15 +321,15 @@ export function convertCompressedPlyToParsedSplat(data: ArrayBuffer): ParsedSpla
     const offsetRef = { value: 0 };
     const chunks = isCompressed ? readChunks(header, dv, offsetRef) : null;
 
-    const shFlat = header.shDegree && header.shCoefficientCount ? new Uint8Array(header.shCoefficientCount * header.vertexCount) : null;
+    const shFlat = header.shDegree && header.shCoefficientCount ? new U8(header.shCoefficientCount * header.vertexCount) : null;
     const shBlockBase = header.rowChunkLength * header.chunkCount + header.vertexCount * header.rowVertexLength;
     const shDim = header.shCoefficientCount / 3;
 
     for (let i = 0; i < header.vertexCount; i++) {
-        const position = new Float32Array(out, i * ROW_OUTPUT_LENGTH, 3);
-        const scale = new Float32Array(out, i * ROW_OUTPUT_LENGTH + 12, 3);
-        const rgba = new Uint8ClampedArray(out, i * ROW_OUTPUT_LENGTH + 24, 4);
-        const rot = new Uint8ClampedArray(out, i * ROW_OUTPUT_LENGTH + 28, 4);
+        const position = new F32(out, i * ROW_OUTPUT_LENGTH, 3);
+        const scale = new F32(out, i * ROW_OUTPUT_LENGTH + 12, 3);
+        const rgba = new U8C(out, i * ROW_OUTPUT_LENGTH + 24, 4);
+        const rot = new U8C(out, i * ROW_OUTPUT_LENGTH + 28, 4);
         const chunk = chunks ? chunks[i >> 8] : null;
 
         let r0 = 255,

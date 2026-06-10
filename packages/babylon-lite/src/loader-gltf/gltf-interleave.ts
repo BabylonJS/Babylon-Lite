@@ -13,6 +13,8 @@
  * that only render never materialize it.
  */
 
+import { F32, U32, U16, U8, DV } from "../engine/typed-arrays.js";
+import { BU } from "../engine/gpu-flags.js";
 import type { Mat4 } from "../math/types.js";
 import type { Aabb } from "../math/aabb.js";
 import { computeAabb } from "../math/compute-aabb.js";
@@ -93,7 +95,7 @@ function resolveStrided(json: any, binChunk: DataView, accessorIdx: number): Acc
         _componentType: accessor.componentType,
         _componentCount: TYPE_SIZES[accessor.type] ?? 1,
         _count: accessor.count,
-        _slice: new Uint8Array(ab, binChunk.byteOffset + (bufferView.byteOffset ?? 0), bufferView.byteLength),
+        _slice: new U8(ab, binChunk.byteOffset + (bufferView.byteOffset ?? 0), bufferView.byteLength),
     };
 }
 
@@ -101,11 +103,11 @@ function resolveStrided(json: any, binChunk: DataView, accessorIdx: number): Acc
  *  component values (no normalization) so the result matches what a tight
  *  accessor view would have produced. */
 function destrideToTight(il: AccessorInterleave): Float32Array {
-    const dv = new DataView(il._slice!.buffer, il._slice!.byteOffset, il._slice!.byteLength);
+    const dv = new DV(il._slice!.buffer, il._slice!.byteOffset, il._slice!.byteLength);
     const cb = COMP_BYTES[il._componentType] ?? 4;
     const ct = il._componentType;
     const cc = il._componentCount;
-    const out = new Float32Array(il._count * cc);
+    const out = new F32(il._count * cc);
     for (let v = 0; v < il._count; v++) {
         const rowBase = il._offset + v * il._stride;
         for (let c = 0; c < cc; c++) {
@@ -189,20 +191,20 @@ export function buildInterleavedPartial(json: any, binChunk: DataView, primitive
     // Absent (not merely strided) NORMAL/UV need a tight zero-filled buffer so the
     // GPU has a bindable vertex buffer — matches the core loader's tight path.
     if (!normals && !vb._n) {
-        normals = new Float32Array(vertexCount * 3);
+        normals = new F32(vertexCount * 3);
     }
     if (!uvs && !vb._u) {
-        uvs = new Float32Array(vertexCount * 2);
+        uvs = new F32(vertexCount * 2);
     }
 
     const idxData = primitive.indices !== undefined ? resolveAccessor(json, binChunk, primitive.indices) : null;
     const indices = idxData
-        ? idxData._data instanceof Uint32Array
-            ? new Uint32Array(idxData._data)
-            : idxData._data instanceof Uint8Array
+        ? idxData._data instanceof U32
+            ? new U32(idxData._data)
+            : idxData._data instanceof U8
               ? Uint16Array.from(idxData._data)
-              : new Uint16Array(idxData._data.buffer, idxData._data.byteOffset, idxData._count)
-        : new Uint16Array(0);
+              : new U16(idxData._data.buffer, idxData._data.byteOffset, idxData._count)
+        : new U16(0);
 
     return {
         _positions: positions,
@@ -231,11 +233,11 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
     const shared = new Map<number, GPUBuffer>();
     const vbuf = (a: AccessorInterleave | undefined, tight: Float32Array | null): GPUBuffer | null => {
         if (!a) {
-            return tight ? createMappedBuffer(engine, tight, GPUBufferUsage.VERTEX) : null;
+            return tight ? createMappedBuffer(engine, tight, BU.VERTEX) : null;
         }
         let b = shared.get(a._bufferView);
         if (!b) {
-            shared.set(a._bufferView, (b = createMappedBuffer(engine, a._slice!, GPUBufferUsage.VERTEX)));
+            shared.set(a._bufferView, (b = createMappedBuffer(engine, a._slice!, BU.VERTEX)));
         }
         return b;
     };
@@ -246,9 +248,9 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
         uvBuffer: vbuf(vbsrc._u, m._uvs)!,
         uv2Buffer: m._uv2s ? vbuf(vbsrc._u2, m._uv2s) : null,
         colorBuffer: m._colors ? vbuf(vbsrc._c, m._colors) : null,
-        indexBuffer: createMappedBuffer(engine, m._indices, GPUBufferUsage.INDEX),
+        indexBuffer: createMappedBuffer(engine, m._indices, BU.INDEX),
         indexCount: m._indexCount,
-        indexFormat: (m._indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
+        indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
         _vbLayout: vbsrc,
         _vbKey: `vb${vbsrc._p?._stride ?? 0}.${vbsrc._n?._stride ?? 0}.${vbsrc._t?._stride ?? 0}.${vbsrc._u?._stride ?? 0}`,
     };
@@ -280,7 +282,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
 
     // Lazy CPU geometry: the de-strided tight copy is built only on first read.
     installLazyCpu(mesh, m);
-    mesh._cpuIndices = m._indices instanceof Uint32Array ? m._indices : new Uint32Array(m._indices);
+    mesh._cpuIndices = m._indices instanceof U32 ? m._indices : new U32(m._indices);
     engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
 
     return mesh as Mesh;
@@ -290,7 +292,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
  *  source — no tight copy is materialized. Mirrors {@link computeAabb}'s
  *  world-transform handling. All current interleaved assets use FLOAT positions. */
 export function computeAabbStrided(il: AccessorInterleave, world?: Mat4): Aabb {
-    const dv = new DataView(il._slice!.buffer, il._slice!.byteOffset, il._slice!.byteLength);
+    const dv = new DV(il._slice!.buffer, il._slice!.byteOffset, il._slice!.byteLength);
     let minX = Infinity,
         minY = Infinity,
         minZ = Infinity;

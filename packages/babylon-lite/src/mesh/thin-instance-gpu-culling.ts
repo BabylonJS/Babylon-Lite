@@ -5,6 +5,8 @@
  * never clobber one another's compacted instance buffers or indirect args.
  */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
+import { BU } from "../engine/gpu-flags.js";
 import type { Camera } from "../camera/camera.js";
 import { getViewProjectionMatrix } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -124,11 +126,11 @@ export function createTiCullState(): ThinInstanceGpuCullState {
         _srcColorBuffer: null,
         _hasColor: false,
         _localSphereReady: false,
-        _localSphere: new Float32Array(4),
+        _localSphere: new F32(4),
         _paramsBytes: paramsBytes,
-        _paramsF32: new Float32Array(paramsBytes),
-        _paramsU32: new Uint32Array(paramsBytes),
-        _argsData: new Uint32Array(5),
+        _paramsF32: new F32(paramsBytes),
+        _paramsU32: new U32(paramsBytes),
+        _argsData: new U32(5),
         _drawBuffers: null,
     };
 }
@@ -224,12 +226,12 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
         state._visibleColorBuffer?.destroy();
         state._visibleMatrixBuffer = device.createBuffer({
             size: Math.max(capacity * 64, 4),
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
+            usage: BU.VERTEX | BU.STORAGE,
         });
         state._visibleColorBuffer = hasColor
             ? device.createBuffer({
                   size: Math.max(capacity * 16, 4),
-                  usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
+                  usage: BU.VERTEX | BU.STORAGE,
               })
             : null;
         state._capacity = capacity;
@@ -238,7 +240,7 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
     } else if (hasColor && !state._visibleColorBuffer) {
         state._visibleColorBuffer = device.createBuffer({
             size: Math.max(state._capacity * 16, 4),
-            usage: GPUBufferUsage.VERTEX | GPUBufferUsage.STORAGE,
+            usage: BU.VERTEX | BU.STORAGE,
         });
         state._bindGroup = null;
         state._drawBuffers = null;
@@ -246,13 +248,13 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
     if (!state._argsBuffer) {
         state._argsBuffer = device.createBuffer({
             size: INDIRECT_ARGS_BYTES,
-            usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            usage: BU.INDIRECT | BU.STORAGE | BU.COPY_DST,
         });
     }
     if (!state._paramsBuffer) {
         state._paramsBuffer = device.createBuffer({
             size: PARAM_BYTES,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            usage: BU.UNIFORM | BU.COPY_DST,
         });
     }
 }

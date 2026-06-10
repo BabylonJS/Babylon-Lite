@@ -427,6 +427,12 @@
             body.no-webgpu .fx-toggle {
                 display: none;
             }
+            /* Mobile: no live background effect (battery/GPU), so hide the
+               (blank) canvas and its toggle — the branded baseline shows. */
+            body.is-mobile #bgCanvas,
+            body.is-mobile .fx-toggle {
+                display: none;
+            }
         </style>
     </head>
     <body>

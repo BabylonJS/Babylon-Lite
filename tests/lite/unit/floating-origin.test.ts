@@ -53,7 +53,16 @@ function makeMockEngine(hpm = false, useFO = false): EngineContext {
         _renderFn: null,
         _renderingContexts: [],
         _currentEncoder: {} as GPUCommandEncoder,
-        _swapchainView: {} as GPUTextureView,
+        scRT: {
+            _colorView: {},
+            _colorTexture: {},
+            _depthTexture: null,
+            _depthView: null,
+            _descriptor: { format: "bgra8unorm", samples: 1, size: "canvas" },
+            _width: 0,
+            _height: 0,
+            _eager: true,
+        } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget,
         _currentDelta: 16.67,
         _cbs: [],
     } as EngineContext;

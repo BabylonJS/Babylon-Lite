@@ -23,6 +23,7 @@
  *  All SPZ-specific code lives here so non-SPZ scenes don't pay the bundle
  *  cost. */
 
+import { F32, U32, I32, U8C, U8 } from "../engine/typed-arrays.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { ParsedSplat } from "./splat-data.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
@@ -34,7 +35,7 @@ const MAGIC_NGSP = 0x5053474e; // 'NGSP' little-endian
 /** Decompress a gzip-wrapped buffer via the browser's DecompressionStream. */
 async function decompressGzip(bytes: Uint8Array): Promise<Uint8Array> {
     const stream = new Response(new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip")));
-    return new Uint8Array(await stream.arrayBuffer());
+    return new U8(await stream.arrayBuffer());
 }
 
 /** Sign-extend the 3 bytes at `offset` into an i32 and scale by `positionScale`. */
@@ -50,11 +51,11 @@ const clamp255 = (v: number): number => (v < 0 ? 0 : v > 255 ? 255 : v);
 
 /** Parse a decompressed SPZ buffer into the engine's standard ParsedSplat. */
 function parseSpz(data: ArrayBuffer): ParsedSplat {
-    const ubuf = new Uint8Array(data);
+    const ubuf = new U8(data);
     if (ubuf.byteLength < 16) {
         throw new Error("loadSPZ: file too short to contain header");
     }
-    const ubuf32 = new Uint32Array(data.slice(0, 12));
+    const ubuf32 = new U32(data.slice(0, 12));
     const splatCount = ubuf32[2]!;
     const shDegree = ubuf[12]!;
     const fractionalBits = ubuf[13]!;
@@ -67,14 +68,14 @@ function parseSpz(data: ArrayBuffer): ParsedSplat {
 
     const ROW = 32;
     const buffer = new ArrayBuffer(ROW * splatCount);
-    const position = new Float32Array(buffer);
-    const scale = new Float32Array(buffer);
-    const rgba = new Uint8ClampedArray(buffer);
-    const rot = new Uint8ClampedArray(buffer);
+    const position = new F32(buffer);
+    const scale = new F32(buffer);
+    const rgba = new U8C(buffer);
+    const rot = new U8C(buffer);
 
     const positionScale = 1.0 / (1 << fractionalBits);
-    const int32View = new Int32Array(1);
-    const uint8View = new Uint8Array(int32View.buffer);
+    const int32View = new I32(1);
+    const uint8View = new U8(int32View.buffer);
 
     let byteOffset = 16;
 
@@ -162,7 +163,7 @@ function parseSpz(data: ArrayBuffer): ParsedSplat {
     if (shDegree) {
         const shVectorCount = (shDegree + 1) * (shDegree + 1) - 1;
         const shComponentCount = shVectorCount * 3;
-        const shFlat = new Uint8Array(splatCount * shComponentCount);
+        const shFlat = new U8(splatCount * shComponentCount);
         for (let i = 0; i < splatCount; i++) {
             for (let k = 0; k < shComponentCount; k++) {
                 shFlat[i * shComponentCount + k] = ubuf[byteOffset++]!;
@@ -184,7 +185,7 @@ export async function loadSPZ(scene: SceneContext, url: string): Promise<Gaussia
     if (!response.ok) {
         throw new Error(`loadSPZ: HTTP ${response.status} for ${url}`);
     }
-    const raw = new Uint8Array(await response.arrayBuffer());
+    const raw = new U8(await response.arrayBuffer());
     // SPZ files are conventionally gzip-wrapped; auto-detect the magic.
     const isGzip = raw[0] === 0x1f && raw[1] === 0x8b;
     const data: ArrayBuffer = isGzip ? ((await decompressGzip(raw)).buffer as ArrayBuffer) : (raw.buffer as ArrayBuffer);

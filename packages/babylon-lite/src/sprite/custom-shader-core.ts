@@ -16,6 +16,8 @@
  * through a descriptor), so the always-loaded sprite/billboard pipeline + renderable modules
  * stay free of it.
  */
+import { F32 } from "../engine/typed-arrays.js";
+import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -139,11 +141,11 @@ export function makeCustomShaderLayoutEntries(extras: readonly CustomShaderTextu
     const entries: GPUBindGroupLayoutEntry[] = [];
     let binding = startBinding;
     for (let i = 0; i < extras.length; i++) {
-        entries.push({ binding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } });
-        entries.push({ binding: binding + 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } });
+        entries.push({ binding, visibility: SS.FRAGMENT, texture: { sampleType: "float" } });
+        entries.push({ binding: binding + 1, visibility: SS.FRAGMENT, sampler: { type: "filtering" } });
         binding += 2;
     }
-    entries.push({ binding, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } });
+    entries.push({ binding, visibility: SS.FRAGMENT, buffer: { type: "uniform" } });
     return entries;
 }
 
@@ -177,7 +179,7 @@ export function makeCustomShaderBindEntries(extras: readonly CustomShaderTexture
 export function createSpriteLayerFx(engine: EngineContext, label: string, extras: readonly CustomShaderTexture[]): SpriteLayerFx {
     const device = engine._device;
     const buffer = createEmptyUniformBuffer(engine, SPRITE_FX_UBO_BYTES, label);
-    const scratch = new Float32Array(SPRITE_FX_UBO_FLOATS);
+    const scratch = new F32(SPRITE_FX_UBO_FLOATS);
     let elapsedMs = 0;
     return {
         bindEntries(startBinding) {

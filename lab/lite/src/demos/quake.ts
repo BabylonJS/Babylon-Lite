@@ -32,6 +32,7 @@ import {
     type ShaderMaterial,
 } from "babylon-lite";
 
+import { installFetchProgress } from "./loading-progress.js";
 import { parseBsp } from "./quake/bsp/parse-bsp.js";
 import { parsePalette, type Palette } from "./quake/palette.js";
 import { parseEntities, parseVec3, filterEntitiesBySkill } from "./quake/entities/parse-entities.js";
@@ -149,6 +150,7 @@ function mergeBatches(dest: Map<number, GeometryBatch>, src: Map<number, Geometr
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 6_600_000 });
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.05, g: 0.05, b: 0.07, a: 1 };
@@ -471,6 +473,7 @@ async function main(): Promise<void> {
     }
 
     await registerScene(engine, scene);
+    progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(drawn);
     canvas.dataset.ready = "true";

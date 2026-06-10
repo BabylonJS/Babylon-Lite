@@ -1,4 +1,5 @@
 /** CubeTexture — loads 6 face images into a GPU cube texture with mipmaps. */
+import { TU } from "../engine/gpu-flags.js";
 import { getTrilinearSampler } from "../resource/samplers.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
@@ -37,7 +38,7 @@ export function loadCubeTexture(engine: EngineContext, baseUrl: string, ext = ".
             size: [sz, sz, 6],
             format: "rgba8unorm",
             dimension: "2d",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
             mipLevelCount: mipLevelCount(sz, sz),
         });
         for (let i = 0; i < 6; i++) {

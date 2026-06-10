@@ -14,6 +14,7 @@
  *  cost (the zip-parser, the WebP decode path, and the per-component
  *  dequantisation tables). */
 
+import { F32, U8C, U8 } from "../engine/typed-arrays.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { ParsedSplat } from "./splat-data.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
@@ -79,7 +80,7 @@ async function decodeWebP(bytes: Uint8Array): Promise<WebPImage> {
     ctx.drawImage(bitmap, 0, 0);
     const imageData = ctx.getImageData(0, 0, width, height);
     bitmap.close?.();
-    return { bits: new Uint8Array(imageData.data.buffer), width: imageData.width, height: imageData.height };
+    return { bits: new U8(imageData.data.buffer), width: imageData.width, height: imageData.height };
 }
 
 /** Build a 32-byte/splat row buffer + optional flat SH bytes from decoded
@@ -88,10 +89,10 @@ function parseSogDatas(data: SOGRootData, images: WebPImage[]): ParsedSplat {
     const splatCount = data.count ?? data.means.shape[0]!;
     const ROW = 32;
     const buffer = new ArrayBuffer(ROW * splatCount);
-    const position = new Float32Array(buffer);
-    const scale = new Float32Array(buffer);
-    const rgba = new Uint8ClampedArray(buffer);
-    const rot = new Uint8ClampedArray(buffer);
+    const position = new F32(buffer);
+    const scale = new F32(buffer);
+    const rgba = new U8C(buffer);
+    const rot = new U8C(buffer);
 
     // Undo the symmetric log transform used at encode time:
     const unlog = (n: number): number => Math.sign(n) * (Math.exp(Math.abs(n)) - 1);
@@ -223,7 +224,7 @@ function parseSogDatas(data: SOGRootData, images: WebPImage[]): ParsedSplat {
         const centroids = images[5]!.bits;
         const labels = images[6]!.bits;
         const centroidsWidth = images[5]!.width;
-        const shFlat = new Uint8Array(splatCount * shComponentCount);
+        const shFlat = new U8(splatCount * shComponentCount);
 
         if (data.version === 2) {
             const cb = data.shN.codebook;

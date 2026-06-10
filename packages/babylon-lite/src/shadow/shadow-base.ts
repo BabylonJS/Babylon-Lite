@@ -2,6 +2,7 @@
  * Shared shadow helpers used by ESM and PCF shadow generators/tasks.
  */
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mat4Storage } from "../math/types.js";
@@ -57,12 +58,12 @@ export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, p
     const uz = fx * ry - fy * rx;
 
     // Column-major view matrix (stores basis as rows of rotation, plus translation column)
-    return new Float32Array([rx, ux, fx, 0, ry, uy, fy, 0, rz, uz, fz, 0, -(rx * px + ry * py + rz * pz), -(ux * px + uy * py + uz * pz), -(fx * px + fy * py + fz * pz), 1]);
+    return new F32([rx, ux, fx, 0, ry, uy, fy, 0, rz, uz, fz, 0, -(rx * px + ry * py + rz * pz), -(ux * px + uy * py + uz * pz), -(fx * px + fy * py + fz * pz), 1]);
 }
 
 /** Multiply two column-major 4x4 matrices: out = a * b. */
 export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
-    const out = new Float32Array(16);
+    const out = new F32(16);
     for (let row = 0; row < 4; row++) {
         for (let col = 0; col < 4; col++) {
             let sum = 0;
@@ -77,7 +78,7 @@ export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
 
 /** Create the shared shadow-params UBO (32 bytes) holding bias/depthScale/depth-range fields. */
 export function createShadowParamsUBO(engine: EngineContext, bias: number, depthScale: number): GPUBuffer {
-    const data = new Float32Array(8);
+    const data = new F32(8);
     data[0] = bias;
     data[2] = depthScale;
     data[4] = 0; // depthMinZ (WebGPU)
@@ -91,12 +92,11 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
     return {
         _descriptor: {
             size: { width: mapSize, height: mapSize },
-            colorFormat: colorTexture ? "rgba16float" : undefined,
-            depthStencilFormat: "depth32float",
+            format: colorTexture ? "rgba16float" : undefined,
+            dFormat: "depth32float",
             _depthClearValue: 1,
             _depthCompare: "less-equal",
-            sampleCount: 1,
-            flipY: false,
+            samples: 1,
         },
         _colorTexture: colorTexture,
         _colorView: colorTexture?.createView() ?? null,
@@ -105,6 +105,9 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
         _width: mapSize,
         _height: mapSize,
         _eager: true,
+        // Borrowed: the depth map is the generator's shared shadow map (persists for the generator's
+        // lifetime); per-task render-target disposal must NOT destroy it (it's reused after rebuilds).
+        _ownsDepthTexture: false,
     };
 }
 
@@ -115,7 +118,7 @@ export function createSharedShadowUBO(
     _depthValues: Float32Array,
     _shadowsInfo: Float32Array
 ): { ubo: GPUBuffer; data: Float32Array } {
-    const data = new Float32Array(24);
+    const data = new F32(24);
     writeShadowUboFields(data, { _lightMatrix, _depthValues, _shadowsInfo });
     const ubo = createUniformBuffer(engine, data);
     return { ubo, data };

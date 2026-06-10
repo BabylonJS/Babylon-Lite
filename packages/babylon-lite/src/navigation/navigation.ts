@@ -35,6 +35,7 @@
  * ```
  */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
 import type { Vec3 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 
@@ -307,8 +308,8 @@ function _mergeMeshes(meshes: Mesh[], doNotReverseIndices: boolean): { positions
         totalVerts += mesh._cpuPositions.length;
         totalIdx += mesh._cpuIndices.length;
     }
-    const positions = new Float32Array(totalVerts);
-    const indices = new Uint32Array(totalIdx);
+    const positions = new F32(totalVerts);
+    const indices = new U32(totalIdx);
 
     let pOff = 0;
     let iOff = 0;
@@ -362,9 +363,9 @@ export function createDebugNavMeshGeometry(plugin: NavigationPlugin): { position
     const [positionsArr, indicesArr] = plugin._recast.getNavMeshPositionsAndIndices(plugin._navMesh);
     const triCount = (indicesArr.length / 3) | 0;
     const vertCount = triCount * 3;
-    const positions = new Float32Array(vertCount * 3);
-    const normals = new Float32Array(vertCount * 3);
-    const indices = new Uint32Array(vertCount);
+    const positions = new F32(vertCount * 3);
+    const normals = new F32(vertCount * 3);
+    const indices = new U32(vertCount);
 
     for (let t = 0; t < triCount; t++) {
         // Recast outputs triangles with original winding such that the face

@@ -15,6 +15,8 @@
  *   - usePercentageCloserFiltering = true (SM_PCF / shadow5 quality)
  */
 
+import { F32 } from "../engine/typed-arrays.js";
+import { TU } from "../engine/gpu-flags.js";
 import type { SpotLight } from "../light/spot-light.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
@@ -39,7 +41,7 @@ export interface PcfSpotlightShadowGeneratorConfig {
 export function _computeSpotLightMatrix(light: SpotLight, near: number, far: number): PcfLightMatrix {
     const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x, light.position.y, light.position.z);
     const f = 1.0 / Math.tan(light.angle * 0.5);
-    const proj = new Float32Array(16);
+    const proj = new F32(16);
     proj[0] = f;
     proj[5] = f;
     proj[10] = far / (far - near);
@@ -69,7 +71,7 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
     const _depthTexture = device.createTexture({
         size: { width: mapSize, height: mapSize },
         format: "depth32float",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING,
     });
     // --- Comparison sampler for PCF ---
     const _depthSampler = device.createSampler({
@@ -81,9 +83,9 @@ export function createPcfSpotlightShadowGenerator(engine: EngineContext, _light:
     // Shadow params UBO (depthScale slot reused as texel size for PCF offsets)
     const _shadowParamsUBO = createShadowParamsUBO(engine, bias, 1.0 / mapSize);
 
-    const _lightMatrix = new Float32Array(16);
-    const _shadowsInfo = new Float32Array([darkness, mapSize, 1.0 / mapSize, 0]);
-    const _depthValues = new Float32Array([0, far]);
+    const _lightMatrix = new F32(16);
+    const _shadowsInfo = new F32([darkness, mapSize, 1.0 / mapSize, 0]);
+    const _depthValues = new F32([0, far]);
 
     // Shared shadow UBO for all receiver meshes (96 bytes)
     const { ubo: _shadowUBO } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);

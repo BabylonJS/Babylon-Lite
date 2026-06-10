@@ -5,6 +5,7 @@ import {
     attachControl,
     createArcRotateCamera,
     createBlurPostProcessTask,
+    createChromaticAberrationPostProcessTask,
     createEngine,
     createRenderTarget,
     createRenderTask,
@@ -13,7 +14,6 @@ import {
     registerScene,
     startEngine,
 } from "babylon-lite";
-import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const initStart = performance.now();
@@ -23,26 +23,22 @@ async function main(): Promise<void> {
 
     addToScene(scene, await loadBabylon(engine, "https://www.babylonjs.com/Scenes/Sponza/Sponza.babylon", { loadCamera: false }));
 
-    scene.camera = createArcRotateCamera(0, Math.PI / 2.2, 0.01, { x: 5.0855, y: 2.492, z: 0.1654 });
-    scene.camera.nearPlane = 0.1;
-    scene.camera.farPlane = 10000;
-    attachControl(scene.camera as ArcRotateCamera, canvas, scene);
+    const camera = createArcRotateCamera(0, Math.PI / 2.2, 0.01, { x: 5.0855, y: 2.492, z: 0.1654 });
+    camera.nearPlane = 0.1;
+    camera.farPlane = 10000;
+    scene.camera = camera;
+    attachControl(camera, canvas, scene);
 
-    const outputTarget = createRenderTarget({
-        label: "scene143-postprocess-output",
-        colorFormat: engine.format,
-        sampleCount: engine.msaaSamples,
-        size: "canvas",
-        resolveToSwapchain: true,
-    });
+    // Final chromatic-aberration pass writes directly into the engine swapchain (a
+    // fullscreen blit, so single-sample is pixel-identical to MSAA-resolve-to-swap).
+    const outputTarget = engine.scRT;
 
     const sourceTarget = createRenderTarget({
-        label: "scene143-source",
-        colorFormat: engine.format,
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: 1,
+        lbl: "scene143-source",
+        format: engine.format,
+        dFormat: "depth24plus-stencil8",
+        samples: 1,
         size: "canvas",
-        flipY: false,
     });
     const sourceTask = createRenderTask(
         {
@@ -60,7 +56,6 @@ async function main(): Promise<void> {
         {
             name: "scene143-blur-x",
             sourceTexture: sourceTarget,
-            targetTexture: outputTarget,
             sourceSamplingMode: "linear",
             direction: { x: 1, y: 0 },
             kernel: 16,
@@ -68,38 +63,39 @@ async function main(): Promise<void> {
         engine,
         scene
     );
-    // const blurY = createBlurPostProcessTask(
-    //     {
-    //         name: "scene143-blur-y",
-    //         sourceTexture: blurX.outputTexture,
-    //         sourceSamplingMode: "linear",
-    //         direction: { x: 0, y: 1 },
-    //         kernel: 16,
-    //     },
-    //     engine,
-    //     scene
-    // );
-    // const chromatic = createChromaticAberrationPostProcessTask(
-    //     {
-    //         name: "scene143-chromatic-aberration",
-    //         sourceTexture: blurY.outputTexture,
-    //         targetTexture: outputTarget,
-    //         sourceSamplingMode: "linear",
-    //         aberrationAmount: 45,
-    //         radialIntensity: 0,
-    //         direction: { x: 0.707, y: 0.707 },
-    //     },
-    //     engine,
-    //     scene
-    // );
+    const blurY = createBlurPostProcessTask(
+        {
+            name: "scene143-blur-y",
+            sourceTexture: blurX.outputTexture,
+            sourceSamplingMode: "linear",
+            direction: { x: 0, y: 1 },
+            kernel: 16,
+        },
+        engine,
+        scene
+    );
+    const chromatic = createChromaticAberrationPostProcessTask(
+        {
+            name: "scene143-chromatic-aberration",
+            sourceTexture: blurY.outputTexture,
+            targetTexture: outputTarget,
+            sourceSamplingMode: "linear",
+            aberrationAmount: 45,
+            radialIntensity: 0,
+            direction: { x: 0.707, y: -0.707 },
+            centerPosition: { x: 0.5, y: 0.5 },
+        },
+        engine,
+        scene
+    );
     addTask(scene, blurX);
-    // addTask(scene, blurY);
-    // addTask(scene, chromatic);
+    addTask(scene, blurY);
+    addTask(scene, chromatic);
 
     await registerScene(engine, scene);
     blurX.updateUniforms();
-    // blurY.updateUniforms();
-    // chromatic.updateUniforms();
+    blurY.updateUniforms();
+    chromatic.updateUniforms();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - initStart);

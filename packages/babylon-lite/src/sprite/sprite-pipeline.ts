@@ -1,4 +1,6 @@
 /** Internal sprite pipeline helpers: owns WGSL, bind-group schema, pipeline construction, and bind-group creation. */
+import { U16 } from "../engine/typed-arrays.js";
+import { BU, SS, CW } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
@@ -250,9 +252,9 @@ function buildSpritePipeline(
 ): GPURenderPipeline {
     const device = engine._device;
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
-        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
-        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+        { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+        { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
+        { binding: 2, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
     ];
     const extraLayoutEntries = layer ? _getSpriteFxHook()?.layoutEntries(layer, 3) : null;
     if (extraLayoutEntries) {
@@ -308,7 +310,7 @@ function buildSpritePipeline(
         fragment: {
             module,
             entryPoint: "fs",
-            targets: [{ format, blend: blendMode._descriptor, writeMask: GPUColorWrite.ALL }],
+            targets: [{ format, blend: blendMode._descriptor, writeMask: CW.ALL }],
         },
         primitive: { topology: "triangle-list", cullMode: "none" },
         multisample: { count: sampleCount },
@@ -337,13 +339,13 @@ export const LAYER_UBO_BYTES = 48;
 export const LAYER_UBO_FLOATS = LAYER_UBO_BYTES / 4;
 
 /** Shared two-triangle quad index buffer source (4 corners → 6 indices). */
-export const SHARED_SPRITE_INDEX_DATA: Readonly<Uint16Array> = new Uint16Array([0, 1, 2, 0, 2, 3]);
+export const SHARED_SPRITE_INDEX_DATA: Readonly<Uint16Array> = new U16([0, 1, 2, 0, 2, 3]);
 
 /** Allocate a per-layer instance vertex buffer sized for `capacity` sprites. */
 export function createSpriteInstanceBuffer(device: GPUDevice, layer: Sprite2DLayer, label?: string): GPUBuffer {
     return device.createBuffer({
         size: layer._capacity * layer._instanceStrideBytes,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        usage: BU.VERTEX | BU.COPY_DST,
         label,
     });
 }

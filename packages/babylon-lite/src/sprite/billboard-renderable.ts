@@ -1,3 +1,5 @@
+import { F32 } from "../engine/typed-arrays.js";
+import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
@@ -69,7 +71,7 @@ interface BillboardRenderableInternal extends Renderable {
 }
 
 export function buildBillboardRenderable(engine: EngineContext, system: BillboardSpriteSystem): { renderable: Renderable; dispose: () => void } {
-    const indexBuffer = createMappedBuffer(engine, BILLBOARD_INDEX_DATA, GPUBufferUsage.INDEX);
+    const indexBuffer = createMappedBuffer(engine, BILLBOARD_INDEX_DATA, BU.INDEX);
     const uniformBuffer = createEmptyUniformBuffer(engine, BILLBOARD_SYSTEM_UBO_BYTES, `${system._orientation}-billboard-system-ubo`);
     const instanceBuffer = createBillboardInstanceBuffer(engine._device, system, `${system._orientation}-billboard-instances`);
     const fx = _getBillboardFxHook()?.createLayerFx(engine, `${system._orientation}-billboard-fx-ubo`, system) ?? null;
@@ -94,8 +96,8 @@ export function buildBillboardRenderable(engine: EngineContext, system: Billboar
         _centerVersion: -1,
         _drawableCount: 0,
         _uboUploaded: false,
-        _lastUbo: new Float32Array(BILLBOARD_SYSTEM_UBO_BYTES / 4),
-        _scratchUbo: new Float32Array(BILLBOARD_SYSTEM_UBO_BYTES / 4),
+        _lastUbo: new F32(BILLBOARD_SYSTEM_UBO_BYTES / 4),
+        _scratchUbo: new F32(BILLBOARD_SYSTEM_UBO_BYTES / 4),
         _fx: fx,
         _disposed: false,
         _worldCenter: [0, 0, 0],

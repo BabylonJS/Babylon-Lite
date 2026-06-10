@@ -1,9 +1,12 @@
+import { F64, I32, U16, U8 } from "../engine/typed-arrays.js";
+import { TU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 import { shToPolynomial } from "../math/spherical-harmonics.js";
+import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 
 // ─── Float16 Conversion ─────────────────────────────────────────────────────
 
@@ -71,13 +74,13 @@ function computeSH(raw: Uint8Array, width: number, mipCount: number): Float32Arr
     const halfTexel = 0.5 * du;
     const minUV = halfTexel - 1.0;
 
-    const sh = new Float64Array(27);
+    const sh = new F64(27);
     let totalSolidAngle = 0;
-    const trig = new Float64Array(9);
+    const trig = new F64(9);
 
     for (let face = 0; face < 6; face++) {
         const faceStart = face * faceBytes;
-        const pixels = new Uint16Array(raw.buffer, raw.byteOffset + faceStart, width * width * 4);
+        const pixels = new U16(raw.buffer, raw.byteOffset + faceStart, width * width * 4);
         const f = FACES[face]!;
         const nx = f[0]!,
             ny = f[1]!,
@@ -203,19 +206,19 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
     const buf = await ddsPromise;
 
     // ── Parse DDS header ──────────────────────────────────────────────────────
-    const header = new Int32Array(buf, 0, 32);
+    const header = new I32(buf, 0, 32);
     const width = header[3]!;
     const height = header[4]!;
     const mipCount = Math.max(header[7]!, 1);
     const dataOffset = header[21] === 0x30315844 /* 'DX10' */ ? 128 + 20 : 128;
-    const raw = new Uint8Array(buf, dataOffset);
+    const raw = new U8(buf, dataOffset);
 
     // ── Create cubemap texture with all mip levels ────────────────────────────
     const specularCube = device.createTexture({
         size: [width, height, 6],
         format: "rgba16float",
         mipLevelCount: mipCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
         dimension: "2d",
     });
 
@@ -247,6 +250,7 @@ export async function loadDdsEnvironment(scene: SceneContext, url: string, optio
     const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
 
     scene._envTextures = textures;
+    registerEnvSceneUniforms(scene);
 
     acquireGPUTexture(specularCube);
     acquireGPUTexture(brdfLut);

@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "./types.js";
 import type { Mat4Storage } from "./types.js";
 
@@ -40,7 +41,7 @@ export function mat4Invert(input: Mat4): Mat4 | null {
     }
     det = 1 / det;
 
-    const out = new Float32Array(16);
+    const out = new F32(16);
     out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
     out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
     out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;

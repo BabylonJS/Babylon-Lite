@@ -5,6 +5,8 @@
  * importance-sampled GGX cubemap prefiltering, and BRDF LUT generation.
  */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
+import { TU } from "../engine/gpu-flags.js";
 import type { HdrImage } from "./hdr-parser.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
@@ -19,10 +21,10 @@ export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceS
     const equirectTex = device.createTexture({
         size: [hdr.width, hdr.height],
         format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
     {
-        const rgba = new Float32Array(hdr.width * hdr.height * 4);
+        const rgba = new F32(hdr.width * hdr.height * 4);
         for (let i = 0; i < hdr.width * hdr.height; i++) {
             rgba[i * 4] = hdr.data[i * 3]!;
             rgba[i * 4 + 1] = hdr.data[i * 3 + 1]!;
@@ -36,7 +38,7 @@ export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceS
     const cubeTex = device.createTexture({
         size: [faceSize, faceSize, 6],
         format: "rgba16float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_SRC,
         dimension: "2d",
     });
 
@@ -46,7 +48,7 @@ export function equirectToCubemapGPU(engine: EngineContext, hdr: HdrImage, faceS
         layout: "auto",
         compute: { module, entryPoint: "main" },
     });
-    const paramBuf = createUniformBuffer(engine, new Uint32Array([faceSize, hdr.width, hdr.height, 0]));
+    const paramBuf = createUniformBuffer(engine, new U32([faceSize, hdr.width, hdr.height, 0]));
 
     const bg = device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
@@ -78,7 +80,7 @@ export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, 
         size: { width: faceSize, height: faceSize, depthOrArrayLayers: 6 },
         mipLevelCount: mipCount,
         format: "rgba16float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING | TU.COPY_DST,
     });
 
     const srcCubeView = srcCube.createView({ dimension: "cube" });
@@ -105,7 +107,7 @@ export function prefilterCubemapGPU(engine: EngineContext, srcCube: GPUTexture, 
             break;
         }
 
-        device.queue.writeBuffer(paramsBuffer, 0, new Uint32Array([faceSize, mip, mipCount, faceSize]));
+        device.queue.writeBuffer(paramsBuffer, 0, new U32([faceSize, mip, mipCount, faceSize]));
 
         const dstView = dstCube.createView({
             dimension: "2d-array",
@@ -158,7 +160,7 @@ export function generateBrdfLut(engine: EngineContext): GPUTexture {
     const texture = device.createTexture({
         size: { width: size, height: size },
         format: "rgba16float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING,
     });
     const bindGroup = device.createBindGroup({
         layout: _brdfPipeline.getBindGroupLayout(0),

@@ -74,6 +74,13 @@ export interface PbrTemplateConfig {
     /** Has tonemap */
     /** @internal */
     readonly _hasTonemap?: boolean;
+    /** Scene has fog (scene.fog != null). `calcFogFactor` helper WGSL, supplied by the dynamic
+     *  pbr-fog-wgsl import only for fog scenes; "" otherwise (zero bytes for non-fog scenes). */
+    /** @internal */
+    readonly _fogHelper?: string;
+    /** Fog blend WGSL, emitted just before the tonemap block; "" for non-fog scenes. */
+    /** @internal */
+    readonly _fogBlock?: string;
     /** ACES WGSL: tonemap helper functions (dynamically imported). Empty string = standard exponential tonemap. */
     /** @internal */
     readonly _acesHelpers?: string;
@@ -152,6 +159,8 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _hasSpecGloss = false,
         _hasDoubleSided = false,
         _hasTonemap = false,
+        _fogHelper = "",
+        _fogBlock = "",
         _acesHelpers = "",
         _acesTonemapCall = "",
         _hasAlphaBlend = false,
@@ -411,6 +420,13 @@ var directSpecular=vec3<f32>(0.0);
 color=1.0-exp2(-1.590579*color);`
         : `color*=scene.vImageInfos.x;`;
 
+    // Fog (opt-in via scene.fog). The fog WGSL — `_fogHelper` (calcFogFactor) and `_fogBlock`
+    // (the blend, emitted just before the tonemap block) — is supplied by pbr-renderable, which
+    // dynamically imports pbr-fog-wgsl.ts only when scene.fog is set. Both are "" for non-fog
+    // scenes, so those bundles carry zero fog bytes (see pbr-fog-wgsl.ts for the parity details).
+    const fogHelper = _fogHelper;
+    const fogBlock = _fogBlock;
+
     // Alpha output
     const alphaBlock = _noColorOutput
         ? ""
@@ -418,7 +434,7 @@ color=1.0-exp2(-1.590579*color);`
           ? `var finalAlpha=alpha*material.materialAlpha;
 var luminanceOverAlpha=0.0;
 /*BA*/
-luminanceOverAlpha+=dot(${_hasIbl ? "finalSpecularScaled" : "directSpecular"},vec3<f32>(0.2126,0.7152,0.0722));
+luminanceOverAlpha+=dot(${_hasIbl ? `finalSpecularScaled` : `directSpecular`},vec3<f32>(0.2126,0.7152,0.0722));
 finalAlpha=saturate(finalAlpha+luminanceOverAlpha*luminanceOverAlpha);
 return vec4<f32>(color,finalAlpha);`
           : `return vec4<f32>(color,alpha*material.materialAlpha);`;
@@ -448,6 +464,7 @@ ${_esmShadowOutput ? "struct shadowParamsUniforms { biasAndScale: vec4<f32>, dep
 /*FI*/
 ${BRDF_FUNCTIONS}
 ${acesBlock}
+${fogHelper}
 ${anisoBrdfBlock}
 ${lightDecls}
 ${lightBindingDecl}
@@ -478,6 +495,7 @@ ${directLightBlock}
 var color=directDiffuse+directSpecular+emissive;
 /*AI*/
 /*NI*/
+${fogBlock}
 ${tonemapBlock}
 color=pow(color,vec3<f32>(1.0/2.2));
 color=clamp(color,vec3<f32>(0.0),vec3<f32>(1.0));

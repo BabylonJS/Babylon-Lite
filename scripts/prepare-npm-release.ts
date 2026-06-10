@@ -150,6 +150,14 @@ if (currentBuildId && latestPublishedBuildId === currentBuildId) {
 
 const previousReleaseTag = getPreviousReleaseTag(latestPublishedVersion);
 const breakingChangesDetected = hasBreakingChanges(previousReleaseTag);
+
+if (breakingChangesDetected && requestedReleaseType !== "auto" && requestedReleaseType !== "major") {
+    throw new Error(
+        `Breaking changes were detected since ${previousReleaseTag || "the start of history"}. ` +
+            `A ${requestedReleaseType} release would hide those changes from the next auto release; request a major release or remove the breaking-change marker if it is incorrect.`
+    );
+}
+
 const resolvedReleaseType: ResolvedReleaseType = requestedReleaseType === "auto" ? (breakingChangesDetected ? "major" : "minor") : requestedReleaseType;
 const nextVersion = bumpVersion(latestPublishedVersion, resolvedReleaseType);
 

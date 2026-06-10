@@ -5,6 +5,7 @@
  * converts sRGB→linear on read and linear→sRGB on write, so filtering is correct.
  */
 
+import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
@@ -38,8 +39,8 @@ function ensureResources(engine: EngineContext): void {
     linearSampler ??= getBilinearSampler(engine);
     bindGroupLayout ??= device.createBindGroupLayout({
         entries: [
-            { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+            { binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
+            { binding: 1, visibility: SS.FRAGMENT, sampler: {} },
         ],
     });
 }

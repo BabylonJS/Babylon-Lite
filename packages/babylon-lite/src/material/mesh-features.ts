@@ -9,6 +9,7 @@ export const MSH_HAS_INSTANCE_COLOR = 1 << 5;
 export const MSH_HAS_VERTEX_COLOR = 1 << 6;
 export const MSH_HAS_UV2 = 1 << 7;
 export const MSH_RECEIVE_SHADOWS = 1 << 8;
+export const MSH_VAT = 1 << 9;
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
@@ -17,7 +18,14 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     if (gpu.tangentBuffer) {
         features |= MSH_HAS_TANGENTS;
     }
-    if (mesh.skeleton) {
+    if (mesh.vat) {
+        // Baked vertex animation: the VAT vertex path replaces live skinning (still uses the 8-bone
+        // joints1 attribute flag when present), so don't also set MSH_HAS_SKELETON.
+        features |= MSH_VAT;
+        if (mesh.vat.joints1Buffer) {
+            features |= MSH_HAS_SKELETON_8;
+        }
+    } else if (mesh.skeleton) {
         features |= MSH_HAS_SKELETON;
         if (mesh.skeleton.joints1Buffer) {
             features |= MSH_HAS_SKELETON_8;

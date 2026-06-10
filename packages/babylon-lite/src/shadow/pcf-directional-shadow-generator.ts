@@ -15,6 +15,8 @@
  *  (`createEsmDirectionalShadowGenerator` → directional ESM, `createPcfSpotlightShadowGenerator` → spot PCF).
  */
 
+import { F32 } from "../engine/typed-arrays.js";
+import { TU } from "../engine/gpu-flags.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -65,7 +67,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: r
 
     const near = orthoMinZ;
     const far = orthoMaxZ;
-    const proj = new Float32Array(16);
+    const proj = new F32(16);
     proj[0] = 2 / (lMaxX - lMinX);
     proj[5] = 2 / (lMaxY - lMinY);
     proj[10] = 1 / (far - near);
@@ -107,9 +109,9 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
     const orthoMaxZ = cfg.orthoMaxZ ?? 10000;
     const forceRefreshEveryFrame = cfg.forceRefreshEveryFrame ?? false;
 
-    const _lightMatrix = new Float32Array(16);
-    const _shadowsInfo = new Float32Array([darkness, mapSize, 1.0 / mapSize, 0]);
-    const _depthValues = new Float32Array([0, 1]);
+    const _lightMatrix = new F32(16);
+    const _shadowsInfo = new F32([darkness, mapSize, 1.0 / mapSize, 0]);
+    const _depthValues = new F32([0, 1]);
     const { ubo: _shadowUBO } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);
     const _config: ShadowGenerator["_config"] = {
         _mapSize: mapSize,
@@ -125,7 +127,7 @@ export function createPcfDirectionalShadowGenerator(engine: EngineContext, _ligh
         _depthTexture: device.createTexture({
             size: { width: mapSize, height: mapSize },
             format: "depth32float",
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING,
         }),
         _depthSampler: device.createSampler({
             compare: "less",

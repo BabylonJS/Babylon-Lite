@@ -1,3 +1,5 @@
+import { F32, U32, I32, U8 } from "../../engine/typed-arrays.js";
+import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh, MeshGPU } from "../../mesh/mesh.js";
@@ -15,19 +17,24 @@ import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
 
-interface ShaderPacket {
+/** @internal Exported as a type only (zero runtime bytes) for the dynamically-imported
+ *  thin-instance builder. */
+export interface ShaderPacket {
     readonly mesh: Mesh;
     readonly systemUBO: GPUBuffer;
     readonly systemData: Float32Array;
+    /** @internal */
     _bindGroup: GPUBindGroup;
+    /** @internal */
     _lastResourceVersion: number;
+    /** @internal */
     _boundTextures: Texture2D[];
-    /** Set when the owning mesh is removed and this packet's GPU resources are
+    /** @internal Set when the owning mesh is removed and this packet's GPU resources are
      *  destroyed. A combined (multi-mesh) renderable keeps every packet in its
      *  closure, so update()/draw() must skip disposed packets to avoid writing to
      *  or submitting an already-destroyed systemUBO / vertex buffer. */
     _disposed?: boolean;
-    /** Back-reference to the combined renderable's packet array, so disposal can
+    /** @internal Back-reference to the combined renderable's packet array, so disposal can
      *  splice this packet out and stop retaining/iterating dead chunk state every
      *  frame (set only for merged opaque renderables). */
     _owner?: ShaderPacket[];
@@ -41,7 +48,8 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomVersion?: number;
 }
 
-type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
+/** @internal */
+export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[]): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
@@ -68,6 +76,32 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     return { renderables, rebuildSingle };
 }
 
+/** Async group entry point. Non-instanced ShaderMaterial scenes (the common case)
+ *  take the synchronous fast path and pull in zero instancing code. When at least
+ *  one mesh uses thin instances, the instancing module is dynamically imported and
+ *  the renderable helpers it needs are handed to it as positional arguments — NOT
+ *  module exports — so those helpers keep their mangled names in this chunk (an
+ *  export would de-mangle them, growing every ShaderMaterial scene's bundle). */
+export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Promise<MeshGroupBuildResult> {
+    if (!meshes.some((m) => !!m.thinInstances)) {
+        return buildShaderMaterialRenderables(scene, meshes);
+    }
+    const mod = await import("./shader-thin-instance.js");
+    const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
+    return mod.buildShaderRenderablesWithInstancing(
+        scene,
+        meshes,
+        buildShaderMaterialRenderables,
+        createPacket,
+        updatePacket,
+        updateCustomUbo,
+        getAttrBuffer,
+        getOrCreateShaderPipeline,
+        getOrCreateShaderPipelineBindings,
+        cull
+    );
+}
+
 function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean): Renderable {
     return buildMaterialRenderables(scene, material, [mesh], isOverride)[0]!;
 }
@@ -87,7 +121,7 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
 function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh): ShaderPacket {
     const engine = scene.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
-    const systemData = new Float32Array(systemSpec._totalBytes / 4);
+    const systemData = new F32(systemSpec._totalBytes / 4);
     writeSystemUniforms(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
     engine._device.queue.writeBuffer(systemUBO, 0, systemData);
     const packet: ShaderPacket = {
@@ -181,6 +215,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
     const r: Renderable = {
         order: packet.mesh.renderOrder ?? 200,
         isTransparent: true,
+        _transmissive: material.transmissive,
         mesh: packet.mesh,
         _worldCenter: sortCenter,
         bind(eng, sig) {
@@ -245,7 +280,7 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void 
     if (!customSpec || !customUbo || !customData || state._shaderCustomVersion === material._uniformVersion) {
         return;
     }
-    const bytes = new Uint8Array(customData);
+    const bytes = new U8(customData);
     bytes.fill(0);
     for (const [name, slot] of material._uniformValues) {
         if (_isShaderSystemUniform(name)) {
@@ -262,14 +297,14 @@ function updateCustomUbo(engine: EngineContext, material: ShaderMaterial): void 
 
 function writeTypedValue(data: ArrayBuffer, offset: number, type: ShaderUniformType, value: Float32Array): void {
     if (type === "u32") {
-        new Uint32Array(data, offset, 1)[0] = value[0]!;
+        new U32(data, offset, 1)[0] = value[0]!;
         return;
     }
     if (type === "i32") {
-        new Int32Array(data, offset, 1)[0] = value[0]!;
+        new I32(data, offset, 1)[0] = value[0]!;
         return;
     }
-    new Float32Array(data, offset, value.length).set(value);
+    new F32(data, offset, value.length).set(value);
 }
 
 function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, systemUBO: GPUBuffer): GPUBindGroup {
@@ -402,7 +437,7 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     }
     const vertexCount = gpu.positionBuffer.size / 12;
     const stride = name === "uv" || name === "uv2" ? 8 : name === "normal" ? 12 : 16;
-    const buffer = engine._device.createBuffer({ label: `shader-zero-${name}`, size: vertexCount * stride, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    const buffer = engine._device.createBuffer({ label: `shader-zero-${name}`, size: vertexCount * stride, usage: BU.VERTEX | BU.COPY_DST });
     cache.set(name, buffer);
     return buffer;
 }

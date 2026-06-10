@@ -10,13 +10,14 @@
  *  bundle the additional decoder code. `isPlyCompressedOrSH` lets callers
  *  decide which path to take. */
 
+import { F32, U8C, U8, DV } from "../engine/typed-arrays.js";
 import type { ParsedSplat } from "./splat-data.js";
 
 const SH_C0 = 0.28209479177387814;
 
 /** True when the buffer starts with a PLY ASCII header that contains `end_header\n`. */
 export function isPly(data: ArrayBuffer): boolean {
-    const ubuf = new Uint8Array(data, 0, Math.min(data.byteLength, 1024 * 10));
+    const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
     const header = new TextDecoder().decode(ubuf);
     return header.startsWith("ply") && header.indexOf("end_header\n") >= 0;
 }
@@ -26,7 +27,7 @@ export function isPly(data: ArrayBuffer): boolean {
  *  per-vertex `f_rest_*` properties). Callers route these assets through the
  *  separately-imported compressed parser. */
 export function isPlyCompressedOrSH(data: ArrayBuffer): boolean {
-    const ubuf = new Uint8Array(data, 0, Math.min(data.byteLength, 1024 * 10));
+    const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
     const header = new TextDecoder().decode(ubuf);
     const end = header.indexOf("end_header\n");
     if (end < 0) {
@@ -41,7 +42,7 @@ export function isPlyCompressedOrSH(data: ArrayBuffer): boolean {
  *  unsupported; returns `{ data }` echoing the input untouched when the buffer
  *  isn't a PLY at all (so callers can chain a `.splat` fast-path). */
 export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
-    const ubuf = new Uint8Array(data);
+    const ubuf = new U8(data);
     const header = new TextDecoder().decode(ubuf.slice(0, 1024 * 10));
     const headerEnd = "end_header\n";
     const headerEndIndex = header.indexOf(headerEnd);
@@ -70,16 +71,16 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
         rowOffset += offsets[type]!;
     }
 
-    const dv = new DataView(data, headerEndIndex + headerEnd.length);
+    const dv = new DV(data, headerEndIndex + headerEnd.length);
     const ROW_OUTPUT_LENGTH = 32;
     const out = new ArrayBuffer(ROW_OUTPUT_LENGTH * vertexCount);
 
     let off = 0;
     for (let i = 0; i < vertexCount; i++) {
-        const position = new Float32Array(out, i * ROW_OUTPUT_LENGTH, 3);
-        const scale = new Float32Array(out, i * ROW_OUTPUT_LENGTH + 12, 3);
-        const rgba = new Uint8ClampedArray(out, i * ROW_OUTPUT_LENGTH + 24, 4);
-        const rot = new Uint8ClampedArray(out, i * ROW_OUTPUT_LENGTH + 28, 4);
+        const position = new F32(out, i * ROW_OUTPUT_LENGTH, 3);
+        const scale = new F32(out, i * ROW_OUTPUT_LENGTH + 12, 3);
+        const rgba = new U8C(out, i * ROW_OUTPUT_LENGTH + 24, 4);
+        const rot = new U8C(out, i * ROW_OUTPUT_LENGTH + 28, 4);
 
         let r0 = 255,
             r1 = 0,

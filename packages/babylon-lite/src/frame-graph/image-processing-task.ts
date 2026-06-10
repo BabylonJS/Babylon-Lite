@@ -1,3 +1,5 @@
+import { F32 } from "../engine/typed-arrays.js";
+import { BU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
@@ -43,12 +45,12 @@ export function createImageProcessingTask(config: ImageProcessingTaskConfig, eng
                 return 0;
             }
             const img = scene.imageProcessing as { exposure: number; contrast: number; toneMappingEnabled: boolean | number };
-            const data = new Float32Array([img.exposure, img.contrast, img.toneMappingEnabled === true ? 1 : 0, 0]);
+            const data = new F32([img.exposure, img.contrast, img.toneMappingEnabled === true ? 1 : 0, 0]);
             engine._device.queue.writeBuffer(state.params, 0, data);
             const pass = engine._currentEncoder.beginRenderPass({
                 colorAttachments: [
                     {
-                        view: engine._swapchainView,
+                        view: engine.scRT._colorView!,
                         loadOp: "clear",
                         storeOp: "store",
                         clearValue: scene.clearColor,
@@ -78,11 +80,11 @@ function createImageProcessingState(engine: EngineContext, source: ImageProcessi
     const device = engine._device;
     const sampleCount = (texture as { sampleCount?: number }).sampleCount ?? 1;
     const multisampled = sampleCount > 1;
-    const params = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const params = device.createBuffer({ size: 16, usage: BU.UNIFORM | BU.COPY_DST });
     const bgl = device.createBindGroupLayout({
         entries: [
-            { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: multisampled ? "unfilterable-float" : "float", multisampled } },
+            { binding: 0, visibility: SS.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: multisampled ? "unfilterable-float" : "float", multisampled } },
         ],
     });
     const common = `struct P{e:f32,c:f32,t:f32,p:f32}

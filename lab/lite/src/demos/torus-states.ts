@@ -185,18 +185,12 @@ async function main(): Promise<void> {
     let lastSwitch = 0;
 
     const sourceTarget = createRenderTarget({
-        label: "torus-states-source",
-        colorFormat: engine.format,
-        sampleCount: 1,
+        lbl: "torus-states-source",
+        format: engine.format,
+        samples: 1,
         size: "canvas",
     });
-    const outputTarget = createRenderTarget({
-        label: "torus-states-bloom-output",
-        colorFormat: engine.format,
-        sampleCount: 1,
-        size: "canvas",
-        resolveToSwapchain: true,
-    });
+    const outputTarget = engine.scRT;
 
     const context = createFrameGraphContext(engine, {
         name: "torus-states",

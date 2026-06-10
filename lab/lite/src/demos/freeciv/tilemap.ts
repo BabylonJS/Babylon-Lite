@@ -63,10 +63,6 @@ export interface TileLayers {
     unit: Sprite2DLayer;
     /** Roaming wildlife (animals sheet). */
     animals: Sprite2DLayer;
-    /** Pulsing selection ring on the active unit (select sheet). */
-    selection: Sprite2DLayer;
-    /** Fog-of-war darkness diamonds (terrain1 mask), drawn on top of the map. */
-    fog: Sprite2DLayer;
 }
 
 export interface TileSheets {

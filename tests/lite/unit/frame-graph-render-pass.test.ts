@@ -21,10 +21,10 @@ function makeTask(): Task {
 
 function makeRenderTarget(label: string) {
     return createRenderTarget({
-        label,
-        colorFormat: "bgra8unorm",
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: 1,
+        lbl: label,
+        format: "bgra8unorm",
+        dFormat: "depth24plus-stencil8",
+        samples: 1,
         size: { width: 1, height: 1 },
     });
 }

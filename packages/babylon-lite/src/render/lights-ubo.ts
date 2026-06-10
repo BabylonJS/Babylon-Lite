@@ -4,6 +4,7 @@
  *  up to MAX_LIGHTS × LightEntry (4 × vec4 = 64 bytes each).
  *  Default total: 16 + 16 × 64 = 1040 bytes. */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { LightBase } from "../light/types.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
@@ -14,8 +15,8 @@ import type { UboField } from "../shader/fragment-types.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.
  *  Avoids allocating a Uint32Array view on every fillLightsData call. */
-const _countU32 = new Uint32Array(1);
-const _countF32 = new Float32Array(_countU32.buffer);
+const _countU32 = new U32(1);
+const _countF32 = new F32(_countU32.buffer);
 
 const MSH_LIGHT_INDEX_WORD_OFFSET = 20; // world matrix (16 u32) + lc (1 u32) + uniform padding (3 u32)
 
@@ -83,7 +84,7 @@ export function ensureSceneLightState(engine: EngineContext, scene: SceneContext
     }
     const registerDisposer = !state;
     state?._buffer.destroy();
-    const scratch = new Float32Array(byteSize / 4);
+    const scratch = new F32(byteSize / 4);
     fillLightsData(scratch, scene.lights);
     state = {
         _buffer: createUniformBuffer(engine, scratch),
@@ -139,7 +140,7 @@ function affectsMesh(light: LightBase, mesh: Mesh): boolean {
  * Writes mesh light indices when data is provided. Return encoding:
  * 0 = no lights, `N > 0` = one light at index N - 1, `N < 0` = -affectedCount. */
 export function writeMeshLightSelection(mesh: Mesh, lights: readonly LightBase[], data?: Float32Array): number {
-    const u32 = data ? new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4) : null;
+    const u32 = data ? new U32(data.buffer, data.byteOffset, data.byteLength / 4) : null;
     let count = 0;
     let single = -1;
     let pi = 0;

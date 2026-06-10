@@ -268,14 +268,14 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
 
 function createScaledBloomTarget(label: string, source: RenderTarget, scale: number, engine: EngineContext): RenderTarget {
     const srcDesc = source._descriptor;
-    if (!srcDesc.colorFormat) {
-        throw new Error(`BloomPostProcessTask "${label}": sourceTexture must have a colorFormat.`);
+    if (!srcDesc.format) {
+        throw new Error(`BloomPostProcessTask "${label}": sourceTexture must have a format.`);
     }
     const sourceSize = resolveSourceSize(source, engine);
     return createRenderTarget({
-        label,
-        colorFormat: srcDesc.colorFormat,
-        sampleCount: 1,
+        lbl: label,
+        format: srcDesc.format,
+        samples: 1,
         size: {
             width: Math.max(1, Math.floor(sourceSize.width * scale)),
             height: Math.max(1, Math.floor(sourceSize.height * scale)),
@@ -284,12 +284,12 @@ function createScaledBloomTarget(label: string, source: RenderTarget, scale: num
 }
 
 function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number, engine: EngineContext): void {
-    const colorFormat = source._descriptor.colorFormat;
-    if (!colorFormat) {
-        throw new Error(`BloomPostProcessTask "${target._descriptor.label ?? "target"}": sourceTexture must have a colorFormat.`);
+    const format = source._descriptor.format;
+    if (!format) {
+        throw new Error(`BloomPostProcessTask "${target._descriptor.lbl ?? "target"}": sourceTexture must have a format.`);
     }
     const sourceSize = resolveSourceSize(source, engine);
-    target._descriptor.colorFormat = colorFormat;
+    target._descriptor.format = format;
     target._descriptor.size = {
         width: Math.max(1, Math.floor(sourceSize.width * scale)),
         height: Math.max(1, Math.floor(sourceSize.height * scale)),

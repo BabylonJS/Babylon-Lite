@@ -5,7 +5,7 @@
 import { PNG } from "pngjs";
 import * as fs from "fs";
 import * as path from "path";
-import type { Browser, TestInfo } from "@playwright/test";
+import type { Browser, Page, TestInfo } from "@playwright/test";
 
 export interface SceneConfig {
     id: number;
@@ -237,6 +237,41 @@ export async function attachCompareArtifacts(testInfo: TestInfo, actualPath: str
 
 // ── Golden reference capture ──────────────────────────────────────
 
+/**
+ * Wait for `canvas.dataset[flag] === "true"`, polling from the Node side rather
+ * than via a single long `page.waitForFunction`.
+ *
+ * On BrowserStack the automation connection is dropped ("Socket idle from a long
+ * time") when no Playwright commands are sent while a heavy scene downloads
+ * assets / compiles WebGPU pipelines — a single `waitForFunction` polls inside
+ * the page and sends nothing over the wire for the whole wait. Polling with a
+ * short `page.evaluate` every second keeps the connection active.
+ *
+ * Also fails fast (instead of timing out) when the scene sets
+ * `canvas.dataset.error` in its top-level catch.
+ */
+export async function waitForCanvasReady(page: Page, opts: { timeout: number; label: string; flag?: string; pollMs?: number }): Promise<void> {
+    const flag = opts.flag ?? "ready";
+    const pollMs = opts.pollMs ?? 1000;
+    const start = Date.now();
+    for (;;) {
+        const state = await page.evaluate((f) => {
+            const c = document.querySelector("canvas") as HTMLCanvasElement | null;
+            return { done: c?.dataset[f] === "true", error: c?.dataset.error ?? null };
+        }, flag);
+        if (state.error) {
+            throw new Error(`${opts.label} failed to initialize: ${state.error}`);
+        }
+        if (state.done) {
+            return;
+        }
+        if (Date.now() - start > opts.timeout) {
+            throw new Error(`${opts.label}: timed out after ${opts.timeout}ms waiting for canvas.dataset.${flag} === "true"`);
+        }
+        await page.waitForTimeout(pollMs);
+    }
+}
+
 export interface CaptureGoldenOptions {
     /** Scene ID number (e.g. 7 for scene7) */
     sceneId: number;
@@ -281,12 +316,12 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
     await bjsPage.goto(`/babylon-ref-scene${opts.sceneId}.html${urlParams}`);
 
-    // Wait for BJS scene ready
-    await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout });
+    // Wait for the BJS reference scene to signal ready (or surface its error).
+    await waitForCanvasReady(bjsPage, { timeout, label: `captureGolden: BJS reference scene ${opts.sceneId}` });
 
     // For animated scenes, wait for animation freeze
     if (opts.seekTime !== undefined) {
-        await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout });
+        await waitForCanvasReady(bjsPage, { timeout, label: `captureGolden: BJS reference scene ${opts.sceneId}`, flag: "animationFrozen" });
     }
 
     // Wait for BJS loading screen to disappear (it overlays the canvas)

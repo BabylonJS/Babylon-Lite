@@ -9,6 +9,7 @@
  *  `nme_computeShadowFactors(input)` dispatcher consumed by the LightBlock.
  */
 
+import { SS } from "../../engine/gpu-flags.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import type { Varying } from "../../shader/fragment-types.js";
 
@@ -111,8 +112,8 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
                 `_sf[${sl.lightIndex}] = computeShadowPCF${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.y, shadowInfo${suf}.shadowsInfo.z);`
             );
             _bglEntries.push(
-                { binding: _texBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth", viewDimension: "2d" } },
-                { binding: _sampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } }
+                { binding: _texBinding, visibility: SS.FRAGMENT, texture: { sampleType: "depth", viewDimension: "2d" } },
+                { binding: _sampBinding, visibility: SS.FRAGMENT, sampler: { type: "comparison" } }
             );
         } else {
             wgslDecls.push(
@@ -136,8 +137,8 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
                 `_sf[${sl.lightIndex}] = computeShadowESM${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.z, shadowInfo${suf}.shadowsInfo.w);`
             );
             _bglEntries.push(
-                { binding: _texBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
-                { binding: _sampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } }
+                { binding: _texBinding, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
+                { binding: _sampBinding, visibility: SS.FRAGMENT, sampler: { type: "filtering" } }
             );
         }
         vertLines.push(
@@ -146,7 +147,7 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
         );
         _bglEntries.push({
             binding: _uboBinding,
-            visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+            visibility: SS.VERTEX | SS.FRAGMENT,
             buffer: { type: "uniform", minBindingSize: 96 },
         });
     }

@@ -24,6 +24,7 @@ export const HAS_CUBE_REFLECTION = 1 << 17;
 export const NO_COLOR_OUTPUT = 1 << 18;
 export const HAS_DEPTH_EMISSIVE_TEXTURE = 1 << 19;
 export const ESM_SHADOW_OUTPUT = 1 << 20;
+export const GEOMETRY_OUTPUT = 1 << 21;
 
 // ─── Standard Material Extension Registry ───────────────────────────
 

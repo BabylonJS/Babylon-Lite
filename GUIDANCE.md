@@ -91,6 +91,34 @@
 
 - Always aim for the long term solution. Never hack a fix
 
+### 8. Y-Orientation Convention (Mandatory)
+
+Babylon Lite uses BJS Y-up UVs throughout the mesh and shader stack (V=1 is top of texture). WebGPU samplers are Y-down (V=0 is row 0 = top of texture in storage). A V-axis conversion is therefore required somewhere on every textured surface. The codebase performs that conversion through exactly **three paths**; do not invent new ones:
+
+1. **Raster upload-flip.** `texture-2d.ts` calls `copyExternalImageToTexture({ flipY: invertY=true })` on image-decoded uploads (PNG/JPG/HTMLImage/Bitmap). The decoded image data is row 0 = top; the upload writes row 0 = bottom into the GPU texture, so subsequent `textureSample(uv)` with V=1=top reads back upright. This is the default for raster `loadTexture2D`.
+
+2. **Material-side V-flip via `invertY`.** Codec-decoded textures (ktx2/basis) store data row 0 = top in the GPU texture (no upload flip) and set `Texture2D.invertY = true`. Standard/PBR pipelines see this flag and emit a UV V-flip in the material shader (`v = 1 - v`, implemented as a `(scaleY, offsetY)` UV uniform in `standard-pipeline.ts`). This works for clamp/repeat/mirror-repeat where UVs land in `[0, 1]`; for clamp-to-edge with UVs outside `[0, 1]` the V-flip is still safe by codebase convention (atlases always stay in `[0, 1]`).
+
+3. **RTT projection-flip.** Offscreen render targets render with a Y-flipped projection (`viewProj` row 1 negated in `writePassSceneUBO`, pipeline `frontFace = "cw"`). The resulting GPU texture has row 0 = bottom of the rendered scene, so downstream `textureSample(uv)` with V=1=top reads it upright. This is driven by `RenderTargetDescriptor.flipY` (which feeds the internal `RenderTargetSignature._flipY` used for pipeline keying).
+
+#### `flipY` override
+
+`RenderTargetDescriptor.flipY` is a public field. Most scenes get the correct convention without setting it. The default at task creation is:
+
+```ts
+_flipY = desc.flipY ?? (desc.resolveToSwapchain !== true)
+```
+
+i.e. **offscreen RTs flip, swapchain RTs do not**. This matches BJS's WebGPU offscreen-RT convention (`webgpuEngine.ts` mirrors offscreen RT rasterization), giving sub-pixel parity for scenes that render geometry into offscreen RTs (e.g. scene 145). Any frame-graph chain composed from `createRenderTask` + `createPostProcessTask` + `createCopyToTextureTask` then produces upright output on the swap because the post-process / copy tasks apply a vertex-stage XOR-derived V-flip on the final hop.
+
+#### Legitimate `flipY` overrides
+
+- `shadow-base.ts` — `flipY: false` on shadow-map RTs (sampled in light-space, no projection flip needed).
+- `transmission.ts` — forces `flipY = false` on the linear-offscreen color target during transmission retargeting (sample chain stays upright through MSAA + image-processing).
+- `scene143.ts` (lab) — `flipY: false` on the scene-source RT. The chain (`blur → blur → chromatic`) ends in a chromatic-aberration pass whose directional Y shift (`shift.y * 0.3`) is asymmetric in screen space. Sampling from an upside-down source would apply the shift in the wrong frame and produce a vertically-mirrored chromatic effect vs the BJS reference (~0.4 MAD). Forcing the source upright makes the chromatic shift land in the correct screen-space direction.
+
+Any new code that needs a `flipY` override must document why the default convention is wrong for that target.
+
 ---
 
 ## Target API Shape
@@ -182,7 +210,7 @@ When a parity diff exists on specific meshes:
     2. Add the entry to `lab/vite.config.ts` rollup inputs
     3. Add a Playwright parity test in `tests/lite/parity/scenes/sceneN-*.spec.ts`
     4. Add a reference screenshot to `reference/lite/sceneN-*/babylon-ref-golden.png`
-    5. Copy the reference to `lab/public/thumbnails/sceneN.png`
+    5. Save a downscaled JPG thumbnail (≤720p, e.g. 1280×720) of the golden to `lab/public/thumbnails/sceneN.jpg`
     6. Add a card to `lab/index.html` (the scene gallery)
     7. Add a bundle-size ceiling test in `tests/lite/parity/bundle-size.spec.ts`
     8. Add an entry to `scene-config.json` with `id`, `slug`, `name`, and `maxMad`
@@ -194,8 +222,20 @@ When a parity diff exists on specific meshes:
 - **Golden reference:** `babylon-ref-golden.png` (every scene, no exceptions).
 - **Test actual output:** `test-actual.png` (written by the parity test).
 - **Live reference (optional):** `live-ref.png` (captured at test time from Babylon.js; falls back to golden if capture fails).
-- **Thumbnail:** Copy the golden to `lab/public/thumbnails/sceneN.png`.
+- **Thumbnail:** A downscaled JPG of the golden lives at `lab/public/thumbnails/sceneN.jpg` — see **§2b″ Thumbnail Convention**.
 - Parity specs define `REFERENCE_DIR = path.resolve(__dirname, '../../../../reference/lite/sceneN-<slug>')` and resolve all images relative to it.
+
+### 2b″. Thumbnail Convention (Mandatory)
+
+Gallery thumbnails are presentation assets for the lab/pages cards — **not** parity ground truth. The lossless PNGs under `reference/lite/**` are reserved for pixel-diffing and must never be served to cards.
+
+- **Format:** JPG only. **Never commit a PNG to `lab/public/thumbnails/`.**
+- **Resolution:** exactly **1280×720** (720p). This is "far enough" for how cards display them and keeps the repo lean. Cover-crop (center, fill, crop overflow) rather than letterbox — gallery cards are 16:9 `object-fit: cover`, so anything taller/wider is cropped at render time anyway. Quality ≈ 78 (raise selectively only if a flat/dark image shows banding; keep files well under ~250 KB).
+- **Naming:** `sceneN.jpg` for scenes, `demo-<slug>.jpg` for demos.
+- **Source:** scene thumbnails are a downscaled JPG of that scene's `babylon-ref-golden.png`; demo thumbnails are a JPG of a representative in-app screenshot.
+- **Cards load thumbnails, not reference images.** Both the scene gallery and the demo gallery `<img src>` point at `/lite/thumbnails/…jpg` and hide on error (`onerror`). Do **not** point cards at `reference/lite/**` or `test-actual.png`.
+- **Every static-server MIME map must map `.jpg`/`.jpeg`** (`lab/vite.config.ts`, `scripts/bundle-scenes-core.ts`, `scripts/coverage-scene.ts`, `scripts/test-scenes-quick.ts`). Adding a new server? Add the JPEG MIME entries.
+- This convention is distinct from the **request-shared screenshots** rule in §1 (JPG, quality ≤ 60, < 1 MB) which governs images attached to a chat turn, not committed thumbnails.
 
 ### 2b′. Scene Config — MAD Thresholds (Mandatory)
 

@@ -5,6 +5,8 @@
  * task hooks used by frame-graph/shadow-task.ts.
  */
 
+import { F32 } from "../engine/typed-arrays.js";
+import { TU, SS } from "../engine/gpu-flags.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { DirectionalLight } from "../light/directional-light.js";
@@ -182,7 +184,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: r
 
     const near = orthoMinZ;
     const far = orthoMaxZ;
-    const proj = new Float32Array(16);
+    const proj = new F32(16);
     proj[0] = 2 / (lMaxX - lMinX);
     proj[5] = 2 / (lMaxY - lMinY);
     proj[10] = 1 / (far - near);
@@ -441,31 +443,31 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     const esmTexture = device.createTexture({
         size: { width: mapSize, height: mapSize },
         format: "rgba16float",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING,
     });
     const depthBuf = device.createTexture({
         size: { width: mapSize, height: mapSize },
         format: "depth32float",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.RENDER_ATTACHMENT,
     });
     const blurTexH = device.createTexture({
         size: { width: blurSize, height: blurSize },
         format: "rgba16float",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING,
     });
     const blurTexV = device.createTexture({
         size: { width: blurSize, height: blurSize },
         format: "rgba16float",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+        usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING,
     });
 
     const blurVert = device.createShaderModule({ code: blurVertSrc });
     const blurFrag = device.createShaderModule({ code: createShadowBlurFragmentWGSL(blurKernel) });
     const blurBGL = device.createBindGroupLayout({
         entries: [
-            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+            { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
+            { binding: 2, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
         ],
     });
     const blurPipeline = device.createRenderPipeline({
@@ -476,7 +478,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
     });
 
     const blurSampler = getBilinearSampler(engine);
-    const blurHData = new Float32Array([1.0 / blurSize, 0, 0, 0]);
+    const blurHData = new F32([1.0 / blurSize, 0, 0, 0]);
     const blurHUBO = createUniformBuffer(engine, blurHData);
     const blurHBG = device.createBindGroup({
         layout: blurBGL,
@@ -486,7 +488,7 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
             { binding: 2, resource: blurSampler },
         ],
     });
-    const blurVData = new Float32Array([0, 1.0 / blurSize, 0, 0]);
+    const blurVData = new F32([0, 1.0 / blurSize, 0, 0]);
     const blurVUBO = createUniformBuffer(engine, blurVData);
     const blurVBG = device.createBindGroup({
         layout: blurBGL,
@@ -497,9 +499,9 @@ export function createEsmDirectionalShadowGenerator(engine: EngineContext, _ligh
         ],
     });
 
-    const _lightMatrix = new Float32Array(16);
-    const _shadowsInfo = new Float32Array([darkness, 0, depthScale, frustumEdgeFalloff]);
-    const _depthValues = new Float32Array([0, 1]);
+    const _lightMatrix = new F32(16);
+    const _shadowsInfo = new F32([darkness, 0, depthScale, frustumEdgeFalloff]);
+    const _depthValues = new F32([0, 1]);
     const { ubo: _shadowUBO, data: shadowUboData } = createSharedShadowUBO(engine, _lightMatrix, _depthValues, _shadowsInfo);
     const _depthTexture = blurTexV;
     const _depthSampler = blurSampler;

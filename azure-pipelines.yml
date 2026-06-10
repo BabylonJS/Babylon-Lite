@@ -1,12 +1,13 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Six parallel jobs:
+# Runs on every PR targeting master. Seven parallel jobs:
 #   1. Release Markers  — breaking-change marker validation
-#   2. Unit Tests       — vitest + plumbing (Playwright)
-#   3. Bundle Size      — ceiling checks
-#   4. Perf Regression  — Lite vs Stable on BrowserStack
-#   5. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
-#   6. Lint             — ESLint + TypeScript type-check
+#   2. API Report       — public API diff comment + breaking-change validation
+#   3. Unit Tests       — vitest + plumbing (Playwright)
+#   4. Bundle Size      — ceiling checks
+#   5. Perf Regression  — Lite vs Stable on BrowserStack
+#   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
+#   7. Lint             — ESLint + TypeScript type-check
 #
 
 trigger: none
@@ -63,7 +64,48 @@ stages:
                       GITHUB_TOKEN: "$(GITHUB_TOKEN)"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 1: Unit Tests
+          # Job 1: API Report
+          # ──────────────────────────────────────────────────────────────
+          - job: ApiReport
+            displayName: "API Report"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  persistCredentials: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm report:api-changes
+                  displayName: "Generate API report diff"
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "$(System.PullRequest.PullRequestNumber)"
+                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post API changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      id: "$(System.PullRequest.PullRequestNumber)"
+                      comment: "$(API_COMMENT_BODY)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 2: Unit Tests
           # ──────────────────────────────────────────────────────────────
           - job: UnitTests
             displayName: "Unit Tests"
@@ -119,7 +161,7 @@ stages:
                   displayName: "Report test results"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 2: Bundle Size
+          # Job 3: Bundle Size
           # ──────────────────────────────────────────────────────────────
           - job: BundleSize
             displayName: "Bundle Size"
@@ -201,7 +243,7 @@ stages:
                       siteName: "Lab"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 3: Performance Regression
+          # Job 4: Performance Regression
           # ──────────────────────────────────────────────────────────────
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
@@ -319,7 +361,7 @@ stages:
                       reportType: perf
 
           # ──────────────────────────────────────────────────────────────
-          # Job 4: Parity (Cloud Browser)
+          # Job 5: Parity (Cloud Browser)
           # ──────────────────────────────────────────────────────────────
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
@@ -378,7 +420,7 @@ stages:
                       reportType: parity
 
           # ──────────────────────────────────────────────────────────────
-          # Job 5: Lint
+          # Job 6: Lint
           # ──────────────────────────────────────────────────────────────
           - job: Lint
             displayName: "Lint & Type Check"

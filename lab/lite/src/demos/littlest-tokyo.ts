@@ -11,10 +11,11 @@
 //   Author:  https://artstation.com/glenatron
 //   License: https://creativecommons.org/licenses/by/4.0/
 
-import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadGltf, onBeforeRender, playAnimation, rebuildMaterial, registerScene, startEngine } from "babylon-lite";
+import { addToScene, attachControl, createArcRotateCamera, createBox, createEngine, createPbrMaterial, createSceneContext, createSolidTexture2D, loadGltf, onBeforeRender, playAnimation, rebuildMaterial, registerScene, setCameraLimits, startEngine } from "babylon-lite";
 import type { PbrMaterialProps } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
-import { demoAssetUrl } from "./demo-asset-url.js";
+import { demoAssetUrl, configureDemoDecoderBases } from "./demo-asset-url.js";
+import { installFetchProgress } from "./loading-progress.js";
 
 // Same environment cube as Scene 26 — used for both IBL and the visible skybox.
 const ENV_URL = "https://playground.babylonjs.com/textures/environment.dds";
@@ -41,6 +42,7 @@ const MAX_RADIUS = 1000;
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 11_500_000 });
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -51,6 +53,26 @@ async function main(): Promise<void> {
     cam.farPlane = 5000;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
+
+    // Orbit/zoom limits enforced by attachControl's per-frame loop (no jiggle):
+    //  • radius — keep the camera outside the diorama (~550 across) so it can't
+    //    clip into the geometry, and stop it drifting so far the model shrinks away.
+    //  • beta — never let the eye dip below the diorama's "surface"
+    //    (eye.y = target.y + r·cos(beta), so beta > π/2 puts the eye underneath);
+    //    a tiny epsilon avoids the exactly-horizontal singularity.
+    setCameraLimits(
+        cam,
+        {
+            lowerRadiusLimit: MIN_RADIUS,
+            upperRadiusLimit: MAX_RADIUS,
+            upperBetaLimit: Math.PI / 2 - 0.001,
+        },
+        scene,
+    );
+
+    // Point the glTF decoders at the demo-local files so they resolve under any
+    // base path (e.g. /lite-demos/) rather than the site root.
+    await configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, demoAssetUrl("./littlest-tokyo/LittlestTokyo.glb", import.meta.url)).then((asset) => {
@@ -101,30 +123,12 @@ async function main(): Promise<void> {
     canvas.addEventListener("wheel", stopOnInteract, { passive: true });
     canvas.addEventListener("touchstart", stopOnInteract, { passive: true });
 
-    // Keep the orbit at or above the target's Y plane: clamp beta so the camera
-    // eye never dips below the diorama's "surface" (eye.y = target.y + r·cos(beta),
-    // so beta > π/2 would put the eye under it). A tiny epsilon avoids the
-    // exactly-horizontal singularity.
-    const MAX_BETA = Math.PI / 2 - 0.001;
-
+    // Keep the orbit at or above the target's Y plane (see setCameraLimits above).
     let last = performance.now();
     onBeforeRender(scene, () => {
         const now = performance.now();
         if (autoRotate) {
             cam.alpha += (AUTO_ROTATE_SPEED * (now - last)) / 1000;
-        }
-        if (cam.beta > MAX_BETA) {
-            cam.beta = MAX_BETA;
-            if (cam.inertialBetaOffset > 0) {
-                cam.inertialBetaOffset = 0;
-            }
-        }
-        if (cam.radius < MIN_RADIUS) {
-            cam.radius = MIN_RADIUS;
-            cam.inertialRadiusOffset = 0;
-        } else if (cam.radius > MAX_RADIUS) {
-            cam.radius = MAX_RADIUS;
-            cam.inertialRadiusOffset = 0;
         }
         last = now;
     });
@@ -162,6 +166,7 @@ async function main(): Promise<void> {
         rebuildMaterial(scene, metalMat, { rebuildFrameGraph: true });
     }
 
+    progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

@@ -1,4 +1,5 @@
 /** Optional stable-identity Handle API for Sprite2DLayer. */
+import { U32 } from "../engine/typed-arrays.js";
 import type { Sprite2DIndexHandleHooks, Sprite2DLayer, Sprite2DProps } from "./sprite-2d.js";
 import { addSprite2DIndex, removeSprite2DIndex, setSprite2DFrameIndex, updateSprite2DIndex } from "./sprite-2d.js";
 
@@ -33,7 +34,7 @@ function getOrCreateState(layer: Sprite2DLayer): Sprite2DHandleState {
     state = {
         nextId: 1,
         idToIndex: new Map<number, number>(),
-        indexToId: new Uint32Array(layer._capacity),
+        indexToId: new U32(layer._capacity),
     };
     const hooks: Sprite2DIndexHandleHooks = {
         removeIndex(index, last): void {
@@ -57,7 +58,7 @@ function ensureIndexCapacity(layer: Sprite2DLayer, state: Sprite2DHandleState): 
     if (state.indexToId.length >= layer._capacity) {
         return;
     }
-    const next = new Uint32Array(layer._capacity);
+    const next = new U32(layer._capacity);
     next.set(state.indexToId);
     state.indexToId = next;
 }

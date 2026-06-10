@@ -94,7 +94,7 @@ For pixel-diff visual regression tests against Babylon.js golden references:
 2. Create the BJS reference: `lab/lite/babylon-ref-sceneN.html` + `lab/lite/src/bjs/sceneN.ts`
 3. Add entries to `lab/vite.config.ts` rollup inputs
 4. Capture a golden reference and save to `reference/lite/sceneN-<slug>/babylon-ref-golden.png`
-5. Copy golden to `lab/public/thumbnails/sceneN.png`
+5. Save a downscaled JPG thumbnail (≤720p) of the golden to `lab/public/thumbnails/sceneN.jpg`
 6. Add scene config to `scene-config.json` with `id`, `slug`, `name`, `maxMad`
 7. Create `tests/lite/parity/scenes/sceneN-<slug>.spec.ts` using `compare-utils.ts` helpers
 8. Add a bundle-size ceiling in `tests/lite/parity/bundle-size.spec.ts` (never raise without approval)

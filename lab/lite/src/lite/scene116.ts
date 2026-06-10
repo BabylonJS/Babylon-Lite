@@ -45,15 +45,15 @@ async function main(): Promise<void> {
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
     const { rt: standardDepthRT, texture: standardDepthTexture } = createRenderTargetTexture(engine, {
-        label: "standard-shadow-depth",
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: 1,
+        lbl: "standard-shadow-depth",
+        dFormat: "depth24plus-stencil8",
+        samples: 1,
         size: { width: 512, height: 512 },
     });
     const { rt: pbrDepthRT, texture: pbrDepthTexture } = createRenderTargetTexture(engine, {
-        label: "pbr-shadow-depth",
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: 1,
+        lbl: "pbr-shadow-depth",
+        dFormat: "depth24plus-stencil8",
+        samples: 1,
         size: { width: 512, height: 512 },
     });
 

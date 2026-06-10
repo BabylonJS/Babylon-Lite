@@ -1,6 +1,7 @@
 // Keyframe interpolation engine — LINEAR, STEP, CUBICSPLINE.
 // Pure functions, zero allocation in the hot path.
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
 
@@ -26,7 +27,7 @@ function findKeyframe(input: Float32Array, t: number): number {
 }
 
 // Reusable scratch for quaternion slerp (avoids per-call allocation)
-const _quat = new Float32Array([0, 0, 0, 1]);
+const _quat = new F32([0, 0, 0, 1]);
 
 /** Normalise 4 consecutive components (quaternion) in-place. No-op on zero length. */
 function normalizeQuat4(buf: Float32Array, o: number): void {

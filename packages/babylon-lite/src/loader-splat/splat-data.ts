@@ -1,3 +1,4 @@
+import { F32, U8 } from "../engine/typed-arrays.js";
 /** Splat row-buffer → GPU-ready typed arrays + bbox.
  *
  *  Input  : ArrayBuffer in the standard splat row layout
@@ -61,8 +62,8 @@ function chooseTextureSize(length: number): { width: number; height: number } {
 
 /** Decode a splat row buffer into the textures + auxiliary arrays needed by the renderer. */
 export function buildSplatGeometry(splatBuffer: ArrayBuffer): SplatGeometry {
-    const u = new Uint8Array(splatBuffer);
-    const f = new Float32Array(splatBuffer);
+    const u = new U8(splatBuffer);
+    const f = new F32(splatBuffer);
     const vertexCount = (u.byteLength / ROW_LENGTH) | 0;
     if (vertexCount === 0) {
         throw new Error("splat buffer is empty");
@@ -71,11 +72,11 @@ export function buildSplatGeometry(splatBuffer: ArrayBuffer): SplatGeometry {
     const { width, height } = chooseTextureSize(vertexCount);
     const texelCount = width * height;
 
-    const positions = new Float32Array(vertexCount * 3);
-    const centersRGBA = new Float32Array(texelCount * 4);
-    const covARGBA = new Float32Array(texelCount * 4);
-    const covBRGBA = new Float32Array(texelCount * 4);
-    const colorsRGBA = new Float32Array(texelCount * 4);
+    const positions = new F32(vertexCount * 3);
+    const centersRGBA = new F32(texelCount * 4);
+    const covARGBA = new F32(texelCount * 4);
+    const covBRGBA = new F32(texelCount * 4);
+    const colorsRGBA = new F32(texelCount * 4);
 
     let minX = Infinity,
         minY = Infinity,
@@ -86,7 +87,7 @@ export function buildSplatGeometry(splatBuffer: ArrayBuffer): SplatGeometry {
 
     // Scratch matrices: rotation R, scaling S, M = R * S, then Σ = M · Mᵀ.
     // We only ever need the 6 upper-triangle entries of Σ, packed into covA/covB.
-    const M = new Float32Array(9);
+    const M = new F32(9);
 
     for (let i = 0; i < vertexCount; i++) {
         const fi = i * 8; // 8 floats per row before the colour/rot tail

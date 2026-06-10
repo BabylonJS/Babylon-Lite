@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /**
  * CreateCylinder — matches Babylon.js MeshBuilder.CreateCylinder default options.
  *
@@ -138,9 +139,9 @@ export function createCylinderData(options: CylinderOptions = {}): CylinderData 
     createCap(true);
 
     return {
-        positions: new Float32Array(positions),
-        normals: new Float32Array(normals),
-        uvs: new Float32Array(uvs),
-        indices: new Uint32Array(indices),
+        positions: new F32(positions),
+        normals: new F32(normals),
+        uvs: new F32(uvs),
+        indices: new U32(indices),
     };
 }

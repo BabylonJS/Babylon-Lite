@@ -1,6 +1,8 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
+import type { RenderTarget } from "./render-target.js";
+import { createRenderTarget } from "./render-target.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -31,9 +33,20 @@ function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
 export interface EngineContext {
     readonly canvas: RenderCanvas;
     readonly msaaSamples: number;
-    /** Preferred GPU texture format for the swapchain. Use as the `colorFormat`
+    /** Preferred GPU texture format for the swapchain. Use as the `format`
      *  for offscreen RTs that are sampled by main-pass materials. */
     readonly format: GPUTextureFormat;
+
+    /**
+     * Engine-owned color-only render target that wraps the canvas swapchain texture.
+     * Its `_colorTexture`/`_colorView` are re-acquired from `context.getCurrentTexture()`
+     * once per frame (see `_refreshScRT`), so it is always single-sample and
+     * carries no depth. Render/post-process/copy tasks target it (or resolve into it) to
+     * present to the canvas. It is `_eager` — `buildRenderTarget` and `disposeRenderTarget`
+     * both no-op on it and the engine owns its textures, so its shared `_descriptor` must
+     * never be mutated.
+     */
+    readonly scRT: RenderTarget;
 
     /** Number of GPU draw calls in the last rendered frame. */
     drawCallCount: number;
@@ -82,8 +95,6 @@ export interface EngineContext {
     /** @internal Encoder being filled this frame. Set by `renderFrame` before each context's
      *  `_update`/`_record`; consumed by frame-graph tasks and pre-passes. */
     _currentEncoder: GPUCommandEncoder;
-    /** @internal Swapchain view acquired once per frame before contexts record. */
-    _swapchainView: GPUTextureView;
     /** @internal Frame delta in ms (read by scenes that don't override fixedDeltaMs). */
     _currentDelta: number;
     /** @internal */
@@ -207,6 +218,13 @@ export interface EngineOptions {
      */
     alphaMode?: GPUCanvasAlphaMode;
     /**
+     * Extra WebGPU device limits to request when calling `adapter.requestDevice()`.
+     * Use to raise per-device caps such as `maxColorAttachmentBytesPerSample` (default 32),
+     * which is required when rendering into many MRT attachments. Caller is responsible for
+     * staying within the adapter's reported limits.
+     */
+    requiredLimits?: Record<string, GPUSize64 | undefined>;
+    /**
      * Enable Float64 intermediate precision for world matrix computations. Defaults to false.
      */
     useHighPrecisionMatrix?: boolean;
@@ -249,7 +267,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             features.push(f);
         }
     }
-    const device = await adapter.requestDevice({ requiredFeatures: features });
+    const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
     const context = canvas.getContext("webgpu");
     if (!context) {
         throw new Error("WebGPU context not available");
@@ -306,10 +324,17 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _makePackMeshWorld = makePackMeshWorld;
     }
 
+    // Engine-owned swapchain target — a color-only, single-sample RT that wraps the
+    // canvas texture. `_eager` so `buildRenderTarget` skips it; the engine refreshes its
+    // textures each frame from `context.getCurrentTexture()`.
+    const scRT = createRenderTarget({ lbl: "swapchain", format: format, samples: 1, size: "canvas" });
+    scRT._eager = true;
+
     const engine: EngineContext = {
         _device: device,
         _context: context,
         format,
+        scRT,
         _alphaMode: alphaMode,
         canvas,
         msaaSamples,
@@ -321,16 +346,33 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _renderFn: null,
         _renderingContexts: [],
         _currentEncoder: undefined!,
-        _swapchainView: undefined!,
         _currentDelta: 0,
         _cbs: [],
         _wrapRenderableForFO,
         _makePackMeshWorld,
     };
 
+    // Size the canvas backing store first (so the swap texture is acquired at the final
+    // size), then populate the swapchain target from the first current texture so its
+    // `_colorView`/`_width`/`_height` are non-null before the frame graph builds.
     resizeEngine(engine);
+    _refreshScRT(engine);
 
     return engine;
+}
+
+/** @internal Re-acquire the canvas swapchain texture into `engine.scRT`.
+ *  WebGPU returns a fresh `GPUTexture` from `getCurrentTexture()` each frame, so this
+ *  is called once per frame (in `renderFrame`, before contexts record) — and again
+ *  after `createEngine`/device-loss reconfigure — to keep the engine-owned target
+ *  pointing at the live canvas texture. */
+export function _refreshScRT(engine: EngineContext): void {
+    const tex = engine._context.getCurrentTexture();
+    const swap = engine.scRT;
+    swap._colorTexture = tex;
+    swap._colorView = tex.createView();
+    swap._width = tex.width;
+    swap._height = tex.height;
 }
 
 /** Resize the swapchain backing-store to match the canvas client size. When the size
@@ -374,6 +416,11 @@ export function setEngineSize(engine: EngineContext, widthPx: number, heightPx: 
     }
     canvas.width = w;
     canvas.height = h;
+    // Keep the engine swapchain target's dimensions in sync with the canvas. Canvas-sized
+    // reads happen at frame-graph build time (e.g. the blur post-process derives its texel
+    // step from `outputTexture._width`), before the next frame re-acquires the swap texture.
+    engine.scRT._width = w;
+    engine.scRT._height = h;
     for (const c of engine._renderingContexts) {
         c._resize?.();
     }
@@ -440,7 +487,7 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
-    engine._swapchainView = engine._context.getCurrentTexture().createView();
+    _refreshScRT(engine);
 
     let drawCalls = 0;
     for (let i = 0; i < ctxs.length; i++) {

@@ -72,7 +72,7 @@ var directSpecular = vec3<f32>(0.0);
 let directRoughness = max(roughness, AA_factor_x);
 let directAlphaG = directRoughness * directRoughness + 0.0005;
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
-let lc = min(mesh.lc, ${MAX_LIGHTS}u);
+let lightCount = min(mesh.lc, ${MAX_LIGHTS}u);
 /*AS*/
 // First-light aliases — kept at directLightBlock scope so the AD slot below
 // (clearcoat / sheen / subsurface) sees the same single-light variable names
@@ -88,7 +88,7 @@ let lightAtten = pl0.atten * shadowFactors[lightIndex0];
 let H = normalize(V + L);
 let NdotH = clamp(dot(N, H), 0.0000001, 1.0);
 let VdotH = saturate(dot(V, H));
-for (var li = 0u; li < lc; li++) {
+for (var li = 0u; li < lightCount; li++) {
 var pl: PbrLightResult;
 let lightIndex = mli(li);
 if (li == 0u) { pl = pl0; } else { pl = computePbrLight(lights.lights[lightIndex], N, input.worldPos, material.lightFalloffMode); }

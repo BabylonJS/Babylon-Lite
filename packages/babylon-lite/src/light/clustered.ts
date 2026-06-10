@@ -1,3 +1,5 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
+import { TU, SS } from "../engine/gpu-flags.js";
 import { getProjectionMatrix, getViewMatrix, type Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene.js";
@@ -11,33 +13,60 @@ const MAX_DATA_TEXTURE_WIDTH = 8192;
 const CLUSTER_BATCH_SIZE = 32;
 const EMPTY_SLICE_FIRST = 0xffffffff;
 
+/**
+ * A single point light stored inside a {@link ClusteredLightContainer}. Plain
+ * data — created via {@link createClusteredPointLight} and mutated in place.
+ */
 export interface ClusteredPointLight {
+    /** World-space position `[x, y, z]`. */
     position: [number, number, number];
+    /** Diffuse colour `[r, g, b]` in linear space. */
     diffuse: [number, number, number];
+    /** Falloff range in world units. */
     range: number;
+    /** Light intensity multiplier. */
     intensity: number;
 }
 
+/**
+ * Holds a large set of point lights that are binned into screen-space clusters
+ * on the GPU, so PBR materials can shade hundreds of lights efficiently. Add it
+ * to a scene with {@link addClusteredLightContainer}.
+ */
 export interface ClusteredLightContainer {
+    /** Discriminant tag identifying this object as a clustered light container. */
     readonly kind: "clusteredLightContainer";
+    /** The point lights managed by this container. */
     pointLights: ClusteredPointLight[];
+    /** Number of cluster tiles across the screen horizontally. */
     horizontalTiles: number;
+    /** Number of cluster tiles across the screen vertically. */
     verticalTiles: number;
+    /** Number of depth slices used to bin lights along view-space Z. */
     zSlices: number;
     /** @internal */
     _version: number;
 }
 
+/** Options for {@link createClusteredPointLight}. */
 export interface ClusteredPointLightOptions {
+    /** World-space position `[x, y, z]`. */
     position: [number, number, number];
+    /** Diffuse colour `[r, g, b]` in linear space. */
     diffuse: [number, number, number];
+    /** Falloff range in world units. Default `1`. */
     range?: number;
+    /** Light intensity multiplier. Default `1`. */
     intensity?: number;
 }
 
+/** Options for {@link createClusteredLightContainer}. */
 export interface ClusteredLightContainerOptions {
+    /** Number of cluster tiles across the screen horizontally. Default `64`. */
     horizontalTiles?: number;
+    /** Number of cluster tiles across the screen vertically. Default `64`. */
     verticalTiles?: number;
+    /** Number of depth slices used to bin lights along view-space Z. Default `16`. */
     zSlices?: number;
 }
 
@@ -50,6 +79,14 @@ export interface ClusteredLightGpuState {
     dispose(): void;
 }
 
+/**
+ * Create an empty {@link ClusteredLightContainer}. Add point lights with
+ * {@link createClusteredPointLight}, then register it on a scene via
+ * {@link addClusteredLightContainer}.
+ *
+ * @param options - Optional cluster tiling overrides.
+ * @returns A new, empty clustered light container.
+ */
 export function createClusteredLightContainer(options?: ClusteredLightContainerOptions): ClusteredLightContainer {
     return {
         kind: "clusteredLightContainer",
@@ -61,6 +98,14 @@ export function createClusteredLightContainer(options?: ClusteredLightContainerO
     };
 }
 
+/**
+ * Add a point light to a clustered light container.
+ *
+ * @param container - The container to add the light to.
+ * @param options - The light's position, colour and (optional) range/intensity.
+ * @returns The created light (also pushed onto `container.pointLights`); mutate
+ * it in place and call {@link markClusteredLightContainerDirty} to animate it.
+ */
 export function createClusteredPointLight(container: ClusteredLightContainer, options: ClusteredPointLightOptions): ClusteredPointLight {
     const light: ClusteredPointLight = {
         position: options.position,
@@ -73,6 +118,20 @@ export function createClusteredPointLight(container: ClusteredLightContainer, op
     return light;
 }
 
+/** Force the container's GPU light state to re-upload next frame. Call after mutating a light's
+ *  position / range / intensity / diffuse in place (e.g. animated lights such as drifting fireflies),
+ *  since those edits don't bump the container version on their own. */
+export function markClusteredLightContainerDirty(container: ClusteredLightContainer): void {
+    container._version++;
+}
+
+/**
+ * Register a clustered light container on a scene, building its GPU state and
+ * wiring it into the PBR materials already present in the scene.
+ *
+ * @param scene - The scene to attach the container to.
+ * @param container - The clustered light container to register.
+ */
 export function addClusteredLightContainer(scene: SceneContext, container: ClusteredLightContainer): void {
     const ctx = scene as SceneContext;
     ctx._clusteredLightContainer = container;
@@ -102,10 +161,10 @@ const clusteredPbrExt: PbrExt = {
         return {
             _id: "clustered-lights",
             _bindings: [
-                { _name: "clusteredLightParams", _type: { _kind: "uniform-buffer" }, _visibility: GPUShaderStage.FRAGMENT },
-                { _name: "clusteredLights", _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" }, _visibility: GPUShaderStage.FRAGMENT },
-                { _name: "clusteredCells", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: GPUShaderStage.FRAGMENT },
-                { _name: "clusteredIndices", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: GPUShaderStage.FRAGMENT },
+                { _name: "clusteredLightParams", _type: { _kind: "uniform-buffer" }, _visibility: SS.FRAGMENT },
+                { _name: "clusteredLights", _type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" }, _visibility: SS.FRAGMENT },
+                { _name: "clusteredCells", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: SS.FRAGMENT },
+                { _name: "clusteredIndices", _type: { _kind: "texture", _textureType: "texture_2d<u32>" }, _visibility: SS.FRAGMENT },
             ],
             _helperFunctions: CLUSTERED_LIGHT_STRUCTS,
             _fragmentSlots: { AD: CLUSTERED_LIGHT_BLOCK, BL: CLUSTERED_LIGHT_BLOCK },
@@ -137,13 +196,13 @@ export function buildClusteredLightGpuState(engine: EngineContext, scene: SceneC
     const dataTextureWidth = Math.max(1, Math.min(MAX_DATA_TEXTURE_WIDTH, engine._device.limits.maxTextureDimension2D));
     const batchCount = Math.max(1, Math.ceil(container.pointLights.length / CLUSTER_BATCH_SIZE));
     const lightTexels = Math.max(1, container.pointLights.length * 2);
-    const lightData = new Float32Array(textureElementCount(lightTexels, 4, dataTextureWidth));
-    const sliceData = new Uint32Array(textureElementCount(zSlices, 4, dataTextureWidth));
+    const lightData = new F32(textureElementCount(lightTexels, 4, dataTextureWidth));
+    const sliceData = new U32(textureElementCount(zSlices, 4, dataTextureWidth));
     const maskTexels = Math.max(1, tileCountX * tileCountY * batchCount);
-    const maskData = new Uint32Array(textureElementCount(maskTexels, 1, dataTextureWidth));
+    const maskData = new U32(textureElementCount(maskTexels, 1, dataTextureWidth));
     const params = new ArrayBuffer(32);
-    const paramsU = new Uint32Array(params);
-    const paramsF = new Float32Array(params);
+    const paramsU = new U32(params);
+    const paramsF = new F32(params);
     paramsU[0] = tileCountX;
     paramsU[1] = tileCountY;
     paramsU[2] = zSlices;
@@ -260,7 +319,7 @@ function createDataTexture(
         label,
         size: { width: dataTextureWidth, height },
         format,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
     writeDataTexture(engine, texture, data, components, texels, dataTextureWidth);
     return texture;

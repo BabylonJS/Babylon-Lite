@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mesh } from "../mesh/mesh.js";
 
 export function hasCpuDeformation(mesh: Mesh): boolean {
@@ -10,7 +11,7 @@ export function computeDeformedPositions(mesh: Mesh): Float32Array | null {
         return null;
     }
 
-    const out = new Float32Array(base);
+    const out = new F32(base);
     applyMorphPositions(mesh, out);
     applySkinPositions(mesh, out);
     return out;
@@ -22,7 +23,7 @@ export function computeDeformedNormals(mesh: Mesh): Float32Array | null {
         return null;
     }
 
-    const out = new Float32Array(base);
+    const out = new F32(base);
     applyMorphNormals(mesh, out);
     applySkinNormals(mesh, out);
     return out;
@@ -80,7 +81,7 @@ function applySkinPositions(mesh: Mesh, out: Float32Array): void {
         return;
     }
 
-    const source = new Float32Array(out);
+    const source = new F32(out);
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;
@@ -100,7 +101,7 @@ function applySkinNormals(mesh: Mesh, out: Float32Array): void {
         return;
     }
 
-    const source = new Float32Array(out);
+    const source = new F32(out);
     const vertexCount = out.length / 3;
     for (let v = 0; v < vertexCount; v++) {
         const i = v * 3;

@@ -26,6 +26,7 @@
     }
     .loading-label { font-size: 1.05rem; font-weight: 600; }
     .loading-sub { font-size: 0.8rem; color: #b8a9a4; }
+    .loading-size { font-size: 0.78rem; color: #d8c9c4; margin-top: 0.4rem; min-height: 1em; letter-spacing: 0.01em; }
     @keyframes lite-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .loading-spinner { animation-duration: 2.4s; } }
     /* Always-visible attribution required by the CC-BY 4.0 license. */
@@ -49,6 +50,16 @@
       backdrop-filter: blur(3px); transition: background 0.2s ease;
     }
     .ctrl-btn:hover { background: rgba(0, 0, 0, 0.7); }
+      .loading-bar {
+        width: 240px; max-width: 62vw; height: 4px; margin-top: 0.55rem;
+        border-radius: 999px; overflow: hidden; background: rgba(255, 255, 255, 0.14);
+        opacity: 0; transition: opacity 0.25s ease;
+      }
+      .loading-overlay.has-progress .loading-bar { opacity: 1; }
+      .loading-bar-fill {
+        width: 0%; height: 100%; border-radius: inherit; background: #e0684b;
+        transition: width 0.25s ease;
+      }
   </style>
 </head>
 <body>
@@ -63,6 +74,8 @@
       <div class="loading-spinner" aria-hidden="true"></div>
       <div class="loading-label">Loading Littlest Tokyo…</div>
       <div class="loading-sub">Loading glTF model & studio environment…</div>
+      <div class="loading-bar" aria-hidden="true"><div id="loadingBarFill" class="loading-bar-fill"></div></div>
+      <div class="loading-size" aria-hidden="true">Estimated demo assets: 11 MB</div>
     </div>
   </div>
   <button id="autoRotateToggle" class="ctrl-btn" type="button" aria-pressed="true">⏸ Auto-rotate</button>
@@ -91,6 +104,34 @@
         new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
         setTimeout(hide, 45000);
       }
+    })();
+  </script>
+  <script>
+    // Determinate progress + asset-amount detail: mirror canvas data-progress /
+    // data-loading-detail (set by installFetchProgress) into the overlay. Runs
+    // independently of the data-ready/data-error hide logic above.
+    (function () {
+      var canvas = document.getElementById("renderCanvas");
+      var overlay = document.getElementById("loadingOverlay");
+      if (!canvas || !overlay) return;
+      var fill = document.getElementById("loadingBarFill");
+      var sub = overlay.querySelector(".loading-sub");
+      var size = overlay.querySelector(".loading-size");
+      function sync() {
+        var p = canvas.dataset.progress;
+        if (p !== undefined && p !== "") {
+          overlay.classList.add("has-progress");
+          if (fill) fill.style.width = Math.max(0, Math.min(100, +p)) + "%";
+        } else {
+          overlay.classList.remove("has-progress");
+        }
+        var d = canvas.dataset.loadingDetail;
+        if (d !== undefined && d !== "" && sub) sub.textContent = d;
+        var sz = canvas.dataset.loadingSize;
+        if (sz !== undefined && sz !== "" && size) size.textContent = sz;
+      }
+      sync();
+      new MutationObserver(sync).observe(canvas, { attributes: true, attributeFilter: ["data-progress", "data-loading-detail", "data-loading-size"] });
     })();
   </script>
   <script type="module" src="/lite/bundle/demos/littlest-tokyo.js"></script>

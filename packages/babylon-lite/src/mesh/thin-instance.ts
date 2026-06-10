@@ -3,6 +3,7 @@
  *  per-instance color (4 floats). The render system creates and syncs
  *  GPU buffers automatically via version tracking. */
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "./mesh.js";
 
@@ -80,12 +81,30 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Arr
     }
 }
 
+/** Update ONLY the active instance count (and re-upload the [0,count) matrix range), leaving `_capacity`
+ *  — and therefore the already-allocated GPU buffer — untouched. This is the way to vary how many instances
+ *  draw FRAME-TO-FRAME on an established thin-instanced mesh WITHOUT recreating the GPU buffer (which would
+ *  invalidate any cached render/shadow bundle that captured the old buffer handle). Pre-size the buffer once
+ *  with `setThinInstances(mesh, matrices, capacity)`, then call this each update with `count <= capacity`.
+ *  The draw reads `count` live, so the bundle stays valid. Caller must keep writing into the SAME `matrices`
+ *  array the mesh already references. No-op if the mesh isn't thin-instanced yet. */
+export function setThinInstanceCount(mesh: Mesh, count: number): void {
+    const ti = mesh.thinInstances;
+    if (!ti) {
+        return;
+    }
+    ti.count = count;
+    ti._version++;
+    ti._dirtyMin = 0;
+    ti._dirtyMax = count;
+}
+
 /** Add one instance. Returns its index. Grows capacity as needed. */
 export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
     const ti = mesh.thinInstances;
     if (!ti) {
         const capacity = 16;
-        const matrices = new Float32Array(capacity * 16);
+        const matrices = new F32(capacity * 16);
         matrices.set(matrix, 0);
         mesh.thinInstances = {
             matrices,
@@ -109,7 +128,7 @@ export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
     const index = ti.count;
     if (index >= ti._capacity) {
         const newCap = ti._capacity * 2;
-        const newData = new Float32Array(newCap * 16);
+        const newData = new F32(newCap * 16);
         newData.set(ti.matrices);
         ti.matrices = newData;
         ti._capacity = newCap;

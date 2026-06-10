@@ -1,9 +1,11 @@
+import { F32, U8 } from "../engine/typed-arrays.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { EngineContext } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { computeSceneSize } from "../material/pbr/scene-size.js";
+import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 
 /** GPU-resident environment textures. */
 export interface EnvironmentTextures {
@@ -22,7 +24,7 @@ export interface EnvironmentTextures {
     lodGenerationScale: number;
 }
 
-const ENV_MAGIC = new Uint8Array([0x86, 0x16, 0x87, 0x96, 0xf6, 0xd6, 0x96, 0x36]);
+const ENV_MAGIC = new U8([0x86, 0x16, 0x87, 0x96, 0xf6, 0xd6, 0x96, 0x36]);
 
 /**
  * Load a Babylon.js .env environment file and upload cubemap + BRDF LUT to GPU.
@@ -75,6 +77,7 @@ export async function loadEnvironment(
     const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 0.8, engine);
 
     scene._envTextures = textures;
+    registerEnvSceneUniforms(scene);
 
     acquireGPUTexture(specularCube);
     acquireGPUTexture(brdfLut);
@@ -146,7 +149,7 @@ interface ParsedEnv {
 }
 
 function parseEnvFile(buffer: ArrayBuffer): ParsedEnv {
-    const bytes = new Uint8Array(buffer);
+    const bytes = new U8(buffer);
 
     for (let i = 0; i < 8; i++) {
         if (bytes[i] !== ENV_MAGIC[i]) {
@@ -169,7 +172,7 @@ function parseEnvFile(buffer: ArrayBuffer): ParsedEnv {
 
     // Irradiance spherical harmonics (9 vec3 coefficients = 27 floats)
     const irr = manifest.irradiance;
-    const irradianceSH = new Float32Array(27);
+    const irradianceSH = new F32(27);
     const shKeys = ["x", "y", "z", "xx", "yy", "zz", "yz", "zx", "xy"];
     for (let i = 0; i < 9; i++) {
         const coeff = irr[shKeys[i]!];
@@ -209,7 +212,7 @@ export function polynomialToPreScaledHarmonics(poly: Float32Array): Float32Array
     const C22 = 1.999991431790211;
 
     // Stride-4 layout matching shader UBO (9 vec3s + pad f32 each)
-    const out = new Float32Array(36);
+    const out = new F32(36);
     for (let i = 0; i < 3; i++) {
         const x = poly[i]!;
         const y = poly[3 + i]!;

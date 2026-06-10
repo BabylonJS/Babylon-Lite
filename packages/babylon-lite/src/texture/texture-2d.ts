@@ -7,6 +7,7 @@
  * - UV scaling via a texture matrix
  */
 
+import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 
@@ -151,7 +152,7 @@ async function loadTexture2DImpl(engine: EngineContext, url: string, opts: Textu
         size: { width, height },
         format,
         mipLevelCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
 
     device.queue.copyExternalImageToTexture({ source: imageBitmap, flipY: invertY }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });

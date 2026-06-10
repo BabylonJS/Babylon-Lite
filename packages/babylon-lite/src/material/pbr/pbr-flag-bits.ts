@@ -3,6 +3,10 @@ export const PBR_HAS_EMISSIVE = 1 << 1;
 export const PBR_HAS_ENV = 1 << 2;
 export const PBR_HAS_ALPHA_TEST = 1 << 3;
 export const PBR_HAS_TONEMAP = 1 << 4;
+/** Scene has fog enabled (scene.fog != null). A scene-feature bit (threaded via
+ *  sceneFeatures), gating the PBR fog blend + calcFogFactor helper into the shader.
+ *  Compile-time gated so non-fog PBR scenes stay byte-identical. */
+export const PBR_HAS_FOG = 1 << 5;
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;
 export const PBR_HAS_DOUBLE_SIDED = 1 << 8;
@@ -69,3 +73,7 @@ export const PBR2_HAS_IRIDESCENCE_THICKNESS_MAP = 1 << 19;
 /** Material has KHR_materials_dispersion (per-channel chromatic refraction).
  *  Implies PBR2_HAS_VOLUME (the extension requires KHR_materials_volume). */
 export const PBR2_HAS_DISPERSION = 1 << 20;
+/** Material view emits multi-attachment geometry-textures instead of a single
+ *  colour. Consumed only by the geometry-renderer task; PBR scenes without
+ *  geometry rendering never set this bit. */
+export const PBR2_GEOMETRY_OUTPUT = 1 << 21;

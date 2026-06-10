@@ -19,6 +19,7 @@
  * they are already tight and the skeleton / index paths expect integers.
  */
 
+import { U8, DV } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 
 const BYTE = 5120;
@@ -107,8 +108,8 @@ const feature: GltfFeature = {
         // Build a new buffer: existing data (normalized to offset 0) + appended floats.
         const baseLen = align4(binChunk.byteLength);
         const out = new ArrayBuffer(baseLen + appended);
-        new Uint8Array(out).set(new Uint8Array(binChunk.buffer, binChunk.byteOffset, binChunk.byteLength));
-        const outView = new DataView(out);
+        new U8(out).set(new U8(binChunk.buffer, binChunk.byteOffset, binChunk.byteLength));
+        const outView = new DV(out);
 
         let cursor = baseLen;
         for (const i of convert) {

@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 import { playAnimation } from "./animation-group.js";
 import type { AnimationGroup, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { addAnimationGroup } from "./animation-group-task.js";
@@ -196,7 +197,7 @@ function createPointerAnimationGroup(
     };
 }
 
-const _pointerScratch = new Float32Array(16);
+const _pointerScratch = new F32(16);
 
 function createSampler(track: PropertyAnimationTrackOptions, frameRate: number): AnimationSampler {
     if (track.keys.length === 0) {
@@ -208,8 +209,8 @@ function createSampler(track: PropertyAnimationTrackOptions, frameRate: number):
 
     const stride = getTrackStride(track);
     const sorted = [...track.keys].sort((a, b) => getKeyTime(a, frameRate, track.path) - getKeyTime(b, frameRate, track.path));
-    const input = new Float32Array(sorted.length);
-    const output = new Float32Array(sorted.length * stride);
+    const input = new F32(sorted.length);
+    const output = new F32(sorted.length * stride);
     let lastTime = -Infinity;
     for (let i = 0; i < sorted.length; i++) {
         const key = sorted[i]!;

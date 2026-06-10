@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /** Splat sort worker.
  *
  *  Vite import: `import SortWorker from './splat-sort-worker.ts?worker&inline'`.
@@ -57,8 +58,8 @@ self.onmessage = (e: MessageEvent) => {
     const cf = data.f;
     const cp = data.c;
     const depthMix = data.d;
-    const indices = new Uint32Array(depthMix.buffer);
-    const floatMix = new Float32Array(depthMix.buffer);
+    const indices = new U32(depthMix.buffer);
+    const floatMix = new F32(depthMix.buffer);
 
     // Collapse cameraForward · (world · localPos - cameraPos) into (a*x + b*y + c*z + d).
     // Lite column-major: world's column k lives at indices [4k, 4k+1, 4k+2, 4k+3]

@@ -19,7 +19,7 @@ export interface ShadowLightSlot {
     /** Index of this light in the scene.lights array (0-based). */
     lightIndex: number;
     /** Shadow type for this light. */
-    shadowType: "esm" | "pcf";
+    shadowType: "esm" | "pcf" | "csm";
 }
 
 /**

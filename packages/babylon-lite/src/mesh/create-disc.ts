@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /**
  * CreateDisc — matches Babylon.js MeshBuilder.CreateDisc defaults.
  *
@@ -64,15 +65,15 @@ export function createDiscData(options: DiscOptions = {}): DiscData {
 
     // Normals: Babylon's ComputeNormals on this triangle ordering yields -Z
     // for every vertex (see cross-product derivation in tests).
-    const normals = new Float32Array(vertexNb * 3);
+    const normals = new F32(vertexNb * 3);
     for (let i = 0; i < vertexNb; i++) {
         normals[i * 3 + 2] = -1;
     }
 
     return {
-        positions: new Float32Array(positions),
+        positions: new F32(positions),
         normals,
-        uvs: new Float32Array(uvs),
-        indices: new Uint32Array(indices),
+        uvs: new F32(uvs),
+        indices: new U32(indices),
     };
 }

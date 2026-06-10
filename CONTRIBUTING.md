@@ -129,10 +129,10 @@ Or manually screenshot the canvas at `http://localhost:5174/babylon-ref-sceneN.h
 reference/lite/sceneN-my-feature/babylon-ref-golden.png
 ```
 
-Also copy as thumbnail:
+Also save a downscaled JPG thumbnail (≤720p, e.g. 1280×720):
 
 ```
-lab/public/thumbnails/sceneN.png
+lab/public/thumbnails/sceneN.jpg
 ```
 
 ### 6. Add Scene Config
@@ -202,7 +202,7 @@ pnpm test
 - [ ] `lab/lite/babylon-ref-sceneN.html` created
 - [ ] `lab/lite/src/bjs/sceneN.ts` created
 - [ ] `reference/lite/sceneN-slug/babylon-ref-golden.png` captured
-- [ ] `lab/public/thumbnails/sceneN.png` copied
+- [ ] `lab/public/thumbnails/sceneN.jpg` saved (JPG, ≤720p)
 - [ ] `scene-config.json` entry added
 - [ ] `tests/lite/parity/scenes/sceneN-slug.spec.ts` created
 - [ ] Parity test passes locally

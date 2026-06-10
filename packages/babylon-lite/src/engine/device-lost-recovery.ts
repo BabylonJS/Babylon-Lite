@@ -1,5 +1,7 @@
+import { U8 } from "./typed-arrays.js";
+import { TU, BU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
-import { startEngine, stopEngine, resizeEngine } from "./engine.js";
+import { startEngine, stopEngine, resizeEngine, _refreshScRT } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
@@ -186,6 +188,10 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         }
         engine._device = await adapter.requestDevice({ requiredFeatures: state.requiredFeatures });
         engine._context.configure({ device: engine._device, format: engine.format, alphaMode: engine._alphaMode });
+        // Re-acquire the canvas swapchain texture into engine.scRT after the
+        // context is reconfigured against the new device (the previous device's texture
+        // is invalid) so the rebuilt frame graph wires a valid color attachment.
+        _refreshScRT(engine);
         clearSceneBGLCache();
         resizeEngine(engine);
 
@@ -293,23 +299,23 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
     const device = engine._device;
     let uvBuffer: GPUBuffer;
     if (uvs && uvs.length > 0) {
-        uvBuffer = createMappedBuffer(engine, uvs, GPUBufferUsage.VERTEX);
+        uvBuffer = createMappedBuffer(engine, uvs, BU.VERTEX);
     } else {
-        uvBuffer = device.createBuffer({ size: (positions.length / 3) * 8, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true });
+        uvBuffer = device.createBuffer({ size: (positions.length / 3) * 8, usage: BU.VERTEX, mappedAtCreation: true });
         uvBuffer.unmap();
     }
     return {
-        positionBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
-        normalBuffer: createMappedBuffer(engine, normals, GPUBufferUsage.VERTEX),
-        tangentBuffer: mesh._cpuTangents ? createMappedBuffer(engine, mesh._cpuTangents, GPUBufferUsage.VERTEX) : null,
+        positionBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
+        normalBuffer: createMappedBuffer(engine, normals, BU.VERTEX),
+        tangentBuffer: mesh._cpuTangents ? createMappedBuffer(engine, mesh._cpuTangents, BU.VERTEX) : null,
         uvBuffer,
-        uv2Buffer: mesh._cpuUv2s ? createMappedBuffer(engine, mesh._cpuUv2s, GPUBufferUsage.VERTEX) : null,
-        colorBuffer: mesh._cpuColors ? createMappedBuffer(engine, mesh._cpuColors, GPUBufferUsage.VERTEX) : null,
+        uv2Buffer: mesh._cpuUv2s ? createMappedBuffer(engine, mesh._cpuUv2s, BU.VERTEX) : null,
+        colorBuffer: mesh._cpuColors ? createMappedBuffer(engine, mesh._cpuColors, BU.VERTEX) : null,
         hasUv: !!uvs && uvs.length > 0,
         hasUv2: !!mesh._cpuUv2s && mesh._cpuUv2s.length > 0,
         hasTangent: !!mesh._cpuTangents && mesh._cpuTangents.length > 0,
         hasColor: !!mesh._cpuColors && mesh._cpuColors.length > 0,
-        indexBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
+        indexBuffer: createMappedBuffer(engine, indices, BU.INDEX),
         indexCount: mesh._gpu.indexCount,
         indexFormat: mesh._cpuIndexFormat ?? mesh._gpu.indexFormat,
     };
@@ -331,8 +337,8 @@ async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): Promise<
         return;
     }
     if (source.kind === "solid") {
-        const texture = engine._device.createTexture({ size: { width: 1, height: 1 }, format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-        const data = new Uint8Array(source.rgba.map((v) => Math.round(v * 255)));
+        const texture = engine._device.createTexture({ size: { width: 1, height: 1 }, format: "rgba8unorm", usage: TU.TEXTURE_BINDING | TU.COPY_DST });
+        const data = new U8(source.rgba.map((v) => Math.round(v * 255)));
         engine._device.queue.writeTexture({ texture }, data, { bytesPerRow: 4, rowsPerImage: 1 }, { width: 1, height: 1 });
         tex.texture = texture;
         tex.view = texture.createView();
@@ -349,7 +355,7 @@ async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): Promise<
         size: { width, height },
         format,
         mipLevelCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.COPY_SRC | TU.RENDER_ATTACHMENT,
     });
     if (source.bitmap) {
         engine._device.queue.copyExternalImageToTexture({ source: source.bitmap }, { texture, premultipliedAlpha: false }, { width, height });
@@ -358,12 +364,7 @@ async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): Promise<
             generateMipmaps(engine, texture);
         }
     } else {
-        engine._device.queue.writeTexture(
-            { texture },
-            (source.fallback ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>,
-            { bytesPerRow: 4 },
-            { width: 1, height: 1 }
-        );
+        engine._device.queue.writeTexture({ texture }, (source.fallback ?? new U8([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
     }
     tex.texture = texture;
     tex.view = texture.createView();
@@ -395,7 +396,7 @@ async function rebuildUrlTexture2D(engine: EngineContext, url: string, opts: Tex
         size: { width, height },
         format,
         mipLevelCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
     engine._device.queue.copyExternalImageToTexture({ source: imageBitmap, flipY: invertY }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });
     imageBitmap.close();

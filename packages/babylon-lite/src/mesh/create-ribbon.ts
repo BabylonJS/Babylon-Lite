@@ -11,6 +11,7 @@
  * from `@babylonjs/core/Meshes/Builders/ribbonBuilder.js`.
  */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
 import type { Vec3 } from "../math/types.js";
 import { computeNormals } from "./compute-normals.js";
 
@@ -199,9 +200,9 @@ export function createRibbonData(options: RibbonOptions): RibbonData {
     }
 
     return {
-        positions: new Float32Array(positions),
-        normals: new Float32Array(normals),
-        uvs: new Float32Array(uvs),
-        indices: new Uint32Array(indices),
+        positions: new F32(positions),
+        normals: new F32(normals),
+        uvs: new F32(uvs),
+        indices: new U32(indices),
     };
 }

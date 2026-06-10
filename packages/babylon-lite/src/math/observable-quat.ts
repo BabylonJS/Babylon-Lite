@@ -15,6 +15,9 @@ export class ObservableQuat implements Quat {
     private _z: number;
     private _w: number;
     private readonly _onDirty: () => void;
+    /** Bumped on every value change. Lets derived caches (e.g. the Euler proxy) detect
+     *  external quaternion writes and re-sync only when needed. */
+    private _version = 0;
 
     constructor(x: number, y: number, z: number, w: number, onDirty: () => void) {
         this._x = x;
@@ -24,12 +27,18 @@ export class ObservableQuat implements Quat {
         this._onDirty = onDirty;
     }
 
+    /** Monotonic change counter — incremented whenever any component changes. */
+    get version(): number {
+        return this._version;
+    }
+
     get x(): number {
         return this._x;
     }
     set x(v: number) {
         if (this._x !== v) {
             this._x = v;
+            this._version++;
             this._onDirty();
         }
     }
@@ -40,6 +49,7 @@ export class ObservableQuat implements Quat {
     set y(v: number) {
         if (this._y !== v) {
             this._y = v;
+            this._version++;
             this._onDirty();
         }
     }
@@ -50,6 +60,7 @@ export class ObservableQuat implements Quat {
     set z(v: number) {
         if (this._z !== v) {
             this._z = v;
+            this._version++;
             this._onDirty();
         }
     }
@@ -60,6 +71,7 @@ export class ObservableQuat implements Quat {
     set w(v: number) {
         if (this._w !== v) {
             this._w = v;
+            this._version++;
             this._onDirty();
         }
     }
@@ -70,6 +82,7 @@ export class ObservableQuat implements Quat {
         this._y = y;
         this._z = z;
         this._w = w;
+        this._version++;
         this._onDirty();
     }
 

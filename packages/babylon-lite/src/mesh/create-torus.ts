@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /**
  * Torus mesh generator — matches Babylon.js Mesh.CreateTorus exactly.
  *
@@ -42,10 +43,10 @@ export function createTorusData(opts: TorusOptions = {}): TorusData {
     // Babylon generates indices for ALL vertex pairs including wrapping seams
     const indexCount = stride * stride * 6;
 
-    const positions = new Float32Array(vertexCount * 3);
-    const normals = new Float32Array(vertexCount * 3);
-    const uvs = new Float32Array(vertexCount * 2);
-    const indices = new Uint32Array(indexCount);
+    const positions = new F32(vertexCount * 3);
+    const normals = new F32(vertexCount * 3);
+    const uvs = new F32(vertexCount * 2);
+    const indices = new U32(indexCount);
 
     const TWO_PI = Math.PI * 2;
 

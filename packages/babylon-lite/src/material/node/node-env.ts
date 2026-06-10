@@ -15,6 +15,7 @@
  *  scene UBO; NodeMaterial does not allocate or write a private scene UBO.
  */
 
+import { SS } from "../../engine/gpu-flags.js";
 import type { SceneContext } from "../../scene/scene.js";
 
 export interface EnvEmit {
@@ -48,10 +49,10 @@ export function emitEnv(startBinding: number): EnvEmit {
         `@group(1) @binding(${brdfSampBinding}) var nmeBrdfSampler: sampler;`,
     ].join("\n");
     const bglEntries: GPUBindGroupLayoutEntry[] = [
-        { binding: iblTexBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
-        { binding: iblSampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
-        { binding: brdfTexBinding, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
-        { binding: brdfSampBinding, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+        { binding: iblTexBinding, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
+        { binding: iblSampBinding, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
+        { binding: brdfTexBinding, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
+        { binding: brdfSampBinding, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
     ];
     return {
         bindings: { _iblTexture: iblTexBinding, _iblSampler: iblSampBinding, _brdfLUT: brdfTexBinding, _brdfSampler: brdfSampBinding },

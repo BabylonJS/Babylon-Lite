@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /** Procedural UV sphere — matches Babylon MeshBuilder.CreateSphere defaults.
  *  Generates vertex positions, normals, and indices for a unit sphere.
  *  Left-handed winding (CCW front face) to match Babylon. */
@@ -37,10 +38,10 @@ export function createSphereData(options: SphereOptions = {}): SphereMeshData {
     const totalVertices = (totalZRotationSteps + 1) * (totalYRotationSteps + 1);
     const totalIndices = totalZRotationSteps * totalYRotationSteps * 6;
 
-    const positions = new Float32Array(totalVertices * 3);
-    const normals = new Float32Array(totalVertices * 3);
-    const uvs = new Float32Array(totalVertices * 2);
-    const indices = new Uint32Array(totalIndices);
+    const positions = new F32(totalVertices * 3);
+    const normals = new F32(totalVertices * 3);
+    const uvs = new F32(totalVertices * 2);
+    const indices = new U32(totalIndices);
 
     let vIdx = 0;
     for (let zStep = 0; zStep <= totalZRotationSteps; zStep++) {

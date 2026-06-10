@@ -8,6 +8,7 @@
  * The Index API stays the storage foundation. The optional Handle API lives in
  * `sprite-2d-handle.ts` and lazily installs hooks only when handles are used.
  */
+import { F32 } from "../engine/typed-arrays.js";
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { Sprite2DCustomShader } from "./sprite-custom-shader.js";
@@ -258,7 +259,7 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
     const baseFloatsPerSprite = depth === "none" ? PURE_2D_INSTANCE_FLOATS_PER_SPRITE : DEPTH_INSTANCE_FLOATS_PER_SPRITE;
     const instanceFloatsPerSprite = uvScroll ? baseFloatsPerSprite + UVSCROLL_EXTRA_FLOATS_PER_SPRITE : baseFloatsPerSprite;
     const instanceStrideBytes = instanceFloatsPerSprite * 4;
-    const instanceData = new Float32Array(capacity * instanceFloatsPerSprite);
+    const instanceData = new F32(capacity * instanceFloatsPerSprite);
     const layer: Sprite2DLayer = {
         _entityType: "sprite-2d-layer",
         atlas,
@@ -275,7 +276,7 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         _instanceFloatsPerSprite: instanceFloatsPerSprite,
         _instanceStrideBytes: instanceStrideBytes,
         _instanceData: instanceData,
-        _savedSize: new Float32Array(capacity * SAVED_SIZE_FLOATS_PER_SPRITE),
+        _savedSize: new F32(capacity * SAVED_SIZE_FLOATS_PER_SPRITE),
         _version: 0,
         _dirtyMin: 0,
         _dirtyMax: 0,
@@ -334,10 +335,10 @@ function growCapacity(layer: Sprite2DLayer, minCapacity: number): void {
     while (cap < minCapacity) {
         cap *= 2;
     }
-    const next = new Float32Array(cap * layer._instanceFloatsPerSprite);
+    const next = new F32(cap * layer._instanceFloatsPerSprite);
     next.set(layer._instanceData);
     layer._instanceData = next;
-    const nextSaved = new Float32Array(cap * SAVED_SIZE_FLOATS_PER_SPRITE);
+    const nextSaved = new F32(cap * SAVED_SIZE_FLOATS_PER_SPRITE);
     nextSaved.set(layer._savedSize);
     layer._savedSize = nextSaved;
     layer._capacity = cap;

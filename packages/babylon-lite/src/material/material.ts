@@ -33,7 +33,12 @@ export interface MaterialRenderFeatures {
  *  The view is also a Material: it inherits material state from {@link source}
  *  through the prototype chain and owns only render-feature bits. Keeping views
  *  material-compatible lets ordinary render paths read properties normally, so
- *  scenes that never create views do not retain view-specific unwrap branches. */
+ *  scenes that never create views do not retain view-specific unwrap branches.
+ *
+ *  Specialized views (e.g. the Standard geometry MRT view) override
+ *  {@link Material._buildGroup} with a view-specific builder whose
+ *  `_rebuildSingle` builds the right kind of Renderable — no per-family
+ *  branching is required in the core render-task. */
 export interface MaterialView extends Material {
     readonly source: Material;
     /** @internal */

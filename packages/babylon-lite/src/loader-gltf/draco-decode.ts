@@ -13,6 +13,7 @@
  * (POSITION/NORMAL/TANGENT=VEC3, TEXCOORD_0=VEC2, ...).
  */
 
+import { F32, U32, I32, U8 } from "../engine/typed-arrays.js";
 import type { DecodedPrimitive } from "./gltf-feature.js";
 
 // Public base URL where the decoder JS + WASM are hosted. Defaults to site root.
@@ -115,7 +116,7 @@ export async function decodeDracoPrimitive(compressed: Uint8Array, attributeMap:
     const indexByteLength = indexCount * 4;
     const indexPtr = module._malloc(indexByteLength);
     decoder.GetTrianglesUInt32Array(mesh, indexByteLength, indexPtr);
-    const indices = new Uint32Array(module.HEAPU32.buffer, indexPtr, indexCount).slice();
+    const indices = new U32(module.HEAPU32.buffer, indexPtr, indexCount).slice();
     module._free(indexPtr);
 
     const attributes = new Map<string, Float32Array | Uint32Array | Int32Array>();
@@ -133,9 +134,9 @@ export async function decodeDracoPrimitive(compressed: Uint8Array, attributeMap:
         // Re-read the HEAP view AFTER malloc/decode — the underlying buffer
         // may have been reallocated during decoding.
         if (isIntAttr) {
-            attributes.set(name, new Int32Array(module.HEAP32.buffer, ptr, totalComponents).slice());
+            attributes.set(name, new I32(module.HEAP32.buffer, ptr, totalComponents).slice());
         } else {
-            attributes.set(name, new Float32Array(module.HEAPF32.buffer, ptr, totalComponents).slice());
+            attributes.set(name, new F32(module.HEAPF32.buffer, ptr, totalComponents).slice());
         }
         module._free(ptr);
     }
@@ -156,5 +157,5 @@ export function getDracoBufferViewBytes(json: { bufferViews: Array<{ byteOffset?
         throw new Error(`Draco bufferView ${bufferViewIdx} not found`);
     }
     const offset = binChunk.byteOffset + (view.byteOffset ?? 0);
-    return new Uint8Array(binChunk.buffer, offset, view.byteLength);
+    return new U8(binChunk.buffer, offset, view.byteLength);
 }

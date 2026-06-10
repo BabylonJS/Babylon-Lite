@@ -9,6 +9,7 @@ import {
     createSceneContext,
     parseNodeMaterialFromSnippet,
     registerScene,
+    setClipPlane,
     startEngine,
 } from "babylon-lite";
 import type { EngineContext, Mesh } from "babylon-lite";
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0.02, g: 0.02, b: 0.035, a: 1 };
-    scene.clipPlane = SCENE86_CLIP_PLANE;
+    setClipPlane(scene, SCENE86_CLIP_PLANE);
 
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 4, { x: 0, y: 0, z: 0 });
     camera.nearPlane = 0.1;

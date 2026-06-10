@@ -1,4 +1,5 @@
 /** Optional stable-identity Handle API for BillboardSpriteSystem. */
+import { U32 } from "../engine/typed-arrays.js";
 import type { BillboardIndexHandleHooks, BillboardSpriteInit, BillboardSpriteSystem } from "./billboard-sprite.js";
 import { addBillboardSpriteIndex, removeBillboardSpriteIndex, setBillboardSpriteFrameIndex, updateBillboardSpriteIndex } from "./billboard-sprite.js";
 
@@ -33,7 +34,7 @@ function getOrCreateState(system: BillboardSpriteSystem): BillboardHandleState {
     state = {
         nextId: 1,
         idToIndex: new Map<number, number>(),
-        indexToId: new Uint32Array(system._capacity),
+        indexToId: new U32(system._capacity),
     };
     const hooks: BillboardIndexHandleHooks = {
         removeIndex(index, last): void {
@@ -57,7 +58,7 @@ function ensureIndexCapacity(system: BillboardSpriteSystem, state: BillboardHand
     if (state.indexToId.length >= system._capacity) {
         return;
     }
-    const next = new Uint32Array(system._capacity);
+    const next = new U32(system._capacity);
     next.set(state.indexToId);
     state.indexToId = next;
 }

@@ -1,3 +1,4 @@
+import { U8 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { GaussianSplattingMesh, GsShaderFragment } from "./gaussian-splatting-mesh.js";
@@ -18,7 +19,7 @@ import SplatSortWorker from "../../loader-splat/splat-sort-worker.ts?worker&inli
 export function createProceduralGaussianSplattingMesh(scene: SceneContext, name: string, splatCount: number, fragments?: readonly GsShaderFragment[]): GaussianSplattingMesh {
     const ROW = 32;
     const buffer = new ArrayBuffer(ROW * splatCount);
-    const u8 = new Uint8Array(buffer);
+    const u8 = new U8(buffer);
     for (let i = 0; i < splatCount; i++) {
         u8[i * ROW + 24 + 3] = 255;
         u8[i * ROW + 28 + 0] = 255;

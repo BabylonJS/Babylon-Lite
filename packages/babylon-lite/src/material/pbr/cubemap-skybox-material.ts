@@ -1,6 +1,7 @@
 /** Shared cubemap skybox material factory — used by DDS and HDR skyboxes.
  *  BGL: binding 0 = uniform buffer, binding 1 = cube texture, binding 2 = sampler. */
 
+import { SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -34,9 +35,9 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
         const layout = device.createBindGroupLayout({
             label: `${label}-material`,
             entries: [
-                { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
-                { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+                { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
+                { binding: 2, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
             ],
         });
         _cmLayouts.set(label, layout);
@@ -72,7 +73,6 @@ export function createCubemapSkyboxMaterial(label: string, vertCode: string, fra
                     _depthCompare: sig._depthCompare,
                     _msaaSamples: sig._sampleCount,
                     _depthWriteEnabled: false,
-                    _flipY: sig._flipY,
                 })
             );
             _cmPipelines.set(key, pipeline);

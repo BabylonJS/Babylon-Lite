@@ -1,5 +1,6 @@
 /** RGBD decoder — decodes Babylon BRDF PNG and .env cubemap faces into rgba16float. */
 
+import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 
 const WGSL = `override f:bool=false;@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var o:texture_storage_2d<rgba16float,write>;@compute @workgroup_size(8,8)fn main(@builtin(global_invocation_id)g:vec3u){let d=textureDimensions(t);if(any(g.xy>=d)){return;}let c=textureLoad(t,vec2u(g.x,select(g.y,d.y-1u-g.y,f)),0);textureStore(o,g.xy,vec4f(pow(c.rgb,vec3f(2.2))/max(c.a,1.0/255.0),1));}`;
@@ -59,13 +60,13 @@ export function decodeBrdfPng(engine: EngineContext, image: ImageBitmap): GPUTex
     const inputTex = device.createTexture({
         size: { width: w, height: h },
         format: "rgba8unorm",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
     device.queue.copyExternalImageToTexture({ source: image, flipY: false }, { texture: inputTex, premultipliedAlpha: false }, { width: w, height: h });
     const texture = device.createTexture({
         size: { width: w, height: h },
         format: "rgba16float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+        usage: TU.TEXTURE_BINDING | TU.STORAGE_BINDING,
     });
     const bg = makeBindGroup(device, pipeline, inputTex.createView(), texture.createView());
     const enc = device.createCommandEncoder();
@@ -85,7 +86,7 @@ export function uploadCubemapRGBD(engine: EngineContext, images: ImageBitmap[], 
         size: { width, height: width, depthOrArrayLayers: 6 },
         format: "rgba16float",
         mipLevelCount: mipCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.COPY_SRC | TU.RENDER_ATTACHMENT,
         dimension: "2d",
     });
 
@@ -95,13 +96,13 @@ export function uploadCubemapRGBD(engine: EngineContext, images: ImageBitmap[], 
         const inputTex = device.createTexture({
             size: { width: mipSize, height: mipSize },
             format: "rgba8unorm",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
         });
 
         const outputTex = device.createTexture({
             size: { width: mipSize, height: mipSize },
             format: "rgba16float",
-            usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+            usage: TU.STORAGE_BINDING | TU.COPY_SRC,
         });
 
         const bindGroup = makeBindGroup(device, pipeline, inputTex.createView(), outputTex.createView());

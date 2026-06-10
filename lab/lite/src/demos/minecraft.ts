@@ -13,6 +13,7 @@
  */
 
 import { addToScene, createEngine, createSceneContext, onBeforeRender, registerScene, startEngine } from "babylon-lite";
+import { installFetchProgress } from "./loading-progress.js";
 
 import { allReferencedTiles, blockDef, HOTBAR, Block } from "./minecraft/blocks.js";
 import { buildBlockAtlas } from "./minecraft/atlas.js";
@@ -42,6 +43,7 @@ const FOG_END = RENDER_RADIUS * 16 * 0.95;
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 110_000 });
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
     scene.clearColor = { r: FOG_COLOR[0], g: FOG_COLOR[1], b: FOG_COLOR[2], a: 1 };
@@ -217,6 +219,7 @@ async function main(): Promise<void> {
     });
 
     await registerScene(engine, scene);
+    progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.ready = "true";

@@ -2,6 +2,8 @@
  *  Used by both the core loader (`load-gltf.ts`) and the variants loader
  *  (`gltf-variants.ts`) so they can't drift. */
 
+import { U8 } from "../engine/typed-arrays.js";
+import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
@@ -35,14 +37,14 @@ export function uploadTex(
     const tex = device.createTexture({
         size: { width: w, height: h },
         format: fmt,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.COPY_SRC | TU.RENDER_ATTACHMENT,
         mipLevelCount: mips,
     });
     if (bitmap) {
         device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: tex, premultipliedAlpha: false }, { width: w, height: h });
         generateMipmaps(engine, tex);
     } else {
-        device.queue.writeTexture({ texture: tex }, (fallback ?? new Uint8Array([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
+        device.queue.writeTexture({ texture: tex }, (fallback ?? new U8([255, 255, 255, 255])) as Uint8Array<ArrayBuffer>, { bytesPerRow: 4 }, { width: 1, height: 1 });
     }
     const result: Texture2D = {
         texture: tex,
@@ -113,7 +115,7 @@ export function buildDefaultPbrTextures(
                   true,
                   sampler,
                   generateMipmaps,
-                  new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
+                  new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
               );
           })();
     const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false) : undefined;
@@ -125,7 +127,7 @@ export function buildDefaultPbrTextures(
         ormTexture = getCachedTex(single, false);
     } else if (!single) {
         const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
     } else {
         ormTexture = getCachedTex(mat._metallicRoughnessImage!, false);
     }

@@ -16,6 +16,8 @@
  * shared.
  */
 
+import { F32 } from "../engine/typed-arrays.js";
+import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/renderable.js";
@@ -100,7 +102,7 @@ export function buildSpriteRenderable(engine: EngineContext, layer: Sprite2DLaye
     if (layer.depth === "none") {
         throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
     }
-    const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, GPUBufferUsage.INDEX);
+    const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
     const uniformBuffer = createEmptyUniformBuffer(engine, LAYER_UBO_BYTES, "sprite-depth-hosted-ubo");
     const cap = layer._capacity;
     const instanceBuffer = createSpriteInstanceBuffer(engine._device, layer, "sprite-depth-hosted-instances");
@@ -124,8 +126,8 @@ export function buildSpriteRenderable(engine: EngineContext, layer: Sprite2DLaye
         _bindGroups: new Map(),
         _uploadedVersion: -1,
         _uboUploaded: false,
-        _lastUbo: new Float32Array(LAYER_UBO_BYTES / 4),
-        _scratchUbo: new Float32Array(LAYER_UBO_BYTES / 4),
+        _lastUbo: new F32(LAYER_UBO_BYTES / 4),
+        _scratchUbo: new F32(LAYER_UBO_BYTES / 4),
         _fx: fx,
         _disposed: false,
         bind(engine, target) {

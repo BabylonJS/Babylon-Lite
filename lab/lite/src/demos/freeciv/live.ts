@@ -3,31 +3,32 @@
  *
  * Pure-2D, no scene: a handful of sprites are mutated every animation frame to
  * make the static tilemap feel alive:
- *   - a roaming **scout** (explorer unit) that wanders the continent,
- *   - a **pulsing selection ring** cycling the four `unit.select*` frames on it,
- *   - a few pieces of **roaming wildlife** from the animals sheet, and
- *   - **fog of war** that hides unexplored land and dims tiles you've seen but
- *     can't currently watch, lifting as the scout (and your cities) gain sight.
+ *   - a roaming **scout** (explorer unit) that wanders the continent (and, while
+ *     selected, gently blinks via its sprite alpha so the player can spot it), and
+ *   - a few pieces of **roaming wildlife** from the animals sheet.
+ *
+ * Fog of war (which lifts as the scout and cities gain sight) lives in its own
+ * module (`fog.ts`); it reads the scout's tile from here each frame. The selection
+ * ring / destination marker / click-ping command feedback lives in `commandfx.ts`.
  *
  * Everything is seeded off the world so the demo replays identically.
  */
 
-import { addSprite2DIndex, clearSprite2DLayer, setSprite2DFrameIndex, updateSprite2DIndex } from "babylon-lite";
-import { DIR8, DIR_DELTA, TILE_H, TILE_W, isoCentre } from "./iso.js";
+import { addSprite2DIndex, updateSprite2DIndex } from "babylon-lite";
+import { DIR8, DIR_DELTA, TILE_H, isoCentre } from "./iso.js";
 import type { TileLayers, TileSheets } from "./tilemap.js";
-import type { City, GameMap } from "./worldgen.js";
+import type { GameMap } from "./worldgen.js";
 
-/** Tile sight radius (Manhattan) around cities and the scout. */
-const CITY_SIGHT = 2;
-const SCOUT_SIGHT = 3;
-/** Fog opacity for tiles never seen vs. seen-but-not-currently-visible. */
-const UNEXPLORED_ALPHA = 0.92;
-const EXPLORED_ALPHA = 0.55;
 /** Wildlife species drawn from the animals sheet. */
 const ANIMAL_TAGS = ["u.wolf", "u.bear", "u.leopard", "u.tiger", "u.crocodile", "u.gorilla", "u.snake"] as const;
 const ANIMAL_COUNT = 6;
-/** Selection ring frame-cycle period (ms per frame). */
-const SELECT_FRAME_MS = 150;
+/** Scout sprite footprint (world px). */
+const SCOUT_W = 64;
+const SCOUT_H = 48;
+/** Selected-unit BLINK: its opacity oscillates between SCOUT_BLINK_MIN and full, at this
+ * speed (rad/ms), so the active unit flashes gently instead of changing size. */
+const SCOUT_BLINK_MIN = 0.3;
+const SCOUT_BLINK_SPEED = 0.006;
 
 /** A sprite that walks tile-to-tile with smooth interpolation. */
 interface Walker {
@@ -62,11 +63,12 @@ export interface LiveSim {
     commandScout: (path: ReadonlyArray<readonly [number, number]>) => void;
     /** The scout's current tile (or the tile it's about to reach, if mid-hop). */
     scoutTile: () => [number, number];
-    /**
-     * Mark the scout as selected/deselected. While selected the pulsing selection
-     * ring holds a steady frame instead of cycling, so the player can tell it's the
-     * unit currently under their command.
-     */
+    /** The scout's live interpolated world-pixel position (its ground point), for trailing FX. */
+    scoutWorld: () => [number, number];
+    /** Whether the scout is mid-hop (moving) right now — emit dust only while it walks. */
+    scoutMoving: () => boolean;
+    /** Mark the scout selected/deselected. While selected the scout sprite gently blinks
+     * (its alpha oscillates) so the player can see it's the unit under their command. */
     setScoutSelected: (selected: boolean) => void;
 }
 
@@ -88,9 +90,10 @@ function ease(t: number): number {
 }
 
 /**
- * Spawn the moving sprites + fog and return a `step` driver. Adds the scout to
- * the (otherwise static) unit layer, wildlife to the animals layer, one ring to
- * the selection layer, and rebuilds the fog layer whenever sight changes.
+ * Spawn the moving sprites and return a `step` driver. Adds the scout to the
+ * (otherwise static) unit layer and wildlife to the animals layer. Fog of war
+ * (`fog.ts`) and the selection / command feedback FX (`commandfx.ts`) are handled
+ * in their own modules.
  */
 export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLayers): LiveSim {
     const { width, height } = world;
@@ -112,7 +115,7 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
     const [ssx, ssy] = isoCentre(scoutStart.x, scoutStart.y);
     const scoutIndex = addSprite2DIndex(layers.unit, {
         positionPx: [ssx, ssy + TILE_H * 0.5],
-        sizePx: [64, 48],
+        sizePx: [SCOUT_W, SCOUT_H],
         frame: scoutFrame,
     });
     const scout: Walker = {
@@ -130,15 +133,9 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
         rng: (scoutStart.x * 73856093) ^ (scoutStart.y * 19349663),
     };
 
-    // --- Selection ring on the scout ------------------------------------
-    const ringIndex = addSprite2DIndex(layers.selection, {
-        positionPx: [ssx, ssy],
-        sizePx: [TILE_W, TILE_H],
-        frame: 0,
-    });
-    let ringFrame = 0;
-    let ringAccumMs = 0;
+    // Selected state drives the scout's pulse; `elapsedMs` accumulates wall time for it.
     let scoutSelected = false;
+    let elapsedMs = 0;
 
     // --- Wildlife --------------------------------------------------------
     const animalGrid = sheets.animals.grid("grid_main");
@@ -173,52 +170,6 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
             rng: (spot.x * 83492791) ^ (spot.y * 12582917) ^ (i + 1),
         });
     }
-
-    // --- Fog of war ------------------------------------------------------
-    // The whole map starts charted (like an old surveyor's map / the minimap):
-    // every tile reads as the soft "seen but not currently watched" haze, and
-    // only lifts to fully clear under a city's or the scout's live sight. This
-    // avoids the near-black "unexplored void" that swallowed the parchment look.
-    const explored = new Uint8Array(width * height).fill(1);
-    const visible = new Uint8Array(width * height);
-    const fogFrame = sheets.terrain.grid("grid_main").frameOf("t.unknown1") ?? 0;
-
-    const stampSight = (cx: number, cy: number, r: number): void => {
-        for (let dy = -r; dy <= r; dy++) {
-            for (let dx = -r; dx <= r; dx++) {
-                if (Math.abs(dx) + Math.abs(dy) > r) continue;
-                const x = cx + dx;
-                const y = cy + dy;
-                if (x < 0 || y < 0 || x >= width || y >= height) continue;
-                const i = y * width + x;
-                visible[i] = 1;
-                explored[i] = 1;
-            }
-        }
-    };
-
-    const rebuildFog = (): void => {
-        visible.fill(0);
-        for (const c of world.cities as City[]) stampSight(c.x, c.y, CITY_SIGHT);
-        stampSight(scout.x, scout.y, SCOUT_SIGHT);
-
-        clearSprite2DLayer(layers.fog);
-        for (let y = 0; y < height; y++) {
-            for (let x = 0; x < width; x++) {
-                const i = y * width + x;
-                if (visible[i]) continue; // currently in sight → clear
-                const alpha = explored[i] ? EXPLORED_ALPHA : UNEXPLORED_ALPHA;
-                const [px, py] = isoCentre(x, y);
-                addSprite2DIndex(layers.fog, {
-                    positionPx: [px, py],
-                    sizePx: [TILE_W, TILE_H],
-                    frame: fogFrame,
-                    color: [0, 0, 0, alpha],
-                });
-            }
-        }
-    };
-    rebuildFog();
 
     // Player-issued orders: a queue of adjacent tiles for the scout to walk. The
     // scout is fully player-controlled — it idles until the player clicks a
@@ -286,28 +237,20 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
 
     return {
         step(dtMs: number): void {
-            // Scout movement + fog reveal on tile change.
+            elapsedMs += dtMs;
+            // Scout movement (sight/fog reveal is handled by the fog module, which
+            // reads the scout's tile each frame).
             const scoutArrived = advanceWalker(scout, dtMs, pickScoutTarget);
             // While following a commanded path, step crisply between tiles instead of
             // taking the lazy wander pause.
             if (scoutArrived && scoutPath.length > 0) scout.dwellMs = 40;
             const [scx, scy] = walkerPx(scout);
-            updateSprite2DIndex(layers.unit, scout.index, { positionPx: [scx, scy + scout.yOffset] });
-            updateSprite2DIndex(layers.selection, ringIndex, { positionPx: [scx, scy] });
-            if (scoutArrived) rebuildFog();
-
-            // Pulsing selection ring — frozen on a steady frame while the scout is
-            // selected so the player can see it's the unit under their command.
-            if (scoutSelected) {
-                ringAccumMs = 0;
-            } else {
-                ringAccumMs += dtMs;
-                while (ringAccumMs >= SELECT_FRAME_MS) {
-                    ringAccumMs -= SELECT_FRAME_MS;
-                    ringFrame = (ringFrame + 1) & 3;
-                    setSprite2DFrameIndex(layers.selection, ringIndex, ringFrame);
-                }
-            }
+            // Selected scouts blink (opacity oscillates) so the player can spot the active unit.
+            const blink = scoutSelected ? SCOUT_BLINK_MIN + (1 - SCOUT_BLINK_MIN) * (0.5 + 0.5 * Math.sin(elapsedMs * SCOUT_BLINK_SPEED)) : 1;
+            updateSprite2DIndex(layers.unit, scout.index, {
+                positionPx: [scx, scy + scout.yOffset],
+                color: [1, 1, 1, blink],
+            });
 
             // Wildlife wander.
             for (const a of animals) {
@@ -327,13 +270,16 @@ export function createLiveSim(world: GameMap, sheets: TileSheets, layers: TileLa
             // chain off the tile it's about to reach.
             return scout.t < 1 ? [scout.toX, scout.toY] : [scout.x, scout.y];
         },
+        scoutWorld(): [number, number] {
+            // The scout's smooth ground position (isoCentre interpolated across the hop),
+            // so trailing FX can drop puffs exactly under it rather than snapping per tile.
+            return walkerPx(scout);
+        },
+        scoutMoving(): boolean {
+            return scout.t < 1;
+        },
         setScoutSelected(selected: boolean): void {
             scoutSelected = selected;
-            if (selected) {
-                // Snap to the first (full) bracket frame and hold it steady.
-                ringFrame = 0;
-                setSprite2DFrameIndex(layers.selection, ringIndex, 0);
-            }
         },
     };
 }

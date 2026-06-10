@@ -1,7 +1,6 @@
 // Demo — Bath Day (animated, Draco-compressed glTF diorama)
 //
-// Showcase-only page (pure Lite, no BJS comparison, no parity/golden
-// obligations). Loads StanSt's "Bath Day" diorama — a frog taking a bath
+// Showcase-only page. Loads StanSt's "Bath Day" diorama — a frog taking a bath
 // surrounded by candles, water and plants. The model (CC BY 4.0) is vendored
 // in-repo at lab/public/bath_day.glb and copied next to the demo bundle at
 // build time, so it loads relative to the page. The model is Draco-compressed,
@@ -29,11 +28,13 @@ import {
     loadGltf,
     onBeforeRender,
     registerScene,
+    setCameraLimits,
     startEngine,
     type RenderTask,
 } from "babylon-lite";
 import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
-import { configureDemoDracoBase, demoAssetUrl } from "./demo-asset-url.js";
+import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
+import { installFetchProgress } from "./loading-progress.js";
 
 const ENV_URL = "https://playground.babylonjs.com/textures/environment.dds";
 
@@ -45,6 +46,7 @@ const IDLE_DELAY_MS = 2500;
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 1_900_000 });
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
@@ -59,8 +61,8 @@ async function main(): Promise<void> {
     scene.imageProcessing.toneMappingEnabled = true;
     scene.imageProcessing.toneMappingType = "aces";
 
-    // Draco-compressed glTF — point the decoder at the demo-local wasm/js.
-    await configureDemoDracoBase(import.meta.url);
+    // Draco-compressed glTF — point the decoders at the demo-local wasm/js.
+    await configureDemoDecoderBases(import.meta.url);
 
     // Load the model + DDS cubemap environment in parallel (same env as Scene 26).
     await Promise.all([
@@ -76,6 +78,18 @@ async function main(): Promise<void> {
     cam.beta = 1.15;
     cam.radius *= 0.62;
     attachControl(cam, canvas, scene);
+
+    // Zoom limits, relative to the auto-framed radius: stop the camera diving
+    // inside the tiny diorama or drifting so far the bath shrinks away / clips.
+    // Enforced every frame by attachControl's loop (covers wheel and pinch).
+    setCameraLimits(
+        cam,
+        {
+            lowerRadiusLimit: cam.radius * 0.45,
+            upperRadiusLimit: cam.radius * 1.5,
+        },
+        scene,
+    );
 
     // Visible PBR skybox that samples the cubemap as the background (Scene 26's
     // SKYBOX_MODE block). The box is recentred on the camera each frame so it
@@ -138,6 +152,7 @@ async function main(): Promise<void> {
     });
 
     await registerScene(engine, scene);
+    progress.done();
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);

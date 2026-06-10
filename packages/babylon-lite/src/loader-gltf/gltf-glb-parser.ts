@@ -1,7 +1,8 @@
+import { U8, DV } from "../engine/typed-arrays.js";
 /** GLB binary container parsing. Kept separate so .gltf-only scenes do not ship it. */
 
 export function parseGlbContainer(buffer: ArrayBuffer): { json: any; binChunk: DataView } {
-    const view = new DataView(buffer);
+    const view = new DV(buffer);
 
     // Header (12 bytes)
     const magic = view.getUint32(0, true);
@@ -18,7 +19,7 @@ export function parseGlbContainer(buffer: ArrayBuffer): { json: any; binChunk: D
     if (jsonType !== 0x4e4f534a) {
         throw new Error("First GLB chunk is not JSON");
     }
-    const jsonStr = new TextDecoder().decode(new Uint8Array(buffer, offset + 8, jsonLength));
+    const jsonStr = new TextDecoder().decode(new U8(buffer, offset + 8, jsonLength));
     const json = JSON.parse(jsonStr);
     offset += 8 + jsonLength;
 
@@ -28,7 +29,7 @@ export function parseGlbContainer(buffer: ArrayBuffer): { json: any; binChunk: D
     if (binType !== 0x004e4942) {
         throw new Error("Second GLB chunk is not BIN");
     }
-    const binChunk = new DataView(buffer, offset + 8, binLength);
+    const binChunk = new DV(buffer, offset + 8, binLength);
 
     return { json, binChunk };
 }

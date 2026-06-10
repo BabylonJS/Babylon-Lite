@@ -14,6 +14,8 @@
  * this wrapper (no transcoder bytes are shipped).
  */
 
+import { U8 } from "../engine/typed-arrays.js";
+import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
@@ -209,7 +211,7 @@ export async function loadBasisTexture2D(engine: EngineContext, url: string, opt
 
     const [mod, buffer] = await Promise.all([loadBasisModule(), fetch(url).then((r) => r.arrayBuffer())]);
 
-    const bytes = new Uint8Array(buffer);
+    const bytes = new U8(buffer);
     const file = new mod.BasisFile(bytes);
     try {
         if (file.getNumImages() === 0) {
@@ -237,7 +239,7 @@ export async function loadBasisTexture2D(engine: EngineContext, url: string, opt
             if (size === 0) {
                 throw new Error(`Basis: transcoded size is 0 for mip ${level}`);
             }
-            const dst = new Uint8Array(size);
+            const dst = new U8(size);
             const ok = file.transcodeImage(dst, 0, level, target.basisFormat, 0, hasAlpha ? 1 : 0);
             if (ok === 0) {
                 throw new Error(`Basis: transcodeImage failed for mip ${level}`);
@@ -250,7 +252,7 @@ export async function loadBasisTexture2D(engine: EngineContext, url: string, opt
             size: { width, height },
             format: gpuFormat,
             mipLevelCount: mips.length,
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST,
         });
 
         for (let level = 0; level < mips.length; level++) {

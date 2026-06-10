@@ -1,4 +1,5 @@
 node_modules/
+
 dist/
 *.tsbuildinfo
 .vite/
@@ -6,7 +7,7 @@ dist/
 *.py
 our-render*
 our-*
-test-actual.png
+test-actual*.png
 diff-map.png
 capture.json
 capture-full.json
@@ -25,7 +26,7 @@ reference/**/final-ours.png
 reference/**/*-capture.json
 reference/**/diff*.png
 reference/**/debug-*.png
-lab/public/bundle/*
+lab/public/bundle/
 !lab/public/bundle/manifest.json
 !lab/public/bundle/demos-manifest.json
 lab/public/bundle-baseline/
@@ -43,6 +44,7 @@ lab/public/minecraft/voxelpack/License.txt
 .voxelpack-cache/
 lab/public/freeciv/
 .freeciv-cache/
+.platformer-cache/
 lab/public/littlest-tokyo/*.bak
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
@@ -73,4 +75,7 @@ build-timeline.json
 lab/public/api-docs/
 lab/public/lite/api-docs/
 
+# Kenney asset source GLBs (CC0) - bake outputs are committed under lab/public
+scratch/
 playwright-report/
+lab/public/littlest-tokyo/CREDITS.txt

@@ -4,6 +4,7 @@
  *  no shared MR image). Scene1 (BoomBox) and any vanilla-PBR glTF skip this
  *  module entirely. */
 
+import { U8 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { cloneTexture2D } from "../texture/texture-2d.js";
@@ -60,7 +61,7 @@ export function buildDefaultPbrTexturesExt(
                   true,
                   sampler,
                   generateMipmaps,
-                  new Uint8Array([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
+                  new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
               );
           })();
     const normalTexture = mat._normalImage ? wrap(getCachedTex(mat._normalImage, false), raw.normalTexture) : undefined;
@@ -72,14 +73,14 @@ export function buildDefaultPbrTexturesExt(
     let ormTexture: Texture2D;
     if (occlusionOnUv2) {
         const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
         occlusionTexture = wrap(getCachedTex(mat._occlusionImage!, false), raw.occlusionTexture);
     } else if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
         const ormTi = mat._metallicRoughnessImage ? pbr.metallicRoughnessTexture : raw.occlusionTexture;
         ormTexture = wrap(getCachedTex(single, false), ormTi);
     } else if (!single) {
         const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
-        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new Uint8Array([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
+        ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
     } else {
         ormTexture = wrap(getCachedTex(mat._metallicRoughnessImage!, false), pbr.metallicRoughnessTexture);
     }

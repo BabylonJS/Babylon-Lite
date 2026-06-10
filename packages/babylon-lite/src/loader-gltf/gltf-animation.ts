@@ -7,6 +7,7 @@
  *  installed via the registration seam below, so scenes that don't declare
  *  the extension pay zero bytes for it.
  */
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding, AnimatedNodeTarget } from "../animation/types.js";
@@ -40,7 +41,7 @@ function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: bool
     if (_convertSampler) {
         return _convertSampler(src, length, normalized);
     }
-    return new Float32Array(src.buffer, src.byteOffset, length);
+    return new F32(src.buffer, src.byteOffset, length);
 }
 
 /** Parsed skin/skeleton data. */
@@ -62,9 +63,9 @@ function resolveIBMs(json: any, binChunk: DataView, skin: any): Float32Array {
     const jointCount = skin.joints.length;
     if (skin.inverseBindMatrices !== undefined) {
         const ibmData = resolveAccessor(json, binChunk, skin.inverseBindMatrices);
-        return new Float32Array(ibmData._data.buffer, ibmData._data.byteOffset, jointCount * 16);
+        return new F32(ibmData._data.buffer, ibmData._data.byteOffset, jointCount * 16);
     }
-    const out = new Float32Array(jointCount * 16);
+    const out = new F32(jointCount * 16);
     for (let i = 0; i < jointCount; i++) {
         const o = i * 16;
         out[o] = out[o + 5] = out[o + 10] = out[o + 15] = 1;
@@ -92,7 +93,7 @@ export function extractSkin(
  *  At rest pose this simplifies to identity for each bone. */
 export function computeBoneTextureData(skin: GltfSkinData): Float32Array {
     const numBones = skin.jointNodes.length;
-    const data = new Float32Array(numBones * 16);
+    const data = new F32(numBones * 16);
     const invMeshWorld = mat4Invert(skin.meshWorldMatrix) ?? mat4Identity();
     const tmp = getLoaderTmpAnim() as unknown as Mat4Storage;
     for (let i = 0; i < numBones; i++) {

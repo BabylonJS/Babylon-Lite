@@ -4,6 +4,7 @@
  * This module is pure state + standalone index API. The optional Handle API
  * lives in `billboard-sprite-handle.ts` and installs swap-remove hooks lazily.
  */
+import { F32 } from "../engine/typed-arrays.js";
 import type { SpriteAtlas } from "./shared/sprite-atlas.js";
 import { resolveSpriteFrame } from "./shared/sprite-atlas.js";
 import type { BillboardCustomShader } from "./billboard-custom-shader.js";
@@ -174,7 +175,7 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
     const blendMode = opts.blendMode ?? billboardBlendAlpha;
     const depthMode = blendMode._depthMode;
     const capacity = Math.max(1, opts.capacity ?? DEFAULT_CAPACITY);
-    const instanceData = new Float32Array(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
+    const instanceData = new F32(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
     const system: BillboardSpriteSystem<TOrientation> = {
         _entityType: "billboard-sprite-system",
         atlas,
@@ -191,7 +192,7 @@ function createBillboardSystem<TOrientation extends BillboardOrientation>(
         _instanceFloatsPerSprite: BILLBOARD_INSTANCE_FLOATS_PER_SPRITE,
         _instanceStrideBytes: BILLBOARD_INSTANCE_STRIDE_BYTES,
         _instanceData: instanceData,
-        _savedSize: new Float32Array(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE),
+        _savedSize: new F32(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE),
         _version: 0,
         _dirtyMin: 0,
         _dirtyMax: 0,
@@ -220,10 +221,10 @@ function growCapacity(system: BillboardSpriteSystem, minCapacity: number): void 
     while (capacity < minCapacity) {
         capacity *= 2;
     }
-    const next = new Float32Array(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
+    const next = new F32(capacity * BILLBOARD_INSTANCE_FLOATS_PER_SPRITE);
     next.set(system._instanceData);
     system._instanceData = next;
-    const nextSavedSize = new Float32Array(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE);
+    const nextSavedSize = new F32(capacity * BILLBOARD_SAVED_SIZE_FLOATS_PER_SPRITE);
     nextSavedSize.set(system._savedSize);
     system._savedSize = nextSavedSize;
     system._capacity = capacity;

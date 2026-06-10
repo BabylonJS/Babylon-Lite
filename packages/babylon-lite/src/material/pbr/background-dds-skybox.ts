@@ -1,6 +1,8 @@
 /** DDS cube skybox — lazy-loaded only when skyboxUrl ends with .dds.
  *  Loads backgroundSkybox.dds and renders it with BJS image processing. */
 
+import { F32, I32, U16, U8 } from "../../engine/typed-arrays.js";
+import { TU, BU } from "../../engine/gpu-flags.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
@@ -17,7 +19,7 @@ const DEFAULT_SKY_URL = "https://assets.babylonjs.com/core/environments/backgrou
 
 function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number } {
     // prettier-ignore
-    const positions = new Float32Array([
+    const positions = new F32([
      S,-S, S, -S,-S, S, -S, S, S,  S, S, S,
      S, S,-S, -S, S,-S, -S,-S,-S,  S,-S,-S,
      S, S,-S,  S,-S,-S,  S,-S, S,  S, S, S,
@@ -26,20 +28,20 @@ function createSkyboxBuffers(engine: EngineContext, S: number): { posBuffer: GPU
      S,-S, S,  S,-S,-S, -S,-S,-S, -S,-S, S,
   ]);
     // prettier-ignore
-    const indices = new Uint16Array([
+    const indices = new U16([
      2, 1, 0,  3, 2, 0,   6, 5, 4,  7, 6, 4,
     10, 9, 8, 11,10, 8,  14,13,12, 15,14,12,
     18,17,16, 19,18,16,  22,21,20, 23,22,20,
   ]);
     return {
-        posBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
-        idxBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
+        posBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
+        idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
         idxCount: 36,
     };
 }
 
 function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Float32Array {
-    const world = new Float32Array(16);
+    const world = new F32(16);
     world[0] = 1;
     world[5] = 1;
     world[10] = 1;
@@ -94,7 +96,7 @@ export async function buildDdsSkyboxRenderable(
 // ─── DDS Skybox UBO ──────────────────────────────────────────────────────────
 
 function createDdsMeshUBO(engine: EngineContext, world: Float32Array, primaryColor: [number, number, number], exposureLinear: number, contrast: number): GPUBuffer {
-    const data = new Float32Array(SKY_DDS_UNIFORM_SIZE / 4);
+    const data = new F32(SKY_DDS_UNIFORM_SIZE / 4);
     data.set(world, 0);
     data[16] = primaryColor[0];
     data[17] = primaryColor[1];
@@ -112,7 +114,7 @@ function createDdsMeshUBO(engine: EngineContext, world: Float32Array, primaryCol
 async function loadDdsCube(engine: EngineContext, url: string): Promise<{ cubeView: GPUTextureView; sampler: GPUSampler }> {
     const device = engine._device;
     const buf = await (await fetch(url)).arrayBuffer();
-    const header = new Int32Array(buf, 0, 32);
+    const header = new I32(buf, 0, 32);
     const width = header[3]!;
     const height = header[4]!;
     const mipCount = Math.max(header[7]!, 1);
@@ -121,14 +123,14 @@ async function loadDdsCube(engine: EngineContext, url: string): Promise<{ cubeVi
     // DDS_HEADER_DX10 at byte 128: dxgiFormat, resourceDimension, miscFlag, arraySize, etc.
     // For cube: miscFlag has RESOURCE_MISC_TEXTURECUBE (0x4), arraySize = 1 (6 faces in data)
     const dataOffset = header[21] === 0x30315844 /* 'DX10' */ ? 128 + 20 : 128;
-    const raw = new Uint8Array(buf, dataOffset);
+    const raw = new U8(buf, dataOffset);
 
     const fmt: GPUTextureFormat = "rgba16float";
     const tex = device.createTexture({
         size: [width, height, 6],
         format: fmt,
         mipLevelCount: mipCount,
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
         dimension: "2d",
     });
 

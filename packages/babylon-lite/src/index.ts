@@ -18,6 +18,7 @@ export {
     unregisterScene,
 } from "./scene/scene.js";
 export type { SceneContextOptions } from "./scene/scene.js";
+export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { getFloatingOriginOffset } from "./large-world/floating-origin.js";
 
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
@@ -41,11 +42,18 @@ export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
+export type { CopyToTextureTask, CopyToTextureTaskConfig } from "./frame-graph/copy-to-texture-task.js";
+export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task.js";
+export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
+export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export { createShadowTask } from "./frame-graph/shadow-task.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
 export { createRenderTargetTexture } from "./texture/rtt.js";
+export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
+export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
 
 // ─── Fullscreen Effects ─────────────────────────────────────────────
 export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectRenderTask, disposeEffectWrapper } from "./effect/effect-renderer.js";
@@ -66,12 +74,17 @@ export { createExtractHighlightsPostProcessTask } from "./post-process/extract-h
 export type { ExtractHighlightsPostProcessTask, ExtractHighlightsPostProcessTaskConfig } from "./post-process/extract-highlights.js";
 export { createChromaticAberrationPostProcessTask } from "./post-process/chromatic-aberration.js";
 export type { ChromaticAberrationPostProcessTask, ChromaticAberrationPostProcessTaskConfig } from "./post-process/chromatic-aberration.js";
+export { createCircleOfConfusionPostProcessTask } from "./post-process/circle-of-confusion.js";
+export type { CircleOfConfusionPostProcessTask, CircleOfConfusionPostProcessTaskConfig } from "./post-process/circle-of-confusion.js";
 export { createBloomPostProcessTask } from "./post-process/bloom.js";
 export type { BloomPostProcessTask, BloomPostProcessTaskConfig } from "./post-process/bloom.js";
+export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post-process/depth-of-field.js";
+export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
 
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
-export { attachControl } from "./camera/arc-rotate-controls.js";
+export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
+export type { ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 
@@ -82,6 +95,7 @@ export { createPointLight } from "./light/point-light.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
 export type { ClusteredLightContainer, ClusteredLightContainerOptions, ClusteredPointLight, ClusteredPointLightOptions } from "./light/clustered.js";
+export { createClusteredLightContainer, createClusteredPointLight, addClusteredLightContainer, markClusteredLightContainerDirty } from "./light/clustered.js";
 export type { LightBase } from "./light/types.js";
 export { setMaxLights, MAX_LIGHTS } from "./light/types.js";
 
@@ -90,6 +104,7 @@ export {
     createSphere,
     createBox,
     createTorus,
+    createTorusKnot,
     createGround,
     createGroundFromHeightMap,
     createCylinder,
@@ -101,9 +116,18 @@ export {
     createExtrudeShape,
     createMeshFromData,
     updateMeshPositions,
+    updateMeshNormals,
+    updateMeshColors,
+    updateMeshUvs,
+    updateMeshUv2,
+    updateMeshTangents,
+    resizeMeshGeometry,
+    invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
+export { createTorusKnotData } from "./mesh/create-torus-knot.js";
+export type { TorusKnotData, TorusKnotOptions } from "./mesh/create-torus-knot.js";
 export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromCsg } from "./mesh/csg.js";
 export type { CsgSolid } from "./mesh/csg.js";
 export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg2Intersect, csg2Add, createMeshFromCsg2, createMeshesFromCsg2, disposeCsg2 } from "./mesh/csg2.js";
@@ -111,8 +135,8 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
-export { createTexture2DFromPixels } from "./texture/pixels-texture.js";
-export type { PixelsTexture2DOptions } from "./texture/pixels-texture.js";
+export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTexture2D } from "./texture/pixels-texture.js";
+export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 
@@ -125,11 +149,14 @@ export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
+export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -146,7 +173,7 @@ export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
-export { loadTexture2D } from "./texture/texture-2d.js";
+export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
@@ -166,6 +193,8 @@ export type { LinearDepthMaterialOptions } from "./render/linear-depth-material.
 export { createEsmDirectionalShadowGenerator } from "./shadow/esm-directional-shadow-generator.js";
 export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow-generator.js";
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
+export { createCsmDirectionalShadowGenerator } from "./shadow/csm-directional-shadow-generator.js";
+export { onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
 export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
@@ -192,6 +221,8 @@ export { createPropertyAnimationClip, createPropertyAnimationGroup } from "./ani
 export type { AnimationTask, AnimationTaskCategoryHandler, AnimationTaskOptions, AnimationTaskUpdate } from "./animation/animation-manager.js";
 export { createMorphTargets, setMorphTargetWeights } from "./morph/create-morph-targets.js";
 export type { MorphTargetData } from "./animation/types.js";
+export { bakeVat, attachVat } from "./vat/vat-baker.js";
+export type { VatBakeResult, VatClip, VatHandle } from "./vat/vat-baker.js";
 
 // ─── Math ────────────────────────────────────────────────────────────
 export { normalizeVec3 } from "./math/normalize-vec3.js";
@@ -199,7 +230,8 @@ export { mat4Translation } from "./math/mat4-translation.js";
 export { mat4Identity } from "./math/mat4-identity.js";
 export { mat4Scale } from "./math/mat4-scale.js";
 export { mat4Compose } from "./math/mat4-compose.js";
-export type { Vec3, Vec3Tuple } from "./math/types.js";
+export { mat4Invert } from "./math/mat4-invert.js";
+export type { Vec3, Vec3Tuple, Mat4 } from "./math/types.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./math/color.js";
@@ -210,6 +242,7 @@ export {
     removeThinInstance,
     setThinInstanceMatrix,
     setThinInstances,
+    setThinInstanceCount,
     flushThinInstances,
     setThinInstanceColors,
     enableThinInstanceGpuCulling,
@@ -263,6 +296,7 @@ export type { ShadowGenerator } from "./shadow/shadow-generator.js";
 export type { EsmDirectionalShadowGeneratorConfig } from "./shadow/esm-directional-shadow-generator.js";
 export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-shadow-generator.js";
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
+export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";
@@ -291,7 +325,7 @@ export { CAP_NONE, CAP_START, CAP_END, CAP_ALL } from "./mesh/create-tube.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { createGpuPicker, pickAsync, disposePicker } from "./picking/gpu-picker.js";
-export type { GpuPicker } from "./picking/gpu-picker.js";
+export type { GpuPicker, PickOptions } from "./picking/gpu-picker.js";
 export type { PickingInfo } from "./picking/picking-info.js";
 export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
@@ -305,7 +339,7 @@ export type { RenderTargetSignature } from "./engine/render-target.js";
 export type { SpriteAtlas, SpriteFrame, SpriteSampling, GridAtlasOptions, LoadAtlasOptions } from "./sprite/shared/sprite-atlas.js";
 export { createGridSpriteAtlas, loadSpriteAtlas } from "./sprite/shared/sprite-atlas.js";
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
-export { createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
+export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
 export { spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendMultiply } from "./sprite/sprite-blend.js";
@@ -393,6 +427,7 @@ export {
     removeSpriteRendererLayer,
     registerSpriteRenderer,
     unregisterSpriteRenderer,
+    setSpriteRendererTarget,
     disposeSpriteRenderer,
 } from "./sprite/sprite-renderer.js";
 

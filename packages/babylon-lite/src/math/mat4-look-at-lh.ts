@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4, Vec3 } from "./types.js";
 import { mat4Identity } from "./mat4-identity.js";
 
@@ -36,7 +37,7 @@ export function mat4LookAtLH(eye: Vec3, target: Vec3, up: Vec3): Mat4 {
         z: zAxis.x * xAxis.y - zAxis.y * xAxis.x,
     };
 
-    return new Float32Array([
+    return new F32([
         xAxis.x,
         yAxis.x,
         zAxis.x,

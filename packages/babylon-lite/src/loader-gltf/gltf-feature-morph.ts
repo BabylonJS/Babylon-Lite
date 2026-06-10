@@ -1,6 +1,7 @@
 /** Morph target feature. Extracts per-primitive morph targets lazily so the
  *  core loader doesn't carry any morph-related code for non-morphed assets. */
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { resolveAccessor } from "./gltf-parser.js";
 
@@ -18,7 +19,7 @@ const feature: GltfFeature = {
             const posAcc = target.POSITION !== undefined ? resolveAccessor(json, binChunk, target.POSITION) : null;
             const normAcc = target.NORMAL !== undefined ? resolveAccessor(json, binChunk, target.NORMAL) : null;
             morphTargets.push({
-                positions: posAcc ? (posAcc._data as Float32Array) : new Float32Array(meshData._vertexCount * 3),
+                positions: posAcc ? (posAcc._data as Float32Array) : new F32(meshData._vertexCount * 3),
                 normals: normAcc ? (normAcc._data as Float32Array) : null,
             });
         }

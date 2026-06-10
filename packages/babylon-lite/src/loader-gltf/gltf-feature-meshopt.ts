@@ -18,6 +18,7 @@
  * transparently.
  */
 
+import { U8, DV } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { getMeshoptDecoder } from "./meshopt-decode.js";
 
@@ -64,15 +65,15 @@ const feature: GltfFeature = {
                 if ((ext.buffer ?? 0) !== 0) {
                     throw new Error(`EXT_meshopt_compression: compressed source buffer ${ext.buffer} is not buffer 0 (unsupported)`);
                 }
-                const source = new Uint8Array(binChunk.buffer, binChunk.byteOffset + (ext.byteOffset ?? 0), ext.byteLength);
-                const target = new Uint8Array(ext.count * ext.byteStride);
+                const source = new U8(binChunk.buffer, binChunk.byteOffset + (ext.byteOffset ?? 0), ext.byteLength);
+                const target = new U8(ext.count * ext.byteStride);
                 decoder.decodeGltfBuffer(target, ext.count, ext.byteStride, source, ext.mode, ext.filter ?? "NONE");
                 bytes = target;
             } else {
                 if ((bv.buffer ?? 0) !== 0) {
                     throw new Error(`EXT_meshopt_compression: uncompressed bufferView in buffer ${bv.buffer} is not buffer 0 (unsupported)`);
                 }
-                bytes = new Uint8Array(binChunk.buffer.slice(binChunk.byteOffset + (bv.byteOffset ?? 0), binChunk.byteOffset + (bv.byteOffset ?? 0) + bv.byteLength));
+                bytes = new U8(binChunk.buffer.slice(binChunk.byteOffset + (bv.byteOffset ?? 0), binChunk.byteOffset + (bv.byteOffset ?? 0) + bv.byteLength));
             }
             materialized[i] = bytes;
             newOffsets[i] = total;
@@ -80,7 +81,7 @@ const feature: GltfFeature = {
         }
 
         // Pass 2: pack into a single contiguous buffer and rewrite bufferViews.
-        const packed = new Uint8Array(total);
+        const packed = new U8(total);
         for (let i = 0; i < bufferViews.length; i++) {
             const bv = bufferViews[i]!;
             packed.set(materialized[i]!, newOffsets[i]!);
@@ -92,7 +93,7 @@ const feature: GltfFeature = {
             }
         }
 
-        return new DataView(packed.buffer);
+        return new DV(packed.buffer);
     },
 };
 

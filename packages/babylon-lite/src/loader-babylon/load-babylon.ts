@@ -10,6 +10,7 @@
  * - Parent-child hierarchy via parentId
  */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { LightBase } from "../light/types.js";
@@ -367,11 +368,11 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
             }
 
             if (md.positions && md.normals && md.indices && md.indices.length > 0) {
-                const positions = new Float32Array(md.positions);
-                const normals = new Float32Array(md.normals);
-                const allIndices = new Uint32Array(md.indices);
-                const uvs = md.uvs ? new Float32Array(md.uvs) : undefined;
-                const uvs2 = md.uvs2 ? new Float32Array(md.uvs2) : undefined;
+                const positions = new F32(md.positions);
+                const normals = new F32(md.normals);
+                const allIndices = new U32(md.indices);
+                const uvs = md.uvs ? new F32(md.uvs) : undefined;
+                const uvs2 = md.uvs2 ? new F32(md.uvs2) : undefined;
 
                 // Bake localMatrix (pivot) into vertex data when present
                 if (md.localMatrix && bakeLocalMatrix) {

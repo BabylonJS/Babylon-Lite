@@ -1,5 +1,6 @@
 /** Internal PCF shadow task hooks owned by PCF shadow generators. */
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Material, MaterialView } from "../material/material.js";
@@ -42,21 +43,25 @@ export interface PcfTaskState extends ShadowTaskInternalState {
 type StandardNoColorFactory = typeof import("../material/standard/no-color-view.js").createStandardNoColorMaterialView;
 type PbrNoColorFactory = typeof import("../material/pbr/no-color-view.js").createPbrNoColorMaterialView;
 type NodeNoColorFactory = typeof import("../material/node/no-color-view.js").createNodeNoColorMaterialView;
+type ShaderNoColorFactory = typeof import("../material/shader/no-color-view.js").createShaderNoColorMaterialView;
 
 let createStandardNoColorMaterialView: StandardNoColorFactory;
 let createPbrNoColorMaterialView: PbrNoColorFactory;
 let createNodeNoColorMaterialView: NodeNoColorFactory;
+let createShaderNoColorMaterialView: ShaderNoColorFactory;
 
 export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): Promise<void> {
     const loads: Promise<void>[] = [];
     let needsStandard = false;
     let needsPbr = false;
     let needsNode = false;
+    let needsShader = false;
     for (const mesh of casterMeshes) {
         const family = mesh.material?._buildGroup._materialFamily;
         needsStandard ||= family === "standard";
         needsPbr ||= family === "pbr";
         needsNode ||= family === "node";
+        needsShader ||= family === "shader";
     }
     if (needsStandard && !createStandardNoColorMaterialView) {
         loads.push(
@@ -76,6 +81,13 @@ export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): 
         loads.push(
             import("../material/node/no-color-view.js").then((module) => {
                 createNodeNoColorMaterialView = module.createNodeNoColorMaterialView;
+            })
+        );
+    }
+    if (needsShader && !createShaderNoColorMaterialView) {
+        loads.push(
+            import("../material/shader/no-color-view.js").then((module) => {
+                createShaderNoColorMaterialView = module.createShaderNoColorMaterialView;
             })
         );
     }
@@ -115,7 +127,7 @@ export function ensurePcfShadowTaskState(
         _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
-        _shadowUboData: new Float32Array(24),
+        _shadowUboData: new F32(24),
         _casterMeshes: casterMeshes,
     };
 
@@ -159,7 +171,7 @@ function updateShadowCamera(state: PcfTaskState, sg: ShadowGenerator, matrix: Pc
 }
 
 function biasViewProjection(viewProj: Float32Array, bias: number): Float32Array {
-    const biased = new Float32Array(viewProj);
+    const biased = new F32(viewProj);
     const b = bias * 0.5;
     for (let col = 0; col < 4; col++) {
         const z = 2 + col * 4;
@@ -169,7 +181,7 @@ function biasViewProjection(viewProj: Float32Array, bias: number): Float32Array 
     return biased;
 }
 
-function getNoColorView(material: Material, cache: Map<Material, MaterialView>): MaterialView {
+export function getNoColorView(material: Material, cache: Map<Material, MaterialView>): MaterialView {
     const cached = cache.get(material);
     if (cached) {
         return cached;
@@ -182,6 +194,10 @@ function getNoColorView(material: Material, cache: Map<Material, MaterialView>):
         view = createPbrNoColorMaterialView(material as Parameters<PbrNoColorFactory>[0]);
     } else if (family === "node") {
         view = createNodeNoColorMaterialView(material as Parameters<NodeNoColorFactory>[0]);
+    } else if (family === "shader") {
+        // Custom ShaderMaterial caster: the shader pipeline drops its fragment stage for the depth-only
+        // shadow target on its own, so the view just hands it a private system UBO (shadow-camera VP).
+        view = createShaderNoColorMaterialView(material as Parameters<typeof createShaderNoColorMaterialView>[0]);
     }
     cache.set(material, view!);
     return view!;

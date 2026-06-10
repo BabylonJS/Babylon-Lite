@@ -6,6 +6,7 @@
  * Renders backfaces (no culling → sees inside of box).
  */
 
+import { SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import skyVertSrc from "../../../shaders/skybox-cubemap.vertex.wgsl?raw";
@@ -40,9 +41,9 @@ export function buildSkyboxCubeMapGPU(engine: EngineContext, worldMatrix: Float3
     const meshBindGroupLayout = device.createBindGroupLayout({
         label: "skybox-cm-mesh",
         entries: [
-            { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+            { binding: 0, visibility: SS.VERTEX, buffer: { type: "uniform" } },
+            { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "cube" } },
+            { binding: 2, visibility: SS.FRAGMENT, sampler: {} },
         ],
     });
 
@@ -82,7 +83,6 @@ export function buildSkyboxCubeMapGPU(engine: EngineContext, worldMatrix: Float3
                     _depthCompare: sig._depthCompare,
                     _msaaSamples: sig._sampleCount,
                     _cullMode: "none",
-                    _flipY: sig._flipY,
                 })
             );
             gpu.pipelines.set(key, pipeline);

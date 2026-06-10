@@ -45,10 +45,10 @@ async function main(): Promise<void> {
     // R1 render target is eagerly allocated so its color view can be wired as
     // B's diffuseTexture before the frame graph is built.
     const { rt: r1RT, texture: r1Tex } = createRenderTargetTexture(engine, {
-        label: "r1",
-        colorFormat: engine.format,
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: 1,
+        lbl: "r1",
+        format: engine.format,
+        dFormat: "depth24plus-stencil8",
+        samples: 1,
         size: { width: 512, height: 512 },
     });
 

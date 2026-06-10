@@ -7,6 +7,7 @@
  *   - Pipelines live inside each `_PbrShaderBindings`, keyed by `targetSignatureKey(sig)`.
  */
 
+import { CW } from "../../engine/gpu-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { ComposedShader } from "../../shader/fragment-types.js";
@@ -110,7 +111,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     const noColorOutput = (features2 & PBR2_NO_COLOR_OUTPUT) !== 0;
     const fragModule = !sig._colorFormat && !noColorOutput ? null : device.createShaderModule({ code: composed._fragmentWGSL });
 
-    const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig._colorFormat!, writeMask: GPUColorWrite.ALL };
+    const fragTarget: GPUColorTargetState | null = noColorOutput ? null : { format: sig._colorFormat!, writeMask: CW.ALL };
     if (hasAlpha && fragTarget) {
         fragTarget.blend = {
             color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
@@ -132,7 +133,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: sig._flipY ? "cw" : "ccw" },
+        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

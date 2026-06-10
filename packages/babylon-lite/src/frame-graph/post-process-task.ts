@@ -1,3 +1,5 @@
+import { F32 } from "../engine/typed-arrays.js";
+import { BU, SS } from "../engine/gpu-flags.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
@@ -71,12 +73,8 @@ interface PostProcessTaskInternal extends PostProcessTask {
     _colorAttachment: GPURenderPassColorAttachment;
 }
 
-const fullscreenVertexWGSL = (
-    outputFlipY: boolean,
-    extraOutput: string,
-    extraMain: string
-) => `struct PostProcessVertexOutput{@builtin(position) position:vec4f,@location(0) uv:vec2f${extraOutput}}
-@vertex fn postProcessVertex(@builtin(vertex_index) vertexIndex:u32)->PostProcessVertexOutput{var positions=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));let p=positions[vertexIndex];var out:PostProcessVertexOutput;out.position=vec4f(p,0,1);out.uv=vec2f(p.x*0.5+0.5,${outputFlipY ? "0.5-p.y*0.5" : "p.y*0.5+0.5"});${extraMain}return out;}`;
+const fullscreenVertexWGSL = (extraOutput: string, extraMain: string) => `struct PostProcessVertexOutput{@builtin(position) position:vec4f,@location(0) uv:vec2f${extraOutput}}
+@vertex fn postProcessVertex(@builtin(vertex_index) vertexIndex:u32)->PostProcessVertexOutput{var positions=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));let p=positions[vertexIndex];var out:PostProcessVertexOutput;out.position=vec4f(p,0,1);out.uv=vec2f(p.x*0.5+0.5,0.5-p.y*0.5);${extraMain}return out;}`;
 
 const SOURCE_WGSL = `@group(0) @binding(0) var sourceSampler:sampler;
 @group(0) @binding(1) var sourceTextureSampler:texture_2d<f32>;
@@ -124,7 +122,7 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
             createPostProcessGpuState(task, engine);
         },
         execute(): number {
-            applyColorAttachmentState(task._colorAttachment, task.outputTexture, engine, task.clear);
+            applyColorAttachmentState(task._colorAttachment, task.outputTexture, task.clear);
             const pass = engine._currentEncoder.beginRenderPass(task._renderPassDescriptor);
             applyViewport(pass, task.viewport, task.outputTexture);
             pass.setPipeline(task._pipeline!);
@@ -147,9 +145,7 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
             task._pipelineLayout = null;
             task._shaderModule = null;
             task._shaderModuleCode = "";
-            if (task._internalTarget) {
-                disposeRenderTarget(task._internalTarget);
-            }
+            disposeRenderTarget(task._internalTarget);
         },
     };
     return task;
@@ -160,13 +156,13 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
     if (!source._colorTexture || !source._colorView) {
         throw new Error(`PostProcessTask "${task.name}": sourceTexture has no color texture. Render the source to an offscreen RenderTarget before post-processing.`);
     }
-    if ((source._descriptor.sampleCount ?? 1) !== 1) {
+    if ((source._descriptor.samples ?? 1) !== 1) {
         throw new Error(`PostProcessTask "${task.name}": multisampled source textures are not supported. Use a sampleCount: 1 source RenderTarget.`);
     }
     const target = task.outputTexture;
-    const colorFormat = target._descriptor.colorFormat;
-    if (!colorFormat) {
-        throw new Error(`PostProcessTask "${task.name}": outputTexture must have a colorFormat.`);
+    const format = target._descriptor.format;
+    if (!format) {
+        throw new Error(`PostProcessTask "${task.name}": outputTexture must have a format.`);
     }
     task._uniformBuffer ??= createUniformBuffer(task, engine);
     task._uniformData ??= createUniformData(task);
@@ -175,8 +171,8 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
     const bgl = getBindGroupLayout(task, engine);
     task._pipelineLayout ??= engine._device.createPipelineLayout({ label: `${task.name}-pipeline-layout`, bindGroupLayouts: [bgl] });
     const signature: RenderTargetSignature = {
-        _colorFormat: colorFormat,
-        _sampleCount: target._descriptor.sampleCount ?? 1,
+        _colorFormat: format,
+        _sampleCount: target._descriptor.samples ?? 1,
     };
     task._pipeline = engine._device.createRenderPipeline({
         label: `${task.name}-${targetSignatureKey(signature)}-${task.alphaMode}`,
@@ -185,7 +181,7 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
         fragment: {
             module: getShaderModule(task, engine),
             entryPoint: "postProcessFragment",
-            targets: [{ format: colorFormat, blend: alphaModeToBlend(task.alphaMode) }],
+            targets: [{ format: format, blend: alphaModeToBlend(task.alphaMode) }],
         },
         primitive: { topology: "triangle-list" },
         multisample: { count: signature._sampleCount },
@@ -233,13 +229,13 @@ function prepareOutputTarget(task: PostProcessTaskInternal): void {
 
 function createInternalTarget(name: string, source: RenderTarget): RenderTarget {
     const srcDesc = source._descriptor;
-    if (!srcDesc.colorFormat) {
-        throw new Error(`PostProcessTask "${name}": sourceTexture must have a colorFormat.`);
+    if (!srcDesc.format) {
+        throw new Error(`PostProcessTask "${name}": sourceTexture must have a format.`);
     }
     const desc: RenderTargetDescriptor = {
-        label: `${name}-output`,
-        colorFormat: srcDesc.colorFormat,
-        sampleCount: 1,
+        lbl: `${name}-output`,
+        format: srcDesc.format,
+        samples: 1,
         size: srcDesc.size,
     };
     return createRenderTarget(desc);
@@ -248,7 +244,7 @@ function createInternalTarget(name: string, source: RenderTarget): RenderTarget 
 function internalTargetKey(source: RenderTarget): string {
     const desc = source._descriptor;
     const size = desc.size === "canvas" ? "canvas" : `${desc.size.width}x${desc.size.height}`;
-    return `${desc.colorFormat ?? "-"}|${desc.sampleCount ?? 1}|${size}`;
+    return `${desc.format ?? "-"}|${desc.samples ?? 1}|${size}`;
 }
 
 function getBindGroupLayout(task: PostProcessTaskInternal, engine: EngineContext): GPUBindGroupLayout {
@@ -257,15 +253,15 @@ function getBindGroupLayout(task: PostProcessTaskInternal, engine: EngineContext
         return task._bindGroupLayout;
     }
     const entries: GPUBindGroupLayoutEntry[] = [
-        { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
-        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+        { binding: 0, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
+        { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float" } },
     ];
     const extraTextures = task._shader.extraTextures ?? [];
     for (let i = 0; i < extraTextures.length; i++) {
-        entries.push({ binding: 2 + i, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } });
+        entries.push({ binding: 2 + i, visibility: SS.FRAGMENT, texture: { sampleType: "float" } });
     }
     if (hasUniform) {
-        entries.push({ binding: getUniformBinding(task), visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } });
+        entries.push({ binding: getUniformBinding(task), visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } });
     }
     task._bindGroupLayout = engine._device.createBindGroupLayout({ label: `${task.name}-bind-group-layout`, entries });
     return task._bindGroupLayout;
@@ -276,11 +272,7 @@ function getUniformBinding(task: PostProcessTaskInternal): number {
 }
 
 function getShaderModule(task: PostProcessTaskInternal, engine: EngineContext): GPUShaderModule {
-    const desc = task.outputTexture._descriptor;
-    // Offscreen sources rendered without a projection flip match Babylon.js post-process sources;
-    // compensate when sampling so derivative-dependent scene shading is not altered.
-    const outputFlipY = (desc.flipY ?? desc.resolveToSwapchain !== true) || task.sourceTexture._descriptor.flipY === false;
-    const code = `${fullscreenVertexWGSL(outputFlipY, task._shader.vertexOutputWGSL ?? "", task._shader.vertexMainWGSL ?? "")}\n${SOURCE_WGSL}\n${task._shader.extraTextureWGSL ?? ""}\n${task._shader.uniformWGSL ?? ""}\n${task._shader.fragmentWGSL}\n${task._shader.fragmentWrapperWGSL ?? FRAGMENT_WRAPPER_WGSL}`;
+    const code = `${fullscreenVertexWGSL(task._shader.vertexOutputWGSL ?? "", task._shader.vertexMainWGSL ?? "")}\n${SOURCE_WGSL}\n${task._shader.extraTextureWGSL ?? ""}\n${task._shader.uniformWGSL ?? ""}\n${task._shader.fragmentWGSL}\n${task._shader.fragmentWrapperWGSL ?? FRAGMENT_WRAPPER_WGSL}`;
     if (!task._shaderModule || task._shaderModuleCode !== code) {
         task._shaderModuleCode = code;
         task._shaderModule = engine._device.createShaderModule({
@@ -299,13 +291,13 @@ function createUniformBuffer(task: PostProcessTaskInternal, engine: EngineContex
     return engine._device.createBuffer({
         label: `${task.name}-uniforms`,
         size,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        usage: BU.UNIFORM | BU.COPY_DST,
     });
 }
 
 function createUniformData(task: PostProcessTaskInternal): Float32Array | null {
     const size = align16(task._shader.uniformByteLength ?? 0);
-    return size === 0 ? null : new Float32Array(size / 4);
+    return size === 0 ? null : new F32(size / 4);
 }
 
 function writePostProcessUniforms(task: PostProcessTaskInternal, engine: EngineContext): void {
@@ -317,19 +309,12 @@ function writePostProcessUniforms(task: PostProcessTaskInternal, engine: EngineC
     engine._device.queue.writeBuffer(task._uniformBuffer!, 0, task._uniformData as Float32Array<ArrayBuffer>);
 }
 
-function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, eng: EngineContext, clear: boolean): void {
-    if (rt._descriptor.resolveToSwapchain === true) {
-        if ((rt._descriptor.sampleCount ?? 1) > 1) {
-            att.view = rt._colorView!;
-            att.resolveTarget = eng._swapchainView;
-        } else {
-            att.view = eng._swapchainView;
-            att.resolveTarget = undefined;
-        }
-    } else {
-        att.view = rt._colorView!;
-        att.resolveTarget = undefined;
-    }
+function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, clear: boolean): void {
+    // Re-read each frame: a scRT output re-acquires its view per frame;
+    // offscreen targets keep a stable view. Post-process passes render to a single
+    // target with no MSAA resolve (the scRT is always single-sample).
+    att.view = rt._colorView!;
+    att.resolveTarget = undefined;
     att.loadOp = clear ? "clear" : "load";
 }
 

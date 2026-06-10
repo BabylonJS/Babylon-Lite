@@ -1,3 +1,5 @@
+import { U8 } from "../engine/typed-arrays.js";
+import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 
 /** Round `n` up to the nearest multiple of `to` (must be a positive integer). */
@@ -11,7 +13,7 @@ export function createUniformBuffer(engine: EngineContext, data: ArrayBufferView
     const buf = device.createBuffer({
         label,
         size: align(data.byteLength, 16),
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        usage: BU.UNIFORM | BU.COPY_DST,
     });
     device.queue.writeBuffer(buf, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
     return buf;
@@ -22,7 +24,7 @@ export function createEmptyUniformBuffer(engine: EngineContext, byteLength: numb
     return engine._device.createBuffer({
         label,
         size: align(byteLength, 16),
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        usage: BU.UNIFORM | BU.COPY_DST,
     });
 }
 
@@ -31,10 +33,10 @@ export function createMappedBuffer(engine: EngineContext, data: ArrayBufferView,
     const size = align(Math.max(data.byteLength, 4), 4);
     const buf = engine._device.createBuffer({
         size,
-        usage: usage | GPUBufferUsage.COPY_DST,
+        usage: usage | BU.COPY_DST,
         mappedAtCreation: true,
     });
-    new Uint8Array(buf.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+    new U8(buf.getMappedRange()).set(new U8(data.buffer, data.byteOffset, data.byteLength));
     buf.unmap();
     return buf;
 }

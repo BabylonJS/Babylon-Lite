@@ -2,6 +2,8 @@
  *  Contains the ground material, mesh buffers, texture loading, and UBO creation.
  *  Tree-shaken away from scenes that use `skipGround: true`. */
 
+import { F32, U16, U8 } from "../../engine/typed-arrays.js";
+import { TU, BU, SS } from "../../engine/gpu-flags.js";
 import type { Mat4 } from "../../math/types.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
@@ -58,7 +60,7 @@ export async function buildGroundRenderable(
     // Column-major for WGSL: ground quad in XY plane, normal +Z → world +Y
     // Offset Y by -0.01 to prevent z-fighting with scene floor geometry.
     const eps = 2.220446049250313e-16;
-    const groundWorld = new Float32Array(16);
+    const groundWorld = new F32(16);
     groundWorld[0] = 1;
     groundWorld[5] = eps;
     groundWorld[6] = -1;
@@ -121,9 +123,9 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
         _gndLayout = device.createBindGroupLayout({
             label: "ground-material",
             entries: [
-                { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-                { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
-                { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+                { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
+                { binding: 2, visibility: SS.FRAGMENT, sampler: { type: "filtering" } },
             ],
         });
         _gndCachedDevice = device;
@@ -178,7 +180,7 @@ function createGroundMaterial(enableNoise: boolean, fragCode: string): GroundMat
                     depthWriteEnabled: false,
                 },
                 multisample: { count: sig._sampleCount },
-                primitive: { topology: "triangle-list", cullMode: "back", frontFace: sig._flipY ? "cw" : "ccw" },
+                primitive: { topology: "triangle-list", cullMode: "back", frontFace: "ccw" },
             });
             _gndPipelines.set(key, pipeline);
             return pipeline;
@@ -214,29 +216,29 @@ function createGroundBuffers(
 } {
     const h = groundSize / 2;
     // prettier-ignore
-    const positions = new Float32Array([
+    const positions = new F32([
     -h, -h, 0,
      h, -h, 0,
      h,  h, 0,
     -h,  h, 0,
   ]);
     // prettier-ignore
-    const normals = new Float32Array([
+    const normals = new F32([
     0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,
   ]);
     // prettier-ignore
-    const uvs = new Float32Array([
+    const uvs = new F32([
     0, 0,  1, 0,  1, 1,  0, 1,
   ]);
     // BACKSIDE winding
     // prettier-ignore
-    const indices = new Uint16Array([0, 2, 1, 0, 3, 2]);
+    const indices = new U16([0, 2, 1, 0, 3, 2]);
 
     return {
-        posBuffer: createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX),
-        normBuffer: createMappedBuffer(engine, normals, GPUBufferUsage.VERTEX),
-        uvBuffer: createMappedBuffer(engine, uvs, GPUBufferUsage.VERTEX),
-        idxBuffer: createMappedBuffer(engine, indices, GPUBufferUsage.INDEX),
+        posBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
+        normBuffer: createMappedBuffer(engine, normals, BU.VERTEX),
+        uvBuffer: createMappedBuffer(engine, uvs, BU.VERTEX),
+        idxBuffer: createMappedBuffer(engine, indices, BU.INDEX),
         idxCount: 6,
     };
 }
@@ -244,7 +246,7 @@ function createGroundBuffers(
 // ─── Ground UBO ─────────────────────────────────────────────────────────────
 
 function createBgMeshUBO(engine: EngineContext, world: Mat4, primaryColor: [number, number, number]): GPUBuffer {
-    const data = new Float32Array(BG_MESH_UNIFORM_SIZE / 4);
+    const data = new F32(BG_MESH_UNIFORM_SIZE / 4);
     data.set(world, 0); // offset 0: world mat4x4
     data[16] = primaryColor[0]; // offset 64: primaryColor.r
     data[17] = primaryColor[1]; // offset 68: primaryColor.g
@@ -266,9 +268,9 @@ async function loadGroundTexture(engine: EngineContext, url?: string, preloadedI
         const tex = device.createTexture({
             size: [1, 1],
             format: "rgba8unorm",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST,
         });
-        device.queue.writeTexture({ texture: tex }, new Uint8Array([255, 255, 255, 255]), { bytesPerRow: 4 }, [1, 1]);
+        device.queue.writeTexture({ texture: tex }, new U8([255, 255, 255, 255]), { bytesPerRow: 4 }, [1, 1]);
         return tex;
     }
     // Use pre-fetched image if available (started early in loadEnvironment)
@@ -280,7 +282,7 @@ async function loadGroundTexture(engine: EngineContext, url?: string, preloadedI
     const tex = device.createTexture({
         size: [bmp.width, bmp.height],
         format: "rgba8unorm",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
     device.queue.copyExternalImageToTexture({ source: bmp }, { texture: tex }, [bmp.width, bmp.height]);
     bmp.close();

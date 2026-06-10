@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /**
  * CreateBox — procedural box mesh matching Babylon.js MeshBuilder.CreateBox()
  *
@@ -19,7 +20,7 @@ export interface BoxData {
 }
 
 // prettier-ignore
-const BOX_POSITIONS = new Float32Array([
+const BOX_POSITIONS = new F32([
   // +Z face
    0.5, -0.5,  0.5,   -0.5, -0.5,  0.5,   -0.5,  0.5,  0.5,    0.5,  0.5,  0.5,
   // -Z face
@@ -35,7 +36,7 @@ const BOX_POSITIONS = new Float32Array([
 ]);
 
 // prettier-ignore
-const BOX_NORMALS = new Float32Array([
+const BOX_NORMALS = new F32([
   // +Z
   0, 0, 1,   0, 0, 1,   0, 0, 1,   0, 0, 1,
   // -Z
@@ -51,7 +52,7 @@ const BOX_NORMALS = new Float32Array([
 ]);
 
 // prettier-ignore
-const BOX_UVS = new Float32Array([
+const BOX_UVS = new F32([
   // Each face: (1,1), (0,1), (0,0), (1,0) — matching BJS box UV layout
   1, 1,  0, 1,  0, 0,  1, 0,  // +Z
   1, 1,  0, 1,  0, 0,  1, 0,  // -Z
@@ -62,7 +63,7 @@ const BOX_UVS = new Float32Array([
 ]);
 
 // prettier-ignore
-const BOX_INDICES = new Uint32Array([
+const BOX_INDICES = new U32([
    0,  1,  2,   0,  2,  3,
    4,  5,  6,   4,  6,  7,
    8,  9, 10,   8, 10, 11,
@@ -83,7 +84,7 @@ export function createBoxData(size = 1): BoxData {
             indexCount: 36,
         };
     }
-    const positions = new Float32Array(BOX_POSITIONS.length);
+    const positions = new F32(BOX_POSITIONS.length);
     for (let i = 0; i < positions.length; i++) {
         positions[i] = BOX_POSITIONS[i]! * size;
     }

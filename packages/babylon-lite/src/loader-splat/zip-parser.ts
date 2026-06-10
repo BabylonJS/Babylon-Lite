@@ -1,3 +1,4 @@
+import { U8, DV } from "../engine/typed-arrays.js";
 /** Minimal ZIP central-directory parser.
  *
  *  Designed for the small ZIP archive shape produced by the BJS SOG export
@@ -41,7 +42,7 @@ function findEocd(view: DataView): number {
 
 /** Parse the archive and return all decoded entries. */
 export async function unzipBuffer(buffer: ArrayBuffer): Promise<ZipEntry[]> {
-    const view = new DataView(buffer);
+    const view = new DV(buffer);
     const eocd = findEocd(view);
     if (eocd < 0) {
         throw new Error("zip: EOCD record not found");
@@ -73,7 +74,7 @@ export async function unzipBuffer(buffer: ArrayBuffer): Promise<ZipEntry[]> {
         if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
             throw new Error("zip: ZIP64 archives are not supported");
         }
-        const name = utf8.decode(new Uint8Array(buffer, p + 46, nameLen));
+        const name = utf8.decode(new U8(buffer, p + 46, nameLen));
         p += 46 + nameLen + extraLen + commentLen;
 
         // Re-read filename/extra lengths from the local file header since the
@@ -85,15 +86,15 @@ export async function unzipBuffer(buffer: ArrayBuffer): Promise<ZipEntry[]> {
         const lfhExtraLen = view.getUint16(localOffset + 28, true);
         const dataStart = localOffset + 30 + lfhNameLen + lfhExtraLen;
 
-        const compressed = new Uint8Array(buffer, dataStart, compressedSize);
+        const compressed = new U8(buffer, dataStart, compressedSize);
 
         let bytes: Uint8Array;
         if (method === 0) {
-            bytes = new Uint8Array(compressed); // copy out so consumers can transfer.
+            bytes = new U8(compressed); // copy out so consumers can transfer.
         } else if (method === 8) {
             const stream = new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw")));
             const ab = await stream.arrayBuffer();
-            bytes = new Uint8Array(ab);
+            bytes = new U8(ab);
         } else {
             throw new Error(`zip: unsupported compression method ${method} for entry '${name}'`);
         }

@@ -1,3 +1,4 @@
+import { F64 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "./types.js";
 
 /** @internal Build-time tag string used by `tests/bundle-content-no-f64.test.ts`
@@ -17,7 +18,7 @@ export const MAT4_STORAGE_F64_BUILD_TAG = "@@MAT4_STORAGE_F64@@";
  *  Tree-shaken out of HPM-off bundles. This module is the ONLY place in the
  *  package that names `new Float64Array(16)`. */
 export function allocateF64Mat4(): Mat4 {
-    return new Float64Array(16) as unknown as Mat4;
+    return new F64(16) as unknown as Mat4;
 }
 
 // Pin the build tag string into the emitted chunk so the bundle-content

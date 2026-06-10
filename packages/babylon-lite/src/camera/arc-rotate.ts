@@ -42,6 +42,29 @@ export interface ArcRotateCamera extends Camera, IWorldMatrixProvider, IParentab
     inertialPanningX: number;
     inertialPanningY: number;
 
+    /**
+     * Optional orbit limits enforced by {@link attachControl}'s per-frame loop.
+     * `undefined` means unbounded on that side. Set these via {@link setCameraLimits}
+     * so the current pose is clamped immediately (and inertia zeroed at the wall),
+     * avoiding any overshoot-then-snap jiggle. Angles are in radians.
+     */
+    lowerAlphaLimit?: number;
+    upperAlphaLimit?: number;
+    lowerBetaLimit?: number;
+    upperBetaLimit?: number;
+    lowerRadiusLimit?: number;
+    upperRadiusLimit?: number;
+
+    /** @internal Self-clamp hook installed by {@link setCameraLimits}. The
+     *  alpha/beta/radius setters invoke it immediately after every mutation, so
+     *  the camera is never observably out of its orbit limits — at any point a
+     *  per-frame callback (e.g. a camera-pinned skybox) reads it. This is what
+     *  makes a direct pinch write or inertial overshoot snap to the wall in the
+     *  same statement that caused it, with no one-frame "blink". Undefined until
+     *  limits are set, so cameras that never call setCameraLimits carry none of
+     *  the clamp code and the setters' `?.()` call is a single dead check. */
+    _clampToLimits?: () => void;
+
     parent: IWorldMatrixProvider | null;
     readonly worldMatrix: Mat4;
     readonly worldMatrixVersion: number;
@@ -143,6 +166,11 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
                 if (scalars[key] !== v) {
                     scalars[key] = v;
                     onDirty();
+                    // Self-clamp into orbit limits the instant a value changes, so
+                    // no caller (pinch direct-write, inertia, auto-rotate) can leave
+                    // the camera transiently out of bounds for any per-frame reader.
+                    // No-op (and no clamp code bundled) until setCameraLimits runs.
+                    cam._clampToLimits?.();
                 }
             },
             configurable: true,

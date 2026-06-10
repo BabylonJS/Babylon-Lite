@@ -6,6 +6,8 @@
  *  that emits draws in the main pass.
  */
 
+import { F32, U32, U8 } from "../../engine/typed-arrays.js";
+import { TU, BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -34,16 +36,16 @@ function getEmptyMorph(engine: EngineContext): { texture: GPUTexture; weightsBuf
         label: "node-morph-empty",
         size: [1, 1],
         format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
-    engine._device.queue.writeTexture({ texture }, new Float32Array([0, 0, 0, 0]).buffer, { bytesPerRow: 16 }, { width: 1, height: 1 });
+    engine._device.queue.writeTexture({ texture }, new F32([0, 0, 0, 0]).buffer, { bytesPerRow: 16 }, { width: 1, height: 1 });
     const ubo = new ArrayBuffer(32);
-    const u32 = new Uint32Array(ubo, 16, 4);
+    const u32 = new U32(ubo, 16, 4);
     u32[0] = 0; // count
     u32[1] = 1; // texWidth
     u32[2] = 1; // rowsPerBand
-    const weightsBuffer = engine._device.createBuffer({ label: "node-morph-empty-ubo", size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    engine._device.queue.writeBuffer(weightsBuffer, 0, new Uint8Array(ubo));
+    const weightsBuffer = engine._device.createBuffer({ label: "node-morph-empty-ubo", size: 32, usage: BU.UNIFORM | BU.COPY_DST });
+    engine._device.queue.writeBuffer(weightsBuffer, 0, new U8(ubo));
     const entry = { texture, weightsBuffer };
     emptyMorphByEngine.set(engine, entry);
     return entry;
@@ -100,6 +102,12 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                   _esmShadowOutput: esmShadowOutput,
                   _esmShadowDepthCode: esmShadowOutput ? material._esmShadowDepthCode : undefined,
                   _alphaMode: esmShadowOutput ? 0 : undefined,
+                  // The shared fragment body still references env IBL/BRDF samplers
+                  // (e.g. nmeBrdfLUT) even in the no-color shadow-depth variant, so we
+                  // must emit the env decls + BGL entries here too; otherwise WGSL fails
+                  // to resolve those identifiers. _envEmitter is undefined for non-env
+                  // materials (state.usesEnv === false), leaving them unaffected.
+                  _envEmitter: material._envHelpers?.emitEnv,
               })
             : material._compile;
         const meshBGL = compile._meshBGL;
@@ -107,7 +115,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
         // Node UBO is per-material (same across all meshes using it).
         let nodeUBO: GPUBuffer | null = null;
         if (compile._nodeUboBinding !== null && compile._nodeUboSize > 0) {
-            nodeUBO = device.createBuffer({ label: "node-ubo", size: compile._nodeUboSize, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            nodeUBO = device.createBuffer({ label: "node-ubo", size: compile._nodeUboSize, usage: BU.UNIFORM | BU.COPY_DST });
             writeNodeUBO(engine, nodeUBO, material);
             material._nodeUBO = nodeUBO;
         }
@@ -117,8 +125,8 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
         for (const _mesh of matMeshes) {
             // Mesh UBO layout: world (64B) + receivesShadow (vec4, 16B) + lightCount/indices.
             const meshUboBytes = 96 + 16 * Math.ceil(MAX_LIGHTS / 4);
-            const _meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-            const _meshScratch = new Float32Array(((meshUboBytes + 15) & ~15) / 4);
+            const _meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: BU.UNIFORM | BU.COPY_DST });
+            const _meshScratch = new F32(((meshUboBytes + 15) & ~15) / 4);
             _packMeshWorld(_meshScratch, _mesh.worldMatrix, 0, 0);
             const recv = _mesh.receiveShadows ? 1 : 0;
             _meshScratch[16] = recv;
@@ -318,13 +326,13 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     // position buffer size in bytes / 12 (vec3) = vertex count.
     const vertexCount = gpu.positionBuffer.size / 12;
     const stride = name === "uv" || name === "uv2" ? 8 : name === "normal" ? 12 : name === "tangent" || name === "color" ? 16 : 16;
-    const buf = engine._device.createBuffer({ label: `node-zero-${name}`, size: vertexCount * stride, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    const buf = engine._device.createBuffer({ label: `node-zero-${name}`, size: vertexCount * stride, usage: BU.VERTEX | BU.COPY_DST });
     // Initialize with zeros (buffer starts zeroed when not mappedAtCreation).
     cache.set(name, buf);
     return buf;
 }
 
-function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
+export function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
     switch (name) {
         case "position":
             return gpu.positionBuffer;
@@ -343,7 +351,7 @@ function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBu
     }
 }
 
-function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
+export function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {
     const gpu = mesh._gpu;
     scratch[17] = gpu.hasUv === false ? 0 : 1;
     scratch[18] = gpu.hasTangent ? 1 : 0;

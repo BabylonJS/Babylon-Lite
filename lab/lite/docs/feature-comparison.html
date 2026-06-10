@@ -859,9 +859,9 @@
                         </tr>
                         <tr>
                             <td>KHR_materials_dispersion</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>Wavelength-dependent refraction</td>
+                            <td>✅</td>
+                            <td>Scene 212 — wavelength-dependent (chromatic) refraction on volumetric glass</td>
                         </tr>
                         <tr>
                             <td>KHR_lights_punctual</td>
@@ -889,9 +889,9 @@
                         </tr>
                         <tr>
                             <td>KHR_mesh_quantization</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>8/16-bit quantized vertex attributes</td>
+                            <td>✅</td>
+                            <td>Scene 211 — 8/16-bit quantized vertex attributes dequantized at load</td>
                         </tr>
                         <tr>
                             <td>KHR_animation_pointer</td>
@@ -913,9 +913,9 @@
                         </tr>
                         <tr>
                             <td>KHR_xmp_json_ld</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>XMP metadata</td>
+                            <td>✅</td>
+                            <td>Scene 210 — XMP JSON-LD metadata parsed and exposed</td>
                         </tr>
                         <tr>
                             <td>EXT_mesh_gpu_instancing</td>
@@ -925,9 +925,9 @@
                         </tr>
                         <tr>
                             <td>EXT_meshopt_compression</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td>meshoptimizer bitstream compression</td>
+                            <td>✅</td>
+                            <td>Scene 211 — meshoptimizer bitstream decode (BrainStem skinned + animated)</td>
                         </tr>
                         <tr>
                             <td>EXT_texture_webp</td>
@@ -1088,6 +1088,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Aligned with WGSL/WebGPU conventions</td>
+                        </tr>
+                        <tr class="feat-highlight">
+                            <td>High-Precision / Floating-Origin Matrices</td>
+                            <td>✅</td>
+                            <td>⚡</td>
+                            <td>Scenes 200/201 — F64 matrix caches + eye-relative floating-origin upload remove far-from-origin jitter at ~5e6 world units; BJS offers useHighPrecisionMatrix but not the eye-relative floating-origin path</td>
                         </tr>
 
                         <!-- Architecture / DX -->

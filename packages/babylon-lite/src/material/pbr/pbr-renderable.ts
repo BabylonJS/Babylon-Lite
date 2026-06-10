@@ -5,6 +5,7 @@
  *  work to `buildSinglePbrRenderable`. Both initial build and material-swap
  *  rebuilds go through the same single-mesh function. */
 
+import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -27,6 +28,7 @@ import {
     PBR2_HAS_UV2,
     PBR_HAS_ENV,
     PBR_HAS_TONEMAP,
+    PBR_HAS_FOG,
     PBR2_ESM_SHADOW_OUTPUT,
 } from "./pbr-flags.js";
 import type { PbrExt } from "./pbr-flags.js";
@@ -54,7 +56,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // Per-size scratch buffers for material UBO re-writes (zero allocation per frame).
     const materialScratch = new Map<number, Float32Array>();
     const hasEnv = !!envTextures;
-    const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf"; gen: ShadowGenerator }[] = [];
+    const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf" | "csm"; gen: ShadowGenerator }[] = [];
     for (let i = 0; i < scene.lights.length; i++) {
         const sg = scene.lights[i]!.shadowGenerator;
         if (sg) {
@@ -97,6 +99,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasSomeSkeletons = false;
     let hasSomeMorphs = false;
     let hasSomeThinInstances = false;
+    let hasCullingTI = false;
     let hasAnyUnlit = false;
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
@@ -118,6 +121,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         hasSomeSkeletons ||= !!m.skeleton;
         hasSomeMorphs ||= !!m.morphTargets;
         hasSomeThinInstances ||= !!m.thinInstances;
+        hasCullingTI ||= !!m.thinInstances?._gpuCullingEnabled;
         hasAnyUnlit ||= !!mat.unlit;
         hasAnyUvTransform ||= !!mat._hasUvTx;
         // UV2 only counts when occlusion samples texcoord 1.
@@ -220,13 +224,33 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     let _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null = null;
     let _syncThinInstanceBuffers:
-        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | ((
+              engine: EngineContext,
+              ti: ThinInstanceData,
+              pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+              slot: number,
+              hasColor: boolean,
+              drawBuffers?: import("../../mesh/thin-instance-gpu.js").ThinInstanceDrawBuffers | null
+          ) => number)
         | null = null;
+    let _cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
+    // Per-frame thin-instance matrix/color UPLOAD (no pass — just writeBuffer of the dirty range).
+    // The bundle-recorded draw only re-binds the buffer; animated instances (e.g. wind-swayed flora)
+    // mutate their matrices every frame, but the cached opaque bundle is NOT re-recorded each frame,
+    // so the draw-time sync never runs on a steady frame. We therefore upload dirty thin-instance data
+    // from the per-frame update() below (which always runs). It is version-gated, so static instances
+    // cost nothing, and it never recreates the buffer for a same-capacity update — keeping the cached
+    // bundle's setVertexBuffer reference valid.
+    let _syncThinInstanceGpuData: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean) => void) | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
         const gpuMod = await import("../../mesh/thin-instance-gpu.js");
         _syncThinInstanceBuffers = gpuMod.syncThinInstanceBuffers;
+        if (hasCullingTI) {
+            _cull = await import("../../mesh/thin-instance-cull-binding.js");
+        }
+        _syncThinInstanceGpuData = gpuMod.syncThinInstanceGpuData;
     }
 
     // ACES tonemap WGSL is dynamically imported only when requested (keeps standard-tonemap bundles lean).
@@ -240,6 +264,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _acesTonemapCall = acesMod.ACES_TONEMAP_CALL_WGSL;
     }
 
+    // Fog WGSL is dynamically imported only when the scene has fog, so non-fog PBR scenes
+    // bundle zero fog bytes (a static import would defeat tree-shaking — see pbr-fog-wgsl.ts).
+    let _fogHelper = "";
+    let _fogBlock = "";
+    if (scene.fog) {
+        const fogMod = await import("./pbr-fog-wgsl.js");
+        _fogHelper = fogMod.PBR_FOG_HELPER;
+        _fogBlock = fogMod.PBR_FOG_BLOCK;
+    }
+
     const composePbr = createPbrComposer({
         _singleLightWGSL,
         _getSingleLightBlock,
@@ -247,6 +281,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _multiLightLoop,
         _acesHelpers,
         _acesTonemapCall,
+        _fogHelper,
+        _fogBlock,
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
@@ -255,11 +291,12 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createThinInstanceFragment,
     });
 
-    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0);
+    const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (hasTonemap ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     // Shadow bind group cache — within one scene build, all receiving meshes share the
     // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
     const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
     const syncThinInstanceBuffers = _syncThinInstanceBuffers;
+    const syncThinInstanceGpuData = _syncThinInstanceGpuData;
 
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
@@ -292,7 +329,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}${vbKey}`);
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
-        const meshUboData = new Float32Array(composed._meshUboSpec._totalBytes / 4);
+        const meshUboData = new F32(composed._meshUboSpec._totalBytes / 4);
         const _packMeshWorld = engine._makePackMeshWorld?.(s as SceneContext) ?? packMat4IntoF32;
         _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
@@ -300,8 +337,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
         // Material UBO.
         const materialSpec = composed._materialUboSpec!;
-        const matInitData = new Float32Array(materialSpec._totalBytes / 4);
-        writeMaterialData(matInitData, mat, materialSpec);
+        const matInitData = new F32(materialSpec._totalBytes / 4);
+        _writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
 
         const needsTaskRefraction = !!mat.transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
@@ -374,13 +411,22 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 _lastUboVersion = uboVersion;
                 let data = materialScratch.get(materialSpec._totalBytes);
                 if (!data) {
-                    data = new Float32Array(materialSpec._totalBytes / 4);
+                    data = new F32(materialSpec._totalBytes / 4);
                     materialScratch.set(materialSpec._totalBytes, data);
                 } else {
                     data.fill(0);
                 }
-                writeMaterialData(data, mat, materialSpec);
+                _writeMaterialData(data, mat, materialSpec);
                 device.queue.writeBuffer(materialUBO, 0, data.buffer, 0, data.byteLength);
+            }
+            // Upload any dirty thin-instance matrices/colors every frame (version-gated; see the
+            // _syncThinInstanceGpuData declaration above). This is what makes per-frame animated
+            // instance transforms (wind sway) actually reach the GPU despite the cached draw bundle.
+            if (hasTI && syncThinInstanceGpuData) {
+                const ti = mesh.thinInstances;
+                if (ti) {
+                    syncThinInstanceGpuData(engine, ti, hasTIColor);
+                }
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -390,7 +436,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         };
         const update = engine._wrapRenderableForFO?.(_baseUpdate, s as SceneContext, _invalidate) ?? _baseUpdate;
 
-        const drawWith = (pass: GPURenderPassEncoder | GPURenderBundleEncoder, materialBindGroup: GPUBindGroup): number => {
+        const drawWith = (
+            pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+            materialBindGroup: GPUBindGroup,
+            cullBinding?: import("../../mesh/thin-instance-cull-binding.js").TiCullBinding
+        ): number => {
             if (!isOverride && mesh.material !== materialInput) {
                 return 0;
             }
@@ -413,29 +463,32 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             if (hasVertexColor && gpu.colorBuffer) {
                 pass.setVertexBuffer(slot++, gpu.colorBuffer, vb?._c?._offset);
             }
-            if (mesh.skeleton) {
-                pass.setVertexBuffer(slot++, mesh.skeleton.jointsBuffer);
-                pass.setVertexBuffer(slot++, mesh.skeleton.weightsBuffer);
-                if (mesh.skeleton.joints1Buffer && mesh.skeleton.weights1Buffer) {
-                    pass.setVertexBuffer(slot++, mesh.skeleton.joints1Buffer);
-                    pass.setVertexBuffer(slot++, mesh.skeleton.weights1Buffer);
+            // Skinning vertex buffers: live skeleton OR baked VAT (same field names, mutually exclusive).
+            const skin = mesh.skeleton ?? mesh.vat;
+            if (skin) {
+                pass.setVertexBuffer(slot++, skin.jointsBuffer);
+                pass.setVertexBuffer(slot++, skin.weightsBuffer);
+                if (skin.joints1Buffer && skin.weights1Buffer) {
+                    pass.setVertexBuffer(slot++, skin.joints1Buffer);
+                    pass.setVertexBuffer(slot++, skin.weights1Buffer);
                 }
             }
 
             const ti = hasTI ? mesh.thinInstances : null;
             if (ti && syncThinInstanceBuffers) {
-                slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor);
+                slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasTIColor, cullBinding?.cullDrawBufs);
             }
 
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-            if (ti && ti.count > 0) {
+            if (cullBinding) {
+                cullBinding.draw(pass, gpu.indexCount, ti!.count);
+            } else if (ti && ti.count > 0) {
                 pass.drawIndexed(gpu.indexCount, ti.count);
             } else {
                 pass.drawIndexed(gpu.indexCount);
             }
             return 1;
         };
-        const draw = (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => drawWith(pass, materialBindGroupStatic!);
 
         const r: Renderable = {
             order,
@@ -447,11 +500,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                 const materialBindGroup = needsTaskRefraction
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;
+                // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
+                const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update);
                 return {
                     renderable: r,
                     pipeline,
-                    update,
-                    draw: needsTaskRefraction ? (pass) => drawWith(pass, materialBindGroup) : draw,
+                    update: cb ? cb.update : update,
+                    draw: (pass) => drawWith(pass, materialBindGroup, cb),
                 };
             },
         };
@@ -464,12 +519,46 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     const renderables = meshes.map((m) => rebuildSingle(scene, m));
 
+    // Stash the per-scene PBR context on the scene so the PBR geometry-renderer
+    // path can reuse the same composer / env / shadow setup without re-running
+    // the scene-wide scan above. Stored on the scene (not on pbrGroupBuilder)
+    // to avoid a static cycle: pbrGroupBuilder lives in pbr-material.ts which
+    // already dynamic-imports this module.
+    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = {
+        _composePbr: composePbr,
+        _sceneFeatures: sceneFeatures,
+        _envTextures: envTextures ?? null,
+        _shadowLights: shadowLights,
+        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
+    };
+
     scene._disposables.push(
         () => clearPbrPipelineCache(),
         () => clearSamplerCache(engine)
     );
 
     return { renderables, rebuildSingle };
+}
+
+/** @internal Per-scene PBR context stashed on the singleton `pbrGroupBuilder`
+ *  after `buildPbrRenderables` runs. Consumed by the PBR geometry-renderer
+ *  module — the only way to reuse the per-scene `composePbr` closure (env,
+ *  shadows, lights, anisotropy, sub-features) without duplicating the heavy
+ *  scene-wide dep-gathering scan. Overwritten on each scene build, matching
+ *  the same pattern used for `_rebuildSingle`. */
+export interface _PbrGeometryContext {
+    /** @internal */
+    readonly _composePbr: ReturnType<typeof createPbrComposer>;
+    /** @internal */
+    readonly _sceneFeatures: number;
+    /** @internal */
+    readonly _envTextures: EnvironmentTextures | null;
+    /** @internal */
+    readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: "esm" | "pcf" | "csm"; readonly gen: ShadowGenerator }[];
+    /** @internal */
+    readonly _syncThinInstanceBuffers:
+        | ((engine: EngineContext, ti: ThinInstanceData, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number)
+        | null;
 }
 
 function toSingleLightType(type: string): SingleLightType {
@@ -503,10 +592,10 @@ async function importSingleLightWgsl(type: SingleLightType): Promise<SingleLight
     return import("./fragments/singlelight-point-wgsl.js");
 }
 
-/** Write material properties into a pre-allocated Float32Array.
+/** @internal Write material properties into a pre-allocated Float32Array.
  *  Core fields only; per-extension slices are contributed by registered
- *  writers. */
-function writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec: import("../../shader/fragment-types.js").UboSpec): void {
+ *  writers. Exported for the PBR geometry-renderer path. */
+export function _writeMaterialData(data: Float32Array, material: PbrMaterialProps, spec: import("../../shader/fragment-types.js").UboSpec): void {
     data[0] = material.environmentIntensity ?? 1.0;
     data[1] = material.directIntensity ?? 1.0;
     data[2] = material.reflectance ?? 0.04;

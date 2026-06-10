@@ -1,3 +1,5 @@
+import { U8 } from "../engine/typed-arrays.js";
+import { BU, SS } from "../engine/gpu-flags.js";
 import { registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
@@ -212,9 +214,9 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
     const effect = config.effect as EffectWrapperInternal;
     const rt = config.target;
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
-    const sampleCount = rt._descriptor.sampleCount ?? 1;
+    const sampleCount = rt._descriptor.samples ?? 1;
     const targetSignature: RenderTargetSignature = {
-        _colorFormat: rt._descriptor.colorFormat,
+        _colorFormat: rt._descriptor.format,
         _sampleCount: sampleCount,
     };
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
@@ -241,7 +243,7 @@ export function createEffectRenderTask(config: EffectRenderTaskConfig, engine: E
                 throw new Error(`EffectRenderTask "${task.name}" executed before record().`);
             }
             task._bindGroup = getEffectBindGroup(effect);
-            applyColorAttachmentState(task._colorAttachment, rt, eng, task._config.clear !== false, task._config.clearColor!);
+            applyColorAttachmentState(task._colorAttachment, rt, undefined, task._config.clear !== false, task._config.clearColor!);
             const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
             pass.setPipeline(pipeline);
             if (task._bindGroup) {
@@ -294,17 +296,15 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
     const clearColor: GPUColorDict = options?.clearColor ?? { r: 0, g: 0, b: 0, a: 1 };
     const update = options?.update;
 
-    const rt = createRenderTarget({
-        label: `${name}-swapchain`,
-        colorFormat: eng.format,
-        sampleCount: eng.msaaSamples,
-        size: "canvas",
-        resolveToSwapchain: true,
-    });
+    // No MSAA → render straight into the single-sample engine scRT; MSAA →
+    // render into an MSAA colour RT and resolve into the scRT at end-of-pass.
+    const useMsaa = eng.msaaSamples > 1;
+    const rt = useMsaa ? createRenderTarget({ lbl: `${name}-msaa`, format: eng.format, samples: eng.msaaSamples, size: "canvas" }) : eng.scRT;
+    const resolveRt = useMsaa ? eng.scRT : undefined;
 
     const targetSignature: RenderTargetSignature = {
-        _colorFormat: rt._descriptor.colorFormat,
-        _sampleCount: rt._descriptor.sampleCount ?? 1,
+        _colorFormat: rt._descriptor.format,
+        _sampleCount: rt._descriptor.samples ?? 1,
     };
 
     const colorAttachment: GPURenderPassColorAttachment = {
@@ -336,7 +336,7 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
                 return 0;
             }
             ensureRtCanvasSize(er._rt, er._engine);
-            applyColorAttachmentState(er._colorAttachment, er._rt, er._engine, er._clear, er.clearColor);
+            applyColorAttachmentState(er._colorAttachment, er._rt, resolveRt, er._clear, er.clearColor);
             const encoder = er._engine._currentEncoder;
             if (!encoder) {
                 return 0;
@@ -400,7 +400,7 @@ function createBindingSlots(wrapper: EffectWrapperInternal): void {
             const buffer = wrapper._engine._device.createBuffer({
                 label: `${wrapper.name}-${layout.name ?? layout.binding}-ubo`,
                 size: byteLength,
-                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+                usage: BU.UNIFORM | BU.COPY_DST,
             });
             wrapper._uniforms.push({ layout, buffer, byteLength });
         } else if (layout.kind === "texture") {
@@ -409,21 +409,13 @@ function createBindingSlots(wrapper: EffectWrapperInternal): void {
     }
 }
 
-function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, eng: EngineContext, clear: boolean, clearColor: GPUColorDict): void {
+function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, resolveRt: RenderTarget | undefined, clear: boolean, clearColor: GPUColorDict): void {
     att.clearValue = clearColor;
     att.loadOp = clear ? "clear" : "load";
-    if (rt._descriptor.resolveToSwapchain === true) {
-        if ((rt._descriptor.sampleCount ?? 1) > 1) {
-            att.view = rt._colorView!;
-            att.resolveTarget = eng._swapchainView;
-        } else {
-            att.view = eng._swapchainView;
-            att.resolveTarget = undefined;
-        }
-    } else {
-        att.view = rt._colorView!;
-        att.resolveTarget = undefined;
-    }
+    // Re-read each frame so a swapchain target (used as `rt` when single-sample, or as
+    // the MSAA `resolveRt`) picks up its fresh per-frame view.
+    att.view = rt._colorView!;
+    att.resolveTarget = resolveRt?._colorView ?? undefined;
 }
 
 function ensureRtCanvasSize(rt: RenderTarget, eng: EngineContext): void {
@@ -497,7 +489,7 @@ function getBindGroupLayout(wrapper: EffectWrapperInternal): GPUBindGroupLayout 
 }
 
 function bindingLayoutEntry(layout: EffectBindingLayout): GPUBindGroupLayoutEntry {
-    const visibility = layout.visibility ?? GPUShaderStage.FRAGMENT;
+    const visibility = layout.visibility ?? SS.FRAGMENT;
     if (layout.kind === "uniform") {
         return { binding: layout.binding, visibility, buffer: { type: "uniform" } };
     }
@@ -580,9 +572,9 @@ function writeUniformSlot(wrapper: EffectWrapperInternal, slot: EffectUniformSlo
 
 function toBytes(data: ArrayBuffer | ArrayBufferView): Uint8Array {
     if (data instanceof ArrayBuffer) {
-        return new Uint8Array(data);
+        return new U8(data);
     }
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    return new U8(data.buffer, data.byteOffset, data.byteLength);
 }
 
 function isBufferData(data: ArrayBuffer | ArrayBufferView | Record<string | number, ArrayBuffer | ArrayBufferView>): data is ArrayBuffer | ArrayBufferView {

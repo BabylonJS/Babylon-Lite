@@ -6,6 +6,8 @@
  *  (shader/fragments/skeleton-fragment.ts) and composed at pipeline
  *  creation time — no global registration needed. */
 
+import { U32 } from "../engine/typed-arrays.js";
+import { TU, BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SkeletonData } from "../animation/types.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -34,28 +36,28 @@ export function createSkeleton(
     const boneTexture = device.createTexture({
         size: [texWidth, 1],
         format: "rgba32float",
-        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
     device.queue.writeTexture({ texture: boneTexture }, boneData.buffer, { bytesPerRow: texWidth * 16 }, { width: texWidth, height: 1 });
 
     // Expand joints to Uint32Array — pipeline reads uint32x4 vertex format
-    const joints32 = new Uint32Array(joints.length);
+    const joints32 = new U32(joints.length);
     for (let i = 0; i < joints.length; i++) {
         joints32[i] = joints[i]!;
     }
 
-    const jointsBuffer = createMappedBuffer(engine, joints32, GPUBufferUsage.VERTEX);
-    const weightsBuffer = createMappedBuffer(engine, weights, GPUBufferUsage.VERTEX);
+    const jointsBuffer = createMappedBuffer(engine, joints32, BU.VERTEX);
+    const weightsBuffer = createMappedBuffer(engine, weights, BU.VERTEX);
 
     let joints1Buffer: GPUBuffer | null = null;
     let weights1Buffer: GPUBuffer | null = null;
     if (joints1 && weights1) {
-        const joints132 = new Uint32Array(joints1.length);
+        const joints132 = new U32(joints1.length);
         for (let i = 0; i < joints1.length; i++) {
             joints132[i] = joints1[i]!;
         }
-        joints1Buffer = createMappedBuffer(engine, joints132, GPUBufferUsage.VERTEX);
-        weights1Buffer = createMappedBuffer(engine, weights1, GPUBufferUsage.VERTEX);
+        joints1Buffer = createMappedBuffer(engine, joints132, BU.VERTEX);
+        weights1Buffer = createMappedBuffer(engine, weights1, BU.VERTEX);
     }
 
     return {

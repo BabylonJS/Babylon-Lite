@@ -46,25 +46,39 @@
         "mobile": false
     },
     {
+        "slug": "platformer",
+        "name": "Platformer — Cosmic Run",
+        "description": "Super Mario Bros-style side-scrolling platformer built on Lite's pure-2D sprite path — no scene, camera, or mesh. A full level with run/jump physics, stompable enemies, mushroom/fire-flower/star power-ups, ?-blocks and breakable bricks, a pipe warp to an underground coin room, moving and one-way platforms, a castle boss, and a flagpole goal. Hand-rolled clean-room swept-AABB tile physics, keyboard/gamepad/touch input, DOM HUD, procedurally-synthesised Web Audio sound effects + music, and an optional CRT/scanline post-process (press C) that is a WGSL port of ichiaka's MIT-licensed CRTFilter. Ships a curated CC0 Kenney Platformer Art Deluxe asset subset — no Nintendo code or assets.",
+        "tags": ["game", "platformer", "2d", "showcase"],
+        "mobile": true
+    },
+    {
+        "slug": "tetris",
+        "name": "3D Tetris",
+        "description": "A playable Tetris built on Babylon Lite. The 10×20 well renders Kenney's CC0 Cube Pets as the falling pieces — thin-instanced, one mesh per piece color — inside a stone-wall frame, keeping the whole playfield at a handful of draw calls; press M to cycle the block style between smooth rounded enamel cubes (default), classic chamfered arcade cubes, and the Cube Pets. Standard 7-bag randomizer, ghost piece, soft/hard drop, wall kicks, line clears and level-based gravity.",
+        "tags": ["game", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "mosquito-amber",
         "name": "Mosquito in Amber",
-        "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume) framed with the same static camera and studio HDR environment as Scene 176. Frame-graph scene-texture transmission renders the refractive amber. Pure Lite — no BJS.",
-        "tags": ["gltf", "pbr", "transmission", "env", "showcase"],
+        "description": "glTF PBR showcase: the Khronos MosquitoInAmber model (KHR_materials_transmission + ior + volume). Frame-graph scene-texture transmission renders the refractive amber.",
+        "tags": ["showcase"],
         "mobile": true
     },
     {
         "slug": "littlest-tokyo",
         "name": "Littlest Tokyo",
         "description": "Animated glTF showcase: Glen Fox's beloved \"Littlest Tokyo\" diorama rendered by Lite from a full-fidelity glTF, with PBR materials lit by an HDR environment (shared as both IBL and skybox) and looping animation driving the cars, train and drifting smoke. Orbit freely to explore the tiny city, or pause the auto-rotation. Model: \"Littlest Tokyo\" by Glen Fox (CC-BY 4.0).",
-        "tags": ["gltf", "animation", "showcase"],
+        "tags": ["showcase"],
         "fetch": "littlest-tokyo",
         "mobile": true
     },
     {
         "slug": "bath-day",
         "name": "Bath Day",
-        "description": "Animated, stylized glTF diorama: a frog enjoying a candle-lit bath surrounded by water and plants, slowly orbiting under a studio HDR environment for PBR lighting. The Draco-compressed model's animation groups auto-play on load. Pure Lite — no BJS. \"Bath Day\" by StanSt (https://sketchfab.com/stanst), CC BY 4.0.",
-        "tags": ["gltf", "pbr", "animation", "diorama", "showcase"],
+        "description": "Animated, stylized glTF diorama: a frog enjoying a candle-lit bath surrounded by water and plants, slowly orbiting under a studio HDR environment for PBR lighting. The Draco-compressed model's animation groups auto-play on load. \"Bath Day\" by StanSt (https://sketchfab.com/stanst), CC BY 4.0.",
+        "tags": ["showcase"],
         "mobile": true
     }
 ]

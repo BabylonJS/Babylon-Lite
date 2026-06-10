@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 /**
  * Ground from heightmap — matches Babylon.js MeshBuilder.CreateGroundFromHeightMap.
  *
@@ -39,10 +40,10 @@ export function createFlatGroundData(opts: GroundOptions = {}): GroundData {
     const vertexCount = cols * rows;
     const indexCount = subdivisions * subdivisions * 6;
 
-    const positions = new Float32Array(vertexCount * 3);
-    const normals = new Float32Array(vertexCount * 3);
-    const uvs = new Float32Array(vertexCount * 2);
-    const indices = new Uint32Array(indexCount);
+    const positions = new F32(vertexCount * 3);
+    const normals = new F32(vertexCount * 3);
+    const uvs = new F32(vertexCount * 2);
+    const indices = new U32(indexCount);
 
     // Generate vertices
     let vi = 0;

@@ -21,6 +21,8 @@
  *  The pipeline has no blending and `depthWriteEnabled = true`, so the
  *  closest-splat wins at each pick pixel (matching BJS GPU picker behaviour). */
 
+import { F32 } from "../engine/typed-arrays.js";
+import { BU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { GaussianSplattingMesh } from "../mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 import { applyGsFragments } from "../mesh/GaussianSplatting/gaussian-splatting-pipeline.js";
@@ -194,17 +196,17 @@ function getCache(engine: EngineContext): GsPickingCache {
     const meshBGL = device.createBindGroupLayout({
         label: "gs-picking-mesh-bgl",
         entries: [
-            { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: GPUShaderStage.VERTEX, sampler: { type: "non-filtering" } },
-            { binding: 2, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-            { binding: 3, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-            { binding: 4, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
-            { binding: 5, visibility: GPUShaderStage.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 1, visibility: SS.VERTEX, sampler: { type: "non-filtering" } },
+            { binding: 2, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 3, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 4, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
+            { binding: 5, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
         ],
     });
     const pickingBGL = device.createBindGroupLayout({
         label: "gs-picking-pick-bgl",
-        entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
+        entries: [{ binding: 0, visibility: SS.FRAGMENT, buffer: { type: "uniform" } }],
     });
     const module = device.createShaderModule({ label: "gs-picking-shader", code: buildPickingWgsl() });
     const pipeline = device.createRenderPipeline({
@@ -227,7 +229,7 @@ function getCache(engine: EngineContext): GsPickingCache {
         depthStencil: { format: "depth24plus", depthCompare: "less", depthWriteEnabled: true },
         multisample: { count: 1 },
     });
-    const pickMatrixUbo = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, label: "gs-picking-scene-ubo" });
+    const pickMatrixUbo = device.createBuffer({ size: 64, usage: BU.UNIFORM | BU.COPY_DST, label: "gs-picking-scene-ubo" });
     const sceneBG = device.createBindGroup({
         label: "gs-picking-scene-bg",
         layout: getPickingSceneBGL(engine),
@@ -265,8 +267,8 @@ export function createGsPickMeshResources(engine: EngineContext, mesh: GaussianS
     const cache = getCache(engine);
 
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4;
-    const meshUbo = device.createBuffer({ size: UBO_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, label: "gs-picking-mesh-ubo" });
-    const meshCpu = new Float32Array(UBO_BYTES / 4);
+    const meshUbo = device.createBuffer({ size: UBO_BYTES, usage: BU.UNIFORM | BU.COPY_DST, label: "gs-picking-mesh-ubo" });
+    const meshCpu = new F32(UBO_BYTES / 4);
     meshCpu[48 + 4] = mesh.textureWidth;
     meshCpu[48 + 5] = mesh.textureHeight;
     meshCpu[48 + 6] = 1;
@@ -284,8 +286,8 @@ export function createGsPickMeshResources(engine: EngineContext, mesh: GaussianS
         ],
     });
 
-    const pickingUbo = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, label: "gs-picking-color-ubo" });
-    const pickingCpu = new Float32Array(4);
+    const pickingUbo = device.createBuffer({ size: 16, usage: BU.UNIFORM | BU.COPY_DST, label: "gs-picking-color-ubo" });
+    const pickingCpu = new F32(4);
 
     const pickingBG = device.createBindGroup({
         label: "gs-picking-color-bg",

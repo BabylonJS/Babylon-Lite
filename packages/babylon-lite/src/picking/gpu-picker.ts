@@ -1,3 +1,5 @@
+import { F32, U32, U8 } from "../engine/typed-arrays.js";
+import { TU, BU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { PickingInfo } from "./picking-info.js";
@@ -14,13 +16,13 @@ import { resolveCameraViewport } from "../camera/viewport.js";
 import { createEmptyUniformBuffer, createMappedBuffer, createUniformBuffer } from "../resource/gpu-buffers.js";
 
 // ─── Scratch arrays — allocated once, reused across all picks ──────
-const _pickVP = new Float32Array(16);
-const _gsPickMatrix = new Float32Array(16);
+const _pickVP = new F32(16);
+const _gsPickMatrix = new F32(16);
 const _uboScratch = new ArrayBuffer(80);
-const _uboF32 = new Float32Array(_uboScratch, 0, 16);
-const _uboU32 = new Uint32Array(_uboScratch, 64, 1);
-const _uboView = new Uint8Array(_uboScratch);
-const _tiUboScratch = new Uint32Array(4);
+const _uboF32 = new F32(_uboScratch, 0, 16);
+const _uboU32 = new U32(_uboScratch, 64, 1);
+const _uboView = new U8(_uboScratch);
+const _tiUboScratch = new U32(4);
 
 /** GPU-based picker — pure state. Use pickAsync() and disposePicker() standalone functions. */
 export interface GpuPicker {
@@ -66,14 +68,14 @@ function ensureTargets(engine: EngineContext, picker: GpuPicker): PickTargets1x1
     if (picker._rt) {
         return picker._rt;
     }
-    const colorTex = device.createTexture({ label: "pick-color", size: [1, 1], format: "rgba8unorm", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+    const colorTex = device.createTexture({ label: "pick-color", size: [1, 1], format: "rgba8unorm", usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
     const depthColorTex = device.createTexture({
         label: "pick-depth-color",
         size: [1, 1],
         format: "r32float",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+        usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC,
     });
-    const depthTex = device.createTexture({ label: "pick-depth", size: [1, 1], format: "depth24plus", usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    const depthTex = device.createTexture({ label: "pick-depth", size: [1, 1], format: "depth24plus", usage: TU.RENDER_ATTACHMENT });
     picker._rt = {
         colorTex,
         colorView: colorTex.createView(),
@@ -81,8 +83,8 @@ function ensureTargets(engine: EngineContext, picker: GpuPicker): PickTargets1x1
         depthColorView: depthColorTex.createView(),
         depthTex,
         depthView: depthTex.createView(),
-        colorStaging: device.createBuffer({ label: "pick-color-staging", size: 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
-        depthStaging: device.createBuffer({ label: "pick-depth-staging", size: 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+        colorStaging: device.createBuffer({ label: "pick-color-staging", size: 256, usage: BU.COPY_DST | BU.MAP_READ }),
+        depthStaging: device.createBuffer({ label: "pick-depth-staging", size: 256, usage: BU.COPY_DST | BU.MAP_READ }),
     };
     return picker._rt;
 }
@@ -113,9 +115,20 @@ function computePickVP(out: Float32Array, vp: Float32Array, px: number, py: numb
     }
 }
 
+/** Options for {@link pickAsync}. */
+export interface PickOptions {
+    /** Restrict the pick to a subset of the scene's meshes — return `true` for a mesh that may be picked,
+     *  `false` to ignore it entirely (it neither occludes nor is returned). Lets a caller provide its
+     *  "list of pickables" so decorative meshes (grass, foliage, particles, …) can't swallow a pick of a
+     *  structure behind/around them. When omitted, every mesh is pickable (previous behaviour). Applied
+     *  identically to the id-assignment and id-resolve passes so ids stay consistent. */
+    filter?: (mesh: Mesh) => boolean;
+}
+
 /** Pick the mesh at CSS-space canvas coordinates, matching Babylon.js Scene.pick. Returns a PickingInfo. */
-export async function pickAsync(picker: GpuPicker, x: number, y: number): Promise<PickingInfo> {
+export async function pickAsync(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
+    const pickFilter = options?.filter ?? null;
     const engine = scene.engine;
     const device = engine._device;
     const canvas = engine.canvas;
@@ -186,6 +199,9 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     const tempBuffers: GPUBuffer[] = [];
     for (let mi = 0; mi < meshCount; mi++) {
         const mesh = meshes[mi]!;
+        if (pickFilter && !pickFilter(mesh)) {
+            continue; // excluded from picking → not drawn AND not given an id (skipped identically below)
+        }
         const gpu = mesh._gpu;
         const ti = mesh.thinInstances;
 
@@ -219,7 +235,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
             if (deformedGeometry && (mesh.morphTargets || mesh.skeleton) && mesh._cpuPositions) {
                 const deformedPositions = deformedGeometry.computeDeformedPositions(mesh);
                 if (deformedPositions) {
-                    positionBuffer = createMappedBuffer(engine, deformedPositions, GPUBufferUsage.VERTEX);
+                    positionBuffer = createMappedBuffer(engine, deformedPositions, BU.VERTEX);
                     tempBuffers.push(positionBuffer);
                 }
             }
@@ -267,9 +283,9 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
 
     await Promise.all([rt.colorStaging.mapAsync(GPUMapMode.READ), rt.depthStaging.mapAsync(GPUMapMode.READ)]);
 
-    const colorData = new Uint8Array(rt.colorStaging.getMappedRange());
+    const colorData = new U8(rt.colorStaging.getMappedRange());
     const pickId = (colorData[0]! << 16) | (colorData[1]! << 8) | colorData[2]!;
-    const depth = new Float32Array(rt.depthStaging.getMappedRange())[0]!;
+    const depth = new F32(rt.depthStaging.getMappedRange())[0]!;
     rt.colorStaging.unmap();
     rt.depthStaging.unmap();
 
@@ -288,6 +304,9 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number): Promis
     let scanId = 1;
     for (let mi = 0; mi < meshCount; mi++) {
         const mesh = meshes[mi]!;
+        if (pickFilter && !pickFilter(mesh)) {
+            continue; // skipped identically to the draw pass above so scanId stays aligned with the ids
+        }
         const ti = mesh.thinInstances;
         if (ti && ti.count > 0 && ti._gpuBuffer) {
             if (pickId >= scanId && pickId < scanId + ti.count) {

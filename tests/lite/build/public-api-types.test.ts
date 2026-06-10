@@ -1,11 +1,13 @@
 import { spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const ROOT = resolve(__dirname, "../../..");
 const PACKAGE_DIR = resolve(ROOT, "packages/babylon-lite");
-const DTS_PATH = resolve(PACKAGE_DIR, "dist/index.d.ts");
+const DIST_DIR = resolve(PACKAGE_DIR, "dist");
+const DTS_PATH = resolve(DIST_DIR, "index.d.ts");
+const PACKAGE_JSON_PATH = resolve(DIST_DIR, "package.json");
 
 // Invoke binaries directly via their JS entry points and the current node
 // executable, so the test does not depend on PATH (which may not contain
@@ -14,17 +16,19 @@ const NODE = process.execPath;
 const VITE_JS = resolve(PACKAGE_DIR, "node_modules/vite/bin/vite.js");
 const TSC_JS = resolve(ROOT, "node_modules/typescript/bin/tsc");
 
-describe("public API .d.ts", () => {
-    it("builds and type-checks cleanly with no references to internal-only types", () => {
-        // Build babylon-lite to produce dist/index.d.ts.
-        const build = spawnSync(NODE, [VITE_JS, "build"], {
-            cwd: PACKAGE_DIR,
-            encoding: "utf-8",
-        });
-        if (build.status !== 0) {
-            throw new Error(`babylon-lite build failed:\n${build.stdout ?? ""}${build.stderr ?? ""}`);
-        }
+// Build babylon-lite once for all dist/* assertions in this file.
+beforeAll(() => {
+    const build = spawnSync(NODE, [VITE_JS, "build"], {
+        cwd: PACKAGE_DIR,
+        encoding: "utf-8",
+    });
+    if (build.status !== 0) {
+        throw new Error(`babylon-lite build failed:\n${build.stdout ?? ""}${build.stderr ?? ""}`);
+    }
+}, 300_000);
 
+describe("dist/index.d.ts", () => {
+    it("type-checks cleanly with no references to internal-only types", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 
         // Type-check the generated declaration file in isolation, without
@@ -67,4 +71,46 @@ describe("public API .d.ts", () => {
         }
         expect(result.status).toBe(0);
     }, 300_000);
+
+    it("does not reference any external (npm) modules", () => {
+        expect(existsSync(DTS_PATH)).toBe(true);
+
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        // Collect every module specifier the .d.ts file refers to via:
+        //   - top-level `import ... from "X"` declarations
+        //   - top-level `export ... from "X"` re-exports
+        //   - inline `import("X").Y` type expressions
+        //   - triple-slash `<reference types="X" />` directives
+        const specifiers = new Set<string>();
+        for (const m of dts.matchAll(/(?:^|\n)\s*(?:import|export)[^;\n]*?\sfrom\s+["']([^"']+)["']/g)) {
+            specifiers.add(m[1]!);
+        }
+        for (const m of dts.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+            specifiers.add(m[1]!);
+        }
+        for (const m of dts.matchAll(/\/\/\/\s*<reference\s+types\s*=\s*["']([^"']+)["']/g)) {
+            specifiers.add(m[1]!);
+        }
+
+        // Any specifier that is not a relative path is a leaked external type:
+        // the rolled-up d.ts is supposed to be fully self-contained so that
+        // consumers never need to install any of our build-time dependencies.
+        const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
+        expect(external, `dist/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
+    });
+});
+
+describe("dist/package.json", () => {
+    it("declares no runtime dependencies", () => {
+        expect(existsSync(PACKAGE_JSON_PATH)).toBe(true);
+
+        const pkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf-8")) as Record<string, unknown>;
+
+        // The published package must bundle every transitive runtime dep as an
+        // opaque implementation detail — no `dependencies` and no
+        // `peerDependencies` should ever appear in dist/package.json.
+        expect(pkg.dependencies ?? {}).toEqual({});
+        expect(pkg.peerDependencies ?? {}).toEqual({});
+    });
 });

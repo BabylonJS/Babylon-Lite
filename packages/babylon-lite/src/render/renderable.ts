@@ -118,5 +118,5 @@ export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise
     /** @internal */
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
     /** @internal */
-    _materialFamily?: "standard" | "pbr" | "node";
+    _materialFamily?: "standard" | "pbr" | "node" | "shader";
 };

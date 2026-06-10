@@ -5,6 +5,7 @@
  * and computes spherical harmonics from equirectangular panoramas.
  */
 
+import { F32, F64, U8 } from "../engine/typed-arrays.js";
 import { shToPolynomial } from "../math/spherical-harmonics.js";
 
 // ─── RGBE Parser ────────────────────────────────────────────────────────────
@@ -17,7 +18,7 @@ export interface HdrImage {
 }
 
 export function parseRGBE(buffer: ArrayBuffer): HdrImage {
-    const bytes = new Uint8Array(buffer);
+    const bytes = new U8(buffer);
     let pos = 0;
 
     function readLine(): string {
@@ -61,8 +62,8 @@ export function parseRGBE(buffer: ArrayBuffer): HdrImage {
     const height = parseInt(resMatch[1]!, 10);
     const width = parseInt(resMatch[2]!, 10);
 
-    const data = new Float32Array(width * height * 3);
-    const scanlineBuf = new Uint8Array(width * 4);
+    const data = new F32(width * height * 3);
+    const scanlineBuf = new U8(width * 4);
     for (let y = 0; y < height; y++) {
         pos = decodeScanline(bytes, pos, width, data, y * width * 3, scanlineBuf);
     }
@@ -127,7 +128,7 @@ export function computeSHFromEquirect(data: Float32Array, width: number, height:
     const Y20c = 0.31539156525252;
     const Y22c = 0.54627421529604;
 
-    const sh = new Float64Array(27); // [R: L00..L22, G: L00..L22, B: L00..L22]
+    const sh = new F64(27); // [R: L00..L22, G: L00..L22, B: L00..L22]
     let totalWeight = 0;
 
     for (let py = 0; py < height; py++) {

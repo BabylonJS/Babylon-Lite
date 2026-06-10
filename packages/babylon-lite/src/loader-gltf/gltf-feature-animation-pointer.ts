@@ -11,6 +11,7 @@
  *      cases the fast path in gltf-animation can't express (e.g. the 11-byte
  *      UNSIGNED_BYTE visibility accessor in CubeVisibility.glb). */
 
+import { F32, U16, I16, U8, I8 } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { AnimationChannel } from "../animation/types.js";
 import { PATH_POINTER } from "../animation/types.js";
@@ -38,26 +39,26 @@ _installPointerHandlers(
     (src, length, normalized) => {
         // Convert any animation-sampler payload to a standalone Float32Array.
         // Handles the cases the aligned-Float32 fast path can't express.
-        const out = new Float32Array(length);
-        if (src instanceof Float32Array) {
+        const out = new F32(length);
+        if (src instanceof F32) {
             for (let i = 0; i < length; i++) {
                 out[i] = src[i]!;
             }
-        } else if (src instanceof Uint8Array) {
+        } else if (src instanceof U8) {
             const k = normalized ? 1 / 255 : 1;
             for (let i = 0; i < length; i++) {
                 out[i] = src[i]! * k;
             }
-        } else if (src instanceof Uint16Array) {
+        } else if (src instanceof U16) {
             const k = normalized ? 1 / 65535 : 1;
             for (let i = 0; i < length; i++) {
                 out[i] = src[i]! * k;
             }
-        } else if (src instanceof Int8Array) {
+        } else if (src instanceof I8) {
             for (let i = 0; i < length; i++) {
                 out[i] = normalized ? Math.max(src[i]! / 127, -1) : src[i]!;
             }
-        } else if (src instanceof Int16Array) {
+        } else if (src instanceof I16) {
             for (let i = 0; i < length; i++) {
                 out[i] = normalized ? Math.max(src[i]! / 32767, -1) : src[i]!;
             }

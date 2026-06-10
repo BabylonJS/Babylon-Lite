@@ -1,3 +1,4 @@
+import { F64, U32 } from "../engine/typed-arrays.js";
 /**
  * ComputeNormals — equivalent to Babylon.js VertexData.ComputeNormals for the
  * default left-handed case. Accumulates face normals per-vertex, normalizes.
@@ -7,15 +8,15 @@
  */
 export function computeNormals(positions: number[], indices: number[]): number[] {
     const n = positions.length;
-    const pos = new Float64Array(n);
+    const pos = new F64(n);
     for (let i = 0; i < n; i++) {
         pos[i] = positions[i]!;
     }
-    const idx = new Uint32Array(indices.length);
+    const idx = new U32(indices.length);
     for (let i = 0; i < indices.length; i++) {
         idx[i] = indices[i]!;
     }
-    const normals = new Float64Array(n);
+    const normals = new F64(n);
     const nbFaces = (indices.length / 3) | 0;
     for (let f = 0; f < nbFaces; f++) {
         const v1x = idx[f * 3]! * 3;

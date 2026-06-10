@@ -1,3 +1,5 @@
+import { F32, U32, U16, U8, DV } from "../engine/typed-arrays.js";
+import { BU } from "../engine/gpu-flags.js";
 import type { Mat4 } from "../math/types.js";
 import { computeAabb } from "../math/compute-aabb.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -11,7 +13,7 @@ import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, getTextureImageIndex, TYPE_SIZES } from "./gltf-parser.js";
+import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, anyPrimitive, needsOrmComposite, TYPE_SIZES } from "./gltf-parser.js";
 import type { AccessorView } from "./gltf-parser.js";
 import type { GltfVb } from "./gltf-interleave.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
@@ -84,9 +86,12 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     const worldMatrixCache = new Map<number, Mat4>();
 
     // Discover every triggered feature (material exts, skeleton, morph,
-    // animations, variants, …) and dynamic-import them concurrently with
-    // mesh extraction. Core loader knows zero feature names.
-    const features = await loadGltfFeatures(json);
+    // animations, variants, …). The feature registry + its ~24 dynamic-import
+    // thunks live in a separate module that is itself dynamic-imported only when
+    // the asset can possibly trigger a feature — so plain metallic-roughness
+    // GLBs (no extensions/animations/skins/morphs/ORM-composite) never fetch the
+    // registry. Core loader knows zero feature names.
+    const features = assetUsesGltfFeatures(json) ? await (await import("./gltf-feature-registry.js")).loadGltfFeatures(json) : [];
 
     // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
     // dequantization) may rewrite bufferViews/accessors and hand back a replacement
@@ -156,13 +161,6 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     return container;
 }
 
-// --- glTF Feature Driver ---
-
-/** A glTF feature: per-asset gating + dynamic-import of a `GltfFeature` module.
- *  Unknown features contribute zero bytes when their `needs(json)` returns false.
- *  Stored as a tuple [needs, load] for bundle-size reasons. */
-type GltfFeatureLoader = [(json: any) => boolean, () => Promise<{ default: GltfFeature }>];
-
 /** Fetch + parse a .glb or .gltf asset. Returns the JSON, binary chunk, and base URL. */
 async function fetchGltfAsset(url: string): Promise<{ json: any; binChunk: DataView; baseUrl: string }> {
     const baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
@@ -178,88 +176,28 @@ async function fetchGltfAsset(url: string): Promise<{ json: any; binChunk: DataV
     if (bufferDef?.uri) {
         const binUrl = new URL(bufferDef.uri, baseUrl + "x").href;
         const binBuffer = await fetch(binUrl).then((r) => r.arrayBuffer());
-        binChunk = new DataView(binBuffer);
+        binChunk = new DV(binBuffer);
     } else {
-        binChunk = new DataView(new ArrayBuffer(0));
+        binChunk = new DV(new ArrayBuffer(0));
     }
     return { json, binChunk, baseUrl };
 }
 
-/** Returns true if any mesh primitive in the asset matches `pred`. */
-function anyPrimitive(json: any, pred: (p: any) => boolean): boolean {
-    for (const m of json.meshes ?? []) {
-        for (const p of m.primitives ?? []) {
-            if (pred(p)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-const _MAT_EXT = "KHR_materials_";
-const hasMatExt =
-    (suffix: string) =>
-    (json: any): boolean =>
-        json.extensionsUsed?.includes(_MAT_EXT + suffix);
-const hasExt =
-    (name: string) =>
-    (json: any): boolean =>
-        json.extensionsUsed?.includes(name);
-
-/** Asset has at least one material that needs ORM compositing
- *  (separate metallicRoughnessTexture + occlusionTexture pointing at different images). */
-function needsOrmComposite(json: any): boolean {
-    const mats = json.materials ?? [];
-    const textures = json.textures ?? [];
-    for (const m of mats) {
-        const mr = m.pbrMetallicRoughness?.metallicRoughnessTexture;
-        const occ = m.occlusionTexture;
-        if (mr && occ && textures[mr.index] && textures[occ.index] && getTextureImageIndex(textures[mr.index]) !== getTextureImageIndex(textures[occ.index])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-const _features: GltfFeatureLoader[] = [
-    // Pre-parse features (buffer-level): order matters — meshopt decompresses
-    // bufferViews first, then quantization dequantizes the resulting accessors.
-    [hasExt("EXT_meshopt_compression"), () => import("./gltf-feature-meshopt.js")],
-    [hasExt("KHR_mesh_quantization"), () => import("./gltf-ext-quantization.js")],
-    // Pre-mesh features (geometry decompression)
-    [hasExt("KHR_draco_mesh_compression"), () => import("./gltf-feature-draco.js")],
-    // Material extensions
-    [hasMatExt("clearcoat"), () => import("./gltf-ext-clearcoat.js")],
-    [hasMatExt("iridescence"), () => import("./gltf-ext-iridescence.js")],
-    [hasMatExt("emissive_strength"), () => import("./gltf-ext-emissive-strength.js")],
-    [hasMatExt("sheen"), () => import("./gltf-ext-sheen.js")],
-    [hasMatExt("anisotropy"), () => import("./gltf-ext-anisotropy.js")],
-    [hasMatExt("unlit"), () => import("./gltf-ext-unlit.js")],
-    [hasMatExt("pbrSpecularGlossiness"), () => import("./gltf-ext-spec-gloss.js")],
-    // Dielectric cluster (ior/specular/transmission/volume) — any of the four triggers the loader;
-    // transmission refraction is wired dynamically by the PBR material path when the loaded material needs it.
-    [(j) => ["transmission", "volume", "ior", "specular", "dispersion"].some((e) => hasMatExt(e)(j)), () => import("./gltf-ext-dielectric.js")],
-    [hasExt("KHR_texture_transform"), () => import("./gltf-ext-uv-transform.js")],
-    [hasExt("KHR_texture_basisu"), () => import("./gltf-ext-basisu.js")],
-    [needsOrmComposite, () => import("./gltf-ext-orm.js")],
-    // Per-mesh features (predicates inlined to avoid eager imports)
-    [(json) => !!json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined), () => import("./gltf-feature-skeleton.js")],
-    [(json) => anyPrimitive(json, (p) => !!p.targets?.length), () => import("./gltf-feature-morph.js")],
-    // Per-asset features
-    [hasExt("KHR_lights_punctual"), () => import("./gltf-feature-lights-punctual.js")],
-    [(json) => !!json.animations?.length, () => import("./gltf-feature-animations.js")],
-    [hasMatExt("variants"), () => import("./gltf-feature-variants.js")],
-    [hasExt("KHR_node_visibility"), () => import("./gltf-ext-node-visibility.js")],
-    [hasExt("KHR_animation_pointer"), () => import("./gltf-feature-animation-pointer.js")],
-    [hasExt("EXT_mesh_gpu_instancing"), () => import("./gltf-feature-gpu-instancing.js")],
-    [hasExt("KHR_xmp_json_ld"), () => import("./gltf-feature-xmp.js")],
-];
-
-/** Dynamic-import every feature the asset triggers. */
-async function loadGltfFeatures(json: any): Promise<GltfFeature[]> {
-    const mods = await Promise.all(_features.flatMap(([needs, load]) => (needs(json) ? [load()] : [])));
-    return mods.map((m) => m.default);
+/** Cheap superset gate: returns true iff the asset can possibly trigger at least
+ *  one optional glTF feature. Every `_features` predicate in gltf-feature-registry
+ *  is implied by one of these buckets (all hasExt/hasMatExt features require a
+ *  non-empty `extensionsUsed`), so when this returns false the registry's
+ *  `loadGltfFeatures` would return `[]` anyway — letting the core loader skip the
+ *  registry import entirely and keep its ~24 feature import-thunks out of the
+ *  bundle for plain metallic-roughness assets. */
+function assetUsesGltfFeatures(json: any): boolean {
+    return !!(
+        json.extensionsUsed?.length ||
+        json.animations?.length ||
+        (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
+        anyPrimitive(json, (p) => !!p.targets?.length) ||
+        needsOrmComposite(json)
+    );
 }
 
 // --- Hierarchy Reconstruction ---
@@ -406,11 +344,18 @@ async function extractAllMeshes(
                 return idx !== undefined ? resolveAccessor(json, binChunk, idx) : null;
             };
             const posData = resolveAttr("POSITION")!;
-            const normData = resolveAttr("NORMAL")!;
+            const normData = resolveAttr("NORMAL");
             const uvData = resolveAttr("TEXCOORD_0");
             const uv2Data = resolveAttr("TEXCOORD_1");
             const tanData = resolveAttr("TANGENT");
             const colorData = resolveAttr("COLOR_0");
+            // glTF COLOR_0 may be VEC3 or VEC4 with float, normalized ubyte, or normalized
+            // ushort components, but the PBR/standard pipelines bind vertex color as a single
+            // float32x3 layout. Normalize any source to a tight float32 RGB buffer so the GPU
+            // stride matches the layout (otherwise every vertex misaligns -> garbage/black).
+            // The normalizer is imported lazily on first need — colorless assets never fetch it
+            // (the runtime caches the module, so the per-primitive import() resolves instantly).
+            const colors = colorData ? (await import("./gltf-color-normalize.js")).normalizeColorToVec3(colorData._data, colorData._count, colorData._componentCount) : null;
             const idxData = decoded
                 ? { _data: decoded._indices, _count: decoded._indexCount, _componentCount: 1 }
                 : primitive.indices !== undefined
@@ -419,23 +364,29 @@ async function extractAllMeshes(
 
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
-                ? idxData._data instanceof Uint32Array
-                    ? new Uint32Array(idxData._data as Uint32Array)
-                    : idxData._data instanceof Uint8Array
+                ? idxData._data instanceof U32
+                    ? new U32(idxData._data as Uint32Array)
+                    : idxData._data instanceof U8
                       ? Uint16Array.from(idxData._data as Uint8Array)
-                      : new Uint16Array(idxData._data!.buffer, idxData._data!.byteOffset, idxData._count)
-                : new Uint16Array(0);
+                      : new U16(idxData._data!.buffer, idxData._data!.byteOffset, idxData._count)
+                : new U16(0);
 
             // Fire material fetch without awaiting — all materials load in parallel
             matPromises.push(getMat(primitive.material));
 
+            // Smooth-normal generation is lazily imported on first need — assets that
+            // always provide NORMAL (the common case) never bundle or fetch this code.
+            const normals = normData
+                ? (normData._data as Float32Array)
+                : (await import("./gltf-normals.js")).computeSmoothNormals(posData._data as Float32Array, indices, posData._count);
+
             partials.push({
                 _positions: posData._data as Float32Array,
-                _normals: normData._data as Float32Array,
+                _normals: normals,
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
-                _uvs: uvData ? (uvData._data as Float32Array) : new Float32Array(posData._count * 2),
+                _uvs: uvData ? (uvData._data as Float32Array) : new F32(posData._count * 2),
                 _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
-                _colors: colorData ? (colorData._data as Float32Array) : null,
+                _colors: colors,
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: idxData?._count ?? 0,
@@ -564,15 +515,15 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
             } else {
                 const [boundMin, boundMax] = computeAabb(m._positions!, m._worldMatrix);
                 const gpu: MeshGPU = {
-                    positionBuffer: createMappedBuffer(engine, m._positions!, GPUBufferUsage.VERTEX),
-                    normalBuffer: createMappedBuffer(engine, m._normals!, GPUBufferUsage.VERTEX),
-                    tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, GPUBufferUsage.VERTEX) : null,
-                    uvBuffer: createMappedBuffer(engine, m._uvs!, GPUBufferUsage.VERTEX),
-                    uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, GPUBufferUsage.VERTEX) : null,
-                    colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, GPUBufferUsage.VERTEX) : null,
-                    indexBuffer: createMappedBuffer(engine, m._indices, GPUBufferUsage.INDEX),
+                    positionBuffer: createMappedBuffer(engine, m._positions!, BU.VERTEX),
+                    normalBuffer: createMappedBuffer(engine, m._normals!, BU.VERTEX),
+                    tangentBuffer: m._tangents ? createMappedBuffer(engine, m._tangents, BU.VERTEX) : null,
+                    uvBuffer: createMappedBuffer(engine, m._uvs!, BU.VERTEX),
+                    uv2Buffer: m._uv2s ? createMappedBuffer(engine, m._uv2s, BU.VERTEX) : null,
+                    colorBuffer: m._colors ? createMappedBuffer(engine, m._colors, BU.VERTEX) : null,
+                    indexBuffer: createMappedBuffer(engine, m._indices, BU.INDEX),
                     indexCount: m._indexCount,
-                    indexFormat: (m._indices instanceof Uint32Array ? "uint32" : "uint16") as GPUIndexFormat,
+                    indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
                 };
 
                 mesh = {
@@ -592,7 +543,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 mesh._cpuPositions = m._positions!;
                 mesh._cpuNormals = m._normals!;
                 mesh._cpuUvs = m._uvs!;
-                mesh._cpuIndices = m._indices instanceof Uint32Array ? m._indices : new Uint32Array(m._indices);
+                mesh._cpuIndices = m._indices instanceof U32 ? m._indices : new U32(m._indices);
                 engine._dlr?.m(mesh, m._uv2s, m._tangents, m._colors, m._indices, gpu.indexFormat);
             }
 

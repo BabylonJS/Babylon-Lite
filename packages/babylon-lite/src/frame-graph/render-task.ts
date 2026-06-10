@@ -21,14 +21,14 @@
  *     scene's renderables. Re-sync happens automatically when the scene's
  *     `_renderableVersion` changes between frames (mesh add/remove, material swap).
  *
- * Swapchain mode is detected by `rt.descriptor.resolveToSwapchain` and is
- * handled inside the `RenderPass` (the swap view is patched into the cached
- * descriptor per frame, as either the resolveTarget for MSAA RTs or the
- * direct color view otherwise). `clr: false` switches color + depth `loadOp`
- * to `"load"` so multiple scenes can share the swapchain in one frame
- * (e.g., a 3D scene + a UI overlay scene).
+ * The engine `scRT` is just another `RenderTarget` here: a task that
+ * targets it (`rt`) or resolves into it (`rst`) re-reads its per-frame color view
+ * at execute time (the swap texture is re-acquired each frame). `clr: false`
+ * switches color + depth `loadOp` to `"load"` so multiple scenes can share the
+ * swapchain in one frame (e.g., a 3D scene + a UI overlay scene).
  */
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -39,9 +39,9 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewProjectionMatrix, getViewMatrix } from "../camera/camera.js";
+import { getViewMatrix } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import { ensureSceneLightState, refreshSceneLightsUBO } from "../render/lights-ubo.js";
@@ -54,10 +54,32 @@ export interface RenderTaskConfig {
      *  management is virtualized, callers must provide the concrete target; once
      *  virtualized, the task should create/manage its own render target. */
     rt: RenderTarget;
+    /** Optional single-sample resolve target. When `rt` is multisampled
+     *  (`sampleCount > 1`), the color attachment resolves into this target's
+     *  color texture at end-of-pass — letting an MSAA render feed a post-process
+     *  that requires a single-sample source, without an extra resolve pass.
+     *  Caller contract (not validated): must be single-sample with a color
+     *  format and size matching `rt`; WebGPU errors at pass-encode time if not.
+     *  Ignored when `rt` is single-sample. */
+    rst?: RenderTarget;
+    /** Optional separate depth/stencil attachment. The pass binds this target's
+     *  depth view instead of `rt`'s own, and uses its `depthStencilFormat` for
+     *  pipeline signature matching. The colour `rt` must omit `depthStencilFormat`
+     *  (so it allocates no internal depth) and match this target in size + sample
+     *  count. Two ownership modes, distinguished by `_eager`:
+     *  - `_eager` depth (e.g. a `GeometryRendererTask` output): the task neither
+     *    builds nor clears nor disposes it — it loads it (`loadOp: "load"`) and the
+     *    caller owns clearing. This is how scenes reuse a pre-rendered depth buffer.
+     *  - non-`_eager` depth: the task owns it — builds/rebuilds it in `record()`,
+     *    clears it (`loadOp: "clear"`), and disposes it. Used by the default
+     *    single-sample scene task, whose colour `rt` is the depth-less
+     *    engine `scRT`. */
+    depth?: RenderTarget;
     /** Background clear color. May be mutated frame-to-frame. */
     clrColor?: GPUColorDict;
-    /** When true, controls color + depth `loadOp` ("clear"). When false, use "load"
-     *  so this pass overlays previous content (UI overlays, second scene, etc.). */
+    /** When true, color `loadOp` is "clear"; when false, "load" (overlays previous
+     *  color content). Depth is always cleared when rt-owned and always loaded when
+     *  supplied via `depth`. */
     clr?: boolean;
     /** Per-pass camera override. Null/undefined uses `scene.camera`. */
     cam?: Camera | null;
@@ -102,6 +124,12 @@ export interface RenderTask extends Task {
     _renderPassDescriptor: GPURenderPassDescriptor;
     /** @internal */
     _colorAttachment: GPURenderPassColorAttachment;
+    /** @internal External depth source from `config.depth`. When unset,
+     *  the pass uses `config.rt._depthView`. */
+    _depthSrc?: RenderTarget;
+    /** @internal External depth/stencil `loadOp` ("load" when `config.depth` is
+     *  set). When unset, defaults to `"clear"`. */
+    _depthLoadOp?: GPULoadOp;
 
     /** Per-task scene UBO + bind group. Created eagerly in createRenderTask
      *  so renderables can reference `_sceneBG` at `bind()` time. Written each
@@ -144,19 +172,17 @@ interface MutableDrawUpdateContext {
  *  Swapchain-targeted tasks acquire the swap view per-frame at execute time. */
 export function createRenderTask(config: RenderTaskConfig, engine: EngineContext, scene: SceneContext): RenderTask {
     const sc = scene as SceneContext;
-    const rt = config.rt;
     config.clrColor ??= { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     config.clr ??= true;
-    const desc = rt._descriptor;
-    // Offscreen RTTs usually need a Y-flipped projection so the result texture
-    // samples upright when sourced by a downstream pass. Depth-only shadow maps
-    // can override this to preserve shadow-sampler UV conventions.
+    const desc = config.rt._descriptor;
+    // Render upright: row 0 of the GPU texture is the top of the scene. Every
+    // RT (offscreen or swapchain) renders without a projection Y-flip; pipelines
+    // use the default ccw front face; downstream samplers see upright pixels.
     const targetSignature = {
-        _colorFormat: desc.colorFormat,
-        _depthStencilFormat: desc.depthStencilFormat,
+        _colorFormat: desc.format,
+        _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
         _depthCompare: desc._depthCompare,
-        _sampleCount: desc.sampleCount ?? 1,
-        _flipY: desc.flipY ?? desc.resolveToSwapchain !== true,
+        _sampleCount: desc.samples ?? 1,
     };
 
     const sceneBGL = getSceneBindGroupLayout(engine);
@@ -187,10 +213,12 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _lastVis: 0,
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
+        _depthSrc: config.depth,
+        _depthLoadOp: config.depth ? (config.depth._eager ? "load" : "clear") : undefined,
         _sceneUBO: sceneUBO,
         _sceneBG: sceneBG,
         _lightsUBO: lightsUBO,
-        _suData: new Float32Array(SCENE_UBO_BYTES / 4),
+        _suData: new F32(SCENE_UBO_BYTES / 4),
         _su: [],
         _targetSignature: targetSignature,
         _pendingMeshes: [],
@@ -210,7 +238,20 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
             if (task._autoFromScene) {
                 task._renderables.push(...sc._renderables);
             }
+            // Read config.rt dynamically — transmission retargeting swaps it after
+            // the task is created, and the engine scRT must never be rebuilt.
+            const rt = config.rt;
             buildRenderTarget(rt, engine);
+            if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
+                buildRenderTarget(config.rst, engine);
+            }
+            // A non-eager external depth (e.g. the default single-sample scene task's
+            // depth, whose colour rt is the depth-less scRT) is task-managed:
+            // build/rebuild it here. Eager depths (GeometryRendererTask outputs) are
+            // pre-built and skipped by buildRenderTarget.
+            if (config.depth && !config.depth._eager) {
+                buildRenderTarget(config.depth, engine);
+            }
             updateContext.targetWidth = rt._width;
             updateContext.targetHeight = rt._height;
             refreshTaskSceneBindGroup(task, engine);
@@ -222,7 +263,12 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         },
         dispose(): void {
             task._passes.length = 0;
-            disposeRenderTarget(rt);
+            // disposeRenderTarget no-ops on the engine scRT and on eager
+            // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
+            // rst/depth — so these can be passed unconditionally.
+            disposeRenderTarget(config.rt);
+            disposeRenderTarget(config.rst);
+            disposeRenderTarget(config.depth);
             task._opaqueBindings.length = 0;
             task._directBindings.length = 0;
             task._transparentBindings.length = 0;
@@ -236,6 +282,11 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
 
 /** Remove a mesh from this task's renderable + binding lists. Idempotent. */
 export function removeMeshFromTask(task: RenderTask, mesh: object): void {
+    // Not a renderable-bearing task (e.g. a post/effect task that also carries `_config`): nothing to
+    // remove. Guard keeps callers that scan all frame-graph tasks (removeFromScene) shape-safe.
+    if (!task._renderables) {
+        return;
+    }
     let removed = false;
     for (let i = task._renderables.length - 1; i >= 0; i--) {
         if (task._renderables[i]!.mesh === mesh) {
@@ -264,8 +315,7 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const buildGroup = material._buildGroup;
-        const rebuild = buildGroup?._rebuildSingle;
+        const rebuild = material._buildGroup?._rebuildSingle;
         if (!rebuild) {
             throw new Error();
         }
@@ -316,26 +366,35 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
 }
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
-    task._colorAttachment.view = rt._colorView!;
-    task._renderPassDescriptor.colorAttachments = rt._colorView ? [task._colorAttachment] : [];
+    const att = task._colorAttachment;
+    att.view = rt._colorView!;
+    // End-of-pass MSAA resolve into a caller-supplied single-sample target.
+    // record() only builds the target's color view for an MSAA rt, so its
+    // presence is the gate. The swapchain case is wired per-frame in
+    // executePass (its view changes each frame); this custom view is stable.
+    att.resolveTarget = task._config.rst?._colorView ?? undefined;
+    task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
 
-    const depthView = rt._depthView;
-    let depthAttachment: GPURenderPassDepthStencilAttachment | null = null;
+    const depthSrc = task._depthSrc ?? rt;
+    const depthView = depthSrc._depthView;
+    let depthAttachment: GPURenderPassDepthStencilAttachment | undefined;
     if (depthView) {
+        const dd = depthSrc._descriptor;
+        const loadOp = task._depthLoadOp ?? "clear";
         depthAttachment = {
             view: depthView,
-            depthClearValue: rt._descriptor._depthClearValue ?? 0,
-            depthLoadOp: "clear",
+            depthClearValue: dd._depthClearValue ?? 0,
+            depthLoadOp: loadOp,
             depthStoreOp: "store",
         };
-        if (rt._descriptor.depthStencilFormat?.includes("stencil")) {
+        if (dd.dFormat?.includes("stencil")) {
             depthAttachment.stencilClearValue = 0;
-            depthAttachment.stencilLoadOp = "clear";
+            depthAttachment.stencilLoadOp = loadOp;
             depthAttachment.stencilStoreOp = "store";
         }
     }
 
-    task._renderPassDescriptor.depthStencilAttachment = depthAttachment ?? undefined;
+    task._renderPassDescriptor.depthStencilAttachment = depthAttachment;
 }
 
 function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSignature: RenderTargetSignature, context: DrawUpdateContext): void {
@@ -354,7 +413,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     refreshTaskSceneBindGroup(task, eng);
     const camera = task._config.cam ?? sc.camera;
     sc._clusteredLightUpdater?.(camera, context.targetWidth, context.targetHeight);
-    writePassSceneUBO(task, eng, sc, camera, targetSignature._flipY);
+    writePassSceneUBO(task, eng, sc, camera);
     refreshSceneLightsUBO(eng, sc);
     // Expose the active camera to per-binding `update()` calls. Some renderables
     // (e.g. transparent billboard systems) need it to compute view-space sort
@@ -375,18 +434,18 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
     prepareRenderTaskPass(task, eng, targetSignature, context);
     const att = task._colorAttachment;
     const cfg = task._config;
-    const swapchain = cfg.rt._descriptor.resolveToSwapchain === true;
-    if (cfg.rt._colorView || swapchain) {
+    if (cfg.rt._colorView) {
+        // The engine scRT's color view is re-acquired every frame, so re-read
+        // it here. Offscreen color views are stable between rebuilds — leaving att.view
+        // untouched preserves an external override (swapchain-overlay shares the base
+        // scene's MSAA color view). The resolve target (rst) is re-read each frame so an
+        // `rst === scRT` picks up its fresh per-frame view.
+        if (cfg.rt === eng.scRT) {
+            att.view = cfg.rt._colorView;
+        }
+        att.resolveTarget = cfg.rst?._colorView ?? undefined;
         att.clearValue = task._autoFromScene ? sc.clearColor : cfg.clrColor!;
         att.loadOp = cfg.clr ? "clear" : "load";
-    }
-    if (swapchain) {
-        const swapView = eng._swapchainView;
-        if (sampleCount > 1) {
-            att.resolveTarget = swapView;
-        } else {
-            att.view = swapView;
-        }
     }
     if (task._executeWithTransmission) {
         return task._executeWithTransmission(sampleCount);
@@ -430,9 +489,14 @@ function executePassBody(task: RenderTask, pass: GPURenderPassEncoder): number {
     if (task._lastVersion !== scene._renderableVersion || task._lastVis !== _vis || opaqueBundles.length === 0) {
         const desc = rt._descriptor;
         const be = eng._device.createRenderBundleEncoder({
-            colorFormats: desc.colorFormat ? [desc.colorFormat] : [],
-            depthStencilFormat: desc.depthStencilFormat,
-            sampleCount: desc.sampleCount ?? 1,
+            colorFormats: desc.format ? [desc.format] : [],
+            // Use the task's target signature, not the RT descriptor: a depth
+            // override (config.depth) supplies the depth format externally, so
+            // the cached opaque pipelines are built with it while the colour RT
+            // carries no depthStencilFormat of its own. The bundle encoder's
+            // attachment state must match those pipelines exactly.
+            depthStencilFormat: task._targetSignature._depthStencilFormat,
+            sampleCount: desc.samples ?? 1,
         });
         be.setBindGroup(0, sceneBG);
         drawList(be, opaqueBindings, eng);
@@ -468,7 +532,7 @@ function refreshTaskSceneBindGroup(task: RenderTask, eng: EngineContext): void {
 
 /** Write the canonical SceneUniforms struct to the task-owned scene UBO.
  *  Bails before touching scratch/GPU when all inputs are unchanged. */
-function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null, flipY?: boolean): void {
+function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneContext, camera: Camera | null): void {
     if (!camera) {
         return;
     }
@@ -477,7 +541,6 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     const rt = task._config.rt;
     const aspect = (task._config.cs ? eng.canvas.width / eng.canvas.height : rt._width / rt._height) * (v ? v.width / v.height : 1);
     const fog = scene.fog;
-    const envTextures = scene._envTextures;
     const img = scene.imageProcessing;
     const envRotationY = scene.envRotationY || 0;
     const wv = camera.worldMatrixVersion;
@@ -494,70 +557,12 @@ function writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: SceneCon
     s[6] = img.contrast;
 
     const data = task._suData;
-    data.fill(0);
-
-    const viewProj = getViewProjectionMatrix(camera, aspect);
-    const viewMat = getViewMatrix(camera);
-    const wm = camera.worldMatrix;
-
-    // SCENE_UBO float offsets (see shaders/scene-uniforms.wgsl):
-    //   viewProjection  = 0    view             = 16   vEyePosition    = 32
-    //   envRotationY    = 36   vSphericalL00    = 40   exposureLinear  = 76
-    //   contrast        = 77   lodGenerationScale = 78 vFogInfos       = 80
-    //   vFogColor       = 84   clipPlane        = 88
-    packMat4IntoF32(data, viewProj, 0);
-    // Y-flip for offscreen passes — negate row 1 of the projection (the multiplied
-    // view*proj matrix). Row 1 of a column-major mat4 lives at indices 1,5,9,13.
-    if (flipY) {
-        data[1] = -data[1]!;
-        data[5] = -data[5]!;
-        data[9] = -data[9]!;
-        data[13] = -data[13]!;
-    }
-    packMat4IntoF32(data, viewMat, 16);
-    // vEyePosition uniform — the world-space camera position. For LWR-on
-    // scenes the camera is at the origin in the eye-relative frame (the
-    // mesh-world pack and the view matrix translation both already encode
-    // the offset subtraction), so the uniform is mathematically zero.
-    // For non-LWR scenes it's the camera world translation. Shader code
-    // that does `vEyePosition - input.worldPos` produces the eye-relative
-    // vector at full precision in both cases.
-    if (eng.useFloatingOrigin) {
-        data[32] = 0;
-        data[33] = 0;
-        data[34] = 0;
-    } else {
-        data[32] = wm[12]!;
-        data[33] = wm[13]!;
-        data[34] = wm[14]!;
-    }
-
-    if (fog) {
-        data[80] = fog.mode;
-        data[81] = fog.start;
-        data[82] = fog.end;
-        data[83] = fog.density;
-        data[84] = fog.color[0]!;
-        data[85] = fog.color[1]!;
-        data[86] = fog.color[2]!;
-    }
-    data[87] = eng.canvas.width;
-
-    data[36] = envRotationY;
-    if (envTextures?.sphericalHarmonics) {
-        data.set(envTextures.sphericalHarmonics, 40);
-    }
-
-    data[76] = img.exposure;
-    data[77] = img.contrast;
-    data[78] = envTextures?.lodGenerationScale ?? 0.8;
-    data[79] = +img.toneMappingEnabled;
-    data[37] = eng.canvas.height;
-    if (scene.clipPlane) {
-        data[88] = scene.clipPlane[0];
-        data[89] = scene.clipPlane[1];
-        data[90] = scene.clipPlane[2];
-        data[91] = scene.clipPlane[3];
+    _packSceneUniforms(data, eng, scene, camera, aspect);
+    const contribs = scene._sceneUboContributors;
+    if (contribs) {
+        for (const c of contribs) {
+            c(data, scene);
+        }
     }
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }

@@ -1,6 +1,8 @@
+import { F32 } from "../../engine/typed-arrays.js";
 import type { Material } from "../material.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { Mat4 } from "../../math/types.js";
 import { shaderGroupBuilder } from "./shader-group-builder.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. */
@@ -36,6 +38,13 @@ export interface ShaderMaterialOptions {
      *  standard src-over; "additive" adds the fragment's premultiplied-by-alpha
      *  color to the framebuffer, which is the right choice for glows/light FX. */
     readonly blendMode?: "alpha" | "additive";
+    /** Mark this surface as transmissive/refractive: the renderer grabs the opaque scene color
+     *  behind it just before it draws, so the fragment can sample what is *through* it (water,
+     *  glass). Requires `needAlphaBlending` (the surface composites over the grabbed scene
+     *  color). Enable the scene-color grab on the surface's render task with
+     *  `enableRenderTaskTransmission`, then bind the resulting texture via `setShaderTexture`.
+     *  Default false. */
+    readonly transmissive?: boolean;
     readonly needAlphaTesting?: boolean;
     readonly backFaceCulling?: boolean;
     readonly depthWrite?: boolean;
@@ -53,6 +62,12 @@ export interface ShaderUniformDecl {
 export interface ShaderSamplerDecl {
     readonly name: string;
     readonly sampleType?: "float" | "unfilterable-float" | "depth";
+    /** Texture view dimension. Default "2d". Use "2d-array" for layered maps such as
+     *  cascaded-shadow (CSM) depth arrays. */
+    readonly viewDimension?: "2d" | "2d-array";
+    /** Bind a hardware comparison sampler (`sampler_comparison`) for depth compare / PCF
+     *  filtering. Implies a depth texture. Default false. */
+    readonly comparison?: boolean;
 }
 
 /** A resolved WGSL preprocessor define (name + value). */
@@ -84,6 +99,8 @@ export interface ShaderMaterial extends Material {
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
+    /** True for transmissive/refractive surfaces (see `ShaderMaterialOptions.transmissive`). */
+    readonly transmissive: boolean;
     readonly needAlphaTesting: boolean;
     readonly backFaceCulling: boolean;
     readonly depthWrite: boolean;
@@ -180,7 +197,15 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const samplerDecls: ShaderSamplerDecl[] = [];
     const textureSlots = new Map<string, ShaderTextureSlot>();
     for (const opt of options.samplers ?? []) {
-        const decl = typeof opt === "string" ? { name: opt, sampleType: "float" as const } : { name: opt.name, sampleType: opt.sampleType ?? "float" };
+        const decl: ShaderSamplerDecl =
+            typeof opt === "string"
+                ? { name: opt, sampleType: "float" }
+                : {
+                      name: opt.name,
+                      sampleType: opt.sampleType ?? (opt.comparison ? "depth" : "float"),
+                      viewDimension: opt.viewDimension ?? "2d",
+                      comparison: opt.comparison ?? false,
+                  };
         assertIdentifier("sampler", decl.name);
         assertUniqueName(usedNames, "sampler", decl.name);
         assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
@@ -199,6 +224,10 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     }
     defines.sort((a, b) => a.name.localeCompare(b.name));
 
+    if (options.transmissive && !(options.needAlphaBlending ?? false)) {
+        throw new Error("ShaderMaterial: `transmissive` requires `needAlphaBlending` (the surface composites over the grabbed opaque scene color).");
+    }
+
     return {
         name: options.name,
         vertexSource: options.vertexSource,
@@ -209,6 +238,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         defines,
         needAlphaBlending: options.needAlphaBlending ?? false,
         blendMode: options.blendMode ?? "alpha",
+        transmissive: options.transmissive ?? false,
         needAlphaTesting: options.needAlphaTesting ?? false,
         backFaceCulling: options.backFaceCulling ?? true,
         depthWrite: options.depthWrite ?? true,
@@ -275,7 +305,7 @@ function defaultUniformValue(decl: ShaderUniformDecl): ShaderUniformValue {
 
 function normalizeUniformValue(decl: ShaderUniformDecl, value: ShaderUniformValue): Float32Array {
     const count = elementCount(decl.type);
-    const arr = typeof value === "number" ? new Float32Array([value]) : value instanceof Float32Array ? new Float32Array(value) : new Float32Array(value);
+    const arr = typeof value === "number" ? new F32([value]) : value instanceof F32 ? new F32(value) : new F32(value);
     if (arr.length !== count) {
         throw new Error(`ShaderMaterial: uniform "${decl.name}" of type ${decl.type} expects ${count} value(s), got ${arr.length}.`);
     }
@@ -308,7 +338,7 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
     }
     if (texture) {
-        const expectsDepth = slot.decl.sampleType === "depth";
+        const expectsDepth = slot.decl.sampleType === "depth" || slot.decl.comparison === true;
         const isDepthTexture = texture._sampleType === "depth";
         if (expectsDepth && !isDepthTexture) {
             throw new Error(`ShaderMaterial: sampler "${name}" expects a depth Texture2D.`);
@@ -331,7 +361,10 @@ export function setShaderVector3(material: ShaderMaterial, name: string, value: 
     setShaderUniform(material, name, value);
 }
 
-/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`. */
-export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array): void {
-    setShaderUniform(material, name, value);
+/** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`.
+ *  Accepts a raw `Float32Array` or the engine's branded `Mat4` (e.g. the result of
+ *  `getViewProjectionMatrix()` / `mat4Invert()`), so camera/math matrices can be fed
+ *  straight into a matrix uniform without laundering through a typed array. */
+export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array | Mat4): void {
+    setShaderUniform(material, name, value instanceof Float32Array ? value : Array.from(value));
 }

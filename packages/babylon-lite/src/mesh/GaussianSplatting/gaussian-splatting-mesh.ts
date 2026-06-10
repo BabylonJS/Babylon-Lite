@@ -9,6 +9,8 @@
  *  `attachGaussianSplattingMesh()` — scene-core stays GS-agnostic so non-GS
  *  scenes never pull in this pipeline. */
 
+import { F32, U32, U16 } from "../../engine/typed-arrays.js";
+import { TU, BU } from "../../engine/gpu-flags.js";
 import type { SceneNode } from "../../scene/scene-node.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Mat4 } from "../../math/types.js";
@@ -133,7 +135,7 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
         const tex = device.createTexture({
             size: [textureWidth, textureHeight],
             format: "rgba32float",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST,
         });
         queue.writeTexture({ texture: tex }, data.buffer, { bytesPerRow: textureWidth * 16 }, { width: textureWidth, height: textureHeight });
         return { tex, view: tex.createView() };
@@ -151,22 +153,22 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
     });
 
     // ── Quad geometry (shared by all instances) ──────────────────────
-    const quadBuffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.VERTEX, mappedAtCreation: true });
-    new Float32Array(quadBuffer.getMappedRange()).set([-2, -2, 2, -2, 2, 2, -2, 2]);
+    const quadBuffer = device.createBuffer({ size: 32, usage: BU.VERTEX, mappedAtCreation: true });
+    new F32(quadBuffer.getMappedRange()).set([-2, -2, 2, -2, 2, 2, -2, 2]);
     quadBuffer.unmap();
 
-    const indexBuffer = device.createBuffer({ size: 12, usage: GPUBufferUsage.INDEX, mappedAtCreation: true });
-    new Uint16Array(indexBuffer.getMappedRange()).set([0, 1, 2, 0, 2, 3]);
+    const indexBuffer = device.createBuffer({ size: 12, usage: BU.INDEX, mappedAtCreation: true });
+    new U16(indexBuffer.getMappedRange()).set([0, 1, 2, 0, 2, 3]);
     indexBuffer.unmap();
 
     // ── Instance buffer: identity splatIndex until the first sort lands. ──
-    const splatIndexCpu = new Float32Array(vertexCount);
+    const splatIndexCpu = new F32(vertexCount);
     for (let i = 0; i < vertexCount; i++) {
         splatIndexCpu[i] = i;
     }
     const splatIndexBuffer = device.createBuffer({
         size: splatIndexCpu.byteLength,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        usage: BU.VERTEX | BU.COPY_DST,
     });
     queue.writeBuffer(splatIndexBuffer, 0, splatIndexCpu.buffer, 0, splatIndexCpu.byteLength);
 
@@ -194,9 +196,9 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
         shDegree: parsed.shDegree ?? 0,
         _worker: worker,
         _depthMix: new BigInt64Array(vertexCount),
-        _sortWorldMatrix: new Float32Array(16),
-        _sortCameraForward: new Float32Array(3),
-        _sortCameraPosition: new Float32Array(3),
+        _sortWorldMatrix: new F32(16),
+        _sortCameraForward: new F32(3),
+        _sortCameraPosition: new F32(3),
         _canPostToWorker: true,
         firstSortReady,
         _firstSortResolve: firstResolve,
@@ -269,7 +271,7 @@ export function createGaussianSplattingMesh(engine: EngineContext, name: string,
     worker.onmessage = (e: MessageEvent) => {
         const data = e.data as { d: BigInt64Array };
         mesh._depthMix = data.d;
-        const indices = new Uint32Array(data.d.buffer);
+        const indices = new U32(data.d.buffer);
         const cpu = mesh._gs._splatIndexCpu;
         for (let j = 0; j < mesh.vertexCount; j++) {
             cpu[j] = indices[2 * j]!;

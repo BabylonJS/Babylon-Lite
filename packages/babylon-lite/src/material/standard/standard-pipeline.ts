@@ -10,6 +10,7 @@
  *  Pipelines are cached per (features, format, msaaSamples) tuple.
  *  Shared scene UBO layout is identical across all variants (176 bytes). */
 
+import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps } from "./standard-material.js";
@@ -42,7 +43,7 @@ import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 
 /** Compose Standard shader via the generic ShaderComposer.
  *  @param fragments - Optional extra fragments (e.g. thin-instance). */
-function composeStandardShader(features: number, _meshFeatures = 0, fragments: ShaderFragment[] = [], esmShadowDepthCode = ""): ComposedShader {
+export function composeStandardShader(features: number, _meshFeatures = 0, fragments: ShaderFragment[] = [], esmShadowDepthCode = ""): ComposedShader {
     const has = (bit: number) => (features & bit) !== 0;
     const template = createStandardTemplate(
         {
@@ -202,7 +203,7 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: sig._flipY ? "cw" : "ccw" },
+        primitive: { topology: "triangle-list", cullMode: features & DOUBLE_SIDED ? "none" : "back", frontFace: "ccw" },
     });
 
     bindings._pipelines.set(key, pipeline);
@@ -244,7 +245,7 @@ export function createStandardMeshBindGroup(
 
     // UV params UBO (only when UVs are actually emitted).
     if (needsUV) {
-        const uvData = new Float32Array(4);
+        const uvData = new F32(4);
         const scaleX = material.uvScale[0];
         let scaleY = material.uvScale[1];
         let offsetY = 0;

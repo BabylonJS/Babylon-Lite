@@ -12,6 +12,7 @@
 
 import { createEngine, createSceneContext, registerScene, startEngine } from "babylon-lite";
 import { demoAssetUrl } from "./demo-asset-url.js";
+import { installFetchProgress } from "./loading-progress.js";
 import { buildDoomLevel } from "./doom/doom-level.js";
 
 const WAD_URL = demoAssetUrl("./doom/freedoom1.wad", import.meta.url);
@@ -19,6 +20,7 @@ const MAP_NAME = "E1M1";
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 28_800_000 });
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
     scene.clearColor = { r: 0, g: 0, b: 0, a: 1 };
@@ -30,6 +32,7 @@ async function main(): Promise<void> {
     buildDoomLevel(engine, scene, wadBytes, MAP_NAME);
 
     await registerScene(engine, scene);
+    progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.ready = "true";

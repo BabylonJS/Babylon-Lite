@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "./types.js";
 
 /** @internal Matrix allocator with strict lazy init. Zero work happens at
@@ -16,7 +17,7 @@ import type { Mat4 } from "./types.js";
  *  the field shaves ~300-500 bytes per scene (no more closure captures,
  *  no `LoaderScratch` struct, no `engine.` prefix at every allocation site). */
 function _defaultAllocate(): Mat4 {
-    return new Float32Array(16) as unknown as Mat4;
+    return new F32(16) as unknown as Mat4;
 }
 
 let _allocate: (() => Mat4) | undefined;

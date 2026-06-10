@@ -102,13 +102,6 @@ function emitPackageJson(outDir: string): Plugin {
                     },
                 },
                 sideEffects: false,
-                dependencies: {
-                    draco3d: "^1.5.7",
-                    "manifold-3d": "3.4.0",
-                    "@recast-navigation/core": "0.43.0",
-                    "@recast-navigation/generators": "0.43.0",
-                    "@recast-navigation/wasm": "0.43.0",
-                },
             };
             writeFileSync(resolve(outDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
         },
@@ -126,9 +119,6 @@ export default defineConfig(({ mode }) => {
                 fileName: "index",
             },
             outDir,
-            rollupOptions: {
-                external: [/^@recast-navigation\//],
-            },
             sourcemap: true,
             minify: mode === "prod" ? "esbuild" : false,
         },

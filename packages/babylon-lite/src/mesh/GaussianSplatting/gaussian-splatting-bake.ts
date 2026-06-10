@@ -1,3 +1,4 @@
+import { F32, U8 } from "../../engine/typed-arrays.js";
 import type { GaussianSplattingMesh } from "./gaussian-splatting-mesh.js";
 import type { Mat4 } from "../../math/types.js";
 
@@ -66,11 +67,11 @@ function quatMultiply(ax: number, ay: number, az: number, aw: number, bx: number
 export function bakeTransformIntoVertices(mesh: GaussianSplattingMesh, transform: Mat4): void {
     const arrayBuffer = mesh.splatsData;
     const newBuffer = arrayBuffer.slice(0);
-    const u8 = new Uint8Array(newBuffer);
-    const f32 = new Float32Array(newBuffer);
+    const u8 = new U8(newBuffer);
+    const f32 = new F32(newBuffer);
     const splatCount = (u8.byteLength / ROW_LENGTH) | 0;
 
-    const m = new Float32Array(transform as unknown as ArrayLike<number>);
+    const m = new F32(transform as unknown as ArrayLike<number>);
 
     const scaleX = Math.sqrt(m[0]! * m[0]! + m[1]! * m[1]! + m[2]! * m[2]!);
 

@@ -110,6 +110,13 @@ async function main(): Promise<void> {
         return;
     }
 
+    // Mobile: skip the live background effect entirely (battery/GPU). The inline
+    // mobile-gate script runs before this deferred module and sets body.is-mobile;
+    // the branded static baseline shows through and the demo cards stay enabled.
+    if (document.body.classList.contains("is-mobile")) {
+        return;
+    }
+
     const engine = await createEngine(canvas);
 
     const effect = createEffectWrapper(engine, {

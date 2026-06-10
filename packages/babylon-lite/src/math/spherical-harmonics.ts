@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 /**
  * Shared SH → SphericalPolynomial conversion.
  *
@@ -15,7 +16,7 @@
  */
 export function shToPolynomial(sh: Float64Array): Float32Array {
     const invPI = 1 / Math.PI;
-    const poly = new Float32Array(27);
+    const poly = new F32(27);
     for (let ch = 0; ch < 3; ch++) {
         const o = ch * 9;
         const L00 = sh[o]!,

@@ -60,7 +60,12 @@ commit. If a PR is labeled `breaking`, `breaking change`, `major`, or
 release-marker job has a repo-scoped `GITHUB_TOKEN` available to read PR labels.
 
 Manual patch/minor/major releases are requested by editing `config/release.json`
-and incrementing its `nonce`; weekly scheduled releases remain `auto`.
+and incrementing its `nonce`; weekly scheduled releases remain `auto`. The npm
+publish script scans commits since the previous `npm-lite-v*` release tag for
+breaking-change markers on every release mode. If breaking changes are present,
+`auto` resolves to `major`, and explicit `patch`/`minor` releases are rejected
+so a manual patch cannot hide a breaking change from the next weekly auto
+release.
 
 ### Guardrails (Non-Negotiable)
 

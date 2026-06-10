@@ -7,6 +7,7 @@
  *  asset lists KHR_texture_basisu in `extensionsUsed`.
  */
 
+import { F32, U32, U8, DV } from "../engine/typed-arrays.js";
 import type { GltfMatExtCtx } from "./gltf-material.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { DecodedPrimitive } from "./gltf-feature.js";
@@ -98,8 +99,8 @@ async function resolveImageBuffer(ctx: BasisuMaterialData, imageIdx: number): Pr
             throw new Error(`${NAME}: bufferView ${image.bufferView} not found`);
         }
         const offset = ctx.binChunk.byteOffset + (bv.byteOffset ?? 0);
-        const copy = new Uint8Array(bv.byteLength);
-        copy.set(new Uint8Array(ctx.binChunk.buffer, offset, bv.byteLength));
+        const copy = new U8(bv.byteLength);
+        copy.set(new U8(ctx.binChunk.buffer, offset, bv.byteLength));
         return copy.buffer;
     }
     if (image.uri) {
@@ -206,8 +207,8 @@ function readStridedFloat(json: any, binChunk: DataView, accessorIdx: number): F
         throw new Error(`${NAME}: invalid accessor stride ${byteStride} for accessor ${accessorIdx}`);
     }
     const baseOffset = binChunk.byteOffset + (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-    const view = new DataView(binChunk.buffer);
-    const out = new Float32Array(accessor.count * componentCount);
+    const view = new DV(binChunk.buffer);
+    const out = new F32(accessor.count * componentCount);
     for (let i = 0, o = 0; i < accessor.count; i++) {
         const src = baseOffset + i * byteStride;
         for (let c = 0; c < componentCount; c++, o++) {
@@ -240,9 +241,7 @@ const ext: GltfFeature = {
                 }
                 const posAcc = gltf.accessors[attrs.POSITION];
                 const idx =
-                    primitive.indices === undefined
-                        ? new Uint32Array(0)
-                        : new Uint32Array(resolveAccessor(gltf, binChunk, primitive.indices)._data as Uint16Array | Uint32Array | Uint8Array);
+                    primitive.indices === undefined ? new U32(0) : new U32(resolveAccessor(gltf, binChunk, primitive.indices)._data as Uint16Array | Uint32Array | Uint8Array);
                 decoded.set(primitive, {
                     _attributes: attributes,
                     _indices: idx,

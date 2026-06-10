@@ -1,3 +1,4 @@
+import { F32, U32 } from "../engine/typed-arrays.js";
 import type { Manifold, ManifoldToplevel, Mesh as ManifoldMesh } from "manifold-3d";
 import type { EngineContext } from "../engine/engine.js";
 import type { Material } from "../material/material.js";
@@ -135,7 +136,7 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     const geometry = requireCpuGeometry(mesh);
     const vertexCount = geometry.positions.length / 3;
     const numProp = 8;
-    const vertProperties = new Float32Array(vertexCount * numProp);
+    const vertProperties = new F32(vertexCount * numProp);
     const world = mesh.worldMatrix;
     const invWorld = mat4Invert(world);
 
@@ -155,7 +156,7 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
         vertProperties[out + 7] = geometry.uvs?.[uv + 1] ?? 0;
     }
 
-    const triVerts = new Uint32Array(geometry.indices.length);
+    const triVerts = new U32(geometry.indices.length);
     for (let i = 0; i < geometry.indices.length; i += 3) {
         triVerts[i] = geometry.indices[i + 2]!;
         triVerts[i + 1] = geometry.indices[i + 1]!;
@@ -166,8 +167,8 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
         numProp,
         vertProperties,
         triVerts,
-        runIndex: new Uint32Array([0]),
-        runOriginalID: new Uint32Array([runtime.firstMaterialId + materialSlot]),
+        runIndex: new U32([0]),
+        runOriginalID: new U32([runtime.firstMaterialId + materialSlot]),
     });
     manifoldMesh.merge();
 
@@ -239,7 +240,7 @@ function createMeshFromOutput(engine: EngineContext, name: string, output: { pos
     if (output.positions.length === 0) {
         throw new Error(`Unable to build CSG2 mesh "${name}". Manifold has 0 vertices for this output.`);
     }
-    return createMeshFromData(engine, name, new Float32Array(output.positions), new Float32Array(output.normals), new Uint32Array(output.indices), new Float32Array(output.uvs));
+    return createMeshFromData(engine, name, new F32(output.positions), new F32(output.normals), new U32(output.indices), new F32(output.uvs));
 }
 
 /**

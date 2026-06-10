@@ -1,0 +1,24 @@
+Tetris (Cube Pets) — Babylon Lite demo
+
+The game, rendering and styling are original work for Babylon Lite. The 3D art
+assets are by Kenney and are public domain (CC0 1.0), so attribution is not
+required — it is included here as a courtesy.
+
+Cube Pets
+  Author:  Kenney  (https://kenney.nl)
+  Source:  https://kenney.nl/assets/cube-pets
+  Used as: the falling tetromino blocks (pig, panda, bunny, crab, chick, cat,
+           caterpillar) in the default "pets" style.
+
+Graveyard Kit
+  Author:  Kenney  (https://kenney.nl)
+  Source:  https://kenney.nl/assets/graveyard-kit
+  Used as: the stone-wall frame surrounding the playfield.
+
+License (both packs): Creative Commons Zero, CC0 1.0 Universal
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+  "You may use these graphics in personal and commercial projects.
+   Credit (Kenney or www.kenney.nl) would be nice but is not mandatory."
+
+Support Kenney: https://kenney.nl  /  https://donate.kenney.nl

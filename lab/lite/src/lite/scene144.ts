@@ -55,10 +55,10 @@ async function main(): Promise<void> {
     attachControl(camera, canvas, scene);
 
     const sourceTarget = createRenderTarget({
-        label: "scene144-source",
-        colorFormat: engine.format,
-        depthStencilFormat: "depth24plus-stencil8",
-        sampleCount: 1,
+        lbl: "scene144-source",
+        format: engine.format,
+        dFormat: "depth24plus-stencil8",
+        samples: 1,
         size: "canvas",
     });
     const sourceTask = createRenderTask(
@@ -72,13 +72,9 @@ async function main(): Promise<void> {
         scene
     );
 
-    const outputTarget = createRenderTarget({
-        label: "scene144-bloom-output",
-        colorFormat: engine.format,
-        sampleCount: engine.msaaSamples,
-        size: "canvas",
-        resolveToSwapchain: true,
-    });
+    // Bloom merge writes directly into the engine swapchain (a fullscreen pass, so
+    // single-sample is pixel-identical to the previous MSAA-resolve-to-swap target).
+    const outputTarget = engine.scRT;
     const bloom = createBloomPostProcessTask(
         {
             name: "scene144-bloom",

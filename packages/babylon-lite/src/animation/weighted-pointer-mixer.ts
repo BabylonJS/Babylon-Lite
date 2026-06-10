@@ -1,3 +1,4 @@
+import { F32 } from "../engine/typed-arrays.js";
 import { tickAnimation } from "./animation-group.js";
 import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
@@ -66,7 +67,7 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
     if (!scratch) {
         scratch = {
             buckets: [],
-            sample: new Float32Array(16),
+            sample: new F32(16),
             fades: [],
         };
         scratchByManager.set(manager, scratch);
@@ -243,7 +244,7 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
     const bucket: WeightedPointerBucket = {
         target: track.mixTarget,
         property: track.mixProperty,
-        values: new Float32Array(arity),
+        values: new F32(arity),
         writer: track.writer,
         arity,
         quaternion: track.quaternion,

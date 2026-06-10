@@ -11,6 +11,7 @@
  * `frontUVs`, `backUVs`. Defaults match exactly.
  */
 
+import { F32, U32 } from "../engine/typed-arrays.js";
 import { POLYHEDRA } from "./polyhedron-data.js";
 import { computeNormals } from "./compute-normals.js";
 
@@ -94,9 +95,9 @@ export function createPolyhedronData(options: PolyhedronOptions = {}): Polyhedro
     const normals = computeNormals(positions, indices);
 
     return {
-        positions: new Float32Array(positions),
-        normals: new Float32Array(normals),
-        uvs: new Float32Array(uvs),
-        indices: new Uint32Array(indices),
+        positions: new F32(positions),
+        normals: new F32(normals),
+        uvs: new F32(uvs),
+        indices: new U32(indices),
     };
 }

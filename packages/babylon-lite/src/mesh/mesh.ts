@@ -1,12 +1,13 @@
 /** High-level Mesh — position/rotation/scaling + material + GPU geometry.
  *  Plain data (no scene reference). The scene collects meshes via addToScene(). */
 
+import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Identity } from "../math/mat4-identity.js";
 import type { Material } from "../material/material.js";
-import type { SkeletonData, MorphTargetData } from "../animation/types.js";
+import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
@@ -83,11 +84,20 @@ export interface Mesh extends SceneNode {
     boundMax?: [number, number, number];
     /** Skeleton GPU data (skeletal animation). Type-only — no module dependency. */
     skeleton?: SkeletonData | null;
+    /** Baked vertex-animation (VAT) GPU data — replaces live skinning so the mesh thin-instances.
+     *  Mutually exclusive with live `skeleton` skinning. Type-only — no module dependency. */
+    vat?: VatData | null;
     /** Morph target GPU data. Type-only — no module dependency. */
     morphTargets?: MorphTargetData | null;
     /** User-controlled render order. Lower = drawn first within phase.
      *  Only affects ordering within the opaque or transparent phase. */
     renderOrder?: number;
+    /** On a transmission-enabled render task, draw this transparent mesh LAST — after the transmissive
+     *  surface and after the scene-colour grab — so it sits on top of the water/glass AND is excluded from
+     *  what that surface refracts (e.g. lily pads resting on water should not appear in the refraction).
+     *  Enable transmission on the task with `enableRenderTaskTransmission`; only transparent surfaces
+     *  (`needAlphaBlending`) are deferred. No effect on tasks without transmission. */
+    renderOnTop?: boolean;
     /** Thin instance data (CPU-side). GPU buffer managed by render system. */
     thinInstances?: ThinInstanceData | null;
     // name, children, position, rotation, rotationQuaternion, scaling,
@@ -181,18 +191,18 @@ export function uploadMeshToGPU(
     colors?: Float32Array
 ): MeshGPU {
     const device = engine._device;
-    const positionBuffer = createMappedBuffer(engine, positions, GPUBufferUsage.VERTEX);
-    const normalBuffer = createMappedBuffer(engine, normals, GPUBufferUsage.VERTEX);
-    const indexBuffer = createMappedBuffer(engine, indices, GPUBufferUsage.INDEX);
+    const positionBuffer = createMappedBuffer(engine, positions, BU.VERTEX);
+    const normalBuffer = createMappedBuffer(engine, normals, BU.VERTEX);
+    const indexBuffer = createMappedBuffer(engine, indices, BU.INDEX);
 
     // UVs: use provided or create zero-filled buffer
     let uvBuffer: GPUBuffer;
     if (uvs && uvs.length > 0) {
-        uvBuffer = createMappedBuffer(engine, uvs, GPUBufferUsage.VERTEX);
+        uvBuffer = createMappedBuffer(engine, uvs, BU.VERTEX);
     } else {
         uvBuffer = device.createBuffer({
             size: (positions.length / 3) * 8,
-            usage: GPUBufferUsage.VERTEX,
+            usage: BU.VERTEX,
             mappedAtCreation: true,
         });
         uvBuffer.unmap();
@@ -201,11 +211,11 @@ export function uploadMeshToGPU(
     // UV2: only create if provided
     let uv2Buffer: GPUBuffer | null = null;
     if (uvs2 && uvs2.length > 0) {
-        uv2Buffer = createMappedBuffer(engine, uvs2, GPUBufferUsage.VERTEX);
+        uv2Buffer = createMappedBuffer(engine, uvs2, BU.VERTEX);
     }
 
-    const tangentBuffer = tangents && tangents.length > 0 ? createMappedBuffer(engine, tangents, GPUBufferUsage.VERTEX) : null;
-    const colorBuffer = colors && colors.length > 0 ? createMappedBuffer(engine, colors, GPUBufferUsage.VERTEX) : null;
+    const tangentBuffer = tangents && tangents.length > 0 ? createMappedBuffer(engine, tangents, BU.VERTEX) : null;
+    const colorBuffer = colors && colors.length > 0 ? createMappedBuffer(engine, colors, BU.VERTEX) : null;
 
     return {
         positionBuffer,

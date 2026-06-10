@@ -14,7 +14,8 @@
  *
  * Per-frame behavior (`_execute`):
  *   1. Patch the cached color attachment with this frame's `clearColor` /
- *      `loadOp` and (in swapchain mode) the per-frame swap view.
+ *      `loadOp` and re-read the target's color view (the engine swapchain target
+ *      is re-acquired per frame; offscreen targets keep a stable view).
  *   2. `enc = encoder.beginRenderPass(_renderPassDescriptor)`.
  *   3. `_executeFunc(enc)` issues the actual draws (or skipped if unset).
  *   4. `enc.end()`.
@@ -37,8 +38,8 @@ export interface RenderPass extends Pass {
     _renderTargetDepth: RenderTarget | null;
 
     /** Cached descriptor + attachments — built once in `_initialize`, then
-     *  patched per-frame in `_execute` for swapchain mode + clearColor +
-     *  loadOp. */
+     *  patched per-frame in `_execute` for clearColor + loadOp + the (re-read)
+     *  color view. */
     /** @internal */
     _renderPassDescriptor: GPURenderPassDescriptor;
     /** @internal */
@@ -52,11 +53,6 @@ export interface RenderPass extends Pass {
     clearColor: GPUColorDict;
     /** True → loadOp `"clear"`, false → `"load"` (overlay mode). */
     clear: boolean;
-
-    /** @internal Cached at descriptor build — `_renderTarget.descriptor.resolveToSwapchain`. */
-    _swapchain: boolean;
-    /** @internal Cached at descriptor build — `_renderTarget.descriptor.sampleCount`. */
-    _sampleCount: number;
 }
 
 const DEFAULT_CLEAR_COLOR: GPUColorDict = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
@@ -77,8 +73,6 @@ export function createRenderPass(name: string, task: Task): RenderPass {
         _depthAttachment: null,
         clearColor: { ...DEFAULT_CLEAR_COLOR },
         clear: true,
-        _swapchain: false,
-        _sampleCount: 1,
         _executeFunc: null,
         _beforeExecute: null,
         _initialize(): void {
@@ -88,19 +82,18 @@ export function createRenderPass(name: string, task: Task): RenderPass {
             if (!rt) {
                 throw new Error(`RenderPass "${pass.name}": render target not set`);
             }
-            const swapchain = rt._descriptor.resolveToSwapchain === true;
             const colorView = rt._colorView;
             let colorAttachment: GPURenderPassColorAttachment | null = null;
-            if (colorView || swapchain) {
+            if (colorView) {
                 colorAttachment = {
-                    view: colorView!,
+                    view: colorView,
                     loadOp: pass.clear ? "clear" : "load",
                     storeOp: "store",
                     clearValue: pass.clearColor,
                 };
             }
             const depthRt = pass._renderTargetDepth ?? rt;
-            const depthFormat = depthRt._descriptor.depthStencilFormat;
+            const depthFormat = depthRt._descriptor.dFormat;
             const depthView = depthRt._depthView;
             const hasStencil = depthFormat ? depthFormat === "depth24plus-stencil8" || depthFormat === "depth32float-stencil8" || depthFormat === "stencil8" : false;
             let depthAttachment: GPURenderPassDepthStencilAttachment | null = null;
@@ -120,8 +113,6 @@ export function createRenderPass(name: string, task: Task): RenderPass {
                 colorAttachments: colorAttachment ? [colorAttachment] : [],
                 depthStencilAttachment: depthAttachment ?? undefined,
             };
-            pass._swapchain = swapchain;
-            pass._sampleCount = rt._descriptor.sampleCount ?? 1;
         },
         _execute(): number {
             const rt = pass._renderTarget;
@@ -134,14 +125,9 @@ export function createRenderPass(name: string, task: Task): RenderPass {
             if (att) {
                 att.clearValue = pass.clearColor;
                 att.loadOp = pass.clear ? "clear" : "load";
-                if (pass._swapchain) {
-                    const swapView = eng._swapchainView;
-                    if (pass._sampleCount > 1) {
-                        att.resolveTarget = swapView;
-                    } else {
-                        att.view = swapView;
-                    }
-                }
+                // Re-read the color view each frame: the engine swapchain target is
+                // re-acquired per frame, offscreen targets keep a stable view.
+                att.view = rt._colorView!;
             }
             const enc = eng._currentEncoder.beginRenderPass(pass._renderPassDescriptor);
             let draws = 0;

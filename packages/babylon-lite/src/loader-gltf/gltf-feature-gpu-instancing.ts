@@ -14,6 +14,7 @@
  *  Spec: https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Vendor/EXT_mesh_gpu_instancing/README.md
  */
 
+import { F32 } from "../engine/typed-arrays.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { resolveAccessor } from "./gltf-parser.js";
@@ -37,7 +38,7 @@ function collectMeshesUnderNode(tn: { children?: unknown[] } | undefined): Mesh[
 }
 
 function buildInstanceMatrices(translation: Float32Array | null, rotation: Float32Array | null, scale: Float32Array | null, count: number): Float32Array {
-    const matrices = new Float32Array(count * 16);
+    const matrices = new F32(count * 16);
     for (let i = 0; i < count; i++) {
         const tx = translation ? translation[i * 3]! : 0;
         const ty = translation ? translation[i * 3 + 1]! : 0;
@@ -127,7 +128,7 @@ function expandMeshAabbForInstances(mesh: Mesh, matrices: Float32Array, count: n
         return;
     }
     // 8 corners of the local AABB, packed as 24 floats for computeAabb.
-    const corners = new Float32Array([
+    const corners = new F32([
         lmin[0]!,
         lmin[1]!,
         lmin[2]!,

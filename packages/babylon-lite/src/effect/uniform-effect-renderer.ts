@@ -1,3 +1,5 @@
+import { U8 } from "../engine/typed-arrays.js";
+import { BU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
@@ -76,7 +78,7 @@ export function createUniformEffectWrapper(engine: EngineContext, options: Unifo
         _uniformBuffer: eng._device.createBuffer({
             label: `${options.name ?? "uniform-effect-wrapper"}-ubo`,
             size: byteLength,
-            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            usage: BU.UNIFORM | BU.COPY_DST,
         }),
         _uniformByteLength: byteLength,
     } as UniformEffectWrapperInternal;
@@ -108,9 +110,9 @@ export function createUniformEffectRenderTask(config: UniformEffectRenderTaskCon
     const effect = config.effect as UniformEffectWrapperInternal;
     const rt = config.target;
     config.clearColor ??= { r: 0, g: 0, b: 0, a: 1 };
-    const sampleCount = rt._descriptor.sampleCount ?? 1;
+    const sampleCount = rt._descriptor.samples ?? 1;
     const targetSignature: RenderTargetSignature = {
-        _colorFormat: rt._descriptor.colorFormat,
+        _colorFormat: rt._descriptor.format,
         _sampleCount: sampleCount,
     };
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
@@ -134,7 +136,7 @@ export function createUniformEffectRenderTask(config: UniformEffectRenderTaskCon
             if (!pipeline) {
                 throw new Error(`UniformEffectRenderTask "${task.name}" executed before record().`);
             }
-            applyColorAttachmentState(task._colorAttachment, rt, eng, task._config.clear !== false, task._config.clearColor!);
+            applyColorAttachmentState(task._colorAttachment, rt, task._config.clear !== false, task._config.clearColor!);
             const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, getUniformEffectBindGroup(effect));
@@ -161,21 +163,13 @@ export function disposeUniformEffectWrapper(wrapper: UniformEffectWrapper): void
     internal._bindGroup = null;
 }
 
-function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, eng: EngineContext, clear: boolean, clearColor: GPUColorDict): void {
+function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: RenderTarget, clear: boolean, clearColor: GPUColorDict): void {
     att.clearValue = clearColor;
     att.loadOp = clear ? "clear" : "load";
-    if (rt._descriptor.resolveToSwapchain === true) {
-        if ((rt._descriptor.sampleCount ?? 1) > 1) {
-            att.view = rt._colorView!;
-            att.resolveTarget = eng._swapchainView;
-        } else {
-            att.view = eng._swapchainView;
-            att.resolveTarget = undefined;
-        }
-    } else {
-        att.view = rt._colorView!;
-        att.resolveTarget = undefined;
-    }
+    // Single render target (the scRT is single-sample); re-read its view
+    // each frame so a swapchain output picks up its fresh per-frame view.
+    att.view = rt._colorView!;
+    att.resolveTarget = undefined;
 }
 
 function getUniformEffectPipeline(wrapper: UniformEffectWrapperInternal, targetSignature: RenderTargetSignature): GPURenderPipeline {
@@ -218,7 +212,7 @@ function getBindGroupLayout(wrapper: UniformEffectWrapperInternal): GPUBindGroup
     if (!wrapper._bindGroupLayout) {
         wrapper._bindGroupLayout = wrapper._engine._device.createBindGroupLayout({
             label: `${wrapper.name}-bgl`,
-            entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
+            entries: [{ binding: 0, visibility: SS.FRAGMENT, buffer: { type: "uniform" } }],
         });
     }
     return wrapper._bindGroupLayout;
@@ -237,9 +231,9 @@ function getUniformEffectBindGroup(wrapper: UniformEffectWrapperInternal): GPUBi
 
 function toBytes(data: ArrayBuffer | ArrayBufferView): Uint8Array {
     if (data instanceof ArrayBuffer) {
-        return new Uint8Array(data);
+        return new U8(data);
     }
-    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    return new U8(data.buffer, data.byteOffset, data.byteLength);
 }
 
 function align4(value: number): number {

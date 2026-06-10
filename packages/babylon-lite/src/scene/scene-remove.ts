@@ -63,10 +63,10 @@ export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
     mesh.parent = null;
     // Frame-graph eviction: the scene always has a frame graph (created in
     // createSceneContext). Walk its render-pass tasks and drop any binding whose
-    // source mesh matches. Tasks identified by having a `_config` field
-    // (RenderTask shape).
+    // source mesh matches. RenderTasks are identified by carrying `_renderables`
+    // (a `_config` field alone is NOT sufficient — post/effect tasks also have one).
     for (const task of scene._frameGraph._tasks) {
-        if ("_config" in (task as object)) {
+        if ("_renderables" in (task as object)) {
             removeMeshFromTask(task as RenderTask, mesh);
         }
     }

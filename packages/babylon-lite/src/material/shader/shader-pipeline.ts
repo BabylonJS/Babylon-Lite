@@ -1,3 +1,4 @@
+import { SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target.js";
@@ -25,7 +26,7 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
     _shaderCustomVersion?: number;
 }
 
-const SHADER_STAGE_ALL = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+const SHADER_STAGE_ALL = SS.VERTEX | SS.FRAGMENT;
 
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
     const state = material as ShaderMaterialPipelineState;
@@ -57,14 +58,27 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
     return bindings;
 }
 
-export function getOrCreateShaderPipeline(engine: EngineContext, sig: RenderTargetSignature, material: ShaderMaterial, bindings: ShaderPipelineBindings): GPURenderPipeline {
-    const key = targetSignatureKey(sig);
+export function getOrCreateShaderPipeline(
+    engine: EngineContext,
+    sig: RenderTargetSignature,
+    material: ShaderMaterial,
+    bindings: ShaderPipelineBindings,
+    variantKey = "",
+    vertexBuffers: readonly GPUVertexBufferLayout[] = bindings.vertexBuffers,
+    instanceAttrs = ""
+): GPURenderPipeline {
+    // `variantKey`, `vertexBuffers` and `instanceAttrs` default to the
+    // non-instanced pipeline — byte-for-byte identical behaviour to before
+    // instancing existed. The dynamically-imported thin-instance module is the
+    // only caller that passes non-default values, so no instancing logic runs
+    // for non-instanced scenes.
+    const key = `${targetSignatureKey(sig)}${variantKey}`;
     const cached = bindings.pipelines.get(key);
     if (cached) {
         return cached;
     }
     const device = engine._device;
-    const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec);
+    const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
     const fragModule = sig._colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
@@ -90,7 +104,7 @@ export function getOrCreateShaderPipeline(engine: EngineContext, sig: RenderTarg
     const pipeline = device.createRenderPipeline({
         label: `${material.name ?? "shader"}-pipeline`,
         layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), bindings.group1BGL] }),
-        vertex: { module: vertModule, entryPoint: "mainVertex", buffers: bindings.vertexBuffers },
+        vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
         ...(fragModule && colorTarget ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: [colorTarget] } } : {}),
         ...(sig._depthStencilFormat
             ? {
@@ -102,7 +116,7 @@ export function getOrCreateShaderPipeline(engine: EngineContext, sig: RenderTarg
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: sig._flipY ? "cw" : "ccw" },
+        primitive: { topology: "triangle-list", cullMode: material.backFaceCulling ? "back" : "none", frontFace: "ccw" },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;
@@ -119,19 +133,20 @@ function buildBindGroupLayoutEntries(samplers: readonly ShaderSamplerDecl[], has
         entries.push({ binding: nextBinding++, visibility: SHADER_STAGE_ALL, buffer: { type: "uniform" } });
     }
     for (const sampler of samplers) {
-        const sampleType = sampler.sampleType ?? "float";
+        const isArray = sampler.viewDimension === "2d-array";
+        const sampleType = sampler.comparison === true ? "depth" : (sampler.sampleType ?? "float");
         entries.push({
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
             texture: {
                 sampleType,
-                viewDimension: "2d",
+                viewDimension: isArray ? "2d-array" : "2d",
             },
         });
         entries.push({
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
-            sampler: { type: sampleType === "float" ? "filtering" : "non-filtering" },
+            sampler: { type: sampler.comparison === true ? "comparison" : sampleType === "float" ? "filtering" : "non-filtering" },
         });
     }
     return entries;
@@ -151,7 +166,7 @@ function attributeLayout(name: ShaderAttributeName, shaderLocation: number): GPU
     }
 }
 
-function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null): string {
+function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null, instanceAttrs = ""): string {
     let wgsl = `${SCENE_UBO_WGSL}
 struct ShaderSystemUniforms {
 ${systemSpec._structBody}
@@ -167,9 +182,12 @@ ${customSpec._structBody}
     }
     let nextBinding = customSpec ? 2 : 1;
     for (const sampler of material.samplerDecls) {
-        const texType = sampler.sampleType === "depth" ? "texture_depth_2d" : "texture_2d<f32>";
+        const isArray = sampler.viewDimension === "2d-array";
+        const isDepth = sampler.comparison === true || sampler.sampleType === "depth";
+        const texType = isDepth ? (isArray ? "texture_depth_2d_array" : "texture_depth_2d") : isArray ? "texture_2d_array<f32>" : "texture_2d<f32>";
+        const samplerType = sampler.comparison === true ? "sampler_comparison" : "sampler";
         wgsl += `@group(1) @binding(${nextBinding++}) var ${sampler.name}: ${texType};
-@group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: sampler;
+@group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: ${samplerType};
 `;
     }
     for (const define of material.defines) {
@@ -183,6 +201,7 @@ ${customSpec._structBody}
         wgsl += `@location(${i}) ${attr}: ${attributeWgslType(attr)},
 `;
     }
+    wgsl += instanceAttrs;
     wgsl += `};
 `;
     return wgsl;
