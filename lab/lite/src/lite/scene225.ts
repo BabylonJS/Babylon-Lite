@@ -41,11 +41,11 @@ function buildContent(scene: SceneContext, surface: SurfaceContext): void {
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
-    const canvasA = document.getElementById("canvasA") as HTMLCanvasElement;
+    const renderCanvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const canvasB = document.getElementById("canvasB") as HTMLCanvasElement;
 
     // Engine + primary surface (canvas A).
-    const engine = await createEngine(canvasA);
+    const engine = await createEngine(renderCanvas);
 
     // Auxiliary surface (canvas B) — shares device + GPU resources with the
     // engine; only the swapchain context is per-canvas.
@@ -54,12 +54,13 @@ async function main(): Promise<void> {
     // Two scenes — one per surface — with the same content but different cameras.
     const sceneA = createSceneContext(engine);
     sceneA.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.5, 6, { x: 0, y: 0.6, z: 0 });
-    attachControl(sceneA.camera as ArcRotateCamera, canvasA, sceneA);
+    attachControl(sceneA.camera as ArcRotateCamera, renderCanvas, sceneA);
     buildContent(sceneA, engine);
 
     const sceneB = createSceneContext(surfaceB);
-    // Near-top-down to make it visually obvious the two canvases are independent.
-    sceneB.camera = createArcRotateCamera(-Math.PI / 2, 0.2, 8, { x: 0, y: 0.6, z: 0 });
+    // Orbit camera offset 3/4 around the box (different alpha + tilt) so the two
+    // canvases obviously show the same scene from independent viewpoints.
+    sceneB.camera = createArcRotateCamera(-Math.PI / 4, Math.PI / 3.5, 6, { x: 0, y: 0.6, z: 0 });
     attachControl(sceneB.camera as ArcRotateCamera, canvasB, sceneB);
     buildContent(sceneB, surfaceB);
 
@@ -67,9 +68,9 @@ async function main(): Promise<void> {
     await registerScene(engine, sceneB);
     await startEngine(engine);
 
-    canvasA.dataset.drawCalls = String(engine.drawCallCount);
-    canvasA.dataset.initMs = String(performance.now() - __initStart);
-    canvasA.dataset.ready = "true";
+    renderCanvas.dataset.drawCalls = String(engine.drawCallCount);
+    renderCanvas.dataset.initMs = String(performance.now() - __initStart);
+    renderCanvas.dataset.ready = "true";
     canvasB.dataset.ready = "true";
 }
 

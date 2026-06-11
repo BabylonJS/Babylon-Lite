@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-    type EngineContext,
-    type RenderingContext,
-    registerRenderingContext,
-    unregisterRenderingContext,
-} from "../../../packages/babylon-lite/src/engine/engine";
+import { type EngineContext, type RenderingContext, registerRenderingContext, unregisterRenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createSurface, disposeSurface, setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
 
 function setDevicePixelRatio(value: number): void {
@@ -177,8 +172,14 @@ describe("createSurface / disposeSurface", () => {
 
         let primaryResizes = 0;
         let auxResizes = 0;
-        registerRenderingContext(engine, makeRenderingContext(() => primaryResizes++));
-        registerRenderingContext(aux, makeRenderingContext(() => auxResizes++));
+        registerRenderingContext(
+            engine,
+            makeRenderingContext(() => primaryResizes++)
+        );
+        registerRenderingContext(
+            aux,
+            makeRenderingContext(() => auxResizes++)
+        );
 
         setSurfaceSize(aux, 320, 240);
 
