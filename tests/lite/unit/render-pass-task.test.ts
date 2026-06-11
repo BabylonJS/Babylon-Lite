@@ -143,7 +143,8 @@ function makeMockEngine(options?: {
         _currentDelta: 0,
         _cbs: [],
     } as unknown as EngineContext;
-    Object.assign(eng, { engine: eng, surfaces: [eng], _surfaces: [eng] });
+    const _surfaces = [eng];
+    Object.assign(eng, { engine: eng, surfaces: _surfaces, _surfaces });
     return eng;
 }
 

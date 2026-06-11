@@ -1587,6 +1587,26 @@
         "skipPerf": true
     },
     {
+        "id": 225,
+        "slug": "scene225-multi-canvas-same-scene",
+        "name": "Scene 225 — Multi-Canvas (Same Scene)",
+        "maxRawKB": 60,
+        "description": "Two canvases side-by-side share a single engine via `createSurface`. Each surface gets its own `SceneContext` containing the same content (colored cube + ground + hemispheric light) but with a different camera angle (front view vs near-top-down), demonstrating that surfaces are independently controllable while sharing the GPU device.",
+        "tags": ["multi-canvas", "surface", "demo", "std"],
+        "skipParity": true,
+        "skipPerf": true
+    },
+    {
+        "id": 226,
+        "slug": "scene226-multi-canvas-different-scenes",
+        "name": "Scene 226 — Multi-Canvas (Different Scenes)",
+        "maxRawKB": 60,
+        "description": "Two canvases side-by-side share a single engine via `createSurface`. Canvas A hosts a row of colored spheres lit by a hemispheric light; canvas B hosts a torus knot lit by a directional light. Demonstrates that completely independent scenes (different geometry, materials, lighting, cameras, clear colors) can coexist on one engine when each is bound to its own surface.",
+        "tags": ["multi-canvas", "surface", "demo", "std"],
+        "skipParity": true,
+        "skipPerf": true
+    },
+    {
         "id": 214,
         "slug": "scene214-cascaded-shadows",
         "name": "Scene 214 — Cascaded Shadow Maps",
