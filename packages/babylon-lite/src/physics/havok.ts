@@ -15,6 +15,7 @@ import type { Vec3, Quat } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
 import { onBeforeRender } from "../scene/scene-core.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
@@ -78,6 +79,8 @@ export interface PhysicsBody {
     /** @internal */ readonly _hkBody: any;
     readonly node: SceneNode;
     readonly motionType: PhysicsMotionType;
+    /** @internal The floating-origin region this body lives in; set only under floating origin. */
+    _region?: WorldRegion;
 }
 
 /** Opaque handle to a Havok collision shape. */
@@ -99,6 +102,10 @@ export interface PhysicsWorld {
     /** @internal */ readonly _hkWorld: any;
     /** @internal */ readonly _bodies: PhysicsBody[];
     /** @internal */ _timestep: number;
+    /** @internal World-wide gravity `[x, y, z]` set at creation; used to seed floating-origin regions. */
+    _gravity: number[];
+    /** @internal Floating-origin runtime; present only after `enableHavokFloatingOrigin` is called. */
+    _fo?: HavokFloatingOriginContext;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -112,6 +119,9 @@ export interface PhysicsWorld {
  *   const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
  *   const world = createHavokWorld(scene, hknp);
  * ```
+ *
+ * For Large World Rendering, call {@link enableHavokFloatingOrigin} on the returned world (before
+ * creating any bodies) to opt into multi-region floating-origin simulation.
  */
 export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3): PhysicsWorld {
     const hkWorld = hknp.HP_World_Create()[1];
@@ -124,6 +134,7 @@ export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3)
         _hkWorld: hkWorld,
         _bodies: [],
         _timestep: 1 / 60,
+        _gravity: [g.x, g.y, g.z],
     };
 
     // Register per-frame physics step
@@ -134,12 +145,38 @@ export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3)
     return world;
 }
 
+/**
+ * Opt a Havok world into multi-region floating-origin simulation (Large World Rendering).
+ *
+ * Loads the floating-origin runtime on demand (`physics/havok-floating-origin.ts`) so worlds that
+ * never call this — i.e. ordinary near-origin physics scenes — never pull that code into their
+ * bundle. Once enabled, bodies far apart in world space are simulated in separate regions (each
+ * within `floatingOriginWorldRadius` of its origin) so the float32 Havok solver keeps full
+ * precision. Node transforms remain true world coordinates; eye-relative rendering is handled
+ * independently by the floating-origin render path.
+ *
+ * Must be called **before** creating any bodies in the world. Pair it with an engine created with
+ * `useFloatingOrigin: true` so rendering and physics share the same far-from-origin handling.
+ * @param world - The physics world to enable floating origin on.
+ * @param floatingOriginWorldRadius - Region capture radius in metres (default 100000, matching Babylon.js).
+ */
+export async function enableHavokFloatingOrigin(world: PhysicsWorld, floatingOriginWorldRadius = 100000): Promise<void> {
+    const fo = await import("./havok-floating-origin.js");
+    world._fo = fo.createHavokFloatingOriginContext(world._hkWorld, world._gravity, floatingOriginWorldRadius);
+}
+
 // ─── Per-frame stepping ──────────────────────────────────────────────
 
 function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
     const dt = Math.min(deltaMs / 1000, 0.1);
     if (dt <= 0) {
+        return;
+    }
+
+    // Floating-origin worlds run a multi-region step (loaded on demand).
+    if (world._fo) {
+        world._fo.step(world);
         return;
     }
 
@@ -184,20 +221,31 @@ function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
 // ─── Gravity ─────────────────────────────────────────────────────────
 
 /**
- * Sets the world's gravity vector.
+ * Sets gravity for the world, or for a single region when `worldPosition` is given.
+ * Passing a position is useful for planetary scenarios where gravity direction varies by location.
  * @param world - The physics world.
  * @param gravity - Gravity acceleration in m/s².
+ * @param worldPosition - Optional world position selecting the region to update; omit to update all regions.
  */
-export function setPhysicsGravity(world: PhysicsWorld, gravity: Vec3): void {
+export function setPhysicsGravity(world: PhysicsWorld, gravity: Vec3, worldPosition?: Vec3): void {
+    if (world._fo) {
+        world._fo.setGravity(world, [gravity.x, gravity.y, gravity.z], worldPosition);
+        return;
+    }
     world._hknp.HP_World_SetGravity(world._hkWorld, [gravity.x, gravity.y, gravity.z]);
 }
 
 /**
- * Returns the world's current gravity vector.
+ * Returns the world's current gravity vector, or a specific region's when `worldPosition` is given.
  * @param world - The physics world.
+ * @param worldPosition - Optional world position selecting the region to read; omit for the world-wide gravity.
  * @returns Gravity acceleration in m/s².
  */
-export function getPhysicsGravity(world: PhysicsWorld): Vec3 {
+export function getPhysicsGravity(world: PhysicsWorld, worldPosition?: Vec3): Vec3 {
+    if (worldPosition && world._fo) {
+        const g = world._fo.getRegionGravity(world, worldPosition);
+        return { x: g[0]!, y: g[1]!, z: g[2]! };
+    }
     const g = world._hknp.HP_World_GetGravity(world._hkWorld)[1];
     return { x: g[0], y: g[1], z: g[2] };
 }
@@ -231,6 +279,10 @@ export function getPhysicsTimestep(world: PhysicsWorld): number {
  * @param maxAngular - Maximum angular speed.
  */
 export function setPhysicsVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: number): void {
+    if (world._fo) {
+        world._fo.setVelocityLimits(world, maxLinear, maxAngular);
+        return;
+    }
     world._hknp.HP_World_SetSpeedLimit(world._hkWorld, maxLinear, maxAngular);
 }
 
@@ -264,21 +316,27 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
         motionType === PhysicsMotionType.STATIC ? hknp.MotionType.STATIC : motionType === PhysicsMotionType.ANIMATED ? hknp.MotionType.KINEMATIC : hknp.MotionType.DYNAMIC;
     hknp.HP_Body_SetMotionType(hkBody, hkMotion);
 
-    // Add to world first, then set transform (Havok resets transform on add)
-    hknp.HP_World_AddBody(hkWorld, hkBody, startsAsleep);
-
-    const p = node.position;
-    const q = node.rotationQuaternion;
-    hknp.HP_Body_SetQTransform(hkBody, [
-        [p.x, p.y, p.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
-
     const body: PhysicsBody = {
         _hkBody: hkBody,
         node,
         motionType,
     };
+
+    if (world._fo) {
+        // Floating origin: place the body in its region, storing it in region-local coordinates.
+        world._fo.placeBody(world, body, startsAsleep);
+    } else {
+        // Add to world first, then set transform (Havok resets transform on add)
+        hknp.HP_World_AddBody(hkWorld, hkBody, startsAsleep);
+
+        const p = node.position;
+        const q = node.rotationQuaternion;
+        hknp.HP_Body_SetQTransform(hkBody, [
+            [p.x, p.y, p.z],
+            [q.x, q.y, q.z, q.w],
+        ]);
+    }
+
     world._bodies.push(body);
     return body;
 }
@@ -473,6 +531,11 @@ function _boundingRadius(mesh: Mesh): number {
  * @param world - The physics world to dispose.
  */
 export function disposePhysics(world: PhysicsWorld): void {
+    if (world._fo) {
+        world._fo.dispose(world);
+        return;
+    }
+
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
 
     // Remove and release all bodies

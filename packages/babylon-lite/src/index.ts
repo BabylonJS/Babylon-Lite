@@ -498,6 +498,7 @@ export {
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
     createHavokWorld,
+    enableHavokFloatingOrigin,
     createPhysicsBody,
     createPhysicsShape,
     createPhysicsAggregate,

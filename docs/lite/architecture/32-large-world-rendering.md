@@ -164,6 +164,16 @@ Each has a paired parity scene (Lite `useFloatingOrigin` vs BJS `useLargeWorldRe
 - Shadow light-space matrix (PCF directional/spot + ESM directional generators build the
   light view/projection eye-relative, so the caster pass and receiver shader stay consistent
   with the eye-relative mesh world matrices) — scene 207.
+- NodeMaterial mesh-world transform (NME resolves `worldViewProjection` to
+  `sceneU.viewProjection * meshU.world`, where `meshU.world` is FO-packed eye-relative) — scene 208.
+- Havok physics: **multi-region floating origin** (opt-in). Calling `enableHavokFloatingOrigin(world)`
+  (loaded on demand) makes `physics/havok.ts` simulate bodies in regions centred near them (local
+  coordinates near zero) so the float32 Havok solver keeps precision at far-from-origin scale; node
+  transforms remain true
+  world coordinates and the eye-relative render path is unchanged. Bodies migrate between regions
+  (with velocity preserved and a 20% hysteresis margin) as they cross region boundaries, mirroring
+  Babylon.js's `scene.floatingOriginMode` + Havok plugin `floatingOriginWorldRadius`. Per-region
+  gravity is supported via the optional `worldPosition` argument to `setPhysicsGravity` — scene 209.
 
 ## Out of scope
 
@@ -185,10 +195,10 @@ is no correct far-from-origin reference to match and Lite intentionally does not
   should keep the environment near the origin.)
 
 - Particles: N/A — Lite has no particle system.
-- Rect-area lights, cascaded shadow maps, edges/bounding-box renderers, utility-layer/gizmos,
-  Havok multi-region floating origin: N/A — Lite does not implement these yet. Babylon.js
-  floating-origin-wires them; when any is ported to Lite, the floating-origin offset MUST be
-  ported with it (see `GUIDANCE.md` → "Large World Rendering — Feature Parity").
+- Rect-area lights, cascaded shadow maps, edges/bounding-box renderers, utility-layer/gizmos:
+  N/A — Lite does not implement these yet. Babylon.js floating-origin-wires them; when any is
+  ported to Lite, the floating-origin offset MUST be ported with it (see `GUIDANCE.md` →
+  "Large World Rendering — Feature Parity").
 
 These extensions slot into the same substrate (per-frame version tracking, packer offset path,
 scene state) already used by the wired features.

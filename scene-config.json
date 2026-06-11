@@ -1504,6 +1504,17 @@
         "skipPerf": true
     },
     {
+        "id": 209,
+        "slug": "scene209-floating-origin-physics",
+        "name": "Scene 209 — LWR Physics",
+        "maxMad": 0.5,
+        "maxRawKB": 53,
+        "maxGzipKB": 22,
+        "description": "Havok Physics V2 sphere drop at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises multi-region floating origin: the physics world places bodies in a region centred near them and simulates in local coordinates (near zero), so the float32 Havok solver keeps precision and the sphere settles exactly on the ground at large world coordinates. Pairs with BJS useLargeWorldRendering, which enables Havok multi-region floating origin via scene.floatingOriginMode.",
+        "tags": ["hpm", "lwr", "floating-origin", "physics", "procedural"],
+        "skipPerf": true
+    },
+    {
         "id": 210,
         "slug": "scene210-xmp-metadata-cube",
         "name": "Scene 210 — XMP Metadata Cube",
