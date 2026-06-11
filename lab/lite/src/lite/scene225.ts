@@ -1,10 +1,21 @@
-// Scene 225 — Multi-Canvas (same scene structure on two canvases).
+// Scene 225 — Multi-Canvas (same scene contents shared across two surfaces).
 //
 // Demonstrates `createSurface` by attaching a second `SurfaceContext` to the
-// engine and rendering the same scene contents (a colored cube + ground +
-// hemispheric light) to both canvases with different camera angles. GPU
-// resources (device, pipelines, materials) are shared across the surfaces —
-// only the swapchain contexts and per-canvas cameras differ.
+// engine and rendering a *single* set of meshes + materials + lights through
+// both canvases with different camera angles.
+//
+// What this actually proves about the architecture:
+//   - Mesh GPU buffers (`mesh._gpu`) are device-scoped — adding the same
+//     `Mesh` to two `SceneContext`s creates two renderables that share the
+//     vertex/index buffers.
+//   - Materials own pipelines + bind-group layouts, which are also
+//     device-scoped — the same `StandardMaterial` instance drives both
+//     scenes' renderables.
+//   - `LightBase` data is plain JS (no GPU resources) and can sit in both
+//     scenes' light lists.
+//   - Each scene/surface still owns its own per-scene UBO, framegraph, and
+//     camera, so the two canvases present the same content from independent
+//     viewpoints.
 
 import {
     addToScene,
@@ -20,24 +31,7 @@ import {
     attachControl,
     registerScene,
 } from "babylon-lite";
-import type { ArcRotateCamera, SceneContext, SurfaceContext } from "babylon-lite";
-
-function buildContent(scene: SceneContext, surface: SurfaceContext): void {
-    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
-
-    const ground = createGround(surface.engine, { width: 6, height: 6 });
-    const groundMat = createStandardMaterial();
-    groundMat.diffuseColor = [0.4, 0.45, 0.5];
-    ground.material = groundMat;
-    addToScene(scene, ground);
-
-    const box = createBox(surface.engine, 1.2);
-    box.position.set(0, 0.8, 0);
-    const boxMat = createStandardMaterial();
-    boxMat.diffuseColor = [0.85, 0.35, 0.25];
-    box.material = boxMat;
-    addToScene(scene, box);
-}
+import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
@@ -51,18 +45,41 @@ async function main(): Promise<void> {
     // engine; only the swapchain context is per-canvas.
     const surfaceB = createSurface(engine, canvasB);
 
-    // Two scenes — one per surface — with the same content but different cameras.
+    // ── Build shared scene contents ONCE — these are device-scoped (mesh GPU
+    //    buffers, material pipelines) or plain data (lights), so both scenes
+    //    can reference the same instances. ───────────────────────────────────
+    const groundMat = createStandardMaterial();
+    groundMat.diffuseColor = [0.4, 0.45, 0.5];
+
+    const ground = createGround(engine, { width: 6, height: 6 });
+    ground.material = groundMat;
+
+    const boxMat = createStandardMaterial();
+    boxMat.diffuseColor = [0.85, 0.35, 0.25];
+
+    const box = createBox(engine, 1.2);
+    box.position.set(0, 0.8, 0);
+    box.material = boxMat;
+
+    const light = createHemisphericLight([0, 1, 0], 1.0);
+
+    // ── Two scenes — one per surface — both populated from the shared
+    //    entities above, but each with its own camera. ────────────────────────
     const sceneA = createSceneContext(engine);
     sceneA.camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2.5, 6, { x: 0, y: 0.6, z: 0 });
     attachControl(sceneA.camera as ArcRotateCamera, renderCanvas, sceneA);
-    buildContent(sceneA, engine);
+    addToScene(sceneA, light);
+    addToScene(sceneA, ground);
+    addToScene(sceneA, box);
 
     const sceneB = createSceneContext(surfaceB);
-    // Orbit camera offset 3/4 around the box (different alpha + tilt) so the two
-    // canvases obviously show the same scene from independent viewpoints.
+    // Orbit camera offset 3/4 around the box (different alpha + tilt) so the
+    // two canvases obviously show the same content from independent viewpoints.
     sceneB.camera = createArcRotateCamera(-Math.PI / 4, Math.PI / 3.5, 6, { x: 0, y: 0.6, z: 0 });
     attachControl(sceneB.camera as ArcRotateCamera, canvasB, sceneB);
-    buildContent(sceneB, surfaceB);
+    addToScene(sceneB, light);
+    addToScene(sceneB, ground);
+    addToScene(sceneB, box);
 
     await registerScene(engine, sceneA);
     await registerScene(engine, sceneB);

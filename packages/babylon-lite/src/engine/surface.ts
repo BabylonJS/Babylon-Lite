@@ -3,7 +3,7 @@ import type { RenderTarget } from "./render-target.js";
 import { createRenderTarget } from "./render-target.js";
 
 /** @internal Type guard: true for a DOM canvas (has layout + attributes). */
-function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
+export function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
     return "clientWidth" in canvas;
 }
 

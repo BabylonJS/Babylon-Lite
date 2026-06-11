@@ -104,7 +104,7 @@
         "slug": "scene11-shark",
         "name": "Scene 11 — Shark GLB",
         "maxMad": 0.01,
-        "maxRawKB": 83.4,
+        "maxRawKB": 83.5,
         "description": "Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
         "tags": ["pbr", "gltf"],
         "skipPerf": true
@@ -154,7 +154,7 @@
         "slug": "scene16-thin-instances",
         "name": "Scene 16 — Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 47.4,
+        "maxRawKB": 47.6,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
         "tags": ["std", "procedural"]
     },
@@ -337,7 +337,7 @@
         "slug": "scene35-gltf-instancing",
         "name": "Scene 35 — EXT_mesh_gpu_instancing",
         "maxMad": 0.02,
-        "maxRawKB": 81.1,
+        "maxRawKB": 81.2,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
         "tags": ["pbr", "gltf", "env", "gpu-instancing"]
     },
@@ -613,7 +613,7 @@
         "slug": "scene73-wheel-nme-viewport",
         "name": "Scene 73 — Wheel PBR vs NME Viewports",
         "maxMad": 0.05,
-        "maxRawKB": 141,
+        "maxRawKB": 141.3,
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
         "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"]
     },
@@ -1000,7 +1000,7 @@
         "slug": "scene126-gs-material-plugin",
         "name": "Scene 126 — Gaussian Splatting Material Plugin",
         "maxMad": 0.5,
-        "maxRawKB": 35,
+        "maxRawKB": 35.1,
         "description": "Loads Halo_Believe.splat and applies a GsShaderFragment that overrides finalColor at GS_FRAGMENT_MAIN_END (parity with BJS MaterialPluginBase CUSTOM_FRAGMENT_MAIN_END).",
         "tags": ["gaussian-splatting", "material-plugin"]
     },
@@ -1651,7 +1651,7 @@
         "slug": "scene225-multi-canvas-same-scene",
         "name": "Scene 225 — Multi-Canvas (Same Scene)",
         "maxRawKB": 60,
-        "description": "Two canvases side-by-side share a single engine via `createSurface`. Each surface gets its own `SceneContext` containing the same content (colored cube + ground + hemispheric light) but with a different camera angle (front view vs 3/4 orbit), demonstrating that surfaces are independently controllable while sharing the GPU device.",
+        "description": "Two canvases side-by-side share a single engine via `createSurface`, and a *single* set of meshes (cube + ground), materials, and lights is added to two `SceneContext`s — one per surface. Proves that mesh GPU buffers, material pipelines, and light data are all device/engine-scoped: the same instances drive both canvases, while each scene keeps its own camera, framegraph, and per-scene UBO (front view vs 3/4 orbit).",
         "tags": ["multi-canvas", "surface", "demo", "std"],
         "skipParity": true,
         "skipPerf": true

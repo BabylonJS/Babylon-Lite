@@ -2,7 +2,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
-import { _buildSurface, _refreshScRT, resizeSurface, setSurfaceSize } from "./surface.js";
+import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -23,11 +23,6 @@ export function bumpVisibilityEpoch(): void {
  * (`clientWidth`/`clientHeight`) and attributes (`setAttribute`).
  */
 export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
-
-/** @internal Type guard: true for a DOM canvas (has layout + attributes). */
-function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
-    return "clientWidth" in canvas;
-}
 
 /**
  * Handle to the WebGPU engine — pure state, no attached methods.
@@ -312,34 +307,35 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     }
 
     // The engine extends `SurfaceContext`, so we need to assemble both the engine-only
-    // fields AND the per-canvas surface fields onto a single object. We build the
-    // engine-only fields first (with `engine` and `_surfaces` self-referential
-    // placeholders pointing to the same object we're populating), then `Object.assign`
-    // the surface fields produced by `_buildSurface`. The `surfaces` field is the same
-    // array as `_surfaces`, exposed publicly as a readonly tuple.
-    const engine = {} as EngineContext;
+    // fields AND the per-canvas surface fields onto a single object. `_buildSurface`
+    // reads `engine._device` at call time, so we seed the object with `_device` up front;
+    // `Object.assign` then evaluates both source expressions (the engine-only literal and
+    // the `_buildSurface` result) before copying, letting us merge both in one call. The
+    // `surfaces` field is the same array as `_surfaces`, exposed publicly as a readonly tuple.
+    const engine = { _device: device } as EngineContext;
     const surfaces: [EngineContext, ...SurfaceContext[]] = [engine];
-    Object.assign(engine, {
-        engine, // self-reference: the engine IS its primary surface
-        surfaces, // public readonly view of `_surfaces` (same underlying array)
-        _surfaces: surfaces,
-        _device: device,
-        drawCallCount: 0,
-        useHighPrecisionMatrix: useHpm,
-        useFloatingOrigin: useFO,
-        _animFrameId: 0,
-        _renderFn: null,
-        _currentEncoder: undefined,
-        _currentDelta: 0,
-        _cbs: [],
-        _wrapRenderableForFO,
-        _makePackMeshWorld,
-        _lightFoVersion,
-        _applyLightFoOffset,
-    } satisfies Partial<EngineContext>);
-    // Build the per-canvas surface fields against the real engine, then merge them in
-    // so `engine` ends up with both the engine-only fields and the SurfaceContext fields.
-    Object.assign(engine, _buildSurface(engine, canvas, options));
+    Object.assign(
+        engine,
+        {
+            engine, // self-reference: the engine IS its primary surface
+            surfaces, // public readonly view of `_surfaces` (same underlying array)
+            _surfaces: surfaces,
+            _device: device,
+            drawCallCount: 0,
+            useHighPrecisionMatrix: useHpm,
+            useFloatingOrigin: useFO,
+            _animFrameId: 0,
+            _renderFn: null,
+            _currentEncoder: undefined,
+            _currentDelta: 0,
+            _cbs: [],
+            _wrapRenderableForFO,
+            _makePackMeshWorld,
+            _lightFoVersion,
+            _applyLightFoOffset,
+        } satisfies Partial<EngineContext>,
+        _buildSurface(engine, canvas, options)
+    );
 
     // Size the canvas backing store first (so the swap texture is acquired at the final
     // size), then populate the swapchain target from the first current texture so its
