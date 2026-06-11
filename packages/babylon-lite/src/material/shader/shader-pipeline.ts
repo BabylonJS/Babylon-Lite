@@ -110,8 +110,14 @@ export function getOrCreateShaderPipeline(
             ? {
                   depthStencil: {
                       format: sig._depthStencilFormat,
-                      depthCompare: material.depthCompare,
+                      // The target's declared depth convention wins over the material default: a depth-only
+                      // caster authored for the forward-Z shadow map ("less-equal") must still depth-test
+                      // correctly when drawn into a reverse-Z camera depth prepass that declares
+                      // "greater-equal" — otherwise every fragment fails against the 0-cleared buffer.
+                      depthCompare: sig._depthCompare ?? material.depthCompare,
                       depthWriteEnabled: material.needAlphaBlending ? false : material.depthWrite,
+                      ...(material.depthBias ? { depthBias: material.depthBias } : {}),
+                      ...(material.depthBiasSlopeScale ? { depthBiasSlopeScale: material.depthBiasSlopeScale } : {}),
                   },
               }
             : {}),

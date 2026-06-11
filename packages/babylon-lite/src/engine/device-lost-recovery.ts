@@ -190,9 +190,13 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         engine._device = await adapter.requestDevice({ requiredFeatures: state.requiredFeatures });
         // Reconfigure every surface's canvas context against the new device and re-acquire
         // its swapchain texture (the previous device's textures are invalid). The rebuilt
-        // frame graphs need fresh color attachments.
+        // frame graphs need fresh color attachments. Per-surface `_swapchainCopySrc` is
+        // honoured so surfaces that had been promoted to COPY_SRC for screenshot readback
+        // keep that capability across recovery; surfaces that never captured stay
+        // RENDER_ATTACHMENT-only.
         for (const surface of engine.surfaces) {
-            surface._context.configure({ device: engine._device, format: surface.format, alphaMode: surface._alphaMode });
+            const usage = surface._swapchainCopySrc ? TU.RENDER_ATTACHMENT | TU.COPY_SRC : TU.RENDER_ATTACHMENT;
+            surface._context.configure({ device: engine._device, format: surface.format, alphaMode: surface._alphaMode, usage });
             _refreshScRT(surface);
         }
         clearSceneBGLCache();

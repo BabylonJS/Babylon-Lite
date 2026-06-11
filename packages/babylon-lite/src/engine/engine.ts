@@ -457,6 +457,14 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     }
 
     const finalEncoder = engine._currentEncoder;
+    // Per-surface screenshot readback hook — undefined (a no-op optional call) until
+    // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
+    // never capture keep this to a single short-circuit and ship none of the readback code.
+    // Each service records its surface's swapchain copy into this frame's encoder.
+    for (let i = 0; i < surfaces.length; i++) {
+        const surface = surfaces[i]!;
+        surface._captureService?.(surface, finalEncoder);
+    }
     engine._cbs[0] = finalEncoder.finish();
     engine._device.queue.submit(engine._cbs);
     engine.drawCallCount = drawCalls;

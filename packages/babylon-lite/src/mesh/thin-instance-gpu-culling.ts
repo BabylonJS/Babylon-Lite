@@ -18,22 +18,14 @@ import { syncThinInstanceGpuData } from "./thin-instance-gpu.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
 
 const WORKGROUP_SIZE = 64;
-const PARAM_BYTES = 224;
-const LOD_FLOAT_OFFSET = 44;
-const COUNT_U32_OFFSET = 52;
+const PARAM_BYTES = 192;
+const COUNT_U32_OFFSET = 44;
 const MESH_WORLD_FLOAT_OFFSET = 24;
 const LOCAL_SPHERE_FLOAT_OFFSET = 40;
 const INDIRECT_ARGS_BYTES = 20;
 
-// Distance-density thinning (setThinInstanceDistanceThin): instances are dropped IN THE CULL with a
-// probability that falls off with distance to a focus point — keep = 1/w², w ramping 1→maxWiden over
-// [near, far] — using a stable per-instance position hash, so the surviving set is deterministic for a
-// given focus. The consumer's vertex shader can recompute the SAME hash/keep (the hash below is
-// fract(sin(dot(p+offset,(127.1,311.7))))·43758.5453) to widen survivors + fade the ones near their
-// keep threshold, giving a smooth, bucket-free LOD with zero CPU work. lod=(cx,cz,near,invRange),
-// lod2=(maxWiden, keepMargin, 0, 0); maxWiden ≤ 1 disables (the default).
 const CULL_WGSL_NO_COLOR = /* wgsl */ `
-struct CullParams{planes:array<vec4<f32>,6>,meshWorld:mat4x4<f32>,localSphere:vec4<f32>,lod:vec4<f32>,lod2:vec4<f32>,count:u32};
+struct CullParams{planes:array<vec4<f32>,6>,meshWorld:mat4x4<f32>,localSphere:vec4<f32>,count:u32};
 @group(0)@binding(0)var<storage,read> srcMatrices:array<mat4x4<f32>>;
 @group(0)@binding(1)var<storage,read_write> dstMatrices:array<mat4x4<f32>>;
 @group(0)@binding(2)var<storage,read_write> args:array<atomic<u32>>;
@@ -50,22 +42,12 @@ if(dot(p.xyz,center)+p.w < -radius){return false;}
 }
 return true;
 }
-fn lodKept(world:mat4x4<f32>)->bool{
-if(params.lod2.x<=1.0){return true;}
-let pxz=world[3].xz;
-let t=clamp((distance(pxz,params.lod.xy)-params.lod.z)*params.lod.w,0.0,1.0);
-let w=1.0+(params.lod2.x-1.0)*t;
-let keep=1.0/(w*w);
-let h=fract(sin(dot(pxz+vec2<f32>(31.7,11.3),vec2<f32>(127.1,311.7)))*43758.5453);
-return h<=keep*params.lod2.y;
-}
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid:vec3<u32>){
 let i=gid.x;
 if(i>=params.count){return;}
 let world=params.meshWorld*srcMatrices[i];
 if(!visible(world)){return;}
-if(!lodKept(world)){return;}
 let outIndex=atomicAdd(&args[1],1u);
 dstMatrices[outIndex]=srcMatrices[i];
 }`;
@@ -79,7 +61,6 @@ let i=gid.x;
 if(i>=params.count){return;}
 let world=params.meshWorld*srcMatrices[i];
 if(!visible(world)){return;}
-if(!lodKept(world)){return;}
 let outIndex=atomicAdd(&args[1],1u);
 dstMatrices[outIndex]=srcMatrices[i];
 dstColors[outIndex]=srcColors[i];
@@ -305,13 +286,6 @@ function writeCullParams(engine: EngineContext, state: ThinInstanceGpuCullState,
     writeFrustumPlanes(params, viewProjection);
     params.set(mesh.worldMatrix, MESH_WORLD_FLOAT_OFFSET);
     params.set(state._localSphere, LOCAL_SPHERE_FLOAT_OFFSET);
-    // Distance-density thinning params (setThinInstanceDistanceThin); zeros = disabled (maxWiden 0 ≤ 1).
-    const lod = mesh.thinInstances?._lodCull;
-    if (lod) {
-        params.set(lod, LOD_FLOAT_OFFSET);
-    } else {
-        params.fill(0, LOD_FLOAT_OFFSET, LOD_FLOAT_OFFSET + 8);
-    }
     state._paramsU32[COUNT_U32_OFFSET] = instanceCount;
 
     const args = state._argsData;

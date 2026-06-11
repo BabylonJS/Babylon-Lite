@@ -55,6 +55,29 @@ export interface SurfaceContext {
     /** @internal Registered rendering contexts in render order for this surface
      *  (first clears; subsequent overlay). */
     _renderingContexts: RenderingContext[];
+
+    /** @internal Pending `captureScreenshot` requests for this surface. Serviced by
+     *  `renderFrame` on a subsequent frame (one shared copy of the surface's swapchain
+     *  texture resolves all queued requests), then cleared. Undefined when nothing is
+     *  waiting so non-capturing frames pay nothing. */
+    _captureQueue?: { resolve: (s: import("./screenshot.js").Screenshot) => void; reject: (e: unknown) => void }[];
+
+    /** @internal Set once this surface's swapchain has been reconfigured with COPY_SRC for
+     *  screenshot readback. Off by default so non-capturing surfaces keep a
+     *  compression-friendly RENDER_ATTACHMENT-only swapchain; flipped on the first capture
+     *  by the capture service and honoured by device-loss recovery. Per-surface so aux
+     *  surfaces that never capture stay COPY_SRC-free even when another surface on the
+     *  same engine is capturable. */
+    _swapchainCopySrc?: boolean;
+
+    /** @internal Screenshot readback hook, dynamically installed by `captureScreenshot` on
+     *  first use. `renderFrame` calls it once per surface per frame via optional chaining;
+     *  it records the surface's swapchain copy into the frame encoder (reconfiguring the
+     *  surface's context with COPY_SRC the first time, then copying on the following
+     *  frame). Kept off `SurfaceContext` until a capture is requested so the copy/unpack
+     *  code (`screenshot-readback.js`) stays out of every bundle that never captures a
+     *  frame. */
+    _captureService?: import("./screenshot-readback.js").CaptureService;
 }
 
 /** Options for {@link createSurface}, and for the per-surface portion of `createEngine`. */
@@ -109,6 +132,12 @@ export function _buildSurface(engine: EngineContext, canvas: RenderCanvas, optio
     }
     const format = options?.format ?? navigator.gpu.getPreferredCanvasFormat();
     const alphaMode: GPUCanvasAlphaMode = options?.alphaMode ?? "opaque";
+    // Plain RENDER_ATTACHMENT swapchain by default — deliberately no COPY_SRC. Marking the
+    // swapchain copyable can force some drivers to drop lossless framebuffer compression, so
+    // surfaces that never take a screenshot must not pay for it. `captureScreenshot` lazily
+    // reconfigures the primary surface's swapchain with COPY_SRC on first use (see
+    // `engine/screenshot-readback.ts`), keeping the public API unchanged while costing
+    // non-capturing surfaces nothing.
     context.configure({ device: engine._device, format, alphaMode });
     const msaaSamples: 1 | 4 = options?.msaaSamples === 1 ? 1 : 4;
     // Surface-owned swapchain target — a color-only, single-sample RT that wraps the

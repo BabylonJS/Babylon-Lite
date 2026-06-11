@@ -479,8 +479,16 @@ ${occlusionDefault}
 ${roughnessMetallic}
 ${emissiveDefault}
 /*AT*/
-${_noColorOutput ? "return;" : _esmShadowOutput ? _esmShadowDepthCode : ""}
-${normalBlock}
+${
+    // When the fragment terminates early (no color output, or ESM shadow
+    // depth output), emit only the terminating return. Appending the
+    // color-path body after the return would make it unreachable and
+    // trigger a "code is unreachable" shader compilation warning.
+    _noColorOutput
+        ? "return;"
+        : _esmShadowOutput
+          ? _esmShadowDepthCode
+          : `${normalBlock}
 ${doubleSidedFlip}
 ${anisotropyTBBlock}
 /*AC*/
@@ -504,7 +512,8 @@ if(scene.vImageInfos.y<1.0){color=mix(vec3<f32>(0.5),color,scene.vImageInfos.y);
 else{color=mix(color,highContrast,scene.vImageInfos.y-1.0);}
 color=max(color,vec3<f32>(0.0));
 /*BC*/
-${alphaBlock}
+${alphaBlock}`
+}
 }`;
 
     return {

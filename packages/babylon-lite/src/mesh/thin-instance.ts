@@ -55,9 +55,6 @@ export interface ThinInstanceData {
 
     /** @internal Opt-in flag for GPU frustum culling + indirect drawing. */
     _gpuCullingEnabled: boolean;
-    /** @internal Distance-density thinning params for the GPU cull (setThinInstanceDistanceThin):
-     *  [centerX, centerZ, near, 1/(far−near), maxWiden, keepMargin, 0, 0]. Null/absent = disabled. */
-    _lodCull?: Float32Array | null;
 }
 
 /** Set all instances from a pre-built matrix array. */
@@ -208,33 +205,6 @@ export function setThinInstanceColor(mesh: Mesh, index: number, r: number, g: nu
     ti._colorVersion++;
     ti._colorDirtyMin = Math.min(ti._colorDirtyMin, index);
     ti._colorDirtyMax = Math.max(ti._colorDirtyMax, index + 1);
-}
-
-/** Configure DISTANCE-DENSITY THINNING on a GPU-culled thin-instanced mesh: the cull compute drops
- *  instances with a probability falling off with distance to the focus point (centerX, centerZ) —
- *  keep = 1/w², where the width factor w ramps 1 → `maxWiden` over [near, far] — using a stable
- *  per-instance position hash (fract(sin(dot(p.xz + (31.7, 11.3), (127.1, 311.7)))·43758.5453)).
- *  Survivors can be widened + threshold-faded in the consumer's vertex shader by recomputing the same
- *  hash/keep, yielding a smooth camera-relative LOD with no CPU streaming: the params are rewritten
- *  every cull dispatch, so call this each frame with the live focus. `keepMargin` (> 1, e.g. 1.2)
- *  keeps a band above the threshold for the vertex-side fade. Pass `maxWiden` ≤ 1 to disable.
- *  Requires enableThinInstanceGpuCulling. */
-export function setThinInstanceDistanceThin(mesh: Mesh, centerX: number, centerZ: number, near: number, far: number, maxWiden: number, keepMargin = 1.2): void {
-    const ti = mesh.thinInstances;
-    if (!ti) {
-        return;
-    }
-    let lod = ti._lodCull;
-    if (!lod) {
-        lod = new F32(8);
-        ti._lodCull = lod;
-    }
-    lod[0] = centerX;
-    lod[1] = centerZ;
-    lod[2] = near;
-    lod[3] = 1 / Math.max(1e-3, far - near);
-    lod[4] = maxWiden;
-    lod[5] = keepMargin;
 }
 
 /** Enable or disable GPU frustum culling for an existing thin-instanced mesh.

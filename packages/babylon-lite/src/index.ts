@@ -6,6 +6,8 @@ export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, setEn
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
+export { captureScreenshot } from "./engine/screenshot.js";
+export type { Screenshot } from "./engine/screenshot.js";
 export {
     createSceneContext,
     createDefaultCamera,
@@ -57,6 +59,10 @@ export { createRenderTargetTexture } from "./texture/rtt.js";
 // Pooled GPU samplers (same descriptor → same GPUSampler). Public so consumers building their own
 // sampled-texture wrappers around managed render targets don't have to reach into `engine._device`.
 export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
+// acquireTexture/releaseTexture let a consumer register the lifetime of its OWN GPU texture in Lite's
+// ref-count pool, so a texture it creates (e.g. a mipped render texture for a Hi-Z pyramid) survives a
+// ShaderMaterial's per-version release/acquire cycle instead of being destroyed at count 0.
+export { acquireTexture, releaseTexture } from "./resource/gpu-pool.js";
 export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
 export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
 
@@ -131,6 +137,8 @@ export {
 } from "./mesh/mesh-factories.js";
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
+export { createCylinderData } from "./mesh/create-cylinder.js";
+export type { CylinderData } from "./mesh/create-cylinder.js";
 export { createTorusKnotData } from "./mesh/create-torus-knot.js";
 export type { TorusKnotData, TorusKnotOptions } from "./mesh/create-torus-knot.js";
 export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromCsg } from "./mesh/csg.js";
@@ -150,6 +158,7 @@ export { createStandardMaterial } from "./material/standard/create-standard-mate
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { createShaderMaterial, setShaderUniform, setShaderTexture, setShaderFloat, setShaderVector3, setShaderMatrix } from "./material/shader/shader-material.js";
+export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
@@ -251,7 +260,6 @@ export {
     flushThinInstances,
     setThinInstanceColors,
     setThinInstanceColor,
-    setThinInstanceDistanceThin,
     enableThinInstanceGpuCulling,
 } from "./mesh/thin-instance.js";
 export type { ThinInstanceData } from "./mesh/thin-instance.js";
