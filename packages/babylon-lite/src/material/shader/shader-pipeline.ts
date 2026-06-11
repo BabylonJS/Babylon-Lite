@@ -116,6 +116,8 @@ export function getOrCreateShaderPipeline(
                       // "greater-equal" — otherwise every fragment fails against the 0-cleared buffer.
                       depthCompare: sig._depthCompare ?? material.depthCompare,
                       depthWriteEnabled: material.needAlphaBlending ? false : material.depthWrite,
+                      ...(material.depthBias ? { depthBias: material.depthBias } : {}),
+                      ...(material.depthBiasSlopeScale ? { depthBiasSlopeScale: material.depthBiasSlopeScale } : {}),
                   },
               }
             : {}),
