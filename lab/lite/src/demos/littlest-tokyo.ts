@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     onBeforeRender(scene, syncSkybox);
     addToScene(scene, skybox);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
 
     // The asset's "metalmat" material bakes an ambient-occlusion texture sampled
     // on a second UV set the metal meshes don't cleanly provide, which renders as

@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     const subjectCamera = createFreeCamera({ x: 0, y: 3, z: -5 }, { x: 0, y: 0.5, z: 0 });
     subjectCamera.nearPlane = 1;
     subjectCamera.farPlane = 10;
-    await registerScene(engine, scene);
+    await registerScene(scene);
 
     const utilityLayer = createUtilityLayer(engine, scene);
 
@@ -101,7 +101,7 @@ async function main(): Promise<void> {
     const dirGizmo = createLightGizmo(engine, utilityLayer);
     attachLightGizmoToLight(dirGizmo, dirLight);
 
-    await registerUtilityLayer(engine, utilityLayer);
+    await registerUtilityLayer(utilityLayer);
 
     (window as unknown as Record<string, unknown>).__scene223 = {
         mainCamera,

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
         m.material = sheenMat;
     }
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

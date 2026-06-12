@@ -110,7 +110,7 @@ export async function runHpmJitterScene(opts: HpmJitterOptions): Promise<void> {
     pillar.scaling.set(0.8, 4, 0.8);
     addToScene(scene, pillar);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);

@@ -49,7 +49,11 @@ async function main(): Promise<void> {
     // misses a handle can't orbit the view (keeping the camera identical between
     // the two engines); interactive use keeps full orbit.
     if (!new URLSearchParams(window.location.search).has("nocam")) {
-        attachControl(camera, canvas, scene, { shouldHandlePointerDown: () => !isGizmoInteracting(canvas), isExternalDragActive: () => isGizmoDragging(canvas), isExternalPickPending: () => isGizmoPickPending(canvas) });
+        attachControl(camera, canvas, scene, {
+            shouldHandlePointerDown: () => !isGizmoInteracting(canvas),
+            isExternalDragActive: () => isGizmoDragging(canvas),
+            isExternalPickPending: () => isGizmoPickPending(canvas),
+        });
     }
 
     const light = createHemisphericLight([0, 1, 0]);
@@ -90,7 +94,7 @@ async function main(): Promise<void> {
         addToScene(scene, cube);
     }
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
 
     const utilityLayer = createUtilityLayer(engine, scene);
     const bbox = createBoundingBoxGizmo(engine, utilityLayer, { color: [1, 1, 0.4] });
@@ -111,7 +115,16 @@ async function main(): Promise<void> {
             root.scaling.set(scl.x, scl.y, scl.z);
         },
         aabb: () => {
-            const b = (bbox as unknown as { _aabb: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number }; centre: { x: number; y: number; z: number }; size: { x: number; y: number; z: number } } })._aabb;
+            const b = (
+                bbox as unknown as {
+                    _aabb: {
+                        min: { x: number; y: number; z: number };
+                        max: { x: number; y: number; z: number };
+                        centre: { x: number; y: number; z: number };
+                        size: { x: number; y: number; z: number };
+                    };
+                }
+            )._aabb;
             return { min: { ...b.min }, max: { ...b.max }, centre: { ...b.centre }, size: { ...b.size } };
         },
         bbox: () => {
@@ -144,7 +157,7 @@ async function main(): Promise<void> {
         },
     };
 
-    await registerUtilityLayer(engine, utilityLayer);
+    await registerUtilityLayer(utilityLayer);
 
     let frame = 0;
     onBeforeRender(scene, () => {

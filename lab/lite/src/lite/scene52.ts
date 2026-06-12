@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     sphere.material = createStandardMaterial();
     addToScene(scene, sphere);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
 
     // HUD overlay: a separate `SpriteRenderer` rendering context, registered
     // after the scene so it draws on top in engine render-list order.

@@ -122,7 +122,7 @@ async function main(): Promise<void> {
     addTask(scene, sceneTask);
     addTask(scene, dofTask);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     dofTask.updateUniforms();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

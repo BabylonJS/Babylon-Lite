@@ -23,7 +23,7 @@ async function main(): Promise<void> {
 
     addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

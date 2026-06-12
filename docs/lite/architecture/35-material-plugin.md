@@ -75,7 +75,7 @@ box.material = mat;
 addToScene(scene, box);
 
 enableMaterialPlugins(scene);      // ← the ONLY thing that loads plugin code
-await registerScene(engine, scene);
+await registerScene(scene);
 ```
 
 `enableMaterialPlugins` (`material/plugin/enable-material-plugins.ts`) statically

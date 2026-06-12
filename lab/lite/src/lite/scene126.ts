@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 
     const splat = await loadSplat(scene, SPLAT_URL, [gsPlugin]);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     await splat.firstSortReady;

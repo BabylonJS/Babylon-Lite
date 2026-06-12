@@ -46,7 +46,7 @@
 
 - **All public interfaces are pure state — no attached methods.**
 - `EngineContext`, `SceneContext`, `Camera`, `ArcRotateCamera`, `FreeCamera`, `Mesh`, `LightBase`, etc. are plain data objects.
-- Behaviour is provided by standalone functions that accept the interface as their first argument: `registerScene(engine, scene)`, `startEngine(engine)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
+- Behaviour is provided by standalone functions that accept the interface as their first argument: `registerScene(scene)`, `startEngine(engine)`, `addToScene(scene, entity)`, `getViewMatrix(camera)`, etc.
 - This maximises tree-shakability: unused functions are fully eliminated. Methods on interfaces cannot be tree-shaken.
 - **Do NOT split a type into a public `Foo` + a `FooInternal` companion** just to hide implementation details. Put the internal members directly on `Foo` and tag each with `/** @internal */`. The build's d.ts trimming pass (`vite.config.ts` → `trim-internal-dts`) re-runs api-extractor with `publicTrimmedFilePath` to strip every `@internal` declaration — and any top-level imports kept alive only by them — from `dist/index.d.ts`. Public consumers see a clean type; internal code reads the field directly with full TypeScript typing. File-local `*Internal` interfaces are still fine for cases where the internal shape is genuinely a separate concrete type (e.g. an internal subtype not tied 1:1 to the public type), but the "two types for one thing" pattern is forbidden.
 - **When a property needs a different access modifier in the public API than internally** (e.g. `readonly` externally but mutable internally), expose **two fields on the same object** that alias the same value: a public `foo` with the public-facing modifier and an `@internal` `_foo` with the internal one. Both point to the same underlying storage (typically the same array/object reference). Example: `SpriteRenderer.layers: readonly Sprite2DLayer[]` paired with `_layers: Sprite2DLayer[]`, where the factory sets `layers = _layers = opts.layers.slice()`. Internal mutation goes through `sr._layers.push(...)`; public consumers can only read `sr.layers`. The d.ts trim pass strips `_layers` entirely. Avoid this pattern unless you actually need divergent modifiers — most internal members just need `@internal`.
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     camera.alpha += Math.PI;
 
     // Materials own their renderable builders — no explicit pipeline building
-    await registerScene(engine, scene); // builds deferred work, partitions renderables
+    await registerScene(scene); // builds deferred work, partitions renderables
     await startEngine(engine); // resolves after first frame rendered; renders all registered scenes
 }
 ```

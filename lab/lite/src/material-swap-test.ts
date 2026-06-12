@@ -22,7 +22,7 @@ async function run() {
     addToScene(scene, sphere);
 
     createDefaultCamera(scene);
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     // Wait a few frames for red to be visible

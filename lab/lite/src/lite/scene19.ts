@@ -49,7 +49,7 @@ async function main(): Promise<void> {
     });
 
     addToScene(scene, sphere);
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);

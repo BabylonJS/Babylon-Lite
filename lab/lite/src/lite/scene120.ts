@@ -22,7 +22,7 @@ async function main(): Promise<void> {
 
     const splat = await loadSplat(scene, SPLAT_URL);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     // Wait for the worker's first sort result to land — only then is the

@@ -445,7 +445,7 @@ const task = createRenderTask({ name: "r1", rt, cam: rttCamera, clrColor: { r: 0
 addTaskAtStart(scene, task);
 task.addMesh(sourceMesh, { material: overrideMaterial });
 
-await registerScene(engine, scene);
+await registerScene(scene);
 await getFrameGraph(scene).build();
 await startEngine(engine);
 ```

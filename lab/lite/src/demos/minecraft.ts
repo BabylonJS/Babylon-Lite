@@ -218,7 +218,7 @@ async function main(): Promise<void> {
         hud.setDebug(player.debugText(fps, renderer.activeCount, lighting.clockText()) + `  mobs ${mobs.count}`);
     });
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

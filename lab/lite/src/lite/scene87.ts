@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     (sphere as { material?: unknown }).material = material;
     addToScene(scene, sphere);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

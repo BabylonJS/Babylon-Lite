@@ -429,13 +429,11 @@ export async function buildScene(scene: SceneContext): Promise<void> {
 
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
- * and adds the scene to its bound surface's render list in overlay order. The `engine`
- * parameter is accepted for back-compat and consistency; the scene is always attached
- * to `scene.surface` (which equals the engine itself in the single-canvas case).
+ * and adds the scene to its bound surface's render list in overlay order. The scene is
+ * always attached to `scene.surface` (which equals the engine itself in the
+ * single-canvas case).
  */
-export async function registerScene(engine: EngineContext, scene: SceneContext): Promise<void> {
-    // TODO: Fix
-    void engine;
+export async function registerScene(scene: SceneContext): Promise<void> {
     const ctx = scene;
     const surface = ctx.surface;
     if (isRenderingContextRegistered(surface, ctx)) {
@@ -481,10 +479,7 @@ async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Pro
 }
 
 /** Remove a previously-registered scene. Idempotent. Does not dispose scene resources.
- *  The `engine` parameter is accepted for back-compat; the scene is always removed from
- *  `scene.surface`. */
-export function unregisterScene(engine: EngineContext, scene: SceneContext): void {
-    // TODO: Fix
-    void engine;
+ *  The scene is always removed from `scene.surface`. */
+export function unregisterScene(scene: SceneContext): void {
     unregisterRenderingContext(scene.surface, scene as SceneContext);
 }

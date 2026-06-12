@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     addTask(scene, blurY);
     addTask(scene, chromatic);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     blurX.updateUniforms();
     blurY.updateUniforms();
     chromatic.updateUniforms();

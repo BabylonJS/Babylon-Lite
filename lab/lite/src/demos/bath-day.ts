@@ -151,7 +151,7 @@ async function main(): Promise<void> {
         }
     });
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     progress.done();
     await startEngine(engine);
 

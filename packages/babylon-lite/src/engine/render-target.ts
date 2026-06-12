@@ -112,7 +112,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc, engine);
+    const { width, height } = resolveSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -167,7 +167,7 @@ export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
     rt._height = 0;
 }
 
-function resolveSize(desc: RenderTargetDescriptor, _engine: EngineContext): { width: number; height: number } {
+function resolveSize(desc: RenderTargetDescriptor): { width: number; height: number } {
     const size = desc.size;
     // SurfaceContext has a `canvas` field; explicit-pixels uses `width`/`height`.
     if ("canvas" in size) {

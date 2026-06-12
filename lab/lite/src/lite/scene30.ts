@@ -30,7 +30,7 @@ async function main(): Promise<void> {
         }),
     ]);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.camAlpha = String(cam.alpha);

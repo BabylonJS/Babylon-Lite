@@ -249,7 +249,7 @@ async function main(): Promise<void> {
     addToScene(scene, skeletonGpuMarker);
     addToScene(scene, skeletonDetailedMarker);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     await waitFrames(4);
 

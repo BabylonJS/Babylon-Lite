@@ -32,7 +32,7 @@ async function createAndRender() {
     createDefaultCamera(scene);
 
     // Render one frame
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     // Stop and wait a tick for GPU work to complete
@@ -69,7 +69,7 @@ async function run() {
         sphere2.material = createStandardMaterial();
         addToScene(scene2, sphere2);
         createDefaultCamera(scene2);
-        await registerScene(engine2, scene2);
+        await registerScene(scene2);
         await startEngine(engine2);
         stopEngine(engine2);
         await new Promise((r) => setTimeout(r, 100));

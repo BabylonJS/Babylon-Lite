@@ -1,7 +1,7 @@
 {
   "scene1": {
     "rawKB": 88,
-    "gzipKB": 36.4,
+    "gzipKB": 36.3,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene1-background-dds-skybox-CAEo3hF5.js",
@@ -602,7 +602,7 @@
     ]
   },
   "scene36": {
-    "rawKB": 50.4,
+    "rawKB": 50.3,
     "gzipKB": 19.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -685,7 +685,7 @@
   },
   "scene53": {
     "rawKB": 57.1,
-    "gzipKB": 22.7,
+    "gzipKB": 22.6,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene53-standard-renderable-Cb_0bN3v.js",
@@ -1450,7 +1450,7 @@
     ]
   },
   "scene91": {
-    "rawKB": 57.1,
+    "rawKB": 57,
     "gzipKB": 22.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [

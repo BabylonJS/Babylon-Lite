@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     addTask(scene, blur);
     addTask(scene, chromatic);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     blackAndWhite.degree = 1;
     blackAndWhite.updateUniforms();
     blur.updateUniforms();

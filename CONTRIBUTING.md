@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     const cam = createDefaultCamera(scene);
     attachControl(cam, canvas, scene);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.ready = "true";
 }

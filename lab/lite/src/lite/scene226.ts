@@ -76,8 +76,8 @@ async function main(): Promise<void> {
     knot.material = knotMat;
     addToScene(sceneB, knot);
 
-    await registerScene(engine, sceneA);
-    await registerScene(engine, sceneB);
+    await registerScene(sceneA);
+    await registerScene(sceneB);
     await startEngine(engine);
 
     renderCanvas.dataset.drawCalls = String(engine.drawCallCount);

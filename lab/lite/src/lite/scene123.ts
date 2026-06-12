@@ -23,7 +23,7 @@ async function main(): Promise<void> {
 
     const splat = await loadSPZ(scene, SPLAT_URL);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     await splat.firstSortReady;

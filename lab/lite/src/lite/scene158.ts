@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     }
     onBeforeRender(scene, (deltaMs) => updateAnimationManager(manager, deltaMs));
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

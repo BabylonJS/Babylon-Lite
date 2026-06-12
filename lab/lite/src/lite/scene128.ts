@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     splat.position.y = 3;
     splat.position.z = 0;
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     await splat.firstSortReady;

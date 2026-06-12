@@ -94,7 +94,7 @@ async function main(): Promise<void> {
         startAnimationManager(manager);
     }
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.boxX = String(box.position.x);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

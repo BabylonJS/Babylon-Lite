@@ -108,12 +108,12 @@ describe("registerScene / unregisterScene", () => {
         const scene = createSceneContext(engine);
         const list = engine._renderingContexts;
 
-        await registerScene(engine, scene);
-        await registerScene(engine, scene);
+        await registerScene(scene);
+        await registerScene(scene);
 
         expect(list).toEqual([scene]);
 
-        unregisterScene(engine, scene);
+        unregisterScene(scene);
 
         expect(list).toEqual([]);
     });
@@ -123,7 +123,7 @@ describe("registerScene / unregisterScene", () => {
         const scene = createSceneContext(engine);
         const list = engine._renderingContexts;
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
         disposeScene(scene);
 
         expect(list).toEqual([]);
@@ -147,7 +147,7 @@ describe("registerScene / unregisterScene", () => {
         };
 
         addTaskAtStart(scene, task);
-        await registerScene(engine, scene);
+        await registerScene(scene);
 
         expect(recorded).toBe(true);
     });

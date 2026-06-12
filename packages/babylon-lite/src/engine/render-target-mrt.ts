@@ -83,7 +83,7 @@ export function buildRenderTargetMrt(rt: RenderTargetMrt, engine: EngineContext)
     disposeRenderTargetMrt(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc, engine);
+    const { width, height } = resolveSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -165,7 +165,7 @@ export function getSampledColorTexture(rt: RenderTargetMrt, i: number): GPUTextu
     return rt._resolveColorTextures[i] ?? rt._colorTextures[i]!;
 }
 
-function resolveSize(desc: RenderTargetMrtDescriptor, _engine: EngineContext): { width: number; height: number } {
+function resolveSize(desc: RenderTargetMrtDescriptor): { width: number; height: number } {
     const size = desc.size;
     if ("canvas" in size) {
         const canvas = size.canvas;

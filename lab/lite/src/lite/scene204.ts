@@ -95,7 +95,7 @@ async function main(): Promise<void> {
     setThinInstanceColors(box, colorData);
     addToScene(scene, box);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);

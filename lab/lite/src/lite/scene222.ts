@@ -75,7 +75,11 @@ async function main(): Promise<void> {
     scene.camera = camera;
     // Orbit/zoom/pan controls — but defer to gizmo interaction: when the pointer
     // is hovering or dragging a gizmo, the camera must not orbit.
-    attachControl(camera, canvas, scene, { shouldHandlePointerDown: () => !isGizmoInteracting(canvas), isExternalDragActive: () => isGizmoDragging(canvas), isExternalPickPending: () => isGizmoPickPending(canvas) });
+    attachControl(camera, canvas, scene, {
+        shouldHandlePointerDown: () => !isGizmoInteracting(canvas),
+        isExternalDragActive: () => isGizmoDragging(canvas),
+        isExternalPickPending: () => isGizmoPickPending(canvas),
+    });
 
     const light = createHemisphericLight([0, 1, 0]);
     light.intensity = 0.9;
@@ -107,7 +111,7 @@ async function main(): Promise<void> {
     const cube2 = makeParentedCube("cube2", { x: 0, y: 0.5, z: 0 }, { x: 0.3, y: -0.5, z: 0.2 }, [0.25, 0.8, 0.25]);
     const cube3 = makeParentedCube("cube3", { x: 4.5, y: 0.5, z: 0 }, { x: -0.3, y: 0.7, z: -0.4 }, [0.25, 0.25, 0.8]);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
 
     const utilityLayer = createUtilityLayer(engine, scene);
 
@@ -159,7 +163,7 @@ async function main(): Promise<void> {
         },
     };
 
-    await registerUtilityLayer(engine, utilityLayer);
+    await registerUtilityLayer(utilityLayer);
 
     let frame = 0;
     onBeforeRender(scene, () => {

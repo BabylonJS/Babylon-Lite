@@ -69,10 +69,10 @@ export function onBeforeRender(scene: SceneContext, cb: (deltaMs: number) => voi
 export function onSceneDispose(scene: SceneContext, cb: () => void): void;
 
 /** Build deferred GPU resources, build the frame graph, and register the scene for rendering. */
-export function registerScene(engine: Engine, scene: SceneContext): Promise<void>;
+export function registerScene(scene: SceneContext): Promise<void>;
 
 /** Remove the scene from the engine render list without disposing scene-owned resources. */
-export function unregisterScene(engine: Engine, scene: SceneContext): void;
+export function unregisterScene(scene: SceneContext): void;
 
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void;

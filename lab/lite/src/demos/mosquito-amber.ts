@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     onBeforeRender(scene, syncSkybox);
     addToScene(scene, skybox);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
