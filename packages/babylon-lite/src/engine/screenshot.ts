@@ -42,17 +42,19 @@ export interface Screenshot {
  * Multiple calls queued on the same surface before the next serviced frame share a single
  * GPU copy and all resolve with the same image.
  *
- * The readback implementation (and the one-time COPY_SRC swapchain reconfigure it needs) is
- * loaded lazily on the first call, so engines whose surfaces never capture a screenshot
- * ship none of it and keep a plain, compression-friendly RENDER_ATTACHMENT swapchain.
+ * The readback implementation is loaded lazily on the first call, so engines whose surfaces
+ * never capture a screenshot ship none of it. The surface's swapchain stays a plain,
+ * compression-friendly RENDER_ATTACHMENT surface until the first capture is queued, at which
+ * point `renderFrame` reconfigures it once with COPY_SRC (before acquiring that frame's texture).
  */
 export function captureScreenshot(surface: SurfaceContext): Promise<Screenshot> {
     const promise = new Promise<Screenshot>((resolve, reject) => {
         (surface._captureQueue ??= []).push({ resolve, reject });
     });
     if (!surface._captureService) {
-        void import("./screenshot-readback.js").then(({ createCaptureService }) => {
+        void import("./screenshot-readback.js").then(({ createCaptureService, createCapturePreFrame }) => {
             surface._captureService ??= createCaptureService();
+            surface._capturePreFrame ??= createCapturePreFrame();
         });
     }
     return promise;

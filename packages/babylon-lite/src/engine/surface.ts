@@ -65,19 +65,27 @@ export interface SurfaceContext {
     /** @internal Set once this surface's swapchain has been reconfigured with COPY_SRC for
      *  screenshot readback. Off by default so non-capturing surfaces keep a
      *  compression-friendly RENDER_ATTACHMENT-only swapchain; flipped on the first capture
-     *  by the capture service and honoured by device-loss recovery. Per-surface so aux
-     *  surfaces that never capture stay COPY_SRC-free even when another surface on the
-     *  same engine is capturable. */
+     *  by the pre-frame hook (before that frame's texture is acquired) and honoured by
+     *  device-loss recovery. Per-surface so aux surfaces that never capture stay COPY_SRC-free
+     *  even when another surface on the same engine is capturable. */
     _swapchainCopySrc?: boolean;
 
     /** @internal Screenshot readback hook, dynamically installed by `captureScreenshot` on
-     *  first use. `renderFrame` calls it once per surface per frame via optional chaining;
-     *  it records the surface's swapchain copy into the frame encoder (reconfiguring the
-     *  surface's context with COPY_SRC the first time, then copying on the following
-     *  frame). Kept off `SurfaceContext` until a capture is requested so the copy/unpack
-     *  code (`screenshot-readback.js`) stays out of every bundle that never captures a
-     *  frame. */
+     *  first use. `renderFrame` calls it once per surface per frame (after the contexts have
+     *  recorded) via optional chaining; it records the surface's swapchain copy into the frame
+     *  encoder for any queued requests. By the time it runs the swapchain is already
+     *  COPY_SRC-capable (see `_capturePreFrame`), so the copy lands in the current frame. Kept
+     *  off `SurfaceContext` until a capture is requested so the copy/unpack code
+     *  (`screenshot-readback.js`) stays out of every bundle that never captures a frame. */
     _captureService?: import("./screenshot-readback.js").CaptureService;
+
+    /** @internal Pre-acquire screenshot hook, installed alongside `_captureService` by
+     *  `captureScreenshot` on first use. `renderFrame` calls it via optional chaining for each
+     *  surface BEFORE acquiring that surface's swapchain texture; on the first queued capture it
+     *  reconfigures the surface's swapchain with COPY_SRC (reconfiguring expires the current
+     *  texture, so it must run before acquire, never mid-frame). Kept off `SurfaceContext` until
+     *  a capture is requested so the reconfigure code stays out of every non-capturing bundle. */
+    _capturePreFrame?: import("./screenshot-readback.js").CapturePreFrame;
 }
 
 /** Options for {@link createSurface}, and for the per-surface portion of `createEngine`. */

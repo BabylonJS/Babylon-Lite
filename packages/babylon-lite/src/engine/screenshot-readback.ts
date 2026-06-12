@@ -7,6 +7,11 @@ import { BU, TU } from "./gpu-flags.js";
  *  surface's swapchain copy for any queued capture requests into the frame's encoder. */
 export type CaptureService = (surface: SurfaceContext, encoder: GPUCommandEncoder) => void;
 
+/** @internal Pre-acquire hook driven by `renderFrame` (installed alongside `_captureService`).
+ *  Called before a surface's frame swapchain texture is acquired; reconfigures that surface's
+ *  swapchain with COPY_SRC the first time a capture is queued. */
+export type CapturePreFrame = (surface: SurfaceContext) => void;
+
 /** A single readback in flight: the buffer the frame's copy lands in, plus the dimensions /
  *  padding needed to unpack it, and the requests waiting on this frame. */
 interface PendingReadback {
@@ -23,23 +28,36 @@ function alignBytesPerRow(width: number): number {
     return Math.ceil((width * 4) / 256) * 256;
 }
 
-/** The readback hook. Called once per surface per frame after the contexts have recorded
- *  (so the surface's swapchain texture holds this frame) and before the encoder is finished.
+/** Pre-acquire hook. Called by `renderFrame` for each surface BEFORE `_refreshScRT` acquires
+ *  that surface's frame swapchain texture. On the first queued capture it reconfigures the
+ *  surface's swapchain with COPY_SRC so the just-acquired texture is copyable. Reconfiguring
+ *  here (not after the scene has recorded) is mandatory: `configure()` expires the current
+ *  canvas texture, so doing it mid-frame would invalidate the recorded texture and fail the
+ *  submit. */
+function preFrame(surface: SurfaceContext): void {
+    const queue = surface._captureQueue;
+    if (!queue || queue.length === 0 || surface._swapchainCopySrc) {
+        return;
+    }
+    surface._swapchainCopySrc = true;
+    surface._context.configure({ device: surface.engine._device, format: surface.format, alphaMode: surface._alphaMode, usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
+}
+
+/** The readback hook. Called once per surface per frame after the contexts have recorded (so the
+ *  surface's swapchain texture holds this frame) and before the encoder is finished.
  *
- *  On the first queued capture the swapchain is still RENDER_ATTACHMENT-only, so it is
- *  reconfigured with COPY_SRC and the copy is deferred one frame — the texture acquired for
- *  the current frame predates the reconfigure and is not copyable. The next frame's
- *  `_refreshScRT` picks up a COPY_SRC texture and the copy is recorded then. Once the
- *  swapchain is copyable, subsequent captures copy on the very next serviced frame. */
+ *  By the time this runs the swapchain is already COPY_SRC-capable: `preFrame` reconfigured it
+ *  before the frame's texture was acquired, so the copy can be recorded straight into this
+ *  frame's encoder. */
 function service(surface: SurfaceContext, encoder: GPUCommandEncoder): void {
     const queue = surface._captureQueue;
     if (!queue || queue.length === 0) {
         return;
     }
-
+    // The swapchain only becomes copyable once `preFrame` has reconfigured it and `renderFrame`
+    // has acquired a COPY_SRC texture; until then there is nothing copyable, so wait for the next
+    // frame (the request stays queued).
     if (!surface._swapchainCopySrc) {
-        surface._swapchainCopySrc = true;
-        surface._context.configure({ device: surface.engine._device, format: surface.format, alphaMode: surface._alphaMode, usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
         return;
     }
 
@@ -71,6 +89,11 @@ function service(surface: SurfaceContext, encoder: GPUCommandEncoder): void {
 async function finish(pend: PendingReadback): Promise<void> {
     const { buffer, width, height, bytesPerRow, bgra, reqs } = pend;
     try {
+        // Yield one microtask so `renderFrame` submits this frame's encoder (which holds the copy)
+        // BEFORE we map the buffer: mapAsync moves the buffer to a pending-map state synchronously,
+        // and a buffer pending map cannot be used by a command buffer in a submit — calling it before
+        // the submit would invalidate the whole frame and read back an empty (all-black) buffer.
+        await Promise.resolve();
         await buffer.mapAsync(GPUMapMode.READ);
         const src = new Uint8Array(buffer.getMappedRange());
         const out = new Uint8ClampedArray(width * height * 4);
@@ -114,4 +137,10 @@ async function finish(pend: PendingReadback): Promise<void> {
  *  Returns the per-frame readback hook installed on `surface._captureService`. */
 export function createCaptureService(): CaptureService {
     return service;
+}
+
+/** @internal Factory invoked by `captureScreenshot` after this module is dynamically imported.
+ *  Returns the pre-acquire hook installed on `engine._capturePreFrame`. */
+export function createCapturePreFrame(): CapturePreFrame {
+    return preFrame;
 }

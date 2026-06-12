@@ -442,6 +442,12 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     let drawCalls = 0;
     for (let i = 0; i < surfaces.length; i++) {
         const surface = surfaces[i]!;
+        // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
+        // before its frame texture is acquired — reconfiguring the context EXPIRES the current
+        // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
+        // `captureScreenshot`, so non-capturing surfaces ship none of the reconfigure code and pay
+        // only this short-circuit.
+        surface._capturePreFrame?.(surface);
         _refreshScRT(surface);
         const ctxs = surface._renderingContexts;
         for (let j = 0; j < ctxs.length; j++) {
