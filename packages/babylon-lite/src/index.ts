@@ -99,6 +99,24 @@ export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-r
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 
+// Geospatial (globe-orbit) camera
+export {
+    createGeospatialCamera,
+    setGeospatialOrientation,
+    computeLocalBasis,
+    computeLookAtFromYawPitch,
+    computeYawPitchFromLookAt,
+    clampCenterFromPoles,
+    normalizeRadians,
+} from "./camera/geospatial-camera.js";
+export type { GeospatialCamera, GeospatialCameraOptions, GeospatialOrientation } from "./camera/geospatial-camera.js";
+export { createGeospatialLimits, getEffectivePitchMax, clampZoomDistance } from "./camera/geospatial-limits.js";
+export type { GeospatialLimits } from "./camera/geospatial-limits.js";
+export { attachGeospatialControls } from "./camera/geospatial-camera-controls.js";
+export type { GeospatialControlOptions } from "./camera/geospatial-camera-controls.js";
+export { flyGeospatialCameraToAsync } from "./camera/geospatial-camera-fly.js";
+export type { GeospatialFlyOptions } from "./camera/geospatial-camera-fly.js";
+
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";

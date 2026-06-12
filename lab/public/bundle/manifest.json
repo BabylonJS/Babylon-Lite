@@ -2639,23 +2639,31 @@
     ]
   },
   "scene225": {
+    "rawKB": 29.3,
+    "gzipKB": 11.6,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene225.js"
+    ]
+  },
+  "scene227": {
     "rawKB": 47.1,
     "gzipKB": 18.6,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene225-standard-renderable-AokkDzwZ.js",
-      "scene225-wgsl-helpers-CwHFFXvt.js",
-      "scene225.js"
+      "scene227-standard-renderable-DcPoDfNT.js",
+      "scene227-wgsl-helpers-CwHFFXvt.js",
+      "scene227.js"
     ]
   },
-  "scene226": {
-    "rawKB": 48.9,
+  "scene228": {
+    "rawKB": 49,
     "gzipKB": 19.4,
     "ignoredRawKB": 0,
     "runtimeChunks": [
-      "scene226-standard-renderable-C8UROoTw.js",
-      "scene226-wgsl-helpers-CwHFFXvt.js",
-      "scene226.js"
+      "scene228-standard-renderable-CHEs45cx.js",
+      "scene228-wgsl-helpers-CwHFFXvt.js",
+      "scene228.js"
     ]
   }
 }

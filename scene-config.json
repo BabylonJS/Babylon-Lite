@@ -1648,8 +1648,18 @@
     },
     {
         "id": 225,
-        "slug": "scene225-multi-canvas-same-scene",
-        "name": "Scene 225 — Multi-Canvas (Same Scene)",
+        "slug": "scene225-geospatial-camera",
+        "name": "Scene 225 — Geospatial Camera",
+        "maxMad": 0.2,
+        "maxRawKB": 52,
+        "description": "Babylon.js GeospatialCamera port: a globe-orbit camera that anchors to a point on a sphere centred at the world origin and is parameterised by center/yaw/pitch/radius. A blue globe with six coloured surface marker cubes is viewed from a fixed deterministic pose (no controls attached) so the camera's view matrix is compared pixel-for-pixel against the Babylon.js GeospatialCamera oracle. The Lite camera reimplements the same left-handed local-basis + lookAt orientation math in the pure-state idiom.",
+        "tags": ["camera", "geospatial", "globe", "standard"],
+        "skipPerf": true
+    },
+    {
+        "id": 227,
+        "slug": "scene227-multi-canvas-same-scene",
+        "name": "Scene 227 — Multi-Canvas (Same Scene)",
         "maxRawKB": 60,
         "description": "Two canvases side-by-side share a single engine via `createSurface`, and a *single* set of meshes (cube + ground), materials, and lights is added to two `SceneContext`s — one per surface. Proves that mesh GPU buffers, material pipelines, and light data are all device/engine-scoped: the same instances drive both canvases, while each scene keeps its own camera, framegraph, and per-scene UBO (front view vs 3/4 orbit).",
         "tags": ["multi-canvas", "surface", "demo", "std"],
@@ -1657,9 +1667,9 @@
         "skipPerf": true
     },
     {
-        "id": 226,
-        "slug": "scene226-multi-canvas-different-scenes",
-        "name": "Scene 226 — Multi-Canvas (Different Scenes)",
+        "id": 228,
+        "slug": "scene228-multi-canvas-different-scenes",
+        "name": "Scene 228 — Multi-Canvas (Different Scenes)",
         "maxRawKB": 60,
         "description": "Two canvases side-by-side share a single engine via `createSurface`. Canvas A hosts a row of colored spheres lit by a hemispheric light; canvas B hosts a torus knot lit by a directional light. Demonstrates that completely independent scenes (different geometry, materials, lighting, cameras, clear colors) can coexist on one engine when each is bound to its own surface.",
         "tags": ["multi-canvas", "surface", "demo", "std"],

@@ -1,4 +1,4 @@
-// Scene 226 — Multi-Canvas (different scenes on two canvases).
+// Scene 228 — Multi-Canvas (different scenes on two canvases).
 //
 // Demonstrates `createSurface` by attaching a second `SurfaceContext` to the
 // engine and rendering two entirely different scenes — a row of standard-shaded
