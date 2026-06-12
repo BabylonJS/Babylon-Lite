@@ -107,8 +107,6 @@ export interface Mesh extends SceneNode {
     // parent, worldMatrix, worldMatrixVersion — all inherited from SceneNode
 
     /** @internal */
-    _materialDirty: boolean;
-    /** @internal */
     _gpu: MeshGPU;
     /** @internal */
     _cpuPositions?: Float32Array;

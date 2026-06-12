@@ -135,16 +135,49 @@ export interface SceneContextOptions {
     defaultRenderTask?: boolean;
 }
 
+/** Per-mesh set of scenes the mesh currently belongs to. Kept OFF the `Mesh` data object
+ *  (pillar 4b: a mesh never references the scene) in a lazily-allocated WeakMap (pillar 4:
+ *  no module-level side effects). A single `Mesh` instance may live in several scenes (e.g.
+ *  multi-canvas `SurfaceContext` rendering), so this set is the one source of truth for both:
+ *    1. material-swap notification — the `mesh.material` setter rebuilds the renderable in
+ *       EVERY subscribed scene, not just the one it was first added to; and
+ *    2. GPU-buffer ref-counting — `disposeMeshGpu` (which frees the mesh's SHARED geometry/
+ *       skeleton/morph/thin-instance buffers) only runs on the LAST scene removal. */
+let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
+
+/** @internal Register `scene` as an owner of `mesh`. Installs the material setter on the mesh's
+ *  first registration only (re-adds just grow the subscriber set, reusing the one setter). */
+function registerMeshScene(scene: SceneContext, mesh: Mesh): void {
+    const map = (_meshScenes ??= new WeakMap());
+    let scenes = map.get(mesh);
+    if (!scenes) {
+        map.set(mesh, (scenes = new Set()));
+        installMaterialSetter(mesh, scenes);
+    }
+    scenes.add(scene);
+}
+
+/** @internal Deregister `scene` from `mesh`. Returns `true` when the mesh now belongs to NO
+ *  scene — the signal that the caller may free the mesh's shared GPU buffers (`disposeMeshGpu`).
+ *  An untracked mesh (never registered) also returns `true` so its buffers are still released. */
+export function unregisterMeshScene(scene: SceneContext, mesh: Mesh): boolean {
+    const scenes = _meshScenes?.get(mesh);
+    if (!scenes) {
+        return true;
+    }
+    scenes.delete(scene);
+    return scenes.size === 0;
+}
+
 /** Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime
- *  mesh add). Lazily loads the swap processor so scenes that never mutate at runtime
- *  don't pull it into their bundle. */
+ *  mesh add). Dedup is per-(scene, mesh) via swap-queue membership — a single shared
+ *  mesh may be queued in several scenes at once. Lazily loads the swap processor so
+ *  scenes that never mutate at runtime don't pull it into their bundle. */
 function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
-    const mi = mesh as Mesh;
-    if (mi._materialDirty) {
+    if (scene._materialSwapQueue.indexOf(mesh) >= 0) {
         return;
     }
-    mi._materialDirty = true;
     scene._materialSwapQueue.push(mesh);
     if (!scene._processSwaps) {
         void import("./scene-material-swap.js").then((m) => {
@@ -153,9 +186,11 @@ function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
     }
 }
 
-/** Install a property setter on mesh.material that sets _materialDirty
- *  and pushes the mesh into the scene's swap queue for processing. */
-function installMaterialSetter(scene: SceneContext, mesh: Mesh): void {
+/** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
+ *  rebuild in EVERY scene currently subscribed via `scenes`. Installed exactly once per mesh
+ *  (the captured `scenes` set is mutated in place by register/unregister), so a mesh shared
+ *  across scenes notifies all of them rather than only its most-recently-added scene. */
+function installMaterialSetter(mesh: Mesh, scenes: Set<SceneContext>): void {
     let _mat = mesh.material;
     Object.defineProperty(mesh, "material", {
         get() {
@@ -164,7 +199,9 @@ function installMaterialSetter(scene: SceneContext, mesh: Mesh): void {
         set(v) {
             if (v !== _mat) {
                 _mat = v;
-                enqueueMaterialSwap(scene, mesh);
+                for (const scene of scenes) {
+                    enqueueMaterialSwap(scene, mesh);
+                }
             }
         },
         configurable: true,
@@ -344,7 +381,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     if ("_gpu" in entity && "material" in entity) {
         const mesh = entity as unknown as Mesh;
         ctx.meshes.push(mesh);
-        installMaterialSetter(ctx, mesh);
+        registerMeshScene(ctx, mesh);
         const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
         if (build) {
             let group = ctx._groups.get(build);
@@ -394,7 +431,10 @@ export function disposeScene(scene: SceneContext): void {
     }
     ctx._meshDisposables.clear();
     for (const mesh of ctx.meshes) {
-        disposeMeshGpu(mesh);
+        // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
+        if (unregisterMeshScene(ctx, mesh)) {
+            disposeMeshGpu(mesh);
+        }
     }
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
@@ -418,9 +458,6 @@ export async function buildScene(scene: SceneContext): Promise<void> {
         const builders = [...ctx._deferredBuilders];
         ctx._deferredBuilders = [];
         await Promise.all(builders.map(async (b) => b()));
-    }
-    for (const mesh of ctx._materialSwapQueue) {
-        (mesh as Mesh)._materialDirty = false;
     }
     ctx._materialSwapQueue.length = 0;
     ctx._renderableVersion++;

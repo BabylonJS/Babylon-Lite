@@ -47,7 +47,6 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
             const meshClone = {
                 ...mesh,
                 name: mesh.name + "_clone",
-                _materialDirty: false,
                 _gpu: { ...mesh._gpu },
             };
             initMeshTransform(

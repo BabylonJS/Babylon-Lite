@@ -53,7 +53,6 @@ export function createMeshFromData(
         receiveShadows: false,
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
-        _materialDirty: false,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
     } as unknown as Mesh;
     initMeshTransform(mesh);
