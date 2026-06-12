@@ -1,7 +1,6 @@
 import { F64, I32, U16, U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { EngineContext } from "../engine/engine.js";
 import type { EnvironmentTextures } from "./load-env.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
@@ -194,7 +193,7 @@ function computeSH(raw: Uint8Array, width: number, mipCount: number): Float32Arr
  * from mip 0 face data for irradiance lighting.
  */
 export async function loadDdsEnvironment(scene: SceneContext, url: string, options: { brdfUrl: string; skipSkybox?: boolean; skipGround?: boolean }): Promise<EnvironmentTextures> {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
     const device = engine._device;
 
     // Fetch DDS and BRDF PNG in parallel

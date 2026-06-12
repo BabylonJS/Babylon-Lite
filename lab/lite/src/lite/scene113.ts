@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     addToScene(scene, surfaceMarker);
     addToScene(scene, normalMarker);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     await waitFrames(4);
 

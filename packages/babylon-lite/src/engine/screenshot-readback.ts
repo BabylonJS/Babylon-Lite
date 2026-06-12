@@ -1,16 +1,16 @@
-import type { EngineContext } from "./engine.js";
+import type { SurfaceContext } from "./surface.js";
 import type { Screenshot } from "./screenshot.js";
 import { BU, TU } from "./gpu-flags.js";
 
 /** @internal Per-frame readback hook driven by `renderFrame` once `captureScreenshot` has
- *  lazily loaded this module and installed it on `engine._captureService`. Records the
- *  swapchain copy for any queued capture requests into the frame's encoder. */
-export type CaptureService = (engine: EngineContext, encoder: GPUCommandEncoder) => void;
+ *  lazily loaded this module and installed it on `surface._captureService`. Records the
+ *  surface's swapchain copy for any queued capture requests into the frame's encoder. */
+export type CaptureService = (surface: SurfaceContext, encoder: GPUCommandEncoder) => void;
 
 /** @internal Pre-acquire hook driven by `renderFrame` (installed alongside `_captureService`).
- *  Called before the frame's swapchain texture is acquired; reconfigures the swapchain with
- *  COPY_SRC the first time a capture is queued. */
-export type CapturePreFrame = (engine: EngineContext) => void;
+ *  Called before a surface's frame swapchain texture is acquired; reconfigures that surface's
+ *  swapchain with COPY_SRC the first time a capture is queued. */
+export type CapturePreFrame = (surface: SurfaceContext) => void;
 
 /** A single readback in flight: the buffer the frame's copy lands in, plus the dimensions /
  *  padding needed to unpack it, and the requests waiting on this frame. */
@@ -28,41 +28,42 @@ function alignBytesPerRow(width: number): number {
     return Math.ceil((width * 4) / 256) * 256;
 }
 
-/** Pre-acquire hook. Called by `renderFrame` BEFORE `_refreshScRT` acquires this frame's
- *  swapchain texture. On the first queued capture it reconfigures the swapchain with COPY_SRC
- *  so the just-acquired texture is copyable. Reconfiguring here (not after the scene has
- *  recorded) is mandatory: `configure()` expires the current canvas texture, so doing it
- *  mid-frame would invalidate the recorded texture and fail the submit. */
-function preFrame(engine: EngineContext): void {
-    const queue = engine._captureQueue;
-    if (!queue || queue.length === 0 || engine._swapchainCopySrc) {
+/** Pre-acquire hook. Called by `renderFrame` for each surface BEFORE `_refreshScRT` acquires
+ *  that surface's frame swapchain texture. On the first queued capture it reconfigures the
+ *  surface's swapchain with COPY_SRC so the just-acquired texture is copyable. Reconfiguring
+ *  here (not after the scene has recorded) is mandatory: `configure()` expires the current
+ *  canvas texture, so doing it mid-frame would invalidate the recorded texture and fail the
+ *  submit. */
+function preFrame(surface: SurfaceContext): void {
+    const queue = surface._captureQueue;
+    if (!queue || queue.length === 0 || surface._swapchainCopySrc) {
         return;
     }
-    engine._swapchainCopySrc = true;
-    engine._context.configure({ device: engine._device, format: engine.format, alphaMode: engine._alphaMode, usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
+    surface._swapchainCopySrc = true;
+    surface._context.configure({ device: surface.engine._device, format: surface.format, alphaMode: surface._alphaMode, usage: TU.RENDER_ATTACHMENT | TU.COPY_SRC });
 }
 
-/** The readback hook. Called once per frame after the contexts have recorded (so the swapchain
- *  texture holds this frame) and before the encoder is finished.
+/** The readback hook. Called once per surface per frame after the contexts have recorded (so the
+ *  surface's swapchain texture holds this frame) and before the encoder is finished.
  *
  *  By the time this runs the swapchain is already COPY_SRC-capable: `preFrame` reconfigured it
  *  before the frame's texture was acquired, so the copy can be recorded straight into this
  *  frame's encoder. */
-function service(engine: EngineContext, encoder: GPUCommandEncoder): void {
-    const queue = engine._captureQueue;
+function service(surface: SurfaceContext, encoder: GPUCommandEncoder): void {
+    const queue = surface._captureQueue;
     if (!queue || queue.length === 0) {
         return;
     }
     // The swapchain only becomes copyable once `preFrame` has reconfigured it and `renderFrame`
     // has acquired a COPY_SRC texture; until then there is nothing copyable, so wait for the next
     // frame (the request stays queued).
-    if (!engine._swapchainCopySrc) {
+    if (!surface._swapchainCopySrc) {
         return;
     }
 
-    engine._captureQueue = undefined;
+    surface._captureQueue = undefined;
 
-    const tex = engine.scRT._colorTexture;
+    const tex = surface.scRT._colorTexture;
     if (!tex) {
         const err = new Error("captureScreenshot: no swapchain texture available");
         for (const r of queue) {
@@ -71,16 +72,16 @@ function service(engine: EngineContext, encoder: GPUCommandEncoder): void {
         return;
     }
 
-    const width = engine.scRT._width;
-    const height = engine.scRT._height;
+    const width = surface.scRT._width;
+    const height = surface.scRT._height;
     const bytesPerRow = alignBytesPerRow(width);
-    const buffer = engine._device.createBuffer({
+    const buffer = surface.engine._device.createBuffer({
         label: "screenshot-readback",
         size: bytesPerRow * height,
         usage: BU.COPY_DST | BU.MAP_READ,
     });
     encoder.copyTextureToBuffer({ texture: tex }, { buffer, bytesPerRow, rowsPerImage: height }, { width, height, depthOrArrayLayers: 1 });
-    void finish({ buffer, width, height, bytesPerRow, bgra: engine.format.startsWith("bgra"), reqs: queue });
+    void finish({ buffer, width, height, bytesPerRow, bgra: surface.format.startsWith("bgra"), reqs: queue });
 }
 
 /** Maps the staging buffer after submit, unpacks it into tightly-packed opaque RGBA8, and
@@ -133,7 +134,7 @@ async function finish(pend: PendingReadback): Promise<void> {
 }
 
 /** @internal Factory invoked by `captureScreenshot` after this module is dynamically imported.
- *  Returns the per-frame readback hook installed on `engine._captureService`. */
+ *  Returns the per-frame readback hook installed on `surface._captureService`. */
 export function createCaptureService(): CaptureService {
     return service;
 }

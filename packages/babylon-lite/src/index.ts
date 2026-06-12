@@ -4,6 +4,8 @@
 // ─── Core ────────────────────────────────────────────────────────────
 export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, setEngineSize, disposeEngine, VERSION } from "./engine/engine.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
+export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
+export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
 export type { Screenshot } from "./engine/screenshot.js";
 export {
@@ -96,6 +98,24 @@ export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js"
 export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
 export { createFreeCamera } from "./camera/free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
+
+// Geospatial (globe-orbit) camera
+export {
+    createGeospatialCamera,
+    setGeospatialOrientation,
+    computeLocalBasis,
+    computeLookAtFromYawPitch,
+    computeYawPitchFromLookAt,
+    clampCenterFromPoles,
+    normalizeRadians,
+} from "./camera/geospatial-camera.js";
+export type { GeospatialCamera, GeospatialCameraOptions, GeospatialOrientation } from "./camera/geospatial-camera.js";
+export { createGeospatialLimits, getEffectivePitchMax, clampZoomDistance } from "./camera/geospatial-limits.js";
+export type { GeospatialLimits } from "./camera/geospatial-limits.js";
+export { attachGeospatialControls } from "./camera/geospatial-camera-controls.js";
+export type { GeospatialControlOptions } from "./camera/geospatial-camera-controls.js";
+export { flyGeospatialCameraToAsync } from "./camera/geospatial-camera-fly.js";
+export type { GeospatialFlyOptions } from "./camera/geospatial-camera-fly.js";
 
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";

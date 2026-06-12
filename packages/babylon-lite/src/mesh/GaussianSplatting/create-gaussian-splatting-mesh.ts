@@ -1,5 +1,4 @@
 import { U8 } from "../../engine/typed-arrays.js";
-import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { GaussianSplattingMesh, GsShaderFragment } from "./gaussian-splatting-mesh.js";
 import { createGaussianSplattingMesh } from "./gaussian-splatting-mesh.js";
@@ -30,7 +29,7 @@ export function createProceduralGaussianSplattingMesh(scene: SceneContext, name:
     const parsed: ParsedSplat = { data: buffer };
     const geom = buildSplatGeometry(parsed.data);
     const worker = new SplatSortWorker({ name: "babylon-lite-splat-sort" });
-    const eng = scene.engine as EngineContext;
+    const eng = scene.surface.engine;
     const mesh = createGaussianSplattingMesh(eng, name, geom, worker, parsed);
     attachGaussianSplattingMesh(scene, mesh, fragments);
     return mesh;

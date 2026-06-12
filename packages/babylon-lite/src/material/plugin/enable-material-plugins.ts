@@ -14,7 +14,7 @@
  * no shared-code changes.
  *
  * Contract: call AFTER creating materials/meshes and adding them to the scene,
- * and BEFORE `registerScene(engine, scene)`. Attach plugins via
+ * and BEFORE `registerScene(scene)`. Attach plugins via
  * `material.plugins = [plugin]` first.
  *
  *   const mat = createStandardMaterial();
@@ -24,7 +24,7 @@
  *   addToScene(scene, box);
  *
  *   enableMaterialPlugins(scene); // ← opt-in
- *   await registerScene(engine, scene);
+ *   await registerScene(scene);
  */
 
 import type { SceneContext } from "../../scene/scene.js";
@@ -48,5 +48,5 @@ import { registerStdPlugins } from "./std-plugin-bridge.js";
  */
 export function enableMaterialPlugins(scene: SceneContext): void {
     registerPbrPlugins(_registerPbrExt);
-    registerStdPlugins(scene.meshes, scene.engine, _registerStdExt);
+    registerStdPlugins(scene.meshes, scene.surface.engine, _registerStdExt);
 }

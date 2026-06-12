@@ -4,7 +4,6 @@
 import { F32 } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { EngineContext } from "../engine/engine.js";
 import { loadCubeTexture } from "../texture/cube-texture.js";
 import { createBoxData } from "../mesh/create-box.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
@@ -29,7 +28,7 @@ export interface SkyboxData {
  *  @param size    - Box size (default 100, matches Babylon)
  */
 export async function loadSkybox(scene: SceneContext, baseUrl: string, ext: string, size = 100): Promise<void> {
-    const eng = scene.engine as EngineContext;
+    const eng = scene.surface.engine;
 
     const cubeTex = await loadCubeTexture(eng, baseUrl, ext);
 

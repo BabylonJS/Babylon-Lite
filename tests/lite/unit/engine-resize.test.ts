@@ -10,7 +10,7 @@ function setDevicePixelRatio(value: number): void {
 }
 
 function makeEngine(canvas: Partial<HTMLCanvasElement>, contexts: RenderingContext[] = []): EngineContext {
-    return {
+    const eng = {
         canvas: canvas as HTMLCanvasElement,
         msaaSamples: 4,
         drawCallCount: 0,
@@ -30,14 +30,17 @@ function makeEngine(canvas: Partial<HTMLCanvasElement>, contexts: RenderingConte
             _colorTexture: {},
             _depthTexture: null,
             _depthView: null,
-            _descriptor: { format: "bgra8unorm", samples: 1, size: "canvas" },
+            _descriptor: { format: "bgra8unorm", samples: 1, size: { width: 800, height: 600 } },
             _width: 0,
             _height: 0,
             _eager: true,
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget,
         _currentDelta: 0,
         _cbs: [],
-    } as EngineContext;
+    } as unknown as EngineContext;
+    const _surfaces = [eng];
+    Object.assign(eng, { engine: eng, surfaces: _surfaces, _surfaces });
+    return eng;
 }
 
 function makeRenderingContext(onResize: () => void): RenderingContext {

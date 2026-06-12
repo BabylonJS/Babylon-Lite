@@ -583,7 +583,7 @@ Implements a 33-tap Gaussian blur matching Babylon's `kernelBlur` post-process w
 
 ### Frame-Graph Scheduling
 
-`registerSceneWithShadowSupport(engine, scene)` installs an internal frame-graph `ShadowTask` before the default swapchain scene render task. Shadow textures are owned by each `ShadowGenerator`; shadow rendering is owned by `ShadowTask`. On every frame, `ShadowTask.execute()` reads `engine._currentEncoder`, loops `scene.lights`, and renders each light's shadow generator. The returned draw counts are summed by `FrameGraph.execute()` together with the scene render task.
+`registerSceneWithShadowSupport(scene)` installs an internal frame-graph `ShadowTask` before the default swapchain scene render task. Shadow textures are owned by each `ShadowGenerator`; shadow rendering is owned by `ShadowTask`. On every frame, `ShadowTask.execute()` reads `engine._currentEncoder`, loops `scene.lights`, and renders each light's shadow generator. The returned draw counts are summed by `FrameGraph.execute()` together with the scene render task.
 
 ESM generators expose their depth/blur resources to `ShadowTask`. Caster meshes are registered as `ShadowTask` inputs. During `record()`, PCF creates a depth-only `RenderTask` over the generator's depth texture; ESM creates an ESM color+depth `RenderTask` over its task resources. Both paths create one shadow material view per unique caster material.
 

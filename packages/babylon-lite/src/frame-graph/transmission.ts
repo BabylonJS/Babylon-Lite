@@ -95,7 +95,7 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
         return grab;
     }
     if (linear) {
-        retargetRenderTaskToLinearOffscreen(task, engine);
+        retargetRenderTaskToLinearOffscreen(task);
     }
     let state: RenderTaskTransmissionState | null = null;
     const record = task.record.bind(task);
@@ -120,10 +120,11 @@ export function enableRenderTaskTransmission(task: RenderTask, engine: EngineCon
     return grab;
 }
 
-function retargetRenderTaskToLinearOffscreen(task: RenderTask, engine: EngineContext): void {
+function retargetRenderTaskToLinearOffscreen(task: RenderTask): void {
     const cfg = task._config;
     const oldDesc = cfg.rt._descriptor;
-    const sampleCount = engine.msaaSamples;
+    const surface = task.scene.surface;
+    const sampleCount = surface.msaaSamples;
     // The scene render task may target the shared engine scRT (single-sample,
     // colour-only — single-sample default path) or an MSAA colour RT that resolves into it
     // via `rst` (MSAA default path). Never mutate the shared scRT descriptor —
@@ -142,7 +143,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTask, engine: EngineCon
         _depthClearValue: oldDesc._depthClearValue,
         _depthCompare: oldDesc._depthCompare,
         samples: sampleCount,
-        size: "canvas",
+        size: surface,
     });
     cfg.rt = newRt;
     cfg.rst = undefined;

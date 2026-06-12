@@ -12,6 +12,7 @@
 
 import { TU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
+import type { SurfaceContext } from "./surface.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 
 /** Signature of a render target's attachment set — enough to key a GPURenderPipeline. */
@@ -46,8 +47,12 @@ export interface RenderTargetDescriptor {
     _depthCompare?: GPUCompareFunction;
     /** MSAA sample count: `1` = single-sample (no multisampling), `4` = 4x MSAA. */
     samples: number;
-    /** 'canvas' means match the canvas pixel size. Otherwise explicit pixels. */
-    size: "canvas" | { width: number; height: number };
+    /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
+     *  `buildRenderTarget`), or explicit `{ width, height }` in device pixels. Pass a
+     *  surface for canvas-sized RTs; the RT then tracks that specific surface in
+     *  multi-surface setups. In the common single-canvas case, pass the engine directly
+     *  (since `EngineContext extends SurfaceContext`). */
+    size: SurfaceContext | { width: number; height: number };
 }
 
 /** Stringified signature used to key pipelines against a render target's attachment set. */
@@ -107,7 +112,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc, engine);
+    const { width, height } = resolveSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -162,9 +167,12 @@ export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
     rt._height = 0;
 }
 
-function resolveSize(desc: RenderTargetDescriptor, engine: EngineContext): { width: number; height: number } {
-    if (desc.size === "canvas") {
-        return { width: engine.canvas.width, height: engine.canvas.height };
+function resolveSize(desc: RenderTargetDescriptor): { width: number; height: number } {
+    const size = desc.size;
+    // SurfaceContext has a `canvas` field; explicit-pixels uses `width`/`height`.
+    if ("canvas" in size) {
+        const canvas = size.canvas;
+        return { width: canvas.width, height: canvas.height };
     }
-    return desc.size;
+    return size;
 }

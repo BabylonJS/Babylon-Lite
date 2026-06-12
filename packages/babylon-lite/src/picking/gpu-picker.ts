@@ -129,9 +129,11 @@ export interface PickOptions {
 export async function pickAsync(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
     const pickFilter = options?.filter ?? null;
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const device = engine._device;
-    const canvas = engine.canvas;
+    // Pick coordinates are relative to the scene's own surface canvas, not the engine's
+    // primary canvas — they differ when the scene renders into an auxiliary surface.
+    const canvas = scene.surface.canvas;
     const camera = scene.camera;
     if (!camera) {
         return createEmptyPickingInfo();

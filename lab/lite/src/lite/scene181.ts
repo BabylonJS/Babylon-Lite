@@ -40,7 +40,7 @@ async function run(): Promise<void> {
         text.position.set(-data.width * scale * 0.5, data.height * scale * 0.5, 0);
     });
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.ready = "true";
 }

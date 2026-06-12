@@ -142,7 +142,11 @@ async function main(): Promise<void> {
         });
     }
 
-    await (noShadows ? registerScene : registerSceneWithShadowSupport)(engine, scene);
+    if (noShadows) {
+        await registerScene(scene);
+    } else {
+        await registerSceneWithShadowSupport(scene);
+    }
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

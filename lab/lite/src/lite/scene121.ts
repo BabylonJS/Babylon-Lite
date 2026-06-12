@@ -27,7 +27,7 @@ async function main(): Promise<void> {
 
     const gs: GaussianSplattingMesh = await loadSplat(scene, SPLAT_URL);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     await gs.firstSortReady;

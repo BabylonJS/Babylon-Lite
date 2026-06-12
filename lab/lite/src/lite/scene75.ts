@@ -65,7 +65,7 @@ async function main(): Promise<void> {
 
     createDefaultCamera(scene);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);

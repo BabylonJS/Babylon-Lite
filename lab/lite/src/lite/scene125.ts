@@ -37,7 +37,7 @@ async function main(): Promise<void> {
     splat.rotation.x = Math.PI * 0.25;
     bakeCurrentTransformIntoVertices(splat);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     await splat.firstSortReady;

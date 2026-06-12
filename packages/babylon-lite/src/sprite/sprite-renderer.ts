@@ -15,8 +15,9 @@
  */
 import { F32 } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
-import { getRenderTargetSize, registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
-import type { EngineContext, RenderingContext } from "../engine/engine.js";
+import { registerRenderingContext, unregisterRenderingContext, getRenderTargetSize } from "../engine/engine.js";
+import type { RenderingContext } from "../engine/engine.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
@@ -80,8 +81,8 @@ export interface SpriteRenderer extends RenderingContext {
     readonly layers: readonly Sprite2DLayer[];
     /** @internal Mutable alias of {@link layers} — same array, used by internal helpers. */
     _layers: Sprite2DLayer[];
-    /** @internal */
-    _engine: EngineContext;
+    /** @internal Surface this renderer draws into. */
+    _surface: SurfaceContext;
     /** @internal */
     _indexBuffer: GPUBuffer;
     /** @internal */
@@ -154,9 +155,9 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
     let lg = rr._layerGpu.get(layer);
     if (!lg) {
         const cap = layer._capacity;
-        const instanceBuffer = createSpriteInstanceBuffer(rr._engine._device, layer, "sprite-layer-instances");
-        const uniformBuffer = createEmptyUniformBuffer(rr._engine, LAYER_UBO_BYTES, "sprite-layer-ubo");
-        const fx = _getSpriteFxHook()?.createLayerFx(rr._engine, "sprite-layer-fx-ubo", layer) ?? null;
+        const instanceBuffer = createSpriteInstanceBuffer(rr._surface.engine._device, layer, "sprite-layer-instances");
+        const uniformBuffer = createEmptyUniformBuffer(rr._surface.engine, LAYER_UBO_BYTES, "sprite-layer-ubo");
+        const fx = _getSpriteFxHook()?.createLayerFx(rr._surface.engine, "sprite-layer-fx-ubo", layer) ?? null;
         lg = {
             layer,
             instanceBuffer,
@@ -173,7 +174,7 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
         };
         rr._layerGpu.set(layer, lg);
     }
-    const grown = ensureSpriteInstanceBuffer(rr._engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity, "sprite-layer-instances");
+    const grown = ensureSpriteInstanceBuffer(rr._surface.engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity, "sprite-layer-instances");
     if (grown.reallocated) {
         lg.instanceBuffer = grown.buffer;
         lg.instanceBufferCapacity = grown.capacity;
@@ -188,9 +189,9 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
  *  Both helpers are version-/dirty-gated and skip work in the steady state. */
 function uploadLayer(rr: SpriteRenderer, lg: LayerGpu, deltaMs: number): void {
     const layer = lg.layer;
-    lg.uploadedVersion = uploadSpriteInstances(rr._engine._device, layer, lg.instanceBuffer, lg.uploadedVersion);
+    lg.uploadedVersion = uploadSpriteInstances(rr._surface.engine._device, layer, lg.instanceBuffer, lg.uploadedVersion);
     buildSpriteLayerUbo(layer, rr._targetWidth, rr._targetHeight, _scratchUbo);
-    lg.uboUploaded = writeSpriteLayerUboIfDirty(rr._engine._device, lg.uniformBuffer, _scratchUbo, lg.lastUbo, lg.uboUploaded);
+    lg.uboUploaded = writeSpriteLayerUboIfDirty(rr._surface.engine._device, lg.uniformBuffer, _scratchUbo, lg.lastUbo, lg.uboUploaded);
     if (lg.fx) {
         _getSpriteFxHook()!.updateFx(lg.fx, layer, deltaMs);
     }
@@ -218,7 +219,7 @@ function ensureBindGroup(rr: SpriteRenderer, lg: LayerGpu, pipeline: GPURenderPi
     if (lg.bindGroup) {
         return lg.bindGroup;
     }
-    lg.bindGroup = createSpriteLayerBindGroup(rr._engine, pipeline, 0, lg.layer, lg.uniformBuffer, lg.fx);
+    lg.bindGroup = createSpriteLayerBindGroup(rr._surface.engine, pipeline, 0, lg.layer, lg.uniformBuffer, lg.fx);
     return lg.bindGroup;
 }
 
@@ -230,22 +231,26 @@ function compareLayers(a: Sprite2DLayer, b: Sprite2DLayer): number {
     return 0;
 }
 
-/** Create a `SpriteRenderer` for `engine`, pre-warming pipelines for the layers' blend modes. */
-export function createSpriteRenderer(engine: EngineContext, opts: SpriteRendererOptions): SpriteRenderer {
+/** Create a `SpriteRenderer` for `surface`, pre-warming pipelines for the layers' blend
+ *  modes. Pass the engine directly for the common single-canvas case (since
+ *  `EngineContext extends SurfaceContext`); pass an auxiliary surface created via
+ *  `createSurface` for multi-canvas. */
+export function createSpriteRenderer(surface: SurfaceContext, opts: SpriteRendererOptions): SpriteRenderer {
+    const engine = surface.engine;
     assertSpriteRendererLayers(opts.layers);
     const indexBuffer = createMappedBuffer(engine, SHARED_SPRITE_INDEX_DATA, BU.INDEX);
-    const targetSize = getRenderTargetSize(engine);
+    const canvas = surface.canvas;
 
     const layers = opts.layers.slice();
     const rr: SpriteRenderer = {
         _kind: KIND,
-        _engine: engine,
+        _surface: surface,
         _indexBuffer: indexBuffer,
         _pipelineCache: createSpritePipelineCache(),
         _layerGpu: new Map(),
         _visibleBundles: [],
-        _targetWidth: targetSize.width,
-        _targetHeight: targetSize.height,
+        _targetWidth: canvas.width,
+        _targetHeight: canvas.height,
         _disposed: false,
         _clear: opts.clear ?? true,
         _targetView: null,
@@ -265,7 +270,7 @@ export function createSpriteRenderer(engine: EngineContext, opts: SpriteRenderer
 
     // Pre-warm pipelines currently in use, so the first frame doesn't pay compile cost.
     for (const layer of rr.layers) {
-        getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
+        getOrCreateSpritePipeline(engine, rr._pipelineCache, surface.format, 1, layer.blendMode, false, false, undefined, undefined, layer);
     }
 
     return rr;
@@ -294,12 +299,12 @@ function spriteRendererUpdate(rr: SpriteRenderer): void {
     if (rr._disposed) {
         return;
     }
-    const deltaMs = rr._engine._currentDelta ?? 0;
+    const deltaMs = rr._surface.engine._currentDelta ?? 0;
     for (const hook of rr._beforeUpdate) {
         hook(deltaMs);
     }
     assertSpriteRendererLayers(rr.layers);
-    const targetSize = getRenderTargetSize(rr._engine);
+    const targetSize = getRenderTargetSize(rr._surface);
     rr._targetWidth = targetSize.width;
     rr._targetHeight = targetSize.height;
 
@@ -336,7 +341,7 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
         return 0;
     }
     assertSpriteRendererLayers(rr.layers);
-    const eng = rr._engine;
+    const eng = rr._surface.engine;
     const encoder = eng._currentEncoder;
     const swapView = rr._targetView ?? eng.scRT._colorView!;
 
@@ -366,7 +371,18 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
             continue;
         }
         const sampleCount = 1;
-        const pipeline = getOrCreateSpritePipeline(rr._engine, rr._pipelineCache, rr._engine.format, sampleCount, layer.blendMode, false, false, undefined, undefined, layer);
+        const pipeline = getOrCreateSpritePipeline(
+            rr._surface.engine,
+            rr._pipelineCache,
+            rr._surface.format,
+            sampleCount,
+            layer.blendMode,
+            false,
+            false,
+            undefined,
+            undefined,
+            layer
+        );
         if (lg.pipeline !== pipeline) {
             lg.pipeline = pipeline;
             lg.bindGroup = null;
@@ -376,8 +392,8 @@ function spriteRendererRecord(rr: SpriteRenderer): number {
         // (Re)record the bundle when count changes (drawIndexed instance count is baked in)
         // or when ensureLayerGpu reallocated the instance buffer (renderBundle was nulled).
         if (lg.renderBundle == null || lg.bundleCount !== layer.count) {
-            const be = rr._engine._device.createRenderBundleEncoder({
-                colorFormats: [rr._engine.format],
+            const be = rr._surface.engine._device.createRenderBundleEncoder({
+                colorFormats: [rr._surface.format],
                 sampleCount,
             });
             be.setIndexBuffer(rr._indexBuffer, "uint16");
@@ -409,7 +425,7 @@ export function addSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLayer)
         return;
     }
     sr._layers.push(layer);
-    getOrCreateSpritePipeline(sr._engine, sr._pipelineCache, sr._engine.format, 1, layer.blendMode, false);
+    getOrCreateSpritePipeline(sr._surface.engine, sr._pipelineCache, sr._surface.format, 1, layer.blendMode, false);
 }
 
 /** Remove a layer from the renderer and destroy any GPU resources cached for it. */
@@ -429,7 +445,7 @@ export function removeSpriteRendererLayer(sr: SpriteRenderer, layer: Sprite2DLay
 
 /** Push the renderer onto its engine's `_renderingContexts`. Idempotent — a second call is a no-op. */
 export function registerSpriteRenderer(sr: SpriteRenderer): void {
-    registerRenderingContext(sr._engine, sr);
+    registerRenderingContext(sr._surface, sr);
 }
 
 /**
@@ -448,7 +464,7 @@ export function setSpriteRendererTarget(sr: SpriteRenderer, target: Texture2D | 
 
 /** Splice the renderer out of its engine's `_renderingContexts`. No-op if not present. */
 export function unregisterSpriteRenderer(sr: SpriteRenderer): void {
-    unregisterRenderingContext(sr._engine, sr);
+    unregisterRenderingContext(sr._surface, sr);
 }
 
 /**
@@ -481,5 +497,5 @@ export function disposeSpriteRenderer(sr: SpriteRenderer): void {
 
 /** @internal Test-only accessor for pipeline-cache size. */
 export function _spriteRendererPipelineCacheSize(sr: SpriteRenderer): number {
-    return getSpritePipelineCacheSize(sr._pipelineCache, sr._engine._device);
+    return getSpritePipelineCacheSize(sr._pipelineCache, sr._surface.engine._device);
 }

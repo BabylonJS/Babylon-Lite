@@ -1,7 +1,8 @@
 import { U8 } from "./typed-arrays.js";
 import { TU, BU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
-import { startEngine, stopEngine, resizeEngine, _refreshScRT } from "./engine.js";
+import { startEngine, stopEngine, resizeEngine } from "./engine.js";
+import { _refreshScRT } from "./surface.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
@@ -187,18 +188,17 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
             throw new Error(`WebGPU device recovery missing required features: ${missingFeatures.join(", ")}`);
         }
         engine._device = await adapter.requestDevice({ requiredFeatures: state.requiredFeatures });
-        // Honour the lazily-enabled screenshot swapchain usage: re-apply COPY_SRC across recovery
-        // only if a capture had already toggled it on, so non-capturing engines stay COPY_SRC-free.
-        engine._context.configure({
-            device: engine._device,
-            format: engine.format,
-            alphaMode: engine._alphaMode,
-            usage: engine._swapchainCopySrc ? TU.RENDER_ATTACHMENT | TU.COPY_SRC : TU.RENDER_ATTACHMENT,
-        });
-        // Re-acquire the canvas swapchain texture into engine.scRT after the
-        // context is reconfigured against the new device (the previous device's texture
-        // is invalid) so the rebuilt frame graph wires a valid color attachment.
-        _refreshScRT(engine);
+        // Reconfigure every surface's canvas context against the new device and re-acquire
+        // its swapchain texture (the previous device's textures are invalid). The rebuilt
+        // frame graphs need fresh color attachments. Per-surface `_swapchainCopySrc` is
+        // honoured so surfaces that had been promoted to COPY_SRC for screenshot readback
+        // keep that capability across recovery; surfaces that never captured stay
+        // RENDER_ATTACHMENT-only.
+        for (const surface of engine.surfaces) {
+            const usage = surface._swapchainCopySrc ? TU.RENDER_ATTACHMENT | TU.COPY_SRC : TU.RENDER_ATTACHMENT;
+            surface._context.configure({ device: engine._device, format: surface.format, alphaMode: surface._alphaMode, usage });
+            _refreshScRT(surface);
+        }
         clearSceneBGLCache();
         resizeEngine(engine);
 
@@ -213,12 +213,14 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
 }
 
 async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
-    for (const ctx of engine._renderingContexts) {
-        const scene = ctx as SceneContext;
-        if (!isRenderingContextRegistered(engine, scene)) {
-            continue;
+    for (const surface of engine.surfaces) {
+        for (const ctx of surface._renderingContexts) {
+            const scene = ctx as SceneContext;
+            if (!isRenderingContextRegistered(surface, scene)) {
+                continue;
+            }
+            await rebuildSceneGpu(engine, scene);
         }
-        await rebuildSceneGpu(engine, scene);
     }
 }
 

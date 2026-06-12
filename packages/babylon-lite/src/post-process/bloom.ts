@@ -73,9 +73,9 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
         bloomScale: config.bloomScale ?? 0.5,
     };
     const name = config.name ?? "bloom";
-    const extractTarget = createScaledBloomTarget(`${name}-extract-output`, params.sourceTexture, params.bloomScale, eng);
-    const blurXTarget = createScaledBloomTarget(`${name}-blur-x-output`, params.sourceTexture, params.bloomScale, eng);
-    const blurYTarget = createScaledBloomTarget(`${name}-blur-y-output`, params.sourceTexture, params.bloomScale, eng);
+    const extractTarget = createScaledBloomTarget(`${name}-extract-output`, params.sourceTexture, params.bloomScale);
+    const blurXTarget = createScaledBloomTarget(`${name}-blur-x-output`, params.sourceTexture, params.bloomScale);
+    const blurYTarget = createScaledBloomTarget(`${name}-blur-y-output`, params.sourceTexture, params.bloomScale);
 
     const extract = createExtractHighlightsPostProcessTask(
         {
@@ -158,9 +158,9 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
         _blurXTarget: blurXTarget,
         _blurYTarget: blurYTarget,
         record(): void {
-            resizeScaledBloomTarget(task._extractTarget, params.sourceTexture, params.bloomScale, eng);
-            resizeScaledBloomTarget(task._blurXTarget, params.sourceTexture, params.bloomScale, eng);
-            resizeScaledBloomTarget(task._blurYTarget, params.sourceTexture, params.bloomScale, eng);
+            resizeScaledBloomTarget(task._extractTarget, params.sourceTexture, params.bloomScale);
+            resizeScaledBloomTarget(task._blurXTarget, params.sourceTexture, params.bloomScale);
+            resizeScaledBloomTarget(task._blurYTarget, params.sourceTexture, params.bloomScale);
             extract.record();
             blurX.record();
             blurY.record();
@@ -266,12 +266,12 @@ export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, e
     return task;
 }
 
-function createScaledBloomTarget(label: string, source: RenderTarget, scale: number, engine: EngineContext): RenderTarget {
+function createScaledBloomTarget(label: string, source: RenderTarget, scale: number): RenderTarget {
     const srcDesc = source._descriptor;
     if (!srcDesc.format) {
         throw new Error(`BloomPostProcessTask "${label}": sourceTexture must have a format.`);
     }
-    const sourceSize = resolveSourceSize(source, engine);
+    const sourceSize = resolveSourceSize(source);
     return createRenderTarget({
         lbl: label,
         format: srcDesc.format,
@@ -283,12 +283,12 @@ function createScaledBloomTarget(label: string, source: RenderTarget, scale: num
     });
 }
 
-function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number, engine: EngineContext): void {
+function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, scale: number): void {
     const format = source._descriptor.format;
     if (!format) {
         throw new Error(`BloomPostProcessTask "${target._descriptor.lbl ?? "target"}": sourceTexture must have a format.`);
     }
-    const sourceSize = resolveSourceSize(source, engine);
+    const sourceSize = resolveSourceSize(source);
     target._descriptor.format = format;
     target._descriptor.size = {
         width: Math.max(1, Math.floor(sourceSize.width * scale)),
@@ -296,13 +296,14 @@ function resizeScaledBloomTarget(target: RenderTarget, source: RenderTarget, sca
     };
 }
 
-function resolveSourceSize(source: RenderTarget, engine: EngineContext): { width: number; height: number } {
+function resolveSourceSize(source: RenderTarget): { width: number; height: number } {
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
     const desc: RenderTargetDescriptor = source._descriptor;
-    if (desc.size === "canvas") {
-        return { width: engine.canvas.width, height: engine.canvas.height };
+    if ("canvas" in desc.size) {
+        const canvas = desc.size.canvas;
+        return { width: canvas.width, height: canvas.height };
     }
     return desc.size;
 }

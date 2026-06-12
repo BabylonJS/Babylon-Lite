@@ -145,7 +145,7 @@ light.shadowGenerator = createEsmDirectionalShadowGenerator(engine, light, {
 });
 setShadowTaskCasterMeshes(light.shadowGenerator, [mesh]);
 ground.receiveShadows = true;
-await registerSceneWithShadowSupport(engine, scene);
+await registerSceneWithShadowSupport(scene);
 ```
 
 For PCF shadows:
@@ -159,7 +159,7 @@ spotLight.shadowGenerator = createPcfSpotlightShadowGenerator(engine, spotLight,
     mapSize: 1024,
 });
 setShadowTaskCasterMeshes(spotLight.shadowGenerator, [mesh]);
-await registerSceneWithShadowSupport(engine, scene);
+await registerSceneWithShadowSupport(scene);
 ```
 
 ### 7. Thin Instances Use Raw Arrays

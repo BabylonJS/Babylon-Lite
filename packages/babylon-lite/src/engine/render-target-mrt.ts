@@ -25,6 +25,7 @@
 
 import { TU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
+import type { SurfaceContext } from "./surface.js";
 
 /** Description of a multi-render-target — what to create, not the GPU objects themselves. */
 export interface RenderTargetMrtDescriptor {
@@ -34,8 +35,9 @@ export interface RenderTargetMrtDescriptor {
     colorFormats: readonly GPUTextureFormat[];
     depthStencilFormat?: GPUTextureFormat;
     sampleCount: number;
-    /** 'canvas' means match the canvas pixel size. Otherwise explicit pixels. */
-    size: "canvas" | { width: number; height: number };
+    /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
+     *  `buildRenderTargetMrt`), or explicit pixels. */
+    size: SurfaceContext | { width: number; height: number };
 }
 
 /** Allocated GPU state for an MRT render target. All arrays are length `colorFormats.length`. */
@@ -81,7 +83,7 @@ export function buildRenderTargetMrt(rt: RenderTargetMrt, engine: EngineContext)
     disposeRenderTargetMrt(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc, engine);
+    const { width, height } = resolveSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -163,9 +165,11 @@ export function getSampledColorTexture(rt: RenderTargetMrt, i: number): GPUTextu
     return rt._resolveColorTextures[i] ?? rt._colorTextures[i]!;
 }
 
-function resolveSize(desc: RenderTargetMrtDescriptor, engine: EngineContext): { width: number; height: number } {
-    if (desc.size === "canvas") {
-        return { width: engine.canvas.width, height: engine.canvas.height };
+function resolveSize(desc: RenderTargetMrtDescriptor): { width: number; height: number } {
+    const size = desc.size;
+    if ("canvas" in size) {
+        const canvas = size.canvas;
+        return { width: canvas.width, height: canvas.height };
     }
-    return desc.size;
+    return size;
 }

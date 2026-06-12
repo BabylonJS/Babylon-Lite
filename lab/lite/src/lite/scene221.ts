@@ -78,7 +78,7 @@ async function main(): Promise<void> {
         cube4Scale: () => ({ x: cube4.scaling.x, y: cube4.scaling.y, z: cube4.scaling.z }),
     };
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
 
     // Utility layer — its render pass overlays the main scene with a freshly
     // cleared depth buffer so gizmos always appear on top.
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     });
     attachAxisScaleGizmoToNode(axisScale, cube4);
 
-    await registerUtilityLayer(engine, utilityLayer);
+    await registerUtilityLayer(utilityLayer);
 
     let frame = 0;
     onBeforeRender(scene, () => {

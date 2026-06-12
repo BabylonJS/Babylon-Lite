@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     setShadowTaskCasterMeshes(sg, casters);
     light.shadowGenerator = sg;
 
-    await registerSceneWithShadowSupport(engine, scene);
+    await registerSceneWithShadowSupport(scene);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);

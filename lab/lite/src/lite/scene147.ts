@@ -56,7 +56,7 @@ async function main(): Promise<void> {
         lbl: "scene147-color",
         format: engine.format,
         samples: sampleCount,
-        size: "canvas",
+        size: engine,
     });
     const scRT = engine.scRT;
 
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     addTask(scene, sceneTask);
     addTask(scene, cocTask);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

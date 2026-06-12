@@ -114,7 +114,7 @@ function createShaderInstancedRenderable(
         if (!isOverride && mesh.material !== material) {
             return;
         }
-        h.updateCustomUbo(scene.engine, material);
+        h.updateCustomUbo(scene.surface.engine, material);
         h.updatePacket(scene, material, packet, context);
         if (isTransparent) {
             const m = mesh.worldMatrix as unknown as ArrayLike<number>;
@@ -172,7 +172,7 @@ function createShaderInstancedRenderable(
 
 /** Build one instanced renderable for `mesh` (used by the combined `rebuildSingle`). */
 function buildInstancedSingle(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, h: ShaderHelpers, cull?: CullModule): Renderable {
-    const bindings = h.getOrCreateShaderPipelineBindings(scene.engine, material);
+    const bindings = h.getOrCreateShaderPipelineBindings(scene.surface.engine, material);
     const packet = h.createPacket(scene, material, bindings.systemSpec, mesh);
     return createShaderInstancedRenderable(scene, material, packet, isOverride, h, cull);
 }

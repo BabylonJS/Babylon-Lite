@@ -51,7 +51,7 @@ interface SingleLightWgslModule {
 
 /** Build PBR Renderable(s) + a SceneUniformUpdater from PBR meshes. */
 export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], envTextures: EnvironmentTextures | undefined): Promise<MeshGroupBuildResult> {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const device = engine._device;
     // Per-size scratch buffers for material UBO re-writes (zero allocation per frame).
     const materialScratch = new Map<number, Float32Array>();

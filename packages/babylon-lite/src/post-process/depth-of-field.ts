@@ -87,18 +87,19 @@ function blurLevelConfig(level: DepthOfFieldBlurLevel): BlurLevelConfig {
     }
 }
 
-function resolveSourceSize(source: RenderTarget, engine: EngineContext): { width: number; height: number } {
+function resolveSourceSize(source: RenderTarget): { width: number; height: number } {
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    if (source._descriptor.size === "canvas") {
-        return { width: engine.canvas.width, height: engine.canvas.height };
+    if ("canvas" in source._descriptor.size) {
+        const canvas = source._descriptor.size.canvas;
+        return { width: canvas.width, height: canvas.height };
     }
     return source._descriptor.size;
 }
 
-function blurTargetSize(source: RenderTarget, ratio: number, engine: EngineContext): { width: number; height: number } {
-    const size = resolveSourceSize(source, engine);
+function blurTargetSize(source: RenderTarget, ratio: number): { width: number; height: number } {
+    const size = resolveSourceSize(source);
     return { width: Math.max(1, Math.floor(size.width * ratio)), height: Math.max(1, Math.floor(size.height * ratio)) };
 }
 
@@ -142,8 +143,10 @@ export function createDepthOfFieldPostProcessTask(config: DepthOfFieldPostProces
         throw new Error(`DepthOfFieldPostProcessTask "${name}": sourceTexture must have a format.`);
     }
 
-    // Circle-of-confusion target (single-channel, filterable), full source size.
-    const cocTarget = createRenderTarget({ lbl: `${name}-coc`, format: "r16float", samples: 1, size: "canvas" });
+    // Circle-of-confusion target (single-channel, filterable). Inherits the source's size
+    // descriptor (a `SurfaceContext` for canvas-sized sources, or explicit pixels) so it
+    // tracks whichever target the source uses.
+    const cocTarget = createRenderTarget({ lbl: `${name}-coc`, format: "r16float", samples: 1, size: params.sourceTexture._descriptor.size });
     const coc = createCircleOfConfusionPostProcessTask(
         {
             name: `${name}-coc`,
@@ -168,7 +171,7 @@ export function createDepthOfFieldPostProcessTask(config: DepthOfFieldPostProces
     const blurXTargets: RenderTarget[] = [];
     const blurSteps: RenderTarget[] = [];
     for (let i = 0; i < blurCount; i++) {
-        const size = blurTargetSize(params.sourceTexture, blurRatios[i]!, eng);
+        const size = blurTargetSize(params.sourceTexture, blurRatios[i]!);
         const yTarget = createRenderTarget({ lbl: `${name}-blur-y-${i}`, format: sourceFormat, samples: 1, size });
         const xTarget = createRenderTarget({ lbl: `${name}-blur-x-${i}`, format: sourceFormat, samples: 1, size });
         const yTask = createDepthOfFieldBlurPostProcessTask(
@@ -241,7 +244,7 @@ export function createDepthOfFieldPostProcessTask(config: DepthOfFieldPostProces
         _blurYTargets: blurYTargets,
         record(): void {
             for (let i = 0; i < blurCount; i++) {
-                const size = blurTargetSize(params.sourceTexture, blurRatios[i]!, eng);
+                const size = blurTargetSize(params.sourceTexture, blurRatios[i]!);
                 blurYTargets[i]!._descriptor.size = size;
                 blurXTargets[i]!._descriptor.size = size;
             }

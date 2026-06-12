@@ -103,7 +103,7 @@ return vec4<f32>(pal.rgb, texel.a) * in.tint;`,
     });
     addFacingBillboardSystem(scene, billboards);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - initStart);

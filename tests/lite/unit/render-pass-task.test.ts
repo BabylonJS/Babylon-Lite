@@ -109,7 +109,7 @@ function makeMockEngine(options?: {
         },
     } as unknown as GPUDevice;
 
-    return {
+    const eng = {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: options?.msaaSamples ?? 4,
         drawCallCount: 0,
@@ -135,14 +135,17 @@ function makeMockEngine(options?: {
             _colorView: {},
             _depthTexture: null,
             _depthView: null,
-            _descriptor: { format: "bgra8unorm", samples: 1, size: "canvas" },
+            _descriptor: { format: "bgra8unorm", samples: 1, size: { width: 800, height: 600 } },
             _width: 800,
             _height: 600,
             _eager: true,
         } as unknown as RenderTarget,
         _currentDelta: 0,
         _cbs: [],
-    };
+    } as unknown as EngineContext;
+    const _surfaces = [eng];
+    Object.assign(eng, { engine: eng, surfaces: _surfaces, _surfaces });
+    return eng;
 }
 
 function makeTransparentRenderable(id: string, initialCenter: [number, number, number], updatedCenter: [number, number, number], drawOrder: string[]): Renderable {
@@ -216,7 +219,7 @@ describe("RenderPassTask transparent sorting", () => {
             makeTransparentRenderable("near-after-update", [0, 0, 2], [0, 0, 2], drawOrder)
         );
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         expect(drawOrder).toEqual(["far-after-update", "near-after-update"]);
@@ -233,7 +236,7 @@ describe("RenderPassTask transparent sorting", () => {
             makeTransparentRenderable("near-but-wide", [0, 0, 0], [100, 0, 2], drawOrder)
         );
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         expect(drawOrder).toEqual(["far-in-view", "near-but-wide"]);
@@ -252,7 +255,7 @@ describe("RenderPassTask transparent sorting", () => {
             makeDrawOrderRenderable("transparent", { order: 200, isTransparent: true }, drawOrder)
         );
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         expect(drawOrder).toEqual(["opaque", "dynamic-depth-write", "transmissive", "transparent"]);
@@ -270,7 +273,7 @@ describe("RenderPassTask transparent sorting", () => {
             makeDrawOrderRenderable("glass-b", { order: 150, _transmissive: true }, defaultOrder)
         );
         enableSceneTransmission(defaultScene, defaultEngine);
-        await registerScene(defaultEngine, defaultScene);
+        await registerScene(defaultScene);
         defaultScene._record();
         expect(defaultCopies).toBe(1);
 
@@ -286,7 +289,7 @@ describe("RenderPassTask transparent sorting", () => {
             makeDrawOrderRenderable("glass-b", { order: 150, _transmissive: true }, everyOrder)
         );
         enableSceneTransmission(everyScene, everyEngine);
-        await registerScene(everyEngine, everyScene);
+        await registerScene(everyScene);
         everyScene._record();
         expect(everyCopies).toBe(2);
     });
@@ -299,7 +302,7 @@ describe("RenderPassTask transparent sorting", () => {
         scene._renderables.push(makeDrawOrderRenderable("transmissive", { isTransparent: true, _transmissive: true }, []));
 
         enableSceneTransmission(scene, engine);
-        await registerScene(engine, scene);
+        await registerScene(scene);
 
         expect(samplers).toContainEqual({
             magFilter: "linear",
@@ -320,7 +323,7 @@ describe("RenderPassTask transparent sorting", () => {
         scene._renderables.push(makeDrawOrderRenderable("glass", { _transmissive: true }, []));
 
         enableSceneTransmission(scene, engine);
-        await registerScene(engine, scene);
+        await registerScene(scene);
 
         const refractionTexture = textures.find(
             (descriptor) => descriptor.format === "rgba16float" && (descriptor.size as GPUExtent3DDict).width === 1024 && (descriptor.usage & GPUTextureUsage.COPY_DST) !== 0
@@ -337,7 +340,7 @@ describe("RenderPassTask transparent sorting", () => {
         scene._renderables.push(makeDrawOrderRenderable("glass", { _transmissive: true }, []));
 
         enableSceneTransmission(scene, engine);
-        await registerScene(engine, scene);
+        await registerScene(scene);
 
         const refractionTexture = textures.find(
             (descriptor) => descriptor.format === "rgba16float" && (descriptor.size as GPUExtent3DDict).width === 1024 && (descriptor.usage & GPUTextureUsage.COPY_DST) !== 0
@@ -364,7 +367,7 @@ describe("RenderPassTask transparent sorting", () => {
         scene._renderables.push(makeDrawOrderRenderable("opaque", { order: 100 }, []), makeDrawOrderRenderable("glass", { order: 150, _transmissive: true }, []));
 
         enableSceneTransmission(scene, engine);
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         expect(textures.some((descriptor) => String(descriptor.label).includes("transmission-snapshot"))).toBe(false);
@@ -402,7 +405,7 @@ describe("RenderPassTask transparent sorting", () => {
         );
 
         enableSceneTransmission(scene, engine);
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         expect(drawOrder).toEqual(["opaque", "glass-a", "glass-b", "glass-c"]);
@@ -423,7 +426,7 @@ describe("RenderPassTask transparent sorting", () => {
         });
         const scene = createSceneContext(engine) as SceneContext;
         scene.camera = makeCamera();
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         expect(seenDescriptors.length).toBeGreaterThan(0);
@@ -467,7 +470,7 @@ describe("RenderPassTask transparent sorting", () => {
         const task = createRenderTask({ name: "scene", rt: colorRt, depth: externalDepth }, engine, scene);
         scene._frameGraph._tasks.push(task);
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         const descriptor = seenDescriptors.find((d) => d.depthStencilAttachment);
@@ -507,7 +510,7 @@ describe("RenderPassTask transparent sorting", () => {
         const task = createRenderTask({ name: "scene", rt, clr: false }, engine, scene);
         scene._frameGraph._tasks.push(task);
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
         scene._record();
 
         const descriptor = seenDescriptors.find((d) => d.depthStencilAttachment);

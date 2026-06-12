@@ -2,6 +2,7 @@ import { U8 } from "../engine/typed-arrays.js";
 import { BU, SS } from "../engine/gpu-flags.js";
 import { registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
@@ -123,7 +124,7 @@ export interface EffectRenderer extends RenderingContext {
 }
 
 interface EffectRendererInternal extends EffectRenderer {
-    _engine: EngineContext;
+    _surface: SurfaceContext;
     _effect: EffectWrapperInternal;
     _clear: boolean;
     _rt: RenderTarget;
@@ -288,19 +289,19 @@ export function disposeEffectWrapper(wrapper: EffectWrapper): void {
  * Call `registerEffectRenderer` to start rendering, `unregisterEffectRenderer`
  * to pause, and `disposeEffectRenderer` to free GPU resources.
  */
-export function createEffectRenderer(engine: EngineContext, effect: EffectWrapper, options?: EffectRendererOptions): EffectRenderer {
-    const eng = engine as EngineContext;
+export function createEffectRenderer(surface: SurfaceContext, effect: EffectWrapper, options?: EffectRendererOptions): EffectRenderer {
+    const eng = surface.engine;
     const ew = effect as EffectWrapperInternal;
     const name = options?.name ?? effect.name;
     const clear = options?.clear !== false;
     const clearColor: GPUColorDict = options?.clearColor ?? { r: 0, g: 0, b: 0, a: 1 };
     const update = options?.update;
 
-    // No MSAA → render straight into the single-sample engine scRT; MSAA →
+    // No MSAA → render straight into the single-sample surface scRT; MSAA →
     // render into an MSAA colour RT and resolve into the scRT at end-of-pass.
-    const useMsaa = eng.msaaSamples > 1;
-    const rt = useMsaa ? createRenderTarget({ lbl: `${name}-msaa`, format: eng.format, samples: eng.msaaSamples, size: "canvas" }) : eng.scRT;
-    const resolveRt = useMsaa ? eng.scRT : undefined;
+    const useMsaa = surface.msaaSamples > 1;
+    const rt = useMsaa ? createRenderTarget({ lbl: `${name}-msaa`, format: surface.format, samples: surface.msaaSamples, size: surface }) : surface.scRT;
+    const resolveRt = useMsaa ? surface.scRT : undefined;
 
     const targetSignature: RenderTargetSignature = {
         _colorFormat: rt._descriptor.format,
@@ -318,7 +319,7 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
         name,
         clearColor,
         _drawCallsPre: 0,
-        _engine: eng,
+        _surface: surface,
         _effect: ew,
         _clear: clear,
         _rt: rt,
@@ -335,9 +336,9 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
             if (er._disposed) {
                 return 0;
             }
-            ensureRtCanvasSize(er._rt, er._engine);
+            ensureRtCanvasSize(er._rt);
             applyColorAttachmentState(er._colorAttachment, er._rt, resolveRt, er._clear, er.clearColor);
-            const encoder = er._engine._currentEncoder;
+            const encoder = er._surface.engine._currentEncoder;
             if (!encoder) {
                 return 0;
             }
@@ -358,22 +359,22 @@ export function createEffectRenderer(engine: EngineContext, effect: EffectWrappe
             if (er._disposed) {
                 return;
             }
-            buildRenderTarget(er._rt, er._engine);
+            buildRenderTarget(er._rt, er._surface.engine);
         },
     };
     return er;
 }
 
-/** Register the effect renderer with its engine. Idempotent — a second call is a no-op. */
+/** Register the effect renderer with its surface. Idempotent — a second call is a no-op. */
 export function registerEffectRenderer(er: EffectRenderer): void {
     const internal = er as EffectRendererInternal;
     prepareEffectRenderer(internal);
-    registerRenderingContext(internal._engine, er);
+    registerRenderingContext(internal._surface, er);
 }
 
-/** Unregister the effect renderer from its engine. No-op if not registered. */
+/** Unregister the effect renderer from its surface. No-op if not registered. */
 export function unregisterEffectRenderer(er: EffectRenderer): void {
-    unregisterRenderingContext((er as EffectRendererInternal)._engine, er);
+    unregisterRenderingContext((er as EffectRendererInternal)._surface, er);
 }
 
 /** Unregister and free all GPU resources owned by the renderer. */
@@ -418,14 +419,17 @@ function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: Render
     att.resolveTarget = resolveRt?._colorView ?? undefined;
 }
 
-function ensureRtCanvasSize(rt: RenderTarget, eng: EngineContext): void {
-    if (rt._descriptor.size !== "canvas") {
+function ensureRtCanvasSize(rt: RenderTarget): void {
+    const size = rt._descriptor.size;
+    if (!("canvas" in size)) {
         return;
     }
-    if (rt._width === eng.canvas.width && rt._height === eng.canvas.height) {
+    // Surface-sized RT: rebuild when the surface's canvas backing-store has resized.
+    const canvas = size.canvas;
+    if (rt._width === canvas.width && rt._height === canvas.height) {
         return;
     }
-    buildRenderTarget(rt, eng);
+    buildRenderTarget(rt, size.engine);
 }
 
 function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: RenderTargetSignature): GPURenderPipeline {

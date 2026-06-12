@@ -36,7 +36,7 @@ function makeMockEngine(): EngineContext {
             }) as unknown as GPUTexture,
         queue: { writeBuffer: () => undefined },
     } as unknown as GPUDevice;
-    return {
+    const eng = {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: 1,
         drawCallCount: 0,
@@ -56,14 +56,17 @@ function makeMockEngine(): EngineContext {
             _colorTexture: {},
             _depthTexture: null,
             _depthView: null,
-            _descriptor: { format: "bgra8unorm", samples: 1, size: "canvas" },
+            _descriptor: { format: "bgra8unorm", samples: 1, size: { width: 800, height: 600 } },
             _width: 0,
             _height: 0,
             _eager: true,
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget,
         _currentDelta: 0,
         _cbs: [],
-    };
+    } as unknown as EngineContext;
+    const _surfaces = [eng];
+    Object.assign(eng, { engine: eng, surfaces: _surfaces, _surfaces });
+    return eng;
 }
 
 describe("GeometryRendererTask", () => {
@@ -161,7 +164,7 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const depth = {
-            _descriptor: { dFormat: "depth32float" as const, samples: 4 as const, size: "canvas" as const },
+            _descriptor: { dFormat: "depth32float" as const, samples: 4 as const, size: { width: 800, height: 600 } as const },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -202,7 +205,7 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const external = {
-            _descriptor: { dFormat: "depth32float" as const, samples: 1 as const, size: "canvas" as const },
+            _descriptor: { dFormat: "depth32float" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -226,7 +229,7 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const target = {
-            _descriptor: { format: "bgra8unorm" as const, samples: 1 as const, size: "canvas" as const },
+            _descriptor: { format: "bgra8unorm" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -242,7 +245,7 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const target = {
-            _descriptor: { format: "bgra8unorm" as const, samples: 4 as const, size: "canvas" as const },
+            _descriptor: { format: "bgra8unorm" as const, samples: 4 as const, size: { width: 800, height: 600 } as const },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -259,7 +262,7 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const target = {
-            _descriptor: { samples: 1 as const, size: "canvas" as const },
+            _descriptor: { samples: 1 as const, size: { width: 800, height: 600 } as const },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,

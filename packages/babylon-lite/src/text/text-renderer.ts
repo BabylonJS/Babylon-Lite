@@ -5,8 +5,9 @@
  *  `TextLayer` is the 2D pixel-space placement record bound to a single TextData; it
  *  lives here because it is consumed exclusively by `TextRenderer`. */
 
-import { getRenderTargetSize, registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
-import type { EngineContext, RenderingContext } from "../engine/engine.js";
+import { registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
+import type { RenderingContext } from "../engine/engine.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
@@ -87,7 +88,7 @@ export interface TextRenderer extends RenderingContext {
     readonly layers: readonly TextLayer[];
     /** @internal Mutable alias of {@link layers} (same array reference). */
     _layers: TextLayer[];
-    /** @internal */ readonly _engine: EngineContext;
+    /** @internal */ readonly _surface: SurfaceContext;
     /** @internal Per-layer GPU resources, keyed by layer. */
     _layerGpu: Map<TextLayer, LayerGpu>;
     /** @internal */ _targetWidth: number;
@@ -143,11 +144,12 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
     if (lg) {
         return lg;
     }
-    const device = rr._engine._device;
+    const engine = rr._surface.engine;
+    const device = engine._device;
     const cap = Math.max(layer.data._instanceCount, 8);
     lg = {
         layer,
-        textU: createEmptyUniformBuffer(rr._engine, TEXT_UBO_BYTES, "text-layer-ubo"),
+        textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-layer-ubo"),
         instanceBuf: device.createBuffer({
             label: "text-layer-instances",
             size: cap * TEXT_INSTANCE_BYTES,
@@ -186,7 +188,7 @@ function ensureInstanceCapacity(device: GPUDevice, lg: LayerGpu, needed: number)
 }
 
 function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGroupLayout): void {
-    const device = rr._engine._device;
+    const device = rr._surface.engine._device;
     const layer = lg.layer;
     const data = layer.data;
 
@@ -271,16 +273,16 @@ function compareLayers(a: TextLayer, b: TextLayer): number {
     return a.order - b.order;
 }
 
-export function createTextRenderer(engine: EngineContext, opts: TextRendererOptions): TextRenderer {
-    const targetSize = getRenderTargetSize(engine);
+export function createTextRenderer(surface: SurfaceContext, opts: TextRendererOptions): TextRenderer {
+    const canvas = surface.canvas;
     const layers = opts.layers.slice();
 
     const rr: TextRenderer = {
         _kind: KIND,
-        _engine: engine,
+        _surface: surface,
         _layerGpu: new Map(),
-        _targetWidth: targetSize.width,
-        _targetHeight: targetSize.height,
+        _targetWidth: canvas.width,
+        _targetHeight: canvas.height,
         _disposed: false,
         _clear: opts.clear ?? true,
         layers,
@@ -301,7 +303,7 @@ function textRendererUpdate(rr: TextRenderer): void {
     if (rr._disposed) {
         return;
     }
-    const size = getRenderTargetSize(rr._engine);
+    const size = rr._surface.canvas;
     rr._targetWidth = size.width;
     rr._targetHeight = size.height;
 
@@ -311,7 +313,7 @@ function textRendererUpdate(rr: TextRenderer): void {
 
     // Pipeline: depth-less, sampleCount=1, swapchain format. The key is identical for every
     // layer, so resolve it once per frame and reuse the pipeline + bind-group layout below.
-    const { pipeline, cache } = getOrCreateTextPipeline(rr._engine, rr._engine.format, 1, null, false);
+    const { pipeline, cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
 
     for (const layer of rr._layers) {
         if (!layer.visible) {
@@ -332,9 +334,9 @@ function textRendererRecord(rr: TextRenderer): number {
     if (rr._disposed) {
         return 0;
     }
-    const eng = rr._engine;
+    const eng = rr._surface.engine;
     const encoder = eng._currentEncoder;
-    const swapView = eng.scRT._colorView!;
+    const swapView = rr._surface.scRT._colorView!;
 
     const pass = encoder.beginRenderPass({
         colorAttachments: [
@@ -349,7 +351,7 @@ function textRendererRecord(rr: TextRenderer): number {
 
     let drawCalls = 0;
     let lastPipeline: GPURenderPipeline | null = null;
-    const { cache } = getOrCreateTextPipeline(rr._engine, rr._engine.format, 1, null, false);
+    const { cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
     const quadVertex = cache.quadVertexBuffer;
     pass.setVertexBuffer(0, quadVertex);
 
@@ -411,11 +413,11 @@ export function removeTextRendererLayer(tr: TextRenderer, layer: TextLayer): boo
 }
 
 export function registerTextRenderer(tr: TextRenderer): void {
-    registerRenderingContext(tr._engine, tr);
+    registerRenderingContext(tr._surface, tr);
 }
 
 export function unregisterTextRenderer(tr: TextRenderer): void {
-    unregisterRenderingContext(tr._engine, tr);
+    unregisterRenderingContext(tr._surface, tr);
 }
 
 export function disposeTextRenderer(tr: TextRenderer): void {

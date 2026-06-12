@@ -83,7 +83,7 @@ export async function startOffscreenScene(canvas: RenderCanvas, brdfUrl: string 
         camera.alpha += 0.0035;
     });
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     return engine;
 }

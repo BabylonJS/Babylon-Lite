@@ -102,7 +102,7 @@ function _variantKey(meshFeatures: number): number {
 /** Build a {@link Renderable} for one mesh drawn through a Standard geometry view.
  *  Reuses or creates per-(view, mesh-variant) shared resources on `view._geometry`. */
 export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh, view: StandardGeometryMaterialView): Renderable {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
     const device = engine._device;
     const source = view.source as StandardMaterialProps;
     // Geometry pass has no receiver path — pass receiveShadows=false.

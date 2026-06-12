@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     addToScene(scene, sphere);
     addToScene(scene, ground);
 
-    await registerSceneWithShadowSupport(engine, scene);
+    await registerSceneWithShadowSupport(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

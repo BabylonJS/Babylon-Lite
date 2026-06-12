@@ -281,7 +281,7 @@ await loadEnvironment(scene, 'environmentSpecular.env');
 | `mesh.receiveShadows = true` | `mesh.receiveShadows = true` *(same)* |
 
 **Key differences**:
-- Shadow support requires `registerSceneWithShadowSupport(engine, scene)`.
+- Shadow support requires `registerSceneWithShadowSupport(scene)`.
 - Caster meshes are assigned through `setShadowTaskCasterMeshes()`.
 - ESM directional and PCF spotlight shadows use explicit factory names.
 

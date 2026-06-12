@@ -15,7 +15,6 @@
 
 import type { EnvironmentTextures } from "../loader-env/load-env.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { EngineContext } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "../loader-env/env-helpers.js";
 import { parseRGBE, computeSHFromEquirect } from "./hdr-parser.js";
@@ -46,7 +45,7 @@ export interface HdrLoadOptions {
  * @returns The assembled environment textures (also stored on the scene).
  */
 export async function loadHdrEnvironment(scene: SceneContext, url: string, options?: HdrLoadOptions): Promise<EnvironmentTextures> {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
     const faceSize = options?.faceSize ?? 256;
 
     // 1. Fetch and parse RGBE

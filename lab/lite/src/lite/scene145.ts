@@ -55,7 +55,7 @@ async function main(): Promise<void> {
         format: engine.format,
         dFormat: "depth24plus-stencil8",
         samples: samples,
-        size: "canvas",
+        size: engine,
     });
     // Single-sample staging target used by the final shader-blit to the swap.
     // We could hardware-resolve the MSAA intermediate straight to the swap with
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
         lbl: "scene145-ss-intermediate",
         format: engine.format,
         samples: 1,
-        size: "canvas",
+        size: engine,
     });
     // Final swapchain target — receives the composite via a closing copy task.
     const scRT = engine.scRT;
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
         lbl: "scene145-real-color",
         format: engine.format,
         samples: samples,
-        size: "canvas",
+        size: engine,
     });
     const sceneTask = createRenderTask(
         {
@@ -223,7 +223,7 @@ async function main(): Promise<void> {
         )
     );
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

@@ -569,7 +569,7 @@ if fogMode > 0: color.rgb = mix(fogColor, color.rgb, fogCoeff)
 
 ```
 addToScene(scene, mesh)            → mesh registered for deferred building
-registerScene(engine, scene)       → runs deferred builders and builds frame graph
+registerScene(scene)       → runs deferred builders and builds frame graph
   standardGroupBuilder()           → detects features, dynamically imports fragment modules
   buildStandardMeshRenderables()   → groups meshes by features, composes shaders
     composeStandardShader()        → createStandardTemplate() + composeShader(template, fragments)

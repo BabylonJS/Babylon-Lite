@@ -1,5 +1,4 @@
 import type { SceneContext } from "../../scene/scene.js";
-import type { EngineContext } from "../../engine/engine.js";
 import { computeSceneSize } from "./scene-size.js";
 
 export interface DdsEnvironmentBackgroundOptions {
@@ -11,7 +10,7 @@ export interface DdsEnvironmentBackgroundOptions {
 }
 
 export function addDdsEnvironmentBackground(scene: SceneContext, options: DdsEnvironmentBackgroundOptions): void {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
     const groundTexPromise = fetch(options.groundTextureUrl)
         .then((r) => r.blob())
         .then((b) => createImageBitmap(b, { premultiplyAlpha: "none" }));

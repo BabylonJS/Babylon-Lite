@@ -108,7 +108,7 @@ Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF ren
 `startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
 
 ```
-registerScene(engine, scene):
+registerScene(scene):
   adds scene as a RenderingContext
 
 startEngine(engine):
@@ -144,14 +144,14 @@ Each frame consists of:
 
 ### Deferred Builder Execution
 
-When `registerScene(engine, scene)` is called, the scene runs its deferred builders, builds material renderables, and rebuilds its frame graph. `startEngine(engine)` then begins the rAF loop and resolves after the first `renderFrame()` call completes.
+When `registerScene(scene)` is called, the scene runs its deferred builders, builds material renderables, and rebuilds its frame graph. `startEngine(engine)` then begins the rAF loop and resolves after the first `renderFrame()` call completes.
 
 Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` through render-target helpers, not by the engine render loop itself.
 
 ## State Machine / Lifecycle
 
 ```
-[Created] --registerScene(engine, scene)--> [Context registered + frame graph built]
+[Created] --registerScene(scene)--> [Context registered + frame graph built]
           --startEngine(engine)-----------> [Running (rAF loop)]
                                                           |
                                                       resizeEngine(engine) each frame
@@ -171,7 +171,7 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 | `engine._device`                                       | `engine._device`                                                                                                                                    |
 | `engine.format`                                        | `engine._textureHelper._glslang.getPreferredFormat()`                                                                                               |
 | `engine.msaaSamples` (1 or 4)                          | `engine._samples`                                                                                                                                   |
-| `registerScene(engine, scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
+| `registerScene(scene)` + `startEngine(engine)` | `engine.runRenderLoop(() => scene.render())` — also similar to `scene.whenReadyAsync()` in that the returned Promise resolves after the first frame |
 | `stopEngine(engine)`                                   | `engine.stopRenderLoop()`                                                                                                                           |
 | `resizeEngine(engine)`                                 | `engine.resize()`                                                                                                                                   |
 | Registered `RenderingContext`s                         | Engine render loop callbacks                                                                                                                        |

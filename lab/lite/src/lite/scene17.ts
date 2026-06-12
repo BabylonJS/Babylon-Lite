@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     ground.material = createStandardMaterial();
     addToScene(scene, ground);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

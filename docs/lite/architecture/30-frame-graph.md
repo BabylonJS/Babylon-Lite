@@ -181,10 +181,10 @@ Rules:
 
 ### Internal Shadow Adapter Task
 
-`registerSceneWithShadowSupport(engine, scene)` installs an internal `ShadowTask` before the default `"scene"` render task:
+`registerSceneWithShadowSupport(scene)` installs an internal `ShadowTask` before the default `"scene"` render task:
 
 ```typescript
-await registerSceneWithShadowSupport(engine, scene);
+await registerSceneWithShadowSupport(scene);
 createRenderTask({ name: "scene", rt: swapRT, clrColor: scene.clearColor }, engine, scene);
 ```
 
@@ -445,7 +445,7 @@ const task = createRenderTask({ name: "r1", rt, cam: rttCamera, clrColor: { r: 0
 addTaskAtStart(scene, task);
 task.addMesh(sourceMesh, { material: overrideMaterial });
 
-await registerScene(engine, scene);
+await registerScene(scene);
 await getFrameGraph(scene).build();
 await startEngine(engine);
 ```

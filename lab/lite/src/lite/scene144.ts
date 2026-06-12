@@ -59,7 +59,7 @@ async function main(): Promise<void> {
         format: engine.format,
         dFormat: "depth24plus-stencil8",
         samples: 1,
-        size: "canvas",
+        size: engine,
     });
     const sourceTask = createRenderTask(
         {
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     addTaskAtStart(scene, sourceTask);
     addTask(scene, bloom);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     bloom.updateUniforms();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

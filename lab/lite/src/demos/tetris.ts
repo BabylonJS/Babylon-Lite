@@ -249,7 +249,7 @@ async function main(): Promise<void> {
     });
 
     progress.done();
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.ready = "true";
 }

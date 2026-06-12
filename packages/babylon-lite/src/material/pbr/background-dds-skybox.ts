@@ -61,7 +61,7 @@ export async function buildDdsSkyboxRenderable(
     skyboxTextureUrl?: string,
     enableNoise = true
 ): Promise<Renderable> {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
 
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 

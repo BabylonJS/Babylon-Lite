@@ -62,7 +62,7 @@ function makeMockEngine(capture: BeginPassCapture): EngineContext {
             }) as unknown as GPUTexture,
         queue: { writeBuffer: () => undefined },
     } as unknown as GPUDevice;
-    return {
+    const eng = {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
         msaaSamples: 1,
         drawCallCount: 0,
@@ -90,14 +90,17 @@ function makeMockEngine(capture: BeginPassCapture): EngineContext {
             _colorView: { id: "swap" },
             _depthTexture: null,
             _depthView: null,
-            _descriptor: { format: "bgra8unorm", samples: 1, size: "canvas" },
+            _descriptor: { format: "bgra8unorm", samples: 1, size: { width: 800, height: 600 } },
             _width: 800,
             _height: 600,
             _eager: true,
         } as unknown as RenderTarget,
         _currentDelta: 0,
         _cbs: [],
-    };
+    } as unknown as EngineContext;
+    const _surfaces = [eng];
+    Object.assign(eng, { engine: eng, surfaces: _surfaces, _surfaces });
+    return eng;
 }
 
 function makeOffscreenRT(format: GPUTextureFormat, width: number, height: number, sampleCount: 1 | 4 = 1) {

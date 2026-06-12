@@ -134,7 +134,7 @@ export function buildSolidSkyboxRenderable(
     rootPosition: [number, number, number],
     primaryColor: [number, number, number]
 ): Renderable {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
     const cc = scene.clearColor;
     const skyBufs = createSkyboxBuffers(engine, skyHalfSize);

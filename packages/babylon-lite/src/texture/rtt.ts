@@ -18,9 +18,12 @@ import type { Texture2D } from "./texture-2d.js";
  *  may change before the frame graph builds, which would invalidate the eagerly-
  *  created texture handle that downstream bind groups have already captured. */
 export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor): { rt: RenderTarget; texture: Texture2D } {
-    if (descriptor.size === "canvas") {
-        throw new Error("createRenderTargetTexture: descriptor.size must be a fixed { width, height }, not 'canvas'.");
+    if ("canvas" in descriptor.size) {
+        throw new Error(
+            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a SurfaceContext (would invalidate eagerly-allocated textures when the canvas resizes)."
+        );
     }
+    const fixedSize = descriptor.size;
     const rt = createRenderTarget(descriptor);
     buildRenderTarget(rt, engine);
     rt._eager = true;
@@ -32,8 +35,8 @@ export function createRenderTargetTexture(engine: EngineContext, descriptor: Ren
             texture: rt._depthTexture,
             view: rt._depthTexture.createView({ aspect: "depth-only" }),
             sampler: getNearestSampler(engine),
-            width: descriptor.size.width,
-            height: descriptor.size.height,
+            width: fixedSize.width,
+            height: fixedSize.height,
             invertY: false,
             _sampleType: "depth",
         };
@@ -43,8 +46,8 @@ export function createRenderTargetTexture(engine: EngineContext, descriptor: Ren
         texture: rt._colorTexture,
         view: rt._colorView,
         sampler: getBilinearSampler(engine),
-        width: descriptor.size.width,
-        height: descriptor.size.height,
+        width: fixedSize.width,
+        height: fixedSize.height,
         invertY: true,
     };
     return { rt, texture };

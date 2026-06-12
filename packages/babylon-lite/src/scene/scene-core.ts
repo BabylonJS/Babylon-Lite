@@ -1,5 +1,6 @@
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import { _vis, isRenderingContextRegistered, registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -34,7 +35,12 @@ export type ClipPlane = readonly [number, number, number, number];
 
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
-    readonly engine: EngineContext;
+    /** Surface this scene renders into. Set at scene-creation time and immutable
+     *  afterwards — the default render task is sized and MSAA-matched to this surface,
+     *  and `registerScene` attaches the scene to it. For the engine's primary surface
+     *  (the common single-canvas case) this is the engine itself. The owning engine is
+     *  reachable via `scene.surface.engine`. */
+    readonly surface: SurfaceContext;
     clearColor: GPUColorDict;
     camera: Camera | null;
     lights: LightBase[];
@@ -166,13 +172,17 @@ function installMaterialSetter(scene: SceneContext, mesh: Mesh): void {
     });
 }
 
-/** Create an empty scene context bound to the given engine. */
-export function createSceneContext(engine: EngineContext, options?: SceneContextOptions): SceneContext {
-    const eng = engine as EngineContext;
+/** Create an empty scene context bound to the given `surface`. The default render task
+ *  is built against the surface's format, MSAA configuration, and swapchain RT — the
+ *  scene is permanently bound to that surface. Pass `engine` directly (since
+ *  `EngineContext extends SurfaceContext`) for the common single-canvas case, or pass
+ *  an auxiliary surface created via `createSurface`. */
+export function createSceneContext(surface: SurfaceContext, options?: SceneContextOptions): SceneContext {
+    const eng = surface.engine;
 
     // Closures below capture `ctx` by-reference via this object.
     const ctxLocal: Omit<SceneContext, "_frameGraph"> = {
-        engine,
+        surface,
         clearColor: { r: 0.2, g: 0.2, b: 0.3, a: 1.0 },
         camera: null,
         lights: [],
@@ -246,10 +256,13 @@ export function createSceneContext(engine: EngineContext, options?: SceneContext
         // MSAA: render into an MSAA colour RT (which owns depth) and resolve into the
         // single-sample scRT. No MSAA: render straight into the colour-only
         // scRT with a task-owned single-sample depth buffer it builds/clears/frees.
-        const msaa = eng.msaaSamples > 1;
-        const rt = msaa ? createRenderTarget({ lbl: "scene-color", format: eng.format, dFormat: "depth24plus-stencil8", samples: eng.msaaSamples, size: "canvas" }) : eng.scRT;
-        const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: "canvas" });
-        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? eng.scRT : undefined, depth, clrColor: ctx.clearColor }, eng, ctx));
+        // All three reads (format / msaaSamples / scRT) come from the bound `surface`.
+        const msaa = surface.msaaSamples > 1;
+        const rt = msaa
+            ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
+            : surface.scRT;
+        const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
+        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth, clrColor: ctx.clearColor }, eng, ctx));
     }
     ctx._disposables.push(() => fg.dispose());
     return ctx;
@@ -283,7 +296,7 @@ export function addDeferredSceneRenderables(
 ): void {
     const ctx = scene as SceneContext;
     ctx._deferredBuilders.push(async () => {
-        const built = await build(ctx.engine as EngineContext, ctx);
+        const built = await build(ctx.surface.engine, ctx);
         ctx._renderables.push(...built.renderables);
         if (built.dispose) {
             ctx._disposables.push(built.dispose);
@@ -315,7 +328,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
             ctx.camera = result.camera;
         }
         if (result.animationGroups?.length) {
-            const engine = ctx.engine as EngineContext;
+            const engine = ctx.surface.engine;
             const groups = result.animationGroups;
             ctx.animationGroups.push(...groups);
             ctx._beforeRender.push((deltaMs: number) => {
@@ -370,7 +383,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
 /** Release all GPU resources owned by this scene. */
 export function disposeScene(scene: SceneContext): void {
     const ctx = scene as SceneContext;
-    unregisterRenderingContext(ctx.engine, ctx);
+    unregisterRenderingContext(ctx.surface, ctx);
     for (const fn of ctx._disposables) {
         fn();
     }
@@ -416,41 +429,46 @@ export async function buildScene(scene: SceneContext): Promise<void> {
 
 /**
  * Register a scene with the engine. Builds deferred work, sorts renderables by order,
- * and adds the scene to the engine's render list in overlay order.
+ * and adds the scene to its bound surface's render list in overlay order. The scene is
+ * always attached to `scene.surface` (which equals the engine itself in the
+ * single-canvas case).
  */
-export async function registerScene(engine: EngineContext, scene: SceneContext): Promise<void> {
-    const ctx = scene as SceneContext;
-    if (isRenderingContextRegistered(engine, ctx)) {
+export async function registerScene(scene: SceneContext): Promise<void> {
+    const ctx = scene;
+    const surface = ctx.surface;
+    if (isRenderingContextRegistered(surface, ctx)) {
         return;
     }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
-    if ((engine as EngineContext)._renderingContexts.length > 0) {
-        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(engine as EngineContext, ctx);
+    if (surface._renderingContexts.length > 0) {
+        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(surface, ctx);
     }
-    registerRenderingContext(engine, ctx);
+    registerRenderingContext(surface, ctx);
 }
 
 /**
  * Register a scene with the engine and install the scene-owned shadow frame-graph task.
- * Use only for scenes that generate shadow maps.
+ * Use only for scenes that generate shadow maps. Like {@link registerScene}, the scene
+ * is attached to `scene.surface` (and its owning engine is `scene.surface.engine`).
  */
-export async function registerSceneWithShadowSupport(engine: EngineContext, scene: SceneContext): Promise<void> {
+export async function registerSceneWithShadowSupport(scene: SceneContext): Promise<void> {
     const ctx = scene as SceneContext;
-    if (isRenderingContextRegistered(engine, ctx)) {
+    const surface = ctx.surface;
+    if (isRenderingContextRegistered(surface, ctx)) {
         return;
     }
     await buildScene(scene);
     ctx._renderables.sort(byOrder);
-    await ensureShadowTask(engine as EngineContext, ctx);
+    await ensureShadowTask(surface.engine, ctx);
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
-    if ((engine as EngineContext)._renderingContexts.length > 0) {
-        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(engine as EngineContext, ctx);
+    if (surface._renderingContexts.length > 0) {
+        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(surface, ctx);
     }
-    registerRenderingContext(engine, ctx);
+    registerRenderingContext(surface, ctx);
 }
 
 const byOrder = (a: Renderable, b: Renderable): number => a.order - b.order;
@@ -460,7 +478,8 @@ async function ensureShadowTask(engine: EngineContext, scene: SceneContext): Pro
     scene._frameGraph._tasks.unshift(createShadowTask(engine, scene));
 }
 
-/** Remove a previously-registered scene. Idempotent. Does not dispose scene resources. */
-export function unregisterScene(engine: EngineContext, scene: SceneContext): void {
-    unregisterRenderingContext(engine, scene as SceneContext);
+/** Remove a previously-registered scene. Idempotent. Does not dispose scene resources.
+ *  The scene is always removed from `scene.surface`. */
+export function unregisterScene(scene: SceneContext): void {
+    unregisterRenderingContext(scene.surface, scene as SceneContext);
 }

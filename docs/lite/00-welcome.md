@@ -125,7 +125,7 @@ await loadEnvironment(scene, "https://assets.babylonjs.com/core/environments/env
 const cam = createDefaultCamera(scene);
 attachControl(cam, canvas, scene);
 
-await registerScene(engine, scene);
+await registerScene(scene);
 await startEngine(engine);
 ```
 

@@ -30,7 +30,7 @@ async function main(): Promise<void> {
 
     await loadSkybox(scene, "https://playground.babylonjs.com/textures/skybox", ".jpg");
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

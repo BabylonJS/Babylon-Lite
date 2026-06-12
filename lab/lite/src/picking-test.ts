@@ -46,7 +46,7 @@ async function run(): Promise<void> {
         sphere.material = createStandardMaterial();
         addToScene(scene, sphere);
 
-        await registerScene(engine, scene);
+        await registerScene(scene);
     await startEngine(engine);
 
         // Let a few frames render so GPU resources are fully initialized

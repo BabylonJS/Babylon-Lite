@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     pbrDepthTask.addMesh(pbrMesh, { material: pbrDepthView });
     addTaskAtStart(scene, pbrDepthTask);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - initStart);

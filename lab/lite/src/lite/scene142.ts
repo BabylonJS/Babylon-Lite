@@ -60,7 +60,7 @@ async function main(): Promise<void> {
         format: engine.format,
         dFormat: "depth24plus-stencil8",
         samples: 1,
-        size: "canvas",
+        size: engine,
     });
     const sourceTask = createRenderTask(
         {
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
         format: engine.format,
         dFormat: "depth24plus-stencil8",
         samples: 1,
-        size: "canvas",
+        size: engine,
     });
     const leftTask = createRenderTask(
         {
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     addTask(scene, blur);
     addTask(scene, chromatic);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     blackAndWhite.degree = 1;
     blackAndWhite.updateUniforms();
     blur.updateUniforms();

@@ -107,7 +107,7 @@ function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: 
 }
 
 function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false): Renderable[] {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
     const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh));
@@ -119,7 +119,7 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
 }
 
 function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh): ShaderPacket {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
     writeSystemUniforms(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
@@ -148,7 +148,7 @@ function createOpaqueRenderable(scene: SceneContext, material: ShaderMaterial, p
         }
     }
     const update = (context: DrawUpdateContext): void => {
-        updateCustomUbo(scene.engine, material);
+        updateCustomUbo(scene.surface.engine, material);
         for (const packet of packets) {
             if (packet._disposed) {
                 continue;
@@ -195,7 +195,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         if (!isOverride && packet.mesh.material !== material) {
             return;
         }
-        updateCustomUbo(scene.engine, material);
+        updateCustomUbo(scene.surface.engine, material);
         updatePacket(scene, material, packet, context);
         const m = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
         sortCenter[0] = m[12]!;
@@ -227,7 +227,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
 }
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext): void {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const state = material as ShaderMaterialRenderState;
     writeSystemUniforms(packet.systemData, state._shaderBindings!.systemSpec, material, packet.mesh, context._camera ?? scene.camera, context.targetWidth, context.targetHeight);
     engine._device.queue.writeBuffer(packet.systemUBO, 0, packet.systemData as Float32Array<ArrayBuffer>);

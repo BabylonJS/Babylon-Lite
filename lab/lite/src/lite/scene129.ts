@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     splat.name = "renderMesh";
     splat.position.y = 1.7;
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 
     await splat.firstSortReady;

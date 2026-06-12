@@ -50,7 +50,7 @@ addToScene(scene, light);
 light.shadowGenerator = createCsmDirectionalShadowGenerator(engine, light, { mapSize: 1024 });
 setShadowTaskCasterMeshes(light.shadowGenerator, casterMeshes);
 // receivers: mesh.receiveShadows = true
-await registerSceneWithShadowSupport(engine, scene);
+await registerSceneWithShadowSupport(scene);
 ```
 
 ## Internal Architecture

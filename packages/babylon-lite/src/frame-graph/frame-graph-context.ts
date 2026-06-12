@@ -1,5 +1,6 @@
 import { registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
-import type { EngineContext, RenderingContext } from "../engine/engine.js";
+import type { RenderingContext } from "../engine/engine.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import { createFrameGraph } from "./frame-graph.js";
 import type { FrameGraph } from "./frame-graph.js";
 
@@ -16,25 +17,26 @@ export interface FrameGraphContextOptions {
 /** A scene-less rendering context driven directly by a FrameGraph. */
 export interface FrameGraphContext extends RenderingContext {
     readonly name: string;
-    readonly engine: EngineContext;
+    /** Surface this context renders into. */
+    readonly surface: SurfaceContext;
     readonly frameGraph: FrameGraph;
     clearColor: GPUColorDict;
 }
 
 interface FrameGraphContextInternal extends FrameGraphContext {
-    readonly _engine: EngineContext;
     _disposed: boolean;
 }
 
-/** Create a scene-less frame-graph context for fullscreen effects and post-process chains. */
-export function createFrameGraphContext(engine: EngineContext, options?: FrameGraphContextOptions): FrameGraphContext {
-    const eng = engine as EngineContext;
+/** Create a scene-less frame-graph context bound to `surface`, for fullscreen effects
+ *  and post-process chains. Pass the engine directly for the single-canvas case (since
+ *  `EngineContext extends SurfaceContext`); pass an auxiliary surface for multi-canvas. */
+export function createFrameGraphContext(surface: SurfaceContext, options?: FrameGraphContextOptions): FrameGraphContext {
+    const engine = surface.engine;
     const update = options?.update;
     const ctx: FrameGraphContextInternal = {
         name: options?.name ?? "frame-graph",
-        engine,
-        _engine: eng,
-        frameGraph: createFrameGraph(eng),
+        surface,
+        frameGraph: createFrameGraph(engine),
         clearColor: options?.clearColor ?? { r: 0, g: 0, b: 0, a: 1 },
         _drawCallsPre: 0,
         _disposed: false,
@@ -42,7 +44,7 @@ export function createFrameGraphContext(engine: EngineContext, options?: FrameGr
             if (ctx._disposed) {
                 return;
             }
-            update?.(eng._currentDelta);
+            update?.(engine._currentDelta);
         },
         _record(): number {
             if (ctx._disposed) {
@@ -60,20 +62,19 @@ export function createFrameGraphContext(engine: EngineContext, options?: FrameGr
     return ctx;
 }
 
-/** Build and register the standalone frame-graph context with its engine. */
+/** Build and register the standalone frame-graph context with its surface. */
 export function registerFrameGraphContext(ctx: FrameGraphContext): void {
     const internal = ctx as FrameGraphContextInternal;
     if (internal._disposed) {
         return;
     }
     ctx.frameGraph.build();
-    registerRenderingContext(internal._engine, ctx);
+    registerRenderingContext(ctx.surface, ctx);
 }
 
-/** Unregister the standalone frame-graph context from its engine. */
+/** Unregister the standalone frame-graph context from its surface. */
 export function unregisterFrameGraphContext(ctx: FrameGraphContext): void {
-    const internal = ctx as FrameGraphContextInternal;
-    unregisterRenderingContext(internal._engine, ctx);
+    unregisterRenderingContext(ctx.surface, ctx);
 }
 
 /** Unregister and dispose all GPU resources owned by the standalone frame graph. */

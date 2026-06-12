@@ -37,6 +37,7 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { RenderTargetMrt } from "../engine/render-target-mrt.js";
@@ -83,8 +84,8 @@ export interface GeometryRendererTaskConfig {
     meshes?: readonly Mesh[];
     /** Per-pass camera override. Defaults to `scene.camera`. */
     camera?: Camera | null;
-    /** Render-target size. Defaults to `"canvas"`. */
-    size?: "canvas" | { width: number; height: number };
+    /** Render-target size. Defaults to the scene's `surface`. */
+    size?: SurfaceContext | { width: number; height: number };
     /** MSAA sample count. Defaults to 1. */
     samples?: 1 | 4;
     /** Externally-owned depth attachment. When omitted, the task creates its
@@ -98,7 +99,7 @@ export interface GeometryRendererTaskConfig {
     /** Optional color render-target that receives the *real* (lit) material
      *  color, written as an additional color attachment alongside the geometry
      *  data attachments. Must have the same {@link sampleCount} and resolved
-     *  pixel size as the geometry MRT (size: "canvas" with samples matching).
+     *  pixel size as the geometry MRT (size: `<surface>` with samples matching).
      *  When omitted, no real-color attachment is added to the pass.
      *
      *  The target attachment uses `loadOp: "load"` (matches BJS), so the
@@ -239,7 +240,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     const needsVelocity = types.includes(GeometryTextureType.LINEAR_VELOCITY);
     const needsParams = needsVelocity || types.includes(GeometryTextureType.NORMALIZED_VIEW_DEPTH);
     const samples = config.samples ?? 1;
-    const size = config.size ?? "canvas";
+    const size = config.size ?? sc.surface;
 
     if (config.depthTexture) {
         const ds = config.depthTexture._descriptor.samples ?? 1;

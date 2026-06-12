@@ -163,7 +163,7 @@ async function main(): Promise<void> {
         }
     });
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
 }
 

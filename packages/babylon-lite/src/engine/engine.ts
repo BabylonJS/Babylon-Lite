@@ -1,9 +1,8 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
-import type { RenderTarget } from "./render-target.js";
-import { createRenderTarget } from "./render-target.js";
-import type { CapturePreFrame, CaptureService } from "./screenshot-readback.js";
+import type { SurfaceContext, SurfaceOptions } from "./surface.js";
+import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -25,31 +24,28 @@ export function bumpVisibilityEpoch(): void {
  */
 export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 
-/** @internal Type guard: true for a DOM canvas (has layout + attributes). */
-function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
-    return "clientWidth" in canvas;
-}
+/**
+ * Handle to the WebGPU engine — pure state, no attached methods.
+ *
+ * The engine owns the `GPUDevice` and all device-scoped GPU resources (textures, buffers,
+ * pipelines, bind groups). It also **is itself a {@link SurfaceContext}** bound to the
+ * canvas passed into `createEngine` — the primary surface. Additional canvases can be
+ * attached via `createSurface(engine, canvas, ...)`; GPU resources are shared across all
+ * surfaces because they're device-scoped, while each surface owns its own swapchain
+ * context.
+ */
+export interface EngineContext extends SurfaceContext {
+    /** Rendering surfaces attached to this engine, in registration order. Index 0 is
+     *  the engine itself (the primary surface) — the tuple type guarantees at least
+     *  one entry so `engine.surfaces[0]` is always defined. Use
+     *  `createSurface(engine, canvas, ...)` to append more. */
+    readonly surfaces: readonly [SurfaceContext, ...SurfaceContext[]];
+    /** @internal Same array as {@link surfaces}, but typed as a mutable tuple so the
+     *  module-internal mutators (`createSurface`, `disposeSurface`, `disposeEngine`)
+     *  can splice into it without casting away the public readonly contract. */
+    _surfaces: [SurfaceContext, ...SurfaceContext[]];
 
-/** Handle to the WebGPU engine — pure state, no attached methods. */
-export interface EngineContext {
-    readonly canvas: RenderCanvas;
-    readonly msaaSamples: number;
-    /** Preferred GPU texture format for the swapchain. Use as the `format`
-     *  for offscreen RTs that are sampled by main-pass materials. */
-    readonly format: GPUTextureFormat;
-
-    /**
-     * Engine-owned color-only render target that wraps the canvas swapchain texture.
-     * Its `_colorTexture`/`_colorView` are re-acquired from `context.getCurrentTexture()`
-     * once per frame (see `_refreshScRT`), so it is always single-sample and
-     * carries no depth. Render/post-process/copy tasks target it (or resolve into it) to
-     * present to the canvas. It is `_eager` — `buildRenderTarget` and `disposeRenderTarget`
-     * both no-op on it and the engine owns its textures, so its shared `_descriptor` must
-     * never be mutated.
-     */
-    readonly scRT: RenderTarget;
-
-    /** Number of GPU draw calls in the last rendered frame. */
+    /** Number of GPU draw calls in the last rendered frame, summed across all surfaces. */
     drawCallCount: number;
 
     /**
@@ -70,27 +66,14 @@ export interface EngineContext {
      */
     useFloatingOrigin: boolean;
 
-    /** Clamps the effective device pixel ratio used for the swapchain backing store.
-     *  The backing store is sized at `min(devicePixelRatio, maxDevicePixelRatio) * cssPixels`.
-     *  `maxDevicePixelRatio = 1` renders at native CSS-pixel resolution (no DPR upscaling);
-     *  the default `Infinity` is unclamped (full devicePixelRatio). Mutable at runtime — set
-     *  before the next `resizeEngine` to take effect (mirrors `setHardwareScalingRatio`). */
-    maxDevicePixelRatio: number;
-
     /** @internal */
     _device: GPUDevice;
-    /** @internal */
-    readonly _context: GPUCanvasContext;
-    /** @internal */
-    readonly _alphaMode: GPUCanvasAlphaMode;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
     _animFrameId: number;
     /** @internal */
     _renderFn: ((now: number) => void) | null;
-    /** @internal Registered rendering contexts in render order (first clears; subsequent overlay). */
-    _renderingContexts: RenderingContext[];
 
     // ─── Per-frame transient state ─────────────────────────────────────
     /** @internal Encoder being filled this frame. Set by `renderFrame` before each context's
@@ -100,35 +83,6 @@ export interface EngineContext {
     _currentDelta: number;
     /** @internal */
     _cbs: GPUCommandBuffer[];
-
-    /** @internal Pending `captureScreenshot` requests. Serviced by `renderFrame` on a
-     *  subsequent frame (one shared copy of the swapchain texture resolves all queued
-     *  requests), then cleared. Undefined when nothing is waiting so non-capturing frames
-     *  pay nothing. */
-    _captureQueue?: { resolve: (s: import("./screenshot.js").Screenshot) => void; reject: (e: unknown) => void }[];
-
-    /** @internal Set once the swapchain has been reconfigured with COPY_SRC for screenshot
-     *  readback. Off by default so non-capturing scenes keep a compression-friendly
-     *  RENDER_ATTACHMENT-only swapchain; flipped on the first capture by the capture service
-     *  and honoured by device-loss recovery. */
-    _swapchainCopySrc?: boolean;
-
-    /** @internal Screenshot readback hook, dynamically installed by `captureScreenshot` on
-     *  first use. `renderFrame` calls it once per frame (after the contexts record) via optional
-     *  chaining; it records the swapchain copy into the frame encoder for any queued requests.
-     *  By the time it runs the swapchain is already COPY_SRC-capable (see `_capturePreFrame`), so
-     *  the copy lands in the current frame. Kept off `EngineContext` until a capture is requested
-     *  so the copy/unpack code (`screenshot-readback.js`) stays out of every bundle that never
-     *  captures a frame. */
-    _captureService?: CaptureService;
-
-    /** @internal Pre-acquire screenshot hook, installed alongside `_captureService` by
-     *  `captureScreenshot` on first use. `renderFrame` calls it via optional chaining BEFORE
-     *  acquiring this frame's swapchain texture; on the first queued capture it reconfigures the
-     *  swapchain with COPY_SRC (reconfiguring expires the current texture, so it must run before
-     *  acquire, never mid-frame). Kept off `EngineContext` until a capture is requested so the
-     *  reconfigure code stays out of every non-capturing bundle. */
-    _capturePreFrame?: CapturePreFrame;
 
     /** @internal Per-frame floating-origin offset updater. Set when the engine
      *  was created with `useFloatingOrigin: true` (which requires
@@ -217,23 +171,23 @@ interface DeviceLostRecoveryCapture {
     ): void;
 }
 
-/** @internal Return true if `context` is already registered with `engine`. */
-export function isRenderingContextRegistered(engine: EngineContext, context: RenderingContext): boolean {
-    return engine._renderingContexts.indexOf(context) !== -1;
+/** @internal Return true if `context` is already registered on `surface`. */
+export function isRenderingContextRegistered(surface: SurfaceContext, context: RenderingContext): boolean {
+    return surface._renderingContexts.indexOf(context) !== -1;
 }
 
-/** @internal Register a rendering context with the engine. Returns false if already present. */
-export function registerRenderingContext(engine: EngineContext, context: RenderingContext): boolean {
-    if (isRenderingContextRegistered(engine, context)) {
+/** @internal Register a rendering context with `surface`. Returns false if already present. */
+export function registerRenderingContext(surface: SurfaceContext, context: RenderingContext): boolean {
+    if (surface._renderingContexts.indexOf(context) !== -1) {
         return false;
     }
-    engine._renderingContexts.push(context);
+    surface._renderingContexts.push(context);
     return true;
 }
 
-/** @internal Unregister a rendering context from the engine. Returns false if not present. */
-export function unregisterRenderingContext(engine: EngineContext, context: RenderingContext): boolean {
-    const list = engine._renderingContexts;
+/** @internal Unregister a rendering context from `surface`. Returns false if not present. */
+export function unregisterRenderingContext(surface: SurfaceContext, context: RenderingContext): boolean {
+    const list = surface._renderingContexts;
     const i = list.indexOf(context);
     if (i === -1) {
         return false;
@@ -248,18 +202,11 @@ export interface RenderTargetSize {
 }
 
 /**
- * Options for `createEngine`.
- * - `msaaSamples`: number of MSAA samples to use for the main render pass.
- *   WebGPU only permits `1` (no MSAA) or `4` (4x MSAA) per the spec
- *   (2x is not a valid WebGPU sample count). Defaults to `4`.
+ * Options for `createEngine`. Per-surface options for the primary surface (the canvas
+ * passed to `createEngine`) come from {@link SurfaceOptions} and are passed alongside
+ * the engine options as a single union: `createEngine(canvas, opts: EngineOptions & SurfaceOptions)`.
  */
-export interface EngineOptions {
-    msaaSamples?: 1 | 4;
-    /**
-     * WebGPU canvas alpha mode. Use "premultiplied" to enable canvas transparency (clear color
-     * with `alpha < 1` will let HTML content underneath show through). Defaults to "opaque".
-     */
-    alphaMode?: GPUCanvasAlphaMode;
+export interface EngineOptions extends SurfaceOptions {
     /**
      * Extra WebGPU device limits to request when calling `adapter.requestDevice()`.
      * Use to raise per-device caps such as `maxColorAttachmentBytesPerSample` (default 32),
@@ -282,19 +229,17 @@ export interface EngineOptions {
      * pattern as the F64 storage module).
      */
     useFloatingOrigin?: boolean;
-    /**
-     * Clamps the effective device pixel ratio used for the swapchain backing store.
-     * The backing store is sized at `min(devicePixelRatio, maxDevicePixelRatio) * cssPixels`.
-     * `maxDevicePixelRatio: 1` renders at native CSS-pixel resolution (no DPR upscaling) —
-     * useful on high-DPI/iOS devices where `devicePixelRatio` is ~3. Defaults to unclamped
-     * (full devicePixelRatio). Equivalent to Babylon.js `setHardwareScalingRatio`.
-     */
-    maxDevicePixelRatio?: number;
 }
 
-/** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain.
- *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred to
- *  a Web Worker) — see {@link RenderCanvas}. */
+/** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
+ *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
+ *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
+ *  given canvas. Additional canvases can be attached afterwards via
+ *  `createSurface(engine, otherCanvas, ...)`; they share device-scoped GPU resources
+ *  (textures, meshes, pipelines, bind groups) with the engine and with each other.
+ *
+ *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
+ *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
@@ -311,19 +256,6 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         }
     }
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
-    const context = canvas.getContext("webgpu");
-    if (!context) {
-        throw new Error("WebGPU context not available");
-    }
-
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    const alphaMode: GPUCanvasAlphaMode = options?.alphaMode ?? "opaque";
-    // Plain RENDER_ATTACHMENT swapchain by default — deliberately no COPY_SRC. Marking the
-    // swapchain copyable can force some drivers to drop lossless framebuffer compression, so
-    // scenes that never take a screenshot must not pay for it. `captureScreenshot` lazily
-    // reconfigures the swapchain with COPY_SRC on first use (see `_ensureSwapchainCapturable`),
-    // keeping the public API unchanged while costing non-capturing scenes nothing.
-    context.configure({ device, format, alphaMode });
 
     const versionToLog = `Babylon Lite v${VERSION}`;
     // eslint-disable-next-line no-console
@@ -331,8 +263,6 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     if (isDomCanvas(canvas)) {
         canvas.setAttribute("data-engine", versionToLog);
     }
-
-    const msaaSamples: 1 | 4 = options?.msaaSamples === 1 ? 1 : 4;
 
     const useHpm = options?.useHighPrecisionMatrix === true;
     const useFO = options?.useFloatingOrigin === true;
@@ -376,116 +306,72 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _applyLightFoOffset = applyLightFoOffset;
     }
 
-    // Engine-owned swapchain target — a color-only, single-sample RT that wraps the
-    // canvas texture. `_eager` so `buildRenderTarget` skips it; the engine refreshes its
-    // textures each frame from `context.getCurrentTexture()`.
-    const scRT = createRenderTarget({ lbl: "swapchain", format: format, samples: 1, size: "canvas" });
-    scRT._eager = true;
-
-    const engine: EngineContext = {
-        _device: device,
-        _context: context,
-        format,
-        scRT,
-        _alphaMode: alphaMode,
-        canvas,
-        msaaSamples,
-        drawCallCount: 0,
-        useHighPrecisionMatrix: useHpm,
-        useFloatingOrigin: useFO,
-        maxDevicePixelRatio: options?.maxDevicePixelRatio ?? Infinity,
-        _animFrameId: 0,
-        _renderFn: null,
-        _renderingContexts: [],
-        _currentEncoder: undefined!,
-        _currentDelta: 0,
-        _cbs: [],
-        _wrapRenderableForFO,
-        _makePackMeshWorld,
-        _lightFoVersion,
-        _applyLightFoOffset,
-    };
+    // The engine extends `SurfaceContext`, so we need to assemble both the engine-only
+    // fields AND the per-canvas surface fields onto a single object. `_buildSurface`
+    // reads `engine._device` at call time, so we seed the object with `_device` up front;
+    // `Object.assign` then evaluates both source expressions (the engine-only literal and
+    // the `_buildSurface` result) before copying, letting us merge both in one call. The
+    // `surfaces` field is the same array as `_surfaces`, exposed publicly as a readonly tuple.
+    const engine = { _device: device } as EngineContext;
+    const surfaces: [EngineContext, ...SurfaceContext[]] = [engine];
+    Object.assign(
+        engine,
+        {
+            engine, // self-reference: the engine IS its primary surface
+            surfaces, // public readonly view of `_surfaces` (same underlying array)
+            _surfaces: surfaces,
+            _device: device,
+            drawCallCount: 0,
+            useHighPrecisionMatrix: useHpm,
+            useFloatingOrigin: useFO,
+            _animFrameId: 0,
+            _renderFn: null,
+            _currentEncoder: undefined,
+            _currentDelta: 0,
+            _cbs: [],
+            _wrapRenderableForFO,
+            _makePackMeshWorld,
+            _lightFoVersion,
+            _applyLightFoOffset,
+        } satisfies Partial<EngineContext>,
+        _buildSurface(engine, canvas, options)
+    );
 
     // Size the canvas backing store first (so the swap texture is acquired at the final
     // size), then populate the swapchain target from the first current texture so its
     // `_colorView`/`_width`/`_height` are non-null before the frame graph builds.
-    resizeEngine(engine);
+    resizeSurface(engine);
     _refreshScRT(engine);
 
     return engine;
 }
 
-/** @internal Re-acquire the canvas swapchain texture into `engine.scRT`.
- *  WebGPU returns a fresh `GPUTexture` from `getCurrentTexture()` each frame, so this
- *  is called once per frame (in `renderFrame`, before contexts record) — and again
- *  after `createEngine`/device-loss reconfigure — to keep the engine-owned target
- *  pointing at the live canvas texture. */
-export function _refreshScRT(engine: EngineContext): void {
-    const tex = engine._context.getCurrentTexture();
-    const swap = engine.scRT;
-    swap._colorTexture = tex;
-    swap._colorView = tex.createView();
-    swap._width = tex.width;
-    swap._height = tex.height;
-}
-
-/** Resize the swapchain backing-store to match the canvas client size. When the size
- *  changes, asks every registered rendering context to rebuild its canvas-sized GPU
- *  resources via the optional `_resize` hook. If the canvas has not been laid out yet,
- *  preserves its explicit backing-store size.
- *
- *  Only DOM canvases are auto-sized from layout here. An `OffscreenCanvas` has no layout
- *  box, so its size is pushed in externally via {@link setEngineSize} (e.g. from the host
- *  thread that owns the visible canvas) and this call is a no-op for it. */
+/** Resize every surface attached to this engine (including the engine's own primary
+ *  surface). For DOM-canvas surfaces, snaps the swapchain backing store to the current
+ *  `clientWidth × clientHeight × devicePixelRatio` (capped by each surface's
+ *  `maxDevicePixelRatio`). For `OffscreenCanvas` surfaces this is a no-op per surface —
+ *  call `setSurfaceSize` on the specific surface instead, since an `OffscreenCanvas`
+ *  has no layout. */
 export function resizeEngine(engine: EngineContext): void {
-    const canvas = engine.canvas;
-    if (!isDomCanvas(canvas)) {
-        return;
+    for (const surface of engine.surfaces) {
+        resizeSurface(surface);
     }
-    const clientWidth = canvas.clientWidth;
-    const clientHeight = canvas.clientHeight;
-    if (!(clientWidth > 0 && clientHeight > 0)) {
-        return;
-    }
-    const scale = Math.min(globalThis.devicePixelRatio || 1, engine.maxDevicePixelRatio);
-    const w = (clientWidth * scale) | 0;
-    const h = (clientHeight * scale) | 0;
-    setEngineSize(engine, w, h);
 }
 
-/** Set the swapchain backing-store size directly, in device pixels. Use this when the
- *  engine renders into an `OffscreenCanvas` whose layout size is only known on another
- *  thread (the host posts the CSS size × devicePixelRatio). When the size changes, asks
- *  every registered rendering context to rebuild its canvas-sized GPU resources via the
- *  optional `_resize` hook. */
+/** Set the engine's primary-surface swapchain backing-store size directly, in device
+ *  pixels. Convenience wrapper around `setSurfaceSize(engine, w, h)` since the engine
+ *  *is* its own primary surface — for auxiliary surfaces, prefer calling `setSurfaceSize`
+ *  on the specific target. */
 export function setEngineSize(engine: EngineContext, widthPx: number, heightPx: number): void {
-    const canvas = engine.canvas;
-    const w = widthPx | 0;
-    const h = heightPx | 0;
-    if (!(w > 0 && h > 0)) {
-        return;
-    }
-    if (w === canvas.width && h === canvas.height) {
-        return;
-    }
-    canvas.width = w;
-    canvas.height = h;
-    // Keep the engine swapchain target's dimensions in sync with the canvas. Canvas-sized
-    // reads happen at frame-graph build time (e.g. the blur post-process derives its texel
-    // step from `outputTexture._width`), before the next frame re-acquires the swap texture.
-    engine.scRT._width = w;
-    engine.scRT._height = h;
-    for (const c of engine._renderingContexts) {
-        c._resize?.();
-    }
+    setSurfaceSize(engine, widthPx, heightPx);
 }
 
-/** @internal Return the canvas-backed render target dimensions. In the frame-graph
- *  architecture, render targets are owned by `RenderingContext`s rather than the
- *  engine itself; this helper exposes the canvas size for callers that just need
- *  the swapchain dimensions (e.g. sprite renderer). */
-export function getRenderTargetSize(engine: EngineContext): RenderTargetSize {
-    const c = engine.canvas;
+/** @internal Return the canvas-backed render target dimensions for a surface (or the
+ *  engine, since the engine itself is a surface). In the frame-graph architecture,
+ *  render targets are owned by `RenderingContext`s rather than the engine itself;
+ *  this helper exposes the swapchain size for callers that just need it. */
+export function getRenderTargetSize(surface: SurfaceContext): RenderTargetSize {
+    const c = surface.canvas;
     return { width: c.width, height: c.height };
 }
 
@@ -522,45 +408,65 @@ export function stopEngine(engine: EngineContext): void {
     engine._renderFn = null;
 }
 
-/** Release all engine-owned GPU resources (device + swapchain). Rendering contexts
- *  own their own GPU resources (frame graphs, render targets) and dispose them
- *  separately. */
+/** Release all engine-owned GPU resources (device + every attached surface's swapchain
+ *  context). Rendering contexts own their own GPU resources (frame graphs, render
+ *  targets) and dispose them separately. */
 export function disposeEngine(engine: EngineContext): void {
     stopEngine(engine);
-    engine._renderingContexts.length = 0;
-    engine._context.unconfigure();
+    const surfaces = engine._surfaces;
+    for (const s of surfaces) {
+        s._renderingContexts.length = 0;
+        s._context.unconfigure();
+    }
+    surfaces.length = 0;
     engine._device.destroy();
 }
 
 export function renderFrame(engine: EngineContext, delta: number): void {
-    const ctxs = engine._renderingContexts;
-    if (ctxs.length === 0) {
+    const surfaces = engine.surfaces;
+    // `surfaces` is typed as a non-empty tuple — the engine itself is always at
+    // index 0 — so we don't need to guard against an empty list. Still skip the
+    // encoder allocation if no surface has any rendering contexts.
+    let total = 0;
+    for (let i = 0; i < surfaces.length; i++) {
+        total += surfaces[i]!._renderingContexts.length;
+    }
+    if (total === 0) {
         return;
     }
 
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
-    // A queued screenshot (`captureScreenshot`) needs the swapchain marked COPY_SRC before this
-    // frame's texture is acquired — reconfiguring the context EXPIRES the current canvas texture,
-    // so it cannot run mid-frame. The hook is installed lazily by `captureScreenshot`, so
-    // non-capturing engines ship none of the reconfigure code and pay only this short-circuit.
-    engine._capturePreFrame?.(engine);
-    _refreshScRT(engine);
 
     let drawCalls = 0;
-    for (let i = 0; i < ctxs.length; i++) {
-        const s = ctxs[i]!;
-        s._update();
-        drawCalls += s._drawCallsPre;
-        drawCalls += s._record();
+    for (let i = 0; i < surfaces.length; i++) {
+        const surface = surfaces[i]!;
+        // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
+        // before its frame texture is acquired — reconfiguring the context EXPIRES the current
+        // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
+        // `captureScreenshot`, so non-capturing surfaces ship none of the reconfigure code and pay
+        // only this short-circuit.
+        surface._capturePreFrame?.(surface);
+        _refreshScRT(surface);
+        const ctxs = surface._renderingContexts;
+        for (let j = 0; j < ctxs.length; j++) {
+            const s = ctxs[j]!;
+            s._update();
+            drawCalls += s._drawCallsPre;
+            drawCalls += s._record();
+        }
     }
 
     const finalEncoder = engine._currentEncoder;
-    // Screenshot readback hook — undefined (a no-op optional call) until `captureScreenshot`
-    // lazily installs it, so non-capturing engines keep this to a single short-circuit and
-    // ship none of the readback code. The service records its copy into this frame's encoder.
-    engine._captureService?.(engine, finalEncoder);
+    // Per-surface screenshot readback hook — undefined (a no-op optional call) until
+    // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
+    // never capture keep this to a single short-circuit and ship none of the readback code.
+    // Each service records its surface's swapchain copy into this frame's encoder.
+    for (let i = 0; i < surfaces.length; i++) {
+        const surface = surfaces[i]!;
+        surface._captureService?.(surface, finalEncoder);
+    }
     engine._cbs[0] = finalEncoder.finish();
     engine._device.queue.submit(engine._cbs);
     engine.drawCallCount = drawCalls;

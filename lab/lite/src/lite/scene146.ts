@@ -56,20 +56,20 @@ async function main(): Promise<void> {
         format: engine.format,
         dFormat: "depth24plus-stencil8",
         samples: samples,
-        size: "canvas",
+        size: engine,
     });
     const ssIntermediate = createRenderTarget({
         lbl: "scene146-ss-intermediate",
         format: engine.format,
         samples: 1,
-        size: "canvas",
+        size: engine,
     });
     const scRT = engine.scRT;
     const realColorTarget = createRenderTarget({
         lbl: "scene146-real-color",
         format: engine.format,
         samples: samples,
-        size: "canvas",
+        size: engine,
     });
     const sceneTask = createRenderTask(
         {
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
         )
     );
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

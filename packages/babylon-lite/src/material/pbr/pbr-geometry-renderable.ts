@@ -77,7 +77,7 @@ function _variantKey(meshFeatures: number, lightMode: number, singleLightType: s
 
 /** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
 export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view: PbrGeometryMaterialView): Renderable {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
     const device = engine._device;
 
     const ctx = (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext;

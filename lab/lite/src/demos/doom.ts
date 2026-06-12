@@ -31,7 +31,7 @@ async function main(): Promise<void> {
 
     buildDoomLevel(engine, scene, wadBytes, MAP_NAME);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     progress.done();
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);

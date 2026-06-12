@@ -61,7 +61,7 @@ export function buildHdrSkyboxRenderable(
     rootPosition: [number, number, number],
     primaryColor: [number, number, number]
 ): Renderable {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
 
     const skyboxWorld = buildSkyboxWorldMatrix(rootPosition);
 

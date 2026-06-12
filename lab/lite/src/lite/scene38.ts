@@ -147,7 +147,7 @@ async function main(): Promise<void> {
     bar.material = col(0.4, 0.4, 0.9);
     addToScene(scene, bar);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

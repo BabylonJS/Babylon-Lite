@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     matA_R1.diffuseColor = [0.2, 1, 0.2];
     r1Task.addMesh(meshA, { material: matA_R1 });
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

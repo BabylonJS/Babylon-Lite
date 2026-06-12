@@ -192,7 +192,7 @@ function getOrCreatePipeline(engine: EngineContext, sig: RenderTargetSignature, 
  *  builder installed by `addToScene`. Owns the per-mesh UBO and a per-signature
  *  bind-group cache. */
 export function buildGaussianSplattingRenderable(scene: SceneContext, mesh: GaussianSplattingMesh, fragments?: readonly GsShaderFragment[]): Renderable {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const device = engine._device;
 
     const UBO_BYTES = 16 * 4 * 3 + 8 * 4; // 3 mat4 + viewport,focal,dataSize,alpha,pad → 224 bytes

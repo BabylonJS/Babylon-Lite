@@ -243,8 +243,14 @@ function createInternalTarget(name: string, source: RenderTarget): RenderTarget 
 
 function internalTargetKey(source: RenderTarget): string {
     const desc = source._descriptor;
-    const size = desc.size === "canvas" ? "canvas" : `${desc.size.width}x${desc.size.height}`;
-    return `${desc.format ?? "-"}|${desc.samples ?? 1}|${size}`;
+    const sz = desc.size;
+    // SurfaceContext-keyed sources key by the surface's stable `_uniqueId` (NOT its current
+    // dimensions): the internal target is sized from the surface descriptor and tracks resizes
+    // automatically, so the key only needs to change when the source is retargeted to a
+    // *different* surface — including one that happens to share the old surface's size.
+    // Explicit-pixel sources key by their dims.
+    const sizeKey = "canvas" in sz ? `surface:${sz._uniqueId}` : `${sz.width}x${sz.height}`;
+    return `${desc.format ?? "-"}|${desc.samples ?? 1}|${sizeKey}`;
 }
 
 function getBindGroupLayout(task: PostProcessTaskInternal, engine: EngineContext): GPUBindGroupLayout {

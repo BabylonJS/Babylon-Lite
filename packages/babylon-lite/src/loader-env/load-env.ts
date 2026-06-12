@@ -1,6 +1,5 @@
 import { F32, U8 } from "../engine/typed-arrays.js";
 import type { SceneContext } from "../scene/scene.js";
-import type { EngineContext } from "../engine/engine.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "./env-helpers.js";
 import { mipLevelCount } from "../texture/mip-count.js";
@@ -50,7 +49,7 @@ export async function loadEnvironment(
         brdfUrl: string;
     }
 ): Promise<EnvironmentTextures> {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
 
     // Fetch .env and BRDF PNG in parallel
     const envPromise = fetch(url).then((r) => r.arrayBuffer());

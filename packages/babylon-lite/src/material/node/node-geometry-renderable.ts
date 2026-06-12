@@ -314,7 +314,7 @@ function buildGeometryBindGroup(
 
 /** Build a {@link Renderable} for one mesh drawn through a NodeMaterial geometry view. */
 export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, view: NodeGeometryMaterialView): Renderable {
-    const engine = scene.engine as EngineContext;
+    const engine = scene.surface.engine;
     const device = engine._device;
     const source = view.source as NodeMaterial;
     const res = ensureGeometryResources(view);

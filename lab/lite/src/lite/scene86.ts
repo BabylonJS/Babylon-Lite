@@ -42,7 +42,7 @@ async function main(): Promise<void> {
         addToScene(scene, mesh);
     }
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - initStart);

@@ -188,7 +188,7 @@ async function main(): Promise<void> {
         lbl: "torus-states-source",
         format: engine.format,
         samples: 1,
-        size: "canvas",
+        size: engine,
     });
     const outputTarget = engine.scRT;
 

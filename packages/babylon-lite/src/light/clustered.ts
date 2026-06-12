@@ -136,7 +136,7 @@ export function addClusteredLightContainer(scene: SceneContext, container: Clust
     const ctx = scene as SceneContext;
     ctx._clusteredLightContainer = container;
     _registerPbrExt(clusteredPbrExt);
-    const state = buildClusteredLightGpuState(ctx.engine, ctx, container);
+    const state = buildClusteredLightGpuState(ctx.surface.engine, ctx, container);
     ctx._clusteredLightUpdater = (camera, targetWidth, targetHeight) => state.refresh(camera, targetWidth, targetHeight);
     ctx._disposables.push(() => state.dispose());
     for (const mesh of ctx.meshes) {

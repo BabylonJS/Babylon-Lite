@@ -65,7 +65,7 @@ type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 /** Build NME renderables for a set of meshes that share a NodeMaterial. */
 export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], materialOverride?: Material): MeshGroupBuildResult {
-    const engine = scene.engine;
+    const engine = scene.surface.engine;
     const device = engine._device;
 
     // All meshes in this group use the same NodeMaterial (scene-core batches by ctor).

@@ -67,8 +67,8 @@ export function createUtilityLayer(engine: EngineContext, mainScene: SceneContex
 
 /** Register the utility layer with the engine. Must be called after the main
  *  scene has been registered so the swapchain overlay path is enabled. */
-export async function registerUtilityLayer(engine: EngineContext, utility: UtilityLayer): Promise<void> {
-    await registerScene(engine, utility.scene);
+export async function registerUtilityLayer(utility: UtilityLayer): Promise<void> {
+    await registerScene(utility.scene);
 }
 
 /** Dispose the utility layer's underlying scene. Idempotent. */

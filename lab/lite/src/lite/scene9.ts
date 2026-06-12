@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     scene.camera.farPlane = 10000;
     attachControl(scene.camera as ArcRotateCamera, canvas, scene);
 
-    await registerScene(engine, scene);
+    await registerScene(scene);
     await startEngine(engine);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - __initStart);

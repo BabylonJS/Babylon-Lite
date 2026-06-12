@@ -111,8 +111,8 @@ async function main(): Promise<void> {
     addToScene(left, leftWheel);
     addToScene(right, rightWheel);
 
-    await registerScene(engine, left);
-    await registerScene(engine, right);
+    await registerScene(left);
+    await registerScene(right);
     await startEngine(engine);
 
     canvas.dataset.drawCalls = String(engine.drawCallCount);
