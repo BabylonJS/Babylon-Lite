@@ -516,6 +516,8 @@ export {
     setPhysicsBodyAngularVelocity,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
+    removePhysicsBody,
+    releasePhysicsShape,
     disposePhysics,
     PhysicsShapeType,
     PhysicsMotionType,

@@ -446,6 +446,38 @@ export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, 
     body.node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
 }
 
+// ─── Removal ─────────────────────────────────────────────────────────
+
+/**
+ * Remove a single body from the world and release its native handle (the per-frame step skips it from
+ * now on). After this the body must not be reused. A body that isn't in the world is ignored, so this is
+ * safe to call once per body. Does NOT release the body's collision shape — release that separately with
+ * {@link releasePhysicsShape} if it isn't shared.
+ * @param world - The physics world.
+ * @param body - The body to remove.
+ */
+export function removePhysicsBody(world: PhysicsWorld, body: PhysicsBody): void {
+    const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
+    const i = bodies.indexOf(body);
+    if (i < 0) {
+        return; // already removed / not part of this world
+    }
+    bodies.splice(i, 1);
+    hknp.HP_World_RemoveBody(hkWorld, body._hkBody);
+    hknp.HP_Body_Release(body._hkBody);
+}
+
+/**
+ * Release a collision shape's native handle, freeing its WASM memory. Only call once no body still
+ * references the shape (e.g. after {@link removePhysicsBody}). Useful when rebuilding a changing set of
+ * static colliders so their shapes don't accumulate.
+ * @param world - The physics world.
+ * @param shape - The shape to release.
+ */
+export function releasePhysicsShape(world: PhysicsWorld, shape: PhysicsShape): void {
+    world._hknp.HP_Shape_Release(shape._hkShape);
+}
+
 // ─── Aggregate (convenience) ─────────────────────────────────────────
 
 /**
