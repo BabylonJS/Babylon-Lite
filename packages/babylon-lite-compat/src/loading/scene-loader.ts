@@ -103,3 +103,39 @@ export const SceneLoader = {
         );
     },
 };
+
+// ── Function-style loaders (Babylon.js 7+ `@babylonjs/core/Loading/sceneLoader`) ──
+
+/** Babylon.js `ImportMeshAsync(source, scene, options?)` — imports an asset into the scene. */
+export async function ImportMeshAsync(source: string, scene: Scene, _options?: unknown): Promise<ImportResult> {
+    const container = await loadFromSource(source, scene);
+    container.addAllToScene(scene);
+    return {
+        meshes: [],
+        particleSystems: [],
+        skeletons: [],
+        animationGroups: container.animationGroups,
+        transformNodes: [],
+        lights: [],
+        container,
+    };
+}
+
+/** Babylon.js `AppendSceneAsync(source, scene, options?)` — appends an asset's contents to the scene. */
+export async function AppendSceneAsync(source: string, scene: Scene, _options?: unknown): Promise<Scene> {
+    const container = await loadFromSource(source, scene);
+    container.addAllToScene(scene);
+    return scene;
+}
+
+/** Babylon.js `LoadAssetContainerAsync(source, scene, options?)` — loads into a container without adding. */
+export async function LoadAssetContainerAsync(source: string, scene: Scene, _options?: unknown): Promise<AssetContainer> {
+    return loadFromSource(source, scene);
+}
+
+/** @internal Load a glTF/.babylon asset from a single source URL (function-loader form). */
+async function loadFromSource(source: string, scene: Scene): Promise<AssetContainer> {
+    const engine = scene.getEngine()._lite;
+    const lite = source.endsWith(".babylon") ? await loadBabylon(engine, source) : await loadGltf(engine, source);
+    return new AssetContainer(lite);
+}

@@ -101,7 +101,8 @@
         "maxRawKB": 54.1,
         "description": "PBR metallic-roughness sphere: golden base, metallic=0, roughness=1, hemispheric light only.",
         "tags": ["pbr", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 11,
@@ -162,7 +163,8 @@
         "maxMad": 0.01,
         "maxRawKB": 47.6,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
-        "tags": ["std", "procedural"]
+        "tags": ["std", "procedural"],
+        "compatParity": true
     },
     {
         "id": 17,
@@ -181,7 +183,8 @@
         "maxRawKB": 60.6,
         "description": "FreeCamera + SpotLight PCF shadow generator. Ground receives hard shadows from box.",
         "tags": ["std", "procedural", "shadow"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 19,
@@ -276,7 +279,8 @@
         "maxMad": 0.02,
         "maxRawKB": 84,
         "description": "ClearCoatTest.gltf (6×3 grid: clearcoat variants) with default environment (IBL only). Matches PG #YG3BBF#33.",
-        "tags": ["pbr", "gltf", "env", "clearcoat"]
+        "tags": ["pbr", "gltf", "env", "clearcoat"],
+        "compatParity": true
     },
     {
         "id": 29,
@@ -286,7 +290,8 @@
         "maxRawKB": 87.4,
         "description": "SheenCloth.gltf (KHR_materials_sheen + KHR_texture_transform 30× tiling) with default environment (IBL only). Matches PG #YG3BBF#2.",
         "tags": ["pbr", "gltf", "env", "sheen", "texture-transform"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 30,
@@ -296,7 +301,8 @@
         "maxRawKB": 100.6,
         "description": "KHR_materials_volume_testing.glb (transmission + volume + ior + specular) against default IBL environment with frame-graph scene-texture transmission. Matches PG #YG3BBF#16.",
         "tags": ["pbr", "gltf", "env", "transmission", "volume"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 31,
@@ -306,7 +312,8 @@
         "maxRawKB": 78.2,
         "description": "EmissiveStrengthTest.glb (grid of materials with varying emissive_strength) against default IBL environment. Matches PG #YG3BBF#52.",
         "tags": ["pbr", "gltf", "env", "emissive"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 32,
@@ -316,7 +323,8 @@
         "maxRawKB": 78.1,
         "description": "UnlitTest.glb (KHR_materials_unlit) against default IBL environment. Base color output directly with no lighting. Matches PG #YG3BBF#53.",
         "tags": ["pbr", "gltf", "env", "unlit"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 33,
@@ -326,7 +334,8 @@
         "maxRawKB": 99.3,
         "description": "LightsPunctualLamp.glb (KHR_lights_punctual point lights + KHR_materials_transmission) with default IBL environment. Matches PG #YG3BBF#54.",
         "tags": ["pbr", "gltf", "env", "lights-punctual", "transmission"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 34,
@@ -336,7 +345,8 @@
         "maxRawKB": 89.5,
         "description": "CubeVisibility.glb — three cubes: green always-visible, blue blinking via KHR_animation_pointer on its visibility flag, two reds hidden via KHR_node_visibility. Default IBL env. Matches PG #YG3BBF#55.",
         "tags": ["pbr", "gltf", "env", "node-visibility", "animation-pointer"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 35,
@@ -345,7 +355,8 @@
         "maxMad": 0.02,
         "maxRawKB": 81.2,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
-        "tags": ["pbr", "gltf", "env", "gpu-instancing"]
+        "tags": ["pbr", "gltf", "env", "gpu-instancing"],
+        "compatParity": true
     },
     {
         "id": 36,
@@ -364,7 +375,8 @@
         "maxMad": 0.02,
         "maxRawKB": 92.9,
         "description": "SheenWoodLeatherSofa.glb (KHR_materials_sheen + KHR_materials_specular + KHR_texture_transform + EXT_texture_webp) with default IBL environment (no skybox, no ground). Matches PG #YG3BBF#58.",
-        "tags": ["pbr", "gltf", "env", "sheen", "specular", "texture-transform", "webp"]
+        "tags": ["pbr", "gltf", "env", "sheen", "specular", "texture-transform", "webp"],
+        "compatParity": true
     },
     {
         "id": 38,
@@ -494,7 +506,8 @@
         "maxRawKB": 60,
         "description": "Minimal Node Material: InputBlock(color, uniform, vec4) feeds FragmentOutput; vertex path is position × WVP. First end-to-end NME scene.",
         "tags": ["nme", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 61,
@@ -504,7 +517,8 @@
         "maxRawKB": 60,
         "description": "Node Material with a vertex→fragment varying: normal attribute remapped as `normal * 0.5 + 0.5` → FragmentOutput.rgb. Exercises ScaleBlock, AddBlock, and attribute-to-fragment bridging.",
         "tags": ["nme", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 62,
@@ -514,7 +528,8 @@
         "maxRawKB": 63,
         "description": "Node Material sampling a 2D texture (crate.png) through a TextureBlock driven by the UV attribute. Exercises texture/sampler BGL slot allocation and `NodeInputHandle.texture` pass-through.",
         "tags": ["nme", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 63,
@@ -524,7 +539,8 @@
         "maxRawKB": 64,
         "description": "Node Material with one DirectionalLight: position/normal world-transformed, driven through LightBlock (Blinn-Phong) to FragmentOutput.rgb. Exercises the shared lights UBO binding + module-scope helper assembly.",
         "tags": ["nme", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 64,
@@ -661,7 +677,8 @@
         "maxRawKB": 65,
         "description": "Node Material compatibility graph for editor-only/alias blocks: OppositeBlock computes 1 - uv.x, Elbow and Teleport In/Out pass the value through, and an inactive DebugBlock is parsed without changing shader output.",
         "tags": ["nme", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 78,
@@ -671,7 +688,8 @@
         "maxRawKB": 60,
         "description": "Single-plane Node Material graph covering scalar and vector math blocks: Divide, Mod, Reciprocal, Length, Distance, Cross, Reflect, Refract, ArcTan2, and Fresnel with UV-derived deterministic inputs.",
         "tags": ["nme", "procedural", "math"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 79,
@@ -681,7 +699,8 @@
         "maxRawKB": 65,
         "description": "Single-plane Node Material graph covering NLerpBlock, ConditionalBlock, CurveBlock, WaveBlock, and RandomNumberBlock with UV-driven deterministic inputs, multiple condition/curve/wave modes, and Babylon.js-compatible getRand(seed.xy).",
         "tags": ["nme", "procedural", "math"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 80,
@@ -691,7 +710,8 @@
         "maxRawKB": 65,
         "description": "Single-plane Node Material color ramp covering ColorMergerBlock, ColorConverterBlock, DesaturateBlock, GradientBlock, PosterizeBlock, and ReplaceColorBlock with deterministic UV-driven color operations.",
         "tags": ["nme", "procedural", "color"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 81,
@@ -711,7 +731,8 @@
         "maxRawKB": 75,
         "description": "Single-plane Node Material graph split into four deterministic procedural quadrants covering CloudBlock, SimplexPerlin3DBlock, VoronoiNoiseBlock, and WorleyNoise3DBlock.",
         "tags": ["nme", "procedural", "noise"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 83,
@@ -721,7 +742,8 @@
         "maxRawKB": 75,
         "description": "Lit Node Material plane covering DerivativeBlock, HeightToNormalBlock, TBNBlock, NormalBlendBlock, and AmbientOcclusionBlock with a UV height field, blended normal-map color, tangent basis tint, and deterministic AO darkening.",
         "tags": ["nme", "procedural", "normals", "lighting"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 84,
@@ -741,7 +763,8 @@
         "maxRawKB": 68,
         "description": "Node Material plane covering MatrixBuilder, MatrixTransposeBlock, MatrixSplitterBlock, and MatrixDeterminantBlock with matrix-driven vertex shear and determinant/splitter-derived fragment color.",
         "tags": ["nme", "procedural", "matrix"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 86,
@@ -771,7 +794,8 @@
         "maxRawKB": 68,
         "description": "Single-plane Node Material graph covering LoopBlock control flow with StorageRead/StorageWrite accumulation of five deterministic UV color bands.",
         "tags": ["nme", "procedural", "loop"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 89,
@@ -781,7 +805,8 @@
         "maxRawKB": 68,
         "description": "Single-plane Node Material graph covering StorageReadBlock and StorageWriteBlock through a LoopBlock-local vec4 storage value with component-dependent feedback updates.",
         "tags": ["nme", "procedural", "loop", "storage"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 90,
@@ -1146,7 +1171,8 @@
         "maxRawKB": 57,
         "description": "Standalone AnimationManager drives a manual position.x float track matching Babylon.js beginDirectAnimation.",
         "tags": ["std", "procedural", "anim"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 151,
@@ -1156,7 +1182,8 @@
         "maxRawKB": 57,
         "description": "Standalone AnimationManager drives position, scaling, and rotationQuaternion tracks on one manual transform clip.",
         "tags": ["std", "procedural", "anim"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 152,

@@ -146,6 +146,27 @@ export class StandardMaterial extends PushMaterial {
 
     private _diffuseTexture: BaseTexture | null = null;
     private _bumpTexture: BaseTexture | null = null;
+
+    /**
+     * @internal Re-bind texture maps to the Lite material. Babylon.js `Texture`s
+     * load asynchronously, so when `material.diffuseTexture = new Texture(url)` ran
+     * the Lite handle was still undefined. By engine-start the scene has awaited the
+     * loads, so copy the now-resolved handles (and UV tiling) onto the Lite props.
+     */
+    public override _ensureRenderable(_engine: EngineContext): void {
+        const diff = this._diffuseTexture as { _lite?: Texture2D; uScale?: number; vScale?: number } | null;
+        if (diff?._lite) {
+            this._lite.diffuseTexture = diff._lite;
+            if (diff.uScale !== undefined && diff.vScale !== undefined) {
+                this._lite.uvScale = [diff.uScale, diff.vScale];
+            }
+        }
+        const bump = this._bumpTexture as { _lite?: Texture2D } | null;
+        if (bump?._lite) {
+            this._lite.bumpTexture = bump._lite;
+        }
+        this._markDirty();
+    }
 }
 
 export class PBRMaterial extends PushMaterial {

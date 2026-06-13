@@ -104,6 +104,103 @@ function lerpValue(a: number | number[], b: number | number[], t: number): numbe
     return av.map((value, i) => value + ((bv[i] ?? value) - value) * t);
 }
 
+/** @internal Assign an animated value to `target` following a dotted property path (e.g. `"position.x"`). */
+function applyAnimatedValue(target: unknown, path: string, value: number | number[]): void {
+    const parts = path.split(".");
+    let obj = target as Record<string, unknown>;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const next = obj[parts[i]!];
+        if (next == null) {
+            return;
+        }
+        obj = next as Record<string, unknown>;
+    }
+    const leaf = parts[parts.length - 1]!;
+    if (Array.isArray(value)) {
+        const slot = obj[leaf] as { set?: (...n: number[]) => void } | undefined;
+        if (slot && typeof slot.set === "function") {
+            slot.set(...value);
+        } else {
+            obj[leaf] = value;
+        }
+    } else {
+        obj[leaf] = value;
+    }
+}
+
+/**
+ * Babylon.js `Animatable` — a running animation on a target, driven per-frame on
+ * the CPU by evaluating each `Animation`'s keyframes and writing the result onto
+ * the target's (dotted) property path.
+ */
+export class Animatable {
+    public masterFrame = 0;
+    public speedRatio = 1;
+    private _paused = false;
+    private _stopped = false;
+
+    public constructor(
+        private readonly _target: unknown,
+        private readonly _animations: Animation[],
+        private readonly _from: number,
+        private readonly _to: number,
+        private readonly _loop: boolean,
+        speedRatio: number
+    ) {
+        this.speedRatio = speedRatio;
+        this.masterFrame = _from;
+        this._apply();
+    }
+
+    /** @internal Advance the animation by `deltaMs`, called once per scene frame. */
+    public _tick(deltaMs: number): void {
+        if (this._paused || this._stopped) {
+            return;
+        }
+        const fps = this._animations[0]?.framePerSecond ?? 60;
+        this.masterFrame += (deltaMs / 1000) * fps * this.speedRatio;
+        if (this.masterFrame > this._to) {
+            if (this._loop) {
+                const span = this._to - this._from || 1;
+                this.masterFrame = this._from + ((this.masterFrame - this._from) % span);
+            } else {
+                this.masterFrame = this._to;
+                this._stopped = true;
+            }
+        }
+        this._apply();
+    }
+
+    public goToFrame(frame: number): void {
+        this.masterFrame = frame;
+        this._apply();
+    }
+
+    public pause(): void {
+        this._paused = true;
+    }
+
+    public restart(): void {
+        this._paused = false;
+        this._stopped = false;
+        this.masterFrame = this._from;
+    }
+
+    public stop(): void {
+        this._stopped = true;
+    }
+
+    public get animationStarted(): boolean {
+        return !this._stopped;
+    }
+
+    private _apply(): void {
+        for (const anim of this._animations) {
+            applyAnimatedValue(this._target, anim.targetProperty, anim.evaluate(this.masterFrame));
+        }
+    }
+}
+
 export type AnimationGroupState = "init" | "playing" | "paused" | "stopped";
 
 /**

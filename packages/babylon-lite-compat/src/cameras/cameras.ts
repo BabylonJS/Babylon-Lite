@@ -158,6 +158,11 @@ export class ArcRotateCamera extends Camera {
         this._lite.target = { x: value.x, y: value.y, z: value.z };
     }
 
+    /** Babylon.js `setTarget` — point the arc-rotate camera at a world-space target. */
+    public setTarget(target: Vector3): void {
+        this.target = target;
+    }
+
     public get lowerRadiusLimit(): number | undefined {
         return this._lite.lowerRadiusLimit;
     }

@@ -25,6 +25,8 @@ import {
     createPolyhedron,
     createTransformNode,
     setParent,
+    setThinInstances,
+    setThinInstanceColors,
 } from "babylon-lite";
 import type { Mesh as LiteMesh, TransformNode as LiteTransformNode, SceneNode, EngineContext } from "babylon-lite";
 
@@ -33,8 +35,9 @@ import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
+import type { NodeMaterial } from "../materials/node-material.js";
 
-type CompatMaterial = StandardMaterial | PBRMaterial;
+type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial;
 
 interface LiteVec3Like {
     x: number;
@@ -135,8 +138,8 @@ export class AbstractMesh extends TransformNode {
     }
     public set material(value: CompatMaterial | null) {
         this._material = value;
-        if (value) {
-            this._lite.material = value._lite;
+        if (value?._lite) {
+            this._lite.material = value._lite as never;
         }
     }
 
@@ -215,6 +218,22 @@ export class Mesh extends AbstractMesh {
     /** Hardware-instanced copy — unsupported. Use native thin instances instead. */
     public createInstance(): never {
         return unsupported("Mesh.createInstance", "Babylon Lite has no hardware-instance object. Use the native thin-instance API (`setThinInstances`).");
+    }
+
+    /**
+     * Babylon.js `mesh.thinInstanceSetBuffer(kind, buffer, stride)`. Maps the
+     * `"matrix"` and `"color"` instance buffers onto Babylon Lite's thin-instance
+     * API. Applied immediately to the Lite mesh (before the scene builds).
+     */
+    public thinInstanceSetBuffer(kind: string, buffer: Float32Array | null, _stride = 16): void {
+        if (!buffer) {
+            return;
+        }
+        if (kind === "matrix") {
+            setThinInstances(this._lite, buffer, buffer.length / 16);
+        } else if (kind === "color") {
+            setThinInstanceColors(this._lite, buffer);
+        }
     }
 
     /** Deep mesh clone — not yet wrapped. */
@@ -317,7 +336,13 @@ function engineOf(scene: Scene): EngineContext {
  */
 function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
     scene._deferAdd(() => {
-        mesh.material?._ensureRenderable(engineOf(scene));
+        const mat = mesh.material;
+        mat?._ensureRenderable(engineOf(scene));
+        // Re-bind in case the material's Lite handle resolved late (async-parsed
+        // NodeMaterial, or a texture map that loaded after `mesh.material = …`).
+        if (mat?._lite) {
+            mesh._lite.material = mat._lite as never;
+        }
         addToScene(scene._lite, mesh._lite);
     });
     return mesh;

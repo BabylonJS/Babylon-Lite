@@ -29,6 +29,8 @@ import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ArcRotateCamera } from "../cameras/cameras.js";
 import { StandardMaterial } from "../materials/materials.js";
+import { Animatable } from "../animations/animation.js";
+import type { Animation } from "../animations/animation.js";
 import type { CubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 
@@ -36,11 +38,15 @@ import type { WebGPUEngine } from "../engine/engine.js";
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
 const DEFAULT_BRDF_URL = "/brdf-lut.png";
+/** Babylon.js `createDefaultEnvironment` IBL fallback when no `environmentTexture` is set. */
+const DEFAULT_ENV_URL = "https://assets.babylonjs.com/environments/environmentSpecular.env";
 
 interface DefaultEnvironmentOptions {
     createSkybox?: boolean;
     createGround?: boolean;
     skyboxSize?: number;
+    /** @internal When set, the skybox is the environment texture itself (Babylon.js `createDefaultSkybox`). */
+    skyboxFromEnv?: boolean;
 }
 
 export class Scene {
@@ -89,6 +95,9 @@ export class Scene {
     private _started = false;
     private _envTexture: CubeTexture | null = null;
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
+    private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void }> = [];
+    private readonly _pendingTextures: Array<Promise<void>> = [];
+    private readonly _runningAnimatables: Animatable[] = [];
 
     public constructor(engine: WebGPUEngine) {
         this._engine = engine;
@@ -99,7 +108,10 @@ export class Scene {
         // (i.e. after the previous frame has rendered). `addOnce` after-render
         // listeners therefore resolve one frame later than they would in BJS.
         let renderedAFrame = false;
-        onBeforeRender(this._lite, () => {
+        onBeforeRender(this._lite, (deltaMs: number) => {
+            for (const a of this._runningAnimatables) {
+                a._tick(deltaMs);
+            }
             if (renderedAFrame) {
                 this.onAfterRenderObservable.notifyObservers(this);
             }
@@ -134,6 +146,37 @@ export class Scene {
             add();
         }
         this._pendingAdds.length = 0;
+    }
+
+    /** @internal Register a compat `ShadowGenerator` to be built at engine start. */
+    public _registerShadowGenerator(gen: { _build(engine: import("babylon-lite").EngineContext): void }): void {
+        this._shadowGenerators.push(gen);
+    }
+
+    /** @internal Track an async texture load so the engine can await it before building the scene. */
+    public _trackTextureLoad(promise: Promise<void>): void {
+        this._pendingTextures.push(promise);
+    }
+
+    /** @internal Await all in-flight texture loads (so material maps are GPU-ready at build). */
+    public async _awaitPendingTextures(): Promise<void> {
+        if (this._pendingTextures.length > 0) {
+            await Promise.all(this._pendingTextures);
+            this._pendingTextures.length = 0;
+        }
+    }
+
+    /** @internal Whether any shadow generator is present (engine uses shadow-aware registration). */
+    public _hasShadows(): boolean {
+        return this._shadowGenerators.length > 0;
+    }
+
+    /** @internal Build all registered shadow generators. Called after meshes are added. */
+    public _buildShadowGenerators(): void {
+        const engine = this._engine._lite;
+        for (const gen of this._shadowGenerators) {
+            gen._build(engine);
+        }
     }
 
     /**
@@ -175,6 +218,16 @@ export class Scene {
 
     /** Babylon.js `scene.performancePriority` — accepted for parity; Babylon Lite tunes its own pipeline. */
     public performancePriority = 0;
+
+    /** Babylon.js `scene.attachControl` — camera input is attached per-camera in the compat layer; no-op. */
+    public attachControl(_attachUp?: boolean, _attachDown?: boolean, _attachMove?: boolean): void {
+        // Camera control is wired through `camera.attachControl(canvas)`.
+    }
+
+    /** Babylon.js `scene.detachControl` — no-op (see {@link attachControl}). */
+    public detachControl(): void {
+        // No-op.
+    }
 
     // ── Fog (Babylon.js `scene.fogMode/fogStart/fogEnd/fogDensity/fogColor`) ──
 
@@ -250,19 +303,43 @@ export class Scene {
     }
 
     /**
+     * Babylon.js `scene.createDefaultSkybox(texture, pbr?, scale?, blur?, setGlobalEnv?)` —
+     * adds a skybox built from the given environment texture. Babylon Lite reuses the
+     * loaded `.env` specular cubemap as an HDR skybox, so this records the env URL (if
+     * not already set) and flags a skybox-from-environment load at engine start.
+     */
+    public createDefaultSkybox(texture?: CubeTexture, _pbr?: boolean, scale?: number, _blur?: number, _setGlobalEnv?: boolean): { dispose(): void } {
+        if (texture) {
+            this._envTexture = texture;
+        }
+        this._defaultEnvOptions = {
+            ...(this._defaultEnvOptions ?? {}),
+            createSkybox: true,
+            createGround: false,
+            skyboxFromEnv: true,
+            ...(scale !== undefined ? { skyboxSize: scale } : {}),
+        };
+        return { dispose(): void {} };
+    }
+
+    /**
      * @internal Load the pending environment (IBL + skybox/ground) into the Lite
      * scene. Awaited by the engine before `registerScene` so the GPU env textures
      * exist when the scene builds.
      */
     public async _loadPendingEnvironment(): Promise<void> {
-        const envUrl = this._envTexture?.url;
+        // Babylon.js `createDefaultEnvironment` lights the scene from a built-in
+        // environment even when no `environmentTexture` is assigned; fall back to
+        // the default specular env so IBL-only scenes are lit correctly.
+        const envUrl = this._envTexture?.url ?? (this._defaultEnvOptions ? DEFAULT_ENV_URL : undefined);
         if (!envUrl) {
             return;
         }
         const opts = this._defaultEnvOptions;
+        const skyboxUrl = opts?.skyboxFromEnv ? envUrl : opts?.createSkybox ? DEFAULT_SKYBOX_URL : undefined;
         await loadEnvironment(this._lite, envUrl, {
             brdfUrl: DEFAULT_BRDF_URL,
-            skyboxUrl: opts?.createSkybox ? DEFAULT_SKYBOX_URL : undefined,
+            skyboxUrl,
             skipSkybox: !opts?.createSkybox,
             groundTextureUrl: opts?.createGround ? DEFAULT_GROUND_URL : undefined,
             skipGround: !opts?.createGround,
@@ -321,9 +398,23 @@ export class Scene {
         return unsupported("Scene.getMeshByName", "Babylon Lite does not expose a public scene-mesh registry yet. Track meshes you create yourself.");
     }
 
-    /** Babylon.js convenience animation starter — not yet wrapped. */
-    public beginAnimation(): never {
-        return unsupported("Scene.beginAnimation", "Not yet wrapped. Use the native Babylon Lite property-animation API (`createPropertyAnimationGroup`).");
+    /**
+     * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
+     * Drives the given `Animation`s on the CPU each frame, writing onto the target's
+     * (dotted) property path. Returns an `Animatable` with `goToFrame`/`pause`/`stop`.
+     */
+    public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
+        const animatable = new Animatable(target, animations, from, to, loop, speedRatio);
+        this._runningAnimatables.push(animatable);
+        return animatable;
+    }
+
+    /**
+     * Babylon.js `scene.beginAnimation(target, from, to, loop, speedRatio?)`. Runs
+     * the animations already attached to `target.animations`.
+     */
+    public beginAnimation(target: { animations?: Animation[] }, from: number, to: number, loop = false, speedRatio = 1): Animatable {
+        return this.beginDirectAnimation(target, target.animations ?? [], from, to, loop, speedRatio);
     }
 
     public dispose(): void {

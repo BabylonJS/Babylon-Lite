@@ -66,7 +66,7 @@ export { Material, PushMaterial, StandardMaterial, PBRMaterial, PBRMetallicRough
 export { BaseTexture, Texture, RawTexture, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
-export { SceneLoader, AssetContainer } from "./loading/scene-loader.js";
+export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
@@ -80,8 +80,12 @@ export { UtilityLayerRenderer, PositionGizmo, RotationGizmo, ScaleGizmo, Boundin
 export { AutoRotationBehavior, BouncingBehavior, FramingBehavior } from "./behaviors/behaviors.js";
 export type { Behavior } from "./behaviors/behaviors.js";
 
+// ─── Shadows ─────────────────────────────────────────────────────────
+export { ShadowGenerator, CascadedShadowGenerator } from "./shadows/shadow-generator.js";
+export { NodeMaterial } from "./materials/node-material.js";
+
 // ─── Animation ───────────────────────────────────────────────────────
-export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes } from "./animations/animation.js";
+export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, Animatable } from "./animations/animation.js";
 export type { IAnimationKey, AnimationGroupState } from "./animations/animation.js";
 export {
     EasingFunction,
@@ -124,7 +128,6 @@ export {
 export {
     MultiMaterial,
     ShaderMaterial,
-    NodeMaterial,
     BackgroundMaterial,
     RectAreaLight,
     ParticleSystem,

@@ -156,12 +156,51 @@ export class Matrix {
         return Matrix.FromValues(c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
     }
 
-    public static Compose(scale: Vector3, rotationZ: number, translation: Vector3): Matrix {
-        // Convenience for simple Z-rotated transforms; full quaternion compose is
-        // available through TransformNode in the compat hierarchy.
-        return Matrix.Scaling(scale.x, scale.y, scale.z)
-            .multiply(Matrix.RotationZ(rotationZ))
-            .multiply(Matrix.Translation(translation.x, translation.y, translation.z));
+    /**
+     * Babylon.js `Matrix.Compose(scale, rotation, translation)` — build a TRS matrix
+     * from a scale vector, a rotation quaternion, and a translation vector (row-vector
+     * convention, translation in elements 12/13/14).
+     */
+    public static Compose(scale: Vector3, rotation: { x: number; y: number; z: number; w: number }, translation: Vector3): Matrix {
+        const { x, y, z, w } = rotation;
+        const x2 = x + x,
+            y2 = y + y,
+            z2 = z + z;
+        const xx = x * x2,
+            xy = x * y2,
+            xz = x * z2,
+            yy = y * y2,
+            yz = y * z2,
+            zz = z * z2,
+            wx = w * x2,
+            wy = w * y2,
+            wz = w * z2;
+        const sx = scale.x,
+            sy = scale.y,
+            sz = scale.z;
+        return Matrix.FromValues(
+            (1 - (yy + zz)) * sx,
+            (xy + wz) * sx,
+            (xz - wy) * sx,
+            0,
+            (xy - wz) * sy,
+            (1 - (xx + zz)) * sy,
+            (yz + wx) * sy,
+            0,
+            (xz + wy) * sz,
+            (yz - wx) * sz,
+            (1 - (xx + yy)) * sz,
+            0,
+            translation.x,
+            translation.y,
+            translation.z,
+            1
+        );
+    }
+
+    /** Babylon.js `Matrix.markAsUpdated()` — Lite has no per-matrix dirty flag; no-op for parity. */
+    public markAsUpdated(): this {
+        return this;
     }
 }
 

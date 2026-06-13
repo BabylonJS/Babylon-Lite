@@ -34,14 +34,38 @@ export abstract class BaseTexture {
 
 export class Texture extends BaseTexture {
     private readonly _ready: Promise<void>;
+    /** Babylon.js sampling-mode constants (numeric parity). */
+    public static readonly NEAREST_SAMPLINGMODE = 1;
+    public static readonly BILINEAR_SAMPLINGMODE = 2;
+    public static readonly TRILINEAR_SAMPLINGMODE = 3;
+    public static readonly NEAREST_NEAREST = 8;
+    public static readonly LINEAR_LINEAR = 11;
+    /** Babylon.js coordinate-mode constants (numeric parity). */
+    public static readonly CLAMP_ADDRESSMODE = 0;
+    public static readonly WRAP_ADDRESSMODE = 1;
+    public static readonly MIRROR_ADDRESSMODE = 2;
+    /** Babylon.js texture UV tiling (applied to the Lite material at bind time). */
+    public uScale = 1;
+    public vScale = 1;
+    public uOffset = 0;
+    public vOffset = 0;
+    public hasAlpha = false;
+    public coordinatesIndex = 0;
 
-    public constructor(url: string, scene: Scene) {
+    public constructor(url: string, scene: Scene, _noMipmapOrOptions?: unknown, _invertY?: boolean, _samplingMode?: number, onLoad?: (() => void) | null) {
         super();
         this.name = url;
         const engine = scene.getEngine()._lite;
         this._ready = loadTexture2D(engine, url).then((tex) => {
             this._lite = tex;
+            if (onLoad) {
+                onLoad();
+            }
         });
+        // Let the scene await this load before it builds renderables, so the GPU
+        // handle exists when the owning material binds (Babylon.js loads in the
+        // background but its render loop simply waits a frame; we wait at build).
+        scene._trackTextureLoad(this._ready);
     }
 
     public override getClassName(): string {

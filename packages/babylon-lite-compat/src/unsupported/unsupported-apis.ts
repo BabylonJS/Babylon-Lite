@@ -27,15 +27,6 @@ export class ShaderMaterial {
     }
 }
 
-export class NodeMaterial {
-    public constructor() {
-        unsupported(
-            "NodeMaterial",
-            "Programmatic node-material graph building is not wrapped. Babylon Lite has an NME snippet parser — use the native `parseNodeMaterialFromSnippet` API instead."
-        );
-    }
-}
-
 export class BackgroundMaterial {
     public constructor() {
         unsupported("BackgroundMaterial", "Standalone BackgroundMaterial is not wrapped. Use the compat `Scene` environment helpers / native `loadEnvironment` instead.");

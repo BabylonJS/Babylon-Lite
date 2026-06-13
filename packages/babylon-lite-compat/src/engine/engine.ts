@@ -12,7 +12,7 @@
  * returns immediately and rendering begins on a subsequent tick.
  */
 
-import { createEngine, startEngine, stopEngine, resizeEngine, setEngineSize, disposeEngine, registerScene, onBeforeRender } from "babylon-lite";
+import { createEngine, startEngine, stopEngine, resizeEngine, setEngineSize, disposeEngine, registerScene, registerSceneWithShadowSupport, onBeforeRender } from "babylon-lite";
 import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
@@ -105,9 +105,15 @@ export class WebGPUEngine {
         }
         this._started = true;
         for (const scene of this._scenes) {
+            await scene._awaitPendingTextures();
             scene._flushPendingAdds();
             await scene._loadPendingEnvironment();
-            await registerScene(scene._lite);
+            scene._buildShadowGenerators();
+            if (scene._hasShadows()) {
+                await registerSceneWithShadowSupport(scene._lite);
+            } else {
+                await registerScene(scene._lite);
+            }
         }
         await startEngine(this._lite);
     }
