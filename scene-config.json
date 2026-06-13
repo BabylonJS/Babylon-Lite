@@ -61,7 +61,8 @@
         "maxRawKB": 74,
         "description": "Procedural sphere with PBR specular-glossiness, environment IBL, no direct light.",
         "tags": ["pbr", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 7,
@@ -112,7 +113,8 @@
         "maxRawKB": 83.6,
         "description": "Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
         "tags": ["pbr", "gltf"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 12,
@@ -386,7 +388,8 @@
         "maxRawKB": 62.3,
         "description": "Cylinder, cone, plane, disc, ring, polyhedron, ribbon, tube, and extruded shape rendered with StandardMaterial. Parity check against BJS MeshBuilder.",
         "tags": ["std", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 40,
@@ -1193,7 +1196,8 @@
         "maxRawKB": 90,
         "description": "One explicit AnimationManager drives a glTF shark skeleton group and a manual camera orbit property group.",
         "tags": ["pbr", "gltf", "anim"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 153,
@@ -1485,7 +1489,8 @@
         "maxRawKB": 60,
         "description": "Point-lit 3×3 box grid + central sphere at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The point light's world position is baked with the camera offset in the lights UBO so the GPU shades with an eye-relative light position — crisp specular highlights vs F32 cancellation jitter. Pairs with BJS useLargeWorldRendering.",
         "tags": ["hpm", "lwr", "floating-origin", "point-light", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 203,
@@ -1495,7 +1500,8 @@
         "maxRawKB": 60,
         "description": "Spot light aimed down onto a ground + box ring + sphere at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The spot's world position is baked with the camera offset in the lights UBO (direction untouched) so the GPU shades eye-relative — a crisp light cone vs F32 cancellation jitter. Pairs with BJS useLargeWorldRendering.",
         "tags": ["hpm", "lwr", "floating-origin", "spot-light", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 204,
@@ -1505,7 +1511,8 @@
         "maxRawKB": 60,
         "description": "Thin-instanced box (5×5 local grid) on a mesh node at world (~5e6, 1, ~5e6) with useFloatingOrigin=true. Both Lite and BJS compose finalWorld = mesh.world * instance, so the large coordinate lives in the eye-relative mesh.world and instance matrices stay local — crisp instanced geometry vs F32 jitter. Pairs with BJS useLargeWorldRendering.",
         "tags": ["hpm", "lwr", "floating-origin", "thin-instances", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 205,
@@ -1535,7 +1542,8 @@
         "maxRawKB": 75,
         "description": "Directional-light PCF shadows (sphere + boxes casting onto a ground receiver) at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises the shadow light-space matrix under floating origin: the PCF directional generator builds its light view/projection eye-relative (camera offset subtracted from the light position and caster AABBs) so the shadow matches the eye-relative mesh world matrices used by both the caster pass and the receiver shader — correctly placed, crisp shadows vs F32 collapse. Pairs with BJS useLargeWorldRendering + ShadowGenerator (usePercentageCloserFiltering).",
         "tags": ["hpm", "lwr", "floating-origin", "shadow", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 210,
@@ -1630,7 +1638,8 @@
         "maxRawKB": 90,
         "description": "Baked vertex animation: the scene-11 shark's skeletal animation is pre-evaluated into one rgba32float texture (bakeVat) and played through the GPU VAT vertex path (mesh.vat) with NO live CPU skeleton — the vertex shader reads each bone matrix from the baked texture at the current frame row. First step toward thin-instancing animated meshes. The baker + VAT shader fragment live in a dynamic-import chunk reached only when a scene bakes a VAT, so scenes that never use vertex animation pay zero bytes.",
         "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 219,
@@ -1640,7 +1649,8 @@
         "maxRawKB": 93,
         "description": "Per-instance VAT: the scene-11 shark baked to a VAT texture and rendered through the GPU thin-instance VAT path (one identity-matrix instance), frozen via ?seekTime. The instanced path's finalWorld = instanceMatrix * mesh.world * skin equals the plain skinned pose at identity, so it matches the BJS live-skeleton golden exactly — validating per-instance frame selection (the instance params texture read by @builtin(instance_index)), the thin-instance world placement, and the dual-clip blend path (single clip = blend 0). One draw call, no live CPU skeleton.",
         "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 221,

@@ -8,6 +8,9 @@
  * native Babylon Lite animation manager when wired to a scene (not modelled here).
  */
 
+import { goToFrame as liteGoToFrame, playAnimation, pauseAnimation, stopAnimation } from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup, EngineContext } from "babylon-lite";
+
 export interface IAnimationKey {
     frame: number;
     value: number | number[];
@@ -204,55 +207,166 @@ export class Animatable {
 export type AnimationGroupState = "init" | "playing" | "paused" | "stopped";
 
 /**
- * Babylon.js `AnimationGroup` — a named collection of animations with playback
- * state. Structural surface (add/play/pause/stop + state + observable-less
- * callbacks); frame stepping is delegated to the native animation manager when
- * the group is bound to a scene.
+ * Babylon.js `AnimationGroup` — a named collection of targeted animations with
+ * playback state. This is the **single** `AnimationGroup` type, matching Babylon.js;
+ * there is no separate "loaded" subtype. Two construction paths map onto Lite:
+ *
+ *  - **Structural** (`new AnimationGroup(name, scene?)`): a CPU-side collection
+ *    built by ported code via `addTargetedAnimation`; playback state is tracked
+ *    structurally (frame stepping is delegated to the native manager when bound).
+ *  - **Loaded** (`AnimationGroup._fromLite`, used to populate `scene.animationGroups`
+ *    from glTF / `.babylon` clips): a thin wrapper over a Babylon Lite loaded group.
+ *    The playback methods (`goToFrame`/`play`/`pause`/`stop`/`reset`) and the
+ *    `from`/`to`/`isPlaying`/`speedRatio`/`loopAnimation`/`weight`/`animatables`
+ *    accessors delegate to the Lite group so ported scenes can freeze/seek a
+ *    loaded animation at a deterministic frame.
  */
 export class AnimationGroup {
     public readonly targetedAnimations: Array<{ animation: Animation; target: unknown }> = [];
-    public from = 0;
-    public to = 0;
     public onAnimationGroupEndObservable?: () => void;
 
-    private _state: AnimationGroupState = "init";
-    public speedRatio = 1;
+    /** @internal Babylon Lite loaded-group backing (set only on the loaded path). */
+    public _lite?: LiteAnimationGroup;
+    /** @internal Engine context used to drive Lite-backed playback. */
+    private _engine?: EngineContext;
 
-    public constructor(public name: string) {}
+    private _from = 0;
+    private _to = 0;
+    private _state: AnimationGroupState = "init";
+    private _speedRatio = 1;
+    private _loopAnimation = false;
+
+    public constructor(
+        public name: string,
+        _scene?: unknown
+    ) {}
+
+    /** @internal Build an `AnimationGroup` backed by a Babylon Lite loaded group. */
+    public static _fromLite(lite: LiteAnimationGroup, engine: EngineContext): AnimationGroup {
+        const group = new AnimationGroup(lite.name);
+        group._lite = lite;
+        group._engine = engine;
+        return group;
+    }
+
+    /** First frame of the clip. Always 0 for loaded clips. */
+    public get from(): number {
+        return this._lite ? 0 : this._from;
+    }
+
+    /** Last frame of the clip. */
+    public get to(): number {
+        return this._lite ? this._lite.duration * (this._lite.frameRate ?? 60) : this._to;
+    }
 
     public get isPlaying(): boolean {
-        return this._state === "playing";
+        return this._lite ? this._lite.isPlaying : this._state === "playing";
     }
 
     public get state(): AnimationGroupState {
+        if (this._lite) {
+            return this._lite.isPlaying ? "playing" : "paused";
+        }
         return this._state;
+    }
+
+    public get speedRatio(): number {
+        return this._lite ? this._lite.speedRatio : this._speedRatio;
+    }
+    public set speedRatio(value: number) {
+        if (this._lite) {
+            this._lite.speedRatio = value;
+        } else {
+            this._speedRatio = value;
+        }
+    }
+
+    public get loopAnimation(): boolean {
+        return this._lite ? this._lite.loopAnimation : this._loopAnimation;
+    }
+    public set loopAnimation(value: boolean) {
+        if (this._lite) {
+            this._lite.loopAnimation = value;
+        } else {
+            this._loopAnimation = value;
+        }
+    }
+
+    public get weight(): number {
+        return this._lite ? this._lite.weight : 1;
+    }
+    public set weight(value: number) {
+        if (this._lite) {
+            this._lite.weight = value;
+        }
+    }
+
+    /**
+     * Babylon.js `AnimationGroup.animatables`. For loaded groups Babylon Lite drives
+     * the whole group as one unit, so this surfaces a single animatable whose
+     * `masterFrame` reflects the group's current frame. Structural groups built
+     * without a running scene report no animatables.
+     */
+    public get animatables(): Array<{ masterFrame: number }> {
+        if (this._lite) {
+            const frameRate = this._lite.frameRate ?? 60;
+            return [{ masterFrame: this._lite.currentFrame * frameRate }];
+        }
+        return [];
     }
 
     public addTargetedAnimation(animation: Animation, target: unknown): { animation: Animation; target: unknown } {
         const entry = { animation, target };
         this.targetedAnimations.push(entry);
-        this.from = Math.min(this.from, 0);
-        this.to = Math.max(this.to, animation.getHighestFrame());
+        this._from = Math.min(this._from, 0);
+        this._to = Math.max(this._to, animation.getHighestFrame());
         return entry;
     }
 
-    public play(_loop?: boolean): this {
-        this._state = "playing";
+    /** Babylon.js `goToFrame(frame)` — seek to a frame (loaded groups seek + hold via Lite). */
+    public goToFrame(frame: number): this {
+        if (this._lite && this._engine) {
+            liteGoToFrame(this._lite, frame, this._engine);
+        }
+        return this;
+    }
+
+    public play(loop?: boolean): this {
+        if (this._lite) {
+            if (loop !== undefined) {
+                this._lite.loopAnimation = loop;
+            }
+            playAnimation(this._lite);
+        } else {
+            this._state = "playing";
+        }
         return this;
     }
 
     public pause(): this {
-        this._state = "paused";
+        if (this._lite) {
+            pauseAnimation(this._lite);
+        } else {
+            this._state = "paused";
+        }
         return this;
     }
 
     public stop(): this {
-        this._state = "stopped";
+        if (this._lite) {
+            stopAnimation(this._lite);
+        } else {
+            this._state = "stopped";
+        }
         return this;
     }
 
     public reset(): this {
-        this._state = "init";
+        if (this._lite && this._engine) {
+            liteGoToFrame(this._lite, 0, this._engine);
+        } else {
+            this._state = "init";
+        }
         return this;
     }
 }

@@ -31,6 +31,7 @@ import { ArcRotateCamera } from "../cameras/cameras.js";
 import { StandardMaterial } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
+import { AnimationGroup } from "../animations/animation.js";
 import type { CubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 
@@ -67,14 +68,27 @@ export class Scene {
     public readonly onDisposeObservable = new Observable<Scene>();
 
     /**
-     * Babylon.js `scene.animationGroups` / `scene.animatables`. Babylon Lite drives
-     * loaded animation playback through its own engine hooks, so these arrays exist
-     * to satisfy the BJS-facing API (iteration, `pause()`/`stop()` calls) without
-     * crashing; they are not the backing store for playback. Loaders push the
-     * groups they create here.
+     * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
+     * `.babylon` animation clips live on the Lite scene; `animationGroups` returns
+     * BJS-shaped `AnimationGroup`s over them (so scenes can `goToFrame`/`pause`/`stop`
+     * to freeze a model at a deterministic frame). `animatables` surfaces the running
+     * CPU `Animatable`s started via `beginDirectAnimation`.
      */
-    public readonly animationGroups: unknown[] = [];
-    public readonly animatables: unknown[] = [];
+    public get animationGroups(): AnimationGroup[] {
+        const liteGroups = this._lite.animationGroups ?? [];
+        return liteGroups.map((g) => {
+            let wrapper = this._animationGroupCache.get(g);
+            if (!wrapper) {
+                wrapper = AnimationGroup._fromLite(g, this._engine._lite);
+                this._animationGroupCache.set(g, wrapper);
+            }
+            return wrapper;
+        });
+    }
+
+    public get animatables(): Animatable[] {
+        return this._runningAnimatables;
+    }
 
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
@@ -98,6 +112,7 @@ export class Scene {
     private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void }> = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _runningAnimatables: Animatable[] = [];
+    private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
 
     public constructor(engine: WebGPUEngine) {
         this._engine = engine;

@@ -13,6 +13,7 @@ import { addToScene, loadGltf, loadBabylon } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, AnimationGroup } from "babylon-lite";
 
 import { unsupported } from "../error.js";
+import { collectLoadedMeshes, type LoadedMesh } from "./loaded-mesh.js";
 import type { Scene } from "../scene/scene.js";
 
 export class AssetContainer {
@@ -27,6 +28,11 @@ export class AssetContainer {
         return this._lite.animationGroups ?? [];
     }
 
+    /** Flat list of renderable meshes (Babylon.js-shaped handles over the loaded node tree). */
+    public get meshes(): LoadedMesh[] {
+        return collectLoadedMeshes(this._lite);
+    }
+
     /** Add every entity, animation group, camera, and clear colour to the scene. */
     public addAllToScene(scene: Scene): void {
         addToScene(scene._lite, this._lite);
@@ -39,7 +45,7 @@ export class AssetContainer {
 }
 
 interface ImportResult {
-    meshes: unknown[];
+    meshes: LoadedMesh[];
     particleSystems: unknown[];
     skeletons: unknown[];
     animationGroups: AnimationGroup[];
@@ -73,7 +79,7 @@ export const SceneLoader = {
         const container = await load(rootUrl, sceneFilename, scene);
         container.addAllToScene(scene);
         return {
-            meshes: [],
+            meshes: container.meshes,
             particleSystems: [],
             skeletons: [],
             animationGroups: container.animationGroups,
@@ -111,7 +117,7 @@ export async function ImportMeshAsync(source: string, scene: Scene, _options?: u
     const container = await loadFromSource(source, scene);
     container.addAllToScene(scene);
     return {
-        meshes: [],
+        meshes: container.meshes,
         particleSystems: [],
         skeletons: [],
         animationGroups: container.animationGroups,

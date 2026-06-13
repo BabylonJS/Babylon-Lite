@@ -29,11 +29,27 @@ export class WebGPUEngine {
     private _initialized = false;
     private _started = false;
 
-    public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean } & EngineOptions) | boolean) {
+    /**
+     * Babylon.js `engine.useReverseDepthBuffer`. Babylon Lite owns its depth
+     * configuration internally, so this is a settable no-op kept for API shape.
+     */
+    public useReverseDepthBuffer = false;
+
+    public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | boolean) {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        this._options = typeof options === "object" ? options : undefined;
+        const opts = typeof options === "object" ? { ...options } : undefined;
+        // Babylon.js exposes floating-origin / large-world rendering through a
+        // single `useLargeWorldRendering` flag. Babylon Lite splits it into
+        // `useHighPrecisionMatrix` + `useFloatingOrigin` (the latter requires the
+        // former). Translate so compat scenes that pass the BJS flag light up LWR.
+        if (opts && (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering) {
+            delete (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering;
+            opts.useHighPrecisionMatrix = true;
+            opts.useFloatingOrigin = true;
+        }
+        this._options = opts;
     }
 
     /** Acquire the GPU device and build the Lite engine context. */

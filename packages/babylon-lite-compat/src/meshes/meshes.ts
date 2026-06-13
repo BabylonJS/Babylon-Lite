@@ -23,6 +23,9 @@ import {
     createTorusKnot,
     createDisc,
     createPolyhedron,
+    createRibbon,
+    createTube,
+    createExtrudeShape,
     createTransformNode,
     setParent,
     setThinInstances,
@@ -392,6 +395,21 @@ export const MeshBuilder = {
 
     CreatePolyhedron(name: string, options: object, scene: Scene): Mesh {
         const lite = createPolyhedron(engineOf(scene), options as never);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
+    },
+
+    CreateRibbon(name: string, options: object, scene: Scene): Mesh {
+        const lite = createRibbon(engineOf(scene), options as never);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
+    },
+
+    CreateTube(name: string, options: object, scene: Scene): Mesh {
+        const lite = createTube(engineOf(scene), options as never);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
+    },
+
+    ExtrudeShape(name: string, options: object, scene: Scene): Mesh {
+        const lite = createExtrudeShape(engineOf(scene), options as never);
         return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 

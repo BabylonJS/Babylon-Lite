@@ -330,49 +330,58 @@ section records which of those scenes currently render at pixel parity with the
 native Babylon Lite port, and the blocker for the ones that don't. It is a
 behavioural cross-check of the API surface above, not a separate contract.
 
-> Snapshot date: 2026-06-12. Method: in-browser MAD diff of `/compat/sceneN`
+> Snapshot date: 2026-06-13. Method: in-browser MAD diff of `/compat/sceneN`
 > vs `/lite/sceneN`. "Working" = renders with MAD ≈ 0 (matches the Lite port).
 > Scenes opted into the Compat tab carry `"compatParity": true` in
 > [scene-config.json](../../scene-config.json).
+>
+> **Lite-only scenes are excluded.** Four scenes — `180`, `181`, `227`, `228`
+> (text rendering / multi-canvas) — have no Babylon.js oracle source, so there is
+> nothing to run through the compat layer; `/compat/sceneN.html` reports them as
+> skipped. The counts below are out of the **164** scenes that have a BJS oracle.
 
-### ✅ Working (36 scenes, MAD ≈ 0)
+### ✅ Working (46 scenes, MAD ≈ 0)
 
-`1`, `2`, `5`, `9`, `10`, `13`, `15`, `16`, `18`, `28`, `29`, `30`, `31`, `32`,
-`33`, `34`, `35`, `37`, `60`, `61`, `62`, `63`, `77`, `78`, `79`, `80`, `82`,
-`83`, `85`, `88`, `89`, `150`, `151`, `200`, `210`, `216`
+`1`, `2`, `5`, `6`, `9`, `10`, `11`, `13`, `15`, `16`, `18`, `28`, `29`, `30`,
+`31`, `32`, `33`, `34`, `35`, `37`, `38`, `60`, `61`, `62`, `63`, `77`, `78`,
+`79`, `80`, `82`, `83`, `85`, `88`, `89`, `150`, `151`, `152`, `200`, `202`,
+`203`, `204`, `207`, `210`, `216`, `218`, `219`
 
-Covers: StandardMaterial + PBR (factor + IBL), glTF / `.babylon` model loading,
-default-environment IBL, fog, spot/directional PCF + ESM shadows, thin instances,
-NME node materials, and CPU keyframe animation.
+Covers: StandardMaterial + PBR (factor + IBL), glTF / `.babylon` model loading
+(+ loaded animation groups with `goToFrame` freeze), default-environment IBL,
+fog, spot/directional PCF + ESM shadows, thin instances, NME node materials,
+procedural builders (ribbon/tube/extrude), floating-origin / large-world
+rendering (point/spot light, thin instances, directional shadows), and CPU
+keyframe animation.
 
 ### ❌ Not working — grouped by blocker
 
-| Blocker                                                  | Scenes                                                                                                    | Notes                                                                                                            |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `SpriteManager` / `SpriteRenderer` (sprites)             | 50, 52, 53, 54, 55, 58, 59, 92, 93, 94, 95, 96, 98, 205                                                   | Sprite system not wrapped; Lite has a different sprite API                                                       |
-| `NodeMaterial` shadow/PBR layers (renders, diverges)     | 65, 66, 67, 68, 69, 70, 71, 72, 73, 84, 87                                                                | Render at MAD ≈ 0.4–1.5; advanced NME-PBR (clearcoat/sheen/SSS/env) not exact                                    |
-| `PostProcess` / rendering pipelines                      | 142, 143, 144, 145, 146                                                                                   | No post-process pipeline; use native frame-graph tasks                                                           |
-| Missing `Effect` / `EffectRenderer` exports              | 74, 75, 76, 116, 127, 128, 159, 160, 161, 162, 163                                                        | Low-level shader-effect API not wrapped                                                                          |
-| Missing `VertexBuffer` export / custom geometry          | 56, 64, 86, 114, 170, 213                                                                                 | Manual vertex-buffer authoring not wrapped                                                                       |
-| glTF model framing (`result.meshes` + `getBoundingInfo`) | 11, 152, 157, 158, 172, 173, 218, 219                                                                     | 🔧 Needs a Lite-core public mesh-bounds accessor                                                                  |
-| Floating-origin / large-world rendering (LWR)            | 201, 202, 203, 204, 206, 207                                                                              | Lite floating-origin not surfaced through compat                                                                 |
-| `.dds` environment / advanced reflection                 | 17, 19, 21, 23, 176, 177, 178, 212                                                                        | `loadEnvironment` consumes `.env`; `.dds` cube + skybox PBR diverge                                              |
-| Heightmap ground (`CreateGroundFromHeightMap`)           | 4, 22                                                                                                     | Async heightmap mesh builder not wrapped                                                                         |
-| `VertexData.applyToMesh` (build mesh from CPU data)      | 57                                                                                                        | Needs an empty-`Mesh(name, scene)` + apply path                                                                  |
-| Gaussian splatting / point clouds                        | 120, 121, 122, 123, 124, 125, 126, 129                                                                    | `.ply`/`.spz`/splat formats not parsed by Lite                                                                   |
-| Navigation meshes (Recast)                               | 171, 174, 175                                                                                             | Recast nav not wrapped                                                                                           |
-| Basis Universal textures                                 | 36                                                                                                        | `.basis` transcode not wrapped                                                                                   |
-| CSG / CSG2                                               | 90, 91                                                                                                    | Constructive solid geometry not wrapped                                                                          |
-| Physics (Havok)                                          | 40                                                                                                        | `PhysicsAggregate`/`PhysicsShapeType` not wrapped                                                                |
-| `CascadedShadowGenerator` (true CSM)                     | 214, 215                                                                                                  | Falls back to single-cascade directional; cascades diverge                                                       |
-| Weighted `AnimationGroup` blending (`group.start`)       | 155, 156                                                                                                  | Weighted cross-fade not modelled                                                                                 |
-| Misc single-API gaps                                     | 8, 12, 20, 25, 26, 27, 38, 113, 140, 147, 148, 149, 153, 154, 165, 179, 211, 217, 221, 222, 223, 224, 225 | e.g. `HDRCubeTexture`, `engine.getCaps`, `NullEngine`, `MaterialPluginBase`, `GeospatialCamera`, gizmo internals |
-| Silent no-render (no throw, blank frame)                 | 14, 24, 112                                                                                               | Under investigation                                                                                              |
-| Hangs the main thread (runaway loop)                     | 180, 181, 227, 228                                                                                        | Likely a Lite-core loop bug; needs separate fix                                                                  |
-| Sync `scene.pick`                                        | 113                                                                                                       | ❌ by design — use async `GPUPicker`                                                                              |
+| Blocker                                                  | Scenes                                                                                                | Notes                                                                                                            |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `SpriteManager` / `SpriteRenderer` (sprites)             | 50, 52, 53, 54, 55, 58, 59, 92, 93, 94, 95, 96, 98, 205                                               | Sprite system not wrapped; Lite has a different sprite API                                                       |
+| `NodeMaterial` shadow/PBR layers (renders, diverges)     | 65, 66, 67, 68, 69, 70, 71, 72, 73, 84, 87                                                            | Render at MAD ≈ 0.4–1.5; advanced NME-PBR (clearcoat/sheen/SSS/env) not exact                                    |
+| `PostProcess` / rendering pipelines                      | 142, 143, 144, 145, 146                                                                               | No post-process pipeline; use native frame-graph tasks                                                           |
+| Missing `Effect` / `EffectRenderer` exports              | 74, 75, 76, 116, 127, 128, 159, 160, 161, 162, 163                                                    | Low-level shader-effect API not wrapped                                                                          |
+| Missing `VertexBuffer` export / custom geometry          | 56, 64, 86, 114, 170, 213                                                                             | Manual vertex-buffer authoring not wrapped                                                                       |
+| glTF model framing (`result.meshes` + `getBoundingInfo`) | 172, 173                                                                                              | 🔧 Recast nav scenes also gated on navigation mesh support                                                        |
+| Floating-origin / large-world rendering (LWR)            | 201, 206                                                                                              | 201/206 add sprite/billboard + `VertexData` on top of LWR; the procedural LWR scenes (202–204, 207) now pass     |
+| `.dds` environment / advanced reflection                 | 17, 19, 21, 23, 176, 177, 178, 212                                                                    | `loadEnvironment` consumes `.env`; `.dds` cube + skybox PBR diverge                                              |
+| Heightmap ground (`CreateGroundFromHeightMap`)           | 4, 22                                                                                                 | Async heightmap mesh builder not wrapped                                                                         |
+| `VertexData.applyToMesh` (build mesh from CPU data)      | 57                                                                                                    | Needs an empty-`Mesh(name, scene)` + apply path                                                                  |
+| Gaussian splatting / point clouds                        | 120, 121, 122, 123, 124, 125, 126, 129                                                                | `.ply`/`.spz`/splat formats not parsed by Lite                                                                   |
+| Navigation meshes (Recast)                               | 171, 174, 175                                                                                         | Recast nav not wrapped                                                                                           |
+| Basis Universal textures                                 | 36                                                                                                    | `.basis` transcode not wrapped                                                                                   |
+| CSG / CSG2                                               | 90, 91                                                                                                | Constructive solid geometry not wrapped                                                                          |
+| Physics (Havok)                                          | 40                                                                                                    | `PhysicsAggregate`/`PhysicsShapeType` not wrapped                                                                |
+| `CascadedShadowGenerator` (true CSM)                     | 214, 215                                                                                              | Falls back to single-cascade directional; cascades diverge                                                       |
+| Weighted `AnimationGroup` blending (`group.start`)       | 155, 156, 157, 158                                                                                    | Weighted cross-fade / additive blend not modelled                                                                |
+| Misc single-API gaps                                     | 8, 12, 20, 25, 26, 27, 113, 140, 147, 148, 149, 153, 154, 165, 179, 211, 217, 221, 222, 223, 224, 225 | e.g. `HDRCubeTexture`, `engine.getCaps`, `NullEngine`, `MaterialPluginBase`, `GeospatialCamera`, gizmo internals |
+| Silent no-render (no throw, blank frame)                 | 14, 24, 112                                                                                           | Under investigation                                                                                              |
+| Sync `scene.pick`                                        | 113                                                                                                   | ❌ by design — use async `GPUPicker`                                                                              |
 
 Adding a missing export usually only advances a scene to its _next_ blocker
 rather than fixing it outright (e.g. several NME-PBR scenes resolve `NodeMaterial`
 but then diverge on clearcoat/sheen lighting). The highest-leverage remaining work
-is a Lite-core mesh-bounds accessor (unblocks the glTF model-framing cluster) and
-the sprite / post-process subsystems.
+is the sprite and post-process subsystems, plus weighted/additive `AnimationGroup`
+blending (unblocks 155–158). The glTF model-framing cluster and the procedural
+large-world-rendering scenes are now resolved.

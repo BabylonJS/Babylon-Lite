@@ -631,9 +631,15 @@ function compatScenesPlugin(): Plugin {
                 const sceneId = match[1];
                 const srcRel = `lite/src/bjs/scene${sceneId}.ts`;
                 if (!existsSync(resolve(__dirname, srcRel))) {
+                    // No Babylon.js oracle source for this scene — it is a Lite-only scene
+                    // (e.g. text rendering, multi-canvas) with nothing to run through the
+                    // compat layer. Report it as intentionally skipped, not as an error.
                     res.statusCode = 404;
                     res.setHeader("Content-Type", "text/html; charset=utf-8");
-                    res.end(`<!DOCTYPE html><meta charset="utf-8"><body style="font:14px monospace;color:#f85149;background:#000">No Babylon.js oracle scene at ${srcRel}</body>`);
+                    res.end(
+                        `<!DOCTYPE html><meta charset="utf-8"><body style="font:14px monospace;color:#8b949e;background:#000">` +
+                            `Scene ${sceneId} is a Lite-only scene (no Babylon.js oracle at ${srcRel}); nothing to run through the compat layer.</body>`
+                    );
                     return;
                 }
                 const baseHtml = [

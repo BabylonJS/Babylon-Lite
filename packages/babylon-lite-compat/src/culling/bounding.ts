@@ -34,12 +34,18 @@ export class BoundingBox {
     public maximum: Vector3;
     public center: Vector3;
     public extendSize: Vector3;
+    /** World-space AABB corners. Equal to `minimum`/`maximum` when the box is
+     *  already built in world space (as the loader's `getBoundingInfo` does). */
+    public minimumWorld: Vector3;
+    public maximumWorld: Vector3;
     /** The 8 corner points (min/max combinations). */
     public vectors: Vector3[];
 
     public constructor(min: Vector3, max: Vector3) {
         this.minimum = min.clone();
         this.maximum = max.clone();
+        this.minimumWorld = min.clone();
+        this.maximumWorld = max.clone();
         this.center = Vector3.Lerp(min, max, 0.5);
         this.extendSize = max.subtract(min).scale(0.5);
         this.vectors = [
