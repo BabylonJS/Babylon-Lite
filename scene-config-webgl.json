@@ -1,1 +1,79 @@
-[]
+[
+    {
+        "id": 1,
+        "slug": "gl-gradient",
+        "name": "Scene 1 — Animated Gradient",
+        "description": "Fullscreen animated gradient rendered with @babylonjs/lite-gl (createEffect + EffectWrapper + cached uniform setters).",
+        "tags": ["effect", "shader", "procedural"],
+        "maxMad": 2.0,
+        "maxRawKB": 12,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 2,
+        "slug": "gl-plasma",
+        "name": "Scene 2 — Plasma",
+        "description": "Fullscreen procedural plasma effect rendered with @babylonjs/lite-gl, animated via the uTime uniform.",
+        "tags": ["effect", "shader", "procedural"],
+        "maxMad": 2.0,
+        "maxRawKB": 12,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 3,
+        "slug": "gl-textured",
+        "name": "Scene 3 — Textured Quad",
+        "description": "Two textures sampled in one custom fragment shader: a procedural checkerboard via createRawTexture and a generated PNG via loadTexture2D, blended by an animated wipe (setEffectTexture + setEffectFloat2).",
+        "tags": ["texture"],
+        "maxMad": 2.0,
+        "maxRawKB": 17,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 4,
+        "slug": "gl-sprites",
+        "name": "Scene 4 — Sprites",
+        "description": "A drifting, hue-cycling field of 64 tinted sprites drawn with the @babylonjs/lite-gl/sprites renderer over a procedural glow-disc sheet (identity view/projection maps sprite positions straight to clip space).",
+        "tags": ["sprites"],
+        "maxMad": 2.0,
+        "maxRawKB": 20,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 5,
+        "slug": "gl-blend-modes",
+        "name": "Scene 5 — Blend Modes",
+        "description": "Three overlapping disc clusters drawn with setBlendMode under GLBlendMode.ADD, ALPHA and PREMULTIPLIED — the additive cluster blooms bright where discs overlap.",
+        "tags": ["blend"],
+        "maxMad": 2.0,
+        "maxRawKB": 14,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 6,
+        "slug": "gl-html-texture",
+        "name": "Scene 6 — HTML-Element Texture",
+        "description": "An animated offscreen 2D canvas wrapped via @babylonjs/lite-gl/html-texture, re-uploaded each frame with updateHtmlElementTexture and sampled fullscreen (with an in-shader V-flip).",
+        "tags": ["texture", "dynamic"],
+        "maxMad": 2.0,
+        "maxRawKB": 15,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 7,
+        "slug": "gl-sine-bands",
+        "name": "Scene 7 — Sine Wave Bands",
+        "description": "Layered phase-shifted sine bands tinted by a cosine-gradient palette (createEffect + EffectWrapper). Original lite-gl reimplementation inspired by shadertoy.com/view/tffSDr.",
+        "tags": ["effect", "shader", "procedural"],
+        "maxMad": 3.0,
+        "maxRawKB": 13,
+        "skipParity": false,
+        "skipPerf": false
+    }
+]

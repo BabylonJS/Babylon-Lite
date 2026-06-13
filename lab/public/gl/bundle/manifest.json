@@ -1,0 +1,44 @@
+{
+  "scene1": {
+    "rawKB": 9.8,
+    "gzipKB": 3.6,
+    "bjsRawKB": 166,
+    "bjsGzipKB": 42.1
+  },
+  "scene2": {
+    "rawKB": 10,
+    "gzipKB": 3.7,
+    "bjsRawKB": 166.3,
+    "bjsGzipKB": 42.2
+  },
+  "scene3": {
+    "rawKB": 14.5,
+    "gzipKB": 5.4,
+    "bjsRawKB": 309.7,
+    "bjsGzipKB": 79.1
+  },
+  "scene4": {
+    "rawKB": 17.7,
+    "gzipKB": 6.4,
+    "bjsRawKB": 329.4,
+    "bjsGzipKB": 84.4
+  },
+  "scene5": {
+    "rawKB": 11.6,
+    "gzipKB": 4.3,
+    "bjsRawKB": 178.7,
+    "bjsGzipKB": 45.7
+  },
+  "scene6": {
+    "rawKB": 12.4,
+    "gzipKB": 4.8,
+    "bjsRawKB": 285.2,
+    "bjsGzipKB": 73.2
+  },
+  "scene7": {
+    "rawKB": 10.5,
+    "gzipKB": 4,
+    "bjsRawKB": 166.7,
+    "bjsGzipKB": 42.4
+  }
+}

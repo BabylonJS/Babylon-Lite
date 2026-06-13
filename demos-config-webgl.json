@@ -1,1 +1,9 @@
-[]
+[
+    {
+        "slug": "sine-bands",
+        "name": "Sine Wave Bands",
+        "description": "Layered sine-wave bands with an IQ cosine palette — an original reimplementation inspired by Shadertoy tffSDr.",
+        "tags": ["effect"],
+        "mobile": true
+    }
+]

@@ -37,9 +37,15 @@ Use `--wait 15000` for Lite pages (compute shaders need time).
 
 ## Build & Test
 
+Babylon-Lite (WebGPU) package:
 - `pnpm test` — Vitest unit/bundle-size tests
 - `pnpm test:parity` — Playwright visual parity tests (needs Chrome, not headless)
 - `pnpm dev:lab` — dev server (port 5174+, auto-increments if busy)
+
+**Lite GL (`@babylonjs/lite-gl`, WebGL2 sibling).** Commands, coverage policy,
+the experience-aware lab dashboard, and **spector.js (SpectorJS) debugging** are
+documented in `docs/gl/welcome.md` (full module spec:
+`docs/gl/architecture/00-lite-gl.md`).
 
 ## Key Architecture Facts
 
