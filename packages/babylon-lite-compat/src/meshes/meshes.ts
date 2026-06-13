@@ -179,6 +179,39 @@ export class Mesh extends AbstractMesh {
         return "Mesh";
     }
 
+    // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
+
+    /** Legacy `Mesh.CreateSphere(name, segments, diameter, scene)`. */
+    public static CreateSphere(name: string, segments: number, diameter: number, scene: Scene): Mesh {
+        return MeshBuilder.CreateSphere(name, { segments, diameter }, scene);
+    }
+
+    /** Legacy `Mesh.CreateBox(name, size, scene)`. */
+    public static CreateBox(name: string, size: number, scene: Scene): Mesh {
+        return MeshBuilder.CreateBox(name, { size }, scene);
+    }
+
+    /** Legacy `Mesh.CreateGround(name, width, height, subdivisions, scene)`. */
+    public static CreateGround(name: string, width: number, height: number, subdivisions: number, scene: Scene): Mesh {
+        return MeshBuilder.CreateGround(name, { width, height, subdivisions }, scene);
+    }
+
+    /** Legacy `Mesh.CreatePlane(name, size, scene)`. */
+    public static CreatePlane(name: string, size: number, scene: Scene): Mesh {
+        return MeshBuilder.CreatePlane(name, { size }, scene);
+    }
+
+    /** Legacy `Mesh.CreateCylinder(name, height, diameterTop, diameterBottom, tessellation, _subdivisions, scene)`. */
+    public static CreateCylinder(name: string, height: number, diameterTop: number, diameterBottom: number, tessellation: number, _subdivisions: number, scene: Scene): Mesh {
+        const diameter = Math.max(diameterTop, diameterBottom);
+        return MeshBuilder.CreateCylinder(name, { height, diameter, tessellation }, scene);
+    }
+
+    /** Legacy `Mesh.CreateTorus(name, diameter, thickness, tessellation, scene)`. */
+    public static CreateTorus(name: string, diameter: number, thickness: number, tessellation: number, scene: Scene): Mesh {
+        return MeshBuilder.CreateTorus(name, { diameter, thickness, tessellation }, scene);
+    }
+
     /** Hardware-instanced copy — unsupported. Use native thin instances instead. */
     public createInstance(): never {
         return unsupported("Mesh.createInstance", "Babylon Lite has no hardware-instance object. Use the native thin-instance API (`setThinInstances`).");
@@ -278,12 +311,15 @@ function engineOf(scene: Scene): EngineContext {
 /**
  * Add a freshly-constructed mesh to its Lite scene. The wrapper constructor has
  * already assigned the mesh's material (a real one or `scene.defaultMaterial`),
- * so `addToScene` — which reads `mesh.material` to build the renderable group —
- * sees a material and produces a drawable. Adding before the material is set
- * would silently skip rendering.
+ * but Babylon.js code commonly reassigns `mesh.material` a line later. Lite locks
+ * a mesh into a render group at add time, so we defer the add until engine start
+ * (via `scene._deferAdd`) to let those assignments settle.
  */
 function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
-    addToScene(scene._lite, mesh._lite);
+    scene._deferAdd(() => {
+        mesh.material?._ensureRenderable(engineOf(scene));
+        addToScene(scene._lite, mesh._lite);
+    });
     return mesh;
 }
 

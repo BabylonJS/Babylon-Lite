@@ -7,7 +7,8 @@
         "maxRegionMad": 0.03,
         "maxRawKB": 93,
         "description": "glTF PBR model, IBL environment, hemispheric light, arc-rotate camera.",
-        "tags": ["pbr", "gltf"]
+        "tags": ["pbr", "gltf"],
+        "compatParity": true
     },
     {
         "id": 2,
@@ -49,7 +50,8 @@
         "maxRawKB": 88.6,
         "description": "glTF Alien model with PBR, skeleton/bones, normal map, hemispheric light.",
         "tags": ["pbr", "gltf"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 6,
@@ -88,7 +90,8 @@
         "maxMad": 0.01,
         "maxRawKB": 59.9,
         "description": "Sponza palace loaded from .babylon format. Standard materials with diffuse textures, point lights.",
-        "tags": ["std", "babylon"]
+        "tags": ["std", "babylon"],
+        "compatParity": true
     },
     {
         "id": 10,
@@ -128,7 +131,8 @@
         "maxRawKB": 88.9,
         "description": "12 spheres with varying metallic/roughness baseColorFactor, default environment.",
         "tags": ["pbr", "gltf"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 14,
@@ -148,7 +152,8 @@
         "maxRawKB": 46.5,
         "description": "Two SpotLights (red + green) with different exponents on a ground plane. Multi-light support.",
         "tags": ["std", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 16,
@@ -1432,7 +1437,8 @@
         "maxRawKB": 50,
         "description": "5×5 grid of boxes + pillar at world (~5e6, *, ~5e6) with useHighPrecisionMatrix=false. F32 view-proj chain visibly jitters at this magnitude — stair-stepped silhouettes, mis-aligned cube faces. Compare to scene 201 (FO on) for the precision win.",
         "tags": ["hpm", "lwr", "precision", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 201,
@@ -1513,7 +1519,8 @@
         "description": "KhronosGroup XmpMetadataRoundedCube.glb exercising the KHR_xmp_json_ld extension; JSON-LD metadata packets are surfaced on the AssetContainer with zero render impact, rendered in environmentSpecular.env with a skybox.",
         "tags": ["pbr", "gltf", "xmp", "metadata", "env", "skybox"],
         "skipPerf": true,
-        "bundleTimeoutMs": 120000
+        "bundleTimeoutMs": 120000,
+        "compatParity": true
     },
     {
         "id": 211,
@@ -1575,6 +1582,7 @@
         "maxRawKB": 54,
         "description": "A receding row of 10 gold PBR boxes fades into linear fog whose colour matches the background, validating that PBR materials apply fog identically to Babylon.js — the fog is mixed into the linear HDR colour before the tonemap/image-processing chain, using the PBR-specific linearised fog factor (toLinearSpace(fog) = pow(fog, 2.2)). Hemispheric light, arc-rotate camera, no environment.",
         "tags": ["pbr", "fog"],
+        "compatParity": true,
         "skipPerf": true
     },
     {

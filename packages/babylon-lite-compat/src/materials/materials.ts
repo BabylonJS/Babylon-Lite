@@ -9,12 +9,12 @@
  * material properties are intentionally omitted.
  */
 
-import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty } from "babylon-lite";
-import type { StandardMaterialProps, PbrMaterialProps, Texture2D } from "babylon-lite";
+import { createStandardMaterial, createPbrMaterial, markMaterialUboDirty, createSolidTexture2D } from "babylon-lite";
+import type { StandardMaterialProps, PbrMaterialProps, Texture2D, EngineContext } from "babylon-lite";
 
 import { Color3 } from "../math/color.js";
 import type { Scene } from "../scene/scene.js";
-import type { BaseTexture } from "../textures/textures.js";
+import type { BaseTexture, CubeTexture } from "../textures/textures.js";
 
 type Tuple3 = [number, number, number];
 type Tuple4 = [number, number, number, number];
@@ -31,8 +31,12 @@ export abstract class Material {
     /** @internal Underlying Babylon Lite material props. */
     public abstract readonly _lite: StandardMaterialProps | PbrMaterialProps;
 
-    protected constructor(name: string, _scene?: Scene) {
+    /** @internal Owning compat scene, when constructed against one. */
+    protected _scene: Scene | undefined;
+
+    protected constructor(name: string, scene?: Scene) {
         this.name = name;
+        this._scene = scene;
     }
 
     public getClassName(): string {
@@ -41,6 +45,15 @@ export abstract class Material {
 
     protected _markDirty(): void {
         markMaterialUboDirty(this._lite);
+    }
+
+    /**
+     * @internal Finalize GPU-facing resources before the mesh is registered.
+     * Base materials need nothing; PBR overrides this to synthesize the solid
+     * textures Babylon Lite's PBR pipeline requires from factor-only materials.
+     */
+    public _ensureRenderable(_engine: EngineContext): void {
+        // No-op for the base/standard material.
     }
 
     public dispose(): void {
@@ -191,6 +204,49 @@ export class PBRMaterial extends PushMaterial {
     public set alpha(value: number) {
         this._lite.alpha = value;
         this._markDirty();
+    }
+
+    /**
+     * Babylon.js `material.environmentTexture` / `reflectionTexture`. Babylon Lite
+     * applies image-based lighting scene-wide rather than per-material, so a cube
+     * environment assigned to a material is routed to the owning scene's
+     * environment (the dominant single-IBL case Babylon.js scenes use).
+     */
+    public get environmentTexture(): CubeTexture | null {
+        return this._scene?.environmentTexture ?? null;
+    }
+    public set environmentTexture(value: CubeTexture | null) {
+        if (this._scene) {
+            this._scene.environmentTexture = value;
+        }
+    }
+
+    public get reflectionTexture(): CubeTexture | null {
+        return this.environmentTexture;
+    }
+    public set reflectionTexture(value: CubeTexture | null) {
+        this.environmentTexture = value;
+    }
+
+    /** @internal Synthesize the solid textures Babylon Lite's PBR pipeline requires from a factor-only material. */
+    public override _ensureRenderable(engine: EngineContext): void {
+        const lite = this._lite;
+        // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
+        // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
+        // 1×1 solid textures. Bake the factors into the textures and neutralize the factors
+        // so each contribution is applied exactly once.
+        if (!lite.baseColorTexture) {
+            const f = lite.baseColorFactor ?? [1, 1, 1, 1];
+            lite.baseColorTexture = createSolidTexture2D(engine, f[0], f[1], f[2], f[3]);
+            lite.baseColorFactor = [1, 1, 1, 1];
+        }
+        if (!lite.ormTexture) {
+            const rough = lite.roughnessFactor ?? 1;
+            const metal = lite.metallicFactor ?? 1;
+            lite.ormTexture = createSolidTexture2D(engine, 1, rough, metal);
+            lite.roughnessFactor = 1;
+            lite.metallicFactor = 1;
+        }
     }
 }
 

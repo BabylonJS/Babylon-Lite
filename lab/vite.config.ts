@@ -647,9 +647,10 @@ function compatScenesPlugin(): Plugin {
                     "<body>",
                     '<canvas id="renderCanvas"></canvas>',
                     // The BJS oracle scenes swallow their own errors via `.catch(console.error)`,
-                    // so intercept console.error / global errors to surface a thrown LiteCompatError
-                    // onto the canvas (the Compat tab polls `data-error` to flag missing APIs).
-                    "<script>(function(){var c=document.getElementById('renderCanvas');function mark(m){if(c&&!c.dataset.error){c.dataset.error=String(m).slice(0,300);}}var o=console.error.bind(console);console.error=function(){try{for(var i=0;i<arguments.length;i++){var a=arguments[i];var s=(a&&a.message)?a.message:String(a);if(/LiteCompatError|not supported|unsupported/i.test(String(a))||/LiteCompatError|not supported|unsupported/i.test(s)){mark(s);break;}}}catch(e){}return o.apply(console,arguments);};window.addEventListener('error',function(e){var m=e&&(e.error&&e.error.message||e.message);if(m&&/LiteCompatError|not supported|unsupported/i.test(m))mark(m);});window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason;var m=(r&&r.message)||r;if(m&&/LiteCompatError|not supported|unsupported/i.test(String(m)))mark(m);});})();</script>",
+                    // so intercept console.error / global errors and surface the thrown error onto
+                    // the canvas (`data-error`). The Compat tab — and the coverage-triage harness —
+                    // poll `data-ready` vs `data-error` to tell "renders" from "throws".
+                    "<script>(function(){var c=document.getElementById('renderCanvas');function mark(m){if(c&&!c.dataset.error){c.dataset.error=String(m).slice(0,400);}}function fromArgs(args){for(var i=0;i<args.length;i++){var a=args[i];if(a&&(a instanceof Error||a.message&&a.stack))return a.message;}for(var j=0;j<args.length;j++){if(typeof args[j]==='string')return args[j];}return '';}var o=console.error.bind(console);console.error=function(){try{var m=fromArgs(arguments);if(m)mark(m);}catch(e){}return o.apply(console,arguments);};window.addEventListener('error',function(e){mark((e&&(e.error&&e.error.message||e.message))||'error');});window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason;mark((r&&r.message)||r||'unhandledrejection');});})();</script>",
                     `<script type="module" src="/${srcRel}?compat"></script>`,
                     "</body>",
                     "</html>",

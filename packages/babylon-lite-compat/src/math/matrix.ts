@@ -39,6 +39,14 @@ export class Matrix {
         return Array.from(this.m);
     }
 
+    /** Babylon.js `Matrix.copyToArray` — copy the 16 elements into `array` at `offset`. */
+    public copyToArray(array: Float32Array | number[], offset = 0): this {
+        for (let i = 0; i < 16; i++) {
+            array[offset + i] = this.m[i]!;
+        }
+        return this;
+    }
+
     public equals(other: Matrix): boolean {
         for (let i = 0; i < 16; i++) {
             if (this.m[i] !== other.m[i]) {

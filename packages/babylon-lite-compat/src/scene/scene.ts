@@ -11,20 +11,47 @@
  * supported in this compat layer.
  */
 
-import { createSceneContext, disposeScene, onBeforeRender, createDefaultCamera as liteCreateDefaultCamera } from "babylon-lite";
+import {
+    createSceneContext,
+    disposeScene,
+    onBeforeRender,
+    createDefaultCamera as liteCreateDefaultCamera,
+    setFog,
+    loadEnvironment,
+    createHemisphericLight,
+    addToScene,
+} from "babylon-lite";
 import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRotateCamera } from "babylon-lite";
 
-import { Color4 } from "../math/color.js";
+import { Color3, Color4 } from "../math/color.js";
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ArcRotateCamera } from "../cameras/cameras.js";
 import { StandardMaterial } from "../materials/materials.js";
+import type { CubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
+
+/** Babylon.js EnvironmentHelper default skybox/ground/BRDF assets (match the Lite ports). */
+const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
+const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
+const DEFAULT_BRDF_URL = "/brdf-lut.png";
+
+interface DefaultEnvironmentOptions {
+    createSkybox?: boolean;
+    createGround?: boolean;
+    skyboxSize?: number;
+}
 
 export class Scene {
     /** @internal Underlying Babylon Lite scene context. */
     public readonly _lite: SceneContext;
+
+    /** Babylon.js fog-mode constants. */
+    public static readonly FOGMODE_NONE = 0;
+    public static readonly FOGMODE_EXP = 1;
+    public static readonly FOGMODE_EXP2 = 2;
+    public static readonly FOGMODE_LINEAR = 3;
 
     /** Fires before each scene render (wired to Lite's before-render hook). */
     public readonly onBeforeRenderObservable = new Observable<Scene>();
@@ -33,9 +60,35 @@ export class Scene {
     /** Fires once when the scene is disposed. */
     public readonly onDisposeObservable = new Observable<Scene>();
 
+    /**
+     * Babylon.js `scene.animationGroups` / `scene.animatables`. Babylon Lite drives
+     * loaded animation playback through its own engine hooks, so these arrays exist
+     * to satisfy the BJS-facing API (iteration, `pause()`/`stop()` calls) without
+     * crashing; they are not the backing store for playback. Loaders push the
+     * groups they create here.
+     */
+    public readonly animationGroups: unknown[] = [];
+    public readonly animatables: unknown[] = [];
+
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
     private _defaultMaterial: StandardMaterial | null = null;
+    private _fogMode = 0;
+    private _fogStart = 0;
+    private _fogEnd = 1000;
+    private _fogDensity = 0.1;
+    private _fogColor = new Color3(0.2, 0.2, 0.3);
+    /**
+     * @internal Mesh scene-adds deferred until the engine starts. Babylon Lite
+     * locks a mesh into a render group (standard vs PBR) at `addToScene` time by
+     * reading its material, whereas Babylon.js code routinely creates a mesh and
+     * assigns `mesh.material` a line later. Deferring the add until engine start
+     * lets those assignments settle so the mesh lands in the correct group.
+     */
+    private readonly _pendingAdds: Array<() => void> = [];
+    private _started = false;
+    private _envTexture: CubeTexture | null = null;
+    private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
 
     public constructor(engine: WebGPUEngine) {
         this._engine = engine;
@@ -58,6 +111,29 @@ export class Scene {
 
     public getEngine(): WebGPUEngine {
         return this._engine;
+    }
+
+    /**
+     * @internal Add a mesh to the Lite scene, deferring until engine start if the
+     * engine has not started yet (so a later `mesh.material = …` is captured in the
+     * correct render group). After start, adds happen immediately and Lite's
+     * material-swap path handles re-routing.
+     */
+    public _deferAdd(add: () => void): void {
+        if (this._started) {
+            add();
+        } else {
+            this._pendingAdds.push(add);
+        }
+    }
+
+    /** @internal Flush deferred mesh adds. Called by the engine just before `registerScene`. */
+    public _flushPendingAdds(): void {
+        this._started = true;
+        for (const add of this._pendingAdds) {
+            add();
+        }
+        this._pendingAdds.length = 0;
     }
 
     /**
@@ -97,12 +173,115 @@ export class Scene {
         return this._lite.imageProcessing;
     }
 
+    /** Babylon.js `scene.performancePriority` — accepted for parity; Babylon Lite tunes its own pipeline. */
+    public performancePriority = 0;
+
+    // ── Fog (Babylon.js `scene.fogMode/fogStart/fogEnd/fogDensity/fogColor`) ──
+
+    public get fogMode(): number {
+        return this._fogMode;
+    }
+    public set fogMode(value: number) {
+        this._fogMode = value;
+        this._applyFog();
+    }
+
+    public get fogStart(): number {
+        return this._fogStart;
+    }
+    public set fogStart(value: number) {
+        this._fogStart = value;
+        this._applyFog();
+    }
+
+    public get fogEnd(): number {
+        return this._fogEnd;
+    }
+    public set fogEnd(value: number) {
+        this._fogEnd = value;
+        this._applyFog();
+    }
+
+    public get fogDensity(): number {
+        return this._fogDensity;
+    }
+    public set fogDensity(value: number) {
+        this._fogDensity = value;
+        this._applyFog();
+    }
+
+    public get fogColor(): Color3 {
+        return this._fogColor;
+    }
+    public set fogColor(value: Color3) {
+        this._fogColor = value;
+        this._applyFog();
+    }
+
+    /** @internal Push the current fog config into the Lite scene UBO. */
+    private _applyFog(): void {
+        setFog(this._lite, {
+            mode: this._fogMode as 0 | 1 | 2 | 3,
+            density: this._fogDensity,
+            start: this._fogStart,
+            end: this._fogEnd,
+            color: [this._fogColor.r, this._fogColor.g, this._fogColor.b],
+        });
+    }
+
+    // ── Environment / IBL (Babylon.js `scene.environmentTexture` + `createDefaultEnvironment`) ──
+
+    public get environmentTexture(): CubeTexture | null {
+        return this._envTexture;
+    }
+    public set environmentTexture(value: CubeTexture | null) {
+        this._envTexture = value;
+    }
+
+    /**
+     * Babylon.js `scene.createDefaultEnvironment` — adds an IBL skybox and ground.
+     * Babylon Lite performs this through `loadEnvironment` (deferred to engine start),
+     * combining the environment URL recorded via `scene.environmentTexture` with
+     * Babylon.js's default skybox/ground assets.
+     */
+    public createDefaultEnvironment(options: DefaultEnvironmentOptions = {}): { dispose(): void } {
+        this._defaultEnvOptions = { createSkybox: true, createGround: true, ...options };
+        return { dispose(): void {} };
+    }
+
+    /**
+     * @internal Load the pending environment (IBL + skybox/ground) into the Lite
+     * scene. Awaited by the engine before `registerScene` so the GPU env textures
+     * exist when the scene builds.
+     */
+    public async _loadPendingEnvironment(): Promise<void> {
+        const envUrl = this._envTexture?.url;
+        if (!envUrl) {
+            return;
+        }
+        const opts = this._defaultEnvOptions;
+        await loadEnvironment(this._lite, envUrl, {
+            brdfUrl: DEFAULT_BRDF_URL,
+            skyboxUrl: opts?.createSkybox ? DEFAULT_SKYBOX_URL : undefined,
+            skipSkybox: !opts?.createSkybox,
+            groundTextureUrl: opts?.createGround ? DEFAULT_GROUND_URL : undefined,
+            skipGround: !opts?.createGround,
+            skyboxSize: opts?.skyboxSize ?? 1000,
+        });
+    }
+
     /** Create and activate a default arc-rotate camera framing the scene. */
     public createDefaultCamera(_createArcRotateCamera = true, _replace = true, _attachControl = false): Camera {
         const lite = liteCreateDefaultCamera(this._lite) as LiteArcRotateCamera;
         const camera = ArcRotateCamera._adopt("default camera", lite, this);
         this._activeCamera = camera;
         return camera;
+    }
+
+    /** Babylon.js `createDefaultCameraOrLight` — default framing camera plus a default hemispheric light. */
+    public createDefaultCameraOrLight(createArcRotateCamera = false, replace = false, attachControl = false): void {
+        this.createDefaultCamera(createArcRotateCamera, replace, attachControl);
+        addToScene(this._lite, createHemisphericLight([0, 1, 0], 1.0));
     }
 
     /** Babylon.js render hook. No-op under Babylon Lite's engine-driven loop. */

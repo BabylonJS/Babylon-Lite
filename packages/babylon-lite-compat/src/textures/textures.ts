@@ -12,6 +12,7 @@ import { loadTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels } f
 import type { Texture2D } from "babylon-lite";
 
 import { unsupported } from "../error.js";
+import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
 export abstract class BaseTexture {
@@ -164,13 +165,61 @@ export class DynamicTexture extends BaseTexture {
 
 /**
  * Babylon.js `CubeTexture` — environment/skybox cube map. Babylon Lite loads
- * environments through `loadEnvironment` (which registers skybox + IBL with the
- * scene directly) rather than as a standalone texture object, so a faithful
- * standalone `CubeTexture` is not wrapped.
+ * environments through `loadEnvironment` (IBL + skybox registered on the scene)
+ * rather than as a standalone GPU texture object. This compat `CubeTexture`
+ * therefore acts as a lightweight handle that records the environment URL; the
+ * actual GPU work happens when it is assigned to `scene.environmentTexture` and
+ * the engine starts (see `Scene` env handling).
  */
 export class CubeTexture {
-    public constructor() {
-        unsupported("CubeTexture", "Babylon Lite registers environments via the native `loadEnvironment` API rather than a standalone cube texture object.");
+    /** Source URL of the (prefiltered) environment. */
+    public readonly url: string;
+    /** Babylon.js `coordinatesMode` (skybox = 5). Recorded for API parity. */
+    public coordinatesMode = 0;
+    public name: string;
+    public gammaSpace = true;
+    public level = 1;
+    /** Fires when the cube map is "ready" (resolved on a microtask in this compat layer). */
+    public readonly onLoadObservable = new Observable<CubeTexture>();
+    private _ready = false;
+
+    public constructor(
+        url: string,
+        _scene?: unknown,
+        _extensions?: unknown,
+        _noMipmap?: boolean,
+        _files?: unknown,
+        onLoad?: (() => void) | null,
+        _onError?: unknown,
+        _format?: unknown,
+        _prefiltered?: boolean
+    ) {
+        this.url = url;
+        this.name = url;
+        // Babylon.js fires onLoad once the cube map is ready; some scenes await it
+        // before continuing. We resolve on a microtask since the actual GPU upload
+        // is deferred to `loadEnvironment` at engine start.
+        setTimeout(() => {
+            this._ready = true;
+            if (onLoad) {
+                onLoad();
+            }
+            this.onLoadObservable.notifyObservers(this);
+        }, 0);
+    }
+
+    /** Babylon.js `BaseTexture.isReady()`. */
+    public isReady(): boolean {
+        return this._ready;
+    }
+
+    /** Babylon.js `CubeTexture.CreateFromPrefilteredData(url, scene)`. */
+    public static CreateFromPrefilteredData(url: string, scene?: unknown): CubeTexture {
+        return new CubeTexture(url, scene);
+    }
+
+    public dispose(): void {
+        // GPU resources are owned by the scene's environment, disposed with the scene.
     }
 }
 

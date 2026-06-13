@@ -105,6 +105,8 @@ export class WebGPUEngine {
         }
         this._started = true;
         for (const scene of this._scenes) {
+            scene._flushPendingAdds();
+            await scene._loadPendingEnvironment();
             await registerScene(scene._lite);
         }
         await startEngine(this._lite);

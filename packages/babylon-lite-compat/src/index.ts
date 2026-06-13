@@ -104,6 +104,7 @@ export {
 export { Observable } from "./misc/observable.js";
 export { Tools } from "./misc/tools.js";
 export { SmartArray, StringDictionary, Tags, PerformanceMonitor, FactorGradient, ColorGradient, Logger, PrecisionDate } from "./misc/misc-utils.js";
+export { ScenePerformancePriority, ImageProcessingConfiguration, Constants } from "./misc/engine-constants.js";
 
 // ─── Actions ─────────────────────────────────────────────────────────
 export {

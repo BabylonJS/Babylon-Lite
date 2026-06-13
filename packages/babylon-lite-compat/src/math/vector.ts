@@ -280,6 +280,16 @@ export class Vector3 {
         return new Vector3(start.x + (end.x - start.x) * amount, start.y + (end.y - start.y) * amount, start.z + (end.z - start.z) * amount);
     }
 
+    /** Midpoint between two vectors. */
+    public static Center(a: Vector3, b: Vector3): Vector3 {
+        return new Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    }
+
+    /** Midpoint between two vectors, written into `ref`. */
+    public static CenterToRef(a: Vector3, b: Vector3, ref: Vector3): Vector3 {
+        return ref.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+    }
+
     public static Normalize(vector: Vector3): Vector3 {
         return vector.clone().normalize();
     }

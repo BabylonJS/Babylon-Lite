@@ -8,11 +8,21 @@
  * standalone functions) and returns the detach handle Lite already provides.
  */
 
-import { createArcRotateCamera, createFreeCamera, attachControl as liteAttachControl, attachFreeControl, getCameraPosition, onBeforeRender } from "babylon-lite";
+import {
+    createArcRotateCamera,
+    createFreeCamera,
+    attachControl as liteAttachControl,
+    attachFreeControl,
+    getCameraPosition,
+    getViewMatrix as liteGetViewMatrix,
+    getProjectionMatrix as liteGetProjectionMatrix,
+    onBeforeRender,
+} from "babylon-lite";
 import type { ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, Camera as LiteCamera } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Vector3 } from "../math/vector.js";
+import { Matrix } from "../math/matrix.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -62,6 +72,24 @@ export abstract class Camera extends Node {
     public get globalPosition(): Vector3 {
         const p = getCameraPosition(this._lite);
         return new Vector3(p.x, p.y, p.z);
+    }
+
+    /** Babylon.js `camera.getViewMatrix()` — the camera's view matrix. */
+    public getViewMatrix(): Matrix {
+        return Matrix.FromArray(liteGetViewMatrix(this._lite) as unknown as ArrayLike<number>);
+    }
+
+    /** Babylon.js `camera.getProjectionMatrix()` — the camera's projection matrix. */
+    public getProjectionMatrix(): Matrix {
+        return Matrix.FromArray(liteGetProjectionMatrix(this._lite, this._aspectRatio()) as unknown as ArrayLike<number>);
+    }
+
+    private _aspectRatio(): number {
+        const scene = this._scene;
+        const canvas = scene?.getEngine().getRenderingCanvas() as { width?: number; height?: number } | undefined;
+        const w = canvas?.width ?? 1;
+        const h = canvas?.height ?? 1;
+        return h !== 0 ? w / h : 1;
     }
 
     public abstract attachControl(canvas: HTMLCanvasElement, noPreventDefault?: boolean): void;
