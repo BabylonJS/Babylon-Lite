@@ -35,16 +35,21 @@ export interface ShaderNormalViewConfig {
     /** Output space of the encoded normal: `"view"` (default — ready for
      *  Blender-style screen-space curvature) or `"world"`. */
     readonly space?: "view" | "world";
+    /** When set, the output ALPHA encodes the fragment's view distance normalized by this range
+     *  (`clamp(viewZ / range, 0, 1)`) so a consumer can fade the effect with distance. Clear the target's
+     *  alpha to `1` as the "no geometry" sentinel. When omitted, alpha is a flat `1` (validity only). */
+    readonly distanceEncodeRange?: number;
 }
 
-/** WGSL `mainFragment` that emits the encoded geometric normal. */
-function buildNormalFragment(varying: string, location: number, space: "view" | "world"): string {
+/** WGSL `mainFragment` that emits the encoded geometric normal (+ optional distance in alpha). */
+function buildNormalFragment(varying: string, location: number, space: "view" | "world", distRange: number | undefined): string {
     const nExpr = space === "world" ? "nW" : "normalize((scene.view * vec4<f32>(nW, 0.0)).xyz)";
+    const aExpr = distRange != null ? `clamp((scene.view * vec4<f32>(input.${varying}, 1.0)).z / ${distRange.toFixed(1)}, 0.0, 1.0)` : "1.0";
     return `struct CavityNormalIn { @location(${location}) ${varying}: vec3<f32>, };
 @fragment fn mainFragment(input: CavityNormalIn) -> @location(0) vec4<f32> {
   let nW = normalize(cross(dpdx(input.${varying}), dpdy(input.${varying})));
   let n = ${nExpr};
-  return vec4<f32>(n * 0.5 + vec3<f32>(0.5), 1.0);
+  return vec4<f32>(n * 0.5 + vec3<f32>(0.5), ${aExpr});
 }`;
 }
 
@@ -54,7 +59,7 @@ function buildNormalFragment(varying: string, location: number, space: "view" | 
  *  source and reuse it. */
 export function createShaderNormalMaterialView(source: ShaderMaterial, config: ShaderNormalViewConfig = {}): MaterialView {
     const view = createMaterialView(source, { features: 0 });
-    const frag = buildNormalFragment(config.worldPosVarying ?? "vWorldPos", config.worldPosLocation ?? 0, config.space ?? "view");
+    const frag = buildNormalFragment(config.worldPosVarying ?? "vWorldPos", config.worldPosLocation ?? 0, config.space ?? "view", config.distanceEncodeRange);
     Object.defineProperty(view, "fragmentSource", { value: frag, enumerable: true, configurable: true });
     return view;
 }
