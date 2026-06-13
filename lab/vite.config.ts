@@ -30,7 +30,9 @@ function escapeHtml(value: string): string {
 function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
     const tagList = demo.tags ?? [];
     const tags = tagList.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
-    const sizeRow = size ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>` : "";
+    const sizeRow = size
+        ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
+        : "";
     return [
         `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<div class="card-image">`,
@@ -565,8 +567,105 @@ function tabContentPlugin(): Plugin {
     };
 }
 
+/**
+ * Single-server compatibility-layer harness.
+ *
+ * The existing Babylon.js oracle scenes under `lab/lite/src/bjs/sceneN.ts` import
+ * deep `@babylonjs/core` / `@babylonjs/loaders` subpaths. This plugin lets the
+ * *same* source render on the `@babylonjs/lite-compat` layer **without a second
+ * dev server**, by serving a parallel `/compat/sceneN.html` route whose module
+ * graph is tagged with a `?compat` query. Within that tagged subtree (and only
+ * there) every `@babylonjs/core`/`@babylonjs/loaders` specifier is redirected to
+ * the compat barrel; everywhere else (the `babylon-ref-*` golden pages) the real
+ * Babylon.js package resolves untouched. This is what makes a true side-by-side —
+ * real BJS vs compat — possible on one port.
+ *
+ * Mechanism:
+ *  - A distinct module id (`scene2.ts?compat`) means Vite caches a *separate*
+ *    transform from the real `scene2.ts`, so the two can resolve `@babylonjs/core`
+ *    differently without colliding.
+ *  - `resolveId` redirects bare `@babylonjs/(core|loaders)` imports to the compat
+ *    barrel only when the importer carries the `compat` query marker, and
+ *    propagates the marker across relative imports so transitive BJS usage in any
+ *    shared helper is redirected too.
+ */
+function compatScenesPlugin(): Plugin {
+    const compatBarrel = resolve(__dirname, "../packages/babylon-lite-compat/src/index.ts");
+    const isBjsBare = (s: string) => /^@babylonjs\/(core|loaders)(\/|$)/.test(s);
+    const hasCompatMarker = (id: string) => {
+        const q = id.split("?")[1];
+        return !!q && q.split("&").includes("compat");
+    };
+
+    return {
+        name: "lab-compat-scenes",
+        enforce: "pre",
+        async resolveId(source, importer) {
+            if (!importer || !hasCompatMarker(importer)) {
+                return null;
+            }
+            // Redirect Babylon.js core/loaders (incl. deep subpaths and side-effect-only
+            // imports) onto the single compat barrel. No query → shared/deduped instance.
+            if (isBjsBare(source)) {
+                return compatBarrel;
+            }
+            // Propagate the marker across relative imports so a helper that itself
+            // imports @babylonjs/core is still redirected within the compat subtree.
+            if (source.startsWith(".")) {
+                const baseImporter = importer.split("?")[0];
+                const resolved = await this.resolve(source, baseImporter, { skipSelf: true });
+                if (resolved && !resolved.external) {
+                    return resolved.id + (resolved.id.includes("?") ? "&compat" : "?compat");
+                }
+            }
+            return null;
+        },
+        configureServer(server) {
+            server.middlewares.use(async (req, res, next) => {
+                const url = (req.url ?? "").split("?")[0];
+                const match = url.match(/^\/compat\/scene(\d+)\.html$/);
+                if (!match) {
+                    next();
+                    return;
+                }
+                const sceneId = match[1];
+                const srcRel = `lite/src/bjs/scene${sceneId}.ts`;
+                if (!existsSync(resolve(__dirname, srcRel))) {
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/html; charset=utf-8");
+                    res.end(`<!DOCTYPE html><meta charset="utf-8"><body style="font:14px monospace;color:#f85149;background:#000">No Babylon.js oracle scene at ${srcRel}</body>`);
+                    return;
+                }
+                const baseHtml = [
+                    "<!DOCTYPE html>",
+                    '<html lang="en">',
+                    "<head>",
+                    '<meta charset="UTF-8" />',
+                    `<title>Babylon Lite Compat — Scene ${sceneId}</title>`,
+                    "<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style>",
+                    "</head>",
+                    "<body>",
+                    '<canvas id="renderCanvas"></canvas>',
+                    // The BJS oracle scenes swallow their own errors via `.catch(console.error)`,
+                    // so intercept console.error / global errors to surface a thrown LiteCompatError
+                    // onto the canvas (the Compat tab polls `data-error` to flag missing APIs).
+                    "<script>(function(){var c=document.getElementById('renderCanvas');function mark(m){if(c&&!c.dataset.error){c.dataset.error=String(m).slice(0,300);}}var o=console.error.bind(console);console.error=function(){try{for(var i=0;i<arguments.length;i++){var a=arguments[i];var s=(a&&a.message)?a.message:String(a);if(/LiteCompatError|not supported|unsupported/i.test(String(a))||/LiteCompatError|not supported|unsupported/i.test(s)){mark(s);break;}}}catch(e){}return o.apply(console,arguments);};window.addEventListener('error',function(e){var m=e&&(e.error&&e.error.message||e.message);if(m&&/LiteCompatError|not supported|unsupported/i.test(m))mark(m);});window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason;var m=(r&&r.message)||r;if(m&&/LiteCompatError|not supported|unsupported/i.test(String(m)))mark(m);});})();</script>",
+                    `<script type="module" src="/${srcRel}?compat"></script>`,
+                    "</body>",
+                    "</html>",
+                ].join("\n");
+                const html = await server.transformIndexHtml(req.url ?? url, baseHtml);
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "text/html; charset=utf-8");
+                res.setHeader("Cache-Control", "no-cache");
+                res.end(html);
+            });
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [pagesDemoPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
+    plugins: [pagesDemoPlugin(), compatScenesPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.

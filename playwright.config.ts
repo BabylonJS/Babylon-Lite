@@ -30,7 +30,7 @@ const swiftShaderArgs = isCI
 
 export default defineConfig({
     testDir: "./tests",
-    testIgnore: ["**/unit/**"],
+    testIgnore: ["**/unit/**", "**/compat/**"],
     timeout: 60_000,
     retries: 2,
     workers: 2,

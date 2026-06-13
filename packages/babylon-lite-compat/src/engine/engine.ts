@@ -29,9 +29,11 @@ export class WebGPUEngine {
     private _initialized = false;
     private _started = false;
 
-    public constructor(canvas: RenderCanvas, _antialias?: boolean, options?: EngineOptions) {
+    public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean } & EngineOptions) | boolean) {
         this._canvas = canvas;
-        this._options = options;
+        // Babylon.js's WebGPUEngine takes an options object as the second arg;
+        // accept a bare boolean too (some older call sites pass `antialias`).
+        this._options = typeof options === "object" ? options : undefined;
     }
 
     /** Acquire the GPU device and build the Lite engine context. */

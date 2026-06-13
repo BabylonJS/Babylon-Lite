@@ -118,6 +118,12 @@ export class AbstractMesh extends TransformNode {
         super(name, scene, lite as unknown as SceneNode);
         this._lite = lite;
         this._lite.name = name;
+        // Babylon Lite requires every mesh to carry a material to render, whereas
+        // Babylon.js falls back to a shared `scene.defaultMaterial`. Mirror BJS by
+        // assigning that default now; an explicit `mesh.material = …` overrides it.
+        if (scene) {
+            this.material = scene.defaultMaterial as unknown as CompatMaterial;
+        }
     }
 
     public override getClassName(): string {
@@ -269,60 +275,63 @@ function engineOf(scene: Scene): EngineContext {
     return scene.getEngine()._lite;
 }
 
+/**
+ * Add a freshly-constructed mesh to its Lite scene. The wrapper constructor has
+ * already assigned the mesh's material (a real one or `scene.defaultMaterial`),
+ * so `addToScene` — which reads `mesh.material` to build the renderable group —
+ * sees a material and produces a drawable. Adding before the material is set
+ * would silently skip rendering.
+ */
+function addPrimitive(mesh: Mesh, scene: Scene): Mesh {
+    addToScene(scene._lite, mesh._lite);
+    return mesh;
+}
+
 /** Babylon.js `MeshBuilder` — factory namespace for primitive meshes. */
 export const MeshBuilder = {
     CreateBox(name: string, options: BoxOptions, scene: Scene): Mesh {
         const lite = createBox(engineOf(scene), options.size ?? options.width ?? 1);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreateSphere(name: string, options: SphereOptions, scene: Scene): Mesh {
         const lite = createSphere(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreateGround(name: string, options: GroundOptions, scene: Scene): Mesh {
         const lite = createGround(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreatePlane(name: string, options: PlaneOptions, scene: Scene): Mesh {
         const lite = createPlane(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreateCylinder(name: string, options: CylinderOptions, scene: Scene): Mesh {
         const lite = createCylinder(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreateTorus(name: string, options: object, scene: Scene): Mesh {
         const lite = createTorus(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreateTorusKnot(name: string, options: object, scene: Scene): Mesh {
         const lite = createTorusKnot(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreateDisc(name: string, options: object, scene: Scene): Mesh {
         const lite = createDisc(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     CreatePolyhedron(name: string, options: object, scene: Scene): Mesh {
         const lite = createPolyhedron(engineOf(scene), options as never);
-        addToScene(scene._lite, lite);
-        return new Mesh(name, lite, scene);
+        return addPrimitive(new Mesh(name, lite, scene), scene);
     },
 
     // ── Known but unsupported (not present in Babylon Lite) ────────────────

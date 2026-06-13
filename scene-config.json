@@ -18,7 +18,8 @@
         "maxRawKB": 46.2,
         "description": "StandardMaterial sphere with Blinn-Phong, directional light, ground plane.",
         "tags": ["std", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 3,

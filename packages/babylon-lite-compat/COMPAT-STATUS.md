@@ -71,7 +71,9 @@ for reader context but are not part of the audited surface.
 | `engine.beginFrame` / `endFrame`                                     | ❌ Not supported   | —                                                    |
 | `Scene`                                                              | ⚡ Partial         | [scene/scene.ts](src/scene/scene.ts)                 |
 | `scene.clearColor` / `activeCamera` / `imageProcessingConfiguration` | ✅ Full            | scene                                                |
-| `scene.onBeforeRender/AfterRender/DisposeObservable`                 | ✅ Full            | scene + [misc/observable.ts](src/misc/observable.ts) |
+| `scene.onBeforeRenderObservable` / `onDisposeObservable`             | ✅ Full            | scene + [misc/observable.ts](src/misc/observable.ts) |
+| `scene.onAfterRenderObservable`                                      | ⚡ Partial         | fires one frame late (Lite has no after-render hook) |
+| `scene.whenReadyAsync` / `isReady`                                   | ✅ Full            | resolve-immediately (Lite builds synchronously)      |
 | `scene.createDefaultCamera`                                          | ✅ Full            | scene                                                |
 | `scene.render()` (manual single frame)                               | ❌ Not supported   | no-op under Lite loop                                |
 | `scene.getMeshByName` / `scene.meshes` enumeration                   | 🔧 Needs Lite core | public scene accessors                               |

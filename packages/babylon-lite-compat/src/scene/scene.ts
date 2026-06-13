@@ -19,6 +19,7 @@ import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ArcRotateCamera } from "../cameras/cameras.js";
+import { StandardMaterial } from "../materials/materials.js";
 import type { WebGPUEngine } from "../engine/engine.js";
 
 export class Scene {
@@ -34,16 +35,45 @@ export class Scene {
 
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
+    private _defaultMaterial: StandardMaterial | null = null;
 
     public constructor(engine: WebGPUEngine) {
         this._engine = engine;
         this._lite = createSceneContext(engine._lite);
-        onBeforeRender(this._lite, () => this.onBeforeRenderObservable.notifyObservers(this));
+        // Babylon Lite exposes a before-render hook but no after-render hook. We
+        // fire `onBeforeRenderObservable` on each tick, and approximate
+        // `onAfterRenderObservable` by firing it at the start of the *next* tick
+        // (i.e. after the previous frame has rendered). `addOnce` after-render
+        // listeners therefore resolve one frame later than they would in BJS.
+        let renderedAFrame = false;
+        onBeforeRender(this._lite, () => {
+            if (renderedAFrame) {
+                this.onAfterRenderObservable.notifyObservers(this);
+            }
+            renderedAFrame = true;
+            this.onBeforeRenderObservable.notifyObservers(this);
+        });
         engine._registerScene(this);
     }
 
     public getEngine(): WebGPUEngine {
         return this._engine;
+    }
+
+    /**
+     * Babylon.js `scene.defaultMaterial` — a shared `StandardMaterial` applied to
+     * meshes that have no material assigned. Babylon Lite requires every mesh to
+     * carry a material to render, so the mesh wrappers assign this lazily-created
+     * default; reading it (or assigning a replacement) matches Babylon.js.
+     */
+    public get defaultMaterial(): StandardMaterial {
+        if (!this._defaultMaterial) {
+            this._defaultMaterial = new StandardMaterial("default material", this);
+        }
+        return this._defaultMaterial;
+    }
+    public set defaultMaterial(value: StandardMaterial) {
+        this._defaultMaterial = value;
     }
 
     public get clearColor(): Color4 {
@@ -78,6 +108,20 @@ export class Scene {
     /** Babylon.js render hook. No-op under Babylon Lite's engine-driven loop. */
     public render(): void {
         // Intentionally empty: Lite renders registered scenes via startEngine.
+    }
+
+    /**
+     * Babylon.js readiness gate. Babylon Lite builds its scene synchronously and
+     * defers GPU work into `registerScene`/`startEngine` (driven by the engine's
+     * render loop), so there is nothing to await here — resolve immediately.
+     */
+    public whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+
+    /** Babylon.js synchronous readiness check — always ready in the compat layer. */
+    public isReady(): boolean {
+        return true;
     }
 
     /** Synchronous CPU picking — unsupported. Babylon Lite uses async GPU picking. */
