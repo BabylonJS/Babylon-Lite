@@ -251,7 +251,7 @@ export class BoundingBoxGizmo extends GizmoBase {
     }
     public set attachedMesh(value: AbstractMesh | null) {
         this._attached = value;
-        attachBoundingBoxGizmoToNode(this._lite, nodeLite(value as unknown as Node | null));
+        attachBoundingBoxGizmoToNode(this._lite, nodeLite(value));
     }
 
     public get attachedNode(): AbstractMesh | null {
@@ -299,7 +299,7 @@ export class LightGizmo {
      * `position` writes through to it.
      */
     public get attachedMesh(): { position: Vector3 } {
-        const root = (this._lite as unknown as { root: { position: { x: number; y: number; z: number; set(x: number, y: number, z: number): void } } }).root;
+        const root = this._lite.root;
         return {
             get position(): Vector3 {
                 return root.position as unknown as Vector3;
@@ -349,7 +349,11 @@ export class CameraGizmo {
  * transform `_node`).
  */
 function nodeLite(value: Node | null): SceneNode | null {
-    return (value as unknown as { _lite?: SceneNode; _node?: SceneNode })?._lite ?? (value as unknown as { _node?: SceneNode })?._node ?? null;
+    if (!value) {
+        return null;
+    }
+    const n = value as { _lite?: SceneNode; _node?: SceneNode };
+    return n._lite ?? n._node ?? null;
 }
 
 /** Babylon.js `AxisDragGizmo` — drags the attached node along a single world axis. */
@@ -552,7 +556,7 @@ export class GizmoManager {
         if (enabled && !this.gizmos[key]) {
             const gizmo = make() as never;
             this.gizmos[key] = gizmo;
-            (this.gizmos[key] as unknown as { attachedMesh: AbstractMesh | null }).attachedMesh = this._attached;
+            this.gizmos[key]!.attachedMesh = this._attached;
         } else if (!enabled && this.gizmos[key]) {
             this.gizmos[key]!.dispose();
             this.gizmos[key] = null;

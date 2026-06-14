@@ -29,13 +29,6 @@ import type { Scene } from "../scene/scene.js";
 
 type Tuple3 = [number, number, number];
 
-interface LiteObservableVec3 {
-    x: number;
-    y: number;
-    z: number;
-    set(x: number, y: number, z: number): void;
-}
-
 /** Babylon.js `Light` — base class for all lights (derives from `Node`). */
 export abstract class Light extends Node {
     /** @internal Underlying Babylon Lite light. */
@@ -78,7 +71,7 @@ function writeColor(tuple: Tuple3, value: Color3): void {
     tuple[2] = value.b;
 }
 
-function readVector(vec: LiteObservableVec3): Vector3 {
+function readVector(vec: { x: number; y: number; z: number }): Vector3 {
     return new Vector3(vec.x, vec.y, vec.z);
 }
 
@@ -106,10 +99,10 @@ export class HemisphericLight extends Light {
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction as unknown as LiteObservableVec3);
+        return readVector(this._lite.direction);
     }
     public set direction(value: Vector3) {
-        (this._lite.direction as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
@@ -158,17 +151,17 @@ export class DirectionalLight extends Light {
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction as unknown as LiteObservableVec3);
+        return readVector(this._lite.direction);
     }
     public set direction(value: Vector3) {
-        (this._lite.direction as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position as unknown as LiteObservableVec3);
+        return readVector(this._lite.position);
     }
     public set position(value: Vector3) {
-        (this._lite.position as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
@@ -217,10 +210,10 @@ export class PointLight extends Light {
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position as unknown as LiteObservableVec3);
+        return readVector(this._lite.position);
     }
     public set position(value: Vector3) {
-        (this._lite.position as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
@@ -283,17 +276,17 @@ export class SpotLight extends Light {
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position as unknown as LiteObservableVec3);
+        return readVector(this._lite.position);
     }
     public set position(value: Vector3) {
-        (this._lite.position as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction as unknown as LiteObservableVec3);
+        return readVector(this._lite.direction);
     }
     public set direction(value: Vector3) {
-        (this._lite.direction as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {

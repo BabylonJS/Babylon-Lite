@@ -34,7 +34,7 @@ import {
     resizeMeshGeometry,
     createGroundFromHeightMap,
 } from "babylon-lite";
-import type { Mesh as LiteMesh, TransformNode as LiteTransformNode, SceneNode, EngineContext } from "babylon-lite";
+import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
 
 import type { Vector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
@@ -46,13 +46,6 @@ import type { NodeMaterial } from "../materials/node-material.js";
 
 type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial;
 
-interface LiteVec3Like {
-    x: number;
-    y: number;
-    z: number;
-    set(x: number, y: number, z: number): void;
-}
-
 /**
  * @internal Runtime discriminator for the `Mesh` constructor's two call shapes:
  * `new Mesh(name, scene)` (empty mesh, Babylon.js) vs the internal
@@ -61,6 +54,19 @@ interface LiteVec3Like {
  */
 function isCompatScene(value: Scene | LiteMesh): value is Scene {
     return typeof (value as Scene).getEngine === "function";
+}
+
+/**
+ * @internal Resolve the backing Lite scene node for a compat node. Mesh/light/
+ * camera wrappers store it as `_lite`; a plain `TransformNode` stores it as
+ * `_node`. (Declared as optionals because the base `Node` exposes neither.)
+ */
+function liteNodeOf(node: Node | null): SceneNode | null {
+    if (!node) {
+        return null;
+    }
+    const n = node as { _node?: SceneNode; _lite?: SceneNode };
+    return n._node ?? n._lite ?? null;
 }
 
 // A degenerate single-triangle placeholder so an empty `new Mesh(name, scene)`
@@ -125,9 +131,9 @@ export class TransformNode extends Node {
             // A subclass (mesh) supplied its own Lite node and owns add-to-scene.
             this._node = liteNode;
         } else {
-            this._node = createTransformNode(name) as unknown as SceneNode;
+            this._node = createTransformNode(name);
             if (scene) {
-                addToScene(scene._lite, this._node as unknown as LiteTransformNode);
+                addToScene(scene._lite, this._node);
             }
         }
     }
@@ -140,21 +146,21 @@ export class TransformNode extends Node {
         return this._node.position as unknown as Vector3;
     }
     public set position(value: Vector3) {
-        (this._node.position as unknown as LiteVec3Like).set(value.x, value.y, value.z);
+        this._node.position.set(value.x, value.y, value.z);
     }
 
     public get rotation(): Vector3 {
         return this._node.rotation as unknown as Vector3;
     }
     public set rotation(value: Vector3) {
-        (this._node.rotation as unknown as LiteVec3Like).set(value.x, value.y, value.z);
+        this._node.rotation.set(value.x, value.y, value.z);
     }
 
     public get scaling(): Vector3 {
         return this._node.scaling as unknown as Vector3;
     }
     public set scaling(value: Vector3) {
-        (this._node.scaling as unknown as LiteVec3Like).set(value.x, value.y, value.z);
+        this._node.scaling.set(value.x, value.y, value.z);
     }
 
     /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
@@ -170,13 +176,13 @@ export class TransformNode extends Node {
         if (!this._useQuat) {
             return null;
         }
-        const q = (this._node as unknown as { rotationQuaternion: { x: number; y: number; z: number; w: number } }).rotationQuaternion;
+        const q = this._node.rotationQuaternion;
         return new Quaternion(q.x, q.y, q.z, q.w);
     }
     public set rotationQuaternion(value: Quaternion | null) {
         if (value) {
             this._useQuat = true;
-            (this._node as unknown as { rotationQuaternion: { set(x: number, y: number, z: number, w: number): void } }).rotationQuaternion.set(value.x, value.y, value.z, value.w);
+            this._node.rotationQuaternion.set(value.x, value.y, value.z, value.w);
         } else {
             this._useQuat = false;
         }
@@ -188,9 +194,8 @@ export class TransformNode extends Node {
      * setter, which keeps the local transform and lets the world move.
      */
     public setParent(parent: Node | null): TransformNode {
-        const parentNode = parent ? ((parent as unknown as { _node?: SceneNode; _lite?: SceneNode })._node ?? (parent as unknown as { _lite?: SceneNode })._lite ?? null) : null;
         this._parent = parent;
-        setParent(this._node as never, (parentNode as never) ?? null);
+        setParent(this._node as never, liteNodeOf(parent) as never);
         return this;
     }
 
@@ -198,8 +203,7 @@ export class TransformNode extends Node {
         // Babylon.js `node.parent = x` keeps the child's LOCAL transform and lets
         // its world position move under the new parent (unlike `setParent`, which
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
-        const parentNode = parent ? ((parent as unknown as { _node?: SceneNode; _lite?: SceneNode })._node ?? (parent as unknown as { _lite?: SceneNode })._lite ?? null) : null;
-        (this._node as unknown as { parent: SceneNode | null }).parent = parentNode;
+        this._node.parent = liteNodeOf(parent);
     }
 }
 
@@ -215,14 +219,14 @@ export class AbstractMesh extends TransformNode {
     private _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
-        super(name, scene, lite as unknown as SceneNode);
+        super(name, scene, lite);
         this._lite = lite;
         this._lite.name = name;
         // Babylon Lite requires every mesh to carry a material to render, whereas
         // Babylon.js falls back to a shared `scene.defaultMaterial`. Mirror BJS by
         // assigning that default now; an explicit `mesh.material = …` overrides it.
         if (scene) {
-            this.material = scene.defaultMaterial as unknown as CompatMaterial;
+            this.material = scene.defaultMaterial;
         }
     }
 
@@ -271,14 +275,13 @@ export class AbstractMesh extends TransformNode {
      * (for picking + device-loss recovery); other kinds are not stored.
      */
     public getVerticesData(kind: string): Float32Array | null {
-        const lite = this._lite as unknown as { _cpuPositions?: Float32Array; _cpuNormals?: Float32Array; _cpuUvs?: Float32Array };
         switch (kind) {
             case "position":
-                return lite._cpuPositions ?? null;
+                return this._lite._cpuPositions ?? null;
             case "normal":
-                return lite._cpuNormals ?? null;
+                return this._lite._cpuNormals ?? null;
             case "uv":
-                return lite._cpuUvs ?? null;
+                return this._lite._cpuUvs ?? null;
             default:
                 return null;
         }
@@ -292,7 +295,7 @@ export class AbstractMesh extends TransformNode {
      */
     public setVerticesData(kind: string, data: number[] | Float32Array, _updatable?: boolean): void {
         const engine = this._scene?.getEngine()._lite;
-        const lite = this._lite as unknown as { _cpuPositions?: Float32Array; _cpuNormals?: Float32Array; _cpuUvs?: Float32Array; _cpuIndices?: Uint32Array };
+        const lite = this._lite;
         if (!engine || !lite._cpuPositions || !lite._cpuIndices) {
             return;
         }
@@ -309,8 +312,8 @@ export class AbstractMesh extends TransformNode {
 
     /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
     public getTotalVertices(): number {
-        const lite = this._lite as unknown as { _cpuPositions?: Float32Array };
-        return lite._cpuPositions ? lite._cpuPositions.length / 3 : 0;
+        const positions = this._lite._cpuPositions;
+        return positions ? positions.length / 3 : 0;
     }
 
     public override dispose(): void {
@@ -579,8 +582,8 @@ export const MeshBuilder = {
         const mesh = new GroundMesh(name, scene);
         scene._trackTextureLoad(
             createGroundFromHeightMap(engine, url, options as never).then((lite) => {
-                const g = lite as unknown as { _cpuPositions: Float32Array; _cpuNormals: Float32Array; _cpuIndices: Uint32Array; _cpuUvs?: Float32Array };
-                resizeMeshGeometry(engine, mesh._lite, g._cpuPositions, g._cpuNormals, g._cpuIndices, g._cpuUvs);
+                // `createGroundFromHeightMap` always populates the CPU geometry buffers.
+                resizeMeshGeometry(engine, mesh._lite, lite._cpuPositions!, lite._cpuNormals!, lite._cpuIndices!, lite._cpuUvs);
             })
         );
         return mesh;

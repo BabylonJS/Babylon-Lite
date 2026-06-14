@@ -26,13 +26,6 @@ import { Matrix } from "../math/matrix.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
-interface LiteObservableVec3 {
-    x: number;
-    y: number;
-    z: number;
-    set(x: number, y: number, z: number): void;
-}
-
 /** Babylon.js `Camera` — base class for all cameras (derives from `Node`). */
 export abstract class Camera extends Node {
     /** @internal Underlying Babylon Lite camera. */
@@ -76,12 +69,12 @@ export abstract class Camera extends Node {
 
     /** Babylon.js `camera.getViewMatrix()` — the camera's view matrix. */
     public getViewMatrix(): Matrix {
-        return Matrix.FromArray(liteGetViewMatrix(this._lite) as unknown as ArrayLike<number>);
+        return Matrix.FromArray(liteGetViewMatrix(this._lite));
     }
 
     /** Babylon.js `camera.getProjectionMatrix()` — the camera's projection matrix. */
     public getProjectionMatrix(): Matrix {
-        return Matrix.FromArray(liteGetProjectionMatrix(this._lite, this._aspectRatio()) as unknown as ArrayLike<number>);
+        return Matrix.FromArray(liteGetProjectionMatrix(this._lite, this._aspectRatio()));
     }
 
     private _aspectRatio(): number {
@@ -210,11 +203,11 @@ export class TargetCamera extends Camera {
     }
 
     public get position(): Vector3 {
-        const p = this._lite.position as unknown as LiteObservableVec3;
+        const p = this._lite.position;
         return new Vector3(p.x, p.y, p.z);
     }
     public set position(value: Vector3) {
-        (this._lite.position as unknown as LiteObservableVec3).set(value.x, value.y, value.z);
+        this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get speed(): number {
@@ -226,7 +219,7 @@ export class TargetCamera extends Camera {
 
     /** Babylon.js `setTarget` — aim the camera at a world-space point. */
     public setTarget(target: Vector3): void {
-        (this._lite.target as unknown as LiteObservableVec3).set(target.x, target.y, target.z);
+        this._lite.target.set(target.x, target.y, target.z);
     }
 
     public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
@@ -306,7 +299,7 @@ export class FollowCamera extends TargetCamera {
         const x = target.position.x + this.radius * Math.sin(radians);
         const z = target.position.z + this.radius * Math.cos(radians);
         const y = target.position.y + this.heightOffset;
-        (this._lite.position as unknown as LiteObservableVec3).set(x, y, z);
+        this._lite.position.set(x, y, z);
         this.setTarget(new Vector3(target.position.x, target.position.y, target.position.z));
     }
 }

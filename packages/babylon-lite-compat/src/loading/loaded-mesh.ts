@@ -52,13 +52,13 @@ export class LoadedMesh {
 
     /** Babylon.js `getVerticesData(kind)` — CPU position buffer (positions only). */
     public getVerticesData(kind: string): Float32Array | null {
-        const positions = (this._mesh as unknown as { _cpuPositions?: Float32Array })._cpuPositions;
+        const positions = this._mesh._cpuPositions;
         return kind === "position" ? (positions ?? null) : null;
     }
 
     /** Babylon.js `getTotalVertices()`. */
     public getTotalVertices(): number {
-        const positions = (this._mesh as unknown as { _cpuPositions?: Float32Array })._cpuPositions;
+        const positions = this._mesh._cpuPositions;
         return positions ? positions.length / 3 : 0;
     }
 }
