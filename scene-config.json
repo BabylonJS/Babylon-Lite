@@ -1004,7 +1004,8 @@
         "maxRawKB": 35,
         "description": "Loads Halo_Believe.splat with keepInRam, modifies the first 30 000 splats' Y by -2, then calls gs.updateData().",
         "tags": ["gaussian-splatting", "splat"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 122,
@@ -1046,7 +1047,9 @@
         "maxMad": 1,
         "maxRawKB": 37,
         "description": "Loads Halo_Believe.splat, applies position/rotation/scale, calls bakeCurrentTransformIntoVertices(), verifies rendering.",
-        "tags": ["gaussian-splatting", "bake-transform"]
+        "tags": ["gaussian-splatting", "bake-transform"],
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 126,
@@ -1079,7 +1082,8 @@
         "name": "Scene 129 — Gaussian Splatting GPU Picking",
         "maxMad": 1,
         "description": "Minimal port of PG #3LNCE6#36 — extends GPU picking to handle GaussianSplattingMesh via the gsGpuPickingFragment plugin and the dedicated gs-picking-pipeline. Ground disappears when picking is not valid;",
-        "tags": ["gaussian-splatting", "gpu-picking"]
+        "tags": ["gaussian-splatting", "gpu-picking"],
+        "compatParity": true
     },
     {
         "id": 140,

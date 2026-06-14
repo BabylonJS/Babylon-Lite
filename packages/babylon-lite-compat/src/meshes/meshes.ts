@@ -37,6 +37,7 @@ import {
 import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
 
 import type { Vector3 } from "../math/vector.js";
+import { liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
@@ -143,21 +144,21 @@ export class TransformNode extends Node {
     }
 
     public get position(): Vector3 {
-        return this._node.position as unknown as Vector3;
+        return liteBackedVector3(this._node.position);
     }
     public set position(value: Vector3) {
         this._node.position.set(value.x, value.y, value.z);
     }
 
     public get rotation(): Vector3 {
-        return this._node.rotation as unknown as Vector3;
+        return liteBackedVector3(this._node.rotation);
     }
     public set rotation(value: Vector3) {
         this._node.rotation.set(value.x, value.y, value.z);
     }
 
     public get scaling(): Vector3 {
-        return this._node.scaling as unknown as Vector3;
+        return liteBackedVector3(this._node.scaling);
     }
     public set scaling(value: Vector3) {
         this._node.scaling.set(value.x, value.y, value.z);

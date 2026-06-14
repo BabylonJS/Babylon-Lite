@@ -21,6 +21,7 @@ import type { GaussianSplattingMesh as LiteGsMesh, GsShaderFragment, SceneNode }
 import { TransformNode } from "./meshes.js";
 import type { Scene } from "../scene/scene.js";
 import type { Vector3 } from "../math/vector.js";
+import { liteBackedVector3 } from "../math/vector.js";
 
 /** Lite loader chosen by file extension (mirrors the BJS splat plugin dispatch). */
 function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext, url: string, fragments?: readonly GsShaderFragment[]) => Promise<LiteGsMesh> {
@@ -33,6 +34,29 @@ function liteLoaderFor(url: string): (scene: import("babylon-lite").SceneContext
     }
     // `.ply`, `.splat`, and compressed-PLY all flow through `loadSplat`.
     return loadSplat;
+}
+
+/** `.splat` row stride: position(3f) + scale(3f) + rgba(4×u8) + rot(4×u8) = 32 bytes. */
+const SPLAT_ROW_BYTES = 32;
+const SPLAT_ROW_FLOATS = SPLAT_ROW_BYTES / 4;
+const SPLAT_Y_FLOAT_INDEX = 1;
+
+/**
+ * @internal Return a copy of a `.splat` buffer with every row's centre Y negated
+ * (the position-space half of Babylon.js's `flipY`). Used to reproduce
+ * `updateData(..., { flipY: false })`. Only the 32-byte `.splat` row layout is
+ * handled; other buffers are returned unchanged.
+ */
+function mirrorSplatRowY(buffer: ArrayBuffer): ArrayBuffer {
+    if (buffer.byteLength % SPLAT_ROW_BYTES !== 0) {
+        return buffer;
+    }
+    const copy = buffer.slice(0);
+    const floats = new Float32Array(copy);
+    for (let f = SPLAT_Y_FLOAT_INDEX; f < floats.length; f += SPLAT_ROW_FLOATS) {
+        floats[f] = -floats[f]!;
+    }
+    return copy;
 }
 
 /**
@@ -65,21 +89,21 @@ export class GaussianSplattingMesh extends TransformNode {
     }
 
     public override get position(): Vector3 {
-        return this._xform.position as unknown as Vector3;
+        return liteBackedVector3(this._xform.position);
     }
     public override set position(value: Vector3) {
         this._xform.position.set(value.x, value.y, value.z);
     }
 
     public override get rotation(): Vector3 {
-        return this._xform.rotation as unknown as Vector3;
+        return liteBackedVector3(this._xform.rotation);
     }
     public override set rotation(value: Vector3) {
         this._xform.rotation.set(value.x, value.y, value.z);
     }
 
     public override get scaling(): Vector3 {
-        return this._xform.scaling as unknown as Vector3;
+        return liteBackedVector3(this._xform.scaling);
     }
     public override set scaling(value: Vector3) {
         this._xform.scaling.set(value.x, value.y, value.z);
@@ -134,11 +158,19 @@ export class GaussianSplattingMesh extends TransformNode {
 
     /**
      * Babylon.js `gs.updateData(buffer, sh?, options?)` — replace the splat data in
-     * place. Babylon Lite takes only the buffer; the `sh` / `options` arguments are
-     * accepted for signature parity and ignored (Lite preserves SH + flip on update).
+     * place. Babylon Lite always applies its loader's Y convention on update; the
+     * `sh` argument is accepted for signature parity and ignored.
+     *
+     * `options.flipY === false` is honoured: Babylon.js's `.splat` loader flips Y
+     * on load by default, so `flipY:false` re-uploads the buffer **without** that
+     * flip — i.e. mirrored relative to the default-loaded pose, which ported scenes
+     * then correct with `scaling.y = -1`. Lite has no per-call flip flag and always
+     * applies its (flip-on-load-equivalent) convention, so we mirror the row Y here
+     * to reproduce the `flipY:false` pose before handing the buffer to Lite.
      */
-    public updateData(splatBuffer: ArrayBuffer, _sh?: unknown, _options?: unknown): void {
-        this._gs?.updateData(splatBuffer);
+    public updateData(splatBuffer: ArrayBuffer, _sh?: unknown, options?: { flipY?: boolean }): void {
+        const buffer = options?.flipY === false ? mirrorSplatRowY(splatBuffer) : splatBuffer;
+        this._gs?.updateData(buffer);
     }
 
     /** Babylon.js `gs.bakeCurrentTransformIntoVertices()` — fold the node transform into the splat data. */
@@ -151,5 +183,10 @@ export class GaussianSplattingMesh extends TransformNode {
     /** @internal Babylon.js's worker-throttle flag; ported scenes poll it to detect the first sort. */
     public get _canPostToWorker(): boolean {
         return this._gs ? this._gs._canPostToWorker : false;
+    }
+
+    /** @internal The loaded Lite splat node, for the GPU picker's result mapping (undefined until loaded). */
+    public get _pickLiteNode(): LiteGsMesh | undefined {
+        return this._gs;
     }
 }

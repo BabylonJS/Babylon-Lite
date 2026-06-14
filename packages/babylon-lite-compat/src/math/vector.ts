@@ -325,6 +325,51 @@ export class Vector3 {
     }
 }
 
+/** Minimal live 3-component backing (Babylon Lite's `ObservableVec3`). */
+interface LiveVec3 {
+    x: number;
+    y: number;
+    z: number;
+}
+
+/**
+ * @internal A `Vector3` whose `x`/`y`/`z` read and write **through** to a live
+ * Babylon Lite vector (`ObservableVec3`). This lets compat code expose
+ * `mesh.position` / `rotation` / `scaling` as a real `Vector3` — so inherited
+ * in-place methods (`scaleInPlace`, `addInPlace`, `set`, …) mutate the Lite node
+ * and trigger its dirty tracking, matching Babylon.js's live-transform semantics.
+ *
+ * The accessors are installed with `Object.defineProperty` **after** `super()`,
+ * which redefines the own `x`/`y`/`z` data properties the base constructor created
+ * (parameter properties). This is required under `useDefineForClassFields` (ES2022),
+ * where overriding the accessors via a subclass field/prototype alone would be
+ * shadowed by the base's own data properties.
+ */
+class LiteBackedVector3 extends Vector3 {
+    public constructor(lite: LiveVec3) {
+        super(0, 0, 0);
+        Object.defineProperty(this, "x", { enumerable: true, configurable: true, get: () => lite.x, set: (v: number) => (lite.x = v) });
+        Object.defineProperty(this, "y", { enumerable: true, configurable: true, get: () => lite.y, set: (v: number) => (lite.y = v) });
+        Object.defineProperty(this, "z", { enumerable: true, configurable: true, get: () => lite.z, set: (v: number) => (lite.z = v) });
+    }
+}
+
+/** One stable proxy per Lite vector, so `mesh.position === mesh.position` (Babylon.js identity parity). */
+const _liteVec3Proxies = new WeakMap<object, Vector3>();
+
+/**
+ * @internal Return the cached write-through `Vector3` proxy over a Lite
+ * `ObservableVec3` (creating it on first use). Stable identity per Lite vector.
+ */
+export function liteBackedVector3(lite: LiveVec3): Vector3 {
+    let proxy = _liteVec3Proxies.get(lite as object);
+    if (!proxy) {
+        proxy = new LiteBackedVector3(lite);
+        _liteVec3Proxies.set(lite as object, proxy);
+    }
+    return proxy;
+}
+
 export class Vector4 {
     public constructor(
         public x: number = 0,

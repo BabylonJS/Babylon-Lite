@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Vector2, Vector3, Vector4 } from "../src/math/vector";
+import { liteBackedVector3 } from "../src/math/vector";
 import { Color3, Color4 } from "../src/math/color";
 import { Quaternion } from "../src/math/quaternion";
 import { Matrix } from "../src/math/matrix";
@@ -38,6 +39,28 @@ describe("Vector3", () => {
     it("provides direction constants", () => {
         expect(Vector3.Up().asArray()).toEqual([0, 1, 0]);
         expect(Vector3.Forward().asArray()).toEqual([0, 0, 1]);
+    });
+});
+
+describe("liteBackedVector3 (write-through transform proxy)", () => {
+    it("reads and writes through to the backing Lite vector and supports in-place methods", () => {
+        const lite = { x: 1, y: 2, z: 3 };
+        const v = liteBackedVector3(lite);
+        // reads pass through
+        expect(v.asArray()).toEqual([1, 2, 3]);
+        // direct component write passes through
+        v.x = 10;
+        expect(lite.x).toBe(10);
+        // inherited in-place methods mutate the backing vector (scene 125's scaleInPlace)
+        v.scaleInPlace(2);
+        expect(lite).toEqual({ x: 20, y: 4, z: 6 });
+        v.set(0, 0, 0);
+        expect(lite).toEqual({ x: 0, y: 0, z: 0 });
+    });
+
+    it("returns a stable proxy per backing vector (Babylon.js identity parity)", () => {
+        const lite = { x: 0, y: 0, z: 0 };
+        expect(liteBackedVector3(lite)).toBe(liteBackedVector3(lite));
     });
 });
 

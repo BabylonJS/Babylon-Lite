@@ -18,36 +18,45 @@
  */
 
 import { createGpuPicker, pickAsync as litePickAsync, disposePicker } from "babylon-lite";
-import type { GpuPicker, Mesh as LiteMesh } from "babylon-lite";
+import type { GpuPicker, Mesh as LiteMesh, GaussianSplattingMesh as LiteGsMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Mesh } from "../meshes/meshes.js";
+import { GaussianSplattingMesh } from "../meshes/gaussian-splatting.js";
 import type { Scene } from "../scene/scene.js";
+
+/** A pickable compat mesh: a regular `Mesh` or a `GaussianSplattingMesh`. */
+type PickableMesh = Mesh | GaussianSplattingMesh;
 
 /** Result of a single GPU pick. Mirrors Babylon.js `IGPUPickingInfo`. */
 export interface IGPUPickingInfo {
-    mesh: Mesh;
+    mesh: PickableMesh;
     thinInstanceIndex?: number;
 }
 
 /** Result of a multi-point GPU pick. Mirrors Babylon.js `IGPUMultiPickingInfo`. */
 export interface IGPUMultiPickingInfo {
-    meshes: Array<Mesh | null>;
+    meshes: Array<PickableMesh | null>;
     thinInstanceIndexes?: number[];
 }
 
-type PickListItem = Mesh | { mesh: Mesh; material?: unknown };
+type PickListItem = PickableMesh | { mesh: PickableMesh; material?: unknown };
 
-function meshOf(item: PickListItem): Mesh {
-    return item instanceof Mesh ? item : item.mesh;
+function meshOf(item: PickListItem): PickableMesh {
+    return item instanceof Mesh || item instanceof GaussianSplattingMesh ? item : item.mesh;
+}
+
+/** @internal The backing Lite node used as the picker's identity key for a compat mesh. */
+function liteNodeOf(mesh: PickableMesh): LiteMesh | LiteGsMesh | undefined {
+    return mesh instanceof GaussianSplattingMesh ? mesh._pickLiteNode : mesh._lite;
 }
 
 export class GPUPicker {
     private _picker: GpuPicker | null = null;
     private _scene: Scene | null = null;
-    /** Maps Lite meshes back to the compat meshes the caller supplied. */
-    private readonly _liteToCompat = new Map<LiteMesh, Mesh>();
-    /** Lite meshes that are pickable (drives the Lite `pickAsync` filter). */
+    /** Maps Lite nodes (regular mesh or splat node) back to the compat meshes the caller supplied. */
+    private readonly _liteToCompat = new Map<LiteMesh | LiteGsMesh, PickableMesh>();
+    /** Regular Lite meshes that are pickable (drives the Lite `pickAsync` filter; GS meshes bypass it). */
     private _pickable = new Set<LiteMesh>();
     private _inProgress = false;
 
@@ -80,8 +89,18 @@ export class GPUPicker {
         }
         for (const item of list) {
             const mesh = meshOf(item);
-            this._liteToCompat.set(mesh._lite, mesh);
-            this._pickable.add(mesh._lite);
+            const liteNode = liteNodeOf(mesh);
+            if (!liteNode) {
+                // A GaussianSplattingMesh whose splat is not loaded yet has no node to
+                // key on; it becomes pickable once loaded and re-added.
+                continue;
+            }
+            this._liteToCompat.set(liteNode, mesh);
+            // Only regular meshes participate in the Lite filter; the Lite picker
+            // auto-includes scene splat meshes (its GS pass ignores the filter).
+            if (mesh instanceof Mesh) {
+                this._pickable.add(mesh._lite);
+            }
         }
     }
 
@@ -93,7 +112,7 @@ export class GPUPicker {
 
     /** Pick the mesh at canvas coordinates `(x, y)`. Resolves to `null` on a miss. */
     public async pickAsync(x: number, y: number, disposeWhenDone = false): Promise<IGPUPickingInfo | null> {
-        if (this._inProgress || !this._picker || this._pickable.size === 0) {
+        if (this._inProgress || !this._picker || this._liteToCompat.size === 0) {
             return null;
         }
         this._inProgress = true;
@@ -102,7 +121,7 @@ export class GPUPicker {
             if (!info.hit || !info.pickedMesh) {
                 return null;
             }
-            const mesh = this._liteToCompat.get(info.pickedMesh as LiteMesh);
+            const mesh = this._liteToCompat.get(info.pickedMesh as LiteMesh | LiteGsMesh);
             if (!mesh) {
                 return null;
             }
@@ -117,10 +136,10 @@ export class GPUPicker {
 
     /** Pick at several points. Always returns one entry per coordinate (mesh or `null`). */
     public async multiPickAsync(xy: Array<{ x: number; y: number }>, disposeWhenDone = false): Promise<IGPUMultiPickingInfo | null> {
-        if (this._inProgress || !this._picker || this._pickable.size === 0 || xy.length === 0) {
+        if (this._inProgress || !this._picker || this._liteToCompat.size === 0 || xy.length === 0) {
             return null;
         }
-        const meshes: Array<Mesh | null> = [];
+        const meshes: Array<PickableMesh | null> = [];
         const thinInstanceIndexes: number[] = [];
         for (const point of xy) {
             // Sequential: Lite picks one pixel per call.
