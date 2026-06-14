@@ -63,6 +63,8 @@ export class Scene {
 
     /** Fires before each scene render (wired to Lite's before-render hook). */
     public readonly onBeforeRenderObservable = new Observable<Scene>();
+    /** Fires before animations are evaluated each frame (used by ported cross-fade drivers). */
+    public readonly onBeforeAnimationsObservable = new Observable<Scene>();
     /** Fires after each scene render. */
     public readonly onAfterRenderObservable = new Observable<Scene>();
     /** Fires once when the scene is disposed. */
@@ -114,6 +116,8 @@ export class Scene {
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _runningAnimatables: Animatable[] = [];
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
+    /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
+    private readonly _structuralGroups: AnimationGroup[] = [];
 
     public constructor(engine: WebGPUEngine) {
         this._engine = engine;
@@ -128,8 +132,15 @@ export class Scene {
             // Record the frame delta so `engine.getDeltaTime()` (read inside
             // before-render observers) reflects the current frame.
             this._engine._lastDeltaMs = deltaMs;
+            this.onBeforeAnimationsObservable.notifyObservers(this);
             for (const a of this._runningAnimatables) {
                 a._tick(deltaMs);
+            }
+            if (this._structuralGroups.length > 0) {
+                for (const g of this._structuralGroups) {
+                    g._advanceStructural(deltaMs);
+                }
+                AnimationGroup._blendStructuralGroups(this._structuralGroups);
             }
             if (renderedAFrame) {
                 this.onAfterRenderObservable.notifyObservers(this);
@@ -437,6 +448,18 @@ export class Scene {
         const animatable = new Animatable(target, animations, from, to, loop, speedRatio);
         this._runningAnimatables.push(animatable);
         return animatable;
+    }
+
+    /** @internal Register a structural `AnimationGroup` to be stepped + blended each frame. */
+    public _registerStructuralGroup(group: AnimationGroup): void {
+        if (!this._structuralGroups.includes(group)) {
+            this._structuralGroups.push(group);
+        }
+    }
+
+    /** @internal Re-run weighted blending across all structural groups (after a seek/weight change). */
+    public _recomputeStructuralBlends(): void {
+        AnimationGroup._blendStructuralGroups(this._structuralGroups);
     }
 
     /**

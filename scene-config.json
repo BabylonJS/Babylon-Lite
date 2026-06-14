@@ -1242,7 +1242,8 @@
         "maxRawKB": 60,
         "description": "Two manual property animation groups blend weighted contributions into the same position.x property.",
         "tags": ["std", "procedural", "anim"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 156,
@@ -1252,7 +1253,8 @@
         "maxRawKB": 61,
         "description": "Two manual property animation groups cross-fade by duration-driven weight transitions.",
         "tags": ["std", "procedural", "anim"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 157,

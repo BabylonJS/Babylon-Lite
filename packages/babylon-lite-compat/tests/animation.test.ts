@@ -67,3 +67,86 @@ describe("AnimationGroup", () => {
         expect(group.state).toBe("stopped");
     });
 });
+
+describe("AnimationGroup structural weighted blending", () => {
+    class TestHost {
+        public readonly groups: AnimationGroup[] = [];
+        public _registerStructuralGroup(group: AnimationGroup): void {
+            if (!this.groups.includes(group)) {
+                this.groups.push(group);
+            }
+        }
+        public _recomputeStructuralBlends(): void {
+            AnimationGroup._blendStructuralGroups(this.groups);
+        }
+    }
+
+    function slide(name: string, peak: number): Animation {
+        const anim = new Animation(name, "position.x", 10);
+        anim.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: peak },
+            { frame: 20, value: 0 },
+        ]);
+        return anim;
+    }
+
+    it("blends two groups by weight into the same property (scene 155)", () => {
+        const host = new TestHost();
+        const box = { position: { x: 0 } };
+
+        const positive = new AnimationGroup("weightedPositive", host);
+        positive.addTargetedAnimation(slide("pos", 2), box);
+        positive.weight = 0.25;
+        positive.start(true, 1, 0, 20);
+
+        const negative = new AnimationGroup("weightedNegative", host);
+        negative.addTargetedAnimation(slide("neg", -2), box);
+        negative.weight = 0.75;
+        negative.start(true, 1, 0, 20);
+
+        positive.goToFrame(10);
+        negative.goToFrame(10);
+
+        // 2 * 0.25 + (-2) * 0.75 = -1
+        expect(box.position.x).toBeCloseTo(-1, 6);
+    });
+
+    it("cross-fades by re-weighting at a fractional frame (scene 156)", () => {
+        const host = new TestHost();
+        const box = { position: { x: 0 } };
+
+        const positive = new AnimationGroup("crossFadePositive", host);
+        positive.addTargetedAnimation(slide("pos", 2), box);
+        positive.weight = 1;
+        positive.start(true, 1, 0, 20);
+
+        const negative = new AnimationGroup("crossFadeNegative", host);
+        negative.addTargetedAnimation(slide("neg", -2), box);
+        negative.weight = 0;
+        negative.start(true, 1, 0, 20);
+
+        // seekTime 1.25 → frame 12.5, fadeT 0.25 → weights 0.75 / 0.25
+        positive.weight = 0.75;
+        negative.weight = 0.25;
+        positive.goToFrame(12.5);
+        negative.goToFrame(12.5);
+
+        // pos@12.5 = 1.5, neg@12.5 = -1.5 → 1.5 * 0.75 + (-1.5) * 0.25 = 0.75
+        expect(box.position.x).toBeCloseTo(0.75, 6);
+    });
+
+    it("falls back to the rest pose when total weight is below 1", () => {
+        const host = new TestHost();
+        const box = { position: { x: 0 } };
+
+        const positive = new AnimationGroup("partial", host);
+        positive.addTargetedAnimation(slide("pos", 2), box);
+        positive.weight = 0.5;
+        positive.start(true, 1, 0, 20);
+        positive.goToFrame(10);
+
+        // total weight 0.5 < 1 → 0 * 0.5 (original) + 2 * 0.5 = 1
+        expect(box.position.x).toBeCloseTo(1, 6);
+    });
+});

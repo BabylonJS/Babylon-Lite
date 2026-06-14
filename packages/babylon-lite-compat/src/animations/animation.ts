@@ -107,6 +107,58 @@ function lerpValue(a: number | number[], b: number | number[], t: number): numbe
     return av.map((value, i) => value + ((bv[i] ?? value) - value) * t);
 }
 
+type AnimValue = number | number[];
+
+function scaleValue(value: AnimValue, scale: number): AnimValue {
+    return typeof value === "number" ? value * scale : value.map((v) => v * scale);
+}
+
+function addValue(acc: AnimValue, value: AnimValue): AnimValue {
+    if (typeof acc === "number" && typeof value === "number") {
+        return acc + value;
+    }
+    const a = acc as number[];
+    const v = value as number[];
+    return a.map((x, i) => x + (v[i] ?? 0));
+}
+
+function zeroLike(value: AnimValue): AnimValue {
+    return typeof value === "number" ? 0 : (value as number[]).map(() => 0);
+}
+
+/**
+ * @internal Pre-animation baseline of each blended property, captured the first
+ * time a structural group starts. Babylon.js mixes this "original value" back in
+ * when a property's total animation weight is below 1 (so partially-weighted
+ * blends settle toward the rest pose); keyed by target object → dotted path.
+ */
+const structuralOriginals = new WeakMap<object, Map<string, AnimValue>>();
+
+function readPath(target: object, path: string): AnimValue {
+    const parts = path.split(".");
+    let obj = target as Record<string, unknown>;
+    for (let i = 0; i < parts.length - 1; i++) {
+        const next = obj[parts[i]!];
+        if (next == null) {
+            return 0;
+        }
+        obj = next as Record<string, unknown>;
+    }
+    const leaf = obj[parts[parts.length - 1]!];
+    return typeof leaf === "number" ? leaf : 0;
+}
+
+function captureOriginal(target: object, path: string): void {
+    let perTarget = structuralOriginals.get(target);
+    if (!perTarget) {
+        perTarget = new Map();
+        structuralOriginals.set(target, perTarget);
+    }
+    if (!perTarget.has(path)) {
+        perTarget.set(path, readPath(target, path));
+    }
+}
+
 /** @internal Assign an animated value to `target` following a dotted property path (e.g. `"position.x"`). */
 function applyAnimatedValue(target: unknown, path: string, value: number | number[]): void {
     const parts = path.split(".");
@@ -207,13 +259,27 @@ export class Animatable {
 export type AnimationGroupState = "init" | "playing" | "paused" | "stopped";
 
 /**
+ * @internal Surface a structural `AnimationGroup` needs from its host scene to be
+ * stepped + weight-blended each frame. Typed structurally to avoid a Scene import
+ * cycle.
+ */
+export interface StructuralAnimationHost {
+    /** @internal Register a structural group to be stepped + blended each frame. */
+    _registerStructuralGroup(group: AnimationGroup): void;
+    /** @internal Re-run weighted blending across all structural groups. */
+    _recomputeStructuralBlends(): void;
+}
+
+/**
  * Babylon.js `AnimationGroup` — a named collection of targeted animations with
  * playback state. This is the **single** `AnimationGroup` type, matching Babylon.js;
  * there is no separate "loaded" subtype. Two construction paths map onto Lite:
  *
  *  - **Structural** (`new AnimationGroup(name, scene?)`): a CPU-side collection
- *    built by ported code via `addTargetedAnimation`; playback state is tracked
- *    structurally (frame stepping is delegated to the native manager when bound).
+ *    built by ported code via `addTargetedAnimation`. When `start`ed it registers
+ *    with the scene and is stepped each frame on the CPU; multiple groups that
+ *    animate the same property are **weight-blended** (Babylon.js manual weighted
+ *    / cross-fade blending) before the result is written to the target.
  *  - **Loaded** (`AnimationGroup._fromLite`, used to populate `scene.animationGroups`
  *    from glTF / `.babylon` clips): a thin wrapper over a Babylon Lite loaded group.
  *    The playback methods (`goToFrame`/`play`/`pause`/`stop`/`reset`) and the
@@ -235,11 +301,19 @@ export class AnimationGroup {
     private _state: AnimationGroupState = "init";
     private _speedRatio = 1;
     private _loopAnimation = false;
+    /** @internal Blend weight for the structural path (loaded path reads `_lite.weight`). */
+    private _weight = 1;
+    /** @internal Current frame for the structural path. */
+    private _currentFrame = 0;
+    /** @internal Host scene that steps + blends this structural group each frame. */
+    private readonly _host?: StructuralAnimationHost;
 
     public constructor(
         public name: string,
-        _scene?: unknown
-    ) {}
+        scene?: unknown
+    ) {
+        this._host = (scene as StructuralAnimationHost | undefined) ?? undefined;
+    }
 
     /** @internal Build an `AnimationGroup` backed by a Babylon Lite loaded group. */
     public static _fromLite(lite: LiteAnimationGroup, engine: EngineContext): AnimationGroup {
@@ -293,11 +367,14 @@ export class AnimationGroup {
     }
 
     public get weight(): number {
-        return this._lite ? this._lite.weight : 1;
+        return this._lite ? this._lite.weight : this._weight;
     }
     public set weight(value: number) {
         if (this._lite) {
             this._lite.weight = value;
+        } else {
+            this._weight = value;
+            this._host?._recomputeStructuralBlends();
         }
     }
 
@@ -323,10 +400,41 @@ export class AnimationGroup {
         return entry;
     }
 
-    /** Babylon.js `goToFrame(frame)` — seek to a frame (loaded groups seek + hold via Lite). */
+    /**
+     * Babylon.js `start(loop?, speedRatio?, from?, to?)`. On the structural path this
+     * registers the group with its host scene, captures the targets' rest-pose
+     * baselines, and begins CPU stepping + weight blending. On the loaded path it
+     * delegates to `play` (Lite drives the clip).
+     */
+    public start(loop = true, speedRatio = 1, from?: number, to?: number): this {
+        if (this._lite) {
+            return this.play(loop);
+        }
+        this._loopAnimation = loop;
+        this._speedRatio = speedRatio;
+        if (from !== undefined) {
+            this._from = from;
+        }
+        if (to !== undefined) {
+            this._to = to;
+        }
+        this._currentFrame = this._from;
+        this._state = "playing";
+        for (const { target, animation } of this.targetedAnimations) {
+            captureOriginal(target as object, animation.targetProperty);
+        }
+        this._host?._registerStructuralGroup(this);
+        this._host?._recomputeStructuralBlends();
+        return this;
+    }
+
+    /** Babylon.js `goToFrame(frame)` — seek to a frame (loaded groups seek + hold via Lite; structural groups re-blend). */
     public goToFrame(frame: number): this {
         if (this._lite && this._engine) {
             liteGoToFrame(this._lite, frame, this._engine);
+        } else {
+            this._currentFrame = frame;
+            this._host?._recomputeStructuralBlends();
         }
         return this;
     }
@@ -368,5 +476,88 @@ export class AnimationGroup {
             this._state = "init";
         }
         return this;
+    }
+
+    /** @internal Whether this structural group currently contributes to blending (started, not stopped). */
+    public _isStructuralActive(): boolean {
+        return !this._lite && (this._state === "playing" || this._state === "paused");
+    }
+
+    /** @internal Advance a playing structural group's frame by `deltaMs` (with loop wrap). */
+    public _advanceStructural(deltaMs: number): void {
+        if (this._lite || this._state !== "playing") {
+            return;
+        }
+        const fps = this.targetedAnimations[0]?.animation.framePerSecond ?? 60;
+        this._currentFrame += (deltaMs / 1000) * fps * this._speedRatio;
+        if (this._currentFrame > this._to) {
+            if (this._loopAnimation) {
+                const span = this._to - this._from || 1;
+                this._currentFrame = this._from + ((this._currentFrame - this._from) % span);
+            } else {
+                this._currentFrame = this._to;
+                this._state = "stopped";
+            }
+        }
+    }
+
+    /**
+     * @internal Babylon.js manual weighted / cross-fade blending. Groups of
+     * animations targeting the same (target, property) are mixed by weight: when
+     * the total weight exceeds 1 the contributions are normalized, and when it is
+     * below 1 the property's captured rest-pose baseline fills the remainder.
+     */
+    public static _blendStructuralGroups(groups: readonly AnimationGroup[]): void {
+        interface Holder {
+            target: object;
+            path: string;
+            total: number;
+            contributions: Array<{ value: AnimValue; weight: number }>;
+        }
+        const holders = new Map<object, Map<string, Holder>>();
+        for (const group of groups) {
+            if (!group._isStructuralActive()) {
+                continue;
+            }
+            const weight = group._weight;
+            for (const { target, animation } of group.targetedAnimations) {
+                const obj = target as object;
+                const path = animation.targetProperty;
+                const value = animation.evaluate(group._currentFrame);
+                let perTarget = holders.get(obj);
+                if (!perTarget) {
+                    perTarget = new Map();
+                    holders.set(obj, perTarget);
+                }
+                let holder = perTarget.get(path);
+                if (!holder) {
+                    holder = { target: obj, path, total: 0, contributions: [] };
+                    perTarget.set(path, holder);
+                }
+                holder.total += weight;
+                holder.contributions.push({ value, weight });
+            }
+        }
+        for (const perTarget of holders.values()) {
+            for (const holder of perTarget.values()) {
+                const original = structuralOriginals.get(holder.target)?.get(holder.path) ?? 0;
+                let final: AnimValue;
+                if (holder.total === 0) {
+                    final = original;
+                } else {
+                    let normalizer = 1;
+                    if (holder.total < 1) {
+                        final = scaleValue(original, 1 - holder.total);
+                    } else {
+                        normalizer = holder.total;
+                        final = zeroLike(holder.contributions[0]!.value);
+                    }
+                    for (const c of holder.contributions) {
+                        final = addValue(final, scaleValue(c.value, c.weight / normalizer));
+                    }
+                }
+                applyAnimatedValue(holder.target, holder.path, final);
+            }
+        }
     }
 }
