@@ -107,7 +107,10 @@ export abstract class Camera extends Node {
     }
 
     protected _makeActive(scene: Scene | undefined): void {
-        if (scene) {
+        // Babylon.js sets `scene.activeCamera` to the **first** camera constructed
+        // against a scene; later cameras are added but do not steal the active
+        // slot (e.g. a `CameraGizmo`'s subject camera must not become the view).
+        if (scene && !scene.activeCamera) {
             scene.activeCamera = this;
         }
     }

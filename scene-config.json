@@ -1677,7 +1677,8 @@
         "maxRawKB": 100,
         "description": "Four cubes over a ground, each driven by a different gizmo: axisDragGizmo (X), planeRotationGizmo (Y) with rotation sector camembert, planeDragGizmo (Y normal), axisScaleGizmo (Y). UtilityLayer overlay + scripted pointer-drag interaction.",
         "tags": ["std", "gizmo", "interactive"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 222,
@@ -1687,7 +1688,8 @@
         "maxRawKB": 110,
         "description": "Three cubes each parented to a TransformNode with non-null rotation and translation, driven by composite PositionGizmo / RotationGizmo / ScaleGizmo. Scripted manipulation in LOCAL coords, then switches to WORLD coords (where supported) and re-manipulates before parity comparison.",
         "tags": ["std", "gizmo", "interactive", "composite"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 223,
@@ -1697,7 +1699,8 @@
         "maxRawKB": 70,
         "description": "Display-only CameraGizmo + a LightGizmo for every supported light type (hemispheric, point, spot, directional) over a ground plane, rendered through a utility-layer overlay. Static scene — no scripted interaction.",
         "tags": ["std", "gizmo", "display"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 224,
@@ -1707,7 +1710,8 @@
         "maxRawKB": 90,
         "description": "5 cubes parented to a group root, with a BoundingBoxGizmo computing the encompassing AABB. Parity is driven by a deterministic `__scene224.setRootTrs(...)` test hook that poses the group identically in both engines, verifying the rendered gizmo (12-edge wireframe, 8 corner-scale L-handles, 12 edge-midpoint rotation anchors, and their lit/hover materials) rather than pointer-drag dynamics.",
         "tags": ["std", "gizmo", "interactive", "bbox"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 225,

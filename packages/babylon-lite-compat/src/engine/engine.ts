@@ -49,6 +49,14 @@ export class WebGPUEngine {
     /** @internal Deferred startup work (thunks) awaited before the engine starts — e.g. sprite-atlas loads. */
     private readonly _startupWork: Array<() => Promise<void>> = [];
 
+    /**
+     * @internal Deferred work awaited *after* the main scenes are registered but
+     * before the engine starts — e.g. utility-layer (gizmo) registration, which
+     * must happen after its gizmos are created and after the main scene is
+     * registered (Babylon Lite's `registerUtilityLayer` ordering).
+     */
+    private readonly _lateWork: Array<() => Promise<void>> = [];
+
     public constructor(canvas: RenderCanvas, options?: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | boolean) {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
@@ -112,6 +120,11 @@ export class WebGPUEngine {
     /** @internal Register deferred startup work (a thunk) awaited before the engine starts. */
     public _registerStartupWork(work: () => Promise<void>): void {
         this._startupWork.push(work);
+    }
+
+    /** @internal Register deferred work awaited after the main scenes register but before the engine starts. */
+    public _registerLateWork(work: () => Promise<void>): void {
+        this._lateWork.push(work);
     }
 
     /** @internal Scenes register themselves on construction. */
@@ -209,6 +222,12 @@ export class WebGPUEngine {
             } else {
                 await registerScene(scene._lite);
             }
+        }
+        // Late work runs after the main scenes are registered (e.g. utility-layer
+        // gizmo registration, which Babylon Lite registers after the main scene).
+        if (this._lateWork.length > 0) {
+            await Promise.all(this._lateWork.map((w) => w()));
+            this._lateWork.length = 0;
         }
         await startEngine(this._lite);
     }

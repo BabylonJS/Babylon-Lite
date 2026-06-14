@@ -37,6 +37,7 @@ import {
 import type { Mesh as LiteMesh, TransformNode as LiteTransformNode, SceneNode, EngineContext } from "babylon-lite";
 
 import type { Vector3 } from "../math/vector.js";
+import { Quaternion } from "../math/quaternion.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
@@ -156,16 +157,49 @@ export class TransformNode extends Node {
         (this._node.scaling as unknown as LiteVec3Like).set(value.x, value.y, value.z);
     }
 
-    /** Babylon.js `setParent` — set this node's parent in the scene graph. */
+    /** @internal Whether `rotationQuaternion` was explicitly set (Babylon.js returns null otherwise). */
+    private _useQuat = false;
+
+    /**
+     * Babylon.js `rotationQuaternion`. Babylon Lite always drives a node's world
+     * matrix from a quaternion (its euler `rotation` is a proxy over the same
+     * quaternion), so this reads/writes that quaternion. Returns `null` until
+     * explicitly assigned, matching Babylon.js's euler-by-default convention.
+     */
+    public get rotationQuaternion(): Quaternion | null {
+        if (!this._useQuat) {
+            return null;
+        }
+        const q = (this._node as unknown as { rotationQuaternion: { x: number; y: number; z: number; w: number } }).rotationQuaternion;
+        return new Quaternion(q.x, q.y, q.z, q.w);
+    }
+    public set rotationQuaternion(value: Quaternion | null) {
+        if (value) {
+            this._useQuat = true;
+            (this._node as unknown as { rotationQuaternion: { set(x: number, y: number, z: number, w: number): void } }).rotationQuaternion.set(value.x, value.y, value.z, value.w);
+        } else {
+            this._useQuat = false;
+        }
+    }
+
+    /**
+     * Babylon.js `setParent(node)` — reparent while **preserving world position**
+     * (the child's local transform is recomputed). Distinct from the `parent`
+     * setter, which keeps the local transform and lets the world move.
+     */
     public setParent(parent: Node | null): TransformNode {
-        this.parent = parent;
+        const parentNode = parent ? ((parent as unknown as { _node?: SceneNode; _lite?: SceneNode })._node ?? (parent as unknown as { _lite?: SceneNode })._lite ?? null) : null;
+        this._parent = parent;
+        setParent(this._node as never, (parentNode as never) ?? null);
         return this;
     }
 
     protected override _applyParent(parent: Node | null): void {
-        if (parent instanceof TransformNode) {
-            setParent(this._node as never, parent._node as never);
-        }
+        // Babylon.js `node.parent = x` keeps the child's LOCAL transform and lets
+        // its world position move under the new parent (unlike `setParent`, which
+        // preserves world). Mirror that with Babylon Lite's raw parent assignment.
+        const parentNode = parent ? ((parent as unknown as { _node?: SceneNode; _lite?: SceneNode })._node ?? (parent as unknown as { _lite?: SceneNode })._lite ?? null) : null;
+        (this._node as unknown as { parent: SceneNode | null }).parent = parentNode;
     }
 }
 

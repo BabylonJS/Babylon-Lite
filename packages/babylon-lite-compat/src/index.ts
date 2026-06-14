@@ -85,7 +85,20 @@ export { GPUPicker } from "./picking/gpu-picker.js";
 export type { IGPUPickingInfo, IGPUMultiPickingInfo } from "./picking/gpu-picker.js";
 
 // ─── Gizmos ──────────────────────────────────────────────────────────
-export { UtilityLayerRenderer, PositionGizmo, RotationGizmo, ScaleGizmo, BoundingBoxGizmo, LightGizmo, CameraGizmo, GizmoManager } from "./gizmos/gizmos.js";
+export {
+    UtilityLayerRenderer,
+    PositionGizmo,
+    RotationGizmo,
+    ScaleGizmo,
+    BoundingBoxGizmo,
+    LightGizmo,
+    CameraGizmo,
+    GizmoManager,
+    AxisDragGizmo,
+    PlaneRotationGizmo,
+    PlaneDragGizmo,
+    AxisScaleGizmo,
+} from "./gizmos/gizmos.js";
 
 // ─── Behaviors ───────────────────────────────────────────────────────
 export { AutoRotationBehavior, BouncingBehavior, FramingBehavior } from "./behaviors/behaviors.js";

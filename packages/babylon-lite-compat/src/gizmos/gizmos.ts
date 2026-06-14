@@ -14,12 +14,15 @@ import {
     createPositionGizmo,
     attachPositionGizmoToNode,
     disposePositionGizmo,
+    setPositionGizmoLocalCoordinates,
     createRotationGizmo,
     attachRotationGizmoToNode,
     disposeRotationGizmo,
+    setRotationGizmoLocalCoordinates,
     createScaleGizmo,
     attachScaleGizmoToNode,
     disposeScaleGizmo,
+    setScaleGizmoLocalCoordinates,
     createBoundingBoxGizmo,
     attachBoundingBoxGizmoToNode,
     disposeBoundingBoxGizmo,
@@ -29,6 +32,18 @@ import {
     createCameraGizmo,
     attachCameraGizmoToCamera,
     disposeCameraGizmo,
+    createAxisDragGizmo,
+    attachAxisDragGizmoToNode,
+    disposeAxisDragGizmo,
+    createPlaneRotationGizmo,
+    attachPlaneRotationGizmoToNode,
+    disposePlaneRotationGizmo,
+    createPlaneDragGizmo,
+    attachPlaneDragGizmoToNode,
+    disposePlaneDragGizmo,
+    createAxisScaleGizmo,
+    attachAxisScaleGizmoToNode,
+    disposeAxisScaleGizmo,
 } from "babylon-lite";
 import type {
     UtilityLayer as LiteUtilityLayer,
@@ -38,14 +53,21 @@ import type {
     BoundingBoxGizmo as LiteBoundingBoxGizmo,
     LightGizmo as LiteLightGizmo,
     CameraGizmo as LiteCameraGizmo,
+    AxisDragGizmo as LiteAxisDragGizmo,
+    PlaneRotationGizmo as LitePlaneRotationGizmo,
+    PlaneDragGizmo as LitePlaneDragGizmo,
+    AxisScaleGizmo as LiteAxisScaleGizmo,
     EngineContext,
     SceneNode,
 } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
 import type { AbstractMesh, Mesh } from "../meshes/meshes.js";
+import type { Node } from "../node/node.js";
 import type { Light } from "../lights/lights.js";
 import type { Camera } from "../cameras/cameras.js";
+import type { Vector3 } from "../math/vector.js";
+import type { Color3 } from "../math/color.js";
 
 /** Babylon.js `UtilityLayerRenderer` — the overlay scene gizmos render into. */
 export class UtilityLayerRenderer {
@@ -53,19 +75,25 @@ export class UtilityLayerRenderer {
     public readonly _lite: LiteUtilityLayer;
     /** @internal Lite engine backing the layer (gizmo factories need it explicitly). */
     public readonly _engine: EngineContext;
-    private _registered: Promise<void> | undefined;
+    private _registered = false;
 
     public constructor(scene: Scene) {
         this._engine = scene.getEngine()._lite;
         this._lite = createUtilityLayer(this._engine, scene._lite);
+        // Babylon Lite registers a utility layer *after* its gizmos are created and
+        // after the main scene is registered. Gizmo creation is synchronous (all
+        // gizmos exist by the time the engine starts), so defer registration to the
+        // engine's late-work phase to capture every gizmo.
+        scene.getEngine()._registerLateWork(() => this._ensureRegistered());
     }
 
     /** @internal Ensure the layer is registered with the engine (idempotent). */
     public _ensureRegistered(): Promise<void> {
-        if (!this._registered) {
-            this._registered = registerUtilityLayer(this._lite);
+        if (this._registered) {
+            return Promise.resolve();
         }
-        return this._registered;
+        this._registered = true;
+        return registerUtilityLayer(this._lite);
     }
 
     public dispose(): void {
@@ -80,7 +108,9 @@ abstract class GizmoBase {
 
     protected constructor(layer: UtilityLayerRenderer) {
         this._layer = layer;
-        void layer._ensureRegistered();
+        // The utility layer registers itself with the engine during the engine's
+        // late-work phase (after all gizmos are created), so no eager registration
+        // is needed here.
     }
 
     public abstract get attachedMesh(): AbstractMesh | null;
@@ -97,6 +127,13 @@ export class PositionGizmo extends GizmoBase {
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createPositionGizmo(layer._engine, layer._lite);
+        // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
+        setPositionGizmoLocalCoordinates(this._lite, true);
+    }
+
+    /** Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` — orient widgets to the node's local axes. */
+    public set updateGizmoRotationToMatchAttachedMesh(value: boolean) {
+        setPositionGizmoLocalCoordinates(this._lite, value);
     }
 
     public get attachedMesh(): AbstractMesh | null {
@@ -105,6 +142,13 @@ export class PositionGizmo extends GizmoBase {
     public set attachedMesh(value: AbstractMesh | null) {
         this._attached = value;
         attachPositionGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+    }
+
+    public get attachedNode(): AbstractMesh | null {
+        return this._attached;
+    }
+    public set attachedNode(value: AbstractMesh | null) {
+        this.attachedMesh = value;
     }
 
     public override dispose(): void {
@@ -120,6 +164,13 @@ export class RotationGizmo extends GizmoBase {
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createRotationGizmo(layer._engine, layer._lite);
+        // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
+        setRotationGizmoLocalCoordinates(this._lite, true);
+    }
+
+    /** Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` — orient widgets to the node's local axes. */
+    public set updateGizmoRotationToMatchAttachedMesh(value: boolean) {
+        setRotationGizmoLocalCoordinates(this._lite, value);
     }
 
     public get attachedMesh(): AbstractMesh | null {
@@ -128,6 +179,13 @@ export class RotationGizmo extends GizmoBase {
     public set attachedMesh(value: AbstractMesh | null) {
         this._attached = value;
         attachRotationGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+    }
+
+    public get attachedNode(): AbstractMesh | null {
+        return this._attached;
+    }
+    public set attachedNode(value: AbstractMesh | null) {
+        this.attachedMesh = value;
     }
 
     public override dispose(): void {
@@ -143,6 +201,13 @@ export class ScaleGizmo extends GizmoBase {
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createScaleGizmo(layer._engine, layer._lite);
+        // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
+        setScaleGizmoLocalCoordinates(this._lite, true);
+    }
+
+    /** Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` — orient widgets to the node's local axes. */
+    public set updateGizmoRotationToMatchAttachedMesh(value: boolean) {
+        setScaleGizmoLocalCoordinates(this._lite, value);
     }
 
     public get attachedMesh(): AbstractMesh | null {
@@ -151,6 +216,13 @@ export class ScaleGizmo extends GizmoBase {
     public set attachedMesh(value: AbstractMesh | null) {
         this._attached = value;
         attachScaleGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+    }
+
+    public get attachedNode(): AbstractMesh | null {
+        return this._attached;
+    }
+    public set attachedNode(value: AbstractMesh | null) {
+        this.attachedMesh = value;
     }
 
     public override dispose(): void {
@@ -163,9 +235,15 @@ export class BoundingBoxGizmo extends GizmoBase {
     public readonly _lite: LiteBoundingBoxGizmo;
     private _attached: AbstractMesh | null = null;
 
-    public constructor(layer: UtilityLayerRenderer) {
-        super(layer);
-        this._lite = createBoundingBoxGizmo(layer._engine, layer._lite);
+    /**
+     * Babylon.js `BoundingBoxGizmo(color?, utilityLayer?)`. The first argument may
+     * be the gizmo colour (when a layer is also supplied) or the utility layer.
+     */
+    public constructor(colorOrLayer: Color3 | UtilityLayerRenderer, layer?: UtilityLayerRenderer) {
+        const resolvedLayer = layer ?? (colorOrLayer as UtilityLayerRenderer);
+        const color = layer ? (colorOrLayer as Color3) : undefined;
+        super(resolvedLayer);
+        this._lite = createBoundingBoxGizmo(resolvedLayer._engine, resolvedLayer._lite, color ? { color: [color.r, color.g, color.b] } : {});
     }
 
     public get attachedMesh(): AbstractMesh | null {
@@ -173,7 +251,20 @@ export class BoundingBoxGizmo extends GizmoBase {
     }
     public set attachedMesh(value: AbstractMesh | null) {
         this._attached = value;
-        attachBoundingBoxGizmoToNode(this._lite, (value?._lite as SceneNode | undefined) ?? null);
+        attachBoundingBoxGizmoToNode(this._lite, nodeLite(value as unknown as Node | null));
+    }
+
+    public get attachedNode(): AbstractMesh | null {
+        return this._attached;
+    }
+    public set attachedNode(value: AbstractMesh | null) {
+        this.attachedMesh = value;
+    }
+
+    /** Babylon.js `BoundingBoxGizmo.enableDragBehavior()` — enables body-drag (Lite enables it by default). */
+    public enableDragBehavior(): void {
+        // Babylon Lite's bounding-box gizmo wires body-drag through its own pointer
+        // behaviour; no explicit opt-in is required.
     }
 
     public override dispose(): void {
@@ -190,7 +281,6 @@ export class LightGizmo {
 
     public constructor(layer: UtilityLayerRenderer) {
         this._layer = layer;
-        void layer._ensureRegistered();
         this._lite = createLightGizmo(layer._engine, layer._lite);
     }
 
@@ -200,6 +290,24 @@ export class LightGizmo {
     public set light(value: Light | null) {
         this._attached = value;
         attachLightGizmoToLight(this._lite, value?._lite ?? null);
+    }
+
+    /**
+     * Babylon.js `LightGizmo.attachedMesh` — the gizmo's visual root. Babylon.js
+     * code reads this to reposition the gizmo for lights without a position (e.g.
+     * hemispheric). Returns a thin proxy over the Lite gizmo's `root` node whose
+     * `position` writes through to it.
+     */
+    public get attachedMesh(): { position: Vector3 } {
+        const root = (this._lite as unknown as { root: { position: { x: number; y: number; z: number; set(x: number, y: number, z: number): void } } }).root;
+        return {
+            get position(): Vector3 {
+                return root.position as unknown as Vector3;
+            },
+            set position(v: Vector3) {
+                root.position.set(v.x, v.y, v.z);
+            },
+        };
     }
 
     public dispose(): void {
@@ -216,7 +324,6 @@ export class CameraGizmo {
 
     public constructor(layer: UtilityLayerRenderer) {
         this._layer = layer;
-        void layer._ensureRegistered();
         this._lite = createCameraGizmo(layer._engine, layer._lite);
     }
 
@@ -230,6 +337,154 @@ export class CameraGizmo {
 
     public dispose(): void {
         disposeCameraGizmo(this._lite, this._layer._lite);
+    }
+}
+
+/**
+ * Babylon.js single-axis / single-plane gizmos. Babylon.js constructs these with
+ * `(axis, color, utilityLayer)` and attaches to a node via `attachedNode`. Each
+ * maps to a Babylon Lite single-axis gizmo factory.
+ *
+ * @internal Resolve the Lite scene node for a compat node (mesh `_lite` or
+ * transform `_node`).
+ */
+function nodeLite(value: Node | null): SceneNode | null {
+    return (value as unknown as { _lite?: SceneNode; _node?: SceneNode })?._lite ?? (value as unknown as { _node?: SceneNode })?._node ?? null;
+}
+
+/** Babylon.js `AxisDragGizmo` — drags the attached node along a single world axis. */
+export class AxisDragGizmo extends GizmoBase {
+    /** @internal */
+    public readonly _lite: LiteAxisDragGizmo;
+    private _attached: Node | null = null;
+
+    public constructor(dragAxis: Vector3, color: Color3, layer: UtilityLayerRenderer) {
+        super(layer);
+        this._lite = createAxisDragGizmo(layer._engine, layer._lite, {
+            dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z },
+            color: [color.r, color.g, color.b],
+        });
+    }
+
+    public get attachedMesh(): AbstractMesh | null {
+        return this._attached as AbstractMesh | null;
+    }
+    public set attachedMesh(value: AbstractMesh | null) {
+        this.attachedNode = value;
+    }
+
+    public get attachedNode(): Node | null {
+        return this._attached;
+    }
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachAxisDragGizmoToNode(this._lite, nodeLite(value));
+    }
+
+    public override dispose(): void {
+        disposeAxisDragGizmo(this._lite, this._layer._lite);
+    }
+}
+
+/** Babylon.js `PlaneRotationGizmo` — rotates the attached node about a plane normal. */
+export class PlaneRotationGizmo extends GizmoBase {
+    /** @internal */
+    public readonly _lite: LitePlaneRotationGizmo;
+    private _attached: Node | null = null;
+
+    public constructor(planeNormal: Vector3, color: Color3, layer: UtilityLayerRenderer) {
+        super(layer);
+        this._lite = createPlaneRotationGizmo(layer._engine, layer._lite, {
+            planeNormal: { x: planeNormal.x, y: planeNormal.y, z: planeNormal.z },
+            color: [color.r, color.g, color.b],
+        });
+    }
+
+    public get attachedMesh(): AbstractMesh | null {
+        return this._attached as AbstractMesh | null;
+    }
+    public set attachedMesh(value: AbstractMesh | null) {
+        this.attachedNode = value;
+    }
+
+    public get attachedNode(): Node | null {
+        return this._attached;
+    }
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachPlaneRotationGizmoToNode(this._lite, nodeLite(value));
+    }
+
+    public override dispose(): void {
+        disposePlaneRotationGizmo(this._lite, this._layer._lite);
+    }
+}
+
+/** Babylon.js `PlaneDragGizmo` — drags the attached node within a plane. */
+export class PlaneDragGizmo extends GizmoBase {
+    /** @internal */
+    public readonly _lite: LitePlaneDragGizmo;
+    private _attached: Node | null = null;
+
+    public constructor(dragPlaneNormal: Vector3, color: Color3, layer: UtilityLayerRenderer) {
+        super(layer);
+        this._lite = createPlaneDragGizmo(layer._engine, layer._lite, {
+            dragPlaneNormal: { x: dragPlaneNormal.x, y: dragPlaneNormal.y, z: dragPlaneNormal.z },
+            color: [color.r, color.g, color.b],
+        });
+    }
+
+    public get attachedMesh(): AbstractMesh | null {
+        return this._attached as AbstractMesh | null;
+    }
+    public set attachedMesh(value: AbstractMesh | null) {
+        this.attachedNode = value;
+    }
+
+    public get attachedNode(): Node | null {
+        return this._attached;
+    }
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachPlaneDragGizmoToNode(this._lite, nodeLite(value));
+    }
+
+    public override dispose(): void {
+        disposePlaneDragGizmo(this._lite, this._layer._lite);
+    }
+}
+
+/** Babylon.js `AxisScaleGizmo` — scales the attached node along a single axis. */
+export class AxisScaleGizmo extends GizmoBase {
+    /** @internal */
+    public readonly _lite: LiteAxisScaleGizmo;
+    private _attached: Node | null = null;
+
+    public constructor(dragAxis: Vector3, color: Color3, layer: UtilityLayerRenderer) {
+        super(layer);
+        this._lite = createAxisScaleGizmo(layer._engine, layer._lite, {
+            dragAxis: { x: dragAxis.x, y: dragAxis.y, z: dragAxis.z },
+            color: [color.r, color.g, color.b],
+        });
+    }
+
+    public get attachedMesh(): AbstractMesh | null {
+        return this._attached as AbstractMesh | null;
+    }
+    public set attachedMesh(value: AbstractMesh | null) {
+        this.attachedNode = value;
+    }
+
+    public get attachedNode(): Node | null {
+        return this._attached;
+    }
+    public set attachedNode(value: Node | null) {
+        this._attached = value;
+        attachAxisScaleGizmoToNode(this._lite, nodeLite(value));
+    }
+
+    public override dispose(): void {
+        disposeAxisScaleGizmo(this._lite, this._layer._lite);
     }
 }
 
