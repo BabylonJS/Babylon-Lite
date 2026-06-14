@@ -551,6 +551,7 @@ export type { PhysicsWorld, PhysicsBody, PhysicsShape, PhysicsAggregate, Physics
 export {
     createNavigationPluginAsync,
     createNavMesh,
+    createNavMeshFromSources,
     createDebugNavMeshGeometry,
     getClosestPoint,
     computePath,
@@ -570,4 +571,4 @@ export {
     removeObstacle,
     updateNavMeshObstacles,
 } from "./navigation/navigation.js";
-export type { NavigationPlugin, NavCrowd, NavMeshParameters, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";
+export type { NavigationPlugin, NavCrowd, NavMeshParameters, NavMeshSource, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";
