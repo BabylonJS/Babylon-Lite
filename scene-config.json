@@ -145,7 +145,8 @@
         "maxRawKB": 93.2,
         "description": "glTF Flight Helmet with PBR materials, DDS cube skybox, default environment.",
         "tags": ["pbr", "gltf"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 15,
