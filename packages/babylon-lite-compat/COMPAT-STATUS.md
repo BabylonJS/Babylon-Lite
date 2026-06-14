@@ -26,8 +26,8 @@ for reader context but are not part of the audited surface.
 
 ## Status legend
 
-| Status             | Meaning                                                                          |
-| ------------------ | -------------------------------------------------------------------------------- |
+| Status            | Meaning                                                                          |
+| ----------------- | -------------------------------------------------------------------------------- |
 | ✅ Full            | Common surface implemented and tested where possible                             |
 | ⚡ Partial         | A practical subset is implemented; some properties/overloads throw or are absent |
 | 🔧 Needs Lite core | Implementable only with a small additive Babylon Lite core change                |
@@ -47,8 +47,8 @@ for reader context but are not part of the audited surface.
 
 ## Math
 
-| BJS API                                            | Status     | Module                                                                                           |
-| -------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------ |
+| BJS API                                            | Status    | Module                                                                                           |
+| -------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------ |
 | `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
 | `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                               |
 | `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts)                                                     |
@@ -65,8 +65,8 @@ for reader context but are not part of the audited surface.
 
 ## Core
 
-| BJS API                                                                     | Status             | Module                                                                                                        |
-| --------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| BJS API                                                                     | Status            | Module                                                                                                        |
+| --------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------- |
 | `WebGPUEngine` / `Engine`                                                   | ⚡ Partial         | [engine/engine.ts](src/engine/engine.ts)                                                                      |
 | `engine.useLargeWorldRendering` → floating origin / `useReverseDepthBuffer` | ⚡ Partial         | engine (BJS `useLargeWorldRendering` maps to Lite `useHighPrecisionMatrix` + `useFloatingOrigin`)             |
 | `engine.runRenderLoop` / `stopRenderLoop`                                   | ⚡ Partial         | engine (async startup; N callbacks)                                                                           |
@@ -93,15 +93,15 @@ for reader context but are not part of the audited surface.
 
 ## Culling & Collisions
 
-| BJS API                                           | Status     | Module                                         |
-| ------------------------------------------------- | ---------- | ---------------------------------------------- |
+| BJS API                                           | Status    | Module                                         |
+| ------------------------------------------------- | --------- | ---------------------------------------------- |
 | `BoundingBox` / `BoundingSphere` / `BoundingInfo` | ✅ Full    | [culling/bounding.ts](src/culling/bounding.ts) |
 | `PickingInfo` / `IntersectionInfo`                | ⚡ Partial | surfaced via `GPUPicker`                       |
 
 ## Cameras
 
-| BJS API                                           | Status           | Module                                       |
-| ------------------------------------------------- | ---------------- | -------------------------------------------- |
+| BJS API                                           | Status          | Module                                       |
+| ------------------------------------------------- | --------------- | -------------------------------------------- |
 | `Camera` (base, extends `Node`)                   | ✅ Full          | [cameras/cameras.ts](src/cameras/cameras.ts) |
 | `camera.getViewMatrix` / `getProjectionMatrix`    | ✅ Full          | cameras (over Lite matrix accessors)         |
 | `ArcRotateCamera`                                 | ✅ Full          | cameras                                      |
@@ -114,8 +114,8 @@ for reader context but are not part of the audited surface.
 
 ## Lights
 
-| BJS API                                               | Status             | Module                                   |
-| ----------------------------------------------------- | ------------------ | ---------------------------------------- |
+| BJS API                                               | Status            | Module                                   |
+| ----------------------------------------------------- | ----------------- | ---------------------------------------- |
 | `HemisphericLight`                                    | ✅ Full            | [lights/lights.ts](src/lights/lights.ts) |
 | `DirectionalLight`                                    | ✅ Full            | lights                                   |
 | `PointLight`                                          | ✅ Full            | lights                                   |
@@ -126,8 +126,8 @@ for reader context but are not part of the audited surface.
 
 ## Shadows
 
-| BJS API                                           | Status     | Module                                                         |
-| ------------------------------------------------- | ---------- | -------------------------------------------------------------- |
+| BJS API                                           | Status    | Module                                                         |
+| ------------------------------------------------- | --------- | -------------------------------------------------------------- |
 | `ShadowGenerator` (directional ESM/PCF, spot PCF) | ⚡ Partial | [shadows/shadow-generator.ts](src/shadows/shadow-generator.ts) |
 | `addShadowCaster` / `getShadowMap().renderList`   | ✅ Full    | shadows (over Lite shadow factories)                           |
 | `mesh.receiveShadows`                             | ✅ Full    | meshes                                                         |
@@ -135,8 +135,8 @@ for reader context but are not part of the audited surface.
 
 ## Meshes & Geometry
 
-| BJS API                                                                                                      | Status             | Module                                                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| BJS API                                                                                                      | Status            | Module                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Node` (base) + `getScene`/`getClassName`/`parent`/`metadata`                                                | ⚡ Partial         | [node/node.ts](src/node/node.ts)                                                                                                                                                                                                           |
 | Class chain `Mesh → AbstractMesh → TransformNode → Node`                                                     | ✅ Full            | node + meshes (real inheritance)                                                                                                                                                                                                           |
 | `MeshBuilder.CreateBox/Sphere/Ground/Plane/Cylinder`                                                         | ⚡ Partial         | [meshes/meshes.ts](src/meshes/meshes.ts)                                                                                                                                                                                                   |
@@ -159,8 +159,8 @@ for reader context but are not part of the audited surface.
 
 ## Gizmos
 
-| BJS API                                                               | Status     | Module                                   |
-| --------------------------------------------------------------------- | ---------- | ---------------------------------------- |
+| BJS API                                                               | Status    | Module                                   |
+| --------------------------------------------------------------------- | --------- | ---------------------------------------- |
 | `UtilityLayerRenderer`                                                | ✅ Full    | [gizmos/gizmos.ts](src/gizmos/gizmos.ts) |
 | `PositionGizmo` / `RotationGizmo` / `ScaleGizmo` / `BoundingBoxGizmo` | ⚡ Partial | gizmos (over Lite gizmo suite)           |
 | `LightGizmo` / `CameraGizmo`                                          | ⚡ Partial | gizmos                                   |
@@ -168,8 +168,8 @@ for reader context but are not part of the audited surface.
 
 ## Behaviors
 
-| BJS API                                      | Status             | Module                                               |
-| -------------------------------------------- | ------------------ | ---------------------------------------------------- |
+| BJS API                                      | Status            | Module                                               |
+| -------------------------------------------- | ----------------- | ---------------------------------------------------- |
 | `Behavior<T>` interface                      | ✅ Full            | [behaviors/behaviors.ts](src/behaviors/behaviors.ts) |
 | `AutoRotationBehavior`                       | ✅ Full            | behaviors                                            |
 | `BouncingBehavior` / `FramingBehavior`       | ⚡ Partial         | behaviors (no tweened animation)                     |
@@ -177,16 +177,16 @@ for reader context but are not part of the audited surface.
 
 ## Actions
 
-| BJS API                                                          | Status     | Module                                       |
-| ---------------------------------------------------------------- | ---------- | -------------------------------------------- |
+| BJS API                                                          | Status    | Module                                       |
+| ---------------------------------------------------------------- | --------- | -------------------------------------------- |
 | `ActionManager` (manual `processTrigger`; auto-dispatch pending) | ⚡ Partial | [actions/actions.ts](src/actions/actions.ts) |
 | `ExecuteCodeAction` / `SetValueAction` / `IncrementValueAction`  | ✅ Full    | actions                                      |
 | `ValueCondition` / `PredicateCondition`                          | ✅ Full    | actions                                      |
 
 ## Misc utilities
 
-| BJS API                                    | Status  | Module                                       |
-| ------------------------------------------ | ------- | -------------------------------------------- |
+| BJS API                                    | Status | Module                                       |
+| ------------------------------------------ | ------ | -------------------------------------------- |
 | `Observable`                               | ✅ Full | [misc/observable.ts](src/misc/observable.ts) |
 | `Tools` (subset)                           | ✅ Full | [misc/tools.ts](src/misc/tools.ts)           |
 | `SmartArray` / `StringDictionary` / `Tags` | ✅ Full | [misc/misc-utils.ts](src/misc/misc-utils.ts) |
@@ -195,8 +195,8 @@ for reader context but are not part of the audited surface.
 
 ## Materials
 
-| BJS API                                                   | Status           | Module                                                                                            |
-| --------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| BJS API                                                   | Status          | Module                                                                                            |
+| --------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------- |
 | `StandardMaterial` (common subset)                        | ⚡ Partial       | [materials/materials.ts](src/materials/materials.ts)                                              |
 | `PBRMaterial` (common subset)                             | ⚡ Partial       | materials                                                                                         |
 | `Material` / `PushMaterial` (base chain)                  | ⚡ Partial       | materials                                                                                         |
@@ -212,8 +212,8 @@ for reader context but are not part of the audited surface.
 
 ## Textures
 
-| BJS API                                                                    | Status           | Module                                                                         |
-| -------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------ |
+| BJS API                                                                    | Status          | Module                                                                         |
+| -------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------ |
 | `Texture` (2D, URL)                                                        | ✅ Full          | [textures/textures.ts](src/textures/textures.ts) (async load awaited at build) |
 | `RawTexture`                                                               | ✅ Full          | textures (Lite pixel texture)                                                  |
 | `DynamicTexture` (canvas-backed)                                           | ✅ Full          | textures                                                                       |
@@ -224,8 +224,8 @@ for reader context but are not part of the audited surface.
 
 ## Loaders
 
-| BJS API                                                                   | Status           | Module                                                            |
-| ------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------- |
+| BJS API                                                                   | Status          | Module                                                            |
+| ------------------------------------------------------------------------- | --------------- | ----------------------------------------------------------------- |
 | `SceneLoader.ImportMeshAsync` / `AppendAsync` / `LoadAssetContainerAsync` | ⚡ Partial       | [loading/scene-loader.ts](src/loading/scene-loader.ts)            |
 | glTF 2.0 + extensions                                                     | ✅ Full          | via Lite `loadGltf`                                               |
 | `.babylon`                                                                | ✅ Full          | via Lite `loadBabylon`                                            |
@@ -235,8 +235,8 @@ for reader context but are not part of the audited surface.
 
 ## Animation
 
-| BJS API                                                     | Status     | Module                                                                                                                                                                                  |
-| ----------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BJS API                                                     | Status    | Module                                                                                                                                                                                  |
+| ----------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Easing functions (`SineEase`, `CubicEase`, `BounceEase`, …) | ✅ Full    | [animations/easing.ts](src/animations/easing.ts)                                                                                                                                        |
 | `Animation` (keyframe model + CPU `evaluate`)               | ✅ Full    | [animations/animation.ts](src/animations/animation.ts)                                                                                                                                  |
 | `Animatable` / `scene.beginDirectAnimation`                 | ⚡ Partial | animation (CPU per-frame evaluation; no weight blending)                                                                                                                                |
@@ -245,58 +245,58 @@ for reader context but are not part of the audited surface.
 
 ## Bones / Skeletons / Morph
 
-| BJS API                              | Status           | Notes                                                   |
-| ------------------------------------ | ---------------- | ------------------------------------------------------- |
+| BJS API                              | Status          | Notes                                                   |
+| ------------------------------------ | --------------- | ------------------------------------------------------- |
 | `Skeleton` / `Bone`                  | ❌ Not supported | throwing stub; produced by glTF loader, not constructed |
 | `MorphTarget` / `MorphTargetManager` | ❌ Not supported | throwing stub; use native `createMorphTargets`          |
 
 ## Sprites
 
-| BJS API                             | Status           | Notes                                                                                                                         |
-| ----------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| BJS API                             | Status          | Notes                                                                                                                         |
+| ----------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `SpriteManager` / `Sprite`          | ⚡ Partial       | [sprites/sprites.ts](src/sprites/sprites.ts) — world-space camera-facing billboards over Lite's `createFacingBillboardSystem` |
 | `SpriteMap` / `SpritePackedManager` | ❌ Not supported | throwing stub; tile-map / packed-atlas variants not wrapped                                                                   |
 
 ## Particles
 
-| BJS API                                                        | Status           | Notes                      |
-| -------------------------------------------------------------- | ---------------- | -------------------------- |
+| BJS API                                                        | Status          | Notes                      |
+| -------------------------------------------------------------- | --------------- | -------------------------- |
 | `ParticleSystem` / `GPUParticleSystem` / `SolidParticleSystem` | ❌ Not supported | throwing stub; not in Lite |
 | `ParticleHelper` / `ParticleSystemSet` / `PointsCloudSystem`   | ❌ Not supported | throwing stub              |
 
 ## Post-processes
 
-| BJS API                                                            | Status           | Notes                                                |
-| ------------------------------------------------------------------ | ---------------- | ---------------------------------------------------- |
+| BJS API                                                            | Status          | Notes                                                |
+| ------------------------------------------------------------------ | --------------- | ---------------------------------------------------- |
 | `PostProcess` (base) + `DefaultRenderingPipeline`                  | ❌ Not supported | throwing stub; use native frame-graph tasks          |
 | `Bloom` / `Blur` / `BlackAndWhite` / `ChromaticAberration` / `DoF` | ❌ Not supported | throwing stub; effects exist as native `create*Task` |
 | `FxaaPostProcess` / `SSAO2RenderingPipeline`                       | ❌ Not supported | throwing stub; not in Lite                           |
 
 ## Probes / Layers / Rendering
 
-| BJS API                                                            | Status           | Notes                                          |
-| ------------------------------------------------------------------ | ---------------- | ---------------------------------------------- |
+| BJS API                                                            | Status          | Notes                                          |
+| ------------------------------------------------------------------ | --------------- | ---------------------------------------------- |
 | `ReflectionProbe`                                                  | ❌ Not supported | throwing stub                                  |
 | `Layer` / `EffectLayer` / `HighlightLayer` / `GlowLayer`           | ❌ Not supported | throwing stub; not in Lite                     |
 | `DepthRenderer` / `GeometryBufferRenderer` / `BoundingBoxRenderer` | ❌ Not supported | throwing stub; use native geometry/depth tasks |
 
 ## Physics
 
-| BJS API                                                             | Status           | Notes                                        |
-| ------------------------------------------------------------------- | ---------------- | -------------------------------------------- |
+| BJS API                                                             | Status          | Notes                                        |
+| ------------------------------------------------------------------- | --------------- | -------------------------------------------- |
 | `HavokPlugin` / `PhysicsAggregate` / `PhysicsBody` / `PhysicsShape` | ❌ Not supported | throwing stub; use native Havok-V2 functions |
 | `CannonJSPlugin` / `AmmoJSPlugin`                                   | ❌ Not supported | throwing stub; Lite is Havok-V2 only         |
 
 ## Navigation
 
-| BJS API          | Status           | Notes                                              |
-| ---------------- | ---------------- | -------------------------------------------------- |
+| BJS API          | Status          | Notes                                              |
+| ---------------- | --------------- | -------------------------------------------------- |
 | `RecastJSPlugin` | ❌ Not supported | throwing stub; use native Recast-V2 navigation API |
 
 ## Audio
 
-| BJS API                                   | Status           | Notes                                 |
-| ----------------------------------------- | ---------------- | ------------------------------------- |
+| BJS API                                   | Status          | Notes                                 |
+| ----------------------------------------- | --------------- | ------------------------------------- |
 | `Sound` / `AudioEngine` / `WeightedSound` | ❌ Not supported | throwing stub; use Web Audio directly |
 
 ## Not yet wrapped (Lite supports — wrappers planned)
@@ -309,8 +309,8 @@ candidate rows for the next audit passes — until wrapped they either carry a
 
 ## Out of scope
 
-| BJS API                                        | Status                                     |
-| ---------------------------------------------- | ------------------------------------------ |
+| BJS API                                        | Status                                    |
+| ---------------------------------------------- | ----------------------------------------- |
 | `BABYLON.*` global namespace                   | ⛔ Out of scope (no `globalThis` mutation) |
 | `SceneLoader.RegisterPlugin` / `RegisterClass` | ⛔ Out of scope (side-effectful)           |
 | `Inspector` / `NodeMaterialEditor`             | ⛔ Out of scope                            |
@@ -381,7 +381,7 @@ wrapper over Lite's `loadSplat` / `loadSOG` / `loadSPZ` (incl. `updateData` with
 | GLSL `ShaderMaterial` / `EffectWrapper` (Lite is WGSL-only) | 74, 75, 76, 159, 160, 161, 162, 163                                                                   | BJS oracle authors shaders in GLSL (`Effect.ShadersStore`, `EffectWrapper.fragmentShader`, `ShaderMaterial`). Lite is WGSL-only with **no GLSL→WGSL translation** (the `ShaderMaterial` compat stub throws by design). Enabling these means rewriting each oracle to `ShaderLanguage.WGSL` so the compat `ShaderMaterial`/`EffectWrapper` can forward WGSL straight to Lite's `createShaderMaterial`/`createEffectWrapper`. Output stays pixel-identical, so committed goldens remain valid.                                                                                                                                                                                                                                                                                                                                                         |
 | GLSL depth `ShaderMaterial` + `RenderTargetTexture`         | 116                                                                                                   | Same WGSL-only blocker as above, **plus** needs a `RenderTargetTexture` + `createDepthStencilTexture` facade over Lite's frame-graph RTT before the depth-preview pass can run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Missing `VertexBuffer` export / custom geometry             | 56, 64, 86, 114, 170, 213                                                                             | Manual vertex-buffer authoring not wrapped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| glTF model framing (`result.meshes` + `getBoundingInfo`)    | 172, 173                                                                                              | 🔧 Recast nav scenes also gated on navigation mesh support                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| glTF model framing (`result.meshes` + `getBoundingInfo`)    | 172, 173                                                                                              | 🔧 Recast nav scenes also gated on navigation mesh support                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Floating-origin / large-world rendering (LWR)               | 201, 206                                                                                              | 201/206 add sprite/billboard + `VertexData` on top of LWR; the procedural LWR scenes (202–204, 207) now pass                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `.dds` environment / advanced reflection                    | 17, 21, 23, 176, 177, 178, 212                                                                        | `.dds` IBL works (scene 19 passes); these add sheen/anisotropy textures or skybox-reflection PBR that still diverge                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Heightmap ground (`CreateGroundFromHeightMap`)              | 4, 22                                                                                                 | Async heightmap mesh builder not wrapped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -394,7 +394,7 @@ wrapper over Lite's `loadSplat` / `loadSOG` / `loadSPZ` (incl. `updateData` with
 | `CascadedShadowGenerator` (true CSM)                        | 214, 215                                                                                              | Falls back to single-cascade directional; cascades diverge                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Misc single-API gaps                                        | 8, 12, 20, 25, 26, 27, 113, 140, 147, 148, 149, 153, 154, 165, 179, 211, 217, 221, 222, 223, 224, 225 | e.g. `HDRCubeTexture`, `engine.getCaps`, `NullEngine`, `MaterialPluginBase`, `GeospatialCamera`, gizmo internals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Loaded-camera surfacing / KTX2 textures                     | 24, 112                                                                                               | Investigated (14 was mislabeled here — it renders at parity and is now enabled). **24** throws `scene.activeCamera` is null: the `.babylon` loader's own camera is applied to the Lite scene but not surfaced as a compat `Camera` (needs a `Camera._fromLite` wrapper for loaded cameras + `attachControl` wiring). **112** throws `scene.materials is not iterable` (needs a `scene.materials` accessor) and underneath requires KTX2 / `KHR_texture_basisu` transcode — the same basis blocker as scene 36.                                                                                                                                                                                                                                                                                                                                       |
-| Sync `scene.pick`                                           | 113                                                                                                   | ❌ by design — use async `GPUPicker`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Sync `scene.pick`                                           | 113                                                                                                   | ❌ by design — use async `GPUPicker`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 Adding a missing export usually only advances a scene to its _next_ blocker
 rather than fixing it outright (e.g. several NME-PBR scenes resolve `NodeMaterial`
