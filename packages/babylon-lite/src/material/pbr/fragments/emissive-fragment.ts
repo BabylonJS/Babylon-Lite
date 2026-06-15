@@ -26,9 +26,7 @@ export function createEmissiveColorFragment(hasEmissiveTexture: boolean): Shader
         ],
 
         _fragmentSlots: {
-            AT: hasEmissiveTexture
-                ? `let emissive = material.emissiveColor * textureSample(emissiveTexture, emissiveSampler, input.uv).rgb;`
-                : `let emissive = material.emissiveColor;`,
+            AT: hasEmissiveTexture ? `emissive=material.emissiveColor*textureSample(emissiveTexture,emissiveSampler,input.uv).rgb;` : `emissive=material.emissiveColor;`,
         },
     };
 }

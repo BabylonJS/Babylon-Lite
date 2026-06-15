@@ -1,11 +1,11 @@
-// Scene 40: Physics V2 — Havok sphere drop (matches playground #Z8HTUN#1)
+// Babylon.js reference — Scene 44: Physics sleeping towers (playground #KJ0945#1)
 
 import HavokPhysics from "@babylonjs/havok";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import "@babylonjs/core/Materials/standardMaterial";
-import { Color4 } from "@babylonjs/core/Maths/math.color";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
@@ -15,6 +15,7 @@ import { PhysicsShapeType } from "@babylonjs/core/Physics/v2/IPhysicsEnginePlugi
 import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 
 const PHYSICS_FPS = 60;
+const DROP_AFTER_MS = 2_000;
 
 function readCaptureAfterFrames(): number | null {
     const params = new URLSearchParams(window.location.search);
@@ -31,6 +32,26 @@ function readCaptureAfterFrames(): number | null {
     return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * PHYSICS_FPS) : null;
 }
 
+function colorFor(index: number): Color3 {
+    const r = ((index * 73 + 41) & 255) / 255;
+    const g = ((index * 151 + 89) & 255) / 255;
+    const b = ((index * 211 + 157) & 255) / 255;
+    return new Color3(r, g, b);
+}
+
+function createBoxes(size: number, numBoxes: number, startAsleep: boolean, pos: Vector3, yOffset: number, scene: Scene, colorOffset: number): void {
+    for (let i = 0; i < numBoxes; i++) {
+        const box = MeshBuilder.CreateBox("box", { size }, scene);
+        const material = new StandardMaterial("boxMat", scene);
+        material.diffuseColor = colorFor(colorOffset + i);
+        material.specularColor = new Color3(0.08, 0.08, 0.08);
+        box.material = material;
+        box.position.copyFrom(pos);
+        box.position.y += i * (yOffset + size) + 0.5;
+        new PhysicsAggregate(box, PhysicsShapeType.BOX, { mass: 1, startAsleep }, scene);
+    }
+}
+
 (async function () {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -39,38 +60,34 @@ function readCaptureAfterFrames(): number | null {
     const captureAfterFrames = readCaptureAfterFrames();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
+    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1);
 
-    // Camera — FreeCamera at (0, 5, -10) looking at origin
-    const camera = new FreeCamera("camera1", new Vector3(0, 5, -10), scene);
-    camera.setTarget(Vector3.Zero());
+    const camera = new FreeCamera("camera1", new Vector3(0, 3, -15), scene);
+    camera.setTarget(new Vector3(0, 3, 0));
+    camera.attachControl(canvas, true);
 
-    // Hemispheric light
     const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
-    light.intensity = 0.7;
+    light.intensity = 0.9;
 
-    // Sphere — diameter 2, starts at y=4
-    const sphere = MeshBuilder.CreateSphere("sphere", { diameter: 2, segments: 32 }, scene);
-    sphere.position.y = 4;
-
-    // Ground — 10x10
     const ground = MeshBuilder.CreateGround("ground", { width: 10, height: 10 }, scene);
+    const groundMat = new StandardMaterial("groundMat", scene);
+    groundMat.diffuseColor = new Color3(0.5, 0.5, 0.5);
+    ground.material = groundMat;
 
-    // Havok physics
     const havokInstance = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-    // Fixed-step mode keeps the 2s parity capture deterministic across machines.
     const hk = new HavokPlugin(false, havokInstance);
-    hk.setTimeStep(1 / PHYSICS_FPS);
-    scene.enablePhysics(new Vector3(0, -9.8, 0), hk);
+    scene.enablePhysics(new Vector3(0, -1, 0), hk);
 
-    // Dynamic sphere body
-    new PhysicsAggregate(sphere, PhysicsShapeType.SPHERE, { mass: 1, restitution: 0.75 }, scene);
-
-    // Static ground body
     new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
-    // Render live. In parity capture mode, freeze after the requested number of
-    // 60 Hz physics frames so Playwright screenshots a stable 2s simulation frame.
+    createBoxes(1, 3, true, new Vector3(-2, 0, 0), 0.5, scene, 0);
+    createBoxes(1, 3, false, new Vector3(2, 0, 0), 0.5, scene, 10);
+
+    window.setTimeout(() => {
+        createBoxes(0.2, 1, false, new Vector3(-2, 5, 0), 0, scene, 20);
+        createBoxes(0.2, 1, false, new Vector3(2, 5, 0), 0, scene, 21);
+    }, DROP_AFTER_MS);
+
     const eng = engine as any;
     scene.onBeforeRenderObservable.add(() => {
         if (eng._drawCalls) {
@@ -102,4 +119,10 @@ function readCaptureAfterFrames(): number | null {
 
     await scene.whenReadyAsync();
     engine.runRenderLoop(() => scene.render());
-})().catch(console.error);
+})().catch((err) => {
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement | null;
+    if (canvas) {
+        canvas.dataset.error = err instanceof Error ? err.message : String(err);
+    }
+    console.error(err);
+});

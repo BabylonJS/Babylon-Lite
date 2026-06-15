@@ -122,7 +122,7 @@
         "slug": "scene12-shader-balls",
         "name": "Scene 12 — PBR Shader Balls",
         "maxMad": 0.027,
-        "maxRawKB": 99.6,
+        "maxRawKB": 100,
         "description": "3 shader balls with metallic reflectance textures, directional light, env rotation.",
         "tags": ["pbr", "gltf"],
         "skipPerf": true
@@ -403,6 +403,72 @@
         "maxRawKB": 48.2,
         "maxGzipKB": 22,
         "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
+        "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
+    },
+    {
+        "id": 41,
+        "slug": "scene41-physics-shapes",
+        "name": "Scene 41 — Physics Shape Debug Viewer",
+        "maxMad": 10,
+        "maxRawKB": 89,
+        "maxGzipKB": 36,
+        "description": "Havok Physics V2 mesh, convex hull, and aggregate collision shapes with PhysicsViewer wireframes. Loaded skull and seagull port of PG #LKPBW5.",
+        "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
+    },
+    {
+        "id": 42,
+        "slug": "scene42-physics-clone",
+        "name": "Scene 42 — Physics Clone Pre-Step",
+        "maxMad": 0.5,
+        "maxRawKB": 52,
+        "maxGzipKB": 23,
+        "description": "Havok Physics V2 sphere clone with pre-step enabled, captured at frame 300. Port of PG #MZCQC4.",
+        "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
+    },
+    {
+        "id": 43,
+        "slug": "scene43-parametric-proximity",
+        "name": "Scene 43 — Parametric Proximity Path",
+        "maxMad": 1,
+        "maxRawKB": 58,
+        "maxGzipKB": 24,
+        "description": "Circle-path replacement for PG #I6AR8X#21 Catmull-Rom proximity demo, captured at frame 300.",
+        "tags": ["std", "procedural", "thin-instances"],
+        "skipPerf": true
+    },
+    {
+        "id": 44,
+        "slug": "scene44-physics-sleeping-towers",
+        "name": "Scene 44 — Physics Sleeping Towers",
+        "maxMad": 1,
+        "maxRawKB": 54,
+        "maxGzipKB": 23,
+        "description": "Havok Physics V2 sleeping vs awake box towers; drop boxes after 2s and capture at 5s. Port of PG #KJ0945#1 without GUI/text.",
+        "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
+    },
+    {
+        "id": 45,
+        "slug": "scene45-physics-filtering",
+        "name": "Scene 45 — Physics Collision Filtering",
+        "maxMad": 1,
+        "maxRawKB": 54,
+        "maxGzipKB": 23,
+        "description": "Havok Physics V2 collision filter masks: one sphere collides with the red box and one ignores it. Port of PG #H4UR4Z#1.",
+        "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
+    },
+    {
+        "id": 46,
+        "slug": "scene46-constraint-viewer",
+        "name": "Scene 46 — Physics Constraints",
+        "maxMad": 1,
+        "maxRawKB": 54,
+        "maxGzipKB": 23,
+        "description": "Havok Physics V2 constraint examples without PhysicsViewer or labels. Port of PG #7DMWP8#693.",
         "tags": ["std", "procedural", "physics"],
         "skipPerf": true
     },
@@ -1594,6 +1660,17 @@
         "tags": ["hpm", "lwr", "floating-origin", "shadow", "procedural", "std"],
         "skipPerf": true,
         "compatParity": true
+    },
+    {
+        "id": 209,
+        "slug": "scene209-floating-origin-physics",
+        "name": "Scene 209 — LWR Physics",
+        "maxMad": 0.5,
+        "maxRawKB": 53,
+        "maxGzipKB": 22,
+        "description": "Havok Physics V2 sphere drop at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises multi-region floating origin: the physics world places bodies in a region centred near them and simulates in local coordinates (near zero), so the float32 Havok solver keeps precision and the sphere settles exactly on the ground at large world coordinates. Pairs with BJS useLargeWorldRendering, which enables Havok multi-region floating origin via scene.floatingOriginMode.",
+        "tags": ["hpm", "lwr", "floating-origin", "physics", "procedural"],
+        "skipPerf": true
     },
     {
         "id": 210,

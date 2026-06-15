@@ -22,6 +22,10 @@ export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0
 /** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers).
  *  Lights, cameras, and other non-mesh/non-TN children are shallow-cloned. */
 export function cloneTransformNode(src: SceneNode): SceneNode {
+    if ("_gpu" in src) {
+        return cloneMeshNode(src as unknown as Mesh);
+    }
+
     const clone = src._localMatrix
         ? createSceneNodeFromMatrix(src.name + "_clone", src._localMatrix)
         : createTransformNode(
@@ -38,32 +42,10 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
               src.scaling.z
           );
     for (const child of src.children) {
-        if (!("_gpu" in child) && !("lightType" in child)) {
+        if (!("lightType" in child)) {
             const childClone = cloneTransformNode(child);
             childClone.parent = clone;
             clone.children.push(childClone);
-        } else if ("_gpu" in child) {
-            const mesh = child as unknown as Mesh;
-            const meshClone = {
-                ...mesh,
-                name: mesh.name + "_clone",
-                _materialDirty: false,
-                _gpu: { ...mesh._gpu },
-            };
-            initMeshTransform(
-                meshClone,
-                mesh.position.x,
-                mesh.position.y,
-                mesh.position.z,
-                mesh.rotation.x,
-                mesh.rotation.y,
-                mesh.rotation.z,
-                mesh.scaling.x,
-                mesh.scaling.y,
-                mesh.scaling.z
-            );
-            meshClone.parent = clone;
-            clone.children.push(meshClone);
         } else {
             // Lights, cameras, other node types — shallow clone with fresh children array
             const childClone = { ...(child as Record<string, unknown>), name: (child as SceneNode).name + "_clone", children: [] } as unknown as SceneNode;
@@ -72,4 +54,32 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
         }
     }
     return clone;
+}
+
+function cloneMeshNode(mesh: Mesh): Mesh {
+    const meshClone = {
+        ...mesh,
+        name: mesh.name + "_clone",
+        children: [],
+        _materialDirty: false,
+        _gpu: { ...mesh._gpu },
+    } as unknown as Mesh;
+    initMeshTransform(
+        meshClone,
+        mesh.position.x,
+        mesh.position.y,
+        mesh.position.z,
+        mesh.rotation.x,
+        mesh.rotation.y,
+        mesh.rotation.z,
+        mesh.scaling.x,
+        mesh.scaling.y,
+        mesh.scaling.z
+    );
+    for (const child of mesh.children) {
+        const childClone = cloneTransformNode(child);
+        childClone.parent = meshClone;
+        meshClone.children.push(childClone);
+    }
+    return meshClone;
 }

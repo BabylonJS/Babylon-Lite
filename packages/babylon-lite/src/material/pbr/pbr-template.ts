@@ -358,13 +358,9 @@ let metallic=0.0;`
         : `let roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
 let metallic=orm.b*material.metallicFactor;`;
 
-    // Emissive default (overridden by emissive-color fragment's AT slot)
+    // Material-view / pass variants can skip extension slots while still compiling the colour path.
     const emissiveUV = _ext?.uvForEmissive ?? "input.uv";
-    const emissiveDefault = _hasEmissiveColor
-        ? ``
-        : _hasEmissiveTexture
-          ? `let emissive=textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`
-          : `let emissive=vec3<f32>(0.0);`;
+    const emissiveDefault = _hasEmissiveColor || !_hasEmissiveTexture ? `var emissive:vec3f;` : `let emissive=textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
     const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? `let occlusion=orm.r;` : `let occlusion=1.0;`;

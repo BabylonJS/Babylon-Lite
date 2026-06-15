@@ -59,6 +59,14 @@ describe("PBR template + fragments integration", () => {
         expect(result._materialUboSpec!._offsets.has("emissiveColor")).toBe(true);
     });
 
+    it("composes PBR emissive-color fallback when the emissive fragment is absent", () => {
+        const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent", _hasTonemap: true, _hasEmissiveColor: true });
+        const result = composeShader(template, []);
+        expect(result._fragmentWGSL).toContain("var emissive:vec3f;");
+        expect(result._fragmentWGSL).toContain("directDiffuse+directSpecular+emissive");
+        expect(result._materialUboSpec!._offsets.has("emissiveColor")).toBe(false);
+    });
+
     it("composes PBR + clearcoat", () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,

@@ -1,4 +1,4 @@
-// Scene 40: Physics V2 — Havok sphere drop (matches playground #Z8HTUN#1)
+// Scene 42: Physics clone pre-step — port of playground #MZCQC4
 
 import HavokPhysics from "@babylonjs/havok";
 import {
@@ -12,12 +12,15 @@ import {
     createSceneContext,
     createSphere,
     createStandardMaterial,
+    cloneTransformNode,
     onBeforeRender,
     PhysicsShapeType,
     registerScene,
+    setPhysicsBodyPreStep,
     startEngine,
     stopEngine,
 } from "babylon-lite";
+import type { Mesh } from "babylon-lite";
 
 const PHYSICS_FPS = 60;
 
@@ -44,29 +47,25 @@ async function main(): Promise<void> {
     scene.fixedDeltaMs = 1000 / PHYSICS_FPS;
     const captureAfterFrames = readCaptureAfterFrames();
 
-    // Camera — FreeCamera at (0, 5, -10) targeting origin
     scene.camera = createFreeCamera({ x: 0, y: 5, z: -10 }, { x: 0, y: 0, z: 0 });
 
-    // Hemispheric light — intensity 0.7
     const light = createHemisphericLight([0, 1, 0]);
     light.intensity = 0.7;
     addToScene(scene, light);
 
-    // Sphere — diameter 2, starts at y=4 (will drop via physics)
+    const material = createStandardMaterial();
+    material.diffuseColor = [1, 1, 1];
+    material.specularColor = [0.08, 0.08, 0.08];
+
     const sphere = createSphere(engine, { diameter: 2, segments: 32 });
-    sphere.material = createStandardMaterial();
-    sphere.position.set(0, 4, 0);
+    sphere.position.set(-2, 4, 0);
+    sphere.material = material;
     addToScene(scene, sphere);
 
-    // Ground — 10x10
     const ground = createGround(engine, { width: 10, height: 10 });
-    ground.material = createStandardMaterial();
+    ground.material = material;
     addToScene(scene, ground);
 
-    // Render live. Register before the physics world so Havok's unshifted
-    // before-render callback steps first, then this capture hook observes the
-    // freshly simulated transform for the frame about to be drawn. In parity
-    // capture mode, freeze after the requested number of 60 Hz physics frames.
     let simulationStarted = false;
     let simulatedFrames = 0;
     let captureQueued = false;
@@ -77,24 +76,32 @@ async function main(): Promise<void> {
         }
         if (captureAfterFrames !== null && !captureQueued && simulatedFrames >= captureAfterFrames) {
             captureQueued = true;
+            canvas.dataset.captureReady = "true";
             window.setTimeout(() => {
-                canvas.dataset.captureReady = "true";
                 stopEngine(engine);
             }, 0);
         }
     });
 
-    // Havok physics — gravity (0, -9.8, 0)
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-    const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
+    const world = createHavokWorld(scene, hknp, { x: 0, y: -1, z: 0 });
 
-    // Dynamic sphere: mass=1, restitution=0.75
     createPhysicsAggregate(world, sphere, PhysicsShapeType.SPHERE, {
         mass: 1,
-        restitution: 0.75,
+        radius: 1,
     });
 
-    // Static ground
+    const sphere2 = cloneTransformNode(sphere) as Mesh;
+    sphere2.name = "sphereClone";
+    sphere2.material = material;
+    addToScene(scene, sphere2);
+    const sphere2Aggregate = createPhysicsAggregate(world, sphere2, PhysicsShapeType.SPHERE, {
+        mass: 1,
+        radius: 1,
+    });
+    setPhysicsBodyPreStep(sphere2Aggregate.body, true);
+    sphere2.position.x = 2;
+
     createPhysicsAggregate(world, ground, PhysicsShapeType.BOX, {
         mass: 0,
     });

@@ -1,12 +1,13 @@
-// Scene 40: Physics V2 — Havok sphere drop (matches playground #Z8HTUN#1)
+// Babylon.js reference — Scene 42: Physics clone pre-step (playground #MZCQC4)
 
 import HavokPhysics from "@babylonjs/havok";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import "@babylonjs/core/Materials/standardMaterial";
-import { Color4 } from "@babylonjs/core/Maths/math.color";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
@@ -39,38 +40,37 @@ function readCaptureAfterFrames(): number | null {
     const captureAfterFrames = readCaptureAfterFrames();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
+    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1);
 
-    // Camera — FreeCamera at (0, 5, -10) looking at origin
     const camera = new FreeCamera("camera1", new Vector3(0, 5, -10), scene);
     camera.setTarget(Vector3.Zero());
 
-    // Hemispheric light
     const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
     light.intensity = 0.7;
 
-    // Sphere — diameter 2, starts at y=4
+    const material = new StandardMaterial("mat", scene);
+    material.diffuseColor = new Color3(1, 1, 1);
+    material.specularColor = new Color3(0.08, 0.08, 0.08);
+
     const sphere = MeshBuilder.CreateSphere("sphere", { diameter: 2, segments: 32 }, scene);
     sphere.position.y = 4;
+    sphere.position.x = -2;
+    sphere.material = material;
 
-    // Ground — 10x10
     const ground = MeshBuilder.CreateGround("ground", { width: 10, height: 10 }, scene);
+    ground.material = material;
 
-    // Havok physics
     const havokInstance = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-    // Fixed-step mode keeps the 2s parity capture deterministic across machines.
     const hk = new HavokPlugin(false, havokInstance);
-    hk.setTimeStep(1 / PHYSICS_FPS);
-    scene.enablePhysics(new Vector3(0, -9.8, 0), hk);
+    scene.enablePhysics(new Vector3(0, -1, 0), hk);
 
-    // Dynamic sphere body
-    new PhysicsAggregate(sphere, PhysicsShapeType.SPHERE, { mass: 1, restitution: 0.75 }, scene);
-
-    // Static ground body
+    new PhysicsAggregate(sphere, PhysicsShapeType.SPHERE, { mass: 1, radius: 1 }, scene);
     new PhysicsAggregate(ground, PhysicsShapeType.BOX, { mass: 0 }, scene);
 
-    // Render live. In parity capture mode, freeze after the requested number of
-    // 60 Hz physics frames so Playwright screenshots a stable 2s simulation frame.
+    const sphere2 = sphere.clone("sphereClone") as Mesh;
+    sphere2.physicsBody!.disablePreStep = false;
+    sphere2.position.x = 2;
+
     const eng = engine as any;
     scene.onBeforeRenderObservable.add(() => {
         if (eng._drawCalls) {

@@ -177,6 +177,8 @@ export { createStandardNoColorMaterialView } from "./material/standard/no-color-
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { createShaderMaterial, setShaderUniform, setShaderTexture, setShaderFloat, setShaderVector3, setShaderMatrix } from "./material/shader/shader-material.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
+export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
+export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
 export { createGridMaterial } from "./material/grid/grid-material.js";
 export type { GridMaterialOptions, GridVec3 } from "./material/grid/grid-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
@@ -522,9 +524,11 @@ export {
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
     createHavokWorld,
+    enableHavokFloatingOrigin,
     createPhysicsBody,
     createPhysicsShape,
     createPhysicsAggregate,
+    createPhysicsConstraint,
     setPhysicsGravity,
     getPhysicsGravity,
     setPhysicsTimestep,
@@ -532,18 +536,51 @@ export {
     setPhysicsVelocityLimits,
     getPhysicsVelocityLimits,
     setPhysicsBodyShape,
+    setPhysicsBodyPreStep,
+    applyPhysicsBodyImpulse,
+    applyPhysicsBodyForce,
+    addPhysicsShapeChild,
+    addPhysicsShapeChildFromParent,
+    setPhysicsShapeFilterMembershipMask,
+    setPhysicsShapeFilterCollideMask,
     setPhysicsShapeMaterial,
     setPhysicsBodyMass,
+    setPhysicsBodyMassProperties,
+    applyPhysicsImpulse,
+    setPhysicsBodyLinearVelocity,
+    getPhysicsBodyLinearVelocity,
+    setPhysicsBodyAngularVelocity,
+    setPhysicsBodyMotionType,
+    setPhysicsBodyTransform,
+    removePhysicsBody,
+    releasePhysicsShape,
     disposePhysics,
     PhysicsShapeType,
     PhysicsMotionType,
+    PhysicsConstraintType,
+    PhysicsConstraintAxis,
 } from "./physics/havok.js";
-export type { PhysicsWorld, PhysicsBody, PhysicsShape, PhysicsAggregate, PhysicsShapeOptions, PhysicsShapeParameters, PhysicsAggregateOptions } from "./physics/havok.js";
+export type {
+    PhysicsWorld,
+    PhysicsBody,
+    PhysicsShape,
+    PhysicsAggregate,
+    PhysicsConstraint,
+    PhysicsShapeOptions,
+    PhysicsShapeParameters,
+    PhysicsAggregateOptions,
+    PhysicsMassProperties,
+    PhysicsConstraintOptions,
+    PhysicsConstraintLimit,
+} from "./physics/havok.js";
+export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
+export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {
     createNavigationPluginAsync,
     createNavMesh,
+    createNavMeshFromSources,
     createDebugNavMeshGeometry,
     getClosestPoint,
     computePath,
@@ -563,4 +600,4 @@ export {
     removeObstacle,
     updateNavMeshObstacles,
 } from "./navigation/navigation.js";
-export type { NavigationPlugin, NavCrowd, NavMeshParameters, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";
+export type { NavigationPlugin, NavCrowd, NavMeshParameters, NavMeshSource, AgentParameters, OffMeshConnection, ObstacleHandle } from "./navigation/navigation.js";
