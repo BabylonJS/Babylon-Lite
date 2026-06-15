@@ -2,7 +2,18 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, setEngineSize, disposeEngine, VERSION } from "./engine/engine.js";
+export {
+    createEngine,
+    startEngine,
+    stopEngine,
+    renderFrame,
+    resizeEngine,
+    setEngineSize,
+    disposeEngine,
+    setGpuTimingEnabled,
+    isGpuTimingSupported,
+    VERSION,
+} from "./engine/engine.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
