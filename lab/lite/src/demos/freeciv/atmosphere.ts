@@ -43,6 +43,11 @@ export interface AtmosphereView {
     x: number;
     y: number;
     zoom: number;
+    /** Render-target size in device pixels (the cloud/shadow quads fill it). Defaults to the canvas. */
+    w?: number;
+    h?: number;
+    /** Continuous display zoom for the altitude fade (`zoom` is the seam-safe rung). */
+    dz?: number;
 }
 
 export interface Atmosphere {
@@ -186,11 +191,13 @@ export function createAtmosphere(engine: EngineContext, sr: SpriteRenderer): Atm
 
     return {
         update(view: AtmosphereView, daylight: number): void {
-            const w = engine.canvas.width || 1;
-            const h = engine.canvas.height || 1;
-            // Clouds live at "altitude": visible only on the zoomed-out rungs, fading
-            // out as you zoom in past 1 so the camera drops below them.
-            const vis = Math.max(0, Math.min(1, (CLOUD_FADE_HI - view.zoom) / (CLOUD_FADE_HI - CLOUD_FADE_LO)));
+            const w = view.w ?? (engine.canvas.width || 1);
+            const h = view.h ?? (engine.canvas.height || 1);
+            // Clouds live at "altitude": visible only zoomed out, fading out as you zoom in
+            // past 1. Use the CONTINUOUS display zoom (`dz`) for the fade — `view.zoom` is the
+            // rung the world rasterises at, which would make clouds vanish abruptly at a rung.
+            const dz = view.dz ?? view.zoom;
+            const vis = Math.max(0, Math.min(1, (CLOUD_FADE_HI - dz) / (CLOUD_FADE_HI - CLOUD_FADE_LO)));
             // World rectangle on screen: a world point W draws at (W − view) · zoom, so
             // screen-left (uv 0) is world `view.x` and the span is `canvas / zoom`.
             const originX = view.x * CLOUD_SCALE;

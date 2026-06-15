@@ -40,6 +40,9 @@ export interface DayNightView {
     x: number;
     y: number;
     zoom: number;
+    /** Render-target size in device pixels (the grade quad fills it). Defaults to the canvas. */
+    w?: number;
+    h?: number;
 }
 
 export interface DayNight {
@@ -175,9 +178,11 @@ export function createDayNight(engine: EngineContext, sr: SpriteRenderer, world:
             const og = 0.06;
             const ob = 0.18;
             const alpha = level * 0.62; // 0 at full day → 0.62 at midnight, linear in time
+            const gw = view.w ?? (engine.canvas.width || 1);
+            const gh = view.h ?? (engine.canvas.height || 1);
             updateSprite2DIndex(gradeLayer, gradeIndex, {
-                positionPx: [(engine.canvas.width || 1) / 2, (engine.canvas.height || 1) / 2],
-                sizePx: [engine.canvas.width || 1, engine.canvas.height || 1],
+                positionPx: [gw / 2, gh / 2],
+                sizePx: [gw, gh],
                 color: [or, og, ob, alpha],
             });
 
