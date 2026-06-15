@@ -9,10 +9,18 @@
 #   2. An issue labeled `compat`.
 #
 # Required secret:
-#   COPILOT_GITHUB_TOKEN — a GitHub PAT from an account with an active GitHub Copilot
-#   subscription. The agent authenticates Copilot with this token, so inference bills
-#   to that account's Copilot allowance (the BabylonJS org has no org Copilot plan and
-#   does not ladder up to a Microsoft enterprise).
+#   COPILOT_GITHUB_TOKEN — a *fine-grained* GitHub PAT (github_pat_...) from an account
+#   with an active GitHub Copilot subscription. Classic PATs (ghp_...) are NOT supported
+#   by the Copilot engine. The agent authenticates Copilot with this token, so inference
+#   bills to that account's Copilot allowance (the BabylonJS org has no org Copilot plan
+#   and does not ladder up to a Microsoft enterprise).
+#
+#   Create the PAT at https://github.com/settings/personal-access-tokens/new with:
+#     - Resource owner: your personal account
+#     - Repository access: Public repositories (read-only)
+#     - Account permissions → Copilot Requests: Read-only
+#   (No repository permissions are needed — this token is only the Copilot credential;
+#   the workflow's repo actions use the Actions GITHUB_TOKEN.)
 #
 #   NOTE: currently configured for testing in the private fork `ryantrem/Babylon-Lite`.
 #   Set the secret (you have admin on your own fork):
