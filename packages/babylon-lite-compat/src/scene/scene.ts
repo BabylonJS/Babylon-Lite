@@ -35,13 +35,13 @@ import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
 import { ArcRotateCamera } from "../cameras/cameras.js";
-import type { TransformNode } from "../meshes/meshes.js";
 import { StandardMaterial } from "../materials/materials.js";
 import { Animatable } from "../animations/animation.js";
 import type { Animation } from "../animations/animation.js";
 import { AnimationGroup } from "../animations/animation.js";
 import type { CubeTexture } from "../textures/textures.js";
 import type { WebGPUEngine } from "../engine/engine.js";
+import { AbstractScene } from "./abstract-scene.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground/BRDF assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -68,7 +68,7 @@ interface DefaultEnvironmentOptions {
     applyImageProcessing?: boolean;
 }
 
-export class Scene {
+export class Scene extends AbstractScene {
     /** @internal Underlying Babylon Lite scene context. */
     public readonly _lite: SceneContext;
 
@@ -106,21 +106,9 @@ export class Scene {
         });
     }
 
-    /**
-     * Babylon.js `scene.meshes`. Babylon Lite does not expose a public scene-mesh
-     * registry, so this tracks the meshes the compat layer creates against a scene
-     * which need lookup (currently Gaussian-Splatting meshes surfaced through the
-     * loader). Other primitives register with the Lite scene directly.
-     */
-    public get meshes(): TransformNode[] {
-        return this._trackedMeshes;
-    }
-
-    /** @internal Track a compat mesh so it appears in `scene.meshes`. */
-    public _registerMesh(mesh: TransformNode): void {
-        if (!this._trackedMeshes.includes(mesh)) {
-            this._trackedMeshes.push(mesh);
-        }
+    /** Babylon.js `scene.getAnimationGroupByName(name)` — first loaded animation group with a matching name, else `null`. */
+    public getAnimationGroupByName(name: string): AnimationGroup | null {
+        return this.animationGroups.find((g) => g.name === name) ?? null;
     }
 
     public get animatables(): Animatable[] {
@@ -156,12 +144,18 @@ export class Scene {
     private readonly _structuralGroups: AnimationGroup[] = [];
     /** @internal Lite manager that weight/additive-blends loaded glTF groups (lazily created). */
     private _blendManager: AnimationManager | null = null;
-    /** @internal Compat meshes surfaced through `scene.meshes` (e.g. Gaussian-Splatting). */
-    private readonly _trackedMeshes: TransformNode[] = [];
+    private _ambientColor = new Color3(0, 0, 0);
+    private _environmentIntensity = 1;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
     private readonly _nodeMaterials: Array<{ _parse(engine: import("babylon-lite").EngineContext, shadowGenerators: readonly unknown[]): Promise<void> }> = [];
 
+    /** @internal Process-unique scene-id source (Babylon.js `scene.uniqueId` / `getUniqueId()`). */
+    private static _uidCounter = 0;
+    /** Babylon.js `scene.uniqueId` — a process-unique numeric id. */
+    public readonly uniqueId = ++Scene._uidCounter;
+
     public constructor(engine: WebGPUEngine) {
+        super();
         this._engine = engine;
         this._lite = createSceneContext(engine._lite);
         // Babylon Lite exposes a before-render hook but no after-render hook. We
@@ -198,6 +192,16 @@ export class Scene {
 
     public getEngine(): WebGPUEngine {
         return this._engine;
+    }
+
+    /** Babylon.js `scene.getClassName()`. */
+    public getClassName(): string {
+        return "Scene";
+    }
+
+    /** Babylon.js `scene.getUniqueId()` — the process-unique scene id. */
+    public getUniqueId(): number {
+        return this.uniqueId;
     }
 
     /**
@@ -351,6 +355,58 @@ export class Scene {
 
     /** Babylon.js `scene.performancePriority` — accepted for parity; Babylon Lite tunes its own pipeline. */
     public performancePriority = 0;
+
+    /**
+     * Babylon.js `scene.ambientColor` — the scene-wide ambient term multiplied into
+     * each material's ambient contribution. Babylon Lite bakes ambient at the
+     * material level (the `.babylon` loader folds `scene.ambientColor` into each
+     * material), so this is stored for parity; the BJS default `(0,0,0)` is a no-op.
+     */
+    public get ambientColor(): Color3 {
+        return this._ambientColor;
+    }
+    public set ambientColor(value: Color3) {
+        this._ambientColor = value;
+    }
+
+    /**
+     * Babylon.js `scene.environmentIntensity` — a global multiplier on IBL
+     * contribution. Babylon Lite applies environment intensity per PBR material;
+     * this is stored for parity (the BJS default `1` is a no-op).
+     */
+    public get environmentIntensity(): number {
+        return this._environmentIntensity;
+    }
+    public set environmentIntensity(value: number) {
+        this._environmentIntensity = value;
+    }
+
+    /**
+     * Babylon.js `scene.useRightHandedSystem`. Babylon Lite's coordinate system is
+     * fixed; this is stored for parity (the BJS WebGPU default is left-handed —
+     * `false` — so the common case is a no-op).
+     */
+    public useRightHandedSystem = false;
+
+    /** Babylon.js `scene.registerBeforeRender(cb)` — convenience over `onBeforeRenderObservable`. */
+    public registerBeforeRender(callback: () => void): void {
+        this.onBeforeRenderObservable.add(callback);
+    }
+
+    /** Babylon.js `scene.unregisterBeforeRender(cb)`. */
+    public unregisterBeforeRender(callback: () => void): void {
+        this.onBeforeRenderObservable.removeCallback(callback);
+    }
+
+    /** Babylon.js `scene.registerAfterRender(cb)` — convenience over `onAfterRenderObservable`. */
+    public registerAfterRender(callback: () => void): void {
+        this.onAfterRenderObservable.add(callback);
+    }
+
+    /** Babylon.js `scene.unregisterAfterRender(cb)`. */
+    public unregisterAfterRender(callback: () => void): void {
+        this.onAfterRenderObservable.removeCallback(callback);
+    }
 
     /** Babylon.js `scene.attachControl` — camera input is attached per-camera in the compat layer; no-op. */
     public attachControl(_attachUp?: boolean, _attachDown?: boolean, _attachMove?: boolean): void {
@@ -585,11 +641,6 @@ export class Scene {
     /** Synchronous ray picking — unsupported. */
     public pickWithRay(): never {
         return unsupported("Scene.pickWithRay", "Synchronous CPU ray-mesh intersection is not implemented in Babylon Lite.");
-    }
-
-    /** Lookup by name — needs a public Lite scene accessor that does not yet exist. */
-    public getMeshByName(): never {
-        return unsupported("Scene.getMeshByName", "Babylon Lite does not expose a public scene-mesh registry yet. Track meshes you create yourself.");
     }
 
     /**

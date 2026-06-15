@@ -78,6 +78,8 @@ export abstract class Node {
 
     public dispose(): void {
         this._disposed = true;
+        // Drop this node from its scene's camera / light / mesh registries.
+        this._scene?._unregisterNode(this);
     }
 
     /** @internal Hook for subclasses to wire the parent link into the Lite scene graph. */

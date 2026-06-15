@@ -36,6 +36,7 @@ export abstract class Light extends Node {
 
     protected constructor(name: string, scene?: Scene) {
         super(name, scene);
+        scene?._registerLight(this);
     }
 
     public override getClassName(): string {

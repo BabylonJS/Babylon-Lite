@@ -31,10 +31,11 @@ export { Angle, Curve3, Path3D } from "./math/curve.js";
 export { BoundingBox, BoundingSphere, BoundingInfo } from "./culling/bounding.js";
 
 // ─── Engine ──────────────────────────────────────────────────────────
-export { WebGPUEngine, Engine } from "./engine/engine.js";
+export { AbstractEngine, ThinEngine, WebGPUEngine, Engine } from "./engine/engine.js";
 
 // ─── Scene graph ─────────────────────────────────────────────────────
 export { Node } from "./node/node.js";
+export { AbstractScene } from "./scene/abstract-scene.js";
 export { Scene } from "./scene/scene.js";
 
 // ─── Cameras ─────────────────────────────────────────────────────────

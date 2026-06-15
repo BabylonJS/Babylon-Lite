@@ -49,6 +49,7 @@ export abstract class Material {
     protected constructor(name: string, scene?: Scene) {
         this.name = name;
         this._scene = scene;
+        scene?._registerMaterial(this);
     }
 
     public getClassName(): string {
@@ -70,7 +71,9 @@ export abstract class Material {
 
     public dispose(): void {
         // No GPU resources are owned by the props object directly; textures are
-        // disposed through their own handles.
+        // disposed through their own handles. Drop the material from its scene's
+        // `scene.materials` registry.
+        this._scene?._unregisterMaterial(this);
     }
 }
 

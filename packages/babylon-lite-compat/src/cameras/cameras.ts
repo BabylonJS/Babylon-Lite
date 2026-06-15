@@ -34,6 +34,7 @@ export abstract class Camera extends Node {
 
     protected constructor(name: string, scene?: Scene) {
         super(name, scene);
+        scene?._registerCamera(this);
     }
 
     public override getClassName(): string {

@@ -1,5 +1,13 @@
 /**
- * Babylon.js-compatible engine wrappers (`WebGPUEngine`, `Engine`).
+ * Babylon.js-compatible engine wrappers.
+ *
+ * The class hierarchy mirrors Babylon.js exactly: `AbstractEngine` is the base,
+ * `ThinEngine extends AbstractEngine`, `Engine extends ThinEngine`, and
+ * `WebGPUEngine extends AbstractEngine` (so `Engine` and `WebGPUEngine` are
+ * siblings, as in Babylon.js). All shared behaviour lives on `AbstractEngine`;
+ * because Babylon Lite is WebGPU-only, every concrete engine is backed by the
+ * same Lite WebGPU context, so `new Engine(...)` and `new WebGPUEngine(...)`
+ * behave identically.
  *
  * Babylon.js exposes a synchronous constructor plus an async `initAsync()` for
  * WebGPU. Babylon Lite acquires the GPU device in an async `createEngine()`.
@@ -16,9 +24,10 @@ import { createEngine, startEngine, stopEngine, resizeEngine, setEngineSize, dis
 import type { EngineContext, EngineOptions, RenderCanvas } from "babylon-lite";
 
 import { LiteCompatError, unsupported } from "../error.js";
+import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
-export class WebGPUEngine {
+export abstract class AbstractEngine {
     /** @internal The underlying Lite engine context. Populated by `initAsync()`. */
     public _lite!: EngineContext;
 
@@ -36,6 +45,12 @@ export class WebGPUEngine {
      * configuration internally, so this is a settable no-op kept for API shape.
      */
     public useReverseDepthBuffer = false;
+
+    /** Babylon.js `engine.onResizeObservable` — fires after `resize()` / `setSize()`. */
+    public readonly onResizeObservable = new Observable<AbstractEngine>();
+
+    /** @internal Babylon.js hardware-scaling level. Babylon Lite manages device-pixel-ratio itself; stored for parity. */
+    private _hardwareScalingLevel = 1;
 
     /** @internal Latest per-frame delta in ms, updated by each scene's before-render hook. */
     public _lastDeltaMs = 16;
@@ -102,6 +117,65 @@ export class WebGPUEngine {
      */
     public get isNDCHalfZRange(): boolean {
         return true;
+    }
+
+    /** Babylon.js `engine.isWebGPU` — Babylon Lite is WebGPU-only, so always `true`. */
+    public get isWebGPU(): boolean {
+        return true;
+    }
+
+    /** Babylon.js `engine.scenes` — every scene created against this engine. */
+    public get scenes(): Scene[] {
+        return this._scenes;
+    }
+
+    /** Babylon.js `engine.getRenderWidth()` — backing render-target width in pixels. */
+    public getRenderWidth(): number {
+        return (this._canvas as { width?: number }).width ?? 0;
+    }
+
+    /** Babylon.js `engine.getRenderHeight()` — backing render-target height in pixels. */
+    public getRenderHeight(): number {
+        return (this._canvas as { height?: number }).height ?? 0;
+    }
+
+    /** Babylon.js `engine.getScreenAspectRatio()` — render-target width / height. */
+    public getScreenAspectRatio(): number {
+        const h = this.getRenderHeight();
+        return h !== 0 ? this.getRenderWidth() / h : 1;
+    }
+
+    /**
+     * Babylon.js `engine.getAspectRatio(camera?, useScreen?)`. Babylon Lite renders
+     * each scene through a single full-canvas viewport, so the camera viewport does
+     * not subdivide the surface — this is the screen aspect ratio.
+     */
+    public getAspectRatio(_camera?: unknown, _useScreen?: boolean): number {
+        return this.getScreenAspectRatio();
+    }
+
+    /** Babylon.js `engine.getFps()` — frames-per-second estimate from the last frame delta. */
+    public getFps(): number {
+        return this._lastDeltaMs > 0 ? 1000 / this._lastDeltaMs : 60;
+    }
+
+    /**
+     * Babylon.js `engine.getHardwareScalingLevel()`. Babylon Lite manages its own
+     * device-pixel-ratio scaling, so this returns the stored parity value.
+     */
+    public getHardwareScalingLevel(): number {
+        return this._hardwareScalingLevel;
+    }
+
+    /** Babylon.js `engine.setHardwareScalingLevel(level)` — stored for parity (Lite self-manages DPR). */
+    public setHardwareScalingLevel(level: number): void {
+        this._hardwareScalingLevel = level;
+    }
+
+    /** Babylon.js `engine.getRenderingCanvasClientRect()` — the canvas client rect, or `null` for offscreen canvases. */
+    public getRenderingCanvasClientRect(): { x: number; y: number; width: number; height: number } | null {
+        const c = this._canvas as { getBoundingClientRect?: () => { x: number; y: number; width: number; height: number } };
+        return typeof c.getBoundingClientRect === "function" ? c.getBoundingClientRect() : null;
     }
 
     /**
@@ -174,11 +248,13 @@ export class WebGPUEngine {
     public resize(): void {
         this._ensureInitialized("resize");
         resizeEngine(this._lite);
+        this.onResizeObservable.notifyObservers(this);
     }
 
     public setSize(width: number, height: number): void {
         this._ensureInitialized("setSize");
         setEngineSize(this._lite, width, height);
+        this.onResizeObservable.notifyObservers(this);
     }
 
     public dispose(): void {
@@ -239,14 +315,31 @@ export class WebGPUEngine {
 
     private _ensureInitialized(api: string): void {
         if (!this._initialized) {
-            throw new LiteCompatError(`WebGPUEngine.${api}`, "Call `await engine.initAsync()` before using the engine.");
+            throw new LiteCompatError(`${this.constructor.name}.${api}`, "Call `await engine.initAsync()` before using the engine.");
         }
     }
 }
 
 /**
- * `Engine` is Babylon.js's WebGL/WebGPU engine. Babylon Lite is WebGPU-only, so
- * this is an alias for {@link WebGPUEngine} that fails loudly if WebGPU is
- * unavailable (surfaced through `initAsync`).
+ * Babylon.js's headless/abstract WebGL engine layer. In Babylon.js
+ * `ThinEngine extends AbstractEngine` and is the lightweight (no scene-graph)
+ * engine; the compat layer carries no extra behaviour over {@link AbstractEngine}
+ * (everything is WebGPU-backed), so this exists purely to reproduce the class
+ * name and inheritance chain.
  */
-export class Engine extends WebGPUEngine {}
+export class ThinEngine extends AbstractEngine {}
+
+/**
+ * Babylon.js's full WebGL engine. In Babylon.js `Engine extends ThinEngine`
+ * (sibling to {@link WebGPUEngine}, both rooted at {@link AbstractEngine}).
+ * Babylon Lite is WebGPU-only, so a compat `Engine` is still backed by the same
+ * Lite WebGPU context; this class exists to mirror Babylon.js's name + hierarchy.
+ */
+export class Engine extends ThinEngine {}
+
+/**
+ * Babylon.js's WebGPU engine. In Babylon.js `WebGPUEngine extends AbstractEngine`
+ * (sibling to {@link Engine}). This is the natural engine for the compat layer
+ * since Babylon Lite is WebGPU-only.
+ */
+export class WebGPUEngine extends AbstractEngine {}
