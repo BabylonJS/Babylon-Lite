@@ -2,7 +2,18 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, setEngineSize, disposeEngine, VERSION } from "./engine/engine.js";
+export {
+    createEngine,
+    startEngine,
+    stopEngine,
+    renderFrame,
+    resizeEngine,
+    setEngineSize,
+    disposeEngine,
+    setGpuTimingEnabled,
+    isGpuTimingSupported,
+    VERSION,
+} from "./engine/engine.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
@@ -170,6 +181,7 @@ export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTextu
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
+export { setKtx2DecoderUrl } from "./texture/ktx2-loader.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";

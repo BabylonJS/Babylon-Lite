@@ -3,6 +3,7 @@ import type { Texture2D, Texture2DOptions } from "../texture/texture-2d.js";
 import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
 import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
+import type { GpuFrameTimer } from "./gpu-timer.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -47,6 +48,31 @@ export interface EngineContext extends SurfaceContext {
 
     /** Number of GPU draw calls in the last rendered frame, summed across all surfaces. */
     drawCallCount: number;
+
+    /** GPU time spent on the last measured frame, in milliseconds — 0 until the first measured frame and
+     *  while GPU timing is disabled (the default). Enable with {@link setGpuTimingEnabled}; query device
+     *  capability with {@link isGpuTimingSupported}. Updates a frame or two behind, since the timestamp
+     *  readback is async and off the render critical path, so reading it does not perturb the value. */
+    gpuFrameTimeMs: number;
+    /** @internal GPU frame timer, lazily created the first time GPU timing is enabled (null when the
+     *  device is unsupported, undefined until the first {@link setGpuTimingEnabled} call dynamic-imports
+     *  the timer module). */
+    _gpuTimer?: GpuFrameTimer | null;
+    /** @internal Per-frame timing hooks, defined exactly while GPU timing is enabled. {@link setGpuTimingEnabled}
+     *  installs them (closing over the timer, from the dynamic-imported timer module) on enable and clears
+     *  them on disable. {@link renderFrame} only optional-chains them, so none of the timer code is statically
+     *  reachable from the always-bundled engine — scenes that never enable timing ship zero bytes of it
+     *  (mirrors the screenshot `_captureService` hook). The timestamps are written *into the frame's command
+     *  encoder* (begin first, end last) so the GPU executes them contiguously around just that frame's work;
+     *  `_gpuTimerResolve` runs after the frame's submit to read the pair back asynchronously. */
+    _gpuTimerBegin?: (encoder: GPUCommandEncoder) => void;
+    /** @internal See `_gpuTimerBegin`. */
+    _gpuTimerEnd?: (encoder: GPUCommandEncoder) => void;
+    /** @internal See `_gpuTimerBegin`. Resolves the timestamp pair (async readback) and publishes `gpuFrameTimeMs`. */
+    _gpuTimerResolve?: () => void;
+    /** @internal Latest desired on/off state requested via {@link setGpuTimingEnabled}, used to apply the
+     *  correct state if timing is toggled while the timer module is still being dynamic-imported. */
+    _gpuTimerWanted?: boolean;
 
     /**
      * When true, world matrices are computed using Float64 intermediate precision
@@ -250,7 +276,10 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     if (adapter.features.has("float32-filterable")) {
         features.push("float32-filterable");
     }
-    for (const f of ["texture-compression-astc", "texture-compression-bc", "texture-compression-etc2"] as GPUFeatureName[]) {
+    // `timestamp-query` is requested opportunistically (like the compression features above) so a later
+    // `setGpuTimingEnabled` can measure GPU frame time. Requesting an available feature is free; the timer
+    // itself ships only when `setGpuTimingEnabled` is called. Devices without it just can't enable timing.
+    for (const f of ["texture-compression-astc", "texture-compression-bc", "texture-compression-etc2", "timestamp-query"] as GPUFeatureName[]) {
         if (adapter.features.has(f)) {
             features.push(f);
         }
@@ -322,6 +351,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
             _surfaces: surfaces,
             _device: device,
             drawCallCount: 0,
+            gpuFrameTimeMs: 0,
             useHighPrecisionMatrix: useHpm,
             useFloatingOrigin: useFO,
             _animFrameId: 0,
@@ -439,6 +469,13 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
 
+    // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
+    // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
+    // a dynamic-imported module), so a frame that never enabled timing pays only this short-circuit and
+    // ships none of the timer code. The begin/end pair is written *into* the encoder so the GPU executes
+    // them contiguously around this frame's passes — measuring only the frame's own GPU work.
+    engine._gpuTimerBegin?.(encoder);
+
     let drawCalls = 0;
     for (let i = 0; i < surfaces.length; i++) {
         const surface = surfaces[i]!;
@@ -467,7 +504,66 @@ export function renderFrame(engine: EngineContext, delta: number): void {
         const surface = surfaces[i]!;
         surface._captureService?.(surface, finalEncoder);
     }
+    // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the
+    // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
+    engine._gpuTimerEnd?.(finalEncoder);
     engine._cbs[0] = finalEncoder.finish();
     engine._device.queue.submit(engine._cbs);
     engine.drawCallCount = drawCalls;
+    // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
+    // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
+    engine._gpuTimerResolve?.();
+}
+
+/** Whether GPU frame-time measurement is available on this engine's device — i.e. the adapter offered
+ *  the WebGPU `timestamp-query` feature (requested opportunistically by {@link createEngine}). When false,
+ *  {@link setGpuTimingEnabled} is a no-op and {@link EngineContext.gpuFrameTimeMs} stays 0. */
+export function isGpuTimingSupported(engine: EngineContext): boolean {
+    return engine._device.features.has("timestamp-query");
+}
+
+/** Enable or disable per-frame GPU timing. Disabled by default and a no-op on devices where
+ *  {@link isGpuTimingSupported} is false. While on, {@link EngineContext.gpuFrameTimeMs} is updated each
+ *  frame with the measured GPU time — the time the GPU spends on that frame's work, not CPU/wall-clock
+ *  time — a frame or two behind via an async, non-blocking readback.
+ *
+ *  Implementation: the timer module is dynamic-imported on the first enable, so engines that never call
+ *  this ship none of it. Once loaded, three tiny per-frame hooks are installed on the engine; while timing
+ *  is off they are undefined and {@link renderFrame} only optional-chains them (a no-op short-circuit), so
+ *  scenes that never enable timing pay effectively nothing. The opening/closing timestamps are written into
+ *  the frame's command encoder so the GPU runs them contiguously around just that frame's passes. The first
+ *  enable takes effect a microtask later (the GPU resources are created lazily, then reused); subsequent
+ *  toggles are synchronous. */
+export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void {
+    if (!enabled) {
+        // Clear the hooks (renderFrame's optional-chains go back to no-ops) but keep `_gpuTimer` so its
+        // GPU resources are reused if timing is re-enabled later.
+        engine._gpuTimerWanted = false;
+        engine.gpuFrameTimeMs = 0;
+        engine._gpuTimerBegin = undefined;
+        engine._gpuTimerEnd = undefined;
+        engine._gpuTimerResolve = undefined;
+        return;
+    }
+    if (!isGpuTimingSupported(engine)) {
+        return;
+    }
+    engine._gpuTimerWanted = true;
+    // Dynamic import (module-cached after the first load — re-enabling triggers no extra fetch). The timer
+    // is created once and reused; its free functions are wired into the per-frame hooks renderFrame calls.
+    void import("./gpu-timer.js").then(({ createGpuFrameTimer, gpuFrameTimerBegin, gpuFrameTimerEnd, gpuFrameTimerResolve }) => {
+        if (engine._gpuTimer === undefined) {
+            engine._gpuTimer = createGpuFrameTimer(engine._device);
+        }
+        const timer = engine._gpuTimer;
+        // Honour the latest intent — the caller may have toggled timing off again while we loaded.
+        if (timer && engine._gpuTimerWanted) {
+            engine._gpuTimerBegin = (encoder) => gpuFrameTimerBegin(timer, encoder);
+            engine._gpuTimerEnd = (encoder) => gpuFrameTimerEnd(timer, encoder);
+            engine._gpuTimerResolve = () => {
+                gpuFrameTimerResolve(timer);
+                engine.gpuFrameTimeMs = timer.lastMs;
+            };
+        }
+    });
 }
