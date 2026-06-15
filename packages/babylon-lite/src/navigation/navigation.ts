@@ -191,7 +191,18 @@ export async function createNavigationPluginAsync(options?: { locateFile?: (url:
  */
 export function createNavMesh(plugin: NavigationPlugin, meshes: Mesh[], params: NavMeshParameters): void {
     const { positions, indices } = _mergeMeshes(meshes, params.doNotReverseIndices === true);
+    _createNavMeshFromMerged(plugin, positions, indices, params);
+}
 
+/** Build a navmesh from raw CPU geometry sources. This is the non-rendering twin of
+ * `createNavMesh`: callers that already own procedural navigation geometry can avoid
+ * creating hidden GPU meshes just to feed Recast. */
+export function createNavMeshFromSources(plugin: NavigationPlugin, sources: NavMeshSource[], params: NavMeshParameters): void {
+    const { positions, indices } = _mergeSources(sources, params.doNotReverseIndices === true);
+    _createNavMeshFromMerged(plugin, positions, indices, params);
+}
+
+function _createNavMeshFromMerged(plugin: NavigationPlugin, positions: Float32Array, indices: Uint32Array, params: NavMeshParameters): void {
     const cfg: Record<string, unknown> = {};
     if (params.cs !== undefined) {
         cfg.cs = params.cs;
@@ -341,6 +352,40 @@ function _mergeMeshes(meshes: Mesh[], doNotReverseIndices: boolean): { positions
             }
         }
         vertBase += src.length / 3;
+    }
+
+    return { positions, indices };
+}
+
+function _mergeSources(sources: NavMeshSource[], doNotReverseIndices: boolean): { positions: Float32Array; indices: Uint32Array } {
+    let totalVerts = 0;
+    let totalIdx = 0;
+    for (const source of sources) {
+        totalVerts += source.positions.length;
+        totalIdx += source.indices.length;
+    }
+    const positions = new F32(totalVerts);
+    const indices = new U32(totalIdx);
+
+    let pOff = 0;
+    let iOff = 0;
+    let vertBase = 0;
+    for (const source of sources) {
+        for (let i = 0; i < source.positions.length; i++) {
+            positions[pOff++] = source.positions[i]!;
+        }
+        if (doNotReverseIndices) {
+            for (let i = 0; i < source.indices.length; i++) {
+                indices[iOff++] = source.indices[i]! + vertBase;
+            }
+        } else {
+            for (let i = 0; i < source.indices.length; i += 3) {
+                indices[iOff++] = source.indices[i]! + vertBase;
+                indices[iOff++] = source.indices[i + 2]! + vertBase;
+                indices[iOff++] = source.indices[i + 1]! + vertBase;
+            }
+        }
+        vertBase += source.positions.length / 3;
     }
 
     return { positions, indices };
