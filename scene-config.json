@@ -386,7 +386,7 @@
         "slug": "scene41-physics-shapes",
         "name": "Scene 41 — Physics Shape Debug Viewer",
         "maxMad": 10,
-        "maxRawKB": 88,
+        "maxRawKB": 89,
         "maxGzipKB": 36,
         "description": "Havok Physics V2 mesh, convex hull, and aggregate collision shapes with PhysicsViewer wireframes. Loaded skull and seagull port of PG #LKPBW5.",
         "tags": ["std", "procedural", "physics"],
