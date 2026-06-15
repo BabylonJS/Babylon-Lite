@@ -376,6 +376,21 @@ export class PBRMaterial extends PushMaterial {
         this._markDirty();
     }
 
+    /**
+     * Babylon.js `pbr.albedoTexture` (glTF base-color map). The texture loads
+     * asynchronously, so the resolved Lite handle (+ sRGB flag) is bound in
+     * {@link _ensureRenderable} at engine start rather than here.
+     */
+    public get albedoTexture(): BaseTexture | null {
+        return this._albedoTexture;
+    }
+    public set albedoTexture(texture: BaseTexture | null) {
+        this._albedoTexture = texture;
+        this._markDirty();
+    }
+
+    private _albedoTexture: BaseTexture | null = null;
+
     public get metallic(): number {
         return this._lite.metallicFactor ?? 1;
     }
@@ -397,6 +412,19 @@ export class PBRMaterial extends PushMaterial {
     }
     public set emissiveColor(value: Color3) {
         this._lite.emissiveColor = [value.r, value.g, value.b];
+        this._markDirty();
+    }
+
+    /**
+     * Babylon.js `pbr.usePhysicalLightFalloff`. When false, point/spot lights use
+     * Standard-style linear range falloff instead of physical inverse-square.
+     * Default true (matches Babylon.js PBRMaterial).
+     */
+    public get usePhysicalLightFalloff(): boolean {
+        return this._lite.usePhysicalLightFalloff ?? true;
+    }
+    public set usePhysicalLightFalloff(value: boolean) {
+        this._lite.usePhysicalLightFalloff = value;
         this._markDirty();
     }
 
@@ -492,9 +520,17 @@ export class PBRMaterial extends PushMaterial {
         this.environmentTexture = value;
     }
 
-    /** @internal Synthesize the solid textures Babylon Lite's PBR pipeline requires from a factor-only material. */
+    /** @internal Bind resolved textures and synthesize the solid textures Babylon Lite's PBR pipeline requires from a factor-only material. */
     public override _ensureRenderable(engine: EngineContext): void {
         const lite = this._lite;
+        // Bind a now-resolved albedo texture (Babylon.js `Texture`s load asynchronously,
+        // so the Lite handle was undefined when `material.albedoTexture = …` ran). BJS
+        // `PBRMaterial.albedoTexture` is sRGB/gamma space by default, so flag `gammaAlbedo`.
+        const albedo = this._albedoTexture as { _lite?: Texture2D; gammaSpace?: boolean } | null;
+        if (albedo?._lite) {
+            lite.baseColorTexture = albedo._lite;
+            lite.gammaAlbedo = albedo.gammaSpace ?? true;
+        }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
         // 1×1 solid textures. Bake the factors into the textures and neutralize the factors

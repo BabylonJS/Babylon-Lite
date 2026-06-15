@@ -226,7 +226,8 @@
         "maxMad": 0.07,
         "maxRawKB": 101.8,
         "description": "Scene 4 variant with PBR ground material. Tests PBR multi-light shadow receiving (ESM + PCF).",
-        "tags": ["pbr", "shadow", "procedural", "multilight"]
+        "tags": ["pbr", "shadow", "procedural", "multilight"],
+        "compatParity": true
     },
     {
         "id": 23,

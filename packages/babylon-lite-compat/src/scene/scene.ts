@@ -146,6 +146,7 @@ export class Scene {
     private _defaultEnvOptions: DefaultEnvironmentOptions | null = null;
     private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void; _liteGen?: unknown }> = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
+    private readonly _pendingGroundBakes: Array<() => void> = [];
     private readonly _runningAnimatables: Animatable[] = [];
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
@@ -235,6 +236,25 @@ export class Scene {
             await Promise.all(this._pendingTextures);
             this._pendingTextures.length = 0;
         }
+    }
+
+    /**
+     * @internal Register a deferred ground-UV bake (for `CreateGroundFromHeightMap` with a
+     * PBR `albedoTexture` whose `uScale`/`vScale` tiling must be baked into the geometry,
+     * since Babylon Lite's PBR pipeline has no material-level UV scale). Run by
+     * {@link _bakeGroundUvs} after textures load, so the material's `albedoTexture` (assigned
+     * by user code after the heightmap resolves) is in place and its tiling is read correctly.
+     */
+    public _registerGroundUvBake(bake: () => void): void {
+        this._pendingGroundBakes.push(bake);
+    }
+
+    /** @internal Run deferred ground-UV bakes. Called by the engine after `_awaitPendingTextures`. */
+    public _bakeGroundUvs(): void {
+        for (const bake of this._pendingGroundBakes) {
+            bake();
+        }
+        this._pendingGroundBakes.length = 0;
     }
 
     /** @internal Whether any shadow generator is present (engine uses shadow-aware registration). */

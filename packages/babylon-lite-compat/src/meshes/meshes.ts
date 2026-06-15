@@ -32,6 +32,7 @@ import {
     setThinInstanceColors,
     createMeshFromData,
     resizeMeshGeometry,
+    updateMeshUvs,
     createGroundFromHeightMap,
 } from "babylon-lite";
 import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
@@ -585,6 +586,33 @@ export const MeshBuilder = {
             createGroundFromHeightMap(engine, url, options as never).then((lite) => {
                 // `createGroundFromHeightMap` always populates the CPU geometry buffers.
                 resizeMeshGeometry(engine, mesh._lite, lite._cpuPositions!, lite._cpuNormals!, lite._cpuIndices!, lite._cpuUvs);
+                // Babylon.js tiles the ground via `albedoTexture.uScale/vScale` (a material-level
+                // UV scale). Babylon Lite's PBR pipeline has no material UV scale (only
+                // StandardMaterial does, applied in-shader), so — exactly like the Lite-native
+                // scene, which passes `uvScale` to `createGroundFromHeightMap` — bake the PBR
+                // albedo tiling into the ground geometry UVs. The material's `albedoTexture` and
+                // its `uScale`/`vScale` are assigned by user code *after* this heightmap load may
+                // resolve, so defer the bake to engine start (after all textures load) instead of
+                // reading the material here, where it would race the material setup.
+                const baseUvs = lite._cpuUvs;
+                if (baseUvs) {
+                    scene._registerGroundUvBake(() => {
+                        const groundMat = mesh.material as { albedoTexture?: { uScale?: number; vScale?: number } | null } | null;
+                        const albedo = groundMat?.albedoTexture ?? null;
+                        const uScale = albedo?.uScale ?? 1;
+                        const vScale = albedo?.vScale ?? 1;
+                        if (uScale === 1 && vScale === 1) {
+                            return;
+                        }
+                        const scaled = new Float32Array(baseUvs.length);
+                        for (let i = 0; i < baseUvs.length; i += 2) {
+                            scaled[i] = baseUvs[i]! * uScale;
+                            scaled[i + 1] = baseUvs[i + 1]! * vScale;
+                        }
+                        updateMeshUvs(engine, mesh._lite, scaled);
+                        mesh._lite._cpuUvs = scaled;
+                    });
+                }
             })
         );
         return mesh;

@@ -218,6 +218,7 @@ export class WebGPUEngine {
             scene._buildShadowGenerators();
             await scene._parseNodeMaterials();
             await scene._awaitPendingTextures();
+            scene._bakeGroundUvs();
             scene._flushPendingAdds();
             await scene._loadPendingEnvironment();
             if (scene._hasShadows()) {
