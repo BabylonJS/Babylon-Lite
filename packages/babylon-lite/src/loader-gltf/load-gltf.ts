@@ -534,7 +534,6 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     boundMax,
                     skeleton: null,
                     morphTargets: null,
-                    _materialDirty: false,
                     _gpu: gpu,
                 } as unknown as Mesh;
                 initMeshTransform(mesh);

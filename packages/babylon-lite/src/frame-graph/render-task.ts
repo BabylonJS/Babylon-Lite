@@ -86,8 +86,9 @@ export interface RenderTaskConfig {
     /** Use canvas dimensions, not render-target dimensions, for this pass's scene UBO aspect. */
     cs?: boolean;
     /** Scene-texture transmission settings. `copyCount: 0` copies before every transmissive draw.
-     *  `generateMipmaps: false` allocates only mip 0 for the refraction texture and skips mip generation. */
-    transmission?: { copyCount?: number; generateMipmaps?: boolean };
+     *  `generateMipmaps: false` allocates only mip 0 for the refraction texture and skips mip generation.
+     *  `mipLevelCount` caps the generated chain when a material only samples low explicit LODs. */
+    transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number };
 }
 
 /** A frame-graph task that records a single `RenderPass`, binds the scene's `RenderTarget`, and draws renderables into it. */

@@ -61,7 +61,6 @@ function cloneMeshNode(mesh: Mesh): Mesh {
         ...mesh,
         name: mesh.name + "_clone",
         children: [],
-        _materialDirty: false,
         _gpu: { ...mesh._gpu },
     } as unknown as Mesh;
     initMeshTransform(meshClone, mesh.position.x, mesh.position.y, mesh.position.z, 0, 0, 0, mesh.scaling.x, mesh.scaling.y, mesh.scaling.z);

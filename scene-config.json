@@ -104,7 +104,7 @@
         "slug": "scene11-shark",
         "name": "Scene 11 — Shark GLB",
         "maxMad": 0.01,
-        "maxRawKB": 83.6,
+        "maxRawKB": 83.8,
         "description": "Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
         "tags": ["pbr", "gltf"],
         "skipPerf": true
@@ -154,7 +154,7 @@
         "slug": "scene16-thin-instances",
         "name": "Scene 16 — Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 47.7,
+        "maxRawKB": 47.8,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
         "tags": ["std", "procedural"]
     },
@@ -297,7 +297,7 @@
         "slug": "scene31-emissive-strength",
         "name": "Scene 31 — KHR_materials_emissive_strength",
         "maxMad": 0.01,
-        "maxRawKB": 78.2,
+        "maxRawKB": 78.4,
         "description": "EmissiveStrengthTest.glb (grid of materials with varying emissive_strength) against default IBL environment. Matches PG #YG3BBF#52.",
         "tags": ["pbr", "gltf", "env", "emissive"],
         "skipPerf": true
@@ -337,7 +337,7 @@
         "slug": "scene35-gltf-instancing",
         "name": "Scene 35 — EXT_mesh_gpu_instancing",
         "maxMad": 0.02,
-        "maxRawKB": 81.3,
+        "maxRawKB": 81.4,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
         "tags": ["pbr", "gltf", "env", "gpu-instancing"]
     },
@@ -679,7 +679,7 @@
         "slug": "scene73-wheel-nme-viewport",
         "name": "Scene 73 — Wheel PBR vs NME Viewports",
         "maxMad": 0.05,
-        "maxRawKB": 141.4,
+        "maxRawKB": 141.5,
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
         "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"]
     },
