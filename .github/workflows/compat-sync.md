@@ -55,6 +55,11 @@ network: defaults
 
 engine: copilot
 
+# Wall-clock cap for the agent job. The update-compat-layer skill is heavy (clones and
+# diffs upstream, implements wrappers, runs the bundle build + parity tests, lands a
+# scene), so the 20-minute default is too short. Raise it to give a full run room.
+timeout-minutes: 120
+
 tools:
     github:
         toolsets: [default]
