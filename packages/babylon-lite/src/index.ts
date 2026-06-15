@@ -536,6 +536,7 @@ export {
     createPhysicsBody,
     createPhysicsShape,
     createPhysicsAggregate,
+    createPhysicsConstraint,
     setPhysicsGravity,
     getPhysicsGravity,
     setPhysicsTimestep,
@@ -543,8 +544,16 @@ export {
     setPhysicsVelocityLimits,
     getPhysicsVelocityLimits,
     setPhysicsBodyShape,
+    setPhysicsBodyPreStep,
+    applyPhysicsBodyImpulse,
+    applyPhysicsBodyForce,
+    addPhysicsShapeChild,
+    addPhysicsShapeChildFromParent,
+    setPhysicsShapeFilterMembershipMask,
+    setPhysicsShapeFilterCollideMask,
     setPhysicsShapeMaterial,
     setPhysicsBodyMass,
+    setPhysicsBodyMassProperties,
     applyPhysicsImpulse,
     setPhysicsBodyLinearVelocity,
     getPhysicsBodyLinearVelocity,
@@ -556,8 +565,24 @@ export {
     disposePhysics,
     PhysicsShapeType,
     PhysicsMotionType,
+    PhysicsConstraintType,
+    PhysicsConstraintAxis,
 } from "./physics/havok.js";
-export type { PhysicsWorld, PhysicsBody, PhysicsShape, PhysicsAggregate, PhysicsShapeOptions, PhysicsShapeParameters, PhysicsAggregateOptions } from "./physics/havok.js";
+export type {
+    PhysicsWorld,
+    PhysicsBody,
+    PhysicsShape,
+    PhysicsAggregate,
+    PhysicsConstraint,
+    PhysicsShapeOptions,
+    PhysicsShapeParameters,
+    PhysicsAggregateOptions,
+    PhysicsMassProperties,
+    PhysicsConstraintOptions,
+    PhysicsConstraintLimit,
+} from "./physics/havok.js";
+export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
+export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {
