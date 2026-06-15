@@ -14,7 +14,18 @@ import type { AnimationGroup as LiteAnimationGroup, EngineContext } from "babylo
 export interface IAnimationKey {
     frame: number;
     value: number | number[];
+    /** Babylon.js per-key interpolation hint (`AnimationKeyInterpolation`). */
+    interpolation?: number;
 }
+
+/**
+ * Babylon.js `AnimationKeyInterpolation` — how the segment starting at a key is
+ * interpolated. `STEP` holds the key's value until the next key (no blend).
+ */
+export const AnimationKeyInterpolation = {
+    NONE: 0,
+    STEP: 1,
+} as const;
 
 export const AnimationTypes = {
     ANIMATIONTYPE_FLOAT: 0,
@@ -79,7 +90,14 @@ export class Animation {
         for (let i = 0; i < keys.length - 1; i++) {
             const a = keys[i]!;
             const b = keys[i + 1]!;
-            if (frame >= a.frame && frame <= b.frame) {
+            // Half-open `[a, b)` so an exact key frame belongs to the segment it
+            // starts (matters for STEP, where the value changes _at_ the next key).
+            if (frame >= a.frame && frame < b.frame) {
+                // Babylon.js `AnimationKeyInterpolation.STEP` holds the start key's
+                // value across the whole segment (no blend to the next key).
+                if (a.interpolation === AnimationKeyInterpolation.STEP) {
+                    return a.value;
+                }
                 const t = (frame - a.frame) / (b.frame - a.frame);
                 return lerpValue(a.value, b.value, t);
             }

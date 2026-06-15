@@ -118,7 +118,7 @@ export { NodeMaterial } from "./materials/node-material.js";
 export { GridMaterial } from "./materials/grid-material.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
-export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, Animatable } from "./animations/animation.js";
+export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
 export type { IAnimationKey, AnimationGroupState } from "./animations/animation.js";
 export {
     EasingFunction,
@@ -141,7 +141,7 @@ export {
 export { Observable } from "./misc/observable.js";
 export { Tools } from "./misc/tools.js";
 export { SmartArray, StringDictionary, Tags, PerformanceMonitor, FactorGradient, ColorGradient, Logger, PrecisionDate } from "./misc/misc-utils.js";
-export { ScenePerformancePriority, ImageProcessingConfiguration, Constants } from "./misc/engine-constants.js";
+export { ScenePerformancePriority, ShaderLanguage, ImageProcessingConfiguration, Constants } from "./misc/engine-constants.js";
 
 // ─── Actions ─────────────────────────────────────────────────────────
 export {
@@ -159,10 +159,12 @@ export {
 
 // ─── Known but unsupported (throw LiteCompatError on use) ─────────────
 export {
+    NullEngine,
     MultiMaterial,
     ShaderMaterial,
     BackgroundMaterial,
     RectAreaLight,
+    ClusteredLightContainer,
     ParticleSystem,
     GPUParticleSystem,
     SolidParticleSystem,

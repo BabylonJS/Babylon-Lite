@@ -14,6 +14,13 @@
 
 import { unsupported } from "../error.js";
 
+// ─── Engines ─────────────────────────────────────────────────────────
+export class NullEngine {
+    public constructor() {
+        unsupported("NullEngine", "Babylon Lite has no headless/null engine. Tests that need a deviceless engine should use the GPU-free compat unit-test surface instead.");
+    }
+}
+
 // ─── Materials ───────────────────────────────────────────────────────
 export class MultiMaterial {
     public constructor() {
@@ -37,6 +44,12 @@ export class BackgroundMaterial {
 export class RectAreaLight {
     public constructor() {
         unsupported("RectAreaLight", "Area lights are not implemented in Babylon Lite. Use Point/Spot/Directional/Hemispheric lights.");
+    }
+}
+
+export class ClusteredLightContainer {
+    public constructor() {
+        unsupported("ClusteredLightContainer", "Clustered lighting is not exposed by the Babylon Lite public API; the compat layer cannot wrap it.");
     }
 }
 

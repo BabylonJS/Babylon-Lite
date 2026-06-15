@@ -7,16 +7,17 @@ three fronts**: react to upstream Babylon.js / Babylon Lite changes (Task 1), ge
 more of the lab's oracle scenes rendering through the compat layer (Task 2), and
 close gaps between the compat surface and the Babylon.js API (Task 3) —
 implementing what is now possible, adding tests, and updating the status file for
-each.
+each. **Task 2 is the required deliverable of every run: land at least one new lab
+scene at pixel parity, even when it takes clearing a chain of hard blockers.**
 
 The single source of truth for all three is
 `packages/babylon-lite-compat/COMPAT-STATUS.md`, which tracks them in three places:
 
-| Task | Goal               | Tracked in `COMPAT-STATUS.md` by                                  |
-| ---- | ------------------ | ----------------------------------------------------------------- |
-| 1    | Upstream diffs     | the `Last synced BJS commit` + `Last sync date` markers           |
-| 2    | Lab-scene coverage | the **Lab scene coverage** section (working list + blocker table) |
-| 3    | API parity         | the per-area **status matrix** (a row per core/loaders symbol)    |
+| Task | Goal                          | Tracked in `COMPAT-STATUS.md` by                                  |
+| ---- | ----------------------------- | ----------------------------------------------------------------- |
+| 1    | Upstream diffs                | the `Last synced BJS commit` + `Last sync date` markers           |
+| 2    | Lab-scene coverage (req. win) | the **Lab scene coverage** section (working list + blocker table) |
+| 3    | API parity                    | the per-area **status matrix** (a row per core/loaders symbol)    |
 
 ---
 
@@ -41,22 +42,25 @@ live outside core. If you encounter one of these, ignore it — do not add a row
 
 ## The three tasks (read this first)
 
-Every run advances the compat layer on three fronts. You need not exhaust all
-three in a single run, but you **must** make real progress on at least one and
-leave `COMPAT-STATUS.md` accurately reflecting the new state of each:
+Every run advances the compat layer on three fronts. **Task 2 is the headline
+deliverable: every run must land at least one new lab scene at MAD ≈ 0** (see the
+firm requirement in Task 2). Tasks 1 and 3 are run alongside it and their status
+must be left accurate, but a run that ships zero new working scenes is incomplete.
 
 - **Task 1 — React to upstream diffs.** Pick up what changed in Babylon.js and
   Babylon Lite since the last sync and act on anything newly relevant.
-- **Task 2 — Advance lab-scene coverage.** Get more of the lab's Babylon.js oracle
-  scenes rendering at pixel parity through the compat layer.
+- **Task 2 — Advance lab-scene coverage (required win).** Get **at least one more**
+  of the lab's Babylon.js oracle scenes rendering at pixel parity through the compat
+  layer — every run, even when it's hard.
 - **Task 3 — Close API-parity gaps.** Bring the compat surface closer to the full
   `@babylonjs/core` + `@babylonjs/loaders` public API.
 
 Task 3 carries a hard **completeness invariant** — every core/loaders symbol must
-have a status row (see Task 3 below) — and is the gate for finishing. Tasks 1 and 2
-are incremental ("make progress"). The three feed each other: a diff in Task 1 can
-unblock a lab scene in Task 2 or a parity gap in Task 3, and the lab-scene recipe
-in Task 2 is often the fastest way to prove an API gap in Task 3 is implementable.
+have a status row (see Task 3 below). The three feed each other: a diff in Task 1
+can unblock a lab scene in Task 2 or a parity gap in Task 3, and the lab-scene
+recipe in Task 2 is usually the fastest way to prove an API gap in Task 3 is
+implementable — which is why the new working scene is the run's anchor, not an
+optional extra.
 
 ---
 
@@ -89,7 +93,7 @@ Use the diffs since the last sync to find — and prioritise — what changed.
 
 ---
 
-## Task 2 — Advance lab-scene coverage
+## Task 2 — Advance lab-scene coverage (required win)
 
 The lab renders each Babylon.js oracle scene (`lab/lite/src/bjs/sceneN.ts`) through
 the compat layer at `/compat/sceneN.html`. A scene **works** when its compat render
@@ -97,21 +101,47 @@ matches the native Lite port (`/lite/sceneN.html`) at MAD ≈ 0. The **Lab scene
 coverage** section of `COMPAT-STATUS.md` is the live record: a working-scene list
 (with a count) plus a table grouping the rest by blocker.
 
+**This is the run's required deliverable: finish with at least one scene that was
+not working before now rendering at MAD ≈ 0, opted into `scene-config.json`, and
+moved into the working list.** Do not stop at "I added an API the scene needs" or
+"I advanced it to its next blocker" — that is not done. Push a single scene all the
+way to parity, however many gaps it takes.
+
 1. Read the **Lab scene coverage** section — the working list and the blocker table.
-2. Pick one or more not-yet-working scenes. Prefer a blocker group where the fix is
-   likely to unblock several scenes at once, and where the native Lite port already
-   renders the feature (proof Lite can back it).
-3. For each candidate, read **both** the BJS oracle (`lab/lite/src/bjs/sceneN.ts`)
+2. **Pick a target scene and commit to it.** Prefer a blocker group where the fix is
+   likely to unblock several scenes at once and where the native Lite port already
+   renders the feature (proof Lite can back it). Pick the candidate with the
+   shortest path to parity, but once chosen, **see it through** rather than hopping
+   to a different scene when the first gap is cleared.
+3. **Diagnose the _full_ chain of blockers, not just the first.** Open
+   `/compat/sceneN.html`, read the console error, fix/stub that gap, then re-run and
+   read the _next_ error. Most blocker-table scenes fail on a **chain** of missing
+   APIs (e.g. `getChildMeshes` → `mesh.clone` → a PBR property); the scene only
+   counts when the whole chain is cleared and it renders. Keep iterating
+   error-by-error until the canvas renders and `dataset.ready` is set.
+4. For each gap in the chain, read **both** the BJS oracle (`lab/lite/src/bjs/sceneN.ts`)
    and the native Lite port (`lab/lite/src/lite/sceneN.ts`). **If the Lite port
    renders the feature, Lite can back it** — that port is a working, copy-able
    recipe for the exact Lite API/call sequence to wrap. Implement or extend the
    compat wrapper to match (see "Implementation patterns").
-4. Measure compat-vs-lite parity (in-browser MAD diff of `/compat/sceneN` vs
-   `/lite/sceneN`). When a scene reaches MAD ≈ 0, opt it into the Compat tab by
-   setting `"compatParity": true` in `scene-config.json`, then regression-check a
-   sample of already-working scenes so the change didn't break them.
-5. Update the **Lab scene coverage** section: move newly-working scenes into the
-   working list (bump its count) and update or remove the blocker row.
+5. Measure compat-vs-lite parity (in-browser MAD diff of `/compat/sceneN` vs
+   `/lite/sceneN`; use `?freeze=1` / `?seekTime=0` for animated scenes to get a
+   deterministic frame). Drive it to MAD ≈ 0. If it renders but diverges, use a
+   3-way comparison (compat vs lite vs the committed `babylon-ref-golden.png`) to
+   localise whether the gap is in compat or the Lite port, and keep fixing.
+6. When the scene reaches MAD ≈ 0, set `"compatParity": true` in
+   `scene-config.json`, then regression-check a sample of already-working scenes so
+   the change didn't break them.
+7. Update the **Lab scene coverage** section: move the newly-working scene(s) into
+   the working list (bump the count) and update or remove the blocker row.
+
+**If a chosen scene proves genuinely unreachable this run** (e.g. it bottoms out on
+a real `🔧 Needs Lite core` gap that can't be made tree-shakeable), document
+precisely why in the blocker row — then **pick another scene and land it instead.**
+"Every candidate I tried was hard" is not an exemption; difficulty is expected. The
+only acceptable zero-scene outcome is a written, evidence-backed argument that
+_every_ remaining not-working scene is blocked on a Lite-core change — which, given
+the size of the blocker table, should essentially never happen.
 
 > Don't conflate "no compat wrapper yet" with "Lite can't do it." A scene whose
 > native Lite port renders the feature is almost never a genuine `🔧 Needs Lite
@@ -308,9 +338,16 @@ tree-shakeable — revert it and record `🔧 Needs Lite core` instead.
 
 ## Completeness gate (required before finishing)
 
-Task 3's coverage ledger is a hard gate; Tasks 1 and 2 are incremental, but the
-status you leave behind for them must be accurate. Do not finish until:
+Task 3's coverage ledger and Task 2's new working scene are both hard gates. Do not
+finish until:
 
+- [ ] **(Task 2 — required win)** At least one scene that was _not_ working before
+      this run now renders at MAD ≈ 0, has `"compatParity": true` in
+      `scene-config.json`, and has moved into the **Lab scene coverage** working
+      list (count bumped). Advancing a scene to its next blocker without landing it
+      does **not** satisfy this. (The only exemption is a written, evidence-backed
+      proof that _every_ remaining not-working scene is blocked on a non-tree-shakeable
+      Lite-core change — see Task 2.)
 - [ ] **(Task 3)** Every public symbol exported by `@babylonjs/core` and
       `@babylonjs/loaders` maps to a row in `COMPAT-STATUS.md`
       (`✅` / `⚡` / `🔧` / `❌`) — the coverage ledger is empty.
@@ -363,9 +400,14 @@ If any box is unchecked, the run is not done.
   compat work.
 - Keep the wrappers honest: a feature is only `✅ Full`/`⚡ Partial` if it actually
   works on the Lite API. When in doubt, mark it `🔧`/`❌` and explain in the row.
+- **Land the scene, don't just unblock it.** Adding an API a scene needs, or
+  advancing it to its next error, is not a Task 2 win — a run is only complete when
+  at least one previously-broken scene actually renders at MAD ≈ 0 and is in the
+  working list. Expect to clear a chain of several gaps for one scene; that is the
+  job, not a reason to stop.
 - Summarise at the end, per task: **(Task 1)** which BJS/Lite changes you acted on
-  and the new `NEW_BJS_SHA`; **(Task 2)** which lab scenes you drove to parity and
-  the new working count; **(Task 3)** the size of the coverage ledger (and that it
-  is now empty) and which wrappers were added/extended — plus any tree-shakeable
-  Lite-core additions (with the bundle-diff proof) and the test/typecheck/lint
-  results.
+  and the new `NEW_BJS_SHA`; **(Task 2)** which lab scene(s) you **landed at MAD ≈ 0**
+  (the required win) and the new working count; **(Task 3)** the size of the
+  coverage ledger (and that it is now empty) and which wrappers were added/extended
+  — plus any tree-shakeable Lite-core additions (with the bundle-diff proof) and the
+  test/typecheck/lint results.

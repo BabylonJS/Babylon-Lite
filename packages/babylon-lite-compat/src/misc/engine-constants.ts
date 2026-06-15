@@ -15,6 +15,17 @@ export enum ScenePerformancePriority {
 }
 
 /**
+ * Babylon.js `ShaderLanguage` — the shader-source language selector. Babylon Lite
+ * is WGSL-only, but the enum is surfaced (with Babylon.js's numeric values) so
+ * scenes that import it to author `WGSL` shaders resolve the symbol; a `GLSL`
+ * `ShaderMaterial`/`EffectWrapper` still fails loudly at construction.
+ */
+export enum ShaderLanguage {
+    GLSL = 0,
+    WGSL = 1,
+}
+
+/**
  * Babylon.js `ImageProcessingConfiguration` — only the tone-mapping constants are
  * surfaced (the live exposure/contrast/tone-mapping toggle is exposed through
  * `scene.imageProcessingConfiguration`).

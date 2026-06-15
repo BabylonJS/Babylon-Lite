@@ -1255,7 +1255,8 @@
         "maxRawKB": 58,
         "description": "Manual property animation uses second-based keyframes and STEP interpolation, matching Babylon.js AnimationKeyInterpolation.STEP.",
         "tags": ["std", "procedural", "anim"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 155,

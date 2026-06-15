@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Animation, AnimationGroup } from "../src/animations/animation";
+import { Animation, AnimationGroup, AnimationKeyInterpolation } from "../src/animations/animation";
 
 describe("Animation", () => {
     it("exposes Babylon.js data-type and loop-mode constants", () => {
@@ -44,6 +44,22 @@ describe("Animation", () => {
         const anim = Animation.CreateAndStartAnimation("spin", {}, "rotation.y", 60, 60, 0, Math.PI);
         expect(anim.getHighestFrame()).toBe(60);
         expect(anim.evaluate(60)).toBeCloseTo(Math.PI, 6);
+    });
+
+    it("holds the start-key value across a STEP-interpolated segment", () => {
+        expect(AnimationKeyInterpolation.STEP).toBe(1);
+        const anim = new Animation("a", "position.x", 10);
+        anim.setKeys([
+            { frame: 0, value: -1.5, interpolation: AnimationKeyInterpolation.STEP },
+            { frame: 10, value: 1.5, interpolation: AnimationKeyInterpolation.STEP },
+            { frame: 20, value: -1.5, interpolation: AnimationKeyInterpolation.STEP },
+        ]);
+        // Within a STEP segment the value is held at the start key (no lerp)…
+        expect(anim.evaluate(5)).toBe(-1.5);
+        expect(anim.evaluate(9.9)).toBe(-1.5);
+        // …and only changes when the next key is reached.
+        expect(anim.evaluate(10)).toBe(1.5);
+        expect(anim.evaluate(15)).toBe(1.5);
     });
 });
 
