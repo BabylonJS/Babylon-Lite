@@ -40,6 +40,7 @@ import type { Mesh as LiteMesh, SceneNode, EngineContext } from "babylon-lite";
 import type { Vector3 } from "../math/vector.js";
 import { liteBackedVector3 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
+import { Matrix } from "../math/matrix.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
@@ -338,6 +339,70 @@ export class AbstractMesh extends TransformNode {
      * (`applySkeleton` / `applyMorph`) are accepted for parity but not used.
      */
     public refreshBoundingInfo(_options?: unknown): this {
+        return this;
+    }
+
+    /**
+     * Babylon.js `mesh.bakeCurrentTransformIntoVertices()` — fold the node's local
+     * transform (position / rotation / scaling) into the CPU geometry and reset the
+     * transform to identity. Babylon Lite has no built-in mesh-transform bake, so we
+     * transform the retained CPU positions (full matrix) and normals (rotation only,
+     * renormalized), re-upload via `resizeMeshGeometry`, then clear the transform.
+     */
+    public bakeCurrentTransformIntoVertices(): this {
+        const engine = this._scene?.getEngine()._lite;
+        const lite = this._lite as { _cpuPositions?: Float32Array; _cpuNormals?: Float32Array; _cpuIndices?: Uint32Array; _cpuUvs?: Float32Array };
+        const positions = lite._cpuPositions;
+        const indices = lite._cpuIndices;
+        if (!engine || !positions || !indices) {
+            return this;
+        }
+        const node = this._node;
+        const s = node.scaling;
+        const q = node.rotationQuaternion;
+        const t = node.position;
+        const matrix = Matrix.Compose(liteBackedVector3(s), { x: q.x, y: q.y, z: q.z, w: q.w }, liteBackedVector3(t));
+        const m = matrix.m;
+
+        const newPositions = new Float32Array(positions.length);
+        for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i]!,
+                y = positions[i + 1]!,
+                z = positions[i + 2]!;
+            newPositions[i] = x * m[0]! + y * m[4]! + z * m[8]! + m[12]!;
+            newPositions[i + 1] = x * m[1]! + y * m[5]! + z * m[9]! + m[13]!;
+            newPositions[i + 2] = x * m[2]! + y * m[6]! + z * m[10]! + m[14]!;
+        }
+
+        let newNormals: Float32Array | undefined;
+        const normals = lite._cpuNormals;
+        if (normals) {
+            newNormals = new Float32Array(normals.length);
+            for (let i = 0; i < normals.length; i += 3) {
+                const x = normals[i]!,
+                    y = normals[i + 1]!,
+                    z = normals[i + 2]!;
+                let nx = x * m[0]! + y * m[4]! + z * m[8]!;
+                let ny = x * m[1]! + y * m[5]! + z * m[9]!;
+                let nz = x * m[2]! + y * m[6]! + z * m[10]!;
+                const len = Math.hypot(nx, ny, nz) || 1;
+                nx /= len;
+                ny /= len;
+                nz /= len;
+                newNormals[i] = nx;
+                newNormals[i + 1] = ny;
+                newNormals[i + 2] = nz;
+            }
+        } else {
+            newNormals = computeFlatNormals(newPositions, indices);
+        }
+
+        resizeMeshGeometry(engine, this._lite, newPositions, newNormals, indices, lite._cpuUvs);
+
+        // Reset the node transform to identity (the geometry now carries it).
+        node.position.set(0, 0, 0);
+        node.rotation.set(0, 0, 0);
+        node.scaling.set(1, 1, 1);
         return this;
     }
 

@@ -841,7 +841,8 @@
         "maxRawKB": 78,
         "description": "Box and sphere constructive solid geometry rows showing subtract, intersect, and union with textured StandardMaterial meshes and SVG texture labels.",
         "tags": ["csg", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 91,
@@ -851,7 +852,8 @@
         "maxRawKB": 78,
         "description": "Box and sphere CSG2 rows showing subtract, intersect, and add/union with textured StandardMaterial meshes and canvas texture labels.",
         "tags": ["csg", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 92,
@@ -1390,7 +1392,8 @@
         "description": "Single crowd agent on the nav_test.glb mesh follows a computed path (port of playground #DPDNVH#2).",
         "tags": ["navigation", "recast", "wasm", "path"],
         "skipPerf": true,
-        "bundleTimeoutMs": 120000
+        "bundleTimeoutMs": 120000,
+        "compatParity": true
     },
     {
         "id": 172,
@@ -1423,7 +1426,8 @@
         "description": "Solo navmesh on nav_test.glb with three off-mesh connections; path computed across the scene exercises elevated platforms (port of playground #DPDNVH#5).",
         "tags": ["navigation", "recast", "wasm", "offmesh"],
         "skipPerf": true,
-        "bundleTimeoutMs": 120000
+        "bundleTimeoutMs": 120000,
+        "compatParity": true
     },
     {
         "id": 175,
@@ -1434,7 +1438,8 @@
         "description": "Navmesh raycast between two far-separated points on nav_test.glb. Spheres mark start/end/hit, a yellow tube traces the ray (port of playground #DPDNVH#7).",
         "tags": ["navigation", "recast", "wasm", "raycast"],
         "skipPerf": true,
-        "bundleTimeoutMs": 120000
+        "bundleTimeoutMs": 120000,
+        "compatParity": true
     },
     {
         "id": 176,

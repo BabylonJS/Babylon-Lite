@@ -35,6 +35,11 @@ export class LoadedMesh {
         this.name = mesh.name ?? "";
     }
 
+    /** @internal The underlying Babylon Lite mesh (e.g. for the navmesh wrapper's geometry merge). */
+    public get _lite(): LiteMesh {
+        return this._mesh;
+    }
+
     /** Babylon.js `refreshBoundingInfo()` — bounds are read on demand, so this is a no-op. */
     public refreshBoundingInfo(_options?: unknown): LoadedMesh {
         return this;
@@ -66,7 +71,28 @@ export class LoadedMesh {
 /**
  * Wrap every renderable mesh in a loaded Babylon Lite asset container as a
  * `LoadedMesh`, matching the flat `meshes` array Babylon.js loaders return.
+ *
+ * Babylon.js loaders place a synthetic `__root__` transform node at
+ * `result.meshes[0]` (the renderable meshes follow it). Babylon Lite builds the
+ * same `__root__` (`entities[0]` for glTF) but `getContainerMeshes` returns only
+ * renderable meshes. Prepend that root so index-based access (`result.meshes[1]`,
+ * used by the navigation scenes) lines up with Babylon.js.
  */
 export function collectLoadedMeshes(container: LiteAssetContainer): LoadedMesh[] {
-    return getContainerMeshes(container).map((mesh) => new LoadedMesh(mesh));
+    const renderable = getContainerMeshes(container);
+    const result: LoadedMesh[] = [];
+    // The glTF loader's root is a transform node (no GPU geometry) that parents the
+    // renderable meshes — include it at index 0 to mirror Babylon.js `__root__`.
+    // Detected as a non-renderable entity that has a `children` array (lights, which
+    // BJS `meshes` excludes, are leaf nodes without one).
+    for (const entity of container.entities) {
+        const node = entity as unknown as { _gpu?: unknown; children?: unknown[] };
+        if (!node._gpu && Array.isArray(node.children) && !renderable.includes(entity as unknown as LiteMesh)) {
+            result.push(new LoadedMesh(entity as unknown as LiteMesh));
+        }
+    }
+    for (const mesh of renderable) {
+        result.push(new LoadedMesh(mesh));
+    }
+    return result;
 }

@@ -59,6 +59,7 @@ export { Light, HemisphericLight, DirectionalLight, PointLight, SpotLight } from
 // ─── Meshes ──────────────────────────────────────────────────────────
 export { Mesh, AbstractMesh, TransformNode, GroundMesh, InstancedMesh, VertexData, VertexBuffer, MeshBuilder } from "./meshes/meshes.js";
 export { CreateBox, CreateSphere, CreateGround, CreatePlane, CreateCylinder, CreateTorus, CreateDisc } from "./meshes/meshes.js";
+export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
 export { GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
 

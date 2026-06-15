@@ -20,9 +20,12 @@ import {
     createNavMesh as liteCreateNavMesh,
     createDebugNavMeshGeometry as liteCreateDebugNavMeshGeometry,
     getClosestPoint as liteGetClosestPoint,
+    computePath as liteComputePath,
+    raycast as liteRaycast,
     createNavCrowd as liteCreateNavCrowd,
     addAgent as liteAddAgent,
     getAgentPosition as liteGetAgentPosition,
+    agentGoto as liteAgentGoto,
     updateNavCrowd as liteUpdateNavCrowd,
     createMeshFromData,
     addToScene,
@@ -64,13 +67,17 @@ interface AgentParameters {
 class RecastJSCrowd {
     /** @internal */ public readonly _lite: LiteNavCrowd;
     private readonly _transforms = new Map<number, AgentTransform>();
+    private readonly _plugin: RecastNavigationJSPluginV2;
 
-    public constructor(lite: LiteNavCrowd, scene: Scene) {
+    public constructor(lite: LiteNavCrowd, plugin: RecastNavigationJSPluginV2, scene: Scene) {
         this._lite = lite;
+        this._plugin = plugin;
         // Babylon.js' crowd advances the simulation and writes back agent transforms
         // on the scene's before-render tick; mirror that over Lite's manual crowd update.
+        // The plugin's `timeFactor` scales the step (0 freezes the crowd — used by parity
+        // tests via `?freeze=1`).
         scene.onBeforeRenderObservable.add(() => {
-            liteUpdateNavCrowd(this._lite, 1 / 60);
+            liteUpdateNavCrowd(this._lite, (1 / 60) * this._plugin.timeFactor);
             for (const [index, transform] of this._transforms) {
                 const p = liteGetAgentPosition(this._lite, index);
                 transform.position.set(p.x, p.y, p.z);
@@ -90,6 +97,11 @@ class RecastJSCrowd {
         const p = liteGetAgentPosition(this._lite, index);
         return new Vector3(p.x, p.y, p.z);
     }
+
+    /** Babylon.js `crowd.agentGoto(index, destination)` — request the agent to move toward a target. */
+    public agentGoto(index: number, destination: Vec3Like): void {
+        liteAgentGoto(this._lite, index, { x: destination.x, y: destination.y, z: destination.z });
+    }
 }
 
 /**
@@ -97,6 +109,11 @@ class RecastJSCrowd {
  */
 class RecastNavigationJSPluginV2 {
     /** @internal */ public readonly _lite: LiteNavigationPlugin;
+    /**
+     * Babylon.js `plugin.timeFactor` — multiplier applied to each crowd update step.
+     * `0` pauses crowd movement (used by parity tests); default `1`.
+     */
+    public timeFactor = 1;
 
     public constructor(lite: LiteNavigationPlugin) {
         this._lite = lite;
@@ -134,10 +151,30 @@ class RecastNavigationJSPluginV2 {
         return new Vector3(p.x, p.y, p.z);
     }
 
+    /** Babylon.js `plugin.computePath(start, end)` — navmesh-snapped path as world points. */
+    public computePath(start: Vec3Like, end: Vec3Like): Vector3[] {
+        const points = liteComputePath(this._lite, { x: start.x, y: start.y, z: start.z }, { x: end.x, y: end.y, z: end.z });
+        return points.map((p) => new Vector3(p.x, p.y, p.z));
+    }
+
+    /** Babylon.js `plugin.computePathSmooth(start, end)` — alias of {@link computePath} (Lite smooths internally). */
+    public computePathSmooth(start: Vec3Like, end: Vec3Like): Vector3[] {
+        return this.computePath(start, end);
+    }
+
+    /**
+     * Babylon.js `plugin.raycast(start, end)` — walkability raycast on the navmesh.
+     * Returns `{ hit, hitPoint? }` (`hitPoint` is a `Vector3` when `hit`).
+     */
+    public raycast(start: Vec3Like, end: Vec3Like): { hit: boolean; hitPoint?: Vector3 } {
+        const r = liteRaycast(this._lite, { x: start.x, y: start.y, z: start.z }, { x: end.x, y: end.y, z: end.z });
+        return r.hit && r.hitPoint ? { hit: true, hitPoint: new Vector3(r.hitPoint.x, r.hitPoint.y, r.hitPoint.z) } : { hit: false };
+    }
+
     /** Babylon.js `plugin.createCrowd(maxAgents, maxAgentRadius, scene)`. */
     public createCrowd(maxAgents: number, maxAgentRadius: number, scene: Scene): RecastJSCrowd {
         const crowd = liteCreateNavCrowd(this._lite, maxAgents, maxAgentRadius);
-        return new RecastJSCrowd(crowd, scene);
+        return new RecastJSCrowd(crowd, this, scene);
     }
 }
 

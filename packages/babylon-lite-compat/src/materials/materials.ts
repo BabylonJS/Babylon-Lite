@@ -159,6 +159,27 @@ export class StandardMaterial extends PushMaterial {
         this._markDirty();
     }
 
+    /**
+     * Babylon.js `StandardMaterial.alphaCutOff` — alpha-test threshold. Fragments
+     * whose diffuse-texture alpha is below this value are discarded. Babylon Lite's
+     * Standard pipeline alpha-tests against the diffuse texture's alpha when
+     * `alphaCutOff > 0`, so this is wired directly.
+     */
+    public get alphaCutOff(): number {
+        return this._lite.alphaCutOff;
+    }
+    public set alphaCutOff(value: number) {
+        this._lite.alphaCutOff = value;
+        this._markDirty();
+    }
+
+    /**
+     * Babylon.js `StandardMaterial.useAlphaFromDiffuseTexture`. Babylon Lite's
+     * alpha test already samples the diffuse texture's alpha (enabled via
+     * `alphaCutOff`), so this is accepted for parity.
+     */
+    public useAlphaFromDiffuseTexture = false;
+
     public get bumpTexture(): BaseTexture | null {
         return this._bumpTexture;
     }
