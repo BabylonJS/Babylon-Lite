@@ -59,14 +59,31 @@ export class Texture extends BaseTexture {
     public constructor(
         url: string,
         sceneOrEngine: Scene | { _lite: import("babylon-lite").EngineContext },
-        _noMipmapOrOptions?: unknown,
-        _invertY?: boolean,
+        noMipmapOrOptions?: unknown,
+        invertY?: boolean,
         _samplingMode?: number,
         onLoad?: (() => void) | null
     ) {
         super();
         this.name = url;
-        this.samplingMode = _samplingMode ?? Texture.BILINEAR_SAMPLINGMODE;
+        // Babylon.js `Texture(url, scene, noMipmapOrOptions?, invertY?, samplingMode?)`.
+        // The third argument is either a `noMipmap` boolean or an options object; parse
+        // both shapes so the load matches what the ported code asked for.
+        let noMipmap = false;
+        let invertYOpt = invertY;
+        let samplingMode = _samplingMode;
+        if (typeof noMipmapOrOptions === "boolean") {
+            noMipmap = noMipmapOrOptions;
+        } else if (noMipmapOrOptions && typeof noMipmapOrOptions === "object") {
+            const o = noMipmapOrOptions as { noMipmap?: boolean; invertY?: boolean; samplingMode?: number };
+            noMipmap = o.noMipmap ?? false;
+            invertYOpt = invertYOpt ?? o.invertY;
+            samplingMode = samplingMode ?? o.samplingMode;
+        }
+        // Babylon.js `Texture.invertY` defaults to true; honour an explicit `false`.
+        this._invertY = invertYOpt ?? true;
+        this._noMipmap = noMipmap;
+        this.samplingMode = samplingMode ?? Texture.BILINEAR_SAMPLINGMODE;
         this._source = sceneOrEngine;
         // Babylon.js's `Texture` accepts either a `Scene` or a `ThinEngine`. When a
         // scene is passed, the load is tracked so the scene awaits it at build; when
@@ -75,7 +92,11 @@ export class Texture extends BaseTexture {
         const scene = (sceneOrEngine as Scene).getEngine ? (sceneOrEngine as Scene) : undefined;
         const engineWrapper = scene ? undefined : (sceneOrEngine as { _lite: import("babylon-lite").EngineContext; _registerStartupWork?: (w: () => Promise<void>) => void });
         const engine = scene ? scene.getEngine()._lite : engineWrapper!._lite;
-        this._ready = loadTexture2D(engine, url).then((tex) => {
+        // Honour `invertY` / `noMipmap` only on the material (scene-based) path. The
+        // bare-engine path feeds Babylon Lite's sprite renderer, which applies its own
+        // V-orientation, so it keeps `loadTexture2D`'s defaults (matching the Lite ports).
+        const loadOpts = scene ? { invertY: this._invertY, mipMaps: !this._noMipmap } : {};
+        this._ready = loadTexture2D(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
             if (onLoad) {
                 onLoad();
@@ -90,6 +111,10 @@ export class Texture extends BaseTexture {
         engineWrapper?._registerStartupWork?.(() => this._ready);
     }
 
+    /** @internal Upload-time vertical flip / mipmap flags, preserved across `clone`. */
+    private readonly _invertY: boolean;
+    private readonly _noMipmap: boolean;
+
     public override getClassName(): string {
         return "Texture";
     }
@@ -100,7 +125,7 @@ export class Texture extends BaseTexture {
      * handle (tracked against the same scene so it is ready at build).
      */
     public clone(): Texture {
-        const c = new Texture(this.name, this._source, undefined, undefined, this.samplingMode);
+        const c = new Texture(this.name, this._source, this._noMipmap, this._invertY, this.samplingMode);
         c.uScale = this.uScale;
         c.vScale = this.vScale;
         c.uOffset = this.uOffset;

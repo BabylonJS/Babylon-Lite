@@ -17,6 +17,7 @@ import {
     onBeforeRender,
     createDefaultCamera as liteCreateDefaultCamera,
     setFog,
+    setClipPlane,
     loadEnvironment,
     createHemisphericLight,
     addToScene,
@@ -29,6 +30,7 @@ import { loadDdsEnvironment } from "babylon-lite/loader-env/load-dds-env";
 import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRotateCamera, AnimationManager } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
+import type { Plane } from "../math/plane.js";
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Camera } from "../cameras/cameras.js";
@@ -147,6 +149,7 @@ export class Scene {
     private readonly _shadowGenerators: Array<{ _build(engine: import("babylon-lite").EngineContext): void; _liteGen?: unknown }> = [];
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
+    private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
     private readonly _runningAnimatables: Animatable[] = [];
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
@@ -255,6 +258,24 @@ export class Scene {
             bake();
         }
         this._pendingGroundBakes.length = 0;
+    }
+
+    /**
+     * @internal Register a mesh's compat `MorphTargetManager` to be built at engine
+     * start. Building is deferred so the mesh's base CPU geometry (set by primitive
+     * builders / `VertexData.applyToMesh`) exists when per-target deltas are computed.
+     */
+    public _registerMorphTargetManager(mesh: { _lite: unknown }, manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void }): void {
+        this._pendingMorphBuilds.push({ mesh, manager });
+    }
+
+    /** @internal Build all registered morph-target managers. Called by the engine before registration. */
+    public _buildMorphTargets(): void {
+        const engine = this._engine._lite;
+        for (const { mesh, manager } of this._pendingMorphBuilds) {
+            manager._build(mesh as never, engine);
+        }
+        this._pendingMorphBuilds.length = 0;
     }
 
     /** @internal Whether any shadow generator is present (engine uses shadow-aware registration). */
@@ -392,6 +413,27 @@ export class Scene {
             end: this._fogEnd,
             color: [this._fogColor.r, this._fogColor.g, this._fogColor.b],
         });
+    }
+
+    // ── Clip plane (Babylon.js `scene.clipPlane`) ──
+
+    private _clipPlane: Plane | null = null;
+
+    /**
+     * Babylon.js `scene.clipPlane` — a single world-space clip plane
+     * (`normal · p + d = 0`); fragments on the negative side are discarded.
+     * Routed to Babylon Lite's opt-in `setClipPlane`.
+     */
+    public get clipPlane(): Plane | null {
+        return this._clipPlane;
+    }
+    public set clipPlane(value: Plane | null) {
+        this._clipPlane = value;
+        if (value) {
+            setClipPlane(this._lite, [value.normal.x, value.normal.y, value.normal.z, value.d]);
+        } else {
+            setClipPlane(this._lite, [0, 0, 0, 0]);
+        }
     }
 
     // ── Environment / IBL (Babylon.js `scene.environmentTexture` + `createDefaultEnvironment`) ──

@@ -45,6 +45,7 @@ import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
+import type { MorphTargetManager } from "../morph/morph.js";
 
 type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial;
 
@@ -291,9 +292,11 @@ export class AbstractMesh extends TransformNode {
 
     /**
      * Babylon.js `mesh.setVerticesData(kind, data)` — replace a vertex attribute.
-     * `position` / `normal` / `uv` / `color` re-upload the geometry in place;
-     * skinning/morph attributes (`matricesIndices`, etc.) are accepted but not
-     * applied (Babylon Lite drives skinning through its own loaded-skeleton path).
+     * `position` / `normal` / `uv` / `color` / `tangent` re-upload the geometry in
+     * place; the last-set `color`/`tangent` buffers are retained so successive calls
+     * (e.g. set tangent then set color) keep both. Skinning/morph attributes
+     * (`matricesIndices`, etc.) are accepted but not applied (Babylon Lite drives
+     * skinning through its own loaded-skeleton path).
      */
     public setVerticesData(kind: string, data: number[] | Float32Array, _updatable?: boolean): void {
         const engine = this._scene?.getEngine()._lite;
@@ -301,21 +304,40 @@ export class AbstractMesh extends TransformNode {
         if (!engine || !lite._cpuPositions || !lite._cpuIndices) {
             return;
         }
-        if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "color") {
+        if (kind !== "position" && kind !== "normal" && kind !== "uv" && kind !== "color" && kind !== "tangent") {
             return;
         }
         const f32 = data instanceof Float32Array ? data : Float32Array.from(data);
+        if (kind === "color") {
+            this._lastColors = f32;
+        }
+        if (kind === "tangent") {
+            this._lastTangents = f32;
+        }
         const positions = kind === "position" ? f32 : lite._cpuPositions;
         const normals = kind === "normal" ? f32 : (lite._cpuNormals ?? computeFlatNormals(positions, lite._cpuIndices));
         const uvs = kind === "uv" ? f32 : lite._cpuUvs;
-        const colors = kind === "color" ? f32 : undefined;
-        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, undefined, undefined, colors);
+        resizeMeshGeometry(engine, this._lite, positions, normals, lite._cpuIndices, uvs, undefined, this._lastTangents, this._lastColors);
     }
+
+    /** @internal Retained tangent/color buffers so successive `setVerticesData` calls keep both. */
+    private _lastTangents: Float32Array | undefined;
+    private _lastColors: Float32Array | undefined;
 
     /** Babylon.js `mesh.getTotalVertices()` — vertex count from the position buffer. */
     public getTotalVertices(): number {
         const positions = this._lite._cpuPositions;
         return positions ? positions.length / 3 : 0;
+    }
+
+    /**
+     * Babylon.js `mesh.refreshBoundingInfo()` — Babylon Lite recomputes a mesh's
+     * bounds from its CPU geometry on demand (and on geometry upload), so this is a
+     * no-op that returns the mesh for chaining. The deformed-pick options
+     * (`applySkeleton` / `applyMorph`) are accepted for parity but not used.
+     */
+    public refreshBoundingInfo(_options?: unknown): this {
+        return this;
     }
 
     public override dispose(): void {
@@ -345,6 +367,24 @@ export class Mesh extends AbstractMesh {
 
     public override getClassName(): string {
         return "Mesh";
+    }
+
+    private _morphTargetManager: MorphTargetManager | null = null;
+
+    /**
+     * Babylon.js `mesh.morphTargetManager`. Babylon Lite builds morph GPU data via
+     * `createMorphTargets` and stores it on the Lite mesh; the compat manager is
+     * registered with the scene so the engine builds it at start (once the base
+     * CPU geometry exists) and assigns it onto the Lite mesh before registration.
+     */
+    public get morphTargetManager(): MorphTargetManager | null {
+        return this._morphTargetManager;
+    }
+    public set morphTargetManager(value: MorphTargetManager | null) {
+        this._morphTargetManager = value;
+        if (value && this._scene) {
+            this._scene._registerMorphTargetManager(this, value);
+        }
     }
 
     // ── Legacy pre-MeshBuilder static creators (Babylon.js `Mesh.CreateX`) ──
@@ -684,3 +724,43 @@ export const MeshBuilder = {
         return unsupported("MeshBuilder.CreateText", "Extruded font meshes are not implemented in Babylon Lite. For 2D/SDF text use the native `createTextRenderable` API.");
     },
 };
+
+// ── Standalone builder functions (Babylon.js `@babylonjs/core/Meshes/Builders/*`) ──
+// Babylon.js also exports each builder as a free function (`CreateBox(name, options, scene)`,
+// etc.) alongside the `MeshBuilder` namespace. These are thin aliases so ported code that
+// imports the standalone functions resolves identically.
+
+/** Babylon.js `CreateBox(name, options, scene)` (boxBuilder). */
+export function CreateBox(name: string, options: BoxOptions, scene: Scene): Mesh {
+    return MeshBuilder.CreateBox(name, options, scene);
+}
+
+/** Babylon.js `CreateSphere(name, options, scene)` (sphereBuilder). */
+export function CreateSphere(name: string, options: SphereOptions, scene: Scene): Mesh {
+    return MeshBuilder.CreateSphere(name, options, scene);
+}
+
+/** Babylon.js `CreateGround(name, options, scene)` (groundBuilder). */
+export function CreateGround(name: string, options: GroundOptions, scene: Scene): Mesh {
+    return MeshBuilder.CreateGround(name, options, scene);
+}
+
+/** Babylon.js `CreatePlane(name, options, scene)` (planeBuilder). */
+export function CreatePlane(name: string, options: PlaneOptions, scene: Scene): Mesh {
+    return MeshBuilder.CreatePlane(name, options, scene);
+}
+
+/** Babylon.js `CreateCylinder(name, options, scene)` (cylinderBuilder). */
+export function CreateCylinder(name: string, options: CylinderOptions, scene: Scene): Mesh {
+    return MeshBuilder.CreateCylinder(name, options, scene);
+}
+
+/** Babylon.js `CreateTorus(name, options, scene)` (torusBuilder). */
+export function CreateTorus(name: string, options: object, scene: Scene): Mesh {
+    return MeshBuilder.CreateTorus(name, options, scene);
+}
+
+/** Babylon.js `CreateDisc(name, options, scene)` (discBuilder). */
+export function CreateDisc(name: string, options: object, scene: Scene): Mesh {
+    return MeshBuilder.CreateDisc(name, options, scene);
+}

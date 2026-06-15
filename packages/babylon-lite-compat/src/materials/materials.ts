@@ -24,8 +24,20 @@ export abstract class Material {
     public name: string;
     /** Common transparency mode flag (Babylon.js `Material.transparencyMode`). */
     public transparencyMode: number | null = null;
-    /** Back-face culling toggle. */
-    public backFaceCulling = true;
+    /** Back-face culling toggle (Babylon.js `Material.backFaceCulling`). */
+    private _backFaceCulling = true;
+    public get backFaceCulling(): boolean {
+        return this._backFaceCulling;
+    }
+    public set backFaceCulling(value: boolean) {
+        this._backFaceCulling = value;
+        this._applyBackFaceCulling(value);
+        this._markDirty();
+    }
+    /** @internal Per-material hook to push culling onto the Lite props (Standard vs PBR differ). */
+    protected _applyBackFaceCulling(_value: boolean): void {
+        // Base/NME materials: no Lite culling field to set.
+    }
     /** Wireframe rendering toggle (not honoured by all Lite materials). */
     public wireframe = false;
     /** @internal Underlying Babylon Lite material props. */
@@ -124,6 +136,10 @@ export class StandardMaterial extends PushMaterial {
     public set disableLighting(value: boolean) {
         this._lite.disableLighting = value;
         this._markDirty();
+    }
+
+    protected override _applyBackFaceCulling(value: boolean): void {
+        this._lite.backFaceCulling = value;
     }
 
     public get alpha(): number {
@@ -441,6 +457,10 @@ export class PBRMaterial extends PushMaterial {
      * irradiance in the fragment stage already, so this is accepted for parity.
      */
     public forceIrradianceInFragment = false;
+
+    protected override _applyBackFaceCulling(value: boolean): void {
+        this._lite.doubleSided = !value;
+    }
 
     /**
      * Babylon.js `pbr.clearCoat` sub-configuration. Lazily allocates the Lite

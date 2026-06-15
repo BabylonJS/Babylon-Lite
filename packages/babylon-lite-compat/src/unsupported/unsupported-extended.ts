@@ -24,18 +24,6 @@ export class Bone {
     }
 }
 
-export class MorphTarget {
-    public constructor() {
-        unsupported("MorphTarget", "Morph targets are created via the native `createMorphTargets` API; the standalone MorphTarget class is not wrapped.");
-    }
-}
-
-export class MorphTargetManager {
-    public constructor() {
-        unsupported("MorphTargetManager", "Use the native `createMorphTargets` / `setMorphTargetWeights` APIs instead.");
-    }
-}
-
 // ─── Probes / Layers / Rendering ─────────────────────────────────────
 export class ReflectionProbe {
     public constructor() {

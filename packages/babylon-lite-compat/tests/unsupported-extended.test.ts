@@ -4,8 +4,6 @@ import { LiteCompatError } from "../src/error";
 import {
     Skeleton,
     Bone,
-    MorphTarget,
-    MorphTargetManager,
     ReflectionProbe,
     Layer,
     EffectLayer,
@@ -47,8 +45,6 @@ describe("Extended unsupported stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["Skeleton", () => new Skeleton()],
         ["Bone", () => new Bone()],
-        ["MorphTarget", () => new MorphTarget()],
-        ["MorphTargetManager", () => new MorphTargetManager()],
         ["ReflectionProbe", () => new ReflectionProbe()],
         ["Layer", () => new Layer()],
         ["EffectLayer", () => new EffectLayer()],

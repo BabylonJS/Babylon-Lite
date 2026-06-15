@@ -479,7 +479,8 @@
         "maxRawKB": 65,
         "description": "Axis-locked world-space billboards constrain rotation to an arbitrary normalized axis. BJS reference uses explicit meshes with axis-aligned basis vectors computed from the camera and lock axis.",
         "tags": ["sprites", "billboards", "axis-locked"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 57,
@@ -565,7 +566,8 @@
         "maxRawKB": 65,
         "description": "Node Material with a MorphTargetsBlock: one morph target shifts every vertex along +Y at weight=1.0 so the sphere renders translated upward. Proves morph-texture + weights-UBO binding and the @builtin(vertex_index) plumbing.",
         "tags": ["nme", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 65,
@@ -795,7 +797,8 @@
         "maxRawKB": 75,
         "description": "Node Material quads covering MeshAttributeExistsBlock, ClipPlanesBlock, and ReflectionTextureBaseBlock compatibility with per-mesh UV/color/tangent branch selection and scene clip-plane discard.",
         "tags": ["nme", "scene-state", "mesh-attributes", "clip-plane"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 87,

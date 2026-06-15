@@ -220,6 +220,7 @@ export class WebGPUEngine {
             await scene._awaitPendingTextures();
             scene._bakeGroundUvs();
             scene._flushPendingAdds();
+            scene._buildMorphTargets();
             await scene._loadPendingEnvironment();
             if (scene._hasShadows()) {
                 await registerSceneWithShadowSupport(scene._lite);
