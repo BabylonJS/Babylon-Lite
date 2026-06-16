@@ -49,6 +49,10 @@ export interface ShaderMaterialOptions {
     readonly backFaceCulling?: boolean;
     readonly depthWrite?: boolean;
     readonly depthCompare?: GPUCompareFunction;
+    /** Compile/run the fragment stage even for depth-only render targets (no colour attachments).
+     *  Use for depth-only casters that need `discard` (alpha/clip masks). The fragment shader must not
+     *  declare colour outputs when drawn into a depth-only target. Default false. */
+    readonly depthOnlyFragment?: boolean;
     /** Constant depth-bias added in the pipeline's depth-stencil state (units of the depth format's minimum
      *  representable value). Lets a surface that hugs another (e.g. tiles overlapping a cone, decals) win the
      *  depth test consistently and avoid z-fighting. Default 0 (no bias). */
@@ -112,6 +116,7 @@ export interface ShaderMaterial extends Material {
     readonly backFaceCulling: boolean;
     readonly depthWrite: boolean;
     readonly depthCompare: GPUCompareFunction;
+    readonly depthOnlyFragment: boolean;
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
     /** @internal */
@@ -252,6 +257,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         backFaceCulling: options.backFaceCulling ?? true,
         depthWrite: options.depthWrite ?? true,
         depthCompare: options.depthCompare ?? "greater-equal",
+        depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
         _buildGroup: shaderGroupBuilder as MeshGroupBuilder,

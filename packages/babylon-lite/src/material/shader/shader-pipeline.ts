@@ -80,7 +80,8 @@ export function getOrCreateShaderPipeline(
     const device = engine._device;
     const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
-    const fragModule = sig._colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
+    const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
+    const fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
         ? {
               format: sig._colorFormat,
@@ -105,7 +106,7 @@ export function getOrCreateShaderPipeline(
         label: `${material.name ?? "shader"}-pipeline`,
         layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), bindings.group1BGL] }),
         vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
-        ...(fragModule && colorTarget ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: [colorTarget] } } : {}),
+        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: colorTarget ? [colorTarget] : [] } } : {}),
         ...(sig._depthStencilFormat
             ? {
                   depthStencil: {
