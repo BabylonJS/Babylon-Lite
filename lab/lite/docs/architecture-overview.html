@@ -17,7 +17,7 @@
                         </div>
                         <div class="arch-mod arch-mod-cam">
                             <div class="arch-mod-name">Camera</div>
-                            <div class="arch-mod-sub">ArcRotate · Free · orbit / zoom / pan · inertia · IWorldMatrixProvider · parentable</div>
+                            <div class="arch-mod-sub">ArcRotate · Free · Geospatial · orbit / zoom / pan · inertia · IWorldMatrixProvider · parentable</div>
                         </div>
                         <div class="arch-mod arch-mod-light">
                             <div class="arch-mod-name">Lights</div>
@@ -28,7 +28,7 @@
                         <div class="arch-mod arch-mod-mat">
                             <div class="arch-mod-name">Materials</div>
                             <div class="arch-mod-sub">
-                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · Standard Blinn-Phong · NodeMaterial · ShaderMaterial · background/ground
+                                PBR metallic-roughness · spec-gloss · clearcoat · sheen · anisotropy · subsurface · iridescence · Standard Blinn-Phong · NodeMaterial · ShaderMaterial · GridMaterial · MaterialPlugins · background/ground
                             </div>
                         </div>
                         <div class="arch-mod arch-mod-mesh">
@@ -46,13 +46,13 @@
                         </div>
                         <div class="arch-mod arch-mod-anim">
                             <div class="arch-mod-name">Animation</div>
-                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights · blending · cross-fade · additive clips</div>
+                            <div class="arch-mod-sub">Groups · play/pause/seek/loop · linear/step/cubic spline · morph weights · blending · cross-fade · additive clips · baked VAT</div>
                         </div>
                     </div>
                     <div class="arch-modules">
                         <div class="arch-mod arch-mod-shadow">
                             <div class="arch-mod-name">Shadows</div>
-                            <div class="arch-mod-sub">ESM directional · PCF spot · depth pass · Gaussian blur · configurable bias/darkness</div>
+                            <div class="arch-mod-sub">ESM directional · PCF directional/spot · cascaded (CSM, 4-split) · depth pass · Gaussian blur · configurable bias/darkness</div>
                         </div>
                         <div class="arch-mod arch-mod-tex">
                             <div class="arch-mod-name">Textures</div>
@@ -91,6 +91,32 @@
                         <div class="arch-mod arch-mod-core">
                             <div class="arch-mod-name">Navigation</div>
                             <div class="arch-mod-sub">Recast V2 navmesh · crowd agents · obstacles · off-mesh links · raycast</div>
+                        </div>
+                    </div>
+                    <div class="arch-modules">
+                        <div class="arch-mod arch-mod-core">
+                            <div class="arch-mod-name">Physics</div>
+                            <div class="arch-mod-sub">Havok V2 · rigid bodies · constraints · triggers · multi-region floating origin</div>
+                        </div>
+                        <div class="arch-mod arch-mod-mesh">
+                            <div class="arch-mod-name">Sprites</div>
+                            <div class="arch-mod-sub">2D sprites · facing billboards · SpriteManager · custom shaders · blend modes</div>
+                        </div>
+                        <div class="arch-mod arch-mod-render">
+                            <div class="arch-mod-name">Post-Process</div>
+                            <div class="arch-mod-sub">Bloom · depth-of-field · circle-of-confusion · geometry renderer · pipelined passes</div>
+                        </div>
+                        <div class="arch-mod arch-mod-cam">
+                            <div class="arch-mod-name">Gizmos</div>
+                            <div class="arch-mod-sub">Position/rotation/scale · bounding-box · camera/light · utility layer · pointer drag</div>
+                        </div>
+                        <div class="arch-mod arch-mod-mat">
+                            <div class="arch-mod-name">Text</div>
+                            <div class="arch-mod-sub">GPU text renderer · layered layout · editor</div>
+                        </div>
+                        <div class="arch-mod arch-mod-math">
+                            <div class="arch-mod-name">Large World</div>
+                            <div class="arch-mod-sub">Floating origin · high-precision matrices · camera-relative rendering</div>
                         </div>
                     </div>
                 </div>

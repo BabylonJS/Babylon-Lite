@@ -243,9 +243,9 @@
                         </tr>
                         <tr>
                             <td>Material Plugins</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>✅</td>
+                            <td>Opt-in enableMaterialPlugins() — custom WGSL injection on PBR/Standard, zero bundle cost when unused (Scene 217)</td>
                         </tr>
                         <tr>
                             <td>PBR Clear Coat</td>
@@ -282,6 +282,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Native PBR thin-film iridescence (Scene 177); NME iridescence remains covered separately by Scene 87</td>
+                        </tr>
+                        <tr>
+                            <td>Grid Material</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Procedural GridMaterial parity with @babylonjs/materials (Scene 213)</td>
                         </tr>
 
                         <!-- Lights -->
@@ -358,6 +364,12 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Scene 18, 24, 25 — WASD/arrow controls</td>
+                        </tr>
+                        <tr>
+                            <td>Geospatial Camera</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Globe-orbit camera (center/yaw/pitch/radius) with fly-to + controls (Scene 225)</td>
                         </tr>
                         <tr>
                             <td>Follow Camera</td>
@@ -561,6 +573,12 @@
                             <td>✅</td>
                             <td>AnimationGroup weight control through AnimationManager</td>
                         </tr>
+                        <tr>
+                            <td>Vertex Animation Textures (VAT)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Baked skeletal animation played on the GPU, incl. per-instance thin-instanced VAT (Scenes 218-219)</td>
+                        </tr>
 
                         <!-- Environment & IBL -->
                         <tr class="feat-cat">
@@ -675,9 +693,9 @@
                         </tr>
                         <tr>
                             <td>Cascaded Shadow Maps</td>
-                            <td>—</td>
                             <td>✅</td>
-                            <td></td>
+                            <td>✅</td>
+                            <td>Directional CSM, up to 4 cascades, PCF5, Standard + PBR receivers (Scenes 214-215)</td>
                         </tr>
                         <tr>
                             <td>Point Light Shadows</td>
@@ -1160,6 +1178,18 @@
                             <td>✅</td>
                             <td>Full GPU resource cleanup on dispose</td>
                         </tr>
+                        <tr>
+                            <td>GPU Frame Timer</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Optional zero-cost GPU frame profiling via WebGPU timestamp queries (setGpuTimingEnabled)</td>
+                        </tr>
+                        <tr>
+                            <td>Multi-Canvas / Multi-Scene</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>One engine drives many canvases/scenes via createSurface; GPU resources are device-scoped (Scenes 227-228)</td>
+                        </tr>
 
                         <!-- Advanced Features (BJS only) -->
                         <tr class="feat-cat">
@@ -1296,6 +1326,30 @@
                             <td>✅</td>
                             <td>✅</td>
                             <td>Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)</td>
+                        </tr>
+                        <tr>
+                            <td>Text Rendering</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>GPU text renderer with layered layout + editor (Scenes 180-181)</td>
+                        </tr>
+                        <tr>
+                            <td>Gizmos</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Position / rotation / scale, bounding-box, camera + light gizmos on a utility layer (Scenes 221-224)</td>
+                        </tr>
+                        <tr>
+                            <td>Geometry Buffer Renderer</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Frame-graph geometry renderer producing normal / depth / position textures; feeds DoF + CoC (Scenes 145-149)</td>
+                        </tr>
+                        <tr>
+                            <td>Large World Rendering (Floating Origin)</td>
+                            <td>✅</td>
+                            <td>✅</td>
+                            <td>Camera-relative rendering + multi-region physics for huge world coordinates (Scenes 200-209)</td>
                         </tr>
                         <tr>
                             <td>Scene Optimizer</td>
