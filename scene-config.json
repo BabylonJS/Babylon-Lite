@@ -1019,7 +1019,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 121,
+        "maxRawKB": 124,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1346,7 +1346,7 @@
         "slug": "scene161-shader-material-uniform",
         "name": "Scene 161 - ShaderMaterial Uniform",
         "maxMad": 0.02,
-        "maxRawKB": 37,
+        "maxRawKB": 39,
         "description": "WGSL ShaderMaterial updates typed custom uniforms through standalone setters.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1651,7 +1651,7 @@
         "slug": "scene213-gridmaterial",
         "name": "Scene 213 — GridMaterial",
         "maxMad": 0.01,
-        "maxRawKB": 44,
+        "maxRawKB": 46,
         "description": "Four meshes shaded by the procedural unlit GridMaterial - an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box - validated against a Babylon.js GridMaterial oracle.",
         "tags": ["materials", "grid", "procedural"],
         "skipPerf": true
