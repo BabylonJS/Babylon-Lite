@@ -275,7 +275,6 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         boundMax,
         skeleton: null,
         morphTargets: null,
-        _materialDirty: false,
         _gpu: gpu,
     } as unknown as Mesh;
     initMeshTransform(mesh);
