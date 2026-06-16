@@ -69,6 +69,15 @@ export interface MeshGPU {
     readonly _vbKey?: string;
 }
 
+/** Optional GPU-picking discard volume. The picker clips fragments in a bounded local frame:
+ *  `a=(origin.x, origin.z, tangent.x, tangent.z)`, `b=(baseY, halfWidth, springY, rise)`,
+ *  `c=(ringT, depthHalf, flatFlag, _)`. */
+export interface PickingClipVolume {
+    readonly a: readonly [number, number, number, number];
+    readonly b: readonly [number, number, number, number];
+    readonly c: readonly [number, number, number, number];
+}
+
 // ─── Mesh ────────────────────────────────────────────────────────────
 
 /** A renderable mesh — plain data with transform, material, and GPU geometry.
@@ -103,6 +112,8 @@ export interface Mesh extends SceneNode {
     /** When `false`, the GPU picker skips this mesh.  Defaults to `true`
      *  (undefined behaves as pickable).  Mirrors BJS `AbstractMesh.isPickable`. */
     pickable?: boolean;
+    /** Optional per-mesh GPU-picking clip volumes. Fragments inside any volume are ignored by the GPU picker. */
+    pickingClipVolumes?: readonly PickingClipVolume[] | null;
     // name, children, position, rotation, rotationQuaternion, scaling,
     // parent, worldMatrix, worldMatrixVersion — all inherited from SceneNode
 

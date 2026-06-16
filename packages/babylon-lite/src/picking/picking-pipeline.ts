@@ -39,7 +39,13 @@ export function getPickingSceneBGL(engine: EngineContext): GPUBindGroupLayout {
 export function getPickingMeshBGL(engine: EngineContext): GPUBindGroupLayout {
     invalidateIfNeeded(engine);
     if (!_meshBGL) {
-        _meshBGL = createSingleUniformBGL(engine, "picking-mesh-bgl", SS.VERTEX | SS.FRAGMENT);
+        _meshBGL = engine._device.createBindGroupLayout({
+            label: "picking-mesh-bgl",
+            entries: [
+                { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: SS.FRAGMENT, buffer: { type: "read-only-storage" } },
+            ],
+        });
     }
     return _meshBGL;
 }
@@ -60,6 +66,11 @@ export function getPickingTIMeshBGL(engine: EngineContext): GPUBindGroupLayout {
                 {
                     binding: 1,
                     visibility: SS.VERTEX,
+                    buffer: { type: "read-only-storage" },
+                },
+                {
+                    binding: 2,
+                    visibility: SS.FRAGMENT,
                     buffer: { type: "read-only-storage" },
                 },
             ],

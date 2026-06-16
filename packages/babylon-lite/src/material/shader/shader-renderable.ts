@@ -29,6 +29,8 @@ export interface ShaderPacket {
     _lastResourceVersion: number;
     /** @internal */
     _boundTextures: Texture2D[];
+    /** @internal */
+    _boundStorageBuffers: GPUBuffer[];
     /** @internal Set when the owning mesh is removed and this packet's GPU resources are
      *  destroyed. A combined (multi-mesh) renderable keeps every packet in its
      *  closure, so update()/draw() must skip disposed packets to avoid writing to
@@ -131,6 +133,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
         _bindGroup: createShaderBindGroup(engine, material, systemUBO),
         _lastResourceVersion: material._resourceVersion,
         _boundTextures: collectShaderTextures(material),
+        _boundStorageBuffers: collectShaderStorageBuffers(material),
     };
     for (const tex of packet._boundTextures) {
         acquireTexture(tex);
@@ -237,6 +240,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         }
         packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
         packet._boundTextures = collectShaderTextures(material);
+        packet._boundStorageBuffers = collectShaderStorageBuffers(material);
         for (const tex of packet._boundTextures) {
             acquireTexture(tex);
         }
@@ -323,6 +327,14 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
         }
         entries.push({ binding: nextBinding++, resource: tex.view }, { binding: nextBinding++, resource: tex.sampler });
     }
+    for (const storage of material.storageBufferDecls) {
+        const slot = material._storageBufferSlots.get(storage.name);
+        const buffer = slot?.current;
+        if (!buffer) {
+            throw new Error(`ShaderMaterial: storage buffer "${storage.name}" has no GPUBuffer. Call setShaderStorageBuffer() before rendering.`);
+        }
+        entries.push({ binding: nextBinding++, resource: { buffer } });
+    }
     return engine._device.createBindGroup({ label: "shader-material-bg", layout: bindings.group1BGL, entries });
 }
 
@@ -334,6 +346,16 @@ function collectShaderTextures(material: ShaderMaterial): Texture2D[] {
         }
     }
     return textures;
+}
+
+function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
+    const buffers: GPUBuffer[] = [];
+    for (const slot of material._storageBufferSlots.values()) {
+        if (slot.current) {
+            buffers.push(slot.current);
+        }
+    }
+    return buffers;
 }
 
 function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket): void {
@@ -352,6 +374,7 @@ function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: Sh
             releaseTexture(tex);
         }
         packet._boundTextures = [];
+        packet._boundStorageBuffers = [];
     });
     scene._meshDisposables.set(mesh, list);
 }

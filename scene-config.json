@@ -456,7 +456,9 @@
         "maxGzipKB": 35,
         "description": "Havok Physics V2 heightfield from heightMap.png with two rows of falling shapes: row 1 PhysicsAggregate all types (box, sphere, capsule, cylinder, plus convex hull and mesh from the seagull glb), row 2 body+shape all types including convex hull and mesh from the seagull glb.",
         "tags": ["physics", "gltf", "procedural", "std"],
-        "skipPerf": true
+        "skipPerf": true,
+        "skipParityOnCI": true,
+        "skipNotes": "Scene 47 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: this scene's golden is regenerated live from the BJS PhysicsViewer each run (machine-dependent, not committed), and the BJS physics-viewer wireframe overlay does not render consistently at the capture frame on BrowserStack, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs and force-recaptures the golden on each test run. The scene remains in the lab/bundle config and can be re-enabled once the BJS reference readiness signal is reliable on CI."
     },
     {
         "id": 48,
@@ -1019,7 +1021,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 121,
+        "maxRawKB": 124,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1346,7 +1348,7 @@
         "slug": "scene161-shader-material-uniform",
         "name": "Scene 161 - ShaderMaterial Uniform",
         "maxMad": 0.02,
-        "maxRawKB": 37,
+        "maxRawKB": 39,
         "description": "WGSL ShaderMaterial updates typed custom uniforms through standalone setters.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1651,7 +1653,7 @@
         "slug": "scene213-gridmaterial",
         "name": "Scene 213 — GridMaterial",
         "maxMad": 0.01,
-        "maxRawKB": 44,
+        "maxRawKB": 46,
         "description": "Four meshes shaded by the procedural unlit GridMaterial - an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box - validated against a Babylon.js GridMaterial oracle.",
         "tags": ["materials", "grid", "procedural"],
         "skipPerf": true

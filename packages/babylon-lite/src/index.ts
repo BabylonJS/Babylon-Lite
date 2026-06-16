@@ -192,7 +192,15 @@ export { setKtx2DecoderUrl } from "./texture/ktx2-loader.js";
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
-export { createShaderMaterial, setShaderUniform, setShaderTexture, setShaderFloat, setShaderVector3, setShaderMatrix } from "./material/shader/shader-material.js";
+export {
+    createShaderMaterial,
+    setShaderUniform,
+    setShaderTexture,
+    setShaderStorageBuffer,
+    setShaderFloat,
+    setShaderVector3,
+    setShaderMatrix,
+} from "./material/shader/shader-material.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
