@@ -4,6 +4,8 @@ import { _setHpmAllocator } from "../math/_matrix-allocator.js";
 import type { SurfaceContext, SurfaceOptions } from "./surface.js";
 import { _buildSurface, _refreshScRT, isDomCanvas, resizeSurface, setSurfaceSize } from "./surface.js";
 import type { GpuFrameTimer } from "./gpu-timer.js";
+import type { GpuTaskTimer } from "./gpu-task-timer.js";
+import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 
 /** Babylon Lite version string. */
 export const VERSION = "0.1.0";
@@ -73,6 +75,18 @@ export interface EngineContext extends SurfaceContext {
     /** @internal Latest desired on/off state requested via {@link setGpuTimingEnabled}, used to apply the
      *  correct state if timing is toggled while the timer module is still being dynamic-imported. */
     _gpuTimerWanted?: boolean;
+    /** @internal Lazily-created task GPU timer resources, owned by the optional profiler module. */
+    _gpuTaskTimer?: GpuTaskTimer | null;
+    /** @internal Latest desired on/off state for task GPU profiling while its dynamic import is pending. */
+    _gpuTaskTimerWanted?: boolean;
+    /** @internal Incremented on each task-profiler enable/disable so stale async readbacks cannot publish after a later toggle. */
+    _gpuTaskTimerEpoch?: number;
+    /** @internal Last public task-timing snapshot published by the optional profiler. */
+    _gpuTaskTimingResult?: RenderTaskGpuTimings;
+    /** @internal Restores frame graphs wrapped by the optional task GPU profiler. */
+    _gpuTaskTimerDisable?: () => void;
+    /** @internal Optional task-profiler resolver chained through `_gpuTimerResolve` after the frame command buffer is submitted. */
+    _gpuTaskTimerResolve?: () => void;
 
     /**
      * When true, world matrices are computed using Float64 intermediate precision
@@ -537,12 +551,13 @@ export function isGpuTimingSupported(engine: EngineContext): boolean {
 export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void {
     if (!enabled) {
         // Clear the hooks (renderFrame's optional-chains go back to no-ops) but keep `_gpuTimer` so its
-        // GPU resources are reused if timing is re-enabled later.
+        // GPU resources are reused if timing is re-enabled later. Preserve the task-profiler resolve hook
+        // when per-task timing is enabled independently.
         engine._gpuTimerWanted = false;
         engine.gpuFrameTimeMs = 0;
         engine._gpuTimerBegin = undefined;
         engine._gpuTimerEnd = undefined;
-        engine._gpuTimerResolve = undefined;
+        engine._gpuTimerResolve = engine._gpuTaskTimerResolve;
         return;
     }
     if (!isGpuTimingSupported(engine)) {
@@ -563,6 +578,7 @@ export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): vo
             engine._gpuTimerResolve = () => {
                 gpuFrameTimerResolve(timer);
                 engine.gpuFrameTimeMs = timer.lastMs;
+                engine._gpuTaskTimerResolve?.();
             };
         }
     });
