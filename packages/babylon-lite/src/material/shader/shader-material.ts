@@ -18,6 +18,8 @@ export type ShaderUniformOption = ShaderSystemUniformName | ShaderUniformDecl;
 export type ShaderUniformValue = number | readonly number[] | Float32Array;
 /** A sampler entry: either a bare sampler name or an explicit declaration. */
 export type ShaderSamplerOption = string | ShaderSamplerDecl;
+/** A storage-buffer entry: a read-only WGSL storage binding declaration. */
+export type ShaderStorageBufferOption = ShaderStorageBufferDecl;
 /** Value of a WGSL preprocessor define — boolean toggle or numeric constant. */
 export type ShaderDefineValue = boolean | number;
 /** Map of WGSL preprocessor define names to their values. */
@@ -32,6 +34,7 @@ export interface ShaderMaterialOptions {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniforms?: readonly ShaderUniformOption[];
     readonly samplers?: readonly ShaderSamplerOption[];
+    readonly storageBuffers?: readonly ShaderStorageBufferOption[];
     readonly defines?: ShaderDefineMap;
     readonly needAlphaBlending?: boolean;
     /** Blend equation used when `needAlphaBlending` is set. "alpha" (default) is
@@ -81,6 +84,12 @@ export interface ShaderSamplerDecl {
     readonly comparison?: boolean;
 }
 
+/** A storage buffer declaration. `type` is the WGSL variable type, e.g. `array<vec4<f32>>`. */
+export interface ShaderStorageBufferDecl {
+    readonly name: string;
+    readonly type: string;
+}
+
 /** A resolved WGSL preprocessor define (name + value). */
 export interface ShaderDefine {
     readonly name: string;
@@ -97,6 +106,11 @@ export interface ShaderTextureSlot {
     current: Texture2D | null;
 }
 
+export interface ShaderStorageBufferSlot {
+    readonly decl: ShaderStorageBufferDecl;
+    current: GPUBuffer | null;
+}
+
 /** A custom WGSL material: compiled from user-supplied vertex/fragment sources
  *  with declared attributes, uniforms, samplers, and defines. Update its values
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
@@ -107,6 +121,7 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
+    readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
@@ -123,6 +138,8 @@ export interface ShaderMaterial extends Material {
     _uniformValues: Map<string, ShaderUniformSlot>;
     /** @internal */
     _textureSlots: Map<string, ShaderTextureSlot>;
+    /** @internal */
+    _storageBufferSlots: Map<string, ShaderStorageBufferSlot>;
     /** @internal */
     _uniformVersion: number;
     /** @internal */
@@ -227,6 +244,15 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         textureSlots.set(decl.name, { decl, current: null });
     }
 
+    const storageBufferDecls: ShaderStorageBufferDecl[] = [];
+    const storageBufferSlots = new Map<string, ShaderStorageBufferSlot>();
+    for (const opt of options.storageBuffers ?? []) {
+        assertIdentifier("storage buffer", opt.name);
+        assertUniqueName(usedNames, "storage buffer", opt.name);
+        storageBufferDecls.push(opt);
+        storageBufferSlots.set(opt.name, { decl: opt, current: null });
+    }
+
     const defines: ShaderDefine[] = [];
     for (const [name, value] of Object.entries(options.defines ?? {})) {
         assertIdentifier("define", name);
@@ -249,6 +275,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         attributes,
         uniformDecls,
         samplerDecls,
+        storageBufferDecls,
         defines,
         needAlphaBlending: options.needAlphaBlending ?? false,
         blendMode: options.blendMode ?? "alpha",
@@ -264,6 +291,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         _uboVersion: 0,
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,
+        _storageBufferSlots: storageBufferSlots,
         _uniformVersion: 0,
         _resourceVersion: 0,
     };
@@ -365,6 +393,16 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         }
     }
     slot.current = texture;
+    material._resourceVersion++;
+}
+
+/** Bind (or clear) a declared read-only storage buffer. */
+export function setShaderStorageBuffer(material: ShaderMaterial, name: string, buffer: GPUBuffer | null): void {
+    const slot = material._storageBufferSlots.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: storage buffer "${name}" was not declared.`);
+    }
+    slot.current = buffer;
     material._resourceVersion++;
 }
 
