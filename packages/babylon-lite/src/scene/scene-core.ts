@@ -5,6 +5,7 @@ import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
+import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap } from "./mesh-scene-registry.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
@@ -133,43 +134,6 @@ export interface SceneContext extends RenderingContext {
 /** Options passed to the scene-context factory. */
 export interface SceneContextOptions {
     defaultRenderTask?: boolean;
-}
-
-/** Queue a mesh for renderable (re)build on the next frame's material-swap drain.
- *  Shared by the material setter (runtime material change) and addToScene (runtime
- *  mesh add). Lazily loads the swap processor so scenes that never mutate at runtime
- *  don't pull it into their bundle. */
-function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
-    const mi = mesh as Mesh;
-    if (mi._materialDirty) {
-        return;
-    }
-    mi._materialDirty = true;
-    scene._materialSwapQueue.push(mesh);
-    if (!scene._processSwaps) {
-        void import("./scene-material-swap.js").then((m) => {
-            scene._processSwaps = m.processMaterialSwaps;
-        });
-    }
-}
-
-/** Install a property setter on mesh.material that sets _materialDirty
- *  and pushes the mesh into the scene's swap queue for processing. */
-function installMaterialSetter(scene: SceneContext, mesh: Mesh): void {
-    let _mat = mesh.material;
-    Object.defineProperty(mesh, "material", {
-        get() {
-            return _mat;
-        },
-        set(v) {
-            if (v !== _mat) {
-                _mat = v;
-                enqueueMaterialSwap(scene, mesh);
-            }
-        },
-        configurable: true,
-        enumerable: true,
-    });
 }
 
 /** Create an empty scene context bound to the given `surface`. The default render task
@@ -344,7 +308,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     if ("_gpu" in entity && "material" in entity) {
         const mesh = entity as unknown as Mesh;
         ctx.meshes.push(mesh);
-        installMaterialSetter(ctx, mesh);
+        registerMeshScene(ctx, mesh);
         const build = mesh.material ? (mesh.material as unknown as { _buildGroup?: MeshGroupBuilder })._buildGroup : undefined;
         if (build) {
             let group = ctx._groups.get(build);
@@ -394,7 +358,10 @@ export function disposeScene(scene: SceneContext): void {
     }
     ctx._meshDisposables.clear();
     for (const mesh of ctx.meshes) {
-        disposeMeshGpu(mesh);
+        // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
+        if (unregisterMeshScene(ctx, mesh)) {
+            disposeMeshGpu(mesh);
+        }
     }
     ctx.meshes.length = 0;
     ctx._renderables.length = 0;
@@ -418,9 +385,6 @@ export async function buildScene(scene: SceneContext): Promise<void> {
         const builders = [...ctx._deferredBuilders];
         ctx._deferredBuilders = [];
         await Promise.all(builders.map(async (b) => b()));
-    }
-    for (const mesh of ctx._materialSwapQueue) {
-        (mesh as Mesh)._materialDirty = false;
     }
     ctx._materialSwapQueue.length = 0;
     ctx._renderableVersion++;

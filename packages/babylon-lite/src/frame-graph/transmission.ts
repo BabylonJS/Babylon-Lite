@@ -73,6 +73,14 @@ export interface TransmissionOptions {
      *  stack) and just need the opaque scene color exposed to a custom transmissive
      *  `ShaderMaterial`. */
     linear?: boolean;
+    /** Override how many times the scene-colour grab is refreshed per frame. `0` means before every
+     *  transmissive draw; the default is once before the first transmissive draw. */
+    copyCount?: number;
+    /** Set false when the transmissive material never samples the scene-colour grab above mip 0. */
+    generateMipmaps?: boolean;
+    /** Cap the scene-colour grab mip chain. Use this when the material samples explicit low LODs only, so
+     *  unused tiny mips are not regenerated every frame. Ignored when `generateMipmaps` is false. */
+    mipLevelCount?: number;
 }
 
 /** Handle to a render task's scene-color grab, returned by `enableRenderTaskTransmission`. */
@@ -86,6 +94,7 @@ export interface SceneColorGrab {
 
 export function enableRenderTaskTransmission(task: RenderTask, engine: EngineContext, options?: TransmissionOptions): SceneColorGrab {
     const linear = options?.linear !== false;
+    applyTransmissionOptions(task, options);
     const grab: SceneColorGrab = {
         get texture(): Texture2D | null {
             return (task._targetSignature as { _transmissionTexture?: Texture2D })._transmissionTexture ?? null;
@@ -231,12 +240,13 @@ function createRenderTaskTransmission(task: RenderTask, engine: EngineContext): 
     const width = 1024;
     const height = 1024;
     const format: GPUTextureFormat = "rgba16float";
-    const generateMipmaps = shouldGenerateMipmaps(task._config.transmission);
+    const mipLevelCount = transmissionMipLevelCount(task._config.transmission, width, height);
+    const generateMipmaps = mipLevelCount > 1;
     const texture = engine._device.createTexture({
         label: task.name,
         size: { width, height },
         format,
-        mipLevelCount: generateMipmaps ? biasedMipLevelCount(width, height, REFRACTION_LOD_BIAS) : 1,
+        mipLevelCount,
         usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_DST,
     });
     const tex: Texture2D = {
@@ -502,6 +512,36 @@ function normalizeCopyCount(cfg: RenderTask["_config"]["transmission"]): number 
     return count === Infinity ? 0 : Math.max(0, count | 0);
 }
 
-function shouldGenerateMipmaps(cfg: RenderTask["_config"]["transmission"]): boolean {
-    return cfg?.generateMipmaps !== false;
+function applyTransmissionOptions(task: RenderTask, options: TransmissionOptions | undefined): void {
+    if (!options) {
+        return;
+    }
+    let next = task._config.transmission;
+    let changed = false;
+    const set = <K extends keyof NonNullable<RenderTask["_config"]["transmission"]>>(key: K, value: NonNullable<RenderTask["_config"]["transmission"]>[K] | undefined): void => {
+        if (value === undefined) {
+            return;
+        }
+        next = { ...next, [key]: value };
+        changed = true;
+    };
+    set("copyCount", options.copyCount);
+    set("generateMipmaps", options.generateMipmaps);
+    set("mipLevelCount", options.mipLevelCount);
+    if (changed) {
+        task._config.transmission = next;
+    }
+}
+
+function transmissionMipLevelCount(cfg: RenderTask["_config"]["transmission"], width: number, height: number): number {
+    if (cfg?.generateMipmaps === false) {
+        return 1;
+    }
+    const full = Math.floor(Math.log2(Math.max(width, height))) + 1;
+    const defaultCount = biasedMipLevelCount(width, height, REFRACTION_LOD_BIAS);
+    const requested = cfg?.mipLevelCount;
+    if (requested === undefined) {
+        return Math.min(full, defaultCount);
+    }
+    return Math.min(full, Math.max(1, requested | 0));
 }

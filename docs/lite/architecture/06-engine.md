@@ -22,7 +22,18 @@ export interface EngineContext {
 
   /** GPU draw calls executed in the last rendered frame. */
   drawCallCount: number;
+
+  /** GPU time spent on the last measured frame, in milliseconds. 0 until the first measured frame and
+   *  while GPU timing is disabled (the default). Enable with `setGpuTimingEnabled`. */
+  gpuFrameTimeMs: number;
 }
+
+/** Whether GPU frame-time measurement is available on this engine's device (the adapter offered the
+ *  WebGPU `timestamp-query` feature). When false, `setGpuTimingEnabled` is a no-op. */
+export function isGpuTimingSupported(engine: EngineContext): boolean;
+/** Enable or disable per-frame GPU timing (disabled by default). While on, `engine.gpuFrameTimeMs`
+ *  updates each frame. Opt-in and zero-cost when unused — see *GPU Frame Timing* below. */
+export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void;
 
 /** Start the render loop for all registered rendering contexts. Resolves after the first frame renders. */
 export function startEngine(engine: EngineContext): Promise<void>;
@@ -148,6 +159,20 @@ When `registerScene(scene)` is called, the scene runs its deferred builders, bui
 
 Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` through render-target helpers, not by the engine render loop itself.
 
+### GPU Frame Timing (optional, zero-cost when unused)
+
+`setGpuTimingEnabled(engine, true)` measures how long the **GPU** spends on each frame (distinct from CPU/wall-clock time), publishing a lightly-smoothed value to `engine.gpuFrameTimeMs` (milliseconds). It's a developer/HUD profiling aid, disabled by default.
+
+The feature is implemented so that scenes which never enable it pay **zero** for it — the heavy timer code (`src/engine/gpu-timer.ts`) is reachable only through a dynamic `import()` inside `setGpuTimingEnabled`, which is itself tree-shaken away when unused. `renderFrame` carries only three optional-chain short-circuits (no-ops while timing is off). The only always-bundled cost is requesting the `timestamp-query` device feature opportunistically in `createEngine` (free at runtime) and a one-field initializer — a handful of bytes that round to zero in bundle-size measurements (e.g. scene1/BoomBox shows no measurable delta).
+
+How it works when enabled:
+
+1. `createEngine` opportunistically requests the `timestamp-query` feature whenever the adapter offers it (alongside the texture-compression features), so timing can be turned on later. `isGpuTimingSupported(engine)` reports whether it was available.
+2. The first `setGpuTimingEnabled(engine, true)` dynamic-imports `gpu-timer.ts`, lazily creates a `GpuFrameTimer` (a 2-slot `timestamp` query set + a recycled MAP_READ readback buffer), and installs three per-frame hooks on the engine (`_gpuTimerBegin` / `_gpuTimerEnd` / `_gpuTimerResolve`).
+3. `renderFrame` writes the opening timestamp into the frame's command encoder right after creating it and the closing timestamp right before finishing it — so both are commands **inside the frame's command buffer**, and the GPU runs them contiguously around exactly that frame's passes. This measures the frame's **GPU work**, independent of how long the CPU took to record it. After the frame is submitted, `_gpuTimerResolve` issues a tiny separate `resolveQuerySet` + buffer copy and maps the result asynchronously, off the render critical path, so the readout (lightly smoothed) lags a frame or two but never stalls the frame.
+
+Disabling clears the three hooks (renderFrame's optional-chains become no-ops again) and resets `gpuFrameTimeMs` to 0; the timer's GPU resources are kept and reused if it is re-enabled.
+
 ## State Machine / Lifecycle
 
 ```
@@ -201,3 +226,4 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 | File                   | Size       | Purpose                                               |
 | ---------------------- | ---------- | ----------------------------------------------------- |
 | `src/engine/engine.ts` | ~150 lines | Engine interface, creation, render loop, MSAA targets |
+| `src/engine/gpu-timer.ts` | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |

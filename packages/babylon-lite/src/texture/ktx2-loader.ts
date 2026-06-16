@@ -49,7 +49,21 @@ interface Ktx2DecoderModule {
     WASMMemoryManager: { LoadBinariesFromCurrentThread: boolean };
 }
 
-const KTX2_DECODER_URL = "https://cdn.babylonjs.com/babylon.ktx2Decoder.js";
+// Public URL of the KTX2/Basis decoder script (default: the Babylon CDN). Override via
+// `setKtx2DecoderUrl()` to self-host the decoder (e.g. to avoid the cross-origin CDN dependency).
+let _ktx2DecoderUrl = "https://cdn.babylonjs.com/babylon.ktx2Decoder.js";
+// Optional overrides for the WASM/JS modules the decoder pulls after it loads (keyed by the property
+// name on the matching KTX2DECODER transcoder, e.g. MSCTranscoder→{JSModuleURL,WASMModuleURL},
+// ZSTDDecoder→{WASMModuleURL}, LiteTranscoder_*→{WASMModuleURL}). Needed to FULLY self-host — the
+// decoder otherwise fetches these from the CDN regardless of the script URL above.
+let _ktx2WasmUrls: Record<string, Record<string, string>> | null = null;
+
+/** Override the URL of the KTX2/Basis decoder script (and, optionally, the URLs of the WASM/JS transcoder
+ *  modules it pulls). Call before the first KHR_texture_basisu texture loads. */
+export function setKtx2DecoderUrl(url: string, wasmUrls?: Record<string, Record<string, string>>): void {
+    _ktx2DecoderUrl = url;
+    _ktx2WasmUrls = wasmUrls ?? null;
+}
 let _ktx2DecoderPromise: Promise<Ktx2Decoder> | null = null;
 
 const GL_RGBA8 = 0x8058;
@@ -71,6 +85,20 @@ function loadKtx2Decoder(): Promise<Ktx2Decoder> {
             }
             mod.MSCTranscoder.UseFromWorkerThread = false;
             mod.WASMMemoryManager.LoadBinariesFromCurrentThread = true;
+            // Redirect the decoder's WASM/JS module fetches to self-hosted copies, if configured. Each key
+            // names a transcoder on the module (MSCTranscoder, ZSTDDecoder, LiteTranscoder_*); set props
+            // that exist (JSModuleURL/WASMModuleURL) and ignore the rest, so it survives decoder updates.
+            if (_ktx2WasmUrls) {
+                const m = mod as unknown as Record<string, Record<string, string> | undefined>;
+                for (const tName of Object.keys(_ktx2WasmUrls)) {
+                    const t = m[tName];
+                    if (t) {
+                        for (const prop of Object.keys(_ktx2WasmUrls[tName]!)) {
+                            t[prop] = _ktx2WasmUrls[tName]![prop]!;
+                        }
+                    }
+                }
+            }
             resolve(new mod.KTX2Decoder());
         };
         if (w.KTX2DECODER) {
@@ -78,7 +106,7 @@ function loadKtx2Decoder(): Promise<Ktx2Decoder> {
             return;
         }
         const script = document.createElement("script");
-        script.src = KTX2_DECODER_URL;
+        script.src = _ktx2DecoderUrl;
         script.async = true;
         script.onload = init;
         script.onerror = (): void => reject(new Error(`KTX2: failed to load ${script.src}`));

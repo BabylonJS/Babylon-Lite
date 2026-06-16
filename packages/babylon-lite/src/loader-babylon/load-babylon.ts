@@ -418,7 +418,6 @@ export async function loadBabylon(engine: EngineContext, url: string, opts: Load
                         id: md.id,
                         material: mat,
                         receiveShadows: false,
-                        _materialDirty: false,
                         _gpu: gpu,
                     } as unknown as Mesh;
 
