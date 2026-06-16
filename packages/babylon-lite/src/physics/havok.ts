@@ -99,6 +99,13 @@ export interface PhysicsAggregateOptions {
     center?: Vec3;
     startAsleep?: boolean;
     isTriggerShape?: boolean;
+    /**
+     * Optional pre-built shape. When provided, it is used directly and the
+     * primitive-shape build path is skipped. This lets callers supply
+     * mesh/convex-hull shapes (built via `createPhysicsShape`) without pulling
+     * the mesh-shape code into `createPhysicsAggregate` itself.
+     */
+    shape?: PhysicsShape;
 }
 
 /** Mass properties applied to a physics body. Omitted fields keep Havok's shape-derived values. */
@@ -178,6 +185,10 @@ export interface PhysicsWorld {
     _gravity: number[];
     /** @internal Floating-origin runtime; present only after `enableHavokFloatingOrigin` is called. */
     _fo?: HavokFloatingOriginContext;
+    /** @internal Callbacks run after each physics step (post body→node sync, pre-render). */
+    _afterStep?: ((timestep: number) => void)[];
+    /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
+    _queryCollector?: any;
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────
@@ -269,6 +280,28 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
             _syncBodyToNode(hknp, b);
         }
     }
+
+    // After-step hooks run once body→node sync is complete, before rendering. This mirrors
+    // Babylon.js, where physics is advanced inside `scene.animate()` (before render) and
+    // post-step scene logic runs in `onAfterRenderObservable`.
+    if (world._afterStep) {
+        const cbs = world._afterStep;
+        for (let i = 0; i < cbs.length; i++) {
+            cbs[i]!(world._timestep);
+        }
+    }
+}
+
+/**
+ * Registers a callback to run after each physics step, once dynamic body transforms have been
+ * synced back to their nodes and before the frame is rendered. Use this for per-step logic that
+ * must observe (or react to) the freshly-integrated state — e.g. tracking a marker to a body's
+ * post-step pose, or applying a force whose effect should integrate on the next step.
+ * @param world - The physics world to hook.
+ * @param cb - Callback invoked with the world timestep (seconds) after each step.
+ */
+export function onPhysicsAfterStep(world: PhysicsWorld, cb: (timestep: number) => void): void {
+    (world._afterStep ??= []).push(cb);
 }
 
 function _syncBodyToNode(hknp: any, body: PhysicsBody): void {
@@ -1101,13 +1134,19 @@ export function releasePhysicsShape(world: PhysicsWorld, shape: PhysicsShape): v
 export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsAggregate {
     const motionType = options.mass === 0 ? PhysicsMotionType.STATIC : PhysicsMotionType.DYNAMIC;
 
-    // Build shape parameters, auto-sizing from bounding box if needed
-    const shapeParams = _buildShapeParams(node, type, options);
-    const hkShape = createPrimitivePhysicsShapeHandle(world._hknp, type, shapeParams);
-    if (hkShape === null) {
-        throw new Error("createPhysicsAggregate supports only primitive physics shapes.");
+    // Use a caller-supplied pre-built shape if present (e.g. a mesh/convex-hull
+    // shape built via createPhysicsShape); otherwise build a primitive shape.
+    // Reading options.shape adds no mesh code to this function.
+    let shape = options.shape;
+    if (!shape) {
+        // Build shape parameters, auto-sizing from bounding box if needed
+        const shapeParams = _buildShapeParams(node, type, options);
+        const hkShape = createPrimitivePhysicsShapeHandle(world._hknp, type, shapeParams);
+        if (hkShape === null) {
+            throw new Error("createPhysicsAggregate supports only primitive physics shapes.");
+        }
+        shape = { _hkShape: hkShape, _type: type };
     }
-    const shape: PhysicsShape = { _hkShape: hkShape, _type: type };
 
     // Create body
     const body = createPhysicsBody(world, node, motionType, options.startAsleep);

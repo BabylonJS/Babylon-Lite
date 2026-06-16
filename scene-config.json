@@ -448,6 +448,39 @@
         "skipPerf": true
     },
     {
+        "id": 47,
+        "slug": "scene47-physics-heightfield",
+        "name": "Scene 47 — Physics Heightfield",
+        "maxMad": 0.05,
+        "maxRawKB": 88,
+        "maxGzipKB": 35,
+        "description": "Havok Physics V2 heightfield from heightMap.png with two rows of falling shapes: row 1 PhysicsAggregate all types (box, sphere, capsule, cylinder, plus convex hull and mesh from the seagull glb), row 2 body+shape all types including convex hull and mesh from the seagull glb.",
+        "tags": ["physics", "gltf", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 48,
+        "slug": "scene48-physics-center-of-mass",
+        "name": "Scene 48 — Physics Center of Mass",
+        "maxMad": 0.01,
+        "maxRawKB": 58,
+        "maxGzipKB": 24,
+        "description": "Havok Physics V2 centre-of-mass demo (port of PG #JVZAFL#1, GUI dropped). Three tall 1x4x1 boxes with distinct centres of mass (marked by red spheres) drop and settle, then a horizontal force kick toppling each differently. Fixed 1/60 timestep; frame captured 10 physics steps after the setTimeout kick.",
+        "tags": ["physics", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 49,
+        "slug": "scene49-physics-shape-queries",
+        "name": "Scene 49 — Physics Shape Queries",
+        "maxMad": 0.005,
+        "maxRawKB": 92,
+        "maxGzipKB": 36,
+        "description": "Havok Physics V2 shape queries — merge of PG #1VT1BK#11 (shapeProximity) and #1VT1BK#12 (shapeCast), shown as TWO distinct groups stacked along Y. Group A (top): cylinder query shape + animated capsule body, shapeProximity draws the closest-point pair (orange on the cylinder, red on the capsule). Group B (bottom): cylinder swept +X + animated capsule body, shapeCast draws the cast ray (cyan) plus its hit point (green). Clicking a cylinder attaches a 3-axis rotation gizmo (GPU-picked) and the queries read the cylinder's live rotation; the gizmo is interactive-only so the static parity frame shows no gizmo. Frame captured once both queries report hits.",
+        "tags": ["physics", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
         "id": 50,
         "slug": "scene50-sprite-grid",
         "name": "Scene 50 — Sprite Grid",

@@ -13,6 +13,7 @@ import {
     createSphere,
     createStandardMaterial,
     onBeforeRender,
+    onPhysicsAfterStep,
     PhysicsShapeType,
     registerScene,
     startEngine,
@@ -63,18 +64,23 @@ async function main(): Promise<void> {
     ground.material = createStandardMaterial();
     addToScene(scene, ground);
 
-    // Render live. Register before the physics world so Havok's unshifted
-    // before-render callback steps first, then this capture hook observes the
-    // freshly simulated transform for the frame about to be drawn. In parity
-    // capture mode, freeze after the requested number of 60 Hz physics frames.
-    let simulationStarted = false;
-    let simulatedFrames = 0;
-    let captureQueued = false;
+    // Per-frame draw-call readout for the harness.
     onBeforeRender(scene, () => {
         canvas.dataset.drawCalls = String(engine.drawCallCount);
-        if (simulationStarted) {
-            simulatedFrames++;
-        }
+    });
+
+    let simulatedFrames = 0;
+    let captureQueued = false;
+
+    // Havok physics — gravity (0, -9.8, 0)
+    const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
+    const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
+
+    // Count ACTUAL physics steps (not render frames) so the parity capture lands on the
+    // same fixed 1/60 step as the BJS reference. onPhysicsAfterStep fires exactly once per
+    // Havok step (after the body→node sync, before render), mirroring BJS onAfterPhysics.
+    onPhysicsAfterStep(world, () => {
+        simulatedFrames++;
         if (captureAfterFrames !== null && !captureQueued && simulatedFrames >= captureAfterFrames) {
             captureQueued = true;
             window.setTimeout(() => {
@@ -83,10 +89,6 @@ async function main(): Promise<void> {
             }, 0);
         }
     });
-
-    // Havok physics — gravity (0, -9.8, 0)
-    const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-    const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
 
     // Dynamic sphere: mass=1, restitution=0.75
     createPhysicsAggregate(world, sphere, PhysicsShapeType.SPHERE, {
@@ -101,7 +103,6 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    simulationStarted = true;
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }

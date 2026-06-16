@@ -81,22 +81,24 @@ function readCaptureAfterFrames(): number | null {
     let ready = false;
     let simulatedFrames = 0;
     let captureQueued = false;
-    scene.onAfterRenderObservable.add(() => {
-        canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);
-        const now = performance.now();
-        if (!ready) {
-            ready = true;
-            canvas.dataset.initMs = String(now - __initStart);
-            canvas.dataset.ready = "true";
-        } else {
-            simulatedFrames++;
-        }
+    // Count ACTUAL physics steps (one per Havok fixed step) so the capture lands on the
+    // same step as the Lite scene. onAfterPhysicsObservable fires once per physics step.
+    scene.onAfterPhysicsObservable.add(() => {
+        simulatedFrames++;
         if (captureAfterFrames !== null && !captureQueued && simulatedFrames >= captureAfterFrames) {
             captureQueued = true;
-            canvas.dataset.captureReady = "true";
             window.setTimeout(() => {
+                canvas.dataset.captureReady = "true";
                 engine.stopRenderLoop();
             }, 0);
+        }
+    });
+    scene.onAfterRenderObservable.add(() => {
+        canvas.dataset.drawCalls = String(eng._drawCalls ? eng._drawCalls.current : 0);
+        if (!ready) {
+            ready = true;
+            canvas.dataset.initMs = String(performance.now() - __initStart);
+            canvas.dataset.ready = "true";
         }
     });
 

@@ -648,7 +648,7 @@
     ]
   },
   "scene40": {
-    "rawKB": 48,
+    "rawKB": 48.1,
     "gzipKB": 19.3,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -658,7 +658,7 @@
     ]
   },
   "scene41": {
-    "rawKB": 88.4,
+    "rawKB": 88.5,
     "gzipKB": 34.9,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -674,7 +674,7 @@
     ]
   },
   "scene42": {
-    "rawKB": 49.6,
+    "rawKB": 49.7,
     "gzipKB": 19.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -696,8 +696,8 @@
     ]
   },
   "scene44": {
-    "rawKB": 48.6,
-    "gzipKB": 19.4,
+    "rawKB": 48.7,
+    "gzipKB": 19.5,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene44-standard-renderable-QPXByYCf.js",
@@ -706,7 +706,7 @@
     ]
   },
   "scene45": {
-    "rawKB": 49.7,
+    "rawKB": 49.8,
     "gzipKB": 19.8,
     "ignoredRawKB": 0,
     "runtimeChunks": [
@@ -716,13 +716,50 @@
     ]
   },
   "scene46": {
-    "rawKB": 52.8,
+    "rawKB": 52.9,
     "gzipKB": 20.7,
     "ignoredRawKB": 0,
     "runtimeChunks": [
       "scene46-standard-renderable-u67MA1oR.js",
       "scene46-wgsl-helpers-CwHFFXvt.js",
       "scene46.js"
+    ]
+  },
+  "scene47": {
+    "rawKB": 87.3,
+    "gzipKB": 34.5,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene47-generate-mipmaps-nvHc2MQU.js",
+      "scene47-gltf-ext-spec-gloss-D60sFZYX.js",
+      "scene47-gltf-feature-registry-B7KT4wEf.js",
+      "scene47-gltf-glb-parser-6-tsF2C2.js",
+      "scene47-shader-composer-DlM-8YlO.js",
+      "scene47-standard-renderable-7LncDsRV.js",
+      "scene47-wgsl-helpers-CwHFFXvt.js",
+      "scene47.js"
+    ]
+  },
+  "scene48": {
+    "rawKB": 53,
+    "gzipKB": 21,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene48-standard-renderable-BojP17MQ.js",
+      "scene48-wgsl-helpers-CwHFFXvt.js",
+      "scene48.js"
+    ]
+  },
+  "scene49": {
+    "rawKB": 89.6,
+    "gzipKB": 33.9,
+    "ignoredRawKB": 0,
+    "runtimeChunks": [
+      "scene49-standard-renderable-C3IPeUHN.js",
+      "scene49-swapchain-overlay-ilhN4El_.js",
+      "scene49-ubo-layout-CnrP4RZD.js",
+      "scene49-wgsl-helpers-CwHFFXvt.js",
+      "scene49.js"
     ]
   },
   "scene50": {
@@ -2503,7 +2540,7 @@
     ]
   },
   "scene209": {
-    "rawKB": 52.7,
+    "rawKB": 52.8,
     "gzipKB": 21.6,
     "ignoredRawKB": 0,
     "runtimeChunks": [
