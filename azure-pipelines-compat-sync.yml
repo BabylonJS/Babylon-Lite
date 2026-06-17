@@ -66,12 +66,15 @@ variables:
     - name: COPILOT_MODEL
       value: "claude-opus-4.8?effort=high"
     # The GitHub repo the PR driver pushes the branch to and opens the PR against, plus
-    # its base branch. Defaults to upstream; OVERRIDE both when testing against a fork
-    # (e.g. ryantrem/Babylon-Lite + compat) via the "Variables" panel on a manual run.
+    # its base branch. The base defaults to the branch this pipeline run was started from
+    # (the "Select pipeline version" branch in the Run UI) via Build.SourceBranchName —
+    # so running from `compat` bases the PR against `compat`, running from `master` bases
+    # against `master`, with no edits needed. (Note: Build.SourceBranchName is the last
+    # path segment, so slashed branch names like `feature/x` would resolve to just `x`.)
     - name: TARGET_REPO
       value: "BabylonJS/Babylon-Lite"
     - name: TARGET_BASE_BRANCH
-      value: "master"
+      value: "$(Build.SourceBranchName)"
 
 stages:
     - stage: CompatSync
