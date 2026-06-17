@@ -19,7 +19,7 @@
 #      kicks this pipeline via the ADO REST API, passing the issue number as
 #      `issueNumber`. The agent then treats that issue as the request to address.
 #
-# ── Secrets / variable group (BabylonJS-Deployment) ───────────────────────────────
+# ── Secrets (set as SECRET pipeline variables on this pipeline) ───────────────────
 #   - GITHUB_TOKEN        PAT with contents:write + pull_requests:write (opens the PR)
 #   - COPILOT_CLI_TOKEN   fine-grained PAT (github_pat_...) from a Copilot-subscribed
 #                         account; authenticates the Copilot CLI. Inference bills to
@@ -54,7 +54,6 @@ parameters:
       default: "none"
 
 variables:
-    - group: BabylonJS-Deployment
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
