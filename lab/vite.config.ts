@@ -27,10 +27,31 @@ function escapeHtml(value: string): string {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * Inject the measured engine/code size (the same KB shown on the demos gallery
+ * card) into a source demo HTML page so its loading overlay can reiterate it next
+ * to the asset estimate. Mirrors the build-time injection used for the deployed
+ * flat demo site (scripts/bundle-demos-core.ts) so dev and prod behave the same:
+ * `installFetchProgress` reads `window.__DEMO_ENGINE_KB`, and the pre-hydration
+ * `.loading-size` text is rewritten to match.
+ */
+function injectDemoEngineSize(html: string, slug: string): string {
+    const sizes = readJson<Record<string, DemoSize>>(resolve(__dirname, "public/bundle/demos-manifest.json"), {});
+    const rawKB = sizes[slug]?.rawKB;
+    if (rawKB == null) {
+        return html;
+    }
+    const tag = `<script>window.__DEMO_ENGINE_KB=${rawKB};</script>`;
+    const withTag = html.includes("</head>") ? html.replace("</head>", `  ${tag}\n</head>`) : `${tag}\n${html}`;
+    return withTag.replace(/Estimated demo assets:\s*/g, `Engine ${rawKB} KB · Assets `);
+}
+
 function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined): string {
     const tagList = demo.tags ?? [];
     const tags = tagList.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
-    const sizeRow = size ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>` : "";
+    const sizeRow = size
+        ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
+        : "";
     return [
         `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
         `<div class="card-image">`,
@@ -141,11 +162,19 @@ function serveReferenceImages(): Plugin {
                     /^\/((?:scene|bundle-scene|bundle-bjs-scene|babylon-ref-scene|bundle-baseline-scene)\d+|demo-[^/]+|dispose-test|leak-test|material-swap-test|picking-test)\.html$/
                 );
                 if (liteHtmlCompat) {
-                    const filePath = resolve(__dirname, "lite", `${liteHtmlCompat[1]}.html`);
+                    const name = liteHtmlCompat[1];
+                    const filePath = resolve(__dirname, "lite", `${name}.html`);
                     if (existsSync(filePath)) {
                         res.setHeader("Content-Type", "text/html; charset=utf-8");
                         res.setHeader("Cache-Control", "no-cache");
-                        createReadStream(filePath).pipe(res);
+                        // Demo pages: inject the measured engine size so the loading
+                        // overlay reiterates it next to the asset estimate, mirroring
+                        // the build-time injection on the deployed flat demo site.
+                        if (name.startsWith("demo-")) {
+                            res.end(injectDemoEngineSize(readFileSync(filePath, "utf-8"), name.slice("demo-".length)));
+                        } else {
+                            createReadStream(filePath).pipe(res);
+                        }
                         return;
                     }
                 }
