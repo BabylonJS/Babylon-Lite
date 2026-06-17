@@ -111,18 +111,23 @@ stages:
                 # last-synced SHA from COMPAT-STATUS.md, diffs BJS master + Lite since
                 # then, implements what is now possible, lands a lab scene at parity,
                 # adds GPU-free tests, and updates the status file. When triggered by a
-                # `compat`-labelled issue, ISSUE_NUMBER is non-empty and the prompt
-                # tells the agent to treat that issue as the request.
+                # `compat`-labelled issue, ISSUE_NUMBER is set and the issue's title+body
+                # are fetched from the GitHub API and injected into the prompt so the
+                # agent acts on the actual request (not just the issue number).
                 - script: |
                       set -euo pipefail
                       npm install -g @github/copilot
 
-                      PROMPT="Follow the instructions in .github/copilot/skills/update-compat-layer.md to reconcile the @babylonjs/lite-compat layer against the latest Babylon.js and Babylon Lite changes. Implement what is newly possible, land at least one new lab oracle scene at pixel parity, add GPU-free tests, and update packages/babylon-lite-compat/COMPAT-STATUS.md (including the synced commit SHA and date). Before finishing, run 'pnpm build:bundle-scenes' and 'pnpm test:parity' and make sure they pass; do NOT run 'pnpm test:perf'; do NOT change bundle-size ceilings or golden reference screenshots. Do not open a pull request or push — the pipeline does that. If there is nothing to change, make no edits."
-                      if [ -n "${ISSUE_NUMBER:-}" ]; then
-                        PROMPT="$PROMPT The run was triggered by issue #${ISSUE_NUMBER} labeled 'compat'; treat that issue as the specific request to address."
-                      fi
+                      # Build the prompt in a file via Node — this avoids YAML/heredoc
+                      # indentation bleeding into the prompt and safely handles arbitrary
+                      # issue text (newlines, quotes, $). When ISSUE_NUMBER is a real
+                      # number, the issue's title+body are fetched and appended so the
+                      # agent acts on the actual request, not just the number.
+                      PROMPT_FILE="$(mktemp)"
+                      node scripts/build-compat-sync-prompt.mjs > "$PROMPT_FILE"
+                      echo "Prompt built ($(wc -c < "$PROMPT_FILE") bytes)."
 
-                      copilot --model "$COPILOT_MODEL" --allow-all-tools --no-ask-user --prompt "$PROMPT"
+                      copilot --model "$COPILOT_MODEL" --allow-all-tools --no-ask-user --prompt "$(cat "$PROMPT_FILE")"
                   displayName: "Run update-compat-layer skill"
                   env:
                       # Copilot CLI auth (fine-grained PAT from a Copilot-subscribed account).
@@ -130,6 +135,10 @@ stages:
                       GH_TOKEN: $(COPILOT_CLI_TOKEN)
                       COPILOT_MODEL: $(COPILOT_MODEL)
                       ISSUE_NUMBER: ${{ parameters.issueNumber }}
+                      TARGET_REPO: $(TARGET_REPO)
+                      # Repo-scoped token (NOT the Copilot one) — needed to read the
+                      # triggering issue's body, including on a private repo.
+                      REPO_TOKEN: $(GITHUB_TOKEN)
 
                 # ── Deterministic PR driver ───────────────────────────────────────
                 # Independently re-validates, then branches/commits/pushes/opens a
