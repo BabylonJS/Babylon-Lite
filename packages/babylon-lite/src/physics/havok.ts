@@ -924,9 +924,15 @@ export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape
  *   its base but whose shape is centred on its middle) so it tumbles around its real centre.
  */
 export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass: number, centerOfMass?: Vec3): void {
-    const com = centerOfMass ?? { x: 0, y: 0, z: 0 };
-    // massProperties: [centerOfMass[3], mass, inertia[3], inertiaOrientation[4]]
-    const massProps = [[com.x, com.y, com.z], mass, [mass, mass, mass], [0, 0, 0, 1]];
+    // Match Babylon.js HavokPlugin._internalUpdateMassProperties: start from the shape-derived
+    // mass properties (correct anisotropic inertia tensor + centre of mass + orientation) and
+    // override only the mass scalar. Writing a placeholder isotropic [mass,mass,mass] inertia
+    // makes constrained/torqued bodies rotate at the wrong rate and breaks physics parity.
+    const massProps = buildMassProperties(world, body);
+    massProps[1] = mass;
+    if (centerOfMass) {
+        massProps[0] = [centerOfMass.x, centerOfMass.y, centerOfMass.z];
+    }
     world._hknp.HP_Body_SetMassProperties(body._hkBody, massProps);
 }
 

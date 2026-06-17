@@ -28,12 +28,14 @@ import {
     createStandardMaterial,
     loadGltf,
     onBeforeRender,
+    onPhysicsAfterStep,
     PhysicsMotionType,
     PhysicsShapeType,
     registerScene,
     setPhysicsBodyMass,
     setPhysicsBodyShape,
     setPhysicsShapeMaterial,
+    setPhysicsTimestep,
     showPhysicsBody,
     startEngine,
     stopEngine,
@@ -207,21 +209,10 @@ async function main(): Promise<void> {
     light.intensity = 0.9;
     addToScene(scene, light);
 
-    let simulationStarted = false;
-    let simulatedFrames = 0;
+    let physicsRunning = false;
     let captureQueued = false;
     onBeforeRender(scene, () => {
         canvas.dataset.drawCalls = String(engine.drawCallCount);
-        if (simulationStarted) {
-            simulatedFrames++;
-        }
-        if (captureAfterFrames !== null && !captureQueued && simulatedFrames >= captureAfterFrames) {
-            captureQueued = true;
-            window.setTimeout(() => {
-                canvas.dataset.captureReady = "true";
-                stopEngine(engine);
-            }, 0);
-        }
     });
 
     // Visible terrain from heightMap.png (same image as scene22).
@@ -240,6 +231,28 @@ async function main(): Promise<void> {
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
     const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
     const viewer = createPhysicsViewer(scene, world, { color: [1, 1, 1, 1] });
+
+    // Robust capture gate: keep physics paused (timestep 0) during the warm-up frames so the
+    // debug wireframe overlay is fully rendered before any motion, then count ACTUAL physics
+    // steps. This decouples the parity capture from GPU pipeline warm-up timing (the BJS
+    // reference renders its PhysicsViewer overlay through an async-compiled utility layer that
+    // is blank on the very first frames). Both scenes start physics from the identical settled
+    // drop-height state and step the same number of times, so the captured frame matches.
+    setPhysicsTimestep(world, 0);
+    let physStep = 0;
+    onPhysicsAfterStep(world, () => {
+        if (!physicsRunning) {
+            return;
+        }
+        physStep++;
+        if (captureAfterFrames !== null && !captureQueued && physStep >= captureAfterFrames) {
+            captureQueued = true;
+            window.setTimeout(() => {
+                canvas.dataset.captureReady = "true";
+                stopEngine(engine);
+            }, 0);
+        }
+    });
 
     // Static heightfield derived from the same ground mesh / heightMap.png.
     const groundShape = createHeightFieldShape(world, { groundMesh: ground });
@@ -306,7 +319,10 @@ async function main(): Promise<void> {
 
     await registerScene(scene);
     await startEngine(engine);
-    simulationStarted = true;
+    // The first rendered frame has drawn the inline wireframe overlay (Lite compiles its
+    // pipelines synchronously, so the overlay is present immediately). Start stepping physics now.
+    physicsRunning = true;
+    setPhysicsTimestep(world, 1 / PHYSICS_FPS);
     canvas.dataset.initMs = String(performance.now() - __initStart);
     canvas.dataset.ready = "true";
 }
