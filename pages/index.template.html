@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Babylon.lite demos</title>
+        <title>Babylon Lite demos</title>
         <meta name="description" content="Standalone showcase demos built on Babylon Lite, a WebGPU-exclusive, tree-shakable, minimal-footprint rendering engine." />
         <style>
             :root {
@@ -440,10 +440,11 @@
         <div class="wrap">
             <header>
                 <img class="logo" src="babylon-logo.svg" alt="Babylon logo" />
-                <h1><span class="brand">Babylon</span><span class="lite">.lite</span> <span class="dot">demos</span></h1>
+                <h1><span class="brand">Babylon</span><span class="lite">&nbsp;Lite</span> <span class="dot">demos</span></h1>
                 <p>
                     Standalone showcase pages built on Babylon&nbsp;Lite, a WebGPU-exclusive, fully tree-shakable rendering engine. Each demo is production-bundled, so the size it
-                    actually ships is shown right on its card. Sizes cover the <strong>engine and demo code only</strong>. External assets (textures, game data, etc.) aren’t included.
+                    actually ships is shown right on its card. Sizes cover the <strong>engine and demo code only</strong>. External assets (textures, game data, etc.) aren’t
+                    included.
                 </p>
             </header>
             <!--FILTERS-->
@@ -489,13 +490,21 @@
 
                 function apply() {
                     var active = pills
-                        .filter(function (p) { return p !== allPill && p.classList.contains("is-active"); })
-                        .map(function (p) { return p.getAttribute("data-filter"); });
+                        .filter(function (p) {
+                            return p !== allPill && p.classList.contains("is-active");
+                        })
+                        .map(function (p) {
+                            return p.getAttribute("data-filter");
+                        });
                     // No tag selected -> behave as "All".
                     if (allPill) setActive(allPill, active.length === 0);
                     cards.forEach(function (card) {
                         var tags = (card.getAttribute("data-tags") || "").split(" ");
-                        var show = active.length === 0 || active.some(function (f) { return tags.indexOf(f) !== -1; });
+                        var show =
+                            active.length === 0 ||
+                            active.some(function (f) {
+                                return tags.indexOf(f) !== -1;
+                            });
                         card.classList.toggle("is-hidden", !show);
                     });
                 }
@@ -504,7 +513,9 @@
                     pill.addEventListener("click", function () {
                         if (pill === allPill) {
                             // Reset: clear every tag selection.
-                            pills.forEach(function (p) { if (p !== allPill) setActive(p, false); });
+                            pills.forEach(function (p) {
+                                if (p !== allPill) setActive(p, false);
+                            });
                         } else {
                             setActive(pill, !pill.classList.contains("is-active"));
                         }
@@ -532,7 +543,9 @@
                 if (!isMobile()) return;
                 document.body.classList.add("is-mobile");
                 var cards = Array.prototype.slice.call(document.querySelectorAll("a.card"));
-                var compatible = cards.filter(function (c) { return c.getAttribute("data-mobile") !== "false"; });
+                var compatible = cards.filter(function (c) {
+                    return c.getAttribute("data-mobile") !== "false";
+                });
                 if (compatible.length === 0) {
                     document.body.classList.add("no-compatible-demos");
                 } else if (compatible.length < cards.length) {

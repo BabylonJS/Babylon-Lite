@@ -21,11 +21,14 @@
 
 import { createEngine } from "babylon-lite";
 import { startGame } from "./platformer/game.js";
+import { installFetchProgress } from "./loading-progress.js";
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas, { estimatedBytes: 1_000_000 });
     const engine = await createEngine(canvas);
     await startGame(canvas, engine);
+    progress.done();
 }
 
 main().catch((error: unknown) => {

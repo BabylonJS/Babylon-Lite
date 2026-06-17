@@ -13,7 +13,7 @@
  * and no tileset bytes are committed to this repo.
  */
 
-import { createEngine, createSprite2DLayer, createSpriteRenderer, registerSpriteRenderer, startEngine, type EngineContext, type Sprite2DLayer } from "babylon-lite";
+import { createEngine, createSprite2DLayer, createSpriteRenderer, registerSpriteRenderer, startEngine, type EngineContext } from "babylon-lite";
 import { loadFreecivSheet } from "./freeciv/atlas.js";
 import { createAtmosphere } from "./freeciv/atmosphere.js";
 import { createBackdrop } from "./freeciv/backdrop.js";
@@ -29,6 +29,7 @@ import { createGlints } from "./freeciv/glints.js";
 import { createLiveSim } from "./freeciv/live.js";
 import { createPicker } from "./freeciv/pick.js";
 import { createMinimap } from "./freeciv/minimap.js";
+import { createPresent } from "./freeciv/present.js";
 import { DIR8, DIR_DELTA, TILE_H, TILE_W, isoCentre, worldToTile } from "./freeciv/iso.js";
 import { demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
@@ -154,12 +155,21 @@ async function main(): Promise<void> {
     };
 
     const view: View = { x: 0, y: 0, zoom: 1, userMoved: false };
+    // Recomputes the seam-safe RUNG render view + present scale from `view`. Assigned once the
+    // render target + present pass exist (just after the world renderer is built, below).
+    let syncView: () => void = () => {};
+    // Smooth wheel zoom: the wheel only nudges `zoomCtl.target` (+ records the world point under
+    // the cursor); the tick eases `view.zoom` toward it over several frames, so a notched mouse
+    // glides instead of stepping. Pan / minimap cancel the ease by snapping the target to live
+    // zoom. All view→render syncing happens in the tick so tiles and world FX move in lockstep.
+    const zoomCtl = { target: 1, wx: 0, wy: 0, sx: 0, sy: 0 };
     // Start pointed at Babylon (the player's capital) rather than the geometric
     // centre of the map bounds, which sits further south.
     const capital = world.cities.find((c) => c.name === "Babylon") ?? world.cities[0];
     const recenter = (): void => {
         if (view.userMoved) return;
         fitView(view, engine, bounds);
+        zoomCtl.target = view.zoom;
         if (capital) {
             const [wx, wy] = isoCentre(capital.x, capital.y);
             const w = engine.canvas.width || 1;
@@ -167,7 +177,7 @@ async function main(): Promise<void> {
             view.x = wx - w / 2 / view.zoom;
             view.y = wy - h / 2 / view.zoom;
         }
-        applyView(view, layers);
+        syncView();
     };
 
     // Subdued public-domain Mercator 1569 world map behind the playfield, plus a
@@ -181,6 +191,44 @@ async function main(): Promise<void> {
         clearValue: { r: 0.149, g: 0.29, b: 0.451, a: 1 }, // deep ocean blue
     });
     registerSpriteRenderer(sr);
+
+    // Smooth zoom: redirect the whole world renderer into a supersampled offscreen render
+    // target and present it scaled (see present.ts). `render` is the seam-safe RUNG view the
+    // tiles actually rasterise at — integer zoom + pixel-snapped origin + the RT size — while
+    // the fractional zoom lives in the present scale. World-anchored effects render into the
+    // same RT, so they are driven by `render`, not the continuous `view`.
+    const present = createPresent(engine, sr);
+    present.resize(engine.canvas.width || 1, engine.canvas.height || 1);
+    const render: RenderView = { x: 0, y: 0, zoom: 1, w: engine.canvas.width || 1, h: engine.canvas.height || 1, dz: 1 };
+    syncView = (): void => {
+        const cw = engine.canvas.width || 1;
+        const ch = engine.canvas.height || 1;
+        const z = view.zoom;
+        const R = ceilRung(z); // smallest seam-safe rung ≥ the continuous zoom
+        // The engine SpriteRenderer always projects at the CANVAS size even when targeting an
+        // offscreen RT (it reads the surface, not the target). So rendering into the SS×-sized RT
+        // stretches the canvas projection by SS. We pre-divide the projection zoom by SS so the
+        // stretch lands the tiles at exactly effective scale R in the RT (seam-safe), and size the
+        // fullscreen-FX quads to the canvas (the SS× stretch then fills the RT).
+        const ss = present.width / cw; // supersample factor (RT px per canvas px), exactly 2
+        render.zoom = R / ss; //          canvas-projection zoom; ×ss stretch ⇒ effective RT scale R
+        render.dz = z; //                 continuous display zoom (for the atmosphere altitude fade)
+        render.w = cw; //                 FX quads size to the canvas; the ×ss stretch fills the RT
+        render.h = ch;
+        // Snap the RT origin to the rung's (effective-scale-R) device-pixel grid so the alpha-baked
+        // diamonds tessellate crack-free; the sub-rung remainder is carried in the present offset.
+        render.x = Math.round(view.x * R) / R;
+        render.y = Math.round(view.y * R) / R;
+        for (const layer of layers) {
+            layer.view.positionPx[0] = render.x;
+            layer.view.positionPx[1] = render.y;
+            layer.view.zoom = render.zoom;
+        }
+        // Present the RT sub-rect matching the viewport. RT pixel of world W = (W − render.x)·R
+        // (effective scale R after the ×ss stretch); the viewport spans cw·R/z RT px. This composite
+        // exactly reproduces `world = view.x + screenPx/zoom`, so all inverse math uses raw `view`.
+        present.sync(cw, ch, (view.x - render.x) * R, (view.y - render.y) * R, (cw * R) / z, (ch * R) / z);
+    };
 
     // Drifting clouds over the parchment backdrop, behind the map (subtle).
     const atmosphere = createAtmosphere(engine, sr);
@@ -204,27 +252,32 @@ async function main(): Promise<void> {
     // forward `commandFx` declared above so the click handler can fire pings.
     commandFx = createCommandFx(engine, sr);
 
-    // Slow day/night cycle: a full-screen multiply grade plus warm additive city
-    // lights that bloom after sunset. Above the clouds, below the vignette/HUD.
+    // Slow day/night cycle: a full-screen alpha grade plus warm additive city lights that
+    // bloom after sunset. World-anchored, so it renders into the RT with the map.
     const dayNight = createDayNight(engine, sr, world);
 
-    // Screen-space vignette: darkens the corners so the void around the island
-    // fades to shadow instead of exposing the Mercator backdrop at the edges.
-    const vignette = createVignette(engine, sr);
+    // Screen-space vignette: darkens the corners so the void around the island fades to
+    // shadow. HUD layer — drawn on the present's swapchain pass, on top of the scaled map.
+    const vignette = createVignette(engine, present.screen);
 
-    installControls(engine, view, layers, picker.hover, onMapClick);
+    installControls(engine, view, zoomCtl, picker.hover, onMapClick);
     recenter();
-    window.addEventListener("resize", recenter);
+    const onResize = (): void => {
+        present.resize(engine.canvas.width || 1, engine.canvas.height || 1);
+        recenter(); // re-fits only if the user hasn't panned/zoomed
+        syncView(); // always re-anchor for the new RT size
+    };
+    window.addEventListener("resize", onResize);
 
     const labels = createCityLabels(world.cities);
 
-    // Overview minimap (corner). Its viewport box inverts the SAME snapped view the
-    // tiles render with; clicking/dragging recentres the main view on that tile.
-    const minimap = createMinimap(engine, sr, world, {
+    // Overview minimap (corner). A HUD layer on the present's swapchain pass; its viewport
+    // box inverts the continuous `view` the map is presented at.
+    const minimap = createMinimap(engine, present.screen, world, {
         viewportCorners: () => viewportTileCorners(view, engine),
         panToTile: (tx, ty) => {
             centreViewOnTile(view, engine, tx, ty);
-            applyView(view, layers);
+            zoomCtl.target = view.zoom; // cancel any in-flight zoom ease
         },
     });
 
@@ -234,26 +287,47 @@ async function main(): Promise<void> {
 
     // Animation loop: advance the live sim and reposition floating city labels.
     let last = performance.now();
+    // The GPU map is drawn by the engine's render loop, which runs a frame AFTER `syncView` sets
+    // its transform (the engine rAF was registered before this tick rAF). So the map you see this
+    // frame reflects the PREVIOUS tick's view. The DOM city labels paint the same frame the tick
+    // runs, so to keep them glued to the map we drive them from this one-frame-old snapshot —
+    // otherwise they lead the map by a frame and visibly bump when the zoom accelerates/decelerates.
+    const presentedView: View = { x: view.x, y: view.y, zoom: view.zoom, userMoved: false };
     const tick = (now: number): void => {
         const dt = Math.min(100, now - last);
         last = now;
         sim.step(dt);
+        // Ease the continuous zoom toward the wheel target, holding the cursor's world point
+        // fixed, so notched wheels glide. Driving it here (not in the wheel event) keeps the
+        // tiles and all world-anchored FX in lockstep — they all read the SAME `view` this frame.
+        if (Math.abs(zoomCtl.target - view.zoom) > 1e-4) {
+            view.zoom += (zoomCtl.target - view.zoom) * 0.25;
+            if (Math.abs(zoomCtl.target - view.zoom) <= 1e-4) view.zoom = zoomCtl.target;
+            view.x = zoomCtl.wx - zoomCtl.sx / view.zoom;
+            view.y = zoomCtl.wy - zoomCtl.sy / view.zoom;
+            view.userMoved = true;
+        }
+        syncView(); // recompute the seam-safe render view + present scale for this frame
         const [scoutX, scoutY] = sim.scoutTile();
-        fog.update(view, scoutX, scoutY);
-        dayNight.update(view);
-        glints.update(view, dayNight.daylight());
+        fog.update(render, scoutX, scoutY);
+        dayNight.update(render);
+        glints.update(render, dayNight.daylight());
         const [scoutWx, scoutWy] = sim.scoutWorld();
-        dust.update(view, scoutWx, scoutWy, sim.scoutMoving(), dt);
+        dust.update(render, scoutWx, scoutWy, sim.scoutMoving(), dt);
         // Clear the marching-ants destination once the scout reaches it (idle again).
         if (scoutDest && !sim.scoutMoving()) {
             const [stx, sty] = sim.scoutTile();
             if (stx === scoutDest[0] && sty === scoutDest[1]) scoutDest = null;
         }
-        commandFx?.update(view, { dest: scoutDest }, dt);
-        atmosphere.update(view, dayNight.daylight());
+        commandFx?.update(render, { dest: scoutDest }, dt);
+        atmosphere.update(render, dayNight.daylight());
         vignette.update();
         waterFx.update();
-        labels.update(view, engine);
+        labels.update(presentedView, engine);
+        // Snapshot the view the engine will composite the map from next frame (see presentedView).
+        presentedView.x = view.x;
+        presentedView.y = view.y;
+        presentedView.zoom = view.zoom;
         minimap.update();
         requestAnimationFrame(tick);
     };
@@ -314,14 +388,12 @@ function createCityLabels(cities: readonly { x: number; y: number; name: string;
         update(view: View, engine: EngineContext): void {
             const cv = engine.canvas as HTMLCanvasElement;
             const dpr = (cv.width || 1) / (cv.clientWidth || 1);
-            // Match the snapped transform the tiles render with so labels don't
-            // drift off their tiles by a fraction of a pixel.
-            const z = snapZoom(view.zoom);
-            const vx = Math.round(view.x * z) / z;
-            const vy = Math.round(view.y * z) / z;
+            // The present composite reproduces the world exactly at the continuous view
+            // (world = view.x + screenPx/zoom), so labels track the raw view — no rung snap.
+            const z = view.zoom;
             for (const a of anchors) {
-                const sx = ((a.wx - vx) * z) / dpr;
-                const sy = ((a.wy - vy) * z) / dpr;
+                const sx = ((a.wx - view.x) * z) / dpr;
+                const sy = ((a.wy - view.y) * z) / dpr;
                 a.el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -100%)`;
             }
         },
@@ -335,88 +407,62 @@ interface View {
     userMoved: boolean;
 }
 
+/** The seam-safe RUNG view the world is rasterised at (integer zoom + pixel-snapped origin)
+ *  plus the render-target size in device pixels. World-anchored effects read this, not `view`. */
+interface RenderView {
+    x: number;
+    y: number;
+    zoom: number;
+    w: number;
+    h: number;
+    /** Continuous display zoom (the perceived zoom); `zoom` is the seam-safe rung. */
+    dz: number;
+}
+
+/** Continuous-zoom clamp = the rung ladder's extremes (the minimap owns the whole-map
+ *  overview, so the main canvas need not zoom out past ½). */
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 8;
+
 /** Fit the whole map into the viewport and centre it. */
 function fitView(view: View, engine: EngineContext, b: Bounds): void {
     const w = engine.canvas.width || 1;
     const h = engine.canvas.height || 1;
     const mapW = b.maxX - b.minX + TILE_W;
     const mapH = b.maxY - b.minY + TILE_H;
-    // Seed the zoom on the ladder so the very first frame is already crack-free and
-    // in lock-step with the wheel handler (snapped to ½, the widest rung).
-    view.zoom = snapZoom(Math.min(w / mapW, h / mapH) * 0.95);
+    // Seed continuous zoom, clamped to the rung range.
+    view.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(w / mapW, h / mapH) * 0.95));
     const cx = (b.minX + b.maxX) / 2;
     const cy = (b.minY + b.maxY) / 2;
     view.x = cx - w / 2 / view.zoom;
     view.y = cy - h / 2 / view.zoom;
 }
 
-function applyView(view: View, layers: readonly Sprite2DLayer[]): void {
-    // The iso tiles are alpha-baked diamonds that tessellate by sharing edges.
-    // With nearest filtering this is only seamless when one texel maps to a whole
-    // number of device pixels — i.e. at INTEGER zoom — and when the grid origin
-    // lands on the device-pixel grid (otherwise every diamond edge resamples at a
-    // fractional offset and a 1px crack appears between tiles). So we render with a
-    // snapped view: zoom rounded to an integer (when zoomed in) and the origin
-    // rounded to the nearest 1/zoom. The logical `view` stays unsnapped so panning
-    // and wheel-zoom still accumulate smoothly; only the per-layer view is snapped.
-    const z = snapZoom(view.zoom);
-    const snapX = Math.round(view.x * z) / z;
-    const snapY = Math.round(view.y * z) / z;
-    for (const layer of layers) {
-        layer.view.positionPx[0] = snapX;
-        layer.view.positionPx[1] = snapY;
-        layer.view.zoom = z;
-    }
-}
-
 /**
- * Discrete zoom ladder. Every rung is seam-safe for nearest-filtered diamond tiles:
- * the ≥1 rungs are integers (one texel maps to a whole number of device pixels, so
- * shared diamond edges never resample at a fractional offset — no 1px cracks), and
- * the ½ rung minifies the tiles enough that any sub-pixel seam is invisible. The
- * whole-map overview lives on the minimap, so the main canvas need not zoom out
- * past ½. Zoom is quantised to these rungs (see the wheel handler) so it can never
- * land on a crack-producing fractional scale — which is why the old render-time
- * integer snap is gone and `view.zoom` is always exactly one of these values.
+ * Seam-safe zoom rungs for nearest-filtered diamond tiles: the ≥1 rungs are integers (one
+ * texel maps to a whole number of device pixels, so shared diamond edges never resample — no
+ * 1px cracks), and the ½ rung minifies enough that any sub-pixel seam is invisible. The tiles
+ * are always rasterised at one of these (into the offscreen RT); the present pass then scales
+ * that crack-free image to the continuous on-screen zoom (see syncView / present.ts).
  */
-const ZOOM_LEVELS = [0.5, 1, 2, 4, 8] as const;
+const ZOOM_RUNGS = [0.5, 1, 2, 4, 8] as const;
 
-/** Index of the ladder rung nearest `zoom`, compared in log space so the
- *  power-of-two gaps feel perceptually even. */
-function nearestZoomLevel(zoom: number): number {
-    const target = Math.log(zoom);
-    let best = 0;
-    let bestErr = Infinity;
-    for (let i = 0; i < ZOOM_LEVELS.length; i++) {
-        const err = Math.abs(Math.log(ZOOM_LEVELS[i]!) - target);
-        if (err < bestErr) {
-            bestErr = err;
-            best = i;
-        }
+/** Smallest rung ≥ `zoom`, clamped to the ladder. Rendering at the CEILING rung and
+ *  down-scaling on present keeps the pixel art crisp (a floor rung would up-scale = blur). */
+function ceilRung(zoom: number): number {
+    for (const r of ZOOM_RUNGS) {
+        if (zoom <= r + 1e-6) return r;
     }
-    return best;
+    return ZOOM_RUNGS[ZOOM_RUNGS.length - 1]!;
 }
 
 /**
- * Snap an arbitrary zoom to its nearest ladder rung. Because the wheel handler keeps
- * `view.zoom` ON a rung at all times, this is effectively identity for the live view;
- * it only does real work for the one-off `fitView` seed. Kept as the single chokepoint
- * so `screenToTile`, the city labels and the minimap all read the same rendered scale.
- */
-function snapZoom(zoom: number): number {
-    return ZOOM_LEVELS[nearestZoomLevel(zoom)]!;
-}
-
-/**
- * Device-pixel cursor position → tile `(x, y)`. Inverts the SNAPPED view that is
- * actually rendered (same `snapZoom` + rounded origin as {@link applyView}), so the
- * tile under the highlight matches the tile under the pointer exactly.
+ * Device-pixel cursor position → tile `(x, y)`. The present composite reproduces the world
+ * exactly at the continuous view (`world = view.x + screenPx/zoom`), so this inverts the raw
+ * `view` directly — the tile under the highlight matches the tile under the pointer exactly.
  */
 function screenToTile(view: View, sxDevice: number, syDevice: number): [number, number] {
-    const z = snapZoom(view.zoom);
-    const vx = Math.round(view.x * z) / z;
-    const vy = Math.round(view.y * z) / z;
-    return worldToTile(vx + sxDevice / z, vy + syDevice / z);
+    return worldToTile(view.x + sxDevice / view.zoom, view.y + syDevice / view.zoom);
 }
 
 /**
@@ -426,9 +472,9 @@ function screenToTile(view: View, sxDevice: number, syDevice: number): [number, 
  * {@link screenToTile} but WITHOUT rounding (we want the exact sub-tile quad).
  */
 function viewportTileCorners(view: View, engine: EngineContext): Array<[number, number]> {
-    const z = snapZoom(view.zoom);
-    const vx = Math.round(view.x * z) / z;
-    const vy = Math.round(view.y * z) / z;
+    const z = view.zoom;
+    const vx = view.x;
+    const vy = view.y;
     const w = engine.canvas.width || 1;
     const h = engine.canvas.height || 1;
     const screen: ReadonlyArray<readonly [number, number]> = [
@@ -525,7 +571,17 @@ function findPath(world: GameMap, sx: number, sy: number, gx: number, gy: number
 /** Callback fired as the cursor moves over the map; `tileX = null` clears hover. */
 type HoverFn = (tileX: number | null, tileY: number | null, cssX: number, cssY: number) => void;
 
-function installControls(engine: EngineContext, view: View, layers: readonly Sprite2DLayer[], onHover?: HoverFn, onClick?: (tileX: number, tileY: number) => void): void {
+/** Smooth-zoom controller: the wheel writes a `target` + cursor anchor here; the tick eases
+ *  `view.zoom` toward it (see the tick loop). Pan / minimap cancel the ease by matching target. */
+interface ZoomCtl {
+    target: number;
+    wx: number;
+    wy: number;
+    sx: number;
+    sy: number;
+}
+
+function installControls(engine: EngineContext, view: View, zoomCtl: ZoomCtl, onHover?: HoverFn, onClick?: (tileX: number, tileY: number) => void): void {
     const canvas = engine.canvas as HTMLCanvasElement;
     const dpr = (): number => (canvas.width || 1) / (canvas.clientWidth || 1);
     let dragging = false;
@@ -548,7 +604,8 @@ function installControls(engine: EngineContext, view: View, layers: readonly Spr
             lastX = e.clientX;
             lastY = e.clientY;
             view.userMoved = true;
-            applyView(view, layers);
+            zoomCtl.target = view.zoom; // a pan cancels any in-flight zoom ease
+            // No syncView() here: the tick re-syncs every frame, keeping tiles + FX in lockstep.
         } else if (onHover) {
             const rect = canvas.getBoundingClientRect();
             const [tx, ty] = screenToTile(view, (e.clientX - rect.left) * dpr(), (e.clientY - rect.top) * dpr());
@@ -572,49 +629,25 @@ function installControls(engine: EngineContext, view: View, layers: readonly Spr
     });
     canvas.addEventListener("pointercancel", endDrag);
 
-    // Discrete, device-independent zoom: scroll accumulates until it crosses one
-    // notch's worth of delta, then steps exactly one ladder rung. This kills the old
-    // "dead zone then lurch" feel (continuous zoom rounded to an integer at render
-    // time) — every step is the same size and lands on a seam-safe rung. No tween:
-    // an animated transit would pass through fractional integer-zooms and flash the
-    // 1px tile cracks the ladder exists to avoid.
-    const WHEEL_NOTCH = 100; // device-px of scroll per zoom step (one mouse notch)
-    let wheelAccum = 0;
+    // Continuous, cursor-anchored wheel zoom. The wheel only nudges the eased TARGET (and records
+    // the world point under the cursor); the tick glides `view.zoom` toward it and re-anchors each
+    // frame, so a notched mouse zooms smoothly instead of jumping a step per notch. The seam-safe
+    // rung rasterisation + scaled present (syncView / present.ts) keep every fractional zoom
+    // crack-free along the way.
     canvas.addEventListener(
         "wheel",
         (e) => {
             e.preventDefault();
-            wheelAccum += e.deltaY;
-            let steps = 0; // +1 per notch = zoom IN (scroll up → negative deltaY)
-            while (wheelAccum <= -WHEEL_NOTCH) {
-                steps++;
-                wheelAccum += WHEEL_NOTCH;
-            }
-            while (wheelAccum >= WHEEL_NOTCH) {
-                steps--;
-                wheelAccum -= WHEEL_NOTCH;
-            }
-            if (steps === 0) return;
-
-            const idx = nearestZoomLevel(view.zoom);
-            const next = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, idx + steps));
-            if (next === idx) return; // already at a rail
-
             const rect = canvas.getBoundingClientRect();
             const sx = (e.clientX - rect.left) * dpr();
             const sy = (e.clientY - rect.top) * dpr();
-            // Hold the world point under the cursor fixed across the step. Anchor on the
-            // SNAPPED origin that is actually rendered (matching `applyView`), else the
-            // target appears to orbit the corner instead of staying under the pointer.
-            const zBefore = snapZoom(view.zoom);
-            const wx = Math.round(view.x * zBefore) / zBefore + sx / zBefore;
-            const wy = Math.round(view.y * zBefore) / zBefore + sy / zBefore;
-            const zAfter = ZOOM_LEVELS[next]!;
-            view.zoom = zAfter;
-            view.x = wx - sx / zAfter;
-            view.y = wy - sy / zAfter;
-            view.userMoved = true;
-            applyView(view, layers);
+            // Anchor on the world point currently under the cursor (live zoom), so the ease holds
+            // it fixed even if more notches arrive mid-glide.
+            zoomCtl.wx = view.x + sx / view.zoom;
+            zoomCtl.wy = view.y + sy / view.zoom;
+            zoomCtl.sx = sx;
+            zoomCtl.sy = sy;
+            zoomCtl.target = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomCtl.target * Math.pow(2, -e.deltaY / 500)));
         },
         { passive: false }
     );

@@ -41,7 +41,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
     const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
     const group1BGL = engine._device.createBindGroupLayout({
         label: "shader-material-group1",
-        entries: buildBindGroupLayoutEntries(material.samplerDecls, customSpec !== null),
+        entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
     });
     const bindings: ShaderPipelineBindings = {
         group1BGL,
@@ -80,7 +80,8 @@ export function getOrCreateShaderPipeline(
     const device = engine._device;
     const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
-    const fragModule = sig._colorFormat ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
+    const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
+    const fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
         ? {
               format: sig._colorFormat,
@@ -105,7 +106,7 @@ export function getOrCreateShaderPipeline(
         label: `${material.name ?? "shader"}-pipeline`,
         layout: device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), bindings.group1BGL] }),
         vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
-        ...(fragModule && colorTarget ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: [colorTarget] } } : {}),
+        ...(fragModule ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: colorTarget ? [colorTarget] : [] } } : {}),
         ...(sig._depthStencilFormat
             ? {
                   depthStencil: {
@@ -132,7 +133,11 @@ function toUboField(decl: ShaderUniformDecl): UboField {
     return { _name: decl.name, _type: decl.type };
 }
 
-function buildBindGroupLayoutEntries(samplers: readonly ShaderSamplerDecl[], hasCustomUbo: boolean): GPUBindGroupLayoutEntry[] {
+function buildBindGroupLayoutEntries(
+    samplers: readonly ShaderSamplerDecl[],
+    storageBuffers: readonly { name: string; type: string }[],
+    hasCustomUbo: boolean
+): GPUBindGroupLayoutEntry[] {
     const entries: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: SHADER_STAGE_ALL, buffer: { type: "uniform" } }];
     let nextBinding = 1;
     if (hasCustomUbo) {
@@ -153,6 +158,13 @@ function buildBindGroupLayoutEntries(samplers: readonly ShaderSamplerDecl[], has
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
             sampler: { type: sampler.comparison === true ? "comparison" : sampleType === "float" ? "filtering" : "non-filtering" },
+        });
+    }
+    for (const _storage of storageBuffers) {
+        entries.push({
+            binding: nextBinding++,
+            visibility: SHADER_STAGE_ALL,
+            buffer: { type: "read-only-storage" },
         });
     }
     return entries;
@@ -194,6 +206,10 @@ ${customSpec._structBody}
         const samplerType = sampler.comparison === true ? "sampler_comparison" : "sampler";
         wgsl += `@group(1) @binding(${nextBinding++}) var ${sampler.name}: ${texType};
 @group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: ${samplerType};
+`;
+    }
+    for (const storage of material.storageBufferDecls) {
+        wgsl += `@group(1) @binding(${nextBinding++}) var<storage, read> ${storage.name}: ${storage.type};
 `;
     }
     for (const define of material.defines) {

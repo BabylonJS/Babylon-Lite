@@ -52,6 +52,9 @@ export interface GlintsView {
     x: number;
     y: number;
     zoom: number;
+    /** Render-target size in device pixels (the sparkle quad fills it). Defaults to the canvas. */
+    w?: number;
+    h?: number;
 }
 
 export interface Glints {
@@ -156,8 +159,8 @@ export function createGlints(engine: EngineContext, sr: SpriteRenderer, world: G
             // Fullscreen quad centred on the canvas; the tint carries the world rectangle
             // currently on screen (a world point W draws at (W − view) · zoom, so screen uv 0
             // is world `view` and the span is `canvas / zoom`). `daylight` rides in fx.params.x.
-            const w = engine.canvas.width || 1;
-            const h = engine.canvas.height || 1;
+            const w = view.w ?? (engine.canvas.width || 1);
+            const h = view.h ?? (engine.canvas.height || 1);
             updateSprite2DIndex(layer, sprite, {
                 positionPx: [w * 0.5, h * 0.5],
                 sizePx: [w, h],

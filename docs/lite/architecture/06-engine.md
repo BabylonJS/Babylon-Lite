@@ -22,7 +22,37 @@ export interface EngineContext {
 
   /** GPU draw calls executed in the last rendered frame. */
   drawCallCount: number;
+
+  /** GPU time spent on the last measured frame, in milliseconds. 0 until the first measured frame and
+   *  while GPU timing is disabled (the default). Enable with `setGpuTimingEnabled`. */
+  gpuFrameTimeMs: number;
 }
+
+/** Whether GPU frame-time measurement is available on this engine's device (the adapter offered the
+ *  WebGPU `timestamp-query` feature). When false, `setGpuTimingEnabled` is a no-op. */
+export function isGpuTimingSupported(engine: EngineContext): boolean;
+/** Enable or disable per-frame GPU timing (disabled by default). While on, `engine.gpuFrameTimeMs`
+ *  updates each frame. Opt-in and zero-cost when unused — see *GPU Frame Timing* below. */
+export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void;
+
+export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" | "available" | "error";
+export interface RenderTaskGpuTiming {
+  readonly index: number;
+  readonly name: string;
+  readonly durationMs: number;
+}
+export interface RenderTaskGpuTimings {
+  readonly status: RenderTaskGpuTimingStatus;
+  readonly supported: boolean;
+  readonly enabled: boolean;
+  readonly frameIndex: number;
+  readonly tasks: readonly RenderTaskGpuTiming[];
+  readonly droppedTaskCount: number;
+  readonly error?: string;
+}
+export function isRenderTaskGpuTimingSupported(engine: EngineContext): boolean;
+export function getRenderTaskGpuTimings(engine: EngineContext): RenderTaskGpuTimings;
+export function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabled: boolean): Promise<RenderTaskGpuTimings>;
 
 /** Start the render loop for all registered rendering contexts. Resolves after the first frame renders. */
 export function startEngine(engine: EngineContext): Promise<void>;
@@ -148,6 +178,46 @@ When `registerScene(scene)` is called, the scene runs its deferred builders, bui
 
 Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` through render-target helpers, not by the engine render loop itself.
 
+### GPU Frame Timing (optional, zero-cost when unused)
+
+`setGpuTimingEnabled(engine, true)` measures how long the **GPU** spends on each frame (distinct from CPU/wall-clock time), publishing a lightly-smoothed value to `engine.gpuFrameTimeMs` (milliseconds). It's a developer/HUD profiling aid, disabled by default.
+
+The feature is implemented so that scenes which never enable it pay **zero** for it — the heavy timer code (`src/engine/gpu-timer.ts`) is reachable only through a dynamic `import()` inside `setGpuTimingEnabled`, which is itself tree-shaken away when unused. `renderFrame` carries only three optional-chain short-circuits (no-ops while timing is off). The only always-bundled cost is requesting the `timestamp-query` device feature opportunistically in `createEngine` (free at runtime) and a one-field initializer — a handful of bytes that round to zero in bundle-size measurements (e.g. scene1/BoomBox shows no measurable delta).
+
+How it works when enabled:
+
+1. `createEngine` opportunistically requests the `timestamp-query` feature whenever the adapter offers it (alongside the texture-compression features), so timing can be turned on later. `isGpuTimingSupported(engine)` reports whether it was available.
+2. The first `setGpuTimingEnabled(engine, true)` dynamic-imports `gpu-timer.ts`, lazily creates a `GpuFrameTimer` (a 2-slot `timestamp` query set + a recycled MAP_READ readback buffer), and installs three per-frame hooks on the engine (`_gpuTimerBegin` / `_gpuTimerEnd` / `_gpuTimerResolve`).
+3. `renderFrame` writes the opening timestamp into the frame's command encoder right after creating it and the closing timestamp right before finishing it — so both are commands **inside the frame's command buffer**, and the GPU runs them contiguously around exactly that frame's passes. This measures the frame's **GPU work**, independent of how long the CPU took to record it. After the frame is submitted, `_gpuTimerResolve` issues a tiny separate `resolveQuerySet` + buffer copy and maps the result asynchronously, off the render critical path, so the readout (lightly smoothed) lags a frame or two but never stalls the frame.
+
+Disabling clears the three hooks (renderFrame's optional-chains become no-ops again) and resets `gpuFrameTimeMs` to 0; the timer's GPU resources are kept and reused if it is re-enabled.
+
+### GPU Render-Task Timing (optional, zero-cost when unused)
+
+`setRenderTaskGpuTimingEnabled(engine, true)` enables per-frame-graph-task GPU timings. It returns a snapshot immediately (`"pending"` after a successful enable), and `getRenderTaskGpuTimings(engine)` returns the latest asynchronously completed frame:
+
+```typescript
+await setRenderTaskGpuTimingEnabled(engine, true);
+// Later, after one or more rendered frames:
+const timings = getRenderTaskGpuTimings(engine);
+if (timings.status === "available") {
+  for (const task of timings.tasks) {
+    // task.name is the existing Task.name label ("shadow", "scene", "post-process", ...)
+    console.log(task.index, task.name, task.durationMs);
+  }
+}
+```
+
+Unsupported devices are explicit: if the WebGPU device lacks `timestamp-query`, `isRenderTaskGpuTimingSupported(engine)` is false and both enable/read APIs return `status: "unsupported"` with an empty `tasks` array.
+
+Bundle-size protection mirrors screenshot capture and frame timing:
+
+1. `createEngine` only requests `timestamp-query` opportunistically when the adapter offers it.
+2. The public API lives in a thin module (`engine/gpu-task-timing.ts`). The timestamp-query implementation (`engine/gpu-task-timer.ts`) is reachable only through the dynamic import inside `setRenderTaskGpuTimingEnabled`.
+3. Non-users do not fetch the profiler chunk and do not carry task-profiling code in the always-fetched frame-graph module. On enable, the dynamic profiler wraps the currently registered frame graphs' `execute()` functions, plus newly pushed surfaces/contexts, so timestamp passes are written only while profiling is explicitly enabled.
+
+When enabled, the first timed task seen for a new frame encoder clears the current record list. The dynamic frame-graph wrapper writes an empty timestamped compute pass before and after each `Task` execution. After `renderFrame` submits the frame command buffer, the profiler chains through the existing post-frame GPU timing hook, resolves/copies the used query slots through a tiny follow-up command buffer, then maps a recycled readback buffer asynchronously. Results are one or more frames behind and include the existing `Task.name` label plus an execution-order `index` to disambiguate duplicate names. If the fixed query capacity is exceeded, excess tasks execute normally and `droppedTaskCount` reports how many were not timed.
+
 ## State Machine / Lifecycle
 
 ```
@@ -201,3 +271,6 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 | File                   | Size       | Purpose                                               |
 | ---------------------- | ---------- | ----------------------------------------------------- |
 | `src/engine/engine.ts` | ~150 lines | Engine interface, creation, render loop, MSAA targets |
+| `src/engine/gpu-timer.ts` | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
+| `src/engine/gpu-task-timing.ts` | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled |
+| `src/engine/gpu-task-timer.ts` | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings |

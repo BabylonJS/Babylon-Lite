@@ -20,6 +20,8 @@ import { createFlatGroundData, createGroundFromHeightMap as createGroundCPU } fr
 import type { GroundOptions } from "./create-ground.js";
 import { createCylinderData } from "./create-cylinder.js";
 import type { CylinderOptions } from "./create-cylinder.js";
+import { createCapsuleData } from "./create-capsule.js";
+import type { CapsuleOptions } from "./create-capsule.js";
 import { createPlaneData } from "./create-plane.js";
 import type { PlaneOptions } from "./create-plane.js";
 import { createDiscData } from "./create-disc.js";
@@ -53,7 +55,6 @@ export function createMeshFromData(
         receiveShadows: false,
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
-        _materialDirty: false,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
     } as unknown as Mesh;
     initMeshTransform(mesh);
@@ -255,6 +256,12 @@ export function createGround(engine: EngineContext, options?: GroundOptions): Me
 export function createCylinder(engine: EngineContext, options?: CylinderOptions): Mesh {
     const data = createCylinderData(options);
     return createMeshFromData(engine as EngineContext, "cylinder", data.positions, data.normals, data.indices, data.uvs);
+}
+
+/** Create a capsule (cylinder capped by two hemispheres) mesh. Caller must assign material. */
+export function createCapsule(engine: EngineContext, options?: CapsuleOptions): Mesh {
+    const data = createCapsuleData(options);
+    return createMeshFromData(engine as EngineContext, "capsule", data.positions, data.normals, data.indices, data.uvs);
 }
 
 /** Create a plane (unit quad facing -Z). Caller must assign material. */

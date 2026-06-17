@@ -6,8 +6,7 @@ import { createPickingRay } from "../picking/ray.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Vec3, Mat4, Mat4Storage } from "../math/types.js";
-
-const REFERENCE_FRAME_RATE = 60;
+import { REFERENCE_FRAME_RATE, integrateInertialVelocity, computePanSpeedMultiplier, computeZoomSpeedMultiplier } from "./geospatial-movement.js";
 
 /** Options for {@link attachGeospatialControls}. */
 export interface GeospatialControlOptions {
@@ -29,7 +28,9 @@ interface PickResult {
  *  - Left-drag: pan (the cursor stays anchored to the globe surface).
  *  - Middle/right-drag: rotate (yaw + pitch / tilt).
  *  - Wheel: zoom (toward the cursor by default).
- *  - Keyboard: arrows = tilt, W/A/S/D = pan, +/- = zoom.
+ *  - Touch: single-finger drag = pan; two-finger pinch = zoom toward the centroid,
+ *    promoting to a pan once the centroid drifts ≥ 20 px.
+ *  - Keyboard: arrows = pan, Ctrl+arrows = tilt (pitch/yaw), +/- = zoom along the look vector.
  *
  * Movement uses Babylon.js's framerate-independent physics model (velocity +
  * inertial decay). Globe picking is analytic ray-sphere against the planet
@@ -89,6 +90,15 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
     let lastX = 0;
     let lastY = 0;
     const keysDown = new Set<string>();
+
+    // ── Touch (pinch) state ──
+    const activeTouches = new Map<number, { x: number; y: number }>();
+    let pinchPrevDist = 0;
+    let pinchStartCentroidX = 0;
+    let pinchStartCentroidY = 0;
+    let pinchPanning = false;
+    const PINCH_PAN_THRESHOLD = 20; // px of centroid translation before a pinch also pans
+    const PINCH_ZOOM_SCALE = 0.05; // pixels of finger-spread → zoom-accumulator units
 
     function rectSize(): { width: number; height: number } {
         const r = canvas.getBoundingClientRect();
@@ -394,27 +404,8 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         return 1000 / REFERENCE_FRAME_RATE;
     }
 
-    function frameDecay(inertia: number, dt: number): number {
-        const eff = effectiveDeltaMs(dt);
-        const refMs = 1000 / REFERENCE_FRAME_RATE;
-        return Math.pow(inertia, eff / refMs);
-    }
-
     function nextVelocity(vel: number, pixelDelta: number, inertia: number, dt: number): number {
-        const eff = effectiveDeltaMs(dt);
-        if (eff === 0) {
-            return vel;
-        }
-        const decay = frameDecay(inertia, dt);
-        let v = vel * decay;
-        if (pixelDelta !== 0 || activeInput) {
-            const oneMinus = 1 - inertia;
-            const inputScale = oneMinus > 0 ? (1 - decay) / oneMinus : 1;
-            v += (pixelDelta / eff) * inputScale;
-        } else if (Math.abs(v) < 1e-6) {
-            v = 0;
-        }
-        return v;
+        return integrateInertialVelocity(vel, pixelDelta, inertia, effectiveDeltaMs(dt), activeInput);
     }
 
     function isDragging(): boolean {
@@ -422,17 +413,10 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
     }
 
     function computeFrameDeltas(dt: number): void {
-        // Pan dampening near the poles.
+        // Pan dampening near the poles and with altitude.
         const center = camera.center;
         if (panAccumulated.x !== 0 || panAccumulated.y !== 0 || panAccumulated.z !== 0) {
-            const centerRadius = Math.hypot(center.x, center.y, center.z);
-            const currentRadius = Math.hypot(camera.position.x, camera.position.y, camera.position.z);
-            const upZ = centerRadius > 0 ? center.z / centerRadius : 0; // sin(latitude)
-            const cosLat = Math.sqrt(1 - Math.min(1, upZ * upZ));
-            const latDamp = Math.sqrt(Math.abs(cosLat));
-            const height = Math.max(currentRadius - centerRadius, GEO_EPSILON);
-            const latDampScale = Math.max(1, centerRadius / height);
-            panSpeedMultiplier = clampNum(latDampScale * latDamp, 0, 1);
+            panSpeedMultiplier = computePanSpeedMultiplier(center, camera.position);
         } else {
             panSpeedMultiplier = 1;
         }
@@ -443,7 +427,7 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
             zoomVelocity = 0;
         } else {
             const target = computedZoomPickPoint ? dist(camera.position, computedZoomPickPoint) : dist(camera.position, center);
-            zoomSpeedMultiplier = target * 0.01;
+            zoomSpeedMultiplier = computeZoomSpeedMultiplier(target);
         }
 
         const eff = effectiveDeltaMs(dt);
@@ -513,42 +497,52 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         const rotateStep = 6; // pixels-equivalent per frame
         const zoomStep = 4;
         const panStep = camera.radius * 0.0015;
+        const ctrl = keysDown.has("ControlLeft") || keysDown.has("ControlRight");
 
-        if (keysDown.has("ArrowLeft")) {
-            rotationAccumulated.y -= rotateStep;
-        }
-        if (keysDown.has("ArrowRight")) {
-            rotationAccumulated.y += rotateStep;
-        }
-        if (keysDown.has("ArrowUp")) {
-            rotationAccumulated.x += rotateStep;
-        }
-        if (keysDown.has("ArrowDown")) {
-            rotationAccumulated.x -= rotateStep;
-        }
+        // +/- : zoom along the look vector (no zoom-to-point pick).
         if (keysDown.has("Equal") || keysDown.has("NumpadAdd")) {
             zoomAccumulated += zoomStep;
+            computedZoomPickPoint = null;
         }
         if (keysDown.has("Minus") || keysDown.has("NumpadSubtract")) {
             zoomAccumulated -= zoomStep;
+            computedZoomPickPoint = null;
         }
 
-        // W/A/S/D pan: move the centre along the local tangent basis.
+        if (ctrl) {
+            // Ctrl + arrows: tilt (pitch) and yaw, matching Babylon.js.
+            if (keysDown.has("ArrowLeft")) {
+                rotationAccumulated.y -= rotateStep;
+            }
+            if (keysDown.has("ArrowRight")) {
+                rotationAccumulated.y += rotateStep;
+            }
+            if (keysDown.has("ArrowUp")) {
+                rotationAccumulated.x += rotateStep;
+            }
+            if (keysDown.has("ArrowDown")) {
+                rotationAccumulated.x -= rotateStep;
+            }
+            return;
+        }
+
+        // Arrows: pan (a drag from the canvas centre). Move the centre along the
+        // local tangent basis; Up = north, Right = east.
         const east: Vec3 = { x: 0, y: 0, z: 0 };
         const north: Vec3 = { x: 0, y: 0, z: 0 };
         const up: Vec3 = { x: 0, y: 0, z: 0 };
         let dn = 0;
         let de = 0;
-        if (keysDown.has("KeyW")) {
+        if (keysDown.has("ArrowUp")) {
             dn += 1;
         }
-        if (keysDown.has("KeyS")) {
+        if (keysDown.has("ArrowDown")) {
             dn -= 1;
         }
-        if (keysDown.has("KeyD")) {
+        if (keysDown.has("ArrowRight")) {
             de += 1;
         }
-        if (keysDown.has("KeyA")) {
+        if (keysDown.has("ArrowLeft")) {
             de -= 1;
         }
         if (dn !== 0 || de !== 0) {
@@ -580,6 +574,13 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         const dy = e.clientY - lastY;
         lastX = e.clientX;
         lastY = e.clientY;
+        // While two fingers are down the gesture is a pinch (handled by the touch
+        // listeners); suppress the pointer-driven pan/rotate the first finger would
+        // otherwise trigger. lastX/Y above stay current so the remaining finger
+        // doesn't jump when one lifts.
+        if (activeTouches.size >= 2) {
+            return;
+        }
         if (mode === "none") {
             return;
         }
@@ -618,6 +619,104 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         keysDown.delete(e.code);
     }
 
+    // ── Touch (two-finger pinch = zoom toward centroid; ≥20 px centroid drift = pan) ──
+
+    function firstTwoTouches(): [{ x: number; y: number }, { x: number; y: number }] {
+        const it = activeTouches.values();
+        const a = it.next().value as { x: number; y: number };
+        const b = it.next().value as { x: number; y: number };
+        return [a, b];
+    }
+
+    function onTouchStart(e: TouchEvent): void {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i]!;
+            activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+        }
+        if (activeTouches.size >= 2) {
+            // A second finger landed: this is a pinch, not a single-finger pan.
+            // Cancel any in-progress pointer drag and stop the browser hijacking
+            // the gesture as a page zoom (iOS ignores touch-action for pinch).
+            e.preventDefault();
+            if (mode === "pan") {
+                stopDrag();
+            }
+            mode = "none";
+            const [p0, p1] = firstTwoTouches();
+            pinchPrevDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+            pinchStartCentroidX = (p0.x + p1.x) / 2;
+            pinchStartCentroidY = (p0.y + p1.y) / 2;
+            pinchPanning = false;
+        }
+    }
+
+    function onTouchMove(e: TouchEvent): void {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const t = e.changedTouches[i]!;
+            if (activeTouches.has(t.identifier)) {
+                activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+            }
+        }
+        if (activeTouches.size < 2) {
+            return;
+        }
+        e.preventDefault();
+        activeInput = true;
+        const [p0, p1] = firstTwoTouches();
+        const dist2 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+        const centroidClientX = (p0.x + p1.x) / 2;
+        const centroidClientY = (p0.y + p1.y) / 2;
+        const rect = canvas.getBoundingClientRect();
+        pointerX = centroidClientX - rect.left;
+        pointerY = centroidClientY - rect.top;
+
+        const centroidDrift = Math.hypot(centroidClientX - pinchStartCentroidX, centroidClientY - pinchStartCentroidY);
+        if (!pinchPanning && centroidDrift > PINCH_PAN_THRESHOLD) {
+            pinchPanning = true;
+            startDrag(pointerX, pointerY);
+        }
+
+        if (pinchPanning) {
+            // Pan dominates: drag the globe under the centroid (zoom is suppressed
+            // while dragging, mirroring the mid-drag zoom lockout).
+            handleDrag(pointerX, pointerY);
+        } else if (pinchPrevDist > 0) {
+            // Zoom toward the centroid: finger-spread Δpx feeds the zoom accumulator.
+            const dDist = dist2 - pinchPrevDist;
+            if (dDist !== 0) {
+                zoomAccumulated += dDist * PINCH_ZOOM_SCALE;
+                const pick = pickScreen(pointerX, pointerY);
+                computedZoomPickPoint = pick.hit && pick.point && zoomToCursor ? pick.point : pickAlongVector(camera._lookAt);
+            }
+        }
+        pinchPrevDist = dist2;
+    }
+
+    function onTouchEnd(e: TouchEvent): void {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            activeTouches.delete(e.changedTouches[i]!.identifier);
+        }
+        if (activeTouches.size < 2) {
+            if (pinchPanning) {
+                stopDrag();
+                pinchPanning = false;
+            }
+            pinchPrevDist = 0;
+        }
+        // One finger remains: re-anchor lastX/Y so its pointer drag doesn't jump.
+        if (activeTouches.size === 1) {
+            const p = activeTouches.values().next().value as { x: number; y: number };
+            lastX = p.x;
+            lastY = p.y;
+        }
+    }
+
+    // iOS Safari fires non-standard gesture* events and still page-zooms even with
+    // touch-action:none; swallow them so the pinch stays with the camera.
+    function onGesture(e: Event): void {
+        e.preventDefault();
+    }
+
     scene._beforeRender.push(onBeforeRenderTick);
 
     const listeners: [EventTarget, string, EventListener, AddEventListenerOptions?][] = [
@@ -626,6 +725,12 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         [canvas, "pointerup", onPointerUp as EventListener],
         [canvas, "wheel", onWheel as EventListener, { passive: false }],
         [canvas, "contextmenu", onContextMenu as EventListener],
+        [canvas, "touchstart", onTouchStart as EventListener, { passive: false }],
+        [canvas, "touchmove", onTouchMove as EventListener, { passive: false }],
+        [canvas, "touchend", onTouchEnd as EventListener],
+        [canvas, "gesturestart", onGesture as EventListener, { passive: false }],
+        [canvas, "gesturechange", onGesture as EventListener, { passive: false }],
+        [canvas, "gestureend", onGesture as EventListener, { passive: false }],
         [window, "keydown", onKeyDown as EventListener],
         [window, "keyup", onKeyUp as EventListener],
     ];

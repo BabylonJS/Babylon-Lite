@@ -148,7 +148,12 @@ Interactions:
 - **Wheel** — zoom; toward the cursor by default (`zoomToCursor`), else along the
   look vector. Zoom speed scales with distance to the target and is suppressed
   while dragging/rotating. `zoomInertia = 0.9` (others 0 by default).
-- **Keyboard** — arrows tilt, W/A/S/D pan, +/− zoom.
+- **Touch** — single-finger drag pans (via pointer events); a two-finger pinch
+  zooms toward the centroid (analytic raycast) and promotes to a pan once the
+  centroid drifts ≥ 20 px. Pointer-driven pan/rotate is suppressed while two
+  fingers are down, and `gesture*`/native pinch-zoom are prevented.
+- **Keyboard** — arrows pan (drag from the canvas centre), Ctrl+arrows tilt
+  (pitch/yaw), +/− zoom along the look vector.
 - **Collision** (`checkCollisions`) — clamps the eye so it cannot dip below the surface.
 
 ### Globe picking — analytic ray-sphere (key simplification)

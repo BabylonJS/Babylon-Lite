@@ -19,6 +19,7 @@ import {
     setUniformEffectUniforms,
     startEngine,
 } from "babylon-lite";
+import { installFetchProgress } from "./loading-progress.js";
 
 const FRAGMENT_WGSL = /* wgsl */ `
 struct U {
@@ -169,6 +170,7 @@ const lerpState = (a: MorphState, b: MorphState, n: number): MorphState => ({
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+    const progress = installFetchProgress(canvas);
     const engine = await createEngine(canvas, { maxDevicePixelRatio: 1 });
 
     const effect = createUniformEffectWrapper(engine, {
@@ -259,6 +261,7 @@ async function main(): Promise<void> {
 
     registerFrameGraphContext(context);
     await startEngine(engine);
+    progress.done();
     canvas.dataset.ready = "true";
 }
 

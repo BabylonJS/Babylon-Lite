@@ -111,7 +111,7 @@
         "slug": "scene11-shark",
         "name": "Scene 11 — Shark GLB",
         "maxMad": 0.01,
-        "maxRawKB": 83.6,
+        "maxRawKB": 83.8,
         "description": "Shark glTF model with PBR material, hemispheric light, auto-framing camera.",
         "tags": ["pbr", "gltf"],
         "skipPerf": true,
@@ -165,7 +165,7 @@
         "slug": "scene16-thin-instances",
         "name": "Scene 16 — Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 47.6,
+        "maxRawKB": 47.8,
         "description": "64,000 colored cubes via thin instances. Per-instance color, disableLighting, emissive-only rendering.",
         "tags": ["std", "procedural"],
         "compatParity": true
@@ -315,7 +315,7 @@
         "slug": "scene31-emissive-strength",
         "name": "Scene 31 — KHR_materials_emissive_strength",
         "maxMad": 0.01,
-        "maxRawKB": 78.2,
+        "maxRawKB": 78.4,
         "description": "EmissiveStrengthTest.glb (grid of materials with varying emissive_strength) against default IBL environment. Matches PG #YG3BBF#52.",
         "tags": ["pbr", "gltf", "env", "emissive"],
         "skipPerf": true,
@@ -359,7 +359,7 @@
         "slug": "scene35-gltf-instancing",
         "name": "Scene 35 — EXT_mesh_gpu_instancing",
         "maxMad": 0.02,
-        "maxRawKB": 81.2,
+        "maxRawKB": 81.4,
         "description": "SimpleInstancing.glb (EXT_mesh_gpu_instancing) — 5×5×5 grid of 125 unit cubes driven by per-instance TRS accessors. Default IBL env. Matches PG #YG3BBF#57.",
         "tags": ["pbr", "gltf", "env", "gpu-instancing"],
         "compatParity": true
@@ -400,7 +400,7 @@
         "slug": "scene40-physics",
         "name": "Scene 40 — Physics",
         "maxMad": 0.5,
-        "maxRawKB": 48.2,
+        "maxRawKB": 48.3,
         "maxGzipKB": 22,
         "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
         "tags": ["std", "procedural", "physics"],
@@ -470,6 +470,41 @@
         "maxGzipKB": 23,
         "description": "Havok Physics V2 constraint examples without PhysicsViewer or labels. Port of PG #7DMWP8#693.",
         "tags": ["std", "procedural", "physics"],
+        "skipPerf": true
+    },
+    {
+        "id": 47,
+        "slug": "scene47-physics-heightfield",
+        "name": "Scene 47 — Physics Heightfield",
+        "maxMad": 0.05,
+        "maxRawKB": 88,
+        "maxGzipKB": 35,
+        "description": "Havok Physics V2 heightfield from heightMap.png with two rows of falling shapes: row 1 PhysicsAggregate all types (box, sphere, capsule, cylinder, plus convex hull and mesh from the seagull glb), row 2 body+shape all types including convex hull and mesh from the seagull glb.",
+        "tags": ["physics", "gltf", "procedural", "std"],
+        "skipPerf": true,
+        "skipParityOnCI": true,
+        "skipNotes": "Scene 47 parity is skipped on CI because the BJS reference capture is flaky on CI/BrowserStack: this scene's golden is regenerated live from the BJS PhysicsViewer each run (machine-dependent, not committed), and the BJS physics-viewer wireframe overlay does not render consistently at the capture frame on BrowserStack, producing a bad live reference image rather than a Babylon Lite regression. Local parity still runs and force-recaptures the golden on each test run. The scene remains in the lab/bundle config and can be re-enabled once the BJS reference readiness signal is reliable on CI."
+    },
+    {
+        "id": 48,
+        "slug": "scene48-physics-center-of-mass",
+        "name": "Scene 48 — Physics Center of Mass",
+        "maxMad": 0.01,
+        "maxRawKB": 58,
+        "maxGzipKB": 24,
+        "description": "Havok Physics V2 centre-of-mass demo (port of PG #JVZAFL#1, GUI dropped). Three tall 1x4x1 boxes with distinct centres of mass (marked by red spheres) drop and settle, then a horizontal force kick toppling each differently. Fixed 1/60 timestep; frame captured 10 physics steps after the setTimeout kick.",
+        "tags": ["physics", "procedural", "std"],
+        "skipPerf": true
+    },
+    {
+        "id": 49,
+        "slug": "scene49-physics-shape-queries",
+        "name": "Scene 49 — Physics Shape Queries",
+        "maxMad": 0.005,
+        "maxRawKB": 92,
+        "maxGzipKB": 36,
+        "description": "Havok Physics V2 shape queries — merge of PG #1VT1BK#11 (shapeProximity) and #1VT1BK#12 (shapeCast), shown as TWO distinct groups stacked along Y. Group A (top): cylinder query shape + animated capsule body, shapeProximity draws the closest-point pair (orange on the cylinder, red on the capsule). Group B (bottom): cylinder swept +X + animated capsule body, shapeCast draws the cast ray (cyan) plus its hit point (green). Clicking a cylinder attaches a 3-axis rotation gizmo (GPU-picked) and the queries read the cylinder's live rotation; the gizmo is interactive-only so the static parity frame shows no gizmo. Frame captured once both queries report hits.",
+        "tags": ["physics", "procedural", "std"],
         "skipPerf": true
     },
     {
@@ -725,7 +760,7 @@
         "slug": "scene73-wheel-nme-viewport",
         "name": "Scene 73 — Wheel PBR vs NME Viewports",
         "maxMad": 0.05,
-        "maxRawKB": 141.3,
+        "maxRawKB": 141.5,
         "description": "CarbonFiberWheel.glb rendered twice on one canvas through two independent Babylon Lite scenes with split camera viewports: native glTF PBR clearcoat material on the left and checked-in C3NEY1#4 NME material on the right.",
         "tags": ["pbr", "nme", "gltf", "env", "clearcoat", "viewport"]
     },
@@ -971,8 +1006,8 @@
         "slug": "scene96-sprite-uvoffset-parallax",
         "name": "Scene 96 — Sprite uvOffset Parallax",
         "maxMad": 0.02,
-        "maxRawKB": 16,
-        "description": "20×9 pure-2D sprite grid sampling one tileable atlas tile (repeat wrap, nearest) where each horizontal band carries a different fixed per-sprite uvOffset (uvScroll), shifting the sampled UV in the vertex stage — the building block for parallax / infinite-scroll backgrounds. BJS SpriteRenderer oracle bakes the same effect into a per-offset rolled-tile atlas selected by cellIndex.",
+        "maxRawKB": 16.1,
+        "description": "20x9 pure-2D sprite grid sampling one tileable atlas tile (repeat wrap, nearest) where each horizontal band carries a different fixed per-sprite uvOffset (uvScroll), shifting the sampled UV in the vertex stage - the building block for parallax / infinite-scroll backgrounds.",
         "tags": ["sprites", "2d", "uvoffset"],
         "skipPerf": true,
         "compatParity": true
@@ -983,7 +1018,7 @@
         "name": "Scene 97 — Sprite Multiply Blend",
         "maxMad": 0.02,
         "maxRawKB": 21,
-        "description": "25×10 pure-2D sprite grid drawn with the opt-in spriteBlendMultiply blend mode (result = src.rgb * dst.rgb) over a light, non-black clear colour so the opaque icon sprites darken / tint the background. Fully static / deterministic. BJS SpriteRenderer oracle draws the same atlas with ALPHA_MULTIPLY (DST_COLOR / ZERO), matching the multiply RGB math including anti-aliased sprite edges.",
+        "description": "25x10 pure-2D sprite grid drawn with the opt-in spriteBlendMultiply blend mode (result = src.rgb * dst.rgb) over a light, non-black clear colour so the opaque icon sprites darken / tint the background, matching the BJS SpriteRenderer ALPHA_MULTIPLY (DST_COLOR / ZERO) oracle.",
         "tags": ["sprites", "2d", "blend"],
         "skipPerf": true
     },
@@ -993,7 +1028,7 @@
         "name": "Scene 98 — Billboard Additive Blend",
         "maxMad": 0.02,
         "maxRawKB": 62,
-        "description": "World-space facing billboards drawn with the opt-in billboardBlendAdditive blend mode (src-alpha, one); several large overlapping billboards in front of two boxes make the additive brightening obvious. Fully static / deterministic. BJS SpriteManager oracle uses ALPHA_ONEONE with each sprite's RGB pre-multiplied by its own alpha so one*(rgb*a) matches src-alpha*rgb for the opaque cells.",
+        "description": "World-space facing billboards drawn with the opt-in billboardBlendAdditive blend mode (src-alpha, one); several large overlapping billboards in front of two boxes make the additive brightening obvious, matching the BJS SpriteManager ALPHA_ONEONE oracle.",
         "tags": ["sprites", "billboards", "blend"],
         "skipPerf": true
     },
@@ -1050,7 +1085,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 121,
+        "maxRawKB": 124,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1082,7 +1117,7 @@
         "slug": "scene121-gs-update-data",
         "name": "Scene 121 — Gaussian Splatting updateData",
         "maxMad": 50,
-        "maxRawKB": 35,
+        "maxRawKB": 35.1,
         "description": "Loads Halo_Believe.splat with keepInRam, modifies the first 30 000 splats' Y by -2, then calls gs.updateData().",
         "tags": ["gaussian-splatting", "splat"],
         "skipPerf": true,
@@ -1243,7 +1278,7 @@
         "name": "Scene 147 — Circle of Confusion",
         "maxMad": 0.05,
         "maxRawKB": 105,
-        "description": "Circle-of-confusion post-process showcase ported from playground SUEU9U#117. The Babylon.js PowerPlant model (glb) is rendered through the frame-graph geometry renderer to produce a normalized view-depth texture, which feeds the CircleOfConfusion post-process. Output is the grayscale CoC map (0=in focus, 1=out of focus). Camera + CoC params match the playground.",
+        "description": "Circle-of-confusion post-process ported from playground SUEU9U#117. The Babylon.js PowerPlant glb is rendered through the frame-graph geometry renderer to a normalized view-depth texture, which feeds the CircleOfConfusion post-process. Output is the grayscale CoC map (0=in focus, 1=out of focus).",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "circle-of-confusion", "depth-of-field"],
         "skipPerf": true,
         "skipParity": false
@@ -1254,7 +1289,7 @@
         "name": "Scene 148 — Depth of Field",
         "maxMad": 0.18,
         "maxRawKB": 113,
-        "description": "Depth-of-field post-process showcase ported from playground SUEU9U#120. The Babylon.js PowerPlant model (glb) is rendered through the frame-graph geometry renderer to produce a camera-space view-depth texture, which feeds the DepthOfField post-process (circle-of-confusion -> CoC-weighted blur pyramid -> merge). A near focus distance with a wide aperture keeps the foreground sharp while the rest of the plant blurs out. The colour pass is rendered at 4x MSAA and resolved (via the render task's resolveTarget) into a single-sample texture for the post-process; the geometry view-depth stays single-sample. Camera + lens params match the playground. The 0.18 MAD ceiling accommodates inherent cross-engine MSAA-resolve variance at silhouette edges (amplified by the CoC-weighted blur).",
+        "description": "Depth-of-field post-process: the PowerPlant glb's geometry-renderer view-depth feeds DepthOfField (CoC -> blur -> merge), keeping the foreground sharp while the rest blurs out.",
         "tags": ["frame-graph", "geometry-renderer", "post-process", "depth-of-field", "blur"],
         "skipPerf": true,
         "skipParity": false
@@ -1265,7 +1300,7 @@
         "name": "Scene 149 — Node-Material Geometry Renderer (PowerPlant)",
         "maxMad": 0.16,
         "maxRawKB": 120,
-        "description": "Babylon.js PowerPlant glb rendered through the frame-graph geometry renderer task, with every original material replaced by a NodeMaterial. One generic NME graph (sampling an albedo texture + computing world/local position, world/view normal and a constant reflectivity) is instantiated once per original material and feeds a new GeometryTextureOutputBlock terminal — the Lite analogue of BJS PrePassOutputBlock. Seven parity-matched geometry-texture impostors are shown on a single strip (viewNormal, worldNormal, worldPosition, reflectivity, localPosition, viewDepth, screenspaceDepth); no realColor tile (the node path does not implement the emitColor attachment).",
+        "description": "PowerPlant glb through the geometry renderer with every material replaced by an NME GeometryTextureOutputBlock graph - seven geometry-texture impostors (normals, positions, reflectivity, depth).",
         "tags": ["frame-graph", "geometry-renderer", "mrt", "node-material", "gltf"],
         "skipPerf": true,
         "skipParity": false
@@ -1394,7 +1429,7 @@
         "slug": "scene161-shader-material-uniform",
         "name": "Scene 161 - ShaderMaterial Uniform",
         "maxMad": 0.02,
-        "maxRawKB": 37,
+        "maxRawKB": 39,
         "description": "WGSL ShaderMaterial updates typed custom uniforms through standalone setters.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1624,7 +1659,7 @@
         "name": "Scene 204 - LWR Thin Instances",
         "maxMad": 0.5,
         "maxRawKB": 60,
-        "description": "Thin-instanced box (5×5 local grid) on a mesh node at world (~5e6, 1, ~5e6) with useFloatingOrigin=true. Both Lite and BJS compose finalWorld = mesh.world * instance, so the large coordinate lives in the eye-relative mesh.world and instance matrices stay local — crisp instanced geometry vs F32 jitter. Pairs with BJS useLargeWorldRendering.",
+        "description": "Thin-instanced box (5x5 local grid) on a mesh node at world (~5e6, 1, ~5e6) with useFloatingOrigin=true. Both Lite and BJS compose finalWorld = mesh.world * instance, so the large coordinate lives in the eye-relative mesh.world while instance matrices stay local - crisp instanced geometry vs F32 jitter.",
         "tags": ["hpm", "lwr", "floating-origin", "thin-instances", "procedural", "std"],
         "skipPerf": true,
         "compatParity": true
@@ -1635,7 +1670,7 @@
         "name": "Scene 205 - LWR Facing Billboards",
         "maxMad": 0.5,
         "maxRawKB": 65,
-        "description": "World-space camera-facing billboard sprite cards (transparent, depth-tested, alpha) at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The billboard upload bakes the active camera world position into every anchor so the GPU sees eye-relative positions matching the eye-relative view-projection — crisp cards vs F32 jitter. Exercises the sorted/transparent billboard upload path. Pairs with BJS useLargeWorldRendering + SpriteManager.",
+        "description": "World-space camera-facing billboard sprite cards (transparent, depth-tested, alpha) at world (~5e6, *, ~5e6) with useFloatingOrigin=true. The billboard upload bakes the active camera world position into every anchor so the GPU sees eye-relative positions matching the eye-relative view-projection - crisp cards vs F32 jitter.",
         "tags": ["hpm", "lwr", "floating-origin", "sprites", "billboards", "depth"],
         "skipPerf": true,
         "compatParity": true
@@ -1646,7 +1681,7 @@
         "name": "Scene 206 - LWR Cutout Billboards",
         "maxMad": 1.0,
         "maxRawKB": 65,
-        "description": "Hard-alpha (alpha-tested, depth-writing) world-space billboard sprite cards at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises the opaque/cutout billboard upload path (uploadBillboardInstances) which bakes the active camera world position into every anchor and re-uploads on camera movement. The cutout cards themselves match BJS within ~0.2 MAD; the higher 1.0 ceiling accommodates the intrinsic sub-pixel large-world residual amplified by razor-sharp alpha-test edges and high-contrast opaque box silhouettes against the dark background (a billboard-FO regression would shift the large card areas far beyond this). Pairs with BJS useLargeWorldRendering + alpha-test facing planes.",
+        "description": "Alpha-tested, depth-writing billboard cards at world (~5e6, *, ~5e6) with useFloatingOrigin=true - exercises the cutout billboard upload path that bakes the camera position into every anchor.",
         "tags": ["hpm", "lwr", "floating-origin", "sprites", "billboards", "depth"],
         "skipPerf": true
     },
@@ -1656,7 +1691,7 @@
         "name": "Scene 207 - LWR Directional Shadows",
         "maxMad": 0.5,
         "maxRawKB": 75,
-        "description": "Directional-light PCF shadows (sphere + boxes casting onto a ground receiver) at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises the shadow light-space matrix under floating origin: the PCF directional generator builds its light view/projection eye-relative (camera offset subtracted from the light position and caster AABBs) so the shadow matches the eye-relative mesh world matrices used by both the caster pass and the receiver shader — correctly placed, crisp shadows vs F32 collapse. Pairs with BJS useLargeWorldRendering + ShadowGenerator (usePercentageCloserFiltering).",
+        "description": "Directional-light PCF shadows at world (~5e6, *, ~5e6) with useFloatingOrigin=true: the generator builds light view/projection eye-relative so shadows stay crisp instead of collapsing under F32.",
         "tags": ["hpm", "lwr", "floating-origin", "shadow", "procedural", "std"],
         "skipPerf": true,
         "compatParity": true
@@ -1668,7 +1703,7 @@
         "maxMad": 0.5,
         "maxRawKB": 53,
         "maxGzipKB": 22,
-        "description": "Havok Physics V2 sphere drop at world (~5e6, *, ~5e6) with useFloatingOrigin=true. Exercises multi-region floating origin: the physics world places bodies in a region centred near them and simulates in local coordinates (near zero), so the float32 Havok solver keeps precision and the sphere settles exactly on the ground at large world coordinates. Pairs with BJS useLargeWorldRendering, which enables Havok multi-region floating origin via scene.floatingOriginMode.",
+        "description": "Havok Physics V2 sphere drop at world (~5e6, *, ~5e6) with useFloatingOrigin=true: multi-region floating origin simulates in local coordinates so the float32 solver stays precise at huge coordinates.",
         "tags": ["hpm", "lwr", "floating-origin", "physics", "procedural"],
         "skipPerf": true
     },
@@ -1711,8 +1746,8 @@
         "slug": "scene213-gridmaterial",
         "name": "Scene 213 — GridMaterial",
         "maxMad": 0.01,
-        "maxRawKB": 44,
-        "description": "Four meshes shaded by the procedural unlit GridMaterial — an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box — validated against a Babylon.js @babylonjs/materials GridMaterial oracle with identical per-mesh grid params, camera, and 4x MSAA.",
+        "maxRawKB": 46,
+        "description": "Four meshes shaded by the procedural unlit GridMaterial - an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box - validated against a Babylon.js GridMaterial oracle.",
         "tags": ["materials", "grid", "procedural"],
         "skipPerf": true,
         "compatParity": true
@@ -1723,7 +1758,7 @@
         "name": "Scene 214 — Cascaded Shadow Maps",
         "maxMad": 0.4,
         "maxRawKB": 67,
-        "description": "A deterministic field of 200 green torus-knot casters (playground #KY0N7T#84) drops shadows onto a large Standard ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). Caster transforms come from a seeded PRNG so Lite and the Babylon.js CSM oracle place every knot identically; cascade Z bounds auto-fit the caster AABB (autoCalcShadowZBounds).",
+        "description": "A deterministic field of 200 green torus-knot casters (playground #KY0N7T#84) drops shadows onto a large Standard ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). A seeded PRNG places every knot identically to the Babylon.js CSM oracle; cascade Z bounds auto-fit the caster AABB.",
         "tags": ["shadows", "csm", "standard", "directional"],
         "skipPerf": true
     },
@@ -1733,7 +1768,7 @@
         "name": "Scene 215 — Cascaded Shadow Maps (PBR)",
         "maxMad": 0.4,
         "maxRawKB": 78,
-        "description": "PBR counterpart of scene214: a deterministic field of 200 green PBR torus-knot casters drops cascaded shadows onto a large PBR ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). Proves CSM works on PBR-material receivers, not just Standard. Caster transforms come from a seeded PRNG so Lite and the Babylon.js CSM oracle place every knot identically; cascade Z bounds auto-fit the caster AABB (autoCalcShadowZBounds).",
+        "description": "PBR counterpart of scene214: a deterministic field of 200 green PBR torus-knot casters drops cascaded shadows onto a large PBR ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). Proves CSM works on PBR receivers, not just Standard; a seeded PRNG matches the Babylon.js CSM oracle.",
         "tags": ["shadows", "csm", "pbr", "directional"],
         "skipPerf": true
     },
@@ -1743,7 +1778,7 @@
         "name": "Scene 216 — PBR Fog",
         "maxMad": 0.05,
         "maxRawKB": 54,
-        "description": "A receding row of 10 gold PBR boxes fades into linear fog whose colour matches the background, validating that PBR materials apply fog identically to Babylon.js — the fog is mixed into the linear HDR colour before the tonemap/image-processing chain, using the PBR-specific linearised fog factor (toLinearSpace(fog) = pow(fog, 2.2)). Hemispheric light, arc-rotate camera, no environment.",
+        "description": "A receding row of 10 gold PBR boxes fades into linear fog whose colour matches the background, validating that PBR materials apply fog identically to Babylon.js - the fog is mixed into the linear HDR colour before the tonemap / image-processing chain, using the PBR-specific linearised fog factor.",
         "tags": ["pbr", "fog"],
         "compatParity": true,
         "skipPerf": true
@@ -1754,7 +1789,7 @@
         "name": "Scene 217 — Material Plugin (BlackAndWhite)",
         "maxMad": 0.4,
         "maxRawKB": 80,
-        "description": "Opt-in MaterialPlugin support (the BJS MaterialPluginBase equivalent): a PBR sphere and a Standard box each carry a stateless BlackAndWhite grayscale plugin that injects custom WGSL at CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR (Lite slot BC, after tonemap+gamma). The full built-in PBR/Standard lighting pipeline is preserved; only the final color is converted to luminance. Proves per-instance plugin attach (material.plugins = [plugin]) on both material families with zero bundle-size impact for plugin-free scenes.",
+        "description": "Opt-in MaterialPlugin support: a PBR sphere and a Standard box each carry a stateless BlackAndWhite grayscale plugin that injects custom WGSL after tonemap+gamma. The built-in PBR/Standard lighting pipeline is preserved; only the final colour is converted to luminance, with zero bundle-size cost for plugin-free scenes.",
         "tags": ["material", "plugin", "pbr", "standard"],
         "skipPerf": true
     },
@@ -1764,7 +1799,7 @@
         "name": "Scene 218 — Vertex Animation Texture (VAT)",
         "maxMad": 0.02,
         "maxRawKB": 90,
-        "description": "Baked vertex animation: the scene-11 shark's skeletal animation is pre-evaluated into one rgba32float texture (bakeVat) and played through the GPU VAT vertex path (mesh.vat) with NO live CPU skeleton — the vertex shader reads each bone matrix from the baked texture at the current frame row. First step toward thin-instancing animated meshes. The baker + VAT shader fragment live in a dynamic-import chunk reached only when a scene bakes a VAT, so scenes that never use vertex animation pay zero bytes.",
+        "description": "Baked vertex animation: the scene-11 shark's skeletal animation is pre-evaluated into one rgba32float texture (bakeVat) and played through the GPU VAT vertex path (mesh.vat) with NO live CPU skeleton - the vertex shader reads each bone matrix from the baked texture at the current frame row.",
         "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
         "skipPerf": true,
         "compatParity": true
@@ -1775,7 +1810,7 @@
         "name": "Scene 219 — Per-instance VAT",
         "maxMad": 0.02,
         "maxRawKB": 93,
-        "description": "Per-instance VAT: the scene-11 shark baked to a VAT texture and rendered through the GPU thin-instance VAT path (one identity-matrix instance), frozen via ?seekTime. The instanced path's finalWorld = instanceMatrix * mesh.world * skin equals the plain skinned pose at identity, so it matches the BJS live-skeleton golden exactly — validating per-instance frame selection (the instance params texture read by @builtin(instance_index)), the thin-instance world placement, and the dual-clip blend path (single clip = blend 0). One draw call, no live CPU skeleton.",
+        "description": "Per-instance VAT: the scene-11 shark baked to a VAT texture and rendered through the GPU thin-instance VAT path (one identity-matrix instance) frozen via ?seekTime. finalWorld = instanceMatrix * mesh.world * skin equals the plain skinned pose at identity, so it matches the BJS live-skeleton golden exactly.",
         "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
         "skipPerf": true,
         "compatParity": true
@@ -1819,7 +1854,7 @@
         "name": "Scene 224 — Bounding Box Gizmo",
         "maxMad": 0.15,
         "maxRawKB": 90,
-        "description": "5 cubes parented to a group root, with a BoundingBoxGizmo computing the encompassing AABB. Parity is driven by a deterministic `__scene224.setRootTrs(...)` test hook that poses the group identically in both engines, verifying the rendered gizmo (12-edge wireframe, 8 corner-scale L-handles, 12 edge-midpoint rotation anchors, and their lit/hover materials) rather than pointer-drag dynamics.",
+        "description": "5 cubes parented to a group root, with a BoundingBoxGizmo computing the encompassing AABB. A deterministic __scene224.setRootTrs(...) test hook poses the group identically in both engines, verifying the rendered gizmo (12-edge wireframe, 8 corner-scale L-handles, 12 edge-midpoint rotation anchors) rather than pointer-drag dynamics.",
         "tags": ["std", "gizmo", "interactive", "bbox"],
         "skipPerf": true,
         "compatParity": true
@@ -1830,7 +1865,7 @@
         "name": "Scene 225 — Geospatial Camera",
         "maxMad": 0.2,
         "maxRawKB": 52,
-        "description": "Babylon.js GeospatialCamera port: a globe-orbit camera that anchors to a point on a sphere centred at the world origin and is parameterised by center/yaw/pitch/radius. A blue globe with six coloured surface marker cubes is viewed from a fixed deterministic pose (no controls attached) so the camera's view matrix is compared pixel-for-pixel against the Babylon.js GeospatialCamera oracle. The Lite camera reimplements the same left-handed local-basis + lookAt orientation math in the pure-state idiom.",
+        "description": "Babylon.js GeospatialCamera port: a globe-orbit camera that anchors to a point on a sphere centred at the world origin, parameterised by center/yaw/pitch/radius. A blue globe with six coloured marker cubes is viewed from a fixed deterministic pose so the view matrix is compared pixel-for-pixel against the BJS GeospatialCamera oracle.",
         "tags": ["camera", "geospatial", "globe", "standard"],
         "skipPerf": true
     },
@@ -1839,7 +1874,7 @@
         "slug": "scene227-multi-canvas-same-scene",
         "name": "Scene 227 — Multi-Canvas (Same Scene)",
         "maxRawKB": 60,
-        "description": "Two canvases side-by-side share a single engine via `createSurface`, and a *single* set of meshes (cube + ground), materials, and lights is added to two `SceneContext`s — one per surface. Proves that mesh GPU buffers, material pipelines, and light data are all device/engine-scoped: the same instances drive both canvases, while each scene keeps its own camera, framegraph, and per-scene UBO (front view vs 3/4 orbit).",
+        "description": "Two canvases side-by-side share a single engine via createSurface, and a single set of meshes (cube + ground), materials, and lights is added to two SceneContexts - one per surface. Proves mesh GPU buffers, material pipelines, and light data are device/engine-scoped: the same instances drive both canvases, each with its own camera.",
         "tags": ["multi-canvas", "surface", "demo", "std"],
         "skipParity": true,
         "skipPerf": true
@@ -1849,7 +1884,7 @@
         "slug": "scene228-multi-canvas-different-scenes",
         "name": "Scene 228 — Multi-Canvas (Different Scenes)",
         "maxRawKB": 60,
-        "description": "Two canvases side-by-side share a single engine via `createSurface`. Canvas A hosts a row of colored spheres lit by a hemispheric light; canvas B hosts a torus knot lit by a directional light. Demonstrates that completely independent scenes (different geometry, materials, lighting, cameras, clear colors) can coexist on one engine when each is bound to its own surface.",
+        "description": "Two canvases side-by-side share a single engine via createSurface. Canvas A hosts a row of coloured spheres lit by a hemispheric light; canvas B hosts a torus knot lit by a directional light. Demonstrates that fully independent scenes (geometry, materials, lighting, cameras) can coexist on one engine, each bound to its own surface.",
         "tags": ["multi-canvas", "surface", "demo", "std"],
         "skipParity": true,
         "skipPerf": true

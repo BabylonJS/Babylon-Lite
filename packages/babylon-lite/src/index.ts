@@ -2,8 +2,21 @@
 // Tree-shakable: import only what you use.
 
 // ─── Core ────────────────────────────────────────────────────────────
-export { createEngine, startEngine, stopEngine, renderFrame, resizeEngine, setEngineSize, disposeEngine, VERSION } from "./engine/engine.js";
+export {
+    createEngine,
+    startEngine,
+    stopEngine,
+    renderFrame,
+    resizeEngine,
+    setEngineSize,
+    disposeEngine,
+    setGpuTimingEnabled,
+    isGpuTimingSupported,
+    VERSION,
+} from "./engine/engine.js";
 export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
+export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings } from "./engine/gpu-task-timing.js";
+export type { RenderTaskGpuTiming, RenderTaskGpuTimings, RenderTaskGpuTimingStatus } from "./engine/gpu-task-timing.js";
 export { createSurface, disposeSurface, resizeSurface, setSurfaceSize } from "./engine/surface.js";
 export type { SurfaceContext, SurfaceOptions } from "./engine/surface.js";
 export { captureScreenshot } from "./engine/screenshot.js";
@@ -137,6 +150,7 @@ export {
     createGround,
     createGroundFromHeightMap,
     createCylinder,
+    createCapsule,
     createPlane,
     createDisc,
     createPolyhedron,
@@ -156,7 +170,9 @@ export {
 export { createSphereData } from "./mesh/create-sphere.js";
 export type { SphereMeshData } from "./mesh/create-sphere.js";
 export { createCylinderData } from "./mesh/create-cylinder.js";
+export { createCapsuleData } from "./mesh/create-capsule.js";
 export type { CylinderData } from "./mesh/create-cylinder.js";
+export type { CapsuleData } from "./mesh/create-capsule.js";
 export { createTorusKnotData } from "./mesh/create-torus-knot.js";
 export type { TorusKnotData, TorusKnotOptions } from "./mesh/create-torus-knot.js";
 export { createCsgFromMesh, csgSubtract, csgIntersect, csgUnion, createMeshFromCsg } from "./mesh/csg.js";
@@ -170,12 +186,21 @@ export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTextu
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
+export { setKtx2DecoderUrl } from "./texture/ktx2-loader.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
-export { createShaderMaterial, setShaderUniform, setShaderTexture, setShaderFloat, setShaderVector3, setShaderMatrix } from "./material/shader/shader-material.js";
+export {
+    createShaderMaterial,
+    setShaderUniform,
+    setShaderTexture,
+    setShaderStorageBuffer,
+    setShaderFloat,
+    setShaderVector3,
+    setShaderMatrix,
+} from "./material/shader/shader-material.js";
 export { createShaderNoColorMaterialView } from "./material/shader/no-color-view.js";
 export { createShaderNormalMaterialView } from "./material/shader/normal-view.js";
 export type { ShaderNormalViewConfig } from "./material/shader/normal-view.js";
@@ -354,6 +379,7 @@ export type { SphereOptions } from "./mesh/create-sphere.js";
 export type { TorusOptions } from "./mesh/create-torus.js";
 export type { GroundOptions } from "./mesh/create-ground.js";
 export type { CylinderOptions } from "./mesh/create-cylinder.js";
+export type { CapsuleOptions } from "./mesh/create-capsule.js";
 export type { PlaneOptions } from "./mesh/create-plane.js";
 export type { DiscOptions } from "./mesh/create-disc.js";
 export type { PolyhedronOptions } from "./mesh/create-polyhedron.js";
@@ -533,6 +559,7 @@ export {
     getPhysicsGravity,
     setPhysicsTimestep,
     getPhysicsTimestep,
+    onPhysicsAfterStep,
     setPhysicsVelocityLimits,
     getPhysicsVelocityLimits,
     setPhysicsBodyShape,
@@ -573,6 +600,10 @@ export type {
     PhysicsConstraintOptions,
     PhysicsConstraintLimit,
 } from "./physics/havok.js";
+export { createHeightFieldShape } from "./physics/havok-heightfield.js";
+export type { HeightFieldShapeOptions } from "./physics/havok-heightfield.js";
+export { shapeProximity, shapeCast } from "./physics/havok-queries.js";
+export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult } from "./physics/havok-queries.js";
 export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
 export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
 

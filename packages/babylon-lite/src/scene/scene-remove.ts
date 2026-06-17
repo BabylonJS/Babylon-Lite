@@ -1,4 +1,5 @@
 import type { SceneContext } from "./scene-core.js";
+import { unregisterMeshScene } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
 import { removeMeshFromTask } from "../frame-graph/render-task.js";
@@ -55,7 +56,6 @@ export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
     if (qi >= 0) {
         scene._materialSwapQueue.splice(qi, 1);
     }
-    mesh._materialDirty = false;
     // Deregister from the world-matrix push registry so a long-lived parent stops
     // retaining/traversing this disposed child on every invalidation. (The parent→
     // child reference is new with the push model; reparent already deregisters, but
@@ -70,5 +70,9 @@ export function removeFromScene(scene: SceneContext, mesh: Mesh): void {
             removeMeshFromTask(task as RenderTask, mesh);
         }
     }
-    disposeMeshGpu(mesh);
+    // Free the mesh's shared GPU buffers only when this was its LAST owning scene — a single
+    // `Mesh` may be added to several scenes, and `disposeMeshGpu` destroys buffers they all share.
+    if (unregisterMeshScene(scene, mesh)) {
+        disposeMeshGpu(mesh);
+    }
 }

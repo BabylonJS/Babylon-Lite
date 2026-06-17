@@ -162,7 +162,14 @@ function addToScene(scene: SceneContext, entity: Mesh | LightBase | ShadowGenera
     if ("_gpu" in entity && "material" in entity) {
         // Mesh → meshes + register material builder (deduped by builder identity)
         this.meshes.push(entity);
-        installMaterialSetter(this, entity);
+        // Subscribe this scene to the mesh. A mesh never references the scene (one-way
+        // ownership), so the reverse index lives off the mesh in a lazily-allocated
+        // `WeakMap<Mesh, Set<SceneContext>>`. The `mesh.material` setter is installed
+        // exactly once (on the mesh's first registration); the captured subscriber set is
+        // mutated in place, so a mesh shared across scenes notifies ALL of them on swap.
+        // The set's size also ref-counts the mesh's shared GPU buffers: disposeScene /
+        // removeFromScene only call disposeMeshGpu on the LAST scene removal.
+        registerMeshScene(this, entity);
         const builder = entity.material?._buildGroup;
         if (builder && !_groups.has(builder)) {
             _groups.set(builder, []);
