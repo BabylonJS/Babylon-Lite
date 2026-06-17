@@ -3,6 +3,7 @@
 A WebGPU-exclusive, tree-shakable 3D engine that produces pixel-identical output to Babylon.js — in a fraction of the bundle size.
 
 📖 **[Porting Guide](docs/lite/01-porting-guide.md)** — How to translate a Babylon.js scene to Babylon Lite
+
 🤝 **[Contributing](CONTRIBUTING.md)** — How to add scenes, tests, and contribute code
 
 ## Prerequisites
