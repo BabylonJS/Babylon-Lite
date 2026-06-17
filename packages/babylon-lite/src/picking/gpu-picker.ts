@@ -143,12 +143,15 @@ export interface PickOptions {
      *  structure behind/around them. When omitted, every mesh is pickable (previous behaviour). Applied
      *  identically to the id-assignment and id-resolve passes so ids stay consistent. */
     filter?: (mesh: Mesh) => boolean;
+    /** Dev-only diagnostics: logs the pick ray, pixel, pick id/depth and resolved mesh. */
+    debugLabel?: string;
 }
 
 /** Pick the mesh at CSS-space canvas coordinates, matching Babylon.js Scene.pick. Returns a PickingInfo. */
 export async function pickAsync(picker: GpuPicker, x: number, y: number, options?: PickOptions): Promise<PickingInfo> {
     const scene = picker._scene;
     const pickFilter = options?.filter ?? null;
+    const debugLabel = options?.debugLabel;
     const engine = scene.surface.engine;
     const device = engine._device;
     // Pick coordinates are relative to the scene's own surface canvas, not the engine's
@@ -182,6 +185,7 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
     const py = Math.max(0, Math.min(Math.floor(pickY - viewport.y), h - 1));
     const aspect = w / h;
     const vp = getViewProjectionMatrix(camera, aspect);
+    const debugRay = debugLabel ? createPickingRay(px, py, vp, w, h) : null;
 
     // ── Compute pick-zoomed VP (renders single pixel to 1×1 target) ──
     computePickVP(_pickVP, vp as unknown as Float32Array, px, py, w, h);
@@ -234,7 +238,10 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
         const gpu = mesh._gpu;
         const ti = mesh.thinInstances;
 
-        if (ti && ti.count > 0 && ti._gpuBuffer) {
+        if (ti) {
+            if (ti.count <= 0 || !ti._gpuBuffer) {
+                continue;
+            }
             _tiUboU32[0] = nextId;
             const tiUbo = createUniformBuffer(engine, _tiUboView);
             const clipBuffer = createPickClipBuffer(engine, mesh, tempBuffers);
@@ -337,6 +344,16 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
 
     // ── Resolve pick ID to mesh ──────────────────────────────────────
     if (pickId === 0) {
+        if (debugLabel) {
+            console.trace("pick-debug", {
+                label: debugLabel,
+                input: { x, y, pickX, pickY, px, py, backingWidth, backingHeight, clientWidth, clientHeight, viewport },
+                ray: debugRay,
+                pickId,
+                depth,
+                hit: false,
+            });
+        }
         return createEmptyPickingInfo();
     }
     let hitMesh: Mesh | GaussianSplattingMesh | null = null;
@@ -352,7 +369,10 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
             continue; // skipped identically to the draw pass above so scanId stays aligned with the ids
         }
         const ti = mesh.thinInstances;
-        if (ti && ti.count > 0 && ti._gpuBuffer) {
+        if (ti) {
+            if (ti.count <= 0 || !ti._gpuBuffer) {
+                continue;
+            }
             if (pickId >= scanId && pickId < scanId + ti.count) {
                 hitMesh = mesh;
                 hitThinIdx = pickId - scanId;
@@ -375,6 +395,17 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
         }
     }
     if (!hitMesh) {
+        if (debugLabel) {
+            console.trace("pick-debug", {
+                label: debugLabel,
+                input: { x, y, pickX, pickY, px, py, backingWidth, backingHeight, clientWidth, clientHeight, viewport },
+                ray: debugRay,
+                pickId,
+                depth,
+                hit: false,
+                unresolved: true,
+            });
+        }
         return createEmptyPickingInfo();
     }
 
@@ -408,6 +439,20 @@ export async function pickAsync(picker: GpuPicker, x: number, y: number, options
             info.ray = ray;
             await picker._detailedPick(info, ray);
         }
+    }
+    if (debugLabel) {
+        console.trace("pick-debug", {
+            label: debugLabel,
+            input: { x, y, pickX, pickY, px, py, backingWidth, backingHeight, clientWidth, clientHeight, viewport },
+            ray: info.ray ?? debugRay,
+            pickId,
+            depth,
+            hit: true,
+            mesh: (hitMesh as Mesh).name ?? "(unnamed)",
+            thinInstanceIndex: hitThinIdx,
+            pickedPoint: info.pickedPoint,
+            distance: info.distance,
+        });
     }
 
     return info;
