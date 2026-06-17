@@ -10,10 +10,13 @@
  *                                      removed entirely while indeterminate.
  *   - `canvas.dataset.loadingDetail` — the current phase, e.g. "Downloading
  *                                      assets…" or "Preparing scene…".
- *   - `canvas.dataset.loadingSize`   — a static, code-set estimate of the demo's
- *                                      asset payload on its own line, e.g.
- *                                      "Estimated demo assets: 28 MB". Set once
- *                                      from `estimatedBytes` and never updated.
+ *   - `canvas.dataset.loadingSize`   — a static, code-set size line that
+ *                                      reiterates the measured engine/code size
+ *                                      (the same KB shown on the demos gallery
+ *                                      card) next to the demo's asset estimate,
+ *                                      e.g. "Engine 126.6 KB · Assets 28 MB". Set
+ *                                      once from `engineKB` and `estimatedBytes`
+ *                                      and never updated.
  *
  * The per-page overlay script (in each `demo-*.html`) renders a determinate bar
  * from `data-progress` (hidden when absent, leaving the spinner as the
@@ -46,6 +49,13 @@ export interface InstallFetchProgressOptions {
      * `Content-Length` header.
      */
     estimatedBytes?: number;
+    /**
+     * The measured engine + demo-code size in KB — the same number shown on the
+     * demos gallery card. When provided, or injected at build time as the global
+     * `window.__DEMO_ENGINE_KB`, the loading overlay reiterates it next to the
+     * asset estimate so the page states its full footprint.
+     */
+    engineKB?: number;
 }
 
 function formatBytes(bytes: number): string {
@@ -60,6 +70,7 @@ function formatBytes(bytes: number): string {
 
 export function installFetchProgress(canvas: HTMLElement, options: InstallFetchProgressOptions = {}): LoadProgressHandle {
     const estimate = Math.max(0, Math.round(options.estimatedBytes ?? 0));
+    const engineKB = Math.max(0, options.engineKB ?? (globalThis as { __DEMO_ENGINE_KB?: number }).__DEMO_ENGINE_KB ?? 0);
     const original = globalThis.fetch.bind(globalThis);
     const tasks: Task[] = [];
     let started = 0;
@@ -206,10 +217,18 @@ export function installFetchProgress(canvas: HTMLElement, options: InstallFetchP
 
     globalThis.fetch = wrapped;
 
-    // Static, code-set size line: a constant estimate of the demo's asset payload
-    // shown for the whole load and never updated dynamically.
-    if (estimate > 0) {
-        canvas.dataset.loadingSize = "Estimated demo assets: " + formatBytes(estimate);
+    // Static, code-set size line shown for the whole load and never updated by the
+    // progress stream: the measured engine/code size (matching the gallery card)
+    // reiterated next to the demo's asset estimate, e.g. "Engine 126.6 KB · Assets
+    // 28 MB". `engineKB` comes from `window.__DEMO_ENGINE_KB`, injected next to the
+    // demo HTML by both the build (deployed flat site) and the lab dev server, so it
+    // resolves synchronously in every environment. Built with string concatenation
+    // (not template literals) because the demo bundler's WGSL minify pass trims
+    // leading whitespace from template-literal tails.
+    if (estimate > 0 || engineKB > 0) {
+        const assets = estimate > 0 ? formatBytes(estimate) : "";
+        const engine = engineKB > 0 ? "Engine " + engineKB + " KB" : "";
+        canvas.dataset.loadingSize = engine ? (assets ? engine + " · Assets " + assets : engine) : "Estimated demo assets: " + assets;
         schedule();
     }
 
