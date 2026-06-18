@@ -1,0 +1,153 @@
+# Azure Pipelines — Babylon Lite Compat-Layer Sync (ADO port of the gh-aw agentic workflow)
+#
+# Runs the `update-compat-layer` Copilot skill, then opens a DRAFT pull request with
+# whatever it changed (compat wrappers, tests, COMPAT-STATUS.md, and — when it lands a
+# scene — scene-config.json + lab oracle files).
+#
+# Two halves:
+#   1. Agent step — runs the GitHub Copilot CLI headlessly against the skill, with the
+#      same model/effort as the gh-aw workflow (Claude Opus 4.8, high effort).
+#   2. PR driver  — scripts/open-compat-sync-pr.ts re-validates INDEPENDENTLY, then
+#      (only if the agent changed something) branches, commits, pushes, and opens a
+#      DRAFT PR. Validation results are captured in the PR body either way.
+#
+# ── Triggers (all three retained from the gh-aw workflow) ──────────────────────────
+#   1. Daily schedule        → the `schedules:` cron below.
+#   2. Manual run            → the "Run pipeline" button + the parameters below.
+#   3. Issue labeled `compat`→ NOT a native ADO trigger. A tiny GitHub Action
+#      (.github/workflows/compat-sync-trigger.yml) fires on `issues: labeled` and
+#      kicks this pipeline via the ADO REST API, passing the issue number as
+#      `issueNumber`. The agent then treats that issue as the request to address.
+#
+# ── Secrets (set as SECRET pipeline variables on this pipeline) ───────────────────
+#   - GITHUB_TOKEN        PAT with contents:write + pull_requests:write (opens the PR)
+#   - COPILOT_CLI_TOKEN   fine-grained PAT (github_pat_...) from a Copilot-subscribed
+#                         account; authenticates the Copilot CLI. Inference bills to
+#                         that account (the BabylonJS org has no org Copilot plan).
+#
+# ── Known gaps vs. the gh-aw framework (cannot be ported 1:1) ──────────────────────
+#   - No AI-credit (AIC) per-run/daily caps — the Copilot CLI has no such mechanism;
+#     the only bound here is the job `timeoutInMinutes`. Watch spend manually.
+#   - No firewalled sandbox / threat detection on agent output.
+#   - The agent is not strictly read-only: it runs in the job and the PR driver uses a
+#     write-scoped GITHUB_TOKEN. (gh-aw isolated these via "safe outputs".)
+
+trigger: none
+pr: none
+
+schedules:
+    - cron: "0 9 * * *"
+      displayName: "Daily compat-layer sync"
+      branches:
+          include:
+              - master
+      always: true
+
+parameters:
+    - name: dryRun
+      displayName: "Dry run (no push / no PR)"
+      type: boolean
+      default: false
+    - name: issueNumber
+      displayName: "Triggering issue number (leave as 'none' for manual runs; set by the GitHub label bridge)"
+      type: string
+      default: "none"
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "9.15.4"
+    - name: CI
+      value: "true"
+    # Model passed to the Copilot CLI's --model flag. Must be a bare identifier the
+    # account's Copilot seat exposes (run `copilot` then `/model` to list them). NOTE:
+    # the raw CLI does NOT accept gh-aw's `?effort=high` query suffix — use the plain id.
+    - name: COPILOT_MODEL
+      value: "claude-opus-4.8"
+    # The GitHub repo the PR driver pushes the branch to and opens the PR against, plus
+    # its base branch. The base defaults to the branch this pipeline run was started from
+    # (the "Select pipeline version" branch in the Run UI) via Build.SourceBranchName —
+    # so running from `compat` bases the PR against `compat`, running from `master` bases
+    # against `master`, with no edits needed. (Note: Build.SourceBranchName is the last
+    # path segment, so slashed branch names like `feature/x` would resolve to just `x`.)
+    - name: TARGET_REPO
+      value: "BabylonJS/Babylon-Lite"
+    - name: TARGET_BASE_BRANCH
+      value: "$(Build.SourceBranchName)"
+
+stages:
+    - stage: CompatSync
+      displayName: "Compat-Layer Sync"
+      jobs:
+          - job: SyncAndOpenPr
+            displayName: "Sync compat layer and open draft PR"
+            # Generous wall-clock cap (matches the gh-aw timeout-minutes: 120). The
+            # skill clones/diffs upstream, implements wrappers, builds bundle scenes,
+            # and runs parity tests.
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+                  persistCredentials: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # ── Agent step ────────────────────────────────────────────────────
+                # Runs the update-compat-layer skill headlessly. The skill reads the
+                # last-synced SHA from COMPAT-STATUS.md, diffs BJS master + Lite since
+                # then, implements what is now possible, lands a lab scene at parity,
+                # adds GPU-free tests, and updates the status file. When triggered by a
+                # `compat`-labelled issue, ISSUE_NUMBER is set and the issue's title+body
+                # are fetched from the GitHub API and injected into the prompt so the
+                # agent acts on the actual request (not just the issue number).
+                - script: |
+                      set -euo pipefail
+                      npm install -g @github/copilot
+
+                      # Build the prompt in a file via Node — this avoids YAML/heredoc
+                      # indentation bleeding into the prompt and safely handles arbitrary
+                      # issue text (newlines, quotes, $). When ISSUE_NUMBER is a real
+                      # number, the issue's title+body are fetched and appended so the
+                      # agent acts on the actual request, not just the number.
+                      PROMPT_FILE="$(mktemp)"
+                      node scripts/build-compat-sync-prompt.mjs > "$PROMPT_FILE"
+                      echo "Prompt built ($(wc -c < "$PROMPT_FILE") bytes)."
+
+                      copilot --model "$COPILOT_MODEL" --allow-all-tools --no-ask-user --prompt "$(cat "$PROMPT_FILE")"
+                  displayName: "Run update-compat-layer skill"
+                  env:
+                      # Copilot CLI auth (fine-grained PAT from a Copilot-subscribed account).
+                      COPILOT_CLI_TOKEN: $(COPILOT_CLI_TOKEN)
+                      GH_TOKEN: $(COPILOT_CLI_TOKEN)
+                      COPILOT_MODEL: $(COPILOT_MODEL)
+                      ISSUE_NUMBER: ${{ parameters.issueNumber }}
+                      TARGET_REPO: $(TARGET_REPO)
+                      # Repo-scoped token (NOT the Copilot one) — needed to read the
+                      # triggering issue's body, including on a private repo.
+                      REPO_TOKEN: $(GITHUB_TOKEN)
+
+                # ── Deterministic PR driver ───────────────────────────────────────
+                # Independently re-validates, then branches/commits/pushes/opens a
+                # DRAFT PR only when the agent actually changed something.
+                - script: npx tsx scripts/open-compat-sync-pr.ts
+                  displayName: "Validate and open compat-sync draft PR"
+                  env:
+                      GITHUB_REPOSITORY: $(TARGET_REPO)
+                      GITHUB_TOKEN: $(GITHUB_TOKEN)
+                      BASE_BRANCH: $(TARGET_BASE_BRANCH)
+                      ISSUE_NUMBER: ${{ parameters.issueNumber }}
+                      DRY_RUN: ${{ lower(parameters.dryRun) }}

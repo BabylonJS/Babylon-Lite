@@ -2291,6 +2291,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="source">Source <span class="tab-badge tab-badge-src">workspace</span></button>
             <button class="tab" data-tab="parity">Parity <span class="tab-badge" style="background: #1a3a1a; color: #3fb950">diff</span></button>
+            <button class="tab" data-tab="compat">Compat <span class="tab-badge" style="background: #22303a; color: #79c0ff">migration</span></button>
             <button class="tab" data-tab="bundle">Bundle <span class="tab-badge tab-badge-bundle">dist</span></button>
             <button class="tab" data-tab="perf">Perf</button>
             <button class="tab" data-tab="perfreg">Perf Regression</button>
@@ -2381,6 +2382,15 @@
                 </div>
             </div>
             <div class="parity-grid" id="parity-grid"></div>
+        </div>
+
+        <div id="panel-compat" class="tab-panel">
+            <div class="tab-hint">
+                💡 The <strong>same Babylon.js source</strong> (<code>lite/src/bjs/sceneN.ts</code>) rendered live through the <code>@babylonjs/lite-compat</code> layer — no code
+                changes, just Vite-remapped <code>@babylonjs/core</code> imports. Opt scenes in with <code>"compatParity": true</code> in <code>scene-config.json</code>. A red
+                border means the scene hit an unsupported API (<code>LiteCompatError</code>) — that's a concrete TODO for the compat layer.
+            </div>
+            <div class="grid" id="compat-grid"></div>
         </div>
 
         <div id="panel-bundle" class="tab-panel">
@@ -2562,9 +2572,7 @@
             </div>
             <div id="apidocs-empty" style="padding: 32px; text-align: center; color: #8b949e; display: none">
                 <p style="font-size: 15px; margin-bottom: 8px">No API documentation is available yet.</p>
-                <p style="font-size: 13px">
-                    Run <code>pnpm docs</code>, or click <strong>Generate API Docs</strong> above when using the Vite dev server (<code>pnpm dev</code>).
-                </p>
+                <p style="font-size: 13px">Run <code>pnpm docs</code>, or click <strong>Generate API Docs</strong> above when using the Vite dev server (<code>pnpm dev</code>).</p>
             </div>
             <div id="apidocs-log-bar" style="display: none; align-items: center; justify-content: space-between; margin-top: 8px; margin-bottom: 4px">
                 <span style="font-size: 12px; color: #8b949e">TypeDoc output</span>
@@ -2846,15 +2854,7 @@
             }
 
             function renderSceneCardImage(s, priorityAttrs) {
-                return (
-                    '<img src="/lite/thumbnails/scene' +
-                    s.id +
-                    '.jpg" onerror="this.style.display=\'none\'" alt="' +
-                    s.name +
-                    '"' +
-                    priorityAttrs +
-                    ' decoding="async" />'
-                );
+                return '<img src="/lite/thumbnails/scene' + s.id + '.jpg" onerror="this.style.display=\'none\'" alt="' + s.name + '"' + priorityAttrs + ' decoding="async" />';
             }
 
             function renderFilterPills(containerId, toggleFnName) {
@@ -2983,6 +2983,52 @@
                     })
                     .join("");
                 renderFilterPills("source-filter-pills", "toggleSourceTag");
+            }
+
+            // ── Compat tab: render allow-listed scenes as clickable cards that open
+            //    the Babylon.js source running live through @babylonjs/lite-compat ──
+            function initCompatGrid(config) {
+                var grid = document.getElementById("compat-grid");
+                if (!grid) return;
+                var scenes = config.filter(function (s) {
+                    return s.compatParity;
+                });
+                if (scenes.length === 0) {
+                    grid.innerHTML =
+                        '<div class="tab-hint" style="grid-column:1/-1">No scenes opted in yet. Add <code>"compatParity": true</code> to a scene in <code>scene-config.json</code>.</div>';
+                    return;
+                }
+                grid.innerHTML = scenes
+                    .map(function (s, index) {
+                        var sceneKey = "scene" + s.id;
+                        var priorityAttrs = index < 6 ? ' loading="eager" fetchpriority="high"' : ' loading="lazy" fetchpriority="auto"';
+                        return (
+                            '<a class="card" href="/compat/scene' +
+                            s.id +
+                            '.html" data-scene="' +
+                            sceneKey +
+                            '" data-tags="' +
+                            s.tags.join(" ") +
+                            '" data-search="' +
+                            sceneSearchAttr(s) +
+                            '">' +
+                            '<div class="card-image">' +
+                            renderSceneCardImage(s, priorityAttrs) +
+                            renderNote(s) +
+                            "</div>" +
+                            '<div class="card-body">' +
+                            "<h2>" +
+                            s.name +
+                            ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/lite/babylon-ref-scene' +
+                            s.id +
+                            ".html','_blank');\">\u25b6 BJS Ref</span>" +
+                            "</h2>" +
+                            "<p>Babylon.js source rendered through <code>@babylonjs/lite-compat</code>.</p>" +
+                            renderBadges(s.tags) +
+                            "</div></a>"
+                        );
+                    })
+                    .join("");
             }
 
             function renderNote(s) {
@@ -5009,6 +5055,7 @@
                     initSourceGrid(config);
                     initBundleGrid(config);
                     initPerfGrid(config);
+                    initCompatGrid(config);
                     restoreLabState();
                     applyHiddenState();
                     if (_currentTab === "parity") {

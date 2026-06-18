@@ -455,3 +455,54 @@ stages:
                 - script: |
                       npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (tests)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 7: Compat Layer (@babylonjs/lite-compat)
+          # ──────────────────────────────────────────────────────────────
+          # Type-checks, builds, and unit-tests the opt-in compatibility layer so
+          # regressions are caught in PR CI. NOTE: this job intentionally does NOT
+          # publish the package — @babylonjs/lite-compat is not released yet. The
+          # npm-publish pipeline only publishes packages/babylon-lite/dist.
+          - job: Compat
+            displayName: "Compat Layer"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: |
+                      npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (compat src)"
+
+                - script: |
+                      npx tsc -p packages/babylon-lite-compat/tests/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (compat tests)"
+
+                - script: pnpm --filter @babylonjs/lite-compat build
+                  displayName: "Build compat package (dist)"
+
+                - script: npx vitest run --project compat
+                  displayName: "Run compat unit tests"
+                  env:
+                      CI: "true"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "**/test-results/unit-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Compat Layer"
+                  continueOnError: true

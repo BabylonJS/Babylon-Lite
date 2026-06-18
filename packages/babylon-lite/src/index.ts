@@ -221,6 +221,7 @@ export { enableMaterialTracking } from "./material/observable-material.js";
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
 export type { AssetContainer } from "./asset-container.js";
+export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
 export type { MaterialVariantData } from "./loader-gltf/material-variants.js";
 // ─── Hierarchy ───────────────────────────────────────────────────────
@@ -231,6 +232,7 @@ export type { TransformNode } from "./scene/transform-node.js";
 export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
+export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
 export { loadTexture2D, cloneTexture2D } from "./texture/texture-2d.js";
 export { loadSkybox } from "./loader-skybox/load-skybox.js";
@@ -342,6 +344,8 @@ export type {
     PbrMaterialProps,
     ClearCoatProps,
     AnisotropyProps,
+    SheenProps,
+    IridescenceProps,
     SubSurfaceProps,
     TranslucencyProps,
     ThicknessProps,

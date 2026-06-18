@@ -1,0 +1,51 @@
+name: Compat-Sync ADO Trigger
+
+# Bridge: the compat-sync automation runs in Azure DevOps (azure-pipelines-compat-sync.yml),
+# but ADO cannot natively trigger on a GitHub issue label. This tiny GitHub Action fires
+# when an issue is labeled `compat` and kicks the ADO pipeline via its REST API, passing
+# the issue number so the agent treats that issue as the request to address.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   ADO_ORG          your Azure DevOps organization name
+#   ADO_PROJECT      the project containing the pipeline
+#   ADO_PIPELINE_ID  the numeric pipeline (definition) id of azure-pipelines-compat-sync.yml
+#   ADO_PAT          an Azure DevOps PAT with "Build: Read & execute" (Run pipeline) scope
+#
+# Find ADO_PIPELINE_ID in the pipeline's URL: .../_build?definitionId=<ID>.
+
+on:
+    issues:
+        types: [labeled]
+
+permissions:
+    contents: read
+
+jobs:
+    trigger-ado:
+        # Only the `compat` label fires the pipeline.
+        if: github.event.label.name == 'compat'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Trigger the ADO compat-sync pipeline
+              env:
+                  ADO_ORG: ${{ secrets.ADO_ORG }}
+                  ADO_PROJECT: ${{ secrets.ADO_PROJECT }}
+                  ADO_PIPELINE_ID: ${{ secrets.ADO_PIPELINE_ID }}
+                  ADO_PAT: ${{ secrets.ADO_PAT }}
+                  ISSUE_NUMBER: ${{ github.event.issue.number }}
+              run: |
+                  set -euo pipefail
+                  # The PAT is the password in basic auth; the username is ignored.
+                  AUTH=$(printf ":%s" "$ADO_PAT" | base64 -w0)
+                  HTTP_CODE=$(curl -sS -o /tmp/ado_resp.json -w "%{http_code}" \
+                    -X POST \
+                    -H "Authorization: Basic ${AUTH}" \
+                    -H "Content-Type: application/json" \
+                    "https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/pipelines/${ADO_PIPELINE_ID}/runs?api-version=7.1-preview.1" \
+                    -d "{\"templateParameters\":{\"issueNumber\":\"${ISSUE_NUMBER}\"}}")
+                  echo "ADO responded HTTP ${HTTP_CODE}"
+                  cat /tmp/ado_resp.json
+                  if [ "$HTTP_CODE" -ge 300 ]; then
+                    echo "::error::Failed to trigger ADO pipeline (HTTP ${HTTP_CODE})"
+                    exit 1
+                  fi

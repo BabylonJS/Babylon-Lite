@@ -24,6 +24,13 @@ export default defineConfig({
                     testTimeout: 300_000,
                 },
             },
+            {
+                extends: true,
+                test: {
+                    name: "compat",
+                    include: ["packages/babylon-lite-compat/tests/**/*.test.ts"],
+                },
+            },
         ],
     },
 });

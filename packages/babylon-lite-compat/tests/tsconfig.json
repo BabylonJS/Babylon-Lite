@@ -1,0 +1,8 @@
+{
+    "extends": "../../../tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "types": ["@webgpu/types"]
+    },
+    "include": ["**/*.ts", "../src/**/*.ts", "../../babylon-lite/src/vite-env.d.ts"]
+}

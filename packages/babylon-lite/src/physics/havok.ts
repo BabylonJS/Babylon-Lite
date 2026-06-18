@@ -965,18 +965,29 @@ export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape
 // ─── Mass ────────────────────────────────────────────────────────────
 
 /**
- * Sets a body's mass and a matching diagonal inertia tensor.
+ * Sets a body's mass, preserving the shape-derived inertia tensor, centre of mass, and inertia
+ * orientation (matching Babylon.js `HavokPlugin` — only the mass scalar is overridden). A body with
+ * no shape attached yet has no inertia tensor to derive, so it falls back to an isotropic inertia
+ * proportional to the mass until a shape is set.
  * @param world - The physics world.
  * @param body - The body to update.
  * @param mass - Mass in kilograms.
- * @param centerOfMass - Optional body-local centre of mass (defaults to the origin). Use this when the
- *   collision shape is offset from the body's reference frame (e.g. a prop whose body origin sits at
- *   its base but whose shape is centred on its middle) so it tumbles around its real centre.
+ * @param centerOfMass - Optional body-local centre of mass override. When omitted, the shape-derived
+ *   centre of mass is preserved. Use this when the collision shape is offset from the body's reference
+ *   frame (e.g. a prop whose body origin sits at its base but whose shape is centred on its middle)
+ *   so it tumbles around its real centre.
  */
 export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass: number, centerOfMass?: Vec3): void {
-    const com = centerOfMass ?? { x: 0, y: 0, z: 0 };
-    // massProperties: [centerOfMass[3], mass, inertia[3], inertiaOrientation[4]]
-    const massProps = [[com.x, com.y, com.z], mass, [mass, mass, mass], [0, 0, 0, 1]];
+    // Match Babylon.js HavokPlugin._internalUpdateMassProperties: for a body with a shape, start from
+    // the shape-derived mass properties (correct anisotropic inertia tensor + centre of mass +
+    // orientation) and override only the mass scalar. Writing a placeholder isotropic inertia would
+    // make constrained/torqued bodies rotate at the wrong rate and break physics parity. A shape-less
+    // body has no inertia to derive, so keep the previous mass-proportional isotropic fallback.
+    const massProps = body._shape ? buildMassProperties(world, body) : [[0, 0, 0], mass, [mass, mass, mass], [0, 0, 0, 1]];
+    massProps[1] = mass;
+    if (centerOfMass) {
+        massProps[0] = [centerOfMass.x, centerOfMass.y, centerOfMass.z];
+    }
     world._hknp.HP_Body_SetMassProperties(body._hkBody, massProps);
 }
 

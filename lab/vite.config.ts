@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { spawn } from "child_process";
+import { mapBabylonImport, type CompatTarget } from "../packages/babylon-lite-compat/src/bundler-resolve.js";
 
 interface DemoConfigEntry {
     slug: string;
@@ -594,13 +595,127 @@ function tabContentPlugin(): Plugin {
     };
 }
 
+/**
+ * Single-server compatibility-layer harness.
+ *
+ * The existing Babylon.js oracle scenes under `lab/lite/src/bjs/sceneN.ts` import
+ * deep `@babylonjs/core` / `@babylonjs/loaders` subpaths. This plugin lets the
+ * *same* source render on the `@babylonjs/lite-compat` layer **without a second
+ * dev server**, by serving a parallel `/compat/sceneN.html` route whose module
+ * graph is tagged with a `?compat` query. Within that tagged subtree (and only
+ * there) every `@babylonjs/core`/`@babylonjs/loaders` specifier is redirected to
+ * the compat barrel; everywhere else (the `babylon-ref-*` golden pages) the real
+ * Babylon.js package resolves untouched. This is what makes a true side-by-side —
+ * real BJS vs compat — possible on one port.
+ *
+ * Mechanism:
+ *  - A distinct module id (`scene2.ts?compat`) means Vite caches a *separate*
+ *    transform from the real `scene2.ts`, so the two can resolve `@babylonjs/core`
+ *    differently without colliding.
+ *  - `resolveId` redirects bare `@babylonjs/(core|loaders)` imports to the compat
+ *    barrel only when the importer carries the `compat` query marker, and
+ *    propagates the marker across relative imports so transitive BJS usage in any
+ *    shared helper is redirected too.
+ */
+function compatScenesPlugin(): Plugin {
+    const compatTargets: Record<CompatTarget, string> = {
+        core: resolve(__dirname, "../packages/babylon-lite-compat/src/index.ts"),
+        addons: resolve(__dirname, "../packages/babylon-lite-compat/src/navigation/navigation.ts"),
+        recast: resolve(__dirname, "../packages/babylon-lite-compat/src/navigation/recast-shim.ts"),
+        // GridMaterial is re-exported from the barrel, so materials folds into core.
+        materials: resolve(__dirname, "../packages/babylon-lite-compat/src/index.ts"),
+    };
+    const hasCompatMarker = (id: string) => {
+        const q = id.split("?")[1];
+        return !!q && q.split("&").includes("compat");
+    };
+
+    return {
+        name: "lab-compat-scenes",
+        enforce: "pre",
+        async resolveId(source, importer) {
+            if (!importer || !hasCompatMarker(importer)) {
+                return null;
+            }
+            // Redirect Babylon.js core/loaders/navigation/grid + raw Recast onto the
+            // matching compat modules. The mapping table is shared with the publishable
+            // `@babylonjs/lite-compat/vite` plugin so the two can never drift.
+            const target = mapBabylonImport(source);
+            if (target) {
+                return compatTargets[target];
+            }
+            // Propagate the marker across relative imports so a helper that itself
+            // imports @babylonjs/core is still redirected within the compat subtree.
+            if (source.startsWith(".")) {
+                const baseImporter = importer.split("?")[0];
+                const resolved = await this.resolve(source, baseImporter, { skipSelf: true });
+                if (resolved && !resolved.external) {
+                    return resolved.id + (resolved.id.includes("?") ? "&compat" : "?compat");
+                }
+            }
+            return null;
+        },
+        configureServer(server) {
+            server.middlewares.use(async (req, res, next) => {
+                const url = (req.url ?? "").split("?")[0];
+                const match = url.match(/^\/compat\/scene(\d+)\.html$/);
+                if (!match) {
+                    next();
+                    return;
+                }
+                const sceneId = match[1];
+                const srcRel = `lite/src/bjs/scene${sceneId}.ts`;
+                if (!existsSync(resolve(__dirname, srcRel))) {
+                    // No Babylon.js oracle source for this scene — it is a Lite-only scene
+                    // (e.g. text rendering, multi-canvas) with nothing to run through the
+                    // compat layer. Report it as intentionally skipped, not as an error.
+                    res.statusCode = 404;
+                    res.setHeader("Content-Type", "text/html; charset=utf-8");
+                    res.end(
+                        `<!DOCTYPE html><meta charset="utf-8"><body style="font:14px monospace;color:#8b949e;background:#000">` +
+                            `Scene ${sceneId} is a Lite-only scene (no Babylon.js oracle at ${srcRel}); nothing to run through the compat layer.</body>`
+                    );
+                    return;
+                }
+                const baseHtml = [
+                    "<!DOCTYPE html>",
+                    '<html lang="en">',
+                    "<head>",
+                    '<meta charset="UTF-8" />',
+                    `<title>Babylon Lite Compat — Scene ${sceneId}</title>`,
+                    "<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style>",
+                    "</head>",
+                    "<body>",
+                    '<canvas id="renderCanvas"></canvas>',
+                    // The BJS oracle scenes swallow their own errors via `.catch(console.error)`,
+                    // so intercept console.error / global errors and surface the thrown error onto
+                    // the canvas (`data-error`). The Compat tab — and the coverage-triage harness —
+                    // poll `data-ready` vs `data-error` to tell "renders" from "throws".
+                    "<script>(function(){var c=document.getElementById('renderCanvas');function mark(m){if(c&&!c.dataset.error){c.dataset.error=String(m).slice(0,400);}}function fromArgs(args){for(var i=0;i<args.length;i++){var a=args[i];if(a&&(a instanceof Error||a.message&&a.stack))return a.message;}for(var j=0;j<args.length;j++){if(typeof args[j]==='string')return args[j];}return '';}var o=console.error.bind(console);console.error=function(){try{var m=fromArgs(arguments);if(m)mark(m);}catch(e){}return o.apply(console,arguments);};window.addEventListener('error',function(e){mark((e&&(e.error&&e.error.message||e.message))||'error');});window.addEventListener('unhandledrejection',function(e){var r=e&&e.reason;mark((r&&r.message)||r||'unhandledrejection');});})();</script>",
+                    `<script type="module" src="/${srcRel}?compat"></script>`,
+                    "</body>",
+                    "</html>",
+                ].join("\n");
+                const html = await server.transformIndexHtml(req.url ?? url, baseHtml);
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "text/html; charset=utf-8");
+                res.setHeader("Cache-Control", "no-cache");
+                res.end(html);
+            });
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [pagesDemoPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
+    plugins: [pagesDemoPlugin(), compatScenesPlugin(), serveReferenceImages(), apiDocsPlugin(), tabContentPlugin()],
     optimizeDeps: {
         // BJS uses prototype-patching side-effect imports (e.g. abstractEngine.dom.js).
         // babylon-lite uses ?raw WGSL imports that esbuild can't handle.
         // Exclude both from Vite's dep optimizer.
-        exclude: ["@babylonjs/core", "@babylonjs/loaders", "@babylonjs/havok"],
+        // @recast-navigation/* ship a wasm binary the esbuild optimizer can't process; serve
+        // them as native ESM so Babylon Lite's navigation (and the compat nav wrapper) can load
+        // Recast on demand without a hung pre-bundle.
+        exclude: ["@babylonjs/core", "@babylonjs/loaders", "@babylonjs/havok", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm"],
     },
     resolve: {
         // Ensure @babylonjs/core resolves to a single instance (loaders registers

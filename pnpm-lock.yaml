@@ -162,6 +162,34 @@ importers:
         specifier: ^4.5.4
         version: 4.5.4(@types/node@25.9.1)(rollup@4.62.0)(typescript@5.9.3)(vite@6.4.3(@types/node@25.9.1)(terser@5.46.1)(tsx@4.21.0)(yaml@2.9.0))
 
+  packages/babylon-lite-compat:
+    dependencies:
+      '@recast-navigation/core':
+        specifier: 0.43.0
+        version: 0.43.0
+      '@recast-navigation/generators':
+        specifier: 0.43.0
+        version: 0.43.0
+      '@recast-navigation/wasm':
+        specifier: 0.43.0
+        version: 0.43.0
+      babylon-lite:
+        specifier: workspace:*
+        version: link:../babylon-lite
+    devDependencies:
+      '@webgpu/types':
+        specifier: ^0.1.52
+        version: 0.1.69
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.3(@types/node@25.9.1)(terser@5.46.1)(tsx@4.21.0)(yaml@2.9.0)
+      vite-plugin-dts:
+        specifier: ^4.5.4
+        version: 4.5.4(@types/node@25.9.1)(rollup@4.62.0)(typescript@5.9.3)(vite@6.4.3(@types/node@25.9.1)(terser@5.46.1)(tsx@4.21.0)(yaml@2.9.0))
+
 packages:
 
   '@babel/helper-string-parser@7.27.1':
@@ -4172,7 +4200,7 @@ snapshots:
 
   '@rollup/pluginutils@5.3.0(rollup@4.62.0)':
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
       estree-walker: 2.0.2
       picomatch: 4.0.4
     optionalDependencies:

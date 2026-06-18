@@ -1,0 +1,9 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "types": ["@webgpu/types"]
+    },
+    "include": ["src", "../babylon-lite/src/vite-env.d.ts"]
+}
