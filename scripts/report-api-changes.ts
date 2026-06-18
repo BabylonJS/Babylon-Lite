@@ -177,10 +177,21 @@ async function normalizeApiReport(reportPath: string, prettierConfig: PrettierOp
     }
 }
 
-function createTargetWorktree(rootDir: string, targetRef: string): string {
+function createBaselineWorktree(rootDir: string, targetRef: string): string {
     const worktreeDir = mkdtempSync(resolve(tmpdir(), "babylon-lite-api-baseline-"));
     run("git", ["fetch", "origin", `${targetRef}:refs/remotes/origin/${targetRef}`], rootDir, { inheritStdio: true });
-    run("git", ["worktree", "add", "--detach", worktreeDir, `origin/${targetRef}`], rootDir, { inheritStdio: true });
+
+    // Build the baseline at the point where this branch diverged from the target
+    // branch, not at the target branch tip. Otherwise public API that landed on
+    // the target branch *after* this PR branched off is reported as "removed" by
+    // the PR — a false breaking-change positive for branches that are merely
+    // behind (e.g. a demo-only PR that never touched the framework). The merge
+    // base is the exact framework state the PR started from, so the diff reflects
+    // only what this PR itself changed. Fall back to the target tip if the merge
+    // base cannot be resolved (e.g. a shallow clone with unrelated histories).
+    const mergeBase = run("git", ["merge-base", "HEAD", `origin/${targetRef}`], rootDir, { allowFailure: true });
+    const baselineRef = mergeBase || `origin/${targetRef}`;
+    run("git", ["worktree", "add", "--detach", worktreeDir, baselineRef], rootDir, { inheritStdio: true });
     return worktreeDir;
 }
 
@@ -468,8 +479,8 @@ async function main(): Promise<void> {
         const currentReport = generateApiReport(rootDir, currentOutputDir);
         await normalizeApiReport(currentReport, prettierConfig);
 
-        console.log(`Building target branch package from origin/${targetBranch}...`);
-        targetWorktree = createTargetWorktree(rootDir, targetBranch);
+        console.log(`Building baseline package from the merge base with origin/${targetBranch}...`);
+        targetWorktree = createBaselineWorktree(rootDir, targetBranch);
         buildPackage(targetWorktree, { installDependencies: true });
         const targetReport = generateApiReport(targetWorktree, targetOutputDir);
         await normalizeApiReport(targetReport, prettierConfig);
