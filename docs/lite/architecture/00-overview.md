@@ -293,11 +293,11 @@ createSceneContext(engine: Engine): SceneContext
 createDefaultCamera(scene: SceneContext): ArcRotateCamera
 removeFromScene(scene: SceneContext, entity: Mesh | ...): void
 
-// Camera — pure data, no scene param
+// Camera — pure data; controls can register per-frame updates on a scene
 createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera
-attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement): void
+attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
 createFreeCamera(position: Vec3, target: Vec3): FreeCamera
-attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement): void
+attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
 
 // Loaders — note: loadGltf and loadBabylon take Engine, not SceneContext
 loadGltf(engine: Engine, url: string): Promise<AssetContainer>

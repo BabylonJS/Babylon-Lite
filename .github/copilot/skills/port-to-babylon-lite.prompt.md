@@ -97,7 +97,7 @@ scene.fog = { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.8
 |---|---|
 | `new BABYLON.ArcRotateCamera("cam", alpha, beta, radius, target, scene)` | `createArcRotateCamera(alpha, beta, radius, target)` |
 | `new BABYLON.FreeCamera("cam", position, scene)` | `createFreeCamera(position, target)` |
-| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas, scene)` *(arc-rotate)* or `attachFreeControl(camera, canvas)` *(free)* |
+| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas, scene)` *(arc-rotate)* or `attachFreeControl(camera, canvas, scene)` *(free)* |
 | `scene.createDefaultCamera(true, true, true)` | `createDefaultCamera(scene)` |
 | `camera.target = new BABYLON.Vector3(x,y,z)` | `camera.target = { x, y, z }` |
 | `camera.minZ = 0.1` | `camera.minZ = 0.1` *(same)* |
