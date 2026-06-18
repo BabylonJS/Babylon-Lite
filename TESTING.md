@@ -32,8 +32,8 @@ jobs on every PR targeting `master`.
 Standard unit tests for core logic (shader composer, shader integration, etc.).
 
 ```sh
-pnpm test:watch   # interactive
-npx vitest run     # single run
+pnpm test:watch        # interactive
+pnpm exec vitest run   # single run
 ```
 
 ---
@@ -51,7 +51,7 @@ Browser-based integration tests that exercise engine lifecycle:
 - `picking.spec.ts` — GPU picking
 
 ```sh
-npx playwright test tests/lite/plumbing/
+pnpm exec playwright test tests/lite/plumbing/
 ```
 
 ---
@@ -302,8 +302,8 @@ Report locations after a run:
 To view the HTML report locally:
 
 ```sh
-npx playwright show-report test-results/parity-report
-npx playwright show-report test-results/perf-report
+pnpm exec playwright show-report test-results/parity-report
+pnpm exec playwright show-report test-results/perf-report
 ```
 
 In CI, test artifacts (including the HTML report) are uploaded as pipeline

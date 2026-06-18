@@ -74,7 +74,7 @@ For pure logic tests (shaders, math, composition) that don't need a browser or G
 
 1. Create `tests/lite/unit/my-feature.test.ts`
 2. Use vitest APIs (`describe`, `it`, `expect`)
-3. Run: `npx vitest run`
+3. Run: `pnpm exec vitest run`
 
 ### Plumbing Tests (Playwright + WebGPU)
 
@@ -83,7 +83,7 @@ For GPU integration tests (dispose, material-swap, lifecycle):
 1. Create a test page: `lab/lite/my-test.html` + `lab/lite/src/my-test.ts`
 2. Add the HTML entry to `lab/vite.config.ts` (auto-detected if in root)
 3. Create `tests/lite/plumbing/my-test.spec.ts`
-4. Run: `npx playwright test tests/lite/plumbing/my-test.spec.ts`
+4. Run: `pnpm exec playwright test tests/lite/plumbing/my-test.spec.ts`
 
 > CI uses Chrome's SwiftShader Vulkan backend — WebGPU works without a real GPU.
 
@@ -99,7 +99,7 @@ For pixel-diff visual regression tests against Babylon.js golden references:
 6. Add scene config to `scene-config.json` with `id`, `slug`, `name`, `maxMad`
 7. Create `tests/lite/parity/scenes/sceneN-<slug>.spec.ts` using `compare-utils.ts` helpers
 8. Add a bundle-size ceiling in `tests/lite/parity/bundle-size.spec.ts` (never raise without approval)
-9. Run: `npx playwright test tests/lite/parity/scenes/sceneN-<slug>.spec.ts`
+9. Run: `pnpm exec playwright test tests/lite/parity/scenes/sceneN-<slug>.spec.ts`
 
 ### CI Workflows
 

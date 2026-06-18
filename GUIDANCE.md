@@ -146,11 +146,11 @@ async function main(): Promise<void> {
 ### 0c. Agent Test Commands (Strict)
 
 - **Agents MUST NOT run `pnpm test:perf`.** Performance tests are machine-sensitive and reserved for the user / CI; running them from an agent session wastes time and produces unreliable signal.
-- **Agents run only:** `pnpm build:bundle-scenes` and `pnpm test:parity` (or the individual spec via `npx playwright test tests/lite/parity/scenes/<spec>.spec.ts`). These cover parity MAD + bundle-size ceilings, which are the agent-enforceable guardrails.
+- **Agents run only:** `pnpm build:bundle-scenes` and `pnpm test:parity` (or the individual spec via `pnpm exec playwright test tests/lite/parity/scenes/<spec>.spec.ts`). These cover parity MAD + bundle-size ceilings, which are the agent-enforceable guardrails.
 - `pnpm test` chains build + parity (no perf), which is acceptable.
 - **The parity suite is slow (many minutes). Only run it when the Lite engine changed.** Run `pnpm test` / `pnpm test:parity` **only if you modified `packages/babylon-lite/src/**`** (the engine/runtime). Changes confined to **demos** (`lab/lite/src/demos/**`), **scenes** (`lab/lite/src/scenes/**`), **lab UI**, thumbnails, docs, manifests, or other static lab assets **do not require** running parity or any test suite — they cannot move engine parity. Skip the suites in those cases unless the user explicitly asks.
 - **Lab-only UI changes do not require parity/test suites.** When a task only changes the lab UI or static lab presentation, do not run parity or other test suites unless explicitly requested; use lightweight static inspection or a lab build only if validation is needed.
-- **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `npx playwright test tests/lite/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
+- **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `pnpm exec playwright test tests/lite/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
 - If perf validation is needed, ask the user to run `pnpm test:perf` locally.
 
 
