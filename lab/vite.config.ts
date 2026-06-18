@@ -17,6 +17,8 @@ interface DemoSize {
     gzipKB: number;
 }
 
+const DEMO_SOURCE_BASE_URL = "https://github.com/BabylonJS/Babylon-Lite/blob/master/lab/lite/src/demos/";
+
 function readJson<T>(path: string, fallback: T): T {
     if (!existsSync(path)) {
         return fallback;
@@ -53,8 +55,10 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
     const sizeRow = size
         ? `<div class="size" title="Engine + demo code only — excludes external assets (textures, game data, etc.)"><strong>${size.rawKB} KB</strong> · ${size.gzipKB} KB gzip</div>`
         : "";
+    const sourceHref = `${DEMO_SOURCE_BASE_URL}${encodeURIComponent(demo.slug)}.ts`;
     return [
-        `<a class="card" href="/demo-${demo.slug}.html" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<article class="card" data-tags="${escapeHtml(tagList.join(" "))}" data-mobile="${demo.mobile === false ? "false" : "true"}">`,
+        `<a class="card-main" href="/demo-${demo.slug}.html" aria-label="Open ${escapeHtml(demo.name)} demo">`,
         `<div class="card-image">`,
         `<img src="/thumbnails/demo-${demo.slug}.jpg" alt="${escapeHtml(demo.name)} thumbnail" loading="lazy" decoding="async" onerror="this.remove()" />`,
         `</div>`,
@@ -65,6 +69,8 @@ function renderPagesDemoCard(demo: DemoConfigEntry, size: DemoSize | undefined):
         sizeRow,
         `<span class="card-disabled-badge">Requires WebGPU</span>`,
         `</div></a>`,
+        `<div class="card-links"><a class="source-link" href="${escapeHtml(sourceHref)}" target="_blank" rel="noopener noreferrer">Source code</a></div>`,
+        `</article>`,
     ].join("");
 }
 
