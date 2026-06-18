@@ -170,6 +170,6 @@ export class Color4 {
 }
 
 function toHex(value: number): string {
-    const hex = value.toString(16);
+    const hex = value.toString(16).toUpperCase();
     return hex.length === 1 ? "0" + hex : hex;
 }

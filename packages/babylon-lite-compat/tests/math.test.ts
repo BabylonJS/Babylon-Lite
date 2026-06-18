@@ -76,7 +76,7 @@ describe("Color3 / Color4", () => {
         const red = Color3.FromHexString("#ff0000");
         expect(red.r).toBeCloseTo(1);
         expect(red.g).toBe(0);
-        expect(red.toHexString()).toBe("#ff0000");
+        expect(red.toHexString()).toBe("#FF0000");
     });
 
     it("converts between Color3 and Color4", () => {
