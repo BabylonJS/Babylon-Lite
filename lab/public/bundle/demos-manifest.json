@@ -1,46 +1,46 @@
 {
-  "offscreen": {
-    "rawKB": 180.3,
-    "gzipKB": 75.7
-  },
-  "torus-states": {
-    "rawKB": 25.1,
-    "gzipKB": 8.8
-  },
-  "doom": {
-    "rawKB": 126.8,
-    "gzipKB": 42.5
-  },
-  "quake": {
-    "rawKB": 128.6,
-    "gzipKB": 46.5
-  },
-  "minecraft": {
-    "rawKB": 108,
-    "gzipKB": 38.9
-  },
-  "freeciv": {
-    "rawKB": 67.1,
-    "gzipKB": 25.2
-  },
-  "tetris": {
-    "rawKB": 70.8,
-    "gzipKB": 26.1
-  },
-  "mosquito-amber": {
-    "rawKB": 105,
-    "gzipKB": 41.8
-  },
-  "littlest-tokyo": {
-    "rawKB": 59,
-    "gzipKB": 23.8
-  },
-  "bath-day": {
-    "rawKB": 178.5,
-    "gzipKB": 61.8
-  },
-  "platformer": {
-    "rawKB": 82.2,
-    "gzipKB": 29.1
-  }
+    "offscreen": {
+        "rawKB": 180.3,
+        "gzipKB": 75.7
+    },
+    "torus-states": {
+        "rawKB": 25.1,
+        "gzipKB": 8.8
+    },
+    "doom": {
+        "rawKB": 126.6,
+        "gzipKB": 42.5
+    },
+    "quake": {
+        "rawKB": 127.8,
+        "gzipKB": 46.3
+    },
+    "minecraft": {
+        "rawKB": 107.2,
+        "gzipKB": 38.8
+    },
+    "freeciv": {
+        "rawKB": 67.1,
+        "gzipKB": 25.2
+    },
+    "tetris": {
+        "rawKB": 70.5,
+        "gzipKB": 26
+    },
+    "mosquito-amber": {
+        "rawKB": 105,
+        "gzipKB": 41.8
+    },
+    "littlest-tokyo": {
+        "rawKB": 59,
+        "gzipKB": 23.8
+    },
+    "bath-day": {
+        "rawKB": 178.5,
+        "gzipKB": 61.8
+    },
+    "platformer": {
+        "rawKB": 82.2,
+        "gzipKB": 29.1
+    }
 }
