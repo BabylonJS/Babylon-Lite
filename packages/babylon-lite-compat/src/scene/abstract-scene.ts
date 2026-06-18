@@ -127,6 +127,16 @@ export abstract class AbstractScene {
         return this._trackedMeshes.find((m) => m.name === name) ?? null;
     }
 
+    /** Babylon.js `scene.getMeshById(id)` — first tracked mesh whose `id` matches, else `null`. */
+    public getMeshById(id: string): TransformNode | null {
+        return this._trackedMeshes.find((m) => (m as unknown as { id?: string }).id === id) ?? null;
+    }
+
+    /** Babylon.js legacy `scene.getMeshByID(id)` — alias of {@link getMeshById}. */
+    public getMeshByID(id: string): TransformNode | null {
+        return this.getMeshById(id);
+    }
+
     /** Babylon.js `scene.getNodeByName(name)` — searches tracked meshes, cameras, and lights. */
     public getNodeByName(name: string): Node | null {
         return this._trackedMeshes.find((m) => m.name === name) ?? this._cameras.find((c) => c.name === name) ?? this._lights.find((l) => l.name === name) ?? null;

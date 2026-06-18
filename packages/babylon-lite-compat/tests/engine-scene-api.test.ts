@@ -106,6 +106,15 @@ describe("Scene entity registries", () => {
         expect(scene.getNodeByName("box")).toBe(mesh);
     });
 
+    it("finds tracked meshes by id via getMeshById / getMeshByID (legacy alias)", () => {
+        const scene = fakeScene();
+        const mesh = { name: "dragon", id: "dragonLR" } as never;
+        (scene as unknown as { _trackedMeshes: unknown[] })._trackedMeshes.push(mesh);
+        expect(scene.getMeshById("dragonLR")).toBe(mesh);
+        expect(scene.getMeshByID("dragonLR")).toBe(mesh);
+        expect(scene.getMeshById("missing")).toBeNull();
+    });
+
     it("reports its class name and a unique id", () => {
         const a = fakeScene() as Scene & { uniqueId: number };
         const b = fakeScene() as Scene & { uniqueId: number };
