@@ -193,9 +193,9 @@ export class TargetCamera extends Camera {
     /** @internal Underlying Babylon Lite free camera. */
     public readonly _lite: LiteFreeCamera;
 
-    public constructor(name: string, position: Vector3, scene?: Scene) {
+    public constructor(name: string, position: Vector3, scene?: Scene, adoptLite?: LiteFreeCamera) {
         super(name, scene);
-        this._lite = createFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
+        this._lite = adoptLite ?? createFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
         this._makeActive(scene);
     }
 
@@ -224,7 +224,7 @@ export class TargetCamera extends Camera {
     }
 
     public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
-        const detach = attachFreeControl(this._lite, canvas);
+        const detach = attachFreeControl(this._lite, canvas, this._scene?._lite);
         this._setDetach(detach);
     }
 }
@@ -233,6 +233,12 @@ export class TargetCamera extends Camera {
 export class FreeCamera extends TargetCamera {
     public override getClassName(): string {
         return "FreeCamera";
+    }
+
+    /** @internal Wrap an already-built Lite free camera (e.g. one parsed from a `.babylon` file). */
+    public static _adopt(name: string, lite: LiteFreeCamera, scene?: Scene): FreeCamera {
+        const p = lite.position;
+        return new FreeCamera(name, new Vector3(p.x, p.y, p.z), scene, lite);
     }
 }
 

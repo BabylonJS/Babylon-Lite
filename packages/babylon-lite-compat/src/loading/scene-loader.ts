@@ -59,6 +59,7 @@ export class AssetContainer {
     /** Add every entity, animation group, camera, and clear colour to the scene. */
     public addAllToScene(scene: Scene): void {
         addToScene(scene._lite, this._lite);
+        scene._surfaceLoadedCamera();
     }
 
     public dispose(): void {

@@ -246,7 +246,8 @@
         "maxMad": 0.06,
         "maxRawKB": 59.7,
         "description": "Hill Valley town loaded from .babylon format. Pre-baked lighting, standard materials, free camera.",
-        "tags": ["std", "babylon"]
+        "tags": ["std", "babylon"],
+        "compatParity": true
     },
     {
         "id": 25,
