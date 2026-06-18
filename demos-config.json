@@ -48,7 +48,7 @@
     {
         "slug": "platformer",
         "name": "Platformer — Cosmic Run",
-        "description": "Super Mario Bros-style side-scrolling platformer built on Lite's pure-2D sprite path — no scene, camera, or mesh. A full level with run/jump physics, stompable enemies, mushroom/fire-flower/star power-ups, ?-blocks and breakable bricks, a pipe warp to an underground coin room, moving and one-way platforms, a castle boss, and a flagpole goal. Hand-rolled clean-room swept-AABB tile physics, keyboard/gamepad/touch input, DOM HUD, procedurally-synthesised Web Audio sound effects + music, and an optional CRT/scanline post-process (press C) that is a WGSL port of ichiaka's MIT-licensed CRTFilter. Ships a curated CC0 Kenney Platformer Art Deluxe asset subset — no Nintendo code or assets.",
+        "description": "Playable Lite 2D platformer with run/jump physics, enemies, power-ups, a boss fight, Web Audio, gamepad/touch input, and an optional CRT post-process. Ships curated CC0 Kenney art — no Nintendo code or assets.",
         "tags": ["game", "platformer", "2d", "showcase"],
         "mobile": true
     },
