@@ -15,17 +15,21 @@ npm install @babylonjs/lite
 ```ts
 import { createEngine, createSceneContext, createDefaultCamera, createHemisphericLight, addToScene, loadGltf, registerScene, startEngine } from "@babylonjs/lite";
 
-const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+async function main(): Promise<void> {
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 
-const engine = await createEngine(canvas);
-const scene = createSceneContext(engine);
+    const engine = await createEngine(canvas);
+    const scene = createSceneContext(engine);
 
-addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/BoomBox.glb"));
-addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
-createDefaultCamera(scene);
+    addToScene(scene, await loadGltf(engine, "https://playground.babylonjs.com/scenes/BoomBox.glb"));
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+    createDefaultCamera(scene);
 
-await registerScene(scene);
-await startEngine(engine);
+    await registerScene(scene);
+    await startEngine(engine);
+}
+
+main().catch(console.error);
 ```
 
 ## Documentation
