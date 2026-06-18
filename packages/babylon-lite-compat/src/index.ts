@@ -86,6 +86,7 @@ export { BaseTexture, Texture, RawTexture, DynamicTexture, CubeTexture, HDRCubeT
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
+export { KHR_materials_variants } from "./loading/material-variants.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { GPUPicker } from "./picking/gpu-picker.js";

@@ -29,10 +29,13 @@ import { BoundingInfo } from "../culling/bounding.js";
 export class LoadedMesh {
     public readonly name: string;
     private readonly _mesh: LiteMesh;
+    /** @internal The asset container this mesh was loaded from (for `KHR_materials_variants`). */
+    public readonly _container: LiteAssetContainer | undefined;
 
-    public constructor(mesh: LiteMesh) {
+    public constructor(mesh: LiteMesh, container?: LiteAssetContainer) {
         this._mesh = mesh;
         this.name = mesh.name ?? "";
+        this._container = container;
     }
 
     /** @internal The underlying Babylon Lite mesh (e.g. for the navmesh wrapper's geometry merge). */
@@ -88,11 +91,11 @@ export function collectLoadedMeshes(container: LiteAssetContainer): LoadedMesh[]
     for (const entity of container.entities) {
         const node = entity as unknown as { _gpu?: unknown; children?: unknown[] };
         if (!node._gpu && Array.isArray(node.children) && !renderable.includes(entity as unknown as LiteMesh)) {
-            result.push(new LoadedMesh(entity as unknown as LiteMesh));
+            result.push(new LoadedMesh(entity as unknown as LiteMesh, container));
         }
     }
     for (const mesh of renderable) {
-        result.push(new LoadedMesh(mesh));
+        result.push(new LoadedMesh(mesh, container));
     }
     return result;
 }

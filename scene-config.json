@@ -277,7 +277,8 @@
         "maxRawKB": 79.4,
         "description": "glTF refrigerator with KHR_materials_variants, White variant selected. ArcRotate camera, hemispheric light.",
         "tags": ["pbr", "gltf", "variants"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 28,
