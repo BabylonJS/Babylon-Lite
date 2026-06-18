@@ -177,6 +177,9 @@ importers:
         specifier: workspace:*
         version: link:../babylon-lite
     devDependencies:
+      '@microsoft/api-extractor':
+        specifier: ^7.58.7
+        version: 7.58.7(@types/node@25.9.1)
       '@webgpu/types':
         specifier: ^0.1.52
         version: 0.1.69
@@ -5637,7 +5640,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.4
+      semver: 7.8.4
       serialize-error: 7.0.1
 
   global-dirs@3.0.1:
@@ -6280,7 +6283,7 @@ snapshots:
       got: 12.6.1
       registry-auth-token: 5.1.1
       registry-url: 6.0.1
-      semver: 7.7.4
+      semver: 7.8.4
 
   parse5-htmlparser2-tree-adapter@7.1.0:
     dependencies:
@@ -6549,7 +6552,7 @@ snapshots:
 
   semver-diff@4.0.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.4
 
   semver@7.7.4: {}
 
@@ -6924,7 +6927,7 @@ snapshots:
       is-yarn-global: 0.4.1
       latest-version: 7.0.0
       pupa: 3.3.0
-      semver: 7.7.4
+      semver: 7.8.4
       semver-diff: 4.0.0
       xdg-basedir: 5.1.0
 

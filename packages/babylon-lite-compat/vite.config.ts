@@ -1,7 +1,8 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
-import { writeFileSync } from "fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import dts from "vite-plugin-dts";
+import { Extractor, ExtractorConfig, ExtractorLogLevel } from "@microsoft/api-extractor";
 
 /**
  * The package's public entry points. Each becomes a standalone ESM file in
@@ -22,24 +23,121 @@ const ENTRIES = {
 } as const;
 
 /**
- * `types` entry-point for each export subpath. vite-plugin-dts mirrors the `src`
- * tree into `dist/`, so the declaration paths follow the original filenames
- * (e.g. `navigation/navigation.ts` → `navigation/navigation.d.ts`) rather than
- * the bundled basenames.
+ * `types` entry-point for each export subpath. With `rollupTypes` on, api-extractor
+ * rolls each entry up into a single declaration whose basename matches the entry
+ * key (the same flattened basename Vite uses for the `.js` output), so every entry
+ * lands at the top level of `dist/` (e.g. `navigation` → `./navigation.d.ts`),
+ * not under a mirrored `src` subpath.
  */
-const TYPES_PATH: Record<keyof typeof ENTRIES, string> = {
-    index: "./index.d.ts",
-    vite: "./vite.d.ts",
-    rollup: "./rollup.d.ts",
-    webpack: "./webpack.d.ts",
-    esbuild: "./esbuild.d.ts",
-    navigation: "./navigation/navigation.d.ts",
-    "recast-shim": "./navigation/recast-shim.d.ts",
-};
+const TYPES_PATH: Record<keyof typeof ENTRIES, string> = Object.fromEntries((Object.keys(ENTRIES) as (keyof typeof ENTRIES)[]).map((name) => [name, `./${name}.d.ts`])) as Record<
+    keyof typeof ENTRIES,
+    string
+>;
 
 /** Map an entry key to its public export subpath (`index` → `.`). */
 function exportKey(name: keyof typeof ENTRIES): string {
     return name === "index" ? "." : `./${name}`;
+}
+
+/**
+ * Re-runs api-extractor on each already-rolled-up entry declaration file to
+ * produce a trimmed variant that drops the top-level imports kept alive only by
+ * `@internal` members (works around api-extractor #4260) and strips the leftover
+ * `/* Excluded from this release type: X *\/` comment stubs that
+ * vite-plugin-dts's `rollupTypes` pass leaves behind. The trimmed file replaces
+ * the original in-place. This mirrors the babylon-lite build so the published
+ * compat `.d.ts` files are clean, single-file rollups with every `@internal`
+ * member (including the `_adopt` factories and the internal camera constructor
+ * overloads) removed.
+ *
+ * Because the compat package ships several entry points, every entry's rolled-up
+ * declaration is trimmed, not just `index.d.ts`.
+ *
+ * `ae-missing-release-tag` is silenced so untagged exports are kept; only members
+ * explicitly tagged `@internal` are dropped. `ae-internal-missing-underscore` is
+ * silenced too: per this repo's convention a constructor (or constructor overload)
+ * may carry `@internal` even though it cannot be underscore-prefixed.
+ */
+function trimInternalDts(outDir: string, typesRelPaths: readonly string[]): Plugin {
+    return {
+        name: "trim-internal-dts",
+        // Must run AFTER vite-plugin-dts writes the rolled-up files.
+        enforce: "post",
+        async closeBundle() {
+            for (const rel of typesRelPaths) {
+                const input = resolve(outDir, rel.replace(/^\.\//, ""));
+                if (!existsSync(input)) {
+                    continue;
+                }
+                const trimmed = input.replace(/\.d\.ts$/, ".public.d.ts");
+                const config = ExtractorConfig.prepare({
+                    configObject: {
+                        projectFolder: __dirname,
+                        mainEntryPointFilePath: input,
+                        compiler: {
+                            overrideTsconfig: {
+                                compilerOptions: {
+                                    target: "es2022",
+                                    module: "esnext",
+                                    moduleResolution: "bundler",
+                                    lib: ["es2022", "dom", "dom.iterable"],
+                                    types: ["@webgpu/types"],
+                                    strict: true,
+                                    declaration: true,
+                                    skipLibCheck: true,
+                                },
+                                include: [input],
+                            },
+                        },
+                        apiReport: { enabled: false, reportFileName: "unused" },
+                        docModel: { enabled: false },
+                        tsdocMetadata: { enabled: false },
+                        dtsRollup: {
+                            enabled: true,
+                            untrimmedFilePath: "",
+                            publicTrimmedFilePath: trimmed,
+                            omitTrimmingComments: true,
+                        },
+                        messages: {
+                            compilerMessageReporting: {
+                                default: { logLevel: ExtractorLogLevel.Warning },
+                            },
+                            extractorMessageReporting: {
+                                default: { logLevel: ExtractorLogLevel.Warning },
+                                "ae-missing-release-tag": { logLevel: ExtractorLogLevel.None },
+                                "ae-forgotten-export": { logLevel: ExtractorLogLevel.None },
+                                "ae-unresolved-link": { logLevel: ExtractorLogLevel.None },
+                                "ae-internal-missing-underscore": { logLevel: ExtractorLogLevel.None },
+                                // The external `babylon-lite` peer publishes its `types` from
+                                // source `.ts`, which api-extractor warns about when it follows
+                                // an imported type into it. Harmless — we never roll the peer up.
+                                "ae-wrong-input-file-type": { logLevel: ExtractorLogLevel.None },
+                            },
+                            tsdocMessageReporting: {
+                                default: { logLevel: ExtractorLogLevel.None },
+                            },
+                        },
+                    },
+                    configObjectFullPath: undefined,
+                    packageJsonFullPath: resolve(__dirname, "package.json"),
+                });
+                const result = Extractor.invoke(config, { localBuild: true, showVerboseMessages: false });
+                if (!result.succeeded) {
+                    throw new Error(`api-extractor failed for ${rel}: ${result.errorCount} errors, ${result.warningCount} warnings`);
+                }
+                // Strip any leftover "/* Excluded from this release type: X */" stubs,
+                // then rewrite the workspace import specifier `babylon-lite` (and any
+                // subpath) to the published peer name `@babylonjs/lite`, mirroring the
+                // JS bundle's `rollupOptions.output.paths` rewrite so the emitted types
+                // reference the package npm consumers actually install.
+                const cleaned = readFileSync(trimmed, "utf8")
+                    .replace(/^\s*\/\* Excluded from this release type:[^*]*\*\/\s*\n/gm, "")
+                    .replace(/(['"])babylon-lite(\/[^'"]*)?\1/g, "$1@babylonjs/lite$2$1");
+                writeFileSync(input, cleaned);
+                unlinkSync(trimmed);
+            }
+        },
+    };
 }
 
 /** Emit a publish-ready `package.json` into the build output directory. */
@@ -107,11 +205,13 @@ export default defineConfig(({ mode }) => {
         },
         plugins: [
             dts({
-                rollupTypes: false,
+                rollupTypes: !isWatch,
                 tsconfigPath: resolve(__dirname, "tsconfig.json"),
                 outDir,
             }),
-            ...(isWatch ? [] : [emitPackageJson(outDir)]),
+            // In watch mode vite-plugin-dts mirrors the src tree (no rollup), so the
+            // api-extractor trim pass is skipped; published builds roll up + trim.
+            ...(isWatch ? [] : [trimInternalDts(outDir, Object.values(TYPES_PATH)), emitPackageJson(outDir)]),
         ],
     };
 });
