@@ -130,7 +130,7 @@ test('Scene N — Animated model matches reference', async ({ page }) => {
 `scripts/capture-golden.ts` is a CLI tool that captures golden reference PNGs:
 
 ```bash
-npx tsx scripts/capture-golden.ts 5   # Capture scene 5 golden
+pnpm exec tsx scripts/capture-golden.ts 5   # Capture scene 5 golden
 ```
 
 For animated scenes it:

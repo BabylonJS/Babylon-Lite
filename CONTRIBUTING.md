@@ -120,7 +120,7 @@ Run the BJS reference page and capture a screenshot:
 pnpm dev:lab
 
 # In another terminal, capture the golden
-npx tsx scripts/capture-golden.ts --scene N
+pnpm exec tsx scripts/capture-golden.ts --scene N
 ```
 
 Or manually screenshot the canvas at `http://localhost:5174/babylon-ref-sceneN.html` and save as:
@@ -189,7 +189,7 @@ test("Scene 23 — My Feature matches Babylon.js reference", async ({ page }) =>
 
 ```bash
 # Run the parity test for your scene
-npx playwright test tests/lite/parity/scenes/sceneN-my-feature.spec.ts
+pnpm exec playwright test tests/lite/parity/scenes/sceneN-my-feature.spec.ts
 
 # Run the full suite to check for regressions
 pnpm test
@@ -216,7 +216,7 @@ Plumbing tests validate engine internals (dispose, material-swap, etc.) using Pl
 
 1. Create a test page in `lab/` (HTML + TS)
 2. Create the spec in `tests/lite/plumbing/`
-3. Run: `npx playwright test tests/lite/plumbing/my-test.spec.ts`
+3. Run: `pnpm exec playwright test tests/lite/plumbing/my-test.spec.ts`
 
 > **Note:** CI uses Chrome's SwiftShader Vulkan backend for WebGPU — no real GPU needed.
 
@@ -226,7 +226,7 @@ For pure logic (shader composition, math) that doesn't need a browser:
 
 1. Create `tests/lite/unit/my-feature.test.ts`
 2. Use vitest: `describe`, `it`, `expect`
-3. Run: `npx vitest run`
+3. Run: `pnpm exec vitest run`
 
 ## Code Quality
 

@@ -130,10 +130,10 @@ The prompt is assembled by
 
 ```sh
 # Unit tests (GPU-free): math, observables, engine/scene APIs, bundler resolver
-npx vitest run --project compat
+pnpm exec vitest run --project compat
 
 # Typecheck the package against the linked babylon-lite types
-npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit
+pnpm exec tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit
 
 # Build the publishable dist (ESM + .d.ts)
 pnpm --filter @babylonjs/lite-compat build

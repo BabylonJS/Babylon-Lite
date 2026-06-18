@@ -328,11 +328,11 @@ For every wrapper you add or extend, add or update a test in
 Run the suite and the typecheck before finishing:
 
 ```
-npx vitest run --project compat
-npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit
-npx tsc -p packages/babylon-lite-compat/tests/tsconfig.json --noEmit
-npx eslint packages/babylon-lite-compat
-npx prettier --check "packages/babylon-lite-compat/**/*.ts"
+pnpm exec vitest run --project compat
+pnpm exec tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit
+pnpm exec tsc -p packages/babylon-lite-compat/tests/tsconfig.json --noEmit
+pnpm exec eslint packages/babylon-lite-compat
+pnpm exec prettier --check "packages/babylon-lite-compat/**/*.ts"
 ```
 
 All must pass.
