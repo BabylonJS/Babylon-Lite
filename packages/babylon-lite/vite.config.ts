@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
-import { copyFileSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "fs";
 import dts from "vite-plugin-dts";
 import { Extractor, ExtractorConfig, ExtractorLogLevel } from "@microsoft/api-extractor";
 
@@ -120,6 +120,61 @@ function emitPackageJson(outDir: string): Plugin {
     };
 }
 
+/**
+ * Third-party packages whose code is bundled into the published output (as
+ * opposed to dev-only tooling, which never ships). Each runtime dependency's
+ * license text must be propagated per its MIT/Apache-2.0 attribution terms.
+ * Keep this list in sync with the `dependencies` field of package.json.
+ */
+const BUNDLED_DEPENDENCIES = ["manifold-3d", "@recast-navigation/core", "@recast-navigation/generators", "@recast-navigation/wasm", "text-shaper"];
+
+/**
+ * Resolve a bundled dependency's installed directory. These are declared
+ * runtime `dependencies`, so the package manager installs them under this
+ * package's `node_modules`. We read from there directly rather than resolving
+ * the dependency specifier, because several of them restrict access via their
+ * `exports` map (resolving the bare entry or `package.json` throws
+ * ERR_PACKAGE_PATH_NOT_EXPORTED).
+ */
+function resolveDependencyDir(dep: string): string {
+    const dir = resolve(__dirname, "node_modules", dep);
+    const pkgJson = resolve(dir, "package.json");
+    if (!existsSync(pkgJson)) {
+        throw new Error(`Could not locate installed package directory for bundled dependency "${dep}" at ${dir}`);
+    }
+    return dir;
+}
+
+/**
+ * Generate THIRD_PARTY_NOTICES.txt by aggregating the license text of every
+ * bundled runtime dependency. Generated at build time so the notices stay in
+ * sync with the actual dependency versions on each release. Fails the build if
+ * a license file cannot be located, so attribution is never silently dropped.
+ */
+function emitThirdPartyNotices(outDir: string): Plugin {
+    return {
+        name: "emit-third-party-notices",
+        writeBundle() {
+            const sections: string[] = [
+                "@babylonjs/lite bundles the following third-party open source software.",
+                "Their license texts are reproduced below as required by their terms.",
+            ];
+            for (const dep of BUNDLED_DEPENDENCIES) {
+                const pkgDir = resolveDependencyDir(dep);
+                const { version } = JSON.parse(readFileSync(resolve(pkgDir, "package.json"), "utf8")) as { version: string };
+                const licenseFile = readdirSync(pkgDir).find((f) => /^(license|licence|copying)/i.test(f));
+                if (!licenseFile) {
+                    throw new Error(`No license file found for bundled dependency "${dep}" in ${pkgDir}`);
+                }
+                const licenseText = readFileSync(resolve(pkgDir, licenseFile), "utf8").trimEnd();
+                const divider = "=".repeat(78);
+                sections.push(`${divider}\n${dep} ${version}\n${divider}\n\n${licenseText}`);
+            }
+            writeFileSync(resolve(outDir, "THIRD_PARTY_NOTICES.txt"), sections.join("\n\n") + "\n");
+        },
+    };
+}
+
 export default defineConfig(({ mode }) => {
     const outDir = mode === "prod" ? "dist/prod" : "dist";
     const isWatch = process.argv.includes("--watch");
@@ -142,6 +197,7 @@ export default defineConfig(({ mode }) => {
             }),
             ...(isWatch ? [] : [trimInternalDts(outDir)]),
             emitPackageJson(outDir),
+            emitThirdPartyNotices(outDir),
         ],
     };
 });
