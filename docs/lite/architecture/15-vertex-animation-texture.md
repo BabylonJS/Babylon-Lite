@@ -147,7 +147,7 @@ influence = infA*(1 - B.z) + infB*B.z                     // weighted bone-matri
 finalWorld = mat4(world0..3) * mesh.world * influence     // instance OUTERMOST = world-space placement
 ```
 
-Because skinned-mesh `mesh.world` is identity (glTF loader, see `17-thin-instances.md` §world-matrix), the instance matrix carries all placement (position/yaw/scale). The single instanced variant always runs the 2-clip blend (single-clip = blend 0), so there is **no extra mesh-feature bit and zero bundle movement on non-VAT scenes**; the 2× bone reads are negligible vs the one-draw-call win.
+Because skinned-mesh `mesh.world` is identity (glTF loader, see `12-thin-instances.md` §world-matrix), the instance matrix carries all placement (position/yaw/scale). The single instanced variant always runs the 2-clip blend (single-clip = blend 0), so there is **no extra mesh-feature bit and zero bundle movement on non-VAT scenes**; the 2× bone reads are negligible vs the one-draw-call win.
 
 ## State Machine / Lifecycle
 

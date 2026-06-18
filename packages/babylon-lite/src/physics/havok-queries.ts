@@ -25,7 +25,7 @@
  */
 
 import type { Quat, Vec3 } from "../math/types.js";
-import type { PhysicsShape, PhysicsWorld } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
 /** Query parameters for {@link shapeProximity}. */
 export interface ShapeProximityQuery {
@@ -85,6 +85,32 @@ export interface ShapeCastResult {
     inputHitNormal: Vec3;
     /** Surface normal at the hit-body contact. */
     hitNormal: Vec3;
+}
+
+/** Query parameters for {@link physicsRaycast}. */
+export interface RaycastQuery {
+    /** Bitmask describing which collision groups the ray belongs to. Default `~0` (all). */
+    membership?: number;
+    /** Bitmask describing which collision groups the ray collides with. Default `~0` (all). */
+    collideWith?: number;
+    /** Whether trigger volumes count as hits. Default `false`. */
+    shouldHitTriggers?: boolean;
+}
+
+/** Result of a {@link physicsRaycast} query. */
+export interface RaycastResult {
+    /** Whether the ray hit a body. */
+    hasHit: boolean;
+    /** World-space contact point. */
+    hitPoint: Vec3;
+    /** Surface normal at the contact point. */
+    hitNormal: Vec3;
+    /** Distance from the ray origin (`from`) to the contact point. */
+    hitDistance: number;
+    /** Index of the triangle hit on a MESH shape, or `-1` for non-mesh shapes. */
+    triangleIndex: number;
+    /** The body that was hit, or `null` when nothing was hit (or the body is not tracked). */
+    body: PhysicsBody | null;
 }
 
 /** Ignore-none body filter handle: a single zero body id. */
@@ -164,6 +190,55 @@ export function shapeCast(world: PhysicsWorld, query: ShapeCastQuery): ShapeCast
         };
     }
     return emptyResult() as ShapeCastResult;
+}
+
+/**
+ * Cast a ray from `from` to `to` and return the first body it hits.
+ *
+ * `collideWith`/`membership` filter which bodies the ray can hit (by their shape filter masks).
+ * For MESH shapes the hit triangle index is reported; non-mesh shapes report `-1`. Run at least
+ * one physics step first so the broadphase exists.
+ * @param world - The physics world to query.
+ * @param from - World-space ray origin.
+ * @param to - World-space ray end point.
+ * @param query - Optional collision-filter masks and trigger behaviour.
+ * @returns The raycast result; `hasHit` is `false` when the ray clears every matching body.
+ */
+export function physicsRaycast(world: PhysicsWorld, from: Vec3, to: Vec3, query: RaycastQuery = {}): RaycastResult {
+    const hknp = world._hknp;
+    const collector = getCollector(world);
+    const membership = query.membership ?? ~0;
+    const collideWith = query.collideWith ?? ~0;
+    const hkQuery = [[from.x, from.y, from.z], [to.x, to.y, to.z], [membership, collideWith], query.shouldHitTriggers ?? false, IGNORE_NONE];
+    hknp.HP_World_CastRayWithCollector(world._hkWorld, collector, hkQuery);
+
+    if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
+        const [, hitData] = hknp.HP_QueryCollector_GetCastRayResult(collector, 0)[1];
+        const hitPos = hitData[3];
+        const dx = from.x - hitPos[0];
+        const dy = from.y - hitPos[1];
+        const dz = from.z - hitPos[2];
+        return {
+            hasHit: true,
+            hitPoint: hitVec(hitPos),
+            hitNormal: hitVec(hitData[4]),
+            hitDistance: Math.sqrt(dx * dx + dy * dy + dz * dz),
+            triangleIndex: hitData[5],
+            body: findBodyById(world, hitData[0][0]),
+        };
+    }
+    return { hasHit: false, hitPoint: { x: 0, y: 0, z: 0 }, hitNormal: { x: 0, y: 0, z: 0 }, hitDistance: 0, triangleIndex: -1, body: null };
+}
+
+/** Resolve a raycast hit's native body id back to the tracked {@link PhysicsBody}. */
+function findBodyById(world: PhysicsWorld, hitBodyId: unknown): PhysicsBody | null {
+    const bodies = world._bodies;
+    for (let i = 0; i < bodies.length; i++) {
+        if (bodies[i]!._hkBody[0] === hitBodyId) {
+            return bodies[i]!;
+        }
+    }
+    return null;
 }
 
 /** Zeroed no-hit result shared by both queries. */

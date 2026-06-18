@@ -590,6 +590,7 @@ export {
     getPhysicsVelocityLimits,
     setPhysicsBodyShape,
     setPhysicsBodyPreStep,
+    setPhysicsBodyPrestepType,
     applyPhysicsBodyImpulse,
     applyPhysicsBodyForce,
     addPhysicsShapeChild,
@@ -610,6 +611,7 @@ export {
     disposePhysics,
     PhysicsShapeType,
     PhysicsMotionType,
+    PhysicsPrestepType,
     PhysicsConstraintType,
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
@@ -628,10 +630,16 @@ export type {
 } from "./physics/havok.js";
 export { createHeightFieldShape } from "./physics/havok-heightfield.js";
 export type { HeightFieldShapeOptions } from "./physics/havok-heightfield.js";
-export { shapeProximity, shapeCast } from "./physics/havok-queries.js";
-export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult } from "./physics/havok-queries.js";
+export { shapeProximity, shapeCast, physicsRaycast } from "./physics/havok-queries.js";
+export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult, RaycastQuery, RaycastResult } from "./physics/havok-queries.js";
+export { setPhysicsBodyCollisionEventsEnabled, onPhysicsCollision } from "./physics/havok-collision.js";
+export type { PhysicsCollisionInfo } from "./physics/havok-collision.js";
+export { setPhysicsShapeIsTrigger, onPhysicsTrigger } from "./physics/havok-trigger.js";
+export type { PhysicsTriggerInfo } from "./physics/havok-trigger.js";
 export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
 export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
+export { createPhysicsCharacterController, PhysicsCharacterController, CharacterSupportedState, CharacterCollisionObservable } from "./physics/character-controller.js";
+export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {

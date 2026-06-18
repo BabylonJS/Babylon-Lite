@@ -11,7 +11,7 @@ import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-s
 //
 // **Constraint under test:** the allocator is process-global. Pages that mix
 // HPM and non-HPM engines on the same page are unsupported (see
-// `docs/architecture/33-high-precision-matrix.md`). This test does not exercise the
+// `docs/lite/architecture/36-high-precision-matrix.md`). This test does not exercise the
 // constraint — it documents that the second installer wins silently.
 
 describe("matrix allocator (process-global singleton)", () => {

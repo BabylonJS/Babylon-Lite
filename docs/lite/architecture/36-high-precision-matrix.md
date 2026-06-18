@@ -5,7 +5,7 @@
 
 High-Precision Matrix (HPM) is the optional Float64 backing for `Mat4`. When the engine is created with `useHighPrecisionMatrix: true`, every matrix allocation on the page returns `Float64Array(16)` instead of `Float32Array(16)`. CPU-side matrix composition (parent-chain world matrices, lookAt, inverse) is then done in F64, which preserves sub-unit precision at large coordinates (~1e5+ from origin) where F32 quantization becomes visible. The single F64→F32 down-cast happens at one explicit boundary — `packMat4IntoF32` — when the matrix is written into a GPU uniform buffer.
 
-HPM is the substrate that Large World Rendering (`32-large-world-rendering.md`) builds on: floating-origin subtracts the eye position from the world translation in F64 *before* the F32 store, recovering the small remainder at full precision.
+HPM is the substrate that Large World Rendering (`35-large-world-rendering.md`) builds on: floating-origin subtracts the eye position from the world translation in F64 *before* the F32 store, recovering the small remainder at full precision.
 
 ## Public API Surface
 
@@ -91,7 +91,7 @@ This violates the original M0 design (which had `engine._matrixPolicy` as a per-
 
 ### Mat4 type vs. Mat4Storage
 
-The public `Mat4` interface is opaque, read-only, and branded so users cannot fabricate or accidentally write to matrices vended by the engine. Internal kernels (`mat4Multiply`, `mat4Invert`, `packMat4IntoF32`, allocators) operate on the raw `Mat4Storage = Float32Array | Float64Array` union, which is writable and brand-free. The two types describe the same memory; you cross between them via `as unknown as Mat4Storage` / `as unknown as Mat4` at the trust boundary. See `09-core-math.md` for full type details.
+The public `Mat4` interface is opaque, read-only, and branded so users cannot fabricate or accidentally write to matrices vended by the engine. Internal kernels (`mat4Multiply`, `mat4Invert`, `packMat4IntoF32`, allocators) operate on the raw `Mat4Storage = Float32Array | Float64Array` union, which is writable and brand-free. The two types describe the same memory; you cross between them via `as unknown as Mat4Storage` / `as unknown as Mat4` at the trust boundary. See `21-core-math.md` for full type details.
 
 ### Per-load glTF scratch
 

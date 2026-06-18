@@ -25,6 +25,8 @@ import {
     HAS_REFLECTION_TEXTURE,
     HAS_SPECULAR_TEXTURE,
     LIGHTMAP_USES_UV2,
+    LIGHTMAP_SHADOWMAP,
+    LIGHTMAP_FLIP_V,
     MATERIAL_ALPHA_BLEND,
     OPACITY_FROM_RGB,
     SPECULAR_USES_UV2,
@@ -70,6 +72,10 @@ export interface StandardMaterialProps extends Material {
     lightmapLevel: number;
     /** Lightmap UV channel. 0=UV1, 1=UV2. Default 1 (BJS convention). */
     lightmapCoordIndex: 0 | 1;
+    /** When true, the lightmap is a baked shadowmap that multiplies the final color
+     *  (`color *= lightmap * level`) instead of being added. Matches BJS
+     *  StandardMaterial.useLightmapAsShadowmap. Default false. */
+    useLightmapAsShadowmap: boolean;
     /** Optional opacity texture. Multiplies alpha (.a channel). */
     opacityTexture: Texture2D | null;
     /** Opacity texture intensity. Default 1.0. */
@@ -128,6 +134,12 @@ export function _computeStandardMaterialFeatures(m: StandardMaterialProps): numb
         f |= HAS_LIGHTMAP_TEXTURE;
         if (m.lightmapCoordIndex === 1) {
             f |= LIGHTMAP_USES_UV2;
+        }
+        if (m.useLightmapAsShadowmap) {
+            f |= LIGHTMAP_SHADOWMAP;
+        }
+        if (m.lightmapTexture.uAng === Math.PI) {
+            f |= LIGHTMAP_FLIP_V;
         }
     }
     if (m.opacityTexture) {

@@ -23,6 +23,7 @@ export function createStandardMaterial(): StandardMaterialProps {
         lightmapTexture: null,
         lightmapLevel: 1,
         lightmapCoordIndex: 1,
+        useLightmapAsShadowmap: false,
         opacityTexture: null,
         opacityLevel: 1,
         opacityFromRGB: false,

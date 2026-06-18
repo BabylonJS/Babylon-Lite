@@ -131,7 +131,7 @@ await startEngine(engine);
 
 Notice the shape is the same: create an engine, build a scene, add a light, load a glTF, set up the environment and camera, then run. The difference is that Lite hands you **plain data plus tree-shakable functions** instead of classes and methods — which is exactly what lets the bundler strip everything you don't use.
 
-> Ready to port a real scene? See the **[Porting Guide](01-porting-guide.md)** for a full side-by-side API map.
+> Ready to port a real scene? See the **[Porting Guide](03-porting-guide.md)** for a full side-by-side API map.
 
 ---
 
@@ -194,7 +194,7 @@ A few honest notes so you can plan with confidence:
 Babylon Lite is WebGPU-only, so it runs anywhere WebGPU is available: Chrome and Edge 113+, and recent Firefox and Safari. There is no WebGL fallback by design.
 
 **Will Babylon.js features come to Lite?**
-Yes — bringing Lite up toward Babylon.js feature parity is our top priority. Features land as isolated, tree-shakable modules, so the engine grows without bloating your bundle.
+Yes — bringing Lite up toward Babylon.js feature parity is our top priority. Features land as isolated, tree-shakable modules, so the engine grows without bloating your bundle. See the **[Feature Comparison](02-feature-comparison.md)** for exactly what's covered today, what's partial, and what's still missing.
 
 **Can I mix Babylon.js and Babylon Lite in one project?**
 A given scene is built with one engine or the other. Because the APIs are similar in shape, the concepts and assets (glTF, `.env`, textures) carry straight across when you choose which engine fits a project.
@@ -221,7 +221,9 @@ And just as importantly: we want to **hear from you** — what's missing, what y
 
 ## Next steps
 
-- 📖 **[Porting Guide](01-porting-guide.md)** — translate a Babylon.js scene to Babylon Lite, side by side.
+- 🚀 **[Getting Started](01-getting-started.md)** — install Lite, learn the mental model, and render your first scene.
+- 🔁 **[Porting Guide](03-porting-guide.md)** — translate a Babylon.js scene to Babylon Lite, side by side.
+- 📊 **[Feature Comparison](02-feature-comparison.md)** — the full Lite-vs-Babylon.js feature matrix, so you can see exactly what's covered, partial, or missing.
 - 🧱 **[Architecture docs](architecture/)** — deep dives into the engine internals.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — explore the code, browse the scene gallery, and follow along with development.
 

@@ -259,7 +259,7 @@ The API intentionally does not implement Babylon.js shader-store lookup, GLSL in
 
 - `packages/babylon-lite/src/effect/effect-renderer.ts`
 - `packages/babylon-lite/src/effect/uniform-effect-renderer.ts`
-- `docs/lite/architecture/27-effect-renderer.md`
+- `docs/lite/architecture/30-effect-renderer.md`
 - `lab/lite/src/bjs/scene74.ts`
 - `lab/lite/babylon-ref-scene74.html`
 - `lab/lite/src/lite/scene74.ts`

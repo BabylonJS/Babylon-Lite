@@ -323,7 +323,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     // F64-specific module that we gate dynamically.
     // **Constraint:** allocator is process-global — mixing HPM and non-HPM
     // engines on the same page is unsupported (see
-    // `docs/architecture/33-high-precision-matrix.md`).
+    // `docs/lite/architecture/36-high-precision-matrix.md`).
     if (useHpm) {
         const { allocateF64Mat4 } = await import("../math/_mat4-storage-f64.js");
         _setHpmAllocator(allocateF64Mat4);

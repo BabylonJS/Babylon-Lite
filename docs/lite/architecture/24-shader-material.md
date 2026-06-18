@@ -87,7 +87,7 @@ The order in `options.attributes` is the vertex buffer binding order and the WGS
 
 ### Thin instances and GPU culling
 
-A ShaderMaterial mesh can be hardware-instanced via the standard thin-instance API (`setThinInstances`, `setThinInstanceColors`, `enableThinInstanceGpuCulling` — see `17-thin-instances.md`). No new ShaderMaterial option is required: when a mesh has `thinInstances`, the renderer builds a per-mesh **instance pipeline variant** and auto-injects extra attributes into the generated `VertexInput` struct, appended after the declared attributes (so at `@location(attributes.length)` onward):
+A ShaderMaterial mesh can be hardware-instanced via the standard thin-instance API (`setThinInstances`, `setThinInstanceColors`, `enableThinInstanceGpuCulling` — see `12-thin-instances.md`). No new ShaderMaterial option is required: when a mesh has `thinInstances`, the renderer builds a per-mesh **instance pipeline variant** and auto-injects extra attributes into the generated `VertexInput` struct, appended after the declared attributes (so at `@location(attributes.length)` onward):
 
 ```wgsl
 @location(N)   world0: vec4<f32>,   // instance world matrix columns
