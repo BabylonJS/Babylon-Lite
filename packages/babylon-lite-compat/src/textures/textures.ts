@@ -19,13 +19,31 @@ import type { Scene } from "../scene/scene.js";
 const KTX_SUFFIX_RE = /(-astc|-dxt|-etc2|-pvrtc)\.ktx(\?.*)?$/i;
 
 /**
+ * @internal Recognise a pre-resolved compressed KTX URL and split it into the
+ * `{ baseUrl, suffix }` pair Babylon Lite's `loadKtxTexture2D` expects (which
+ * takes a base image URL plus a format suffix and reconstructs the KTX URL
+ * itself), or `null` when the URL is not a compressed KTX.
+ *
+ * Babylon.js code selects the format via `engine.getCaps()` and hands `Texture`
+ * a single fully-qualified `.ktx` URL (e.g. `…/grid-dxt.ktx`), so the base is the
+ * `.png` fallback (`…/grid.png`) and the suffix is `-dxt.ktx`. Any query string
+ * (auth / cache-busting / signed-URL params) is preserved on the base URL so it
+ * survives onto both the KTX fetch and the `.png` fallback.
+ */
+export function resolveKtxUrl(url: string): { baseUrl: string; suffix: string } | null {
+    const ktx = url.match(KTX_SUFFIX_RE);
+    if (!ktx) {
+        return null;
+    }
+    return { baseUrl: url.replace(KTX_SUFFIX_RE, ".png$2"), suffix: ktx[1]! + ".ktx" };
+}
+
+/**
  * Pick the right Babylon Lite loader for a texture URL:
  *  - `.basis` → `loadBasisTexture2D` (GPU-format transcode; manages its own V-flip).
- *  - a pre-resolved compressed KTX (`…-dxt.ktx` etc.) → `loadKtxTexture2D`, which
- *    re-checks device support and falls back to the base image. Babylon.js code
- *    selects the format via `engine.getCaps()` and hands `Texture` a single
- *    fully-qualified `.ktx` URL, so reconstruct the base image + suffix the Lite
- *    loader expects (e.g. `…-dxt.ktx` → base `….png`, suffix `-dxt.ktx`).
+ *  - a pre-resolved compressed KTX (`…-dxt.ktx` etc.) → `loadKtxTexture2D` (see
+ *    {@link resolveKtxUrl}), which re-checks device support and falls back to the
+ *    base image.
  *  - everything else → the raster `loadTexture2D`.
  *
  * The basis/KTX loaders manage their own V-orientation, so the raster-only
@@ -36,11 +54,9 @@ function loadCompatTexture(engine: EngineContext, url: string, opts: Texture2DOp
     if (path.endsWith(".basis")) {
         return loadBasisTexture2D(engine, url, opts);
     }
-    const ktx = url.match(KTX_SUFFIX_RE);
+    const ktx = resolveKtxUrl(url);
     if (ktx) {
-        const suffix = ktx[1]! + ".ktx";
-        const baseUrl = url.replace(KTX_SUFFIX_RE, ".png");
-        return loadKtxTexture2D(engine, baseUrl, [suffix], opts);
+        return loadKtxTexture2D(engine, ktx.baseUrl, [ktx.suffix], opts);
     }
     return loadTexture2D(engine, url, opts);
 }

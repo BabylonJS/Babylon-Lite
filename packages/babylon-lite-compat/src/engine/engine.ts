@@ -145,7 +145,10 @@ export abstract class AbstractEngine {
             s3tc: has("texture-compression-bc"),
             bc7: has("texture-compression-bc"),
             etc2: has("texture-compression-etc2"),
-            etc1: has("texture-compression-etc2"),
+            // ETC1 is a distinct format family with no WebGPU feature flag — never
+            // report it as available (an ETC2 device can decode ETC1 content, but
+            // advertising `etc1` can steer upstream selection to a non-existent path).
+            etc1: false,
             pvrtc: false,
             // WebGPU baseline capabilities Babylon Lite always provides.
             textureFloat: true,

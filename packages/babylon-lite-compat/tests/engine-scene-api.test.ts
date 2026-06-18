@@ -59,12 +59,15 @@ describe("WebGPUEngine scalar getters", () => {
 
     it("derives compressed-texture caps from the WebGPU device features", () => {
         const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
-        (engine as unknown as { _lite: unknown })._lite = { _device: { features: new Set(["texture-compression-bc"]) } };
+        (engine as unknown as { _lite: unknown })._lite = { _device: { features: new Set(["texture-compression-bc", "texture-compression-etc2"]) } };
         const caps = engine.getCaps();
         expect(caps.s3tc).toBe(true);
         expect(caps.bc7).toBe(true);
         expect(caps.astc).toBe(false);
-        expect(caps.etc2).toBe(false);
+        expect(caps.etc2).toBe(true);
+        // ETC1 has no WebGPU feature flag — never reported as available, even when
+        // ETC2 (which can decode ETC1 content) is present.
+        expect(caps.etc1).toBe(false);
         // WebGPU baseline flags are always reported.
         expect(caps.textureFloat).toBe(true);
         expect(caps.uintIndices).toBe(true);
@@ -77,6 +80,7 @@ describe("WebGPUEngine scalar getters", () => {
         expect(caps.s3tc).toBe(false);
         expect(caps.astc).toBe(false);
         expect(caps.etc2).toBe(false);
+        expect(caps.etc1).toBe(false);
     });
 });
 
