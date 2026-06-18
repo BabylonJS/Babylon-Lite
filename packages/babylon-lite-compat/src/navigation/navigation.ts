@@ -27,11 +27,16 @@ import {
     getAgentPosition as liteGetAgentPosition,
     agentGoto as liteAgentGoto,
     updateNavCrowd as liteUpdateNavCrowd,
+    addBoxObstacle as liteAddBoxObstacle,
+    addCylinderObstacle as liteAddCylinderObstacle,
+    removeObstacle as liteRemoveObstacle,
+    updateNavMeshObstacles as liteUpdateNavMeshObstacles,
     createMeshFromData,
     addToScene,
     type NavigationPlugin as LiteNavigationPlugin,
     type NavCrowd as LiteNavCrowd,
     type Mesh as LiteMesh,
+    type ObstacleHandle as LiteObstacleHandle,
 } from "babylon-lite";
 
 import { Mesh } from "../meshes/meshes.js";
@@ -46,6 +51,16 @@ interface Vec3Like {
 
 interface AgentTransform {
     position: { set(x: number, y: number, z: number): unknown };
+}
+
+/**
+ * Result of {@link RecastNavigationJSPluginV2.createNavMesh}. Babylon.js's
+ * tile-cache navmesh build returns `{ navMesh, tileCache }`; here both reference
+ * the plugin so {@link WaitForFullTileCacheUpdate} can reach it.
+ */
+interface NavMeshResult {
+    navMesh: RecastNavigationJSPluginV2;
+    tileCache: RecastNavigationJSPluginV2;
 }
 
 /** Babylon.js `IAgentParameters` subset accepted by `RecastJSCrowd.addAgent`. */
@@ -119,13 +134,39 @@ class RecastNavigationJSPluginV2 {
         this._lite = lite;
     }
 
-    /** Babylon.js `plugin.createNavMesh(meshes, parameters)`. */
-    public createNavMesh(meshes: Array<{ _lite: LiteMesh }>, parameters: Record<string, unknown>): void {
+    /**
+     * Babylon.js `plugin.createNavMesh(meshes, parameters)`. Returns a
+     * `{ navMesh, tileCache }` handle (both reference this plugin) so scenes using
+     * the tile-cache obstacle API can pass them to {@link WaitForFullTileCacheUpdate}.
+     * Scenes that ignore the return (the non-obstacle navmesh scenes) are unaffected.
+     */
+    public createNavMesh(meshes: Array<{ _lite: LiteMesh }>, parameters: Record<string, unknown>): NavMeshResult {
         liteCreateNavMesh(
             this._lite,
             meshes.map((m) => m._lite),
             parameters as never
         );
+        return { navMesh: this, tileCache: this };
+    }
+
+    /** Babylon.js `plugin.addCylinderObstacle(position, radius, height)` — tile-cache obstacle. */
+    public addCylinderObstacle(position: Vec3Like, radius: number, height: number): LiteObstacleHandle | null {
+        return liteAddCylinderObstacle(this._lite, { x: position.x, y: position.y, z: position.z }, radius, height);
+    }
+
+    /** Babylon.js `plugin.addBoxObstacle(position, extent, angle)` — tile-cache obstacle (`extent` = half-extents). */
+    public addBoxObstacle(position: Vec3Like, extent: Vec3Like, angle: number): LiteObstacleHandle | null {
+        return liteAddBoxObstacle(this._lite, { x: position.x, y: position.y, z: position.z }, { x: extent.x, y: extent.y, z: extent.z }, angle);
+    }
+
+    /** Babylon.js `plugin.removeObstacle(obstacle)` — remove a previously-added tile-cache obstacle. */
+    public removeObstacle(obstacle: LiteObstacleHandle): void {
+        liteRemoveObstacle(this._lite, obstacle);
+    }
+
+    /** @internal Apply pending tile-cache obstacle updates (drives {@link WaitForFullTileCacheUpdate}). */
+    public _updateObstacles(): void {
+        liteUpdateNavMeshObstacles(this._lite);
     }
 
     /** Babylon.js `plugin.createDebugNavMesh(scene)` — builds a renderable debug mesh. */
@@ -189,3 +230,17 @@ export async function CreateNavigationPluginAsync(_options?: { version?: string;
 }
 
 export { RecastNavigationJSPluginV2, RecastJSCrowd };
+
+/**
+ * Babylon.js `@babylonjs/addons/navigation/common/tile-cache`
+ * `WaitForFullTileCacheUpdate(navMesh, tileCache)` — block until pending
+ * tile-cache obstacle updates are applied. The addon takes the raw navMesh /
+ * tileCache; here `navMesh` is the compat plugin (returned from `createNavMesh`),
+ * so this delegates to Babylon Lite's `updateNavMeshObstacles`.
+ */
+export function WaitForFullTileCacheUpdate(navMesh: unknown, _tileCache?: unknown): void {
+    const plugin = navMesh as RecastNavigationJSPluginV2 | undefined;
+    if (plugin && typeof plugin._updateObstacles === "function") {
+        plugin._updateObstacles();
+    }
+}

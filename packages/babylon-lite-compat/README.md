@@ -147,7 +147,7 @@ overloads within a supported area may still be absent.
 
 | Feature area                                                     | Status | Notes                            |
 | ---------------------------------------------------------------- | :----: | -------------------------------- |
-| `RecastJSPlugin` (navmesh, crowd, path, raycast, off-mesh links) |   ✅    | over Lite's native Recast-V2 API |
+| `RecastJSPlugin` (navmesh, crowd, path, raycast, off-mesh links, tile-cache obstacles) |   ✅    | over Lite's native Recast-V2 API |
 
 ### `@babylonjs/materials`
 

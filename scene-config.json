@@ -1510,7 +1510,8 @@
         "description": "Tile-cache navmesh on a 10x10 ground with one cylinder + one box obstacle. Single agent computes a path around obstacles (port of playground #DPDNVH#3).",
         "tags": ["navigation", "recast", "wasm", "obstacles"],
         "skipPerf": true,
-        "bundleTimeoutMs": 120000
+        "bundleTimeoutMs": 120000,
+        "compatParity": true
     },
     {
         "id": 173,
