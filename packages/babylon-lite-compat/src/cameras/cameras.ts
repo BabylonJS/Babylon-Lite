@@ -117,6 +117,10 @@ export class ArcRotateCamera extends Camera {
     /** @internal Underlying Babylon Lite arc-rotate camera. */
     public readonly _lite: LiteArcRotateCamera;
 
+    public constructor(name: string, alpha: number, beta: number, radius: number, target: Vector3, scene?: Scene);
+    // Internal overload (used by `_adopt`): adopt an already-built Lite arc-rotate
+    // camera (e.g. from `createDefaultCamera`) instead of creating a new one.
+    public constructor(name: string, alpha: number, beta: number, radius: number, target: Vector3, scene: Scene | undefined, adoptLite: LiteArcRotateCamera);
     public constructor(name: string, alpha: number, beta: number, radius: number, target: Vector3, scene?: Scene, adoptLite?: LiteArcRotateCamera) {
         super(name, scene);
         this._lite = adoptLite ?? createArcRotateCamera(alpha, beta, radius, { x: target.x, y: target.y, z: target.z });
@@ -196,6 +200,10 @@ export class TargetCamera extends Camera {
     /** @internal Underlying Babylon Lite free camera. */
     public readonly _lite: LiteFreeCamera;
 
+    public constructor(name: string, position: Vector3, scene?: Scene);
+    // Internal overload (used by `_adopt`): adopt an already-built Lite free
+    // camera (e.g. one parsed from a `.babylon` file) instead of creating a new one.
+    public constructor(name: string, position: Vector3, scene: Scene | undefined, adoptLite: LiteFreeCamera);
     public constructor(name: string, position: Vector3, scene?: Scene, adoptLite?: LiteFreeCamera) {
         super(name, scene);
         this._lite = adoptLite ?? createFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
