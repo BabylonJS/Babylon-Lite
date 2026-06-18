@@ -56,6 +56,28 @@ describe("WebGPUEngine scalar getters", () => {
         // A zero delta (before the first frame) falls back to 60.
         expect(fakeEngine({ width: 1, height: 1 }, 0).getFps()).toBe(60);
     });
+
+    it("derives compressed-texture caps from the WebGPU device features", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
+        (engine as unknown as { _lite: unknown })._lite = { _device: { features: new Set(["texture-compression-bc"]) } };
+        const caps = engine.getCaps();
+        expect(caps.s3tc).toBe(true);
+        expect(caps.bc7).toBe(true);
+        expect(caps.astc).toBe(false);
+        expect(caps.etc2).toBe(false);
+        // WebGPU baseline flags are always reported.
+        expect(caps.textureFloat).toBe(true);
+        expect(caps.uintIndices).toBe(true);
+    });
+
+    it("reports all compressed caps off when there is no device (NullEngine)", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
+        (engine as unknown as { _lite: unknown })._lite = {};
+        const caps = engine.getCaps();
+        expect(caps.s3tc).toBe(false);
+        expect(caps.astc).toBe(false);
+        expect(caps.etc2).toBe(false);
+    });
 });
 
 describe("Scene entity registries", () => {

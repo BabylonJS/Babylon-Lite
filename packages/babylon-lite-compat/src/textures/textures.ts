@@ -8,12 +8,42 @@
  * `Texture.LoadAsync`) so the GPU handle is present when the material binds.
  */
 
-import { loadTexture2D, loadBasisTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels } from "babylon-lite";
-import type { Texture2D } from "babylon-lite";
+import { loadTexture2D, loadBasisTexture2D, loadKtxTexture2D, createTexture2DFromPixels, updateTexture2DFromPixels } from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
+
+/** Compression suffix → `loadKtxTexture2D` token, recognised in a pre-resolved KTX URL. */
+const KTX_SUFFIX_RE = /(-astc|-dxt|-etc2|-pvrtc)\.ktx(\?.*)?$/i;
+
+/**
+ * Pick the right Babylon Lite loader for a texture URL:
+ *  - `.basis` → `loadBasisTexture2D` (GPU-format transcode; manages its own V-flip).
+ *  - a pre-resolved compressed KTX (`…-dxt.ktx` etc.) → `loadKtxTexture2D`, which
+ *    re-checks device support and falls back to the base image. Babylon.js code
+ *    selects the format via `engine.getCaps()` and hands `Texture` a single
+ *    fully-qualified `.ktx` URL, so reconstruct the base image + suffix the Lite
+ *    loader expects (e.g. `…-dxt.ktx` → base `….png`, suffix `-dxt.ktx`).
+ *  - everything else → the raster `loadTexture2D`.
+ *
+ * The basis/KTX loaders manage their own V-orientation, so the raster-only
+ * `invertY` / `mipMaps` options are ignored there — passing the same opts is safe.
+ */
+function loadCompatTexture(engine: EngineContext, url: string, opts: Texture2DOptions): Promise<Texture2D> {
+    const path = url.split(/[?#]/)[0]!.toLowerCase();
+    if (path.endsWith(".basis")) {
+        return loadBasisTexture2D(engine, url, opts);
+    }
+    const ktx = url.match(KTX_SUFFIX_RE);
+    if (ktx) {
+        const suffix = ktx[1]! + ".ktx";
+        const baseUrl = url.replace(KTX_SUFFIX_RE, ".png");
+        return loadKtxTexture2D(engine, baseUrl, [suffix], opts);
+    }
+    return loadTexture2D(engine, url, opts);
+}
 
 export abstract class BaseTexture {
     public name = "";
@@ -103,15 +133,7 @@ export class Texture extends BaseTexture {
         const filterOpts: { minFilter?: "nearest" | "linear"; magFilter?: "nearest" | "linear" } = nearest ? { minFilter: "nearest", magFilter: "nearest" } : {};
         const loadOpts = scene ? { invertY: this._invertY, mipMaps: !this._noMipmap, ...filterOpts } : {};
 
-        // Basis Universal (`.basis`) files are transcoded through Lite's dedicated
-        // `loadBasisTexture2D` (the GPU-format transcode path), not the raster
-        // `loadTexture2D`. The basis loader manages its own V-orientation
-        // (`invertY: true`, applied material-side), so the raster-only `invertY` /
-        // `mipMaps` opts are ignored there — passing the same options is harmless.
-        const isBasis = url.split(/[?#]/)[0]!.toLowerCase().endsWith(".basis");
-        const loadTex = isBasis ? loadBasisTexture2D : loadTexture2D;
-
-        this._ready = loadTex(engine, url, loadOpts).then((tex) => {
+        this._ready = loadCompatTexture(engine, url, loadOpts).then((tex) => {
             this._lite = tex;
             if (onLoad) {
                 onLoad();

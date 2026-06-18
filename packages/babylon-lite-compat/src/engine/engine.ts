@@ -131,6 +131,32 @@ export abstract class AbstractEngine {
         return true;
     }
 
+    /**
+     * Babylon.js `engine.getCaps()` — engine capability flags. Only the
+     * compressed-texture-format flags ported scenes branch on are derived (from the
+     * Lite WebGPU device's enabled features); the rest report Babylon Lite's fixed
+     * WebGPU baseline. A headless `NullEngine` has no device, so all flags are off.
+     */
+    public getCaps(): Record<string, unknown> {
+        const device = (this._lite as { _device?: { features?: { has(name: string): boolean } } } | undefined)?._device;
+        const has = (name: string): boolean => !!device?.features?.has(name);
+        return {
+            astc: has("texture-compression-astc"),
+            s3tc: has("texture-compression-bc"),
+            bc7: has("texture-compression-bc"),
+            etc2: has("texture-compression-etc2"),
+            etc1: has("texture-compression-etc2"),
+            pvrtc: false,
+            // WebGPU baseline capabilities Babylon Lite always provides.
+            textureFloat: true,
+            textureHalfFloat: true,
+            textureFloatLinearFiltering: true,
+            maxTextureSize: 8192,
+            instancedArrays: true,
+            uintIndices: true,
+        };
+    }
+
     /** Babylon.js `engine.scenes` — every scene created against this engine. */
     public get scenes(): Scene[] {
         return this._scenes;

@@ -257,7 +257,8 @@
         "maxRawKB": 51.8,
         "description": "Ground plane with KTX compressed texture (auto-format selection), UV tiling, FreeCamera, hemispheric light.",
         "tags": ["std", "procedural"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 26,
