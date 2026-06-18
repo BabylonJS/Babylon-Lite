@@ -32,9 +32,16 @@ import {
 } from "babylon-lite";
 import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 
-// Same CDN assets used by the existing Flight Helmet scene (lab scene 14):
-// PBR model, .env IBL, DDS skybox and a reflective ground texture.
-const MODEL_URL = "https://assets.babylonjs.com/meshes/flightHelmet.glb";
+// Same Flight Helmet model + studio environment as lab scene 14 (PBR model,
+// .env IBL, DDS skybox, reflective ground).
+//
+// The model is the loose-file glTF (.gltf + .bin + per-material textures) rather
+// than the single ~55 MB flightHelmet.glb. A 55 MB resource exceeds Chromium's
+// per-cache-entry size cap, so the .glb is never stored in the HTTP cache and
+// re-downloads on every load — including this demo's second (worker) load. Split
+// into small per-texture files, each stays under the cap and is cached normally,
+// so the worker's load and reloads are served from cache.
+const MODEL_URL = "https://assets.babylonjs.com/meshes/FlightHelmet/glTF/FlightHelmet.gltf";
 const ENV_URL = "https://assets.babylonjs.com/core/environments/environmentSpecular.env";
 const SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
 const GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";

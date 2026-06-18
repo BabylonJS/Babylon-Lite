@@ -36,8 +36,10 @@ async function main(): Promise<void> {
     const slowButton = document.getElementById("slowButton") as HTMLButtonElement | null;
 
     // The main-thread (left) engine performs the real asset downloads (glTF +
-    // environment); the worker re-uses the warm HTTP cache. Report that download.
-    const progress = installFetchProgress(leftCanvas, { estimatedBytes: 55_700_000 });
+    // environment); the worker mostly re-uses the warm HTTP cache, now that the
+    // model is a loose-file glTF whose small per-texture files are individually
+    // cacheable. Report that download.
+    const progress = installFetchProgress(leftCanvas, { estimatedBytes: 49_000_000 });
 
     let leftReady = false;
     let rightReady = false;
