@@ -11,6 +11,11 @@
 # (never `latest`) with a unique `<base>-preview.<buildId>` version, so the
 # compatibility layer is opt-in via `@babylonjs/lite-compat@preview` until it
 # graduates to a stable release line.
+#
+# Set the `dryRun` parameter (manual run) to exercise the whole pipeline —
+# build, test, version resolution, and package-content validation — without
+# uploading to npm or pushing a release tag. In dry-run mode both `npm publish`
+# calls use `--dry-run` and the git tag is created locally but not pushed.
 
 trigger:
     branches:
@@ -40,6 +45,10 @@ parameters:
           - patch
           - minor
           - major
+    - name: dryRun
+      displayName: "Dry run (validate + resolve versions, but do NOT publish or push tags)"
+      type: boolean
+      default: false
 
 variables:
     - name: NODE_VERSION
@@ -50,6 +59,8 @@ variables:
       value: "true"
     - name: HEADLESS
       value: "true"
+    - name: DRY_RUN
+      value: "${{ parameters.dryRun }}"
 
 stages:
     - stage: PublishNpm
@@ -111,7 +122,13 @@ stages:
                       fi
 
                       printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-                      npm publish ./packages/babylon-lite/dist --access public --registry https://registry.npmjs.org/
+
+                      EXTRA=""
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
+                        EXTRA="--dry-run"
+                      fi
+                      npm publish ./packages/babylon-lite/dist $EXTRA --access public --registry https://registry.npmjs.org/
                   displayName: "Publish package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
@@ -123,7 +140,11 @@ stages:
                       git config user.email "bjsplat@gmail.com"
                       git config user.name "Babylon.js CI"
                       git tag "$TAG" -m "Publish @babylonjs/lite $(PACKAGE_VERSION)"
-                      git push origin "refs/tags/$TAG"
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: created tag $TAG locally but will NOT push it."
+                      else
+                        git push origin "refs/tags/$TAG"
+                      fi
                   displayName: "Tag published npm version"
 
                 # --- @babylonjs/lite-compat (preview dist-tag) ---------------------
@@ -154,7 +175,13 @@ stages:
                       fi
 
                       printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-                      npm publish ./packages/babylon-lite-compat/dist --tag "$(PACKAGE_DIST_TAG_COMPAT)" --access public --registry https://registry.npmjs.org/
+
+                      EXTRA=""
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
+                        EXTRA="--dry-run"
+                      fi
+                      npm publish ./packages/babylon-lite-compat/dist $EXTRA --tag "$(PACKAGE_DIST_TAG_COMPAT)" --access public --registry https://registry.npmjs.org/
                   displayName: "Publish compat package to npm (preview)"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
