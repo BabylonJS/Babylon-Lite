@@ -16,6 +16,7 @@
 import { offContextRestored, onContextRestored, type GLEngineContext } from "./context.js";
 import { createEffect, disposeEffect, type GLEffect, isEffectReady, setEffectTexture, useEffect } from "./effect.js";
 import { GLBlendMode, setBlendMode } from "./blend.js";
+import { applyGLStates } from "./apply-states.js";
 import { type GLTexture } from "./texture.js";
 
 /* ─────────────────────────────  shaders (GLSL ES 3.00)  ───────────────────── */
@@ -483,6 +484,7 @@ export function renderSprites(
     setEffectTexture(engine, effect, "diffuseSampler", tex);
 
     setBlendMode(engine, renderer.blendMode);
+    applyGLStates(engine);
     gl.drawElements(gl.TRIANGLES, visible * INDICES_PER_SPRITE, gl.UNSIGNED_SHORT, 0);
     // Auto-reset (Babylon `autoResetAlpha = true`): leave blend disabled so a
     // subsequent fullscreen `drawEffect` renders with the same state as before.

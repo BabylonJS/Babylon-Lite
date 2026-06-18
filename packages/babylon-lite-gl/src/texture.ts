@@ -91,6 +91,15 @@ export interface GLTexture {
     _dynInvertY?: boolean;
     /** UNPACK_PREMULTIPLY_ALPHA applied when replaying {@link GLTexture._dynSource}. @internal */
     _dynPremultiplyAlpha?: boolean;
+    /**
+     * The `handle` the dynamic texture's `texParameteri` filter/wrap state was
+     * last applied to. `texParameteri` is per-texture GL state that survives pixel
+     * re-uploads, so the dynamic-texture `_upload` re-applies it ONLY when this no
+     * longer matches `handle` — i.e. at creation and after `webglcontextrestored`
+     * installs a fresh handle — not on every per-frame `updateDynamicTexture`.
+     * @internal
+     */
+    _dynParamsHandle?: WebGLTexture | null;
 }
 
 /**

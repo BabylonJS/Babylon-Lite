@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GLBlendMode, createGLEngine, createRawTexture, disposeGLEngine } from "../../../packages/babylon-lite-gl/src/index";
 import { createSpriteRenderer, disposeSpriteRenderer, renderSprites, setSpriteRendererTexture, type GLSprite } from "../../../packages/babylon-lite-gl/src/sprites";
+import { applyGLStates } from "../../../packages/babylon-lite-gl/src/apply-states";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 const VIEW = new Float32Array(16);
@@ -147,7 +148,9 @@ describe("lite-gl sprites: blend mode", () => {
         const fc = callsNamed(mock, "blendFuncSeparate");
         expect(fc).toHaveLength(1);
         expect(fc[0]?.args).toEqual([gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE]);
-        // autoReset (Babylon autoResetAlpha) leaves blending disabled afterwards.
+        // autoReset (Babylon autoResetAlpha) records a deferred DISABLE; it is
+        // flushed by the next draw / applyGLStates, leaving blending disabled.
+        applyGLStates(engine);
         expect(mock.count("disable")).toBe(1);
     });
 
@@ -349,5 +352,48 @@ describe("lite-gl sprites: context restore", () => {
         // The owned effect is rebuilt by the engine; buffers by our restore hook.
         renderSprites(renderer, [makeSprite()], 0, VIEW, PROJ);
         expect(mock.count("drawElements")).toBe(1);
+    });
+});
+
+describe("lite-gl sprites: multiple renderers share one program (redundant-useProgram fix)", () => {
+    it("two sprite renderers reuse ONE cached program but own separate geometry", () => {
+        const { mock, engine, texture } = setup();
+        mock.clear();
+        const a = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
+        const b = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
+        // The identical sprite shader compiles ONE program, shared via the
+        // source-keyed effect cache (pre-fix this was 2 distinct programs).
+        expect(mock.count("createProgram")).toBe(1);
+        expect(a._effect).toBe(b._effect);
+        expect(a._effect.program).toBe(b._effect.program);
+        // ...but each renderer still owns its own VAO/VBO/IBO.
+        expect(a._vao).not.toBe(b._vao);
+        expect(a._vbo).not.toBe(b._vbo);
+    });
+
+    it("drawing both renderers binds the shared program at most once (no per-renderer useProgram)", () => {
+        const { mock, engine, texture } = setup();
+        const a = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
+        const b = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
+        mock.clear();
+        renderSprites(a, [makeSprite()], 0, VIEW, PROJ);
+        renderSprites(b, [makeSprite()], 0, VIEW, PROJ);
+        // Both layers drew, yet the program was bound at most once across them —
+        // the second renderer's draw does NOT re-issue gl.useProgram (was 2 pre-fix).
+        expect(mock.count("drawElements")).toBe(2);
+        expect(mock.count("useProgram")).toBeLessThanOrEqual(1);
+    });
+
+    it("the shared program is ref-counted: disposing one renderer keeps it alive for the other", () => {
+        const { mock, engine, texture } = setup();
+        const a = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
+        const b = createSpriteRenderer(engine, { capacity: 8, cellWidth: 32, cellHeight: 32, texture });
+        mock.clear();
+        disposeSpriteRenderer(a);
+        // b still references the shared program → not deleted yet.
+        expect(mock.count("deleteProgram")).toBe(0);
+        disposeSpriteRenderer(b);
+        // Last reference gone → program torn down exactly once.
+        expect(mock.count("deleteProgram")).toBe(1);
     });
 });

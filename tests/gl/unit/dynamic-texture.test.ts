@@ -128,3 +128,30 @@ describe("lite-gl clearDynamicTextureSource()", () => {
         expect(up[0]?.args[4]).toBe(16);
     });
 });
+
+describe("lite-gl dynamic texture: texParameteri caching", () => {
+    it("does NOT re-apply texParameteri on per-frame updates (filter/wrap persist on the same handle)", () => {
+        const { mock, engine } = setup();
+        const tex = createDynamicTexture(engine, 64, 64); // 4 texParameteri at create
+        mock.clear();
+        updateDynamicTexture(engine, tex, fakeSource(64, 64));
+        updateDynamicTexture(engine, tex, fakeSource(64, 64));
+        // Same handle across updates → GL retains the filter/wrap → zero redundant
+        // texParameteri (the scene13 redundancy fix)...
+        expect(mock.count("texParameteri")).toBe(0);
+        // ...while the pixels still upload on every update.
+        expect(mock.count("texImage2D")).toBe(2);
+    });
+
+    it("re-applies texParameteri on webglcontextrestored (the fresh handle starts at GL defaults)", () => {
+        const { mock, canvas, engine } = setup();
+        const tex = createDynamicTexture(engine, 64, 64);
+        updateDynamicTexture(engine, tex, fakeSource(64, 64)); // same handle → no re-apply
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        // A new handle is created → all four filter/wrap params must be re-applied.
+        expect(mock.count("createTexture")).toBe(1);
+        expect(mock.count("texParameteri")).toBe(4);
+    });
+});

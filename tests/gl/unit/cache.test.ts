@@ -6,6 +6,7 @@ import {
     createEffectWrapper,
     createRawTexture,
     createGLEngine,
+    disposeEffect,
     disposeEffectWrapper,
     disposeTexture,
     disposeGLEngine,
@@ -268,6 +269,83 @@ describe("lite-gl cache: program + viewport + quad", () => {
         mock.clear();
         applyEffectWrapper(wrapper);
         expect(mock.count("useProgram")).toBe(0);
+    });
+});
+
+describe("lite-gl effect cache: identical descriptors share one program (ref-counted)", () => {
+    const UNIFORMS = ["u_a", "u_b"];
+    const SAMPLERS = ["s0", "s1"];
+
+    function makeEngine() {
+        const mock = createMockGL();
+        const canvas = createMockCanvas(mock);
+        const engine = createGLEngine(canvas);
+        mock.setParallelComplete(true);
+        return { mock, canvas, engine };
+    }
+
+    it("two createEffect calls with identical descriptors return the SAME effect + program, compiling once", () => {
+        const { mock, engine } = makeEngine();
+        const a = createEffect(engine, { name: "a", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        mock.clear();
+        const b = createEffect(engine, { name: "b", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        // Same object, same program handle …
+        expect(b).toBe(a);
+        expect(b.program).toBe(a.program);
+        // … and the second (cache-hit) call compiled / linked NOTHING.
+        expect(mock.count("createProgram")).toBe(0);
+        expect(mock.count("compileShader")).toBe(0);
+        expect(mock.count("linkProgram")).toBe(0);
+    });
+
+    it("the shared effect ref-counts: dispose once keeps it alive, dispose again tears down", () => {
+        const { mock, engine } = makeEngine();
+        const a = createEffect(engine, { name: "a", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        const b = createEffect(engine, { name: "b", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        expect(b).toBe(a);
+        mock.clear();
+        // First dispose: still shared (refCount 2 → 1) — the program survives.
+        disposeEffect(engine, a);
+        expect(a._disposed).toBe(false);
+        expect(mock.count("deleteProgram")).toBe(0);
+        // Second dispose: refCount 1 → 0 — real teardown.
+        disposeEffect(engine, b);
+        expect(b._disposed).toBe(true);
+        expect(mock.count("deleteProgram")).toBe(1);
+    });
+
+    it("two DIFFERENT sources get distinct effects + program handles", () => {
+        const { engine } = makeEngine();
+        const FS2 = "#version 300 es\nprecision highp float;\nout vec4 glFragColor;\nvoid main(){ glFragColor = vec4(0.5); }";
+        const a = createEffect(engine, { name: "a", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        const b = createEffect(engine, { name: "b", vertexSource: VS, fragmentSource: FS2, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        expect(b).not.toBe(a);
+        expect(b.program).not.toBe(a.program);
+    });
+
+    it("descriptors differing only in uniform / sampler / attribute / defines are NOT shared", () => {
+        const { engine } = makeEngine();
+        const base = { vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS };
+        const a = createEffect(engine, { name: "a", ...base });
+        const diffUniform = createEffect(engine, { name: "b", ...base, uniformNames: ["u_a"] });
+        const diffSampler = createEffect(engine, { name: "c", ...base, samplerNames: ["s0"] });
+        const diffDefines = createEffect(engine, { name: "d", ...base, defines: "#define X 1\n" });
+        const diffAttribs = createEffect(engine, { name: "e", ...base, attributeNames: ["position", "uv"] });
+        expect(diffUniform).not.toBe(a);
+        expect(diffSampler).not.toBe(a);
+        expect(diffDefines).not.toBe(a);
+        expect(diffAttribs).not.toBe(a);
+    });
+
+    it("after the shared effect is fully disposed, a new identical createEffect compiles a fresh program", () => {
+        const { mock, engine } = makeEngine();
+        const a = createEffect(engine, { name: "a", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        disposeEffect(engine, a);
+        expect(a._disposed).toBe(true);
+        mock.clear();
+        const b = createEffect(engine, { name: "b", vertexSource: VS, fragmentSource: FS, uniformNames: UNIFORMS, samplerNames: SAMPLERS });
+        expect(b).not.toBe(a);
+        expect(mock.count("linkProgram")).toBe(1);
     });
 });
 

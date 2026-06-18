@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
 import { setDepthState, setCullState, setStencilState, setColorMask, clearEngine, generateRenderTargetStencil } from "../../../packages/babylon-lite-gl/src/depth-stencil";
+import { applyGLStates } from "../../../packages/babylon-lite-gl/src/apply-states";
 import { createRenderTarget, disposeRenderTarget, resizeRenderTarget, bindRenderTarget } from "../../../packages/babylon-lite-gl/src/render-target";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
@@ -30,11 +31,13 @@ describe("lite-gl depth state", () => {
     it("enables/disables DEPTH_TEST, sets mask + func, all cached", () => {
         const { mock, engine } = makeEngine();
         setDepthState(engine, { test: true, write: true, func: engine.gl.LESS });
+        applyGLStates(engine);
         expect(callsNamed(mock, "enable").some((c) => c.args[0] === engine.gl.DEPTH_TEST)).toBe(true);
         expect(callsNamed(mock, "depthMask")[0]?.args).toEqual([true]);
         expect(callsNamed(mock, "depthFunc")[0]?.args).toEqual([engine.gl.LESS]);
         mock.clear();
         setDepthState(engine, { test: true, write: true, func: engine.gl.LESS });
+        applyGLStates(engine);
         expect(callsNamed(mock, "enable")).toHaveLength(0);
         expect(callsNamed(mock, "depthMask")).toHaveLength(0);
         expect(callsNamed(mock, "depthFunc")).toHaveLength(0);
@@ -43,8 +46,10 @@ describe("lite-gl depth state", () => {
     it("only re-issues the field that changed", () => {
         const { mock, engine } = makeEngine();
         setDepthState(engine, { test: true, write: true });
+        applyGLStates(engine);
         mock.clear();
         setDepthState(engine, { write: false });
+        applyGLStates(engine);
         expect(callsNamed(mock, "depthMask")[0]?.args).toEqual([false]);
         expect(callsNamed(mock, "enable")).toHaveLength(0);
         expect(callsNamed(mock, "disable")).toHaveLength(0);
@@ -53,8 +58,20 @@ describe("lite-gl depth state", () => {
     it("omitted fields are untouched", () => {
         const { mock, engine } = makeEngine();
         setDepthState(engine, { func: engine.gl.LESS });
+        applyGLStates(engine);
         expect(callsNamed(mock, "depthMask")).toHaveLength(0);
         expect(callsNamed(mock, "enable")).toHaveLength(0);
+    });
+
+    it("intra-frame churn collapses to a single applied value (write true→false→true, one flush)", () => {
+        const { mock, engine } = makeEngine();
+        setDepthState(engine, { write: true });
+        setDepthState(engine, { write: false });
+        setDepthState(engine, { write: true });
+        applyGLStates(engine);
+        // Only the surviving desired value (true) reaches GL — vs the sentinel -1.
+        expect(callsNamed(mock, "depthMask")).toHaveLength(1);
+        expect(callsNamed(mock, "depthMask")[0]?.args).toEqual([true]);
     });
 });
 
@@ -62,10 +79,12 @@ describe("lite-gl cull state", () => {
     it("enables CULL_FACE + sets cullFace, cached", () => {
         const { mock, engine } = makeEngine();
         setCullState(engine, true, engine.gl.BACK);
+        applyGLStates(engine);
         expect(callsNamed(mock, "enable").some((c) => c.args[0] === engine.gl.CULL_FACE)).toBe(true);
         expect(callsNamed(mock, "cullFace")[0]?.args).toEqual([engine.gl.BACK]);
         mock.clear();
         setCullState(engine, true, engine.gl.BACK);
+        applyGLStates(engine);
         expect(callsNamed(mock, "enable")).toHaveLength(0);
         expect(callsNamed(mock, "cullFace")).toHaveLength(0);
     });
@@ -75,17 +94,20 @@ describe("lite-gl stencil state", () => {
     it("applies the func triple as a unit and caches it", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { test: true, mask: 0xff, func: engine.gl.ALWAYS, ref: 1, funcMask: 0xff });
+        applyGLStates(engine);
         expect(callsNamed(mock, "enable").some((c) => c.args[0] === engine.gl.STENCIL_TEST)).toBe(true);
         expect(callsNamed(mock, "stencilMask")[0]?.args).toEqual([0xff]);
         expect(callsNamed(mock, "stencilFunc")[0]?.args).toEqual([engine.gl.ALWAYS, 1, 0xff]);
         mock.clear();
         setStencilState(engine, { func: engine.gl.ALWAYS, ref: 1, funcMask: 0xff });
+        applyGLStates(engine);
         expect(callsNamed(mock, "stencilFunc")).toHaveLength(0);
     });
 
     it("applies the op triple independently of the func triple", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { opFail: engine.gl.INCR_WRAP, opZFail: engine.gl.INCR_WRAP, opZPass: engine.gl.INCR_WRAP });
+        applyGLStates(engine);
         expect(callsNamed(mock, "stencilOp")[0]?.args).toEqual([engine.gl.INCR_WRAP, engine.gl.INCR_WRAP, engine.gl.INCR_WRAP]);
         expect(callsNamed(mock, "stencilFunc")).toHaveLength(0);
     });
@@ -93,8 +115,10 @@ describe("lite-gl stencil state", () => {
     it("partial func update merges unspecified members from cache", () => {
         const { mock, engine } = makeEngine();
         setStencilState(engine, { func: engine.gl.ALWAYS, ref: 0, funcMask: 0x3 });
+        applyGLStates(engine);
         mock.clear();
         setStencilState(engine, { func: engine.gl.NOTEQUAL });
+        applyGLStates(engine);
         expect(callsNamed(mock, "stencilFunc")[0]?.args).toEqual([engine.gl.NOTEQUAL, 0, 0x3]);
     });
 });
@@ -103,11 +127,14 @@ describe("lite-gl color mask", () => {
     it("issues colorMask and caches the packed value", () => {
         const { mock, engine } = makeEngine();
         setColorMask(engine, true, true, true, true);
+        applyGLStates(engine);
         expect(callsNamed(mock, "colorMask")[0]?.args).toEqual([true, true, true, true]);
         mock.clear();
         setColorMask(engine, true, true, true, true);
+        applyGLStates(engine);
         expect(callsNamed(mock, "colorMask")).toHaveLength(0);
         setColorMask(engine, false, false, false, false);
+        applyGLStates(engine);
         expect(callsNamed(mock, "colorMask")[0]?.args).toEqual([false, false, false, false]);
     });
 });
@@ -130,6 +157,20 @@ describe("lite-gl clearEngine", () => {
         const { mock, engine } = makeEngine();
         clearEngine(engine, {});
         expect(callsNamed(mock, "clear")).toHaveLength(0);
+    });
+
+    it("flushes deferred write-mask state before clearing (Babylon parity — clear respects masks)", () => {
+        const { mock, engine } = makeEngine();
+        // A deferred colorMask has NOT been applied yet (setter is lazy).
+        setColorMask(engine, true, false, true, false);
+        expect(callsNamed(mock, "colorMask")).toHaveLength(0);
+        clearEngine(engine, { color: { r: 0, g: 0, b: 0 } });
+        // clearEngine flushed the mask, and it precedes gl.clear in the log.
+        expect(callsNamed(mock, "colorMask")[0]?.args).toEqual([true, false, true, false]);
+        const idxMask = mock.log.findIndex((c) => c.name === "colorMask");
+        const idxClear = mock.log.findIndex((c) => c.name === "clear");
+        expect(idxMask).toBeGreaterThanOrEqual(0);
+        expect(idxClear).toBeGreaterThan(idxMask);
     });
 });
 

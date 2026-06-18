@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clearEngine, createGLEngine, disposeGLEngine, resizeGLEngine, setGLEngineSize, setHardwareScalingLevel } from "../../../packages/babylon-lite-gl/src/index";
-import { createMockCanvas, createMockGL, fireLost, type MockCall, type MockGL } from "./_lite-gl-mock";
+import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 // Adapted from the tinylottie branch's `clear.test.ts`. The converged API exposes
 // `clearEngine(engine, { color, depth, stencil })` (from the depth-stencil module)
@@ -127,5 +127,49 @@ describe("lite-gl setGLEngineSize(): explicit drawing-buffer resize", () => {
         setGLEngineSize(engine, 640, 480);
         expect(canvas.width).toBe(640);
         expect(canvas.height).toBe(480);
+    });
+});
+
+describe("lite-gl clearEngine(): clearColor cache", () => {
+    it("elides gl.clearColor when the color is unchanged, but still clears", () => {
+        const { mock, engine } = setup();
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 1 } });
+        mock.clear();
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 1 } });
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 1 } });
+        // Same color → gl.clearColor elided (the redundant-call fix)...
+        expect(callsNamed(mock, "clearColor")).toHaveLength(0);
+        // ...but the actual clear still runs each call.
+        expect(callsNamed(mock, "clear")).toHaveLength(2);
+    });
+
+    it("re-issues gl.clearColor when the color changes", () => {
+        const { mock, engine } = setup();
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3 } });
+        mock.clear();
+        clearEngine(engine, { color: { r: 0.4, g: 0.5, b: 0.6 } });
+        const cc = callsNamed(mock, "clearColor");
+        expect(cc).toHaveLength(1);
+        expect(cc[0]?.args).toEqual([0.4, 0.5, 0.6, 1]);
+    });
+
+    it("a changed alpha alone re-issues gl.clearColor", () => {
+        const { mock, engine } = setup();
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 1 } });
+        mock.clear();
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 0.5 } });
+        expect(callsNamed(mock, "clearColor")).toHaveLength(1);
+    });
+
+    it("resets the clearColor cache on context loss so the next clear re-issues", () => {
+        const { mock, canvas, engine } = setup();
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 1 } });
+        fireLost(canvas);
+        fireRestored(canvas);
+        mock.clear();
+        // The restored context's gl.clearColor is back at the GL default, so the
+        // reset cache must re-issue rather than wrongly elide.
+        clearEngine(engine, { color: { r: 0.1, g: 0.2, b: 0.3, a: 1 } });
+        expect(callsNamed(mock, "clearColor")).toHaveLength(1);
     });
 });

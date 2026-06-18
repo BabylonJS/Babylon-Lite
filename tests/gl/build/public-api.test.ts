@@ -117,6 +117,10 @@ describe("babylon-lite-gl build output", () => {
             "disposeBuffer",
             "bindAttributes",
             "drawIndexed",
+            "createMeshVao",
+            "bindMeshVao",
+            "drawMesh",
+            "disposeMeshVao",
             // blend / depth-stencil / scissor
             "setBlendMode",
             "setBlendState",
@@ -183,6 +187,10 @@ describe("babylon-lite-gl build output", () => {
             "bindAttributes",
             "unbindInstanceAttributes",
             "drawIndexed",
+            "createMeshVao",
+            "bindMeshVao",
+            "drawMesh",
+            "disposeMeshVao",
         ]) {
             expect(typeof mesh[name], `mesh export ${name}`).toBe("function");
         }

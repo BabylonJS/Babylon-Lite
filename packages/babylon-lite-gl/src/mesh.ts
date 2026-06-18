@@ -20,7 +20,9 @@
  * `webglcontextrestored`.
  */
 import type { GLEngineContext } from "./context.js";
+import { onContextRestored, offContextRestored } from "./context.js";
 import { getEffectAttributeLocation, type GLEffect } from "./effect.js";
+import { applyGLStates } from "./apply-states.js";
 
 /** GL `gl.ARRAY_BUFFER`. */
 const ARRAY_BUFFER = 0x8892;
@@ -365,11 +367,233 @@ export function drawIndexed(engine: GLEngineContext, ib: GLIndexBuffer, indexCou
     const gl = engine.gl;
     const type = ib.is32Bits ? UNSIGNED_INT : UNSIGNED_SHORT;
     const byteOffset = indexStart * (ib.is32Bits ? 4 : 2);
+    applyGLStates(engine);
     if (instanceCount > 0) {
         gl.drawElementsInstanced(TRIANGLES, indexCount, type, byteOffset, instanceCount);
     } else {
         gl.drawElements(TRIANGLES, indexCount, type, byteOffset);
     }
+}
+
+/* ──────────────────────────  static mesh VAO  ─────────────────────────────
+ * The VAO-cached counterpart of the manual `bindAttributes` path above — Babylon's
+ * `recordVertexArrayObject` / `_cachedVertexArrayObject` for STATIC meshes. A
+ * `GLMeshVao` records the whole attribute layout (enable + pointer + divisor for
+ * every attribute, across one or more vertex buffers) AND the index binding into a
+ * single VAO ONCE. The per-frame draw is then just `bindVertexArray` +
+ * `drawElements[Instanced]` — zero per-draw `vertexAttribPointer`/`vertexAttribDivisor`,
+ * and no `unbindInstanceAttributes` (the VAO isolates the divisors from the default
+ * VAO). Use this for fixed-layout meshes; keep `bindAttributes` for dynamic layouts
+ * (e.g. ShapeBuilder's per-draw sliding-window tape buffers). */
+
+/** One vertex buffer + its attribute layout, for {@link createMeshVao}. */
+export interface GLMeshVertexBuffer {
+    /** The buffer supplying this group's attributes. */
+    buffer: GLVertexBuffer;
+    /** The attributes read from `buffer` (same shape as {@link bindAttributes}). */
+    attributes: readonly GLAttributeDescriptor[];
+    /** Stride mode (see {@link bindAttributes}): `false` (default) → stride `0`
+     *  per attribute; `true` → interleaved stride = Σ(`size`·4). */
+    computeStride?: boolean;
+}
+
+/** A recorded Vertex Array Object capturing a static mesh's attribute layout +
+ *  index binding. Bind + draw it with {@link drawMesh} each frame — the GPU
+ *  replays the entire attribute setup from one `bindVertexArray`. Re-recorded
+ *  automatically on `webglcontextrestored`. */
+export interface GLMeshVao {
+    /** The live `WebGLVertexArrayObject`. Swapped on `webglcontextrestored`. */
+    handle: WebGLVertexArrayObject;
+    /** @internal */
+    _disposed: boolean;
+    /** @internal The index buffer recorded into the VAO. */
+    _indexBuffer: GLIndexBuffer;
+    /** @internal Resolved attribute bindings, reused to re-record on restore. */
+    _bindings: _ResolvedBinding[];
+    /** @internal `webglcontextrestored` re-record hook. */
+    _restore: () => void;
+}
+
+/** @internal A single attribute with its location resolved once at record time
+ *  (locations are stable across re-link via `bindAttribLocation`, so the VAO can
+ *  re-record on context-restore without the effect). */
+interface _ResolvedAttr {
+    loc: number;
+    size: number;
+    type: number;
+    normalized: boolean;
+    stride: number;
+    offset: number;
+    divisor: number;
+}
+
+/** @internal A vertex buffer + its resolved attributes. */
+interface _ResolvedBinding {
+    buffer: GLVertexBuffer;
+    attrs: _ResolvedAttr[];
+}
+
+/**
+ * Record a static mesh's attribute layout + index binding into a new VAO. The
+ * effect MUST be ready (its attribute locations are resolved here, once). Returns
+ * a {@link GLMeshVao} to draw with {@link drawMesh}.
+ *
+ * @param engine - The engine.
+ * @param vertexBuffers - One or more buffers + their attribute layouts.
+ * @param indexBuffer - The index buffer recorded into the VAO.
+ * @param effect - The effect whose attribute locations resolve unnamed indices.
+ * @returns The recorded {@link GLMeshVao}.
+ */
+export function createMeshVao(engine: GLEngineContext, vertexBuffers: readonly GLMeshVertexBuffer[], indexBuffer: GLIndexBuffer, effect: GLEffect): GLMeshVao {
+    const gl = engine.gl;
+    // The effect's attribute locations are resolved (once) below; an unready effect
+    // would resolve every name to -1 → a silently-empty VAO. Fail fast — callers
+    // must gate on isEffectReady (see scene10's first-ready-frame creation).
+    if (!effect.isReady) {
+        throw new Error("lite-gl: createMeshVao requires a ready effect (poll isEffectReady first)");
+    }
+    const handle = gl.createVertexArray();
+    if (handle === null) {
+        throw new Error("lite-gl: gl.createVertexArray returned null (mesh VAO)");
+    }
+    // Resolve every attribute location ONCE (stable across re-link), so a restore
+    // re-record needs only the buffer handles, not the effect.
+    const bindings: _ResolvedBinding[] = [];
+    for (const vbb of vertexBuffers) {
+        let stride = 0;
+        if (vbb.computeStride) {
+            for (let i = 0; i < vbb.attributes.length; i++) {
+                stride += (vbb.attributes[i] as GLAttributeDescriptor).size * 4;
+            }
+        }
+        const attrs: _ResolvedAttr[] = [];
+        for (let i = 0; i < vbb.attributes.length; i++) {
+            const d = vbb.attributes[i] as GLAttributeDescriptor;
+            const loc = d.index !== undefined ? d.index : d.name !== undefined ? getEffectAttributeLocation(engine, effect, d.name) : -1;
+            if (loc < 0) {
+                continue;
+            }
+            attrs.push({
+                loc,
+                size: d.size,
+                type: d.type ?? FLOAT,
+                normalized: d.normalized ?? false,
+                stride,
+                offset: d.offset ?? 0,
+                divisor: d.divisor === undefined ? 1 : d.divisor,
+            });
+        }
+        bindings.push({ buffer: vbb.buffer, attrs });
+    }
+    const vao: GLMeshVao = { handle, _disposed: false, _indexBuffer: indexBuffer, _bindings: bindings, _restore: () => {} };
+    vao._restore = (): void => {
+        if (engine._isLost || engine._disposed || vao._disposed) {
+            return;
+        }
+        const fresh = engine.gl.createVertexArray();
+        if (fresh === null) {
+            return;
+        }
+        vao.handle = fresh;
+        recordMeshVao(engine, vao);
+    };
+    recordMeshVao(engine, vao);
+    onContextRestored(engine, vao._restore);
+    return vao;
+}
+
+/**
+ * Bind a {@link GLMeshVao} (cached `gl.bindVertexArray`). Rarely called directly —
+ * {@link drawMesh} binds it for you. Binding restores the VAO's recorded element
+ * binding, so the element-buffer cache is updated in lock-step.
+ *
+ * @param engine - The engine.
+ * @param vao - The mesh VAO to bind.
+ */
+export function bindMeshVao(engine: GLEngineContext, vao: GLMeshVao): void {
+    if (engine._isLost || engine._disposed || vao._disposed) {
+        return;
+    }
+    const s = engine._state;
+    if (s.boundVao === vao.handle) {
+        return;
+    }
+    engine.gl.bindVertexArray(vao.handle);
+    s.boundVao = vao.handle;
+    s.boundElementBuffer = vao._indexBuffer.handle;
+}
+
+/**
+ * Draw a static mesh recorded with {@link createMeshVao}: binds its VAO (cached),
+ * flushes deferred GL state, and issues ONE `drawElements` (or
+ * `drawElementsInstanced` when `instanceCount > 0`) over the VAO's full index
+ * buffer. No per-draw attribute (re)binding. No-op on a lost/disposed context, a
+ * disposed VAO, or when no program is current.
+ *
+ * @param engine - The engine.
+ * @param vao - The mesh VAO to draw.
+ * @param instanceCount - Instance count for instanced draws. Default 0 (non-instanced).
+ */
+export function drawMesh(engine: GLEngineContext, vao: GLMeshVao, instanceCount = 0): void {
+    if (engine._isLost || engine._disposed || vao._disposed) {
+        return;
+    }
+    if (engine._state.currentProgram === null) {
+        return;
+    }
+    bindMeshVao(engine, vao);
+    applyGLStates(engine);
+    const ib = vao._indexBuffer;
+    const gl = engine.gl;
+    const type = ib.is32Bits ? UNSIGNED_INT : UNSIGNED_SHORT;
+    if (instanceCount > 0) {
+        gl.drawElementsInstanced(TRIANGLES, ib.count, type, 0, instanceCount);
+    } else {
+        gl.drawElements(TRIANGLES, ib.count, type, 0);
+    }
+}
+
+/** Dispose a {@link GLMeshVao}: delete the VAO and unregister its restore hook.
+ *  Does NOT dispose the vertex/index buffers (the caller owns those). Idempotent. */
+export function disposeMeshVao(engine: GLEngineContext, vao: GLMeshVao): void {
+    if (vao._disposed) {
+        return;
+    }
+    vao._disposed = true;
+    offContextRestored(engine, vao._restore);
+    if (!engine._isLost && !engine._disposed) {
+        const s = engine._state;
+        engine.gl.deleteVertexArray(vao.handle);
+        if (s.boundVao === vao.handle) {
+            // Return to the default VAO so the cache stays coherent.
+            engine.gl.bindVertexArray(null);
+            s.boundVao = null;
+            s.boundElementBuffer = null;
+        }
+    }
+}
+
+/** @internal Record `vao._bindings` + the index binding into `vao.handle`. Leaves
+ *  the default (null) VAO bound afterwards (so the mesh VAO is not left current),
+ *  forgetting the element-buffer cache. Touches neither `s.enabledAttribs` (those
+ *  track the DEFAULT VAO) nor the divisor reset — all of that lives in the VAO. */
+function recordMeshVao(engine: GLEngineContext, vao: GLMeshVao): void {
+    const gl = engine.gl;
+    const s = engine._state;
+    gl.bindVertexArray(vao.handle);
+    s.boundVao = vao.handle;
+    for (const b of vao._bindings) {
+        bindArrayBufferRaw(engine, b.buffer.handle);
+        for (const a of b.attrs) {
+            gl.enableVertexAttribArray(a.loc);
+            gl.vertexAttribPointer(a.loc, a.size, a.type, a.normalized, a.stride, a.offset);
+            gl.vertexAttribDivisor(a.loc, a.divisor);
+        }
+    }
+    gl.bindBuffer(ELEMENT_ARRAY_BUFFER, vao._indexBuffer.handle);
+    gl.bindVertexArray(null);
+    s.boundVao = null;
+    s.boundElementBuffer = null;
 }
 
 /* ────────────────────────────  internal helpers  ──────────────────────────── */

@@ -82,6 +82,21 @@ export interface GLEffect {
     /** @internal */
     _disposed: boolean;
     /**
+     * Number of live `createEffect` callers sharing this effect (and its one
+     * `WebGLProgram`). `createEffect` returns the cached effect and bumps this
+     * when an identical descriptor is requested; `disposeEffect` decrements it
+     * and only tears the program down when it reaches 0.
+     * @internal
+     */
+    _refCount: number;
+    /**
+     * The `_effectCache` key this effect was stored under (the source
+     * descriptor). Used by `disposeEffect` to evict the cache entry at refcount
+     * 0.
+     * @internal
+     */
+    _cacheKey: string;
+    /**
      * Callbacks fired exactly once on the first transition to ready.
      * @internal
      */
@@ -101,6 +116,20 @@ export interface GLEffect {
 export function createEffect(engine: GLEngineContext, options: GLEffectOptions): GLEffect {
     const attribs = options.attributeNames ?? ["position"];
     const gl = engine.gl;
+
+    // Per-engine cache keyed by the source descriptor. Identical descriptors
+    // share ONE GLEffect (and thus one WebGLProgram), so `useEffect`'s
+    // current-program cache can elide redundant `gl.useProgram` across the
+    // consumers. The key covers every input that affects the program or its
+    // readiness finalization, joined by a NUL separator (cannot appear in GLSL).
+    const cacheKey = [options.vertexSource, options.fragmentSource, options.defines ?? "", attribs.join(","), options.uniformNames.join(","), options.samplerNames.join(",")].join(
+        "\u0000"
+    );
+    const cached = engine._effectCache.get(cacheKey);
+    if (cached !== undefined && !cached._disposed) {
+        cached._refCount++;
+        return cached;
+    }
 
     const compileErr: (string | null)[] = [null];
     const finalVS = applyDefines(options.vertexSource, options.defines);
@@ -138,6 +167,8 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
         isReady: false,
         _compileError: null,
         _disposed: false,
+        _refCount: 1,
+        _cacheKey: cacheKey,
         _onCompiled: [],
         _restore: () => {},
     };
@@ -168,6 +199,7 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
     };
 
     engine._effects.push(effect);
+    engine._effectCache.set(cacheKey, effect);
     return effect;
 }
 
@@ -245,10 +277,17 @@ export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, c
     effect._onCompiled.push(cb);
 }
 
-/** Delete the effect's program + shaders, unregister it from the context, and
- *  clear the cached current-program if it pointed at this effect. Idempotent. */
+/** Decrement the share count and, on the last release, delete the effect's
+ *  program + shaders, unregister it from the context + cache, and clear the
+ *  cached current-program if it pointed at this effect. A shared effect (still
+ *  referenced by another `createEffect` caller) is kept alive. Call exactly ONCE
+ *  per `createEffect` (each call decrements the ref count); safe (no-op) once the
+ *  effect is fully torn down. */
 export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void {
     if (effect._disposed) {
+        return;
+    }
+    if (--effect._refCount > 0) {
         return;
     }
     effect._disposed = true;
@@ -257,6 +296,7 @@ export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void {
     if (i !== -1) {
         engine._effects.splice(i, 1);
     }
+    engine._effectCache.delete(effect._cacheKey);
     if (!engine._isLost && !engine._disposed) {
         engine.gl.deleteProgram(effect.program);
         engine.gl.deleteShader(effect._vs);

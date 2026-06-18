@@ -1,19 +1,23 @@
-import { createEffect, createGLEngine, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, useEffect } from "babylon-lite-gl";
-import { bindAttributes, bindIndexBuffer, createIndexBuffer, createVertexBuffer, drawIndexed, unbindInstanceAttributes, type GLAttributeDescriptor } from "babylon-lite-gl/mesh";
+import { createGLEngine, createEffect, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, useEffect } from "babylon-lite-gl";
+import { createIndexBuffer, createMeshVao, createVertexBuffer, drawMesh, type GLAttributeDescriptor, type GLMeshVao } from "babylon-lite-gl/mesh";
 import { clearEngine, setCullState, setDepthState } from "babylon-lite-gl/depth-stencil";
 
 /**
  * Scene 10 — Indexed Mesh + Instancing (the first lite-gl scene with REAL
  * geometry rather than a fullscreen quad).
  *
- * Exercises the @babylonjs/lite-gl/mesh sub-entry end-to-end:
+ * Exercises the @babylonjs/lite-gl/mesh sub-entry end-to-end, using the
+ * VAO-cached static-mesh path:
  *   - `createVertexBuffer` uploads an interleaved (position + colour) base quad.
  *   - `createIndexBuffer` uploads the two-triangle index list.
- *   - `bindAttributes` feeds the per-vertex attributes (divisor 0) AND the
- *     per-instance attributes (divisor 1, the default) from a second buffer.
- *   - `bindIndexBuffer` + `drawIndexed(…, instanceCount)` issue ONE
- *     `drawElementsInstanced` call that stamps the quad five times.
- *   - `unbindInstanceAttributes` resets the instanced divisors afterwards.
+ *   - `createMeshVao` records BOTH the per-vertex attributes (divisor 0) and the
+ *     per-instance attributes (divisor 1, the default, from a second buffer) plus
+ *     the index binding into ONE Vertex Array Object — once, after the effect
+ *     compiles.
+ *   - `drawMesh(…, INSTANCE_COUNT)` then binds the VAO and issues ONE
+ *     `drawElementsInstanced` per frame that stamps the quad five times — with no
+ *     per-frame `vertexAttribPointer`/`vertexAttribDivisor` and no
+ *     `unbindInstanceAttributes` (the VAO isolates the divisors).
  *
  * Depth + cull (from @babylonjs/lite-gl/depth-stencil) are the visible proof
  * that depth-testing and instancing work: the five instances march diagonally
@@ -68,7 +72,6 @@ const INSTANCES = new Float32Array([
 ]);
 
 const INSTANCE_COUNT = 5;
-const INDEX_COUNT = 6;
 /** Bytes from the start of one attribute element to the colour/tint half. */
 const HALF_OFFSET_BYTES = 12;
 
@@ -140,10 +143,26 @@ const INSTANCE_ATTRIBUTES: readonly GLAttributeDescriptor[] = [
 const seekTime = parseSeekTime();
 const initStart = performance.now();
 let firstFrameDrawn = false;
+/** Recorded once on the first ready frame (the effect's attribute locations must
+ *  resolve first), then bound + drawn each frame. */
+let meshVao: GLMeshVao | null = null;
 
 runRenderLoop(engine, () => {
     if (!isEffectReady(engine, effect)) {
         return;
+    }
+    // Record the static mesh (both buffers' attribute layouts + the index binding)
+    // into one VAO, once. The per-frame draw is then a single bind + draw.
+    if (meshVao === null) {
+        meshVao = createMeshVao(
+            engine,
+            [
+                { buffer: meshBuffer, attributes: BASE_ATTRIBUTES, computeStride: true },
+                { buffer: instanceBuffer, attributes: INSTANCE_ATTRIBUTES, computeStride: true },
+            ],
+            indexBuffer,
+            effect
+        );
     }
     resizeGLEngine(engine);
     setViewport(engine); // full canvas
@@ -158,13 +177,9 @@ runRenderLoop(engine, () => {
 
     useEffect(engine, effect);
 
-    // Feed per-vertex attributes from the base buffer, per-instance attributes
-    // from the instance buffer, then draw all five instances in ONE call.
-    bindAttributes(engine, meshBuffer, BASE_ATTRIBUTES, effect, true);
-    bindAttributes(engine, instanceBuffer, INSTANCE_ATTRIBUTES, effect, true);
-    bindIndexBuffer(engine, indexBuffer);
-    drawIndexed(engine, indexBuffer, INDEX_COUNT, 0, INSTANCE_COUNT);
-    unbindInstanceAttributes(engine);
+    // Bind the recorded VAO and draw all five instances in ONE call — no per-frame
+    // vertexAttribPointer/Divisor, no unbindInstanceAttributes.
+    drawMesh(engine, meshVao, INSTANCE_COUNT);
 
     if (!firstFrameDrawn) {
         firstFrameDrawn = true;

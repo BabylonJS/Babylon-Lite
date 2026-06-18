@@ -2,11 +2,14 @@
  * Depth, stencil, color-mask and clear state — the lite-gl counterpart of
  * Babylon's `_depthCullingState` / `_stencilState` / `setColorWrite` / `clear`.
  *
- * Unlike Babylon, which buffers these in dirty-flag state objects and flushes
- * them in `applyStates()` before each draw, lite-gl applies each on the setter
- * call and caches the result in `GLState`, eliding redundant GL calls. Every
- * field is independently cached, so a setter that changes only one sub-state
- * (e.g. just the stencil op triple) issues only that GL call.
+ * Like Babylon, these setters are DEFERRED: they buffer the requested values
+ * into the DESIRED (`d*`) mirror fields of `GLState` and raise `statesDirty`,
+ * issuing NO `gl.*` calls themselves. `applyGLStates` (apply-states.ts) flushes
+ * the diff to GL right before each draw (and before `clearEngine`'s `gl.clear`,
+ * since a clear respects the current write masks). Every field is reconciled
+ * independently, so a flush that changes only one sub-state (e.g. just the
+ * stencil op triple) issues only that GL call. Omitted setter fields leave the
+ * corresponding desired value untouched (merge-from-desired).
  *
  * All setters are no-ops on a lost/disposed context.
  *
@@ -20,17 +23,42 @@
  */
 import type { GLEngineContext } from "./context.js";
 import type { GLRenderTarget } from "./render-target.js";
+import { applyGLStates } from "./apply-states.js";
+import {
+    RS_CLEAR_A,
+    RS_CLEAR_B,
+    RS_CLEAR_G,
+    RS_CLEAR_R,
+    RS_COLOR_MASK,
+    RS_CULL_ENABLED,
+    RS_CULL_FACE,
+    RS_DEPTH_FUNC,
+    RS_DEPTH_MASK,
+    RS_DEPTH_TEST,
+    RS_DESIRED,
+    RS_STENCIL_FUNC_FUNC,
+    RS_STENCIL_FUNC_MASK,
+    RS_STENCIL_FUNC_REF,
+    RS_STENCIL_MASK,
+    RS_STENCIL_OP_FAIL,
+    RS_STENCIL_OP_ZFAIL,
+    RS_STENCIL_OP_ZPASS,
+    RS_STENCIL_TEST,
+} from "./state.js";
 
+// ── Clear bits (used by `clearEngine`).
+/** GL clear bits. */
+const COLOR_BUFFER_BIT = 0x4000;
+const DEPTH_BUFFER_BIT = 0x0100;
+const STENCIL_BUFFER_BIT = 0x0400;
+
+// ── Test-enable enums for the per-category reconcilers below.
 /** GL `gl.DEPTH_TEST`. */
 const DEPTH_TEST = 0x0b71;
 /** GL `gl.CULL_FACE`. */
 const CULL_FACE = 0x0b44;
 /** GL `gl.STENCIL_TEST`. */
 const STENCIL_TEST = 0x0b90;
-/** GL clear bits. */
-const COLOR_BUFFER_BIT = 0x4000;
-const DEPTH_BUFFER_BIT = 0x0100;
-const STENCIL_BUFFER_BIT = 0x0400;
 
 // ── Framebuffer / renderbuffer enums (used only by generateRenderTargetStencil).
 // Module-local consts mirror render-target.ts's constant style. Because the
@@ -99,9 +127,10 @@ export interface GLClearOptions {
 }
 
 /**
- * Apply depth-buffer state (test enable, write mask, comparison function),
- * cached per field. The lite-gl equivalent of mutating Babylon's
- * `engine.depthCullingState.{depthTest,depthMask,depthFunc}`.
+ * Buffer depth-buffer state (test enable, write mask, comparison function) into
+ * the DESIRED state — the lite-gl equivalent of mutating Babylon's
+ * `engine.depthCullingState.{depthTest,depthMask,depthFunc}`. Flushed to GL by
+ * `applyGLStates` before the next draw / clear; omitted fields are untouched.
  *
  * @param engine - The engine.
  * @param state - The depth fields to change. Omitted fields are untouched.
@@ -110,30 +139,18 @@ export function setDepthState(engine: GLEngineContext, state: GLDepthState): voi
     if (engine._isLost || engine._disposed) {
         return;
     }
-    const gl = engine.gl;
     const s = engine._state;
     if (state.test !== undefined) {
-        const v = state.test ? 1 : 0;
-        if (s.depthTest !== v) {
-            s.depthTest = v;
-            if (v === 1) {
-                gl.enable(DEPTH_TEST);
-            } else {
-                gl.disable(DEPTH_TEST);
-            }
-        }
+        s.rs[RS_DEPTH_TEST + RS_DESIRED] = state.test ? 1 : 0;
     }
     if (state.write !== undefined) {
-        const v = state.write ? 1 : 0;
-        if (s.depthMask !== v) {
-            s.depthMask = v;
-            gl.depthMask(state.write);
-        }
+        s.rs[RS_DEPTH_MASK + RS_DESIRED] = state.write ? 1 : 0;
     }
-    if (state.func !== undefined && s.depthFunc !== state.func) {
-        s.depthFunc = state.func;
-        gl.depthFunc(state.func);
+    if (state.func !== undefined) {
+        s.rs[RS_DEPTH_FUNC + RS_DESIRED] = state.func;
     }
+    s._flushDepthCull = flushDepthCull;
+    s.statesDirty = true;
 }
 
 /**
@@ -148,27 +165,20 @@ export function setCullState(engine: GLEngineContext, enabled: boolean, face?: G
     if (engine._isLost || engine._disposed) {
         return;
     }
-    const gl = engine.gl;
     const s = engine._state;
-    const v = enabled ? 1 : 0;
-    if (s.cullEnabled !== v) {
-        s.cullEnabled = v;
-        if (v === 1) {
-            gl.enable(CULL_FACE);
-        } else {
-            gl.disable(CULL_FACE);
-        }
+    s.rs[RS_CULL_ENABLED + RS_DESIRED] = enabled ? 1 : 0;
+    if (face !== undefined) {
+        s.rs[RS_CULL_FACE + RS_DESIRED] = face;
     }
-    if (face !== undefined && s.cullFace !== face) {
-        s.cullFace = face;
-        gl.cullFace(face);
-    }
+    s._flushDepthCull = flushDepthCull;
+    s.statesDirty = true;
 }
 
 /**
- * Apply stencil state (test enable, write mask, comparison func triple, op
- * triple), cached per sub-state. The lite-gl equivalent of mutating Babylon's
- * `engine.stencilState.*`.
+ * Buffer stencil state (test enable, write mask, comparison func triple, op
+ * triple) into the DESIRED state — the lite-gl equivalent of mutating Babylon's
+ * `engine.stencilState.*`. Flushed by `applyGLStates` before the next draw /
+ * clear; omitted fields are untouched (merge-from-desired).
  *
  * @param engine - The engine.
  * @param state - The stencil fields to change. Omitted fields are untouched.
@@ -177,50 +187,40 @@ export function setStencilState(engine: GLEngineContext, state: GLStencilState):
     if (engine._isLost || engine._disposed) {
         return;
     }
-    const gl = engine.gl;
     const s = engine._state;
     if (state.test !== undefined) {
-        const v = state.test ? 1 : 0;
-        if (s.stencilTest !== v) {
-            s.stencilTest = v;
-            if (v === 1) {
-                gl.enable(STENCIL_TEST);
-            } else {
-                gl.disable(STENCIL_TEST);
-            }
-        }
+        s.rs[RS_STENCIL_TEST + RS_DESIRED] = state.test ? 1 : 0;
     }
-    if (state.mask !== undefined && s.stencilMask !== state.mask) {
-        s.stencilMask = state.mask;
-        gl.stencilMask(state.mask);
+    if (state.mask !== undefined) {
+        s.rs[RS_STENCIL_MASK + RS_DESIRED] = state.mask;
     }
-    if (state.func !== undefined || state.ref !== undefined || state.funcMask !== undefined) {
-        const func = state.func ?? s.stencilFuncFunc;
-        const ref = state.ref ?? s.stencilFuncRef;
-        const funcMask = state.funcMask ?? s.stencilFuncMask;
-        if (s.stencilFuncFunc !== func || s.stencilFuncRef !== ref || s.stencilFuncMask !== funcMask) {
-            s.stencilFuncFunc = func;
-            s.stencilFuncRef = ref;
-            s.stencilFuncMask = funcMask;
-            gl.stencilFunc(func, ref, funcMask);
-        }
+    if (state.func !== undefined) {
+        s.rs[RS_STENCIL_FUNC_FUNC + RS_DESIRED] = state.func;
     }
-    if (state.opFail !== undefined || state.opZFail !== undefined || state.opZPass !== undefined) {
-        const fail = state.opFail ?? s.stencilOpFail;
-        const zFail = state.opZFail ?? s.stencilOpZFail;
-        const zPass = state.opZPass ?? s.stencilOpZPass;
-        if (s.stencilOpFail !== fail || s.stencilOpZFail !== zFail || s.stencilOpZPass !== zPass) {
-            s.stencilOpFail = fail;
-            s.stencilOpZFail = zFail;
-            s.stencilOpZPass = zPass;
-            gl.stencilOp(fail, zFail, zPass);
-        }
+    if (state.ref !== undefined) {
+        s.rs[RS_STENCIL_FUNC_REF + RS_DESIRED] = state.ref;
     }
+    if (state.funcMask !== undefined) {
+        s.rs[RS_STENCIL_FUNC_MASK + RS_DESIRED] = state.funcMask;
+    }
+    if (state.opFail !== undefined) {
+        s.rs[RS_STENCIL_OP_FAIL + RS_DESIRED] = state.opFail;
+    }
+    if (state.opZFail !== undefined) {
+        s.rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED] = state.opZFail;
+    }
+    if (state.opZPass !== undefined) {
+        s.rs[RS_STENCIL_OP_ZPASS + RS_DESIRED] = state.opZPass;
+    }
+    s._flushStencil = flushStencil;
+    s.statesDirty = true;
 }
 
 /**
- * Set the color write mask (`gl.colorMask`), cached — the lite-gl equivalent of
+ * Buffer the color write mask into the DESIRED state — the lite-gl equivalent of
  * Babylon's `setColorWrite` (which passes the same flag to all four channels).
+ * Flushed to GL (`gl.colorMask`) by `applyGLStates` before the next draw /
+ * clear.
  *
  * @param engine - The engine.
  * @param r - Write red.
@@ -234,11 +234,9 @@ export function setColorMask(engine: GLEngineContext, r: boolean, g: boolean, b:
     }
     const packed = (r ? 8 : 0) | (g ? 4 : 0) | (b ? 2 : 0) | (a ? 1 : 0);
     const s = engine._state;
-    if (s.colorMask === packed) {
-        return;
-    }
-    s.colorMask = packed;
-    engine.gl.colorMask(r, g, b, a);
+    s.rs[RS_COLOR_MASK + RS_DESIRED] = packed;
+    s._flushColorMask = flushColorMask;
+    s.statesDirty = true;
 }
 
 /**
@@ -259,7 +257,18 @@ export function clearEngine(engine: GLEngineContext, options: GLClearOptions): v
     let mask = 0;
     if (options.color !== undefined) {
         const c = options.color;
-        gl.clearColor(c.r, c.g, c.b, c.a ?? 1);
+        const a = c.a ?? 1;
+        const rs = engine._state.rs;
+        // Cached: gl.clearColor is per-context state GL retains, so only re-issue
+        // it when the requested color actually changes (Babylon re-sets it every
+        // clear; this elides the redundant JS↔native call for constant backgrounds).
+        if (rs[RS_CLEAR_R] !== c.r || rs[RS_CLEAR_G] !== c.g || rs[RS_CLEAR_B] !== c.b || rs[RS_CLEAR_A] !== a) {
+            gl.clearColor(c.r, c.g, c.b, a);
+            rs[RS_CLEAR_R] = c.r;
+            rs[RS_CLEAR_G] = c.g;
+            rs[RS_CLEAR_B] = c.b;
+            rs[RS_CLEAR_A] = a;
+        }
         mask |= COLOR_BUFFER_BIT;
     }
     if (options.depth === true) {
@@ -269,7 +278,109 @@ export function clearEngine(engine: GLEngineContext, options: GLClearOptions): v
         mask |= STENCIL_BUFFER_BIT;
     }
     if (mask !== 0) {
+        // Babylon parity: a clear respects the current depth/stencil/color write
+        // masks, so flush any deferred state before clearing.
+        applyGLStates(engine);
         gl.clear(mask);
+    }
+}
+
+/* ───────────────────  deferred render-state reconcilers  ──────────────────────
+ * The per-category half of `applyGLStates`. Each setter above installs the
+ * matching reconciler onto its `_state._flush*` slot; `applyGLStates`
+ * (apply-states.ts) dispatches ONLY through those slots. Co-locating them with
+ * their setters makes each one reachable solely when its setter is in the bundle,
+ * so a scene that never touches depth/cull, stencil, or color-mask tree-shakes
+ * the corresponding reconciler — and its GL code — away entirely. Each reconciles
+ * its DESIRED (`rs[RS_X + RS_DESIRED]`) slots against the ACTUAL twins (`rs[RS_X]`)
+ * and issues only the `gl.*` calls that changed, in the same order and with the
+ * same elision rules as the former monolithic flush. */
+
+/** Reconcile depth + cull (Babylon's `_depthCullingState.apply`). @internal */
+function flushDepthCull(engine: GLEngineContext): void {
+    const gl = engine.gl;
+    const rs = engine._state.rs;
+    const dTest = rs[RS_DEPTH_TEST + RS_DESIRED]!;
+    if (dTest !== rs[RS_DEPTH_TEST]) {
+        rs[RS_DEPTH_TEST] = dTest;
+        if (dTest === 1) {
+            gl.enable(DEPTH_TEST);
+        } else {
+            gl.disable(DEPTH_TEST);
+        }
+    }
+    const dMask = rs[RS_DEPTH_MASK + RS_DESIRED]!;
+    if (dMask !== rs[RS_DEPTH_MASK]) {
+        rs[RS_DEPTH_MASK] = dMask;
+        gl.depthMask(dMask === 1);
+    }
+    const dFunc = rs[RS_DEPTH_FUNC + RS_DESIRED]!;
+    if (dFunc !== rs[RS_DEPTH_FUNC]) {
+        rs[RS_DEPTH_FUNC] = dFunc;
+        gl.depthFunc(dFunc);
+    }
+    const dCull = rs[RS_CULL_ENABLED + RS_DESIRED]!;
+    if (dCull !== rs[RS_CULL_ENABLED]) {
+        rs[RS_CULL_ENABLED] = dCull;
+        if (dCull === 1) {
+            gl.enable(CULL_FACE);
+        } else {
+            gl.disable(CULL_FACE);
+        }
+    }
+    const dCullFace = rs[RS_CULL_FACE + RS_DESIRED]!;
+    if (dCullFace !== rs[RS_CULL_FACE]) {
+        rs[RS_CULL_FACE] = dCullFace;
+        gl.cullFace(dCullFace);
+    }
+}
+
+/** Reconcile the stencil test / mask / func-triple / op-triple (Babylon's
+ *  `_stencilState.apply`); each triple is issued as a unit. @internal */
+function flushStencil(engine: GLEngineContext): void {
+    const gl = engine.gl;
+    const rs = engine._state.rs;
+    const dTest = rs[RS_STENCIL_TEST + RS_DESIRED]!;
+    if (dTest !== rs[RS_STENCIL_TEST]) {
+        rs[RS_STENCIL_TEST] = dTest;
+        if (dTest === 1) {
+            gl.enable(STENCIL_TEST);
+        } else {
+            gl.disable(STENCIL_TEST);
+        }
+    }
+    const dMask = rs[RS_STENCIL_MASK + RS_DESIRED]!;
+    if (dMask !== rs[RS_STENCIL_MASK]) {
+        rs[RS_STENCIL_MASK] = dMask;
+        gl.stencilMask(dMask);
+    }
+    const dFuncFunc = rs[RS_STENCIL_FUNC_FUNC + RS_DESIRED]!;
+    const dFuncRef = rs[RS_STENCIL_FUNC_REF + RS_DESIRED]!;
+    const dFuncMask = rs[RS_STENCIL_FUNC_MASK + RS_DESIRED]!;
+    if (dFuncFunc !== rs[RS_STENCIL_FUNC_FUNC] || dFuncRef !== rs[RS_STENCIL_FUNC_REF] || dFuncMask !== rs[RS_STENCIL_FUNC_MASK]) {
+        rs[RS_STENCIL_FUNC_FUNC] = dFuncFunc;
+        rs[RS_STENCIL_FUNC_REF] = dFuncRef;
+        rs[RS_STENCIL_FUNC_MASK] = dFuncMask;
+        gl.stencilFunc(dFuncFunc, dFuncRef, dFuncMask);
+    }
+    const dOpFail = rs[RS_STENCIL_OP_FAIL + RS_DESIRED]!;
+    const dOpZFail = rs[RS_STENCIL_OP_ZFAIL + RS_DESIRED]!;
+    const dOpZPass = rs[RS_STENCIL_OP_ZPASS + RS_DESIRED]!;
+    if (dOpFail !== rs[RS_STENCIL_OP_FAIL] || dOpZFail !== rs[RS_STENCIL_OP_ZFAIL] || dOpZPass !== rs[RS_STENCIL_OP_ZPASS]) {
+        rs[RS_STENCIL_OP_FAIL] = dOpFail;
+        rs[RS_STENCIL_OP_ZFAIL] = dOpZFail;
+        rs[RS_STENCIL_OP_ZPASS] = dOpZPass;
+        gl.stencilOp(dOpFail, dOpZFail, dOpZPass);
+    }
+}
+
+/** Reconcile the packed color-write mask (Babylon's `setColorWrite`). @internal */
+function flushColorMask(engine: GLEngineContext): void {
+    const rs = engine._state.rs;
+    const dColorMask = rs[RS_COLOR_MASK + RS_DESIRED]!;
+    if (dColorMask !== rs[RS_COLOR_MASK]) {
+        rs[RS_COLOR_MASK] = dColorMask;
+        engine.gl.colorMask((dColorMask & 8) !== 0, (dColorMask & 4) !== 0, (dColorMask & 2) !== 0, (dColorMask & 1) !== 0);
     }
 }
 

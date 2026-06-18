@@ -102,10 +102,10 @@
         "id": 10,
         "slug": "gl-mesh",
         "name": "Scene 10 — Indexed Mesh + Instancing",
-        "description": "An indexed mesh drawn from @babylonjs/lite-gl/mesh (createVertexBuffer + createIndexBuffer + bindAttributes + drawIndexed) as several depth-tested instances, with setDepthState/setCullState — the first lite-gl scene with real geometry rather than a fullscreen quad.",
+        "description": "An indexed mesh drawn from @babylonjs/lite-gl/mesh via the VAO-cached static-mesh path (createVertexBuffer + createIndexBuffer + createMeshVao + drawMesh) as several depth-tested instances, with setDepthState/setCullState — recording the attribute layout into one VAO so the per-frame draw is a single bind + drawElementsInstanced (no per-frame vertexAttribPointer).",
         "tags": ["mesh", "depth"],
         "maxMad": 2.0,
-        "maxRawKB": 14,
+        "maxRawKB": 15,
         "skipParity": false,
         "skipPerf": false
     },
@@ -116,7 +116,7 @@
         "description": "A stencil mask written into an offscreen render target's stencil buffer (generateRenderTargetStencil from @babylonjs/lite-gl/depth-stencil + setStencilState), then a fullscreen pattern drawn only where the stencil test passes.",
         "tags": ["stencil", "rtt"],
         "maxMad": 2.0,
-        "maxRawKB": 19.5,
+        "maxRawKB": 20,
         "skipParity": false,
         "skipPerf": false
     },
@@ -150,6 +150,17 @@
         "tags": ["texture", "rtt", "hdr"],
         "maxMad": 3.0,
         "maxRawKB": 17.5,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 15,
+        "slug": "gl-multi-sprite",
+        "name": "Scene 15 — Multiple Sprite Renderers",
+        "description": "Two @babylonjs/lite-gl/sprites renderers (a glow-disc layer and a ring layer) draw over a gradient background. Both compile the same sprite shader, so the source-keyed effect cache hands them ONE shared WebGLProgram and gl.useProgram is issued only once across the two — the redundant-useProgram fix in action.",
+        "tags": ["sprites"],
+        "maxMad": 2.0,
+        "maxRawKB": 21.5,
         "skipParity": false,
         "skipPerf": false
     }

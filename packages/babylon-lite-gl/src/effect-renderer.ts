@@ -1,5 +1,6 @@
 import type { GLEngineContext } from "./context.js";
 import { createEffect, disposeEffect, type GLEffect, useEffect } from "./effect.js";
+import { applyGLStates } from "./apply-states.js";
 
 /** Built-in fullscreen-quad vertex shader, used when `GLEffectWrapperOptions`
  *  omits `vertexSource`. Maps the package's fullscreen-quad positions
@@ -136,6 +137,7 @@ export function drawEffect(engine: GLEngineContext): void {
     if (engine._state.currentProgram === null) {
         return;
     }
+    applyGLStates(engine);
     engine.gl.drawElements(engine.gl.TRIANGLES, 6, engine.gl.UNSIGNED_SHORT, 0);
 }
 

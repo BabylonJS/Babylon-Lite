@@ -12,7 +12,7 @@ import {
     setEffectIntArray,
     type GLEffect,
 } from "../../../packages/babylon-lite-gl/src/effect";
-import { createMockCanvas, createMockGL, type MockCall, type MockGL } from "./_lite-gl-mock";
+import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function makeEngine() {
     const mock = createMockGL();
@@ -115,5 +115,25 @@ describe("lite-gl effect: extended uniform setters", () => {
         mock.clear();
         setEffectMatrix(engine, eff, "u_mat", new Float32Array(16));
         expect(callsNamed(mock, "uniformMatrix4fv")).toHaveLength(0);
+    });
+
+    it("value cache is invalidated on context-loss → an unchanged uniform re-uploads after restore", () => {
+        const { mock, canvas, engine } = makeEngine();
+        const eff = makeReadyEffect(engine);
+        setEffectVector2(engine, eff, "u_v2", { x: 0.1, y: 0.2 }); // uploaded + cached
+        expect(callsNamed(mock, "uniform2f")).toHaveLength(1);
+        // Lose + restore the context: the re-linked program's uniforms reset to 0,
+        // so the value cache MUST have been cleared on loss.
+        fireLost(canvas);
+        fireRestored(canvas);
+        isEffectReady(engine, eff); // re-finalize (re-resolve locations) after restore
+        mock.clear();
+        // Same value as before the loss — must STILL re-upload (cache was cleared),
+        // otherwise the uniform would wrongly stay at the new program's 0 default.
+        setEffectVector2(engine, eff, "u_v2", { x: 0.1, y: 0.2 });
+        expect(callsNamed(mock, "uniform2f")).toHaveLength(1);
+        // ...and a genuine repeat after that is elided again (cache re-primed).
+        setEffectVector2(engine, eff, "u_v2", { x: 0.1, y: 0.2 });
+        expect(callsNamed(mock, "uniform2f")).toHaveLength(1);
     });
 });

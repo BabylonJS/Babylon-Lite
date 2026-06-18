@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createGLEngine, disposeGLEngine } from "../../../packages/babylon-lite-gl/src/context";
-import { createEffect, isEffectReady } from "../../../packages/babylon-lite-gl/src/effect";
+import { createEffect, isEffectReady, useEffect } from "../../../packages/babylon-lite-gl/src/effect";
 import {
     createVertexBuffer,
     updateVertexBuffer,
@@ -10,6 +10,9 @@ import {
     bindAttributes,
     unbindInstanceAttributes,
     drawIndexed,
+    createMeshVao,
+    drawMesh,
+    disposeMeshVao,
     type GLAttributeDescriptor,
 } from "../../../packages/babylon-lite-gl/src/mesh";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
@@ -288,5 +291,130 @@ describe("lite-gl mesh: lifecycle", () => {
         disposeGLEngine(engine);
         expect(callsNamed(mock, "deleteBuffer")).toHaveLength(2);
         expect(engine._buffers).toHaveLength(0);
+    });
+});
+
+describe("lite-gl mesh: static mesh VAO (createMeshVao / drawMesh)", () => {
+    function meshEffect(engine: ReturnType<typeof makeEngine>["engine"]) {
+        const eff = createEffect(engine, {
+            name: "mesh-vao",
+            vertexSource: "v",
+            fragmentSource: "f",
+            uniformNames: [],
+            samplerNames: [],
+            attributeNames: ["a_pos", "a_color"],
+        });
+        isEffectReady(engine, eff);
+        return eff;
+    }
+
+    it("records the attribute layout into ONE VAO and leaves the default VAO bound", () => {
+        const { mock, engine } = makeEngine();
+        const effect = meshEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0, 1, 1, 1]));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        mock.clear();
+        const vao = createMeshVao(
+            engine,
+            [
+                {
+                    buffer: vb,
+                    attributes: [
+                        { name: "a_pos", size: 3, offset: 0, divisor: 0 },
+                        { name: "a_color", size: 3, offset: 12, divisor: 0 },
+                    ],
+                    computeStride: true,
+                },
+            ],
+            ib,
+            effect
+        );
+        expect(vao.handle).not.toBeNull();
+        expect(mock.count("createVertexArray")).toBe(1);
+        // Both attributes recorded once → two pointer + two divisor calls.
+        expect(mock.count("vertexAttribPointer")).toBe(2);
+        expect(mock.count("vertexAttribDivisor")).toBe(2);
+        // Recording ends back on the default (null) VAO — the mesh VAO is not left current.
+        expect(engine._state.boundVao).toBeNull();
+    });
+
+    it("drawMesh issues ZERO per-frame attribute calls (the VAO win) and binds the VAO once", () => {
+        const { mock, engine } = makeEngine();
+        const effect = meshEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
+        useEffect(engine, effect); // drawMesh needs a current program
+        mock.clear();
+        drawMesh(engine, vao);
+        drawMesh(engine, vao);
+        // No vertexAttribPointer/Divisor on the per-frame draw — the VAO replays them.
+        expect(mock.count("vertexAttribPointer")).toBe(0);
+        expect(mock.count("vertexAttribDivisor")).toBe(0);
+        // First draw binds the VAO; the second is elided (already current).
+        expect(mock.count("bindVertexArray")).toBe(1);
+        expect(mock.count("drawElements")).toBe(2);
+    });
+
+    it("drawMesh issues drawElementsInstanced when instanceCount > 0", () => {
+        const { mock, engine } = makeEngine();
+        const effect = meshEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
+        useEffect(engine, effect);
+        mock.clear();
+        drawMesh(engine, vao, 5);
+        const di = callsNamed(mock, "drawElementsInstanced");
+        expect(di).toHaveLength(1);
+        expect(di[0]?.args[4]).toBe(5); // instanceCount
+        expect(mock.count("drawElements")).toBe(0);
+    });
+
+    it("re-records the VAO on webglcontextrestored (fresh handle, captured locations)", () => {
+        const { mock, canvas, engine } = makeEngine();
+        const effect = meshEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        // The VAO is rebuilt + re-recorded AFTER its buffers restore (no effect needed).
+        expect(mock.count("createVertexArray")).toBe(1);
+        expect(mock.count("vertexAttribPointer")).toBe(1);
+    });
+
+    it("disposeMeshVao deletes the VAO and unregisters its restore hook", () => {
+        const { mock, canvas, engine } = makeEngine();
+        const effect = meshEffect(engine);
+        const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        const vao = createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3, divisor: 0 }], computeStride: true }], ib, effect);
+        disposeMeshVao(engine, vao);
+        expect(mock.count("deleteVertexArray")).toBe(1);
+        // A later restore must NOT re-record the disposed VAO.
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(mock.count("createVertexArray")).toBe(0);
+    });
+});
+
+describe("lite-gl mesh: VAO effect-readiness guard", () => {
+    it("createMeshVao throws when the effect is not ready (avoids a silently-empty VAO)", () => {
+        const { engine } = makeEngine();
+        const effect = createEffect(engine, {
+            name: "mesh-vao-unready",
+            vertexSource: "v",
+            fragmentSource: "f",
+            uniformNames: [],
+            samplerNames: [],
+            attributeNames: ["a_pos"],
+        });
+        // Intentionally NOT calling isEffectReady → effect.isReady stays false.
+        const vb = createVertexBuffer(engine, new Float32Array([0, 0, 0]));
+        const ib = createIndexBuffer(engine, new Uint16Array([0, 1, 2]));
+        expect(() => createMeshVao(engine, [{ buffer: vb, attributes: [{ name: "a_pos", size: 3 }] }], ib, effect)).toThrow(/ready/);
     });
 });

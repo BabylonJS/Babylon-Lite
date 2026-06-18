@@ -98,8 +98,21 @@ export {
 export type { GLRenderTarget, GLRenderTargetOptions, GLFloatRenderTargetOptions, GLPingPong } from "./render-target.js";
 
 // ─── Meshes / buffers / instancing (also at `@babylonjs/lite-gl/mesh`) ──
-export { createVertexBuffer, updateVertexBuffer, createIndexBuffer, disposeBuffer, bindIndexBuffer, bindAttributes, unbindInstanceAttributes, drawIndexed } from "./mesh.js";
-export type { GLVertexBuffer, GLIndexBuffer, GLAttributeDescriptor } from "./mesh.js";
+export {
+    createVertexBuffer,
+    updateVertexBuffer,
+    createIndexBuffer,
+    disposeBuffer,
+    bindIndexBuffer,
+    bindAttributes,
+    unbindInstanceAttributes,
+    drawIndexed,
+    createMeshVao,
+    bindMeshVao,
+    drawMesh,
+    disposeMeshVao,
+} from "./mesh.js";
+export type { GLVertexBuffer, GLIndexBuffer, GLAttributeDescriptor, GLMeshVertexBuffer, GLMeshVao } from "./mesh.js";
 
 // ─── Blend modes ─────────────────────────────────────────────────────
 // GLBlendMode / GLBlendEquation are const + same-name type; one value
