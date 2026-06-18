@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
-import { readFileSync, unlinkSync, writeFileSync } from "fs";
+import { copyFileSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import dts from "vite-plugin-dts";
 import { Extractor, ExtractorConfig, ExtractorLogLevel } from "@microsoft/api-extractor";
 
@@ -83,7 +83,10 @@ function trimInternalDts(outDir: string): Plugin {
     };
 }
 
-/** Emit a publish-ready package.json into the build output directory. */
+/**
+ * Emit a publish-ready package.json into the build output directory and copy
+ * the README and LICENSE alongside it so the published package is complete.
+ */
 function emitPackageJson(outDir: string): Plugin {
     return {
         name: "emit-package-json",
@@ -91,6 +94,13 @@ function emitPackageJson(outDir: string): Plugin {
             const pkg = {
                 name: "@babylonjs/lite",
                 version: "0.1.0",
+                description: "A lightweight, tree-shakable, WebGPU-first rendering library derived from Babylon.js.",
+                license: "Apache-2.0",
+                homepage: "https://doc.babylonjs.com/lite/",
+                repository: {
+                    type: "git",
+                    url: "https://github.com/BabylonJS/Babylon-Lite.git",
+                },
                 type: "module",
                 main: "./index.js",
                 module: "./index.js",
@@ -104,6 +114,8 @@ function emitPackageJson(outDir: string): Plugin {
                 sideEffects: false,
             };
             writeFileSync(resolve(outDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+            copyFileSync(resolve(__dirname, "README.md"), resolve(outDir, "README.md"));
+            copyFileSync(resolve(__dirname, "../../LICENSE"), resolve(outDir, "LICENSE"));
         },
     };
 }
