@@ -70,16 +70,31 @@ export interface GltfMeshData {
 }
 
 /**
- * Load a .glb or .gltf file, parse it, and upload mesh + material data to GPU.
+ * Load a glTF/GLB asset, parse it, and upload mesh + material data to GPU.
  * Supports both binary GLB and separate .gltf + .bin + image files.
  * Registers a deferred PBR renderable builder.
  * Automatically parses glTF animations if present.
  *
  * Returns a AssetContainer. Pass it to addToScene() which adds the hierarchy,
  * registers animation ticks, and applies any scene-level settings.
+ *
+ * @param engine - The engine to upload GPU resources to.
+ * @param url - URL of the .glb/.gltf asset to fetch.
  */
-export async function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer> {
-    const { json, binChunk, baseUrl } = await fetchGltfAsset(url);
+export function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer>;
+/**
+ * Load a glTF/GLB asset directly from already-loaded local data (drag-and-drop, OPFS, a `fetch` body, etc.).
+ *
+ * GLB-vs-glTF is determined from the data's magic bytes, not a file extension. `ArrayBuffer`/`Blob` inputs
+ * have no base URL, so they must be self-contained: a GLB, or a glTF whose buffers/images use `data:` URIs.
+ * A glTF that references external `.bin`/image files by relative path can only be loaded from a URL.
+ *
+ * @param engine - The engine to upload GPU resources to.
+ * @param data - The raw `ArrayBuffer` or `Blob` of a self-contained glTF/GLB asset.
+ */
+export function loadGltf(engine: EngineContext, data: ArrayBuffer | Blob): Promise<AssetContainer>;
+export async function loadGltf(engine: EngineContext, source: string | ArrayBuffer | Blob): Promise<AssetContainer> {
+    const { json, binChunk, baseUrl } = await fetchGltfAsset(source);
 
     // Build parent map + world-matrix cache once for O(n) hierarchy traversal
     const parentMap = buildParentMap(json);
@@ -161,26 +176,48 @@ export async function loadGltf(engine: EngineContext, url: string): Promise<Asse
     return container;
 }
 
-/** Fetch + parse a .glb or .gltf asset. Returns the JSON, binary chunk, and base URL. */
-async function fetchGltfAsset(url: string): Promise<{ json: any; binChunk: DataView; baseUrl: string }> {
-    const baseUrl = url.substring(0, url.lastIndexOf("/") + 1);
-    if (url.toLowerCase().endsWith(".glb")) {
-        const buffer = await fetch(url).then((r) => r.arrayBuffer());
+/** Fetch/resolve + parse a glTF or GLB asset from a URL string, ArrayBuffer, or Blob.
+ *  Returns the JSON, binary chunk, and base URL (empty for non-URL sources). */
+async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ json: any; binChunk: DataView; baseUrl: string }> {
+    // Resolve the source to bytes. Only a URL string yields a base URL for resolving external .bin/image
+    // references; ArrayBuffer/Blob inputs are self-contained (GLB, or glTF with data: URIs).
+    const isUrl = typeof source === "string";
+    const baseUrl = isUrl ? source.substring(0, source.lastIndexOf("/") + 1) : "";
+    const buffer = isUrl ? await fetch(source).then((r) => r.arrayBuffer()) : source instanceof Blob ? await source.arrayBuffer() : source;
+
+    // Classify by the GLB magic ("glTF" = 0x46546c67, little-endian) rather than the URL extension, so
+    // object URLs (blob:…), OPFS handles, and extensionless sources are detected correctly. The length guard
+    // keeps an empty/too-short input failing with the JSON/GLB parse error below, not a DataView RangeError.
+    if (buffer.byteLength >= 4 && new DV(buffer).getUint32(0, true) === 0x46546c67) {
         const { parseGlbContainer } = await import("./gltf-glb-parser.js");
-        const { json, binChunk } = parseGlbContainer(buffer);
-        return { json, binChunk, baseUrl };
+        return { ...parseGlbContainer(buffer), baseUrl };
     }
-    const json = await fetch(url).then((r) => r.json());
+
+    // Otherwise treat the bytes as a JSON glTF document.
+    const json = JSON.parse(new TextDecoder().decode(buffer));
     const bufferDef = json.buffers?.[0];
     let binChunk: DataView;
     if (bufferDef?.uri) {
-        const binUrl = new URL(bufferDef.uri, baseUrl + "x").href;
-        const binBuffer = await fetch(binUrl).then((r) => r.arrayBuffer());
-        binChunk = new DV(binBuffer);
+        binChunk = new DV(await fetch(resolveBufferUri(bufferDef.uri, baseUrl)).then((r) => r.arrayBuffer()));
     } else {
         binChunk = new DV(new ArrayBuffer(0));
     }
     return { json, binChunk, baseUrl };
+}
+
+/** Resolve a glTF buffer `uri` to a fetchable URL. With a base URL (the source was a URL string), relative
+ *  `.bin` paths resolve against it. Without one (ArrayBuffer/Blob source), only self-contained `data:`/
+ *  absolute URIs are resolvable — a bare relative path has no base and throws a clear error. */
+function resolveBufferUri(uri: string, baseUrl: string): string {
+    if (baseUrl) {
+        return new URL(uri, baseUrl + "x").href;
+    }
+    try {
+        // No base: succeeds for data:/absolute URIs, throws for a relative path (which `new URL` rejects).
+        return new URL(uri).href;
+    } catch {
+        throw new Error(`loadGltf: relative buffer URI "${uri}" needs a base URL — load from a URL, or use a self-contained GLB/data: URI glTF.`);
+    }
 }
 
 /** Cheap superset gate: returns true iff the asset can possibly trigger at least

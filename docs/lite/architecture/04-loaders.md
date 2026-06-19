@@ -93,11 +93,13 @@ export interface GltfMaterialData {
   emissiveImage: ImageBitmap | null;
 }
 
-/** Load a .glb file, parse it, upload to GPU. Returns an AssetContainer. */
-export async function loadGltf(engine: EngineContext, url: string): Promise<AssetContainer>;
+/** Load a glTF/GLB asset from a URL, ArrayBuffer, or Blob; parse it, upload to GPU. Returns an AssetContainer. */
+export async function loadGltf(engine: EngineContext, source: string | ArrayBuffer | Blob): Promise<AssetContainer>;
 ```
 
 > **Note**: `loadGltf` takes an `Engine` (not `SceneContext`) and returns an `AssetContainer`. The result's `entities` array contains root scene entities; glTF meshes usually hang off a root `TransformNode` hierarchy. Pass the result to `addToScene(scene, result)` — it will traverse the hierarchy, register animation ticks, and integrate everything into the scene. Meshes are the standard `Mesh` type with GPU data in the `_gpu` field and bounding box on `Mesh.boundMin`/`Mesh.boundMax`.
+>
+> **Local data**: `source` may be a URL `string`, or an `ArrayBuffer`/`Blob` of an already-loaded asset (drag-and-drop, OPFS, a `fetch` body, etc.). GLB-vs-glTF is detected from the data's magic bytes, **not** the URL extension, so object URLs (`blob:…`) and extensionless sources load correctly. `ArrayBuffer`/`Blob` inputs have no base URL, so they must be self-contained (a GLB, or a glTF whose buffers/images use `data:` URIs); a glTF referencing external `.bin`/image files by relative path must be loaded from a URL.
 
 ### `load-env.ts`
 

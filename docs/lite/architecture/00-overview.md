@@ -289,6 +289,10 @@ babylon-lite/
 All exports from `packages/babylon-lite/src/index.ts`. The API must feel like Babylon.js
 but is composed of pure functions and plain data types.
 
+> This section is a **curated, signature-level walkthrough** of the most common entry points. For the
+> **complete, always-up-to-date API reference** of every export (functions, types, and signatures),
+> see the generated TypeDoc site: **<https://doc.babylonjs.com/lite/typedoc>**.
+
 ### Functions
 
 ```typescript
@@ -307,7 +311,7 @@ createFreeCamera(position: Vec3, target: Vec3): FreeCamera
 attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
 
 // Loaders — note: loadGltf and loadBabylon take Engine, not SceneContext
-loadGltf(engine: Engine, url: string): Promise<AssetContainer>
+loadGltf(engine: Engine, source: string | ArrayBuffer | Blob): Promise<AssetContainer>
 loadEnvironment(scene: SceneContext, url: string, options: {
     brdfUrl: string;
     groundTextureUrl?: string;
