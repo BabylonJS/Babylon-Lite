@@ -15,7 +15,6 @@ type PublishPackageJson = {
 };
 
 const PACKAGE_NAME = "@babylonjs/lite-compat";
-const PREVIEW_DIST_TAG = "preview";
 const DIST_PACKAGE_JSON = resolve(process.cwd(), "packages/babylon-lite-compat/dist/package.json");
 const LITE_VERSION_ENV = process.env.LITE_VERSION;
 
@@ -83,8 +82,6 @@ writeFileSync(DIST_PACKAGE_JSON, `${JSON.stringify(pkg, null, 2)}\n`);
 console.log(`Package: ${PACKAGE_NAME}`);
 console.log(`Base @babylonjs/lite version: ${liteBaseVersion}`);
 console.log(`Preview version: ${previewVersion}`);
-console.log(`Dist tag: ${PREVIEW_DIST_TAG}`);
 console.log(`Built against @babylonjs/lite: ${liteBaseVersion}`);
 console.log(`##vso[task.setvariable variable=PACKAGE_NAME_COMPAT]${PACKAGE_NAME}`);
 console.log(`##vso[task.setvariable variable=PACKAGE_VERSION_COMPAT]${previewVersion}`);
-console.log(`##vso[task.setvariable variable=PACKAGE_DIST_TAG_COMPAT]${PREVIEW_DIST_TAG}`);
