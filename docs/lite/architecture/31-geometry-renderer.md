@@ -349,9 +349,9 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
 
 ## Related
 
-- `27-frame-graph.md` — `Task` / single-attachment `RenderTarget` API.
-- `31-post-process.md` — sibling frame-graph task family.
-- `11-standard-material.md` — Standard material features and bindings.
+- `28-frame-graph.md` — `Task` / single-attachment `RenderTarget` API.
+- `29-post-process.md` — sibling frame-graph task family.
+- `08-standard-material.md` — Standard material features and bindings.
 - `engine/render-target-mrt.ts` — MRT-only render-target module, lazy-loaded
   by `geometry-renderer-task.ts` so existing scenes keep paying nothing for
   the multi-attachment API.

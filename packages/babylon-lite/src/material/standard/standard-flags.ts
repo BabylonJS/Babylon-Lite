@@ -25,6 +25,10 @@ export const NO_COLOR_OUTPUT = 1 << 18;
 export const HAS_DEPTH_EMISSIVE_TEXTURE = 1 << 19;
 export const ESM_SHADOW_OUTPUT = 1 << 20;
 export const GEOMETRY_OUTPUT = 1 << 21;
+/** Lightmap is used as a baked shadowmap: multiplies the final color instead of adding. */
+export const LIGHTMAP_SHADOWMAP = 1 << 15;
+/** Lightmap UVs are V-flipped (BJS Texture.uAng === π → uv'=(u, 1-v)). */
+export const LIGHTMAP_FLIP_V = 1 << 22;
 
 // ─── Standard Material Extension Registry ───────────────────────────
 

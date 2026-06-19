@@ -6,7 +6,7 @@
 
 The GridMaterial module provides Lite's equivalent of Babylon.js `GridMaterial` (from
 `@babylonjs/materials`): an **unlit, procedural, object-space grid** that wraps any mesh.
-It is a thin factory built entirely on top of [ShaderMaterial](29-shader-material.md) — it
+It is a thin factory built entirely on top of [ShaderMaterial](24-shader-material.md) — it
 composes minimal-whitespace WGSL from typed options and constructs a `ShaderMaterial`. No
 new pipeline, renderable, or group builder is introduced; it reuses the shader-material
 infrastructure end-to-end, so it stays fully tree-shakable and carries zero cost for scenes

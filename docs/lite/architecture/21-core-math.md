@@ -42,7 +42,7 @@ export interface Color4 {
 
 /** 4x4 column-major matrix (16 elements). Opaque-by-convention: the
  *  underlying storage is `Float32Array` (default) or `Float64Array`
- *  (after an HPM engine is created — see `33-high-precision-matrix.md`).
+ *  (after an HPM engine is created — see `36-high-precision-matrix.md`).
  *  Layout matches WebGPU/WGSL mat4x4<f32> memory order. */
 export interface Mat4 {
   readonly __brand: 'Mat4';
@@ -158,7 +158,7 @@ Logical matrix:
   | m[3]  m[7]  m[11]  m[15] |
 ```
 
-This matches WGSL `mat4x4<f32>` which stores columns contiguously. Mat4 values are written to GPU uniform buffers via the single packing helper `packMat4IntoF32` (see `33-high-precision-matrix.md`) — never directly via `Float32Array.set(mat)`, because the backing may be `Float64Array` when HPM is enabled and must be down-cast at the upload boundary.
+This matches WGSL `mat4x4<f32>` which stores columns contiguously. Mat4 values are written to GPU uniform buffers via the single packing helper `packMat4IntoF32` (see `36-high-precision-matrix.md`) — never directly via `Float32Array.set(mat)`, because the backing may be `Float64Array` when HPM is enabled and must be down-cast at the upload boundary.
 
 ### Branded Opaque Type
 
@@ -174,7 +174,7 @@ This prevents callers from passing a raw `Float32Array` (or array of the wrong l
 
 Internal kernels (`mat4Multiply`, `mat4Invert`, `packMat4IntoF32`, the allocator) operate on `Mat4Storage = Float32Array | Float64Array` — a raw typed-array union without brand, so the kernel can write freely. The two types describe the same memory; you cross between them at the trust boundary via `as unknown as Mat4Storage` / `as unknown as Mat4`.
 
-New matrices are allocated via `allocateMat4()` from `_matrix-allocator.ts`, which returns `Float32Array(16)` by default and `Float64Array(16)` after `useHighPrecisionMatrix: true` is installed on the page (see `33-high-precision-matrix.md`).
+New matrices are allocated via `allocateMat4()` from `_matrix-allocator.ts`, which returns `Float32Array(16)` by default and `Float64Array(16)` after `useHighPrecisionMatrix: true` is installed on the page (see `36-high-precision-matrix.md`).
 
 ## Shader Logic (Exact Math Formulas)
 

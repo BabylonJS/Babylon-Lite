@@ -15,21 +15,21 @@ Given Babylon.js source code from the user, produce equivalent Babylon Lite code
    - A light/camera/mesh is plain data — it does NOT take a scene parameter.
    - The caller adds the result to the scene via `addToScene()` or direct assignment.
 3. **WebGPU only.** No WebGL, no abstraction layers, no `engine.webGPUVersion` checks.
-4. **Tree-shakable imports.** Import only the exact functions you use from `'babylon-lite'`.
-5. **No mutation of engine internals.** Engine is opaque; you call `startEngine(engine, scene)`.
+4. **Tree-shakable imports.** Import only the exact functions you use from `'@babylonjs/lite'`.
+5. **No mutation of engine internals.** Engine is opaque; register the scene, then call `startEngine(engine)`.
 
 ---
 
 ## Import Mapping
 
-All public API is imported from `'babylon-lite'`. There are **no** sub-path imports.
+All public API is imported from `'@babylonjs/lite'`. There are **no** sub-path imports.
 
 ```typescript
 // ✅ Correct
-import { createEngine, createSceneContext, loadGltf } from 'babylon-lite';
+import { createEngine, createSceneContext, loadGltf } from '@babylonjs/lite';
 
 // ❌ Wrong — no sub-path imports
-import { createEngine } from 'babylon-lite/engine';
+import { createEngine } from '@babylonjs/lite/engine';
 
 // ❌ Wrong — no BABYLON namespace
 const engine = new BABYLON.Engine(canvas);
@@ -45,7 +45,7 @@ const engine = new BABYLON.Engine(canvas);
 |---|---|
 | `new BABYLON.Engine(canvas, true)` | `await createEngine(canvas)` |
 | `new BABYLON.WebGPUEngine(canvas)` then `await engine.initAsync()` | `await createEngine(canvas)` |
-| `engine.runRenderLoop(() => scene.render())` | `startEngine(engine, scene)` |
+| `engine.runRenderLoop(() => scene.render())` | `await registerScene(scene)` + `await startEngine(engine)` |
 | `engine.stopRenderLoop()` | `stopEngine(engine)` |
 
 **Key difference**: `createEngine` is **async** (it acquires the GPU device). Always `await` it.
@@ -59,7 +59,8 @@ engine.runRenderLoop(() => scene.render());
 // Babylon Lite
 const engine = await createEngine(canvas);
 const scene = createSceneContext(engine);
-startEngine(engine, scene);
+await registerScene(scene);
+await startEngine(engine);
 ```
 
 ### Scene
@@ -96,7 +97,7 @@ scene.fog = { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.8
 |---|---|
 | `new BABYLON.ArcRotateCamera("cam", alpha, beta, radius, target, scene)` | `createArcRotateCamera(alpha, beta, radius, target)` |
 | `new BABYLON.FreeCamera("cam", position, scene)` | `createFreeCamera(position, target)` |
-| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas)` *(arc-rotate)* or `attachFreeControl(camera, canvas)` *(free)* |
+| `camera.attachControl(canvas, true)` | `attachControl(camera, canvas, scene)` *(arc-rotate)* or `attachFreeControl(camera, canvas, scene)` *(free)* |
 | `scene.createDefaultCamera(true, true, true)` | `createDefaultCamera(scene)` |
 | `camera.target = new BABYLON.Vector3(x,y,z)` | `camera.target = { x, y, z }` |
 | `camera.minZ = 0.1` | `camera.minZ = 0.1` *(same)* |
@@ -105,7 +106,7 @@ scene.fog = { mode: 1, density: 0.02, start: 0, end: 1000, color: [0.9, 0.9, 0.8
 | `camera.alpha`, `camera.beta`, `camera.radius` | *(same property names)* |
 
 **Key differences**:
-- No `name` parameter. No `scene` parameter.
+- No `name` parameter. Camera factory functions do not take a `scene` parameter.
 - `target` is `{ x, y, z }` plain object, not `BABYLON.Vector3`.
 - `attachControl` is a standalone function, not a method on the camera.
 - Assign camera to scene with `scene.camera = camera`.
@@ -119,7 +120,7 @@ camera.attachControl(canvas, true);
 // Babylon Lite
 const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
 scene.camera = camera;
-attachControl(camera, canvas);
+attachControl(camera, canvas, scene);
 ```
 
 ### Lights
@@ -251,13 +252,13 @@ material creation is rarely needed.
 
 | Babylon.js | Babylon Lite |
 |---|---|
-| `BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene)` | `await loadGltf(scene, url)` |
-| `BABYLON.SceneLoader.AppendAsync(url, scene)` | `await loadGltf(scene, url)` |
+| `BABYLON.SceneLoader.ImportMeshAsync("", url, "", scene)` | `addToScene(scene, await loadGltf(engine, url))` |
+| `BABYLON.SceneLoader.AppendAsync(url, scene)` | `addToScene(scene, await loadGltf(engine, url))` |
 | `scene.createDefaultEnvironment()` | `await loadEnvironment(scene, envUrl)` |
 | `new BABYLON.CubeTexture.CreateFromPrefilteredData(url, scene)` | `await loadEnvironment(scene, url)` |
 
 **Key differences**:
-- `loadGltf` takes `(scene, url)` — scene first, then URL.
+- `loadGltf` takes `(engine, url)` and returns an asset container; add it to the scene with `addToScene(scene, container)`.
 - `loadEnvironment` loads a `.env` file and auto-configures tone mapping.
 - `loadSkybox` loads 6 cubemap face images for a skybox box.
 
@@ -267,7 +268,7 @@ await BABYLON.SceneLoader.ImportMeshAsync("", "", "BoomBox.glb", scene);
 scene.createDefaultEnvironment();
 
 // Babylon Lite
-await loadGltf(scene, 'BoomBox.glb');
+addToScene(scene, await loadGltf(engine, 'BoomBox.glb'));
 await loadEnvironment(scene, 'environmentSpecular.env');
 ```
 
@@ -332,7 +333,7 @@ are `[x, y, z]` tuples. Camera target uses `{ x, y, z }` object form.
 Every Babylon Lite scene follows this pattern:
 
 ```typescript
-import { /* only what you need */ } from 'babylon-lite';
+import { /* only what you need */ } from '@babylonjs/lite';
 
 async function main(): Promise<void> {
   const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
@@ -344,13 +345,13 @@ async function main(): Promise<void> {
   const scene = createSceneContext(engine);
 
   // 3. Load assets (order: models, then environment)
-  await loadGltf(scene, 'model.glb');
+  addToScene(scene, await loadGltf(engine, 'model.glb'));
   await loadEnvironment(scene, 'environment.env');
 
   // 4. Create and configure camera
   const cam = createArcRotateCamera(alpha, beta, radius, { x: 0, y: 0, z: 0 });
   scene.camera = cam;
-  attachControl(cam, canvas);
+  attachControl(cam, canvas, scene);
 
   // 5. Create and add lights
   addToScene(scene, createHemisphericLight([0, 1, 0], 0.7));
@@ -361,7 +362,8 @@ async function main(): Promise<void> {
   addToScene(scene, sphere);
 
   // 7. Start rendering
-  startEngine(engine, scene);
+  await registerScene(scene);
+  await startEngine(engine);
 }
 
 main().catch(console.error);
@@ -382,12 +384,13 @@ await BABYLON.SceneLoader.AppendAsync("", "model.glb", scene);
 
 // Babylon Lite
 const scene = createSceneContext(engine);
-await loadGltf(scene, 'model.glb');
+addToScene(scene, await loadGltf(engine, 'model.glb'));
 await loadEnvironment(scene, 'https://assets.babylonjs.com/core/environments/environmentSpecular.env');
 const cam = createDefaultCamera(scene);
-attachControl(cam, canvas);
+attachControl(cam, canvas, scene);
 addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
-startEngine(engine, scene);
+await registerScene(scene);
+await startEngine(engine);
 ```
 
 ### Pattern: Multiple Meshes with Materials

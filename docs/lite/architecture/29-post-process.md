@@ -321,7 +321,7 @@ The current concrete post-processes mirror their Babylon.js thin post-process sh
 - `packages/babylon-lite/src/post-process/extract-highlights.ts`
 - `packages/babylon-lite/src/post-process/chromatic-aberration.ts`
 - `packages/babylon-lite/src/post-process/bloom.ts`
-- `docs/lite/architecture/31-post-process.md`
+- `docs/lite/architecture/29-post-process.md`
 - `lab/lite/src/bjs/scene142.ts`
 - `lab/lite/src/lite/scene142.ts`
 - `lab/lite/src/bjs/scene143.ts`

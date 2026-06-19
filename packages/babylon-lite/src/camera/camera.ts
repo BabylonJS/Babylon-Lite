@@ -11,7 +11,7 @@ import type { Mat4Storage } from "../math/types.js";
  *  The view/projection matrix caches below are allocated by the camera factory
  *  via the process-global `allocateMat4()` singleton — F32 by default, F64
  *  after any HPM engine is constructed (see
- *  `docs/architecture/33-high-precision-matrix.md`). The storage
+ *  `docs/lite/architecture/36-high-precision-matrix.md`). The storage
  *  type is fixed at construction and never changes. */
 export interface Camera {
     fov: number;

@@ -281,6 +281,12 @@ export interface CaptureGoldenOptions {
     seekTime?: number;
     /** Extra query string (without leading '?') appended to the ref page URL. */
     queryParams?: string;
+    /**
+     * Optional extra `canvas.dataset` flag to await (after `ready`) before screenshotting.
+     * Used by the frame-capture physics scenes that signal `captureReady` once the page has
+     * advanced to its requested `?captureFrame=N` and frozen. Polled like `waitForCanvasReady`.
+     */
+    waitFlag?: string;
     /** Page load timeout in ms (default: 60_000) */
     timeout?: number;
     /** GPU settle delay in ms (default: 1500) */
@@ -322,6 +328,11 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     // For animated scenes, wait for animation freeze
     if (opts.seekTime !== undefined) {
         await waitForCanvasReady(bjsPage, { timeout, label: `captureGolden: BJS reference scene ${opts.sceneId}`, flag: "animationFrozen" });
+    }
+
+    // For frame-capture scenes, wait for the requested capture frame to be reached + frozen.
+    if (opts.waitFlag) {
+        await waitForCanvasReady(bjsPage, { timeout, label: `captureGolden: BJS reference scene ${opts.sceneId}`, flag: opts.waitFlag, pollMs: 100 });
     }
 
     // Wait for BJS loading screen to disappear (it overlays the canvas)

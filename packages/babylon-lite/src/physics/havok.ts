@@ -42,6 +42,18 @@ export const enum PhysicsMotionType {
     DYNAMIC = 2,
 }
 
+/**
+ * How a moved transform node is propagated to its physics body before each step.
+ * `DISABLED` skips the sync, `TELEPORT` snaps the body to the node (`HP_Body_SetQTransform`),
+ * and `ACTION` sets the body's velocity so it reaches the node (`HP_Body_SetTargetQTransform`,
+ * dragging resting bodies via friction). Values match Babylon.js `PhysicsPrestepType`.
+ */
+export const enum PhysicsPrestepType {
+    DISABLED = 0,
+    TELEPORT = 1,
+    ACTION = 2,
+}
+
 /** Type of Havok Physics V2 constraint. */
 export const enum PhysicsConstraintType {
     BALL_AND_SOCKET = 1,
@@ -145,6 +157,8 @@ export interface PhysicsBody {
     /** @internal */ readonly _world: PhysicsWorld;
     /** @internal */ _shape?: PhysicsShape | null;
     /** @internal */ _preStep: boolean;
+    /** @internal How a moved node is propagated to the body pre-step (TELEPORT by default). */
+    _prestepType: PhysicsPrestepType;
     readonly node: SceneNode;
     readonly motionType: PhysicsMotionType;
     /** @internal The floating-origin region this body lives in; set only under floating origin. */
@@ -263,11 +277,17 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
         return;
     }
 
-    // Pre-step: sync ANIMATED bodies from node → Havok
+    // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
+    // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
+    // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
     for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i]!;
-        if (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep) {
-            _syncNodeToBody(hknp, b);
+        if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
+            if (b._prestepType === PhysicsPrestepType.ACTION) {
+                _syncNodeToBodyTarget(hknp, b);
+            } else {
+                _syncNodeToBody(hknp, b);
+            }
         }
     }
 
@@ -318,6 +338,19 @@ function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
     const p = node.position;
     const q = node.rotationQuaternion;
     hknp.HP_Body_SetQTransform(body._hkBody, [
+        [p.x, p.y, p.z],
+        [q.x, q.y, q.z, q.w],
+    ]);
+}
+
+// ACTION prestep: instead of snapping the body, set its target transform so Havok derives a
+// velocity that carries the body to the node over the step. Resting bodies stacked on top are then
+// dragged along by friction rather than tunneled through.
+function _syncNodeToBodyTarget(hknp: any, body: PhysicsBody): void {
+    const node = body.node;
+    const p = node.position;
+    const q = node.rotationQuaternion;
+    hknp.HP_Body_SetTargetQTransform(body._hkBody, [
         [p.x, p.y, p.z],
         [q.x, q.y, q.z, q.w],
     ]);
@@ -425,6 +458,7 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
         _hkBody: hkBody,
         _shape: null,
         _preStep: false,
+        _prestepType: PhysicsPrestepType.TELEPORT,
         _world: world,
         node,
         motionType,
@@ -456,6 +490,22 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
  */
 export function setPhysicsBodyPreStep(body: PhysicsBody, enabled: boolean): void {
     body._preStep = enabled;
+}
+
+/**
+ * Sets how a moved transform node is propagated to its physics body before each step.
+ * `TELEPORT` snaps the body to the node, `ACTION` sets a velocity toward it (so resting bodies are
+ * dragged along by friction), and `DISABLED` skips the pre-step sync entirely. Setting any type
+ * other than `DISABLED` automatically enables prestep syncing for the body (equivalent to
+ * {@link setPhysicsBodyPreStep}), so STATIC/DYNAMIC bodies are synced without an extra call.
+ * @param body - The physics body to update.
+ * @param type - The prestep behaviour to apply.
+ */
+export function setPhysicsBodyPrestepType(body: PhysicsBody, type: PhysicsPrestepType): void {
+    body._prestepType = type;
+    if (type !== PhysicsPrestepType.DISABLED) {
+        body._preStep = true;
+    }
 }
 
 /**
