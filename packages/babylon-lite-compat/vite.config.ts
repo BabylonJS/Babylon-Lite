@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import { resolve } from "path";
-import { writeFileSync } from "fs";
+import { copyFileSync, writeFileSync } from "fs";
 import dts from "vite-plugin-dts";
 import { trimInternalDts } from "../../scripts/vite-trim-internal-dts";
 
@@ -49,7 +49,7 @@ function rewriteLiteSpecifier(content: string): string {
     return content.replace(/(['"])babylon-lite(\/[^'"]*)?\1/g, "$1@babylonjs/lite$2$1");
 }
 
-/** Emit a publish-ready `package.json` into the build output directory. */
+/** Emit publish artifacts into the build output directory. */
 function emitPackageJson(outDir: string): Plugin {
     return {
         name: "emit-package-json",
@@ -81,6 +81,8 @@ function emitPackageJson(outDir: string): Plugin {
                 },
             };
             writeFileSync(resolve(outDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+            copyFileSync(resolve(__dirname, "README.md"), resolve(outDir, "README.md"));
+            copyFileSync(resolve(__dirname, "../../LICENSE"), resolve(outDir, "LICENSE"));
         },
     };
 }

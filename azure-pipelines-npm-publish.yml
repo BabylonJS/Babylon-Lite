@@ -7,10 +7,10 @@
 # Pushes to master that change config/release.json read the release type from
 # that file, so repeated patch releases can be requested by bumping its nonce.
 #
-# The same run also publishes @babylonjs/lite-compat under the `preview` dist-tag
-# (never `latest`) with a unique `<base>-preview.<buildId>` version, so the
-# compatibility layer is opt-in via `@babylonjs/lite-compat@preview` until it
-# graduates to a stable release line.
+# The same run also publishes @babylonjs/lite-compat as `<lite-version>-preview`
+# under the `latest` dist-tag. npm requires every package to carry a `latest`
+# tag, so the `-preview` version suffix (not a separate dist-tag) is what marks
+# the compatibility layer as pre-release.
 #
 # Set the `dryRun` parameter (manual run) to exercise the whole pipeline —
 # build, test, version resolution, and package-content validation — without
@@ -147,19 +147,19 @@ stages:
                       fi
                   displayName: "Tag published npm version"
 
-                # --- @babylonjs/lite-compat (preview dist-tag) ---------------------
-                # The compatibility layer is published under the `preview` dist-tag
-                # only (never `latest`), so `npm install @babylonjs/lite-compat`
-                # resolves nothing until it graduates, while early adopters can opt in
-                # with `@babylonjs/lite-compat@preview`. Each run stamps a unique
-                # `<base>-preview.<buildId>` version and records the @babylonjs/lite
+                # --- @babylonjs/lite-compat -------------------------------------
+                # The compatibility layer publishes each build as
+                # `<lite-version>-preview` under npm's default `latest` dist-tag.
+                # npm requires every package to carry a `latest` tag, so there is no
+                # "preview-only" state: the `-preview` version suffix is what marks
+                # these builds as pre-release. Each run records the @babylonjs/lite
                 # version it was built against.
 
                 - script: pnpm --filter @babylonjs/lite-compat build
                   displayName: "Build @babylonjs/lite-compat"
 
                 - script: npx tsx scripts/prepare-compat-preview-release.ts
-                  displayName: "Resolve compat preview version"
+                  displayName: "Resolve compat version"
                   env:
                       LITE_VERSION: $(PACKAGE_VERSION)
 
@@ -181,7 +181,7 @@ stages:
                         echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
                         EXTRA="--dry-run"
                       fi
-                      npm publish ./packages/babylon-lite-compat/dist $EXTRA --tag "$(PACKAGE_DIST_TAG_COMPAT)" --access public --registry https://registry.npmjs.org/
-                  displayName: "Publish compat package to npm (preview)"
+                      npm publish ./packages/babylon-lite-compat/dist $EXTRA --access public --registry https://registry.npmjs.org/
+                  displayName: "Publish compat package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)

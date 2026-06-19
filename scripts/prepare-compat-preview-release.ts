@@ -15,8 +15,8 @@ type PublishPackageJson = {
 };
 
 const PACKAGE_NAME = "@babylonjs/lite-compat";
-const PREVIEW_DIST_TAG = "preview";
 const DIST_PACKAGE_JSON = resolve(process.cwd(), "packages/babylon-lite-compat/dist/package.json");
+const LITE_VERSION_ENV = process.env.LITE_VERSION;
 
 function run(command: string, args: string[], options: { allowFailure?: boolean } = {}): string {
     try {
@@ -33,23 +33,21 @@ function run(command: string, args: string[], options: { allowFailure?: boolean 
     }
 }
 
-function parseBaseVersion(version: string): string {
-    // Accept a plain semver core (x.y.z); strip any pre-existing pre-release/build
-    // metadata so we always append a fresh preview suffix.
-    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+function parseSemverCore(version: string, source: string): string {
+    // Accept a semver core (x.y.z) with optional pre-release/build metadata and
+    // normalize to the plain x.y.z core.
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version);
     if (!match) {
-        throw new Error(`Unsupported base version '${version}'. Expected x.y.z.`);
+        throw new Error(`Unsupported ${source} '${version}'. Expected x.y.z (optionally with pre-release/build metadata).`);
     }
     return `${match[1]}.${match[2]}.${match[3]}`;
 }
 
-function previewSuffix(): string {
-    const buildId = process.env.BUILD_BUILDID;
-    if (buildId && /^\d+$/.test(buildId)) {
-        return buildId;
+function resolveLiteBaseVersion(): string {
+    if (!LITE_VERSION_ENV || LITE_VERSION_ENV.trim() === "") {
+        throw new Error("LITE_VERSION must be set to the @babylonjs/lite version resolved earlier in the publish pipeline.");
     }
-    // Local / non-Azure fallback: compact UTC timestamp (YYYYMMDDHHmmss).
-    return new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    return parseSemverCore(LITE_VERSION_ENV.trim(), "LITE_VERSION");
 }
 
 function isVersionPublished(version: string): boolean {
@@ -66,8 +64,8 @@ if (!pkg.version) {
     throw new Error(`${DIST_PACKAGE_JSON} does not contain a version.`);
 }
 
-const baseVersion = parseBaseVersion(pkg.version);
-const previewVersion = `${baseVersion}-preview.${previewSuffix()}`;
+const liteBaseVersion = resolveLiteBaseVersion();
+const previewVersion = `${liteBaseVersion}-preview`;
 
 if (isVersionPublished(previewVersion)) {
     throw new Error(`${PACKAGE_NAME}@${previewVersion} is already published. Refusing to overwrite an existing npm version.`);
@@ -77,17 +75,13 @@ pkg.version = previewVersion;
 pkg.babylonLiteRelease = {
     ...(process.env.BUILD_BUILDID ? { azureBuildId: process.env.BUILD_BUILDID } : {}),
     ...(process.env.BUILD_SOURCEVERSION ? { sourceVersion: process.env.BUILD_SOURCEVERSION } : {}),
-    ...(process.env.LITE_VERSION ? { builtAgainstLite: process.env.LITE_VERSION } : {}),
+    builtAgainstLite: liteBaseVersion,
 };
 writeFileSync(DIST_PACKAGE_JSON, `${JSON.stringify(pkg, null, 2)}\n`);
 
 console.log(`Package: ${PACKAGE_NAME}`);
-console.log(`Base version: ${baseVersion}`);
+console.log(`Base @babylonjs/lite version: ${liteBaseVersion}`);
 console.log(`Preview version: ${previewVersion}`);
-console.log(`Dist tag: ${PREVIEW_DIST_TAG}`);
-if (process.env.LITE_VERSION) {
-    console.log(`Built against @babylonjs/lite: ${process.env.LITE_VERSION}`);
-}
+console.log(`Built against @babylonjs/lite: ${liteBaseVersion}`);
 console.log(`##vso[task.setvariable variable=PACKAGE_NAME_COMPAT]${PACKAGE_NAME}`);
 console.log(`##vso[task.setvariable variable=PACKAGE_VERSION_COMPAT]${previewVersion}`);
-console.log(`##vso[task.setvariable variable=PACKAGE_DIST_TAG_COMPAT]${PREVIEW_DIST_TAG}`);
