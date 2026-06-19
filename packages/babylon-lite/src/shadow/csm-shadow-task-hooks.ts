@@ -464,12 +464,11 @@ function _castersWorldAabb(casterMeshes: readonly Mesh[]): { _min: [number, numb
         maxY = -Infinity,
         maxZ = -Infinity;
     for (const mesh of casterMeshes) {
-        // Thin-instanced casters render via their per-instance matrices (world0..world3), NOT
-        // `mesh.worldMatrix` — which can be stale/off-world for baked or skinned prototypes (e.g. a
-        // recentred Sketchfab rig whose loader transform lingers in mesh.world). Bounding such a caster
-        // by `mesh.worldMatrix × boundMin/Max` yields a wildly wrong AABB that wrecks the cascade Z-fit
-        // (one off-world chicken collapsed every shadow). Derive the AABB from the instance matrices so
-        // it matches what's actually drawn.
+        // Thin-instanced casters are drawn at `finalWorld = mesh.world * instanceMatrix` (see
+        // thin-instance-fragment.ts), so a single `mesh.worldMatrix × boundMin/Max` box ignores the per-instance
+        // spread entirely — one prototype-sized box wrecks the cascade Z-fit (an off-world herd collapsed every
+        // shadow). Bound the caster by the union of every drawn instance instead, using the SAME composition the
+        // shader uses.
         const ti = mesh.thinInstances;
         if (ti && ti.count > 0 && ti.matrices) {
             const a = _thinInstanceWorldAabb(mesh, ti);
@@ -512,26 +511,33 @@ interface ThinCasterAabb {
     _max: [number, number, number];
 }
 
-/** Per-mesh cache of a thin-instanced caster's world AABB, keyed on the instance-matrix version so
- *  the per-instance scan runs only when the matrices change (a rebake), not every frame. Lazily
- *  allocated so this module keeps zero import-time side effects and stays tree-shakable. */
-let _thinCasterAabbCache: WeakMap<Mesh, { _version: number; _aabb: ThinCasterAabb | null }> | null = null;
-function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _aabb: ThinCasterAabb | null }> {
+/** Per-mesh cache of a thin-instanced caster's world AABB, keyed on BOTH the instance-matrix version and the
+ *  prototype mesh's `worldMatrixVersion` — the drawn world transform is `mesh.world * instanceMatrix`, so the
+ *  AABB must invalidate when EITHER changes (a rebake, or the prototype moving/reparenting). Lazily allocated
+ *  so this module keeps zero import-time side effects and stays tree-shakable. */
+let _thinCasterAabbCache: WeakMap<Mesh, { _version: number; _worldVersion: number; _aabb: ThinCasterAabb | null }> | null = null;
+function _getThinCasterAabbCache(): WeakMap<Mesh, { _version: number; _worldVersion: number; _aabb: ThinCasterAabb | null }> {
     if (!_thinCasterAabbCache) {
         _thinCasterAabbCache = new WeakMap();
     }
     return _thinCasterAabbCache;
 }
 
-/** World AABB of a thin-instanced caster, built from its instance matrices × local geometry bounds.
- *  Parked/degenerate instances (zero linear part — drawn as zero-area, used to hide an unused tail)
- *  are skipped so a tail parked far off-world can't balloon the box. */
+/** World AABB of a thin-instanced caster. Matches the shader's `finalWorld = mesh.world * instanceMatrix`
+ *  exactly: each local bound corner is transformed by the per-instance matrix, then by the prototype mesh
+ *  world matrix. Parked/degenerate instances (zero linear part — drawn as zero-area, used to hide an unused
+ *  tail) are skipped so a tail parked far off-world can't balloon the box. */
 function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabb | null {
     const cache = _getThinCasterAabbCache();
+    // The drawn transform is `mesh.world * instanceMatrix`, so the AABB depends on BOTH the instance matrices
+    // and the prototype world matrix — invalidate when either version changes.
+    const worldVersion = mesh.worldMatrixVersion;
     const cached = cache.get(mesh);
-    if (cached && cached._version === ti._version) {
+    if (cached && cached._version === ti._version && cached._worldVersion === worldVersion) {
         return cached._aabb;
     }
+    // Hoist the prototype world matrix once (worldMatrix is a getter) — it is constant across all instances.
+    const world = mesh.worldMatrix;
     const bmin = mesh.boundMin ?? [-0.5, -0.5, -0.5];
     const bmax = mesh.boundMax ?? [0.5, 0.5, 0.5];
     const mats = ti.matrices;
@@ -562,9 +568,14 @@ function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"
             const lx = k & 1 ? bmax[0]! : bmin[0]!;
             const ly = k & 2 ? bmax[1]! : bmin[1]!;
             const lz = k & 4 ? bmax[2]! : bmin[2]!;
-            const wx = mats[o]! * lx + mats[o + 4]! * ly + mats[o + 8]! * lz + mats[o + 12]!;
-            const wy = mats[o + 1]! * lx + mats[o + 5]! * ly + mats[o + 9]! * lz + mats[o + 13]!;
-            const wz = mats[o + 2]! * lx + mats[o + 6]! * ly + mats[o + 10]! * lz + mats[o + 14]!;
+            // 1) instance-local: ip = instanceMatrix * localCorner
+            const ix = mats[o]! * lx + mats[o + 4]! * ly + mats[o + 8]! * lz + mats[o + 12]!;
+            const iy = mats[o + 1]! * lx + mats[o + 5]! * ly + mats[o + 9]! * lz + mats[o + 13]!;
+            const iz = mats[o + 2]! * lx + mats[o + 6]! * ly + mats[o + 10]! * lz + mats[o + 14]!;
+            // 2) world: wp = mesh.world * ip  (matches finalWorld = mesh.world * instanceMatrix)
+            const wx = world[0]! * ix + world[4]! * iy + world[8]! * iz + world[12]!;
+            const wy = world[1]! * ix + world[5]! * iy + world[9]! * iz + world[13]!;
+            const wz = world[2]! * ix + world[6]! * iy + world[10]! * iz + world[14]!;
             if (wx < minX) {
                 minX = wx;
             }
@@ -586,7 +597,7 @@ function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"
         }
     }
     const aabb: ThinCasterAabb | null = Number.isFinite(minX) ? { _min: [minX, minY, minZ], _max: [maxX, maxY, maxZ] } : null;
-    cache.set(mesh, { _version: ti._version, _aabb: aabb });
+    cache.set(mesh, { _version: ti._version, _worldVersion: worldVersion, _aabb: aabb });
     return aabb;
 }
 
