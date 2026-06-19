@@ -25,6 +25,7 @@ export interface UtilityLayer {
     readonly mainScene: SceneContext;
 }
 
+/** Options used when creating a utility layer for gizmos and overlays. */
 export interface UtilityLayerOptions {
     /** Add a built-in hemispheric light so gizmo materials are visible without
      *  the caller adding one. Defaults to true. */

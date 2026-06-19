@@ -30,6 +30,7 @@ import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 
+/** Options for building a single-axis or uniform scale gizmo handle. */
 export interface AxisScaleGizmoOptions {
     /** World-space drag axis (unit vector). Scaling is applied to the attached
      *  node's local `scaling` components proportional to each axis component. */
@@ -45,6 +46,7 @@ export interface AxisScaleGizmoOptions {
     uniformScaling?: boolean;
 }
 
+/** A cube or octahedron handle that scales its attached node from pointer drag distance. */
 export interface AxisScaleGizmo {
     readonly root: SceneNode;
     readonly drag: PointerDrag;
@@ -126,6 +128,12 @@ function buildScaleArrow(
     return [head, tail];
 }
 
+/** Create an axis scale gizmo in the utility layer.
+ * @param engine - Engine that owns the created meshes.
+ * @param layer - Utility layer that renders and picks the gizmo.
+ * @param options - Drag axis, scale mode, sensitivity, and material options.
+ * @returns A detached scale gizmo ready to attach to a node.
+ */
 export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer, options: AxisScaleGizmoOptions): AxisScaleGizmo {
     const color = options.color ?? [0.5, 0.5, 0.5];
     const thickness = options.thickness ?? 1;
@@ -271,11 +279,13 @@ export function createAxisScaleGizmo(engine: EngineContext, layer: UtilityLayer,
     return gizmo;
 }
 
+/** Attach the axis scale gizmo to a scene node, or detach it with `null`. */
 export function attachAxisScaleGizmoToNode(gizmo: AxisScaleGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     gizmo.drag.enabled = node !== null;
 }
 
+/** Dispose the axis scale gizmo meshes, observers, and pointer-drag registration. */
 export function disposeAxisScaleGizmo(gizmo: AxisScaleGizmo, layer: UtilityLayer): void {
     gizmo._disposePointer();
     gizmo._disposeFollow();

@@ -31,11 +31,13 @@ import type { UtilityLayer } from "./utility-layer.js";
  *  keeps the widget at a roughly constant on-screen size. */
 const LIGHT_GIZMO_SCALE = 0.007;
 
+/** Options for the display-only light gizmo. */
 export interface LightGizmoOptions {
     /** RGB color for the light gizmo body material.  Defaults to grey. */
     color?: [number, number, number];
 }
 
+/** Display-only gizmo that visualizes an attached light using type-specific geometry. */
 export interface LightGizmo {
     /** Root node — follows the attached light's position (when it has one)
      *  and orients along its direction (when it has one). */
@@ -365,6 +367,9 @@ export function createLightGizmo(engine: EngineContext, layer: UtilityLayer, opt
     return gizmo;
 }
 
+/** Attach the light gizmo to a light, or detach it with `null`.
+ * Type-specific geometry is built lazily when a light is first attached.
+ */
 export function attachLightGizmoToLight(gizmo: LightGizmo, light: LightBase | null): void {
     gizmo.attachedLight = light;
     if (light) {
@@ -372,6 +377,7 @@ export function attachLightGizmoToLight(gizmo: LightGizmo, light: LightBase | nu
     }
 }
 
+/** Dispose all meshes and frame callbacks owned by the light gizmo. */
 export function disposeLightGizmo(gizmo: LightGizmo, layer: UtilityLayer): void {
     gizmo._disposeFollow();
     for (const m of gizmo._meshes) {

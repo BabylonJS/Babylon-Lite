@@ -29,6 +29,7 @@ import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 import { createRotationSectorMaterial } from "./rotation-sector-material.js";
 
+/** Options for building a rotation ring constrained to a single plane. */
 export interface PlaneRotationGizmoOptions {
     /** World-space rotation plane normal (unit vector). */
     planeNormal: Vec3;
@@ -44,6 +45,7 @@ export interface PlaneRotationGizmoOptions {
     rotationColor?: [number, number, number];
 }
 
+/** A torus-shaped gizmo that rotates its attached node around a plane normal. */
 export interface PlaneRotationGizmo {
     readonly root: SceneNode;
     readonly drag: PointerDrag;
@@ -66,6 +68,12 @@ export interface PlaneRotationGizmo {
     _disposeFollow: () => void;
 }
 
+/** Create a plane rotation gizmo in the utility layer.
+ * @param engine - Engine that owns the created meshes and rotation display material.
+ * @param layer - Utility layer that renders and picks the gizmo.
+ * @param options - Plane normal, ring sizing, and material options.
+ * @returns A detached rotation gizmo ready to attach to a node.
+ */
 export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLayer, options: PlaneRotationGizmoOptions): PlaneRotationGizmo {
     const color = options.color ?? [0.5, 0.5, 0.5];
     const tessellation = options.tessellation ?? 32;
@@ -265,11 +273,13 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
     return gizmo;
 }
 
+/** Attach the rotation gizmo to a scene node, or detach it with `null`. */
 export function attachPlaneRotationGizmoToNode(gizmo: PlaneRotationGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     gizmo.drag.enabled = node !== null;
 }
 
+/** Dispose the rotation gizmo meshes, observers, and pointer-drag registration. */
 export function disposePlaneRotationGizmo(gizmo: PlaneRotationGizmo, layer: UtilityLayer): void {
     gizmo._disposePointer();
     gizmo._disposeFollow();

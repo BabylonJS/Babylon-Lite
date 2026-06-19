@@ -22,6 +22,7 @@ import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
+/** Initial transform and draw options for a scene-attached text renderable. */
 export interface TextRenderableOptions {
     readonly position?: Readonly<Vec3>;
     readonly rotationQuaternion?: { readonly x: number; readonly y: number; readonly z: number; readonly w: number };
@@ -33,6 +34,7 @@ export interface TextRenderableOptions {
     readonly order?: number;
 }
 
+/** Scene renderable that draws a `TextData` block with mesh-like transform controls. */
 export interface TextRenderable extends Renderable {
     /** @internal */
     readonly _entityType: "text";
@@ -73,6 +75,11 @@ function targetSig(target: RenderTargetSignature): string {
     return (target._colorFormat ?? "-") + ":" + (target._sampleCount ?? 1) + ":" + (target._depthStencilFormat ?? "-");
 }
 
+/** Create a scene renderable that draws the supplied `TextData` through the normal renderable pipeline.
+ *
+ *  @param data - Text data block to render.
+ *  @param options - Optional transform, opacity, depth, and ordering settings.
+ *  @returns A transparent renderable suitable for adding to a scene. */
 export function createTextRenderable(data: TextData, options?: TextRenderableOptions): TextRenderable {
     const pos = options?.position;
     const rq = options?.rotationQuaternion;
@@ -295,6 +302,7 @@ function drawTextRenderable(gpu: TextRenderableGpu, data: TextData, quadVertex: 
     return draws;
 }
 
+/** Release GPU buffers owned by a text renderable. The underlying `TextData` and `GlyphStorage` remain caller-owned. */
 export function disposeTextRenderable(renderable: TextRenderable): void {
     if (renderable._gpu) {
         renderable._gpu.textU.destroy();

@@ -26,6 +26,7 @@ import { rayPlaneIntersect, normalizeVec3Obj } from "./gizmo-math.js";
 import { GizmoObservable } from "./gizmo-core.js";
 import type { UtilityLayer } from "./utility-layer.js";
 
+/** Event raised when a pointer drag begins on one of the registered colliders. */
 export interface PointerDragStartEvent {
     /** World-space point where the ray intersected the drag plane on drag start. */
     dragPlanePoint: Vec3;
@@ -33,6 +34,7 @@ export interface PointerDragStartEvent {
     pointerEvent: PointerEvent;
 }
 
+/** Event raised for each pointer move while a drag is active. */
 export interface PointerDragMoveEvent {
     /** World-space delta from the previous drag-plane point.  For axis-drag this
      *  is already projected onto the drag axis (parallel to axis). */
@@ -44,10 +46,12 @@ export interface PointerDragMoveEvent {
     dragDistance: number;
 }
 
+/** Event raised when the active pointer drag is released or cancelled. */
 export interface PointerDragEndEvent {
     pointerEvent: PointerEvent | null;
 }
 
+/** Configuration for converting pointer movement into world-space drag deltas. */
 export interface PointerDragOptions {
     /** Drag along a single world-space axis (unit vector). Mutually exclusive
      *  with `dragPlaneNormal`. */
@@ -69,6 +73,7 @@ export interface PointerDragOptions {
     getPlanePoint?: () => Vec3 | null;
 }
 
+/** Pointer-drag behavior shared by gizmos and driven by the per-canvas dispatcher. */
 export interface PointerDrag {
     readonly options: Readonly<PointerDragOptions>;
     enabled: boolean;

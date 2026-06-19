@@ -326,7 +326,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const vbKey = mi._gpu._vbKey ?? "";
 
         const composed = composePbr(features, features2, meshFeatures, sceneFeatures, lightMode, singleLightType, esmShadowDepthCode, vbLayout, vbKey);
-        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}${vbKey}`);
+        const bindings = getOrCreatePbrBindings(engine, features, features2, meshFeatures, sceneFeatures, composed, `${lightMode}:${singleLightType}${vbKey}`, mat.stencil ?? null);
 
         // Mesh UBO (world matrix at offset 0; spec.totalBytes covers any extra fields).
         const meshUboData = new F32(composed._meshUboSpec._totalBytes / 4);

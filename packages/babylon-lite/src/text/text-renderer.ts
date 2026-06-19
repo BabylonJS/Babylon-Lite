@@ -16,6 +16,7 @@ import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
 // ─── TextLayer ────────────────────────────────────────────────────────────
 
+/** Initial placement and compositing options for a 2D text layer in a standalone text renderer. */
 export interface TextLayerOptions {
     /** Top-left origin (in canvas pixels) for the layer's local coordinate frame. Default (0, 0). */
     readonly positionPx?: { readonly x: number; readonly y: number };
@@ -46,6 +47,11 @@ export interface TextLayer {
     _version: number;
 }
 
+/** Create a 2D text layer that places a `TextData` block in canvas pixel space.
+ *
+ *  @param data - Text data block drawn by the layer.
+ *  @param options - Optional pixel placement, scale, order, opacity, and visibility.
+ *  @returns A mutable layer object for use with a `TextRenderer`. */
 export function createTextLayer(data: TextData, options?: TextLayerOptions): TextLayer {
     return {
         _kind: "text-layer",
@@ -74,6 +80,7 @@ const KIND = "text-renderer" as const;
 /** UBO: mat4 mvp (64B) + viewport vec4 (16B) + color vec4 (16B). */
 const TEXT_UBO_BYTES = 96;
 
+/** Options for creating a standalone text renderer that draws directly to a surface. */
 export interface TextRendererOptions {
     layers: readonly TextLayer[];
     /** Default true. Set false for HUD overlays so the text pass preserves existing scene color. */
@@ -82,6 +89,7 @@ export interface TextRendererOptions {
     clearValue?: GPUColorDict;
 }
 
+/** Standalone rendering context that draws sorted 2D text layers directly to the swapchain. */
 export interface TextRenderer extends RenderingContext {
     /** @internal */
     readonly _kind: typeof KIND;
@@ -273,6 +281,11 @@ function compareLayers(a: TextLayer, b: TextLayer): number {
     return a.order - b.order;
 }
 
+/** Create a standalone text renderer for one surface.
+ *
+ *  @param surface - Surface whose swapchain receives the text pass.
+ *  @param opts - Initial layers and clear settings.
+ *  @returns A rendering context that can be registered with the engine. */
 export function createTextRenderer(surface: SurfaceContext, opts: TextRendererOptions): TextRenderer {
     const canvas = surface.canvas;
     const layers = opts.layers.slice();
@@ -388,6 +401,10 @@ function textRendererRecord(rr: TextRenderer): number {
     return drawCalls;
 }
 
+/** Add a text layer to an existing renderer if it is not already present.
+ *
+ *  @param tr - Text renderer to mutate.
+ *  @param layer - Layer to append; draw order is sorted during renderer update. */
 export function addTextRendererLayer(tr: TextRenderer, layer: TextLayer): void {
     if (tr._disposed) {
         throw new Error("TextRenderer has been disposed.");
@@ -398,6 +415,9 @@ export function addTextRendererLayer(tr: TextRenderer, layer: TextLayer): void {
     tr._layers.push(layer);
 }
 
+/** Remove a text layer and release its per-layer GPU buffers.
+ *
+ *  @returns `true` when the layer was present and removed. */
 export function removeTextRendererLayer(tr: TextRenderer, layer: TextLayer): boolean {
     const i = tr._layers.indexOf(layer);
     if (i < 0) {
@@ -412,14 +432,17 @@ export function removeTextRendererLayer(tr: TextRenderer, layer: TextLayer): boo
     return true;
 }
 
+/** Register a text renderer with its surface so the engine updates and records it each frame. */
 export function registerTextRenderer(tr: TextRenderer): void {
     registerRenderingContext(tr._surface, tr);
 }
 
+/** Unregister a text renderer from its surface without disposing its layer data. */
 export function unregisterTextRenderer(tr: TextRenderer): void {
     unregisterRenderingContext(tr._surface, tr);
 }
 
+/** Dispose a text renderer and all per-layer GPU resources it owns. Layer `TextData` remains caller-owned. */
 export function disposeTextRenderer(tr: TextRenderer): void {
     if (tr._disposed) {
         return;

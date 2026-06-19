@@ -24,6 +24,7 @@ import { createPointerDrag, registerPointerDrag } from "./pointer-drag.js";
 import type { PointerDrag } from "./pointer-drag.js";
 import type { UtilityLayer } from "./utility-layer.js";
 
+/** Options for building a single-axis position drag gizmo. */
 export interface AxisDragGizmoOptions {
     /** World-space drag axis (unit vector). */
     dragAxis: Vec3;
@@ -37,6 +38,7 @@ export interface AxisDragGizmoOptions {
     thickness?: number;
 }
 
+/** A single arrow-shaped gizmo that translates its attached node along one axis. */
 export interface AxisDragGizmo {
     /** The root node — gizmo follows its `attachedNode` by copying world translation. */
     readonly root: SceneNode;

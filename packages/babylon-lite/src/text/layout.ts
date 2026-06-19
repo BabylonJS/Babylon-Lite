@@ -8,6 +8,7 @@ import { UnicodeBuffer, shape } from "text-shaper";
 import type { Font } from "./font.js";
 import type { PlacedGlyph } from "./text-data.js";
 
+/** Options for the default text layout helper, expressed in output pixels with simple LTR word wrapping. */
 export type TextLayoutOptions = {
     /** Max line width in pixels before word-wrap. Default: Infinity. */
     readonly maxWidth?: number;

@@ -47,6 +47,7 @@ let blitBgl: GPUBindGroupLayout | null = null;
 let blitMsaaBgl: GPUBindGroupLayout | null = null;
 let blitDevice: GPUDevice | null = null;
 
+/** Enable scene-color transmission for every render task currently registered in a scene. PBR materials are marked for linear transmission, and a trailing image-processing task is appended when needed. */
 export function enableSceneTransmission(scene: SceneContext, engine: EngineContext): void {
     markPbrMaterialsLinear(scene);
     let lastRenderTask: RenderTask | null = null;
@@ -62,6 +63,7 @@ export function enableSceneTransmission(scene: SceneContext, engine: EngineConte
     }
 }
 
+/** Options controlling how a render task exposes opaque scene color to transmissive materials. Use these to opt out of the linear offscreen path, control refresh frequency, and limit mipmap generation cost. */
 export interface TransmissionOptions {
     /** When true (the default), retarget the task's color buffer to a linear `rgba16float`
      *  offscreen and tone-map it in a trailing image-processing pass — the model PBR
@@ -92,6 +94,7 @@ export interface SceneColorGrab {
     readonly texture: Texture2D | null;
 }
 
+/** Enable mid-pass scene-color grabs for a single render task and return the live texture handle. The task is wrapped so transmissive draw calls can sample the opaque color rendered earlier in the same pass. */
 export function enableRenderTaskTransmission(task: RenderTask, engine: EngineContext, options?: TransmissionOptions): SceneColorGrab {
     const linear = options?.linear !== false;
     applyTransmissionOptions(task, options);

@@ -10,6 +10,7 @@ import type { GlyphCurves } from "./glyph-storage.js";
 
 declare const fontBrand: unique symbol;
 
+/** Opaque handle for a loaded TrueType/OpenType font used by the default text layout and glyph extraction helpers. */
 export interface Font {
     readonly [fontBrand]: true;
     /** @internal Underlying text-shaper font handle. */

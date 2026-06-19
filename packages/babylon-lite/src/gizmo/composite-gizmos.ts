@@ -62,6 +62,7 @@ function wireCrossAxisDisable(gizmos: DisableableSubGizmo[]): void {
 
 // ─── PositionGizmo ───────────────────────────────────────────────────
 
+/** Options for the composite position gizmo. */
 export interface PositionGizmoOptions {
     /** When true, planar drag gizmos (XY/XZ/YZ) are created in addition to the
      *  3 axis arrows.  Default false — matches BJS where `planarGizmoEnabled`
@@ -71,6 +72,7 @@ export interface PositionGizmoOptions {
     thickness?: number;
 }
 
+/** Composite translation gizmo made from X/Y/Z axis arrows and optional planar handles. */
 export interface PositionGizmo {
     readonly xGizmo: AxisDragGizmo;
     readonly yGizmo: AxisDragGizmo;
@@ -105,6 +107,7 @@ export function createPositionGizmo(engine: EngineContext, layer: UtilityLayer, 
     };
 }
 
+/** Attach all position sub-gizmos to a node, or detach them with `null`. */
 export function attachPositionGizmoToNode(gizmo: PositionGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     attachAxisDragGizmoToNode(gizmo.xGizmo, node);
@@ -121,6 +124,7 @@ export function attachPositionGizmoToNode(gizmo: PositionGizmo, node: SceneNode 
     }
 }
 
+/** Toggle whether the position gizmo axes follow the attached node's rotation. */
 export function setPositionGizmoLocalCoordinates(gizmo: PositionGizmo, useLocal: boolean): void {
     gizmo.xGizmo.useLocalCoordinates = useLocal;
     gizmo.yGizmo.useLocalCoordinates = useLocal;
@@ -136,6 +140,7 @@ export function setPositionGizmoLocalCoordinates(gizmo: PositionGizmo, useLocal:
     }
 }
 
+/** Dispose all sub-gizmos owned by the composite position gizmo. */
 export function disposePositionGizmo(gizmo: PositionGizmo, layer: UtilityLayer): void {
     disposeAxisDragGizmo(gizmo.xGizmo, layer);
     disposeAxisDragGizmo(gizmo.yGizmo, layer);
@@ -153,11 +158,13 @@ export function disposePositionGizmo(gizmo: PositionGizmo, layer: UtilityLayer):
 
 // ─── RotationGizmo ───────────────────────────────────────────────────
 
+/** Options for the composite rotation gizmo. */
 export interface RotationGizmoOptions {
     tessellation?: number;
     thickness?: number;
 }
 
+/** Composite rotation gizmo made from X/Y/Z plane rotation rings. */
 export interface RotationGizmo {
     readonly xGizmo: PlaneRotationGizmo;
     readonly yGizmo: PlaneRotationGizmo;
@@ -165,6 +172,12 @@ export interface RotationGizmo {
     attachedNode: SceneNode | null;
 }
 
+/** Create a composite rotation gizmo with one ring for each principal axis.
+ * @param engine - Engine that owns the created meshes.
+ * @param layer - Utility layer that renders and picks the rings.
+ * @param options - Ring tessellation and thickness options.
+ * @returns A detached rotation gizmo ready to attach to a node.
+ */
 export function createRotationGizmo(engine: EngineContext, layer: UtilityLayer, options: RotationGizmoOptions = {}): RotationGizmo {
     const tessellation = options.tessellation ?? 32;
     const thickness = options.thickness ?? 1;
@@ -175,6 +188,7 @@ export function createRotationGizmo(engine: EngineContext, layer: UtilityLayer, 
     return { xGizmo, yGizmo, zGizmo, attachedNode: null };
 }
 
+/** Attach all rotation sub-gizmos to a node, or detach them with `null`. */
 export function attachRotationGizmoToNode(gizmo: RotationGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     attachPlaneRotationGizmoToNode(gizmo.xGizmo, node);
@@ -182,12 +196,14 @@ export function attachRotationGizmoToNode(gizmo: RotationGizmo, node: SceneNode 
     attachPlaneRotationGizmoToNode(gizmo.zGizmo, node);
 }
 
+/** Toggle whether the rotation rings follow the attached node's rotation. */
 export function setRotationGizmoLocalCoordinates(gizmo: RotationGizmo, useLocal: boolean): void {
     gizmo.xGizmo.useLocalCoordinates = useLocal;
     gizmo.yGizmo.useLocalCoordinates = useLocal;
     gizmo.zGizmo.useLocalCoordinates = useLocal;
 }
 
+/** Dispose all sub-gizmos owned by the composite rotation gizmo. */
 export function disposeRotationGizmo(gizmo: RotationGizmo, layer: UtilityLayer): void {
     disposePlaneRotationGizmo(gizmo.xGizmo, layer);
     disposePlaneRotationGizmo(gizmo.yGizmo, layer);
@@ -196,10 +212,12 @@ export function disposeRotationGizmo(gizmo: RotationGizmo, layer: UtilityLayer):
 
 // ─── ScaleGizmo ──────────────────────────────────────────────────────
 
+/** Options for the composite scale gizmo. */
 export interface ScaleGizmoOptions {
     thickness?: number;
 }
 
+/** Composite scale gizmo made from X/Y/Z axis handles and a central uniform handle. */
 export interface ScaleGizmo {
     readonly xGizmo: AxisScaleGizmo;
     readonly yGizmo: AxisScaleGizmo;
@@ -209,6 +227,12 @@ export interface ScaleGizmo {
     attachedNode: SceneNode | null;
 }
 
+/** Create a composite scale gizmo with per-axis handles and a uniform centre handle.
+ * @param engine - Engine that owns the created meshes.
+ * @param layer - Utility layer that renders and picks the handles.
+ * @param options - Shared scale-handle thickness options.
+ * @returns A detached scale gizmo ready to attach to a node.
+ */
 export function createScaleGizmo(engine: EngineContext, layer: UtilityLayer, options: ScaleGizmoOptions = {}): ScaleGizmo {
     const thickness = options.thickness ?? 1;
     const xGizmo = createAxisScaleGizmo(engine, layer, { dragAxis: { x: 1, y: 0, z: 0 }, color: [0.5, 0, 0], thickness });
@@ -231,6 +255,7 @@ export function createScaleGizmo(engine: EngineContext, layer: UtilityLayer, opt
     return { xGizmo, yGizmo, zGizmo, uniformScaleGizmo, attachedNode: null };
 }
 
+/** Attach all scale sub-gizmos to a node, or detach them with `null`. */
 export function attachScaleGizmoToNode(gizmo: ScaleGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     attachAxisScaleGizmoToNode(gizmo.xGizmo, node);
@@ -247,6 +272,7 @@ export function setScaleGizmoLocalCoordinates(gizmo: ScaleGizmo, useLocal: boole
     gizmo.zGizmo.useLocalCoordinates = useLocal;
 }
 
+/** Dispose all sub-gizmos owned by the composite scale gizmo. */
 export function disposeScaleGizmo(gizmo: ScaleGizmo, layer: UtilityLayer): void {
     disposeAxisScaleGizmo(gizmo.xGizmo, layer);
     disposeAxisScaleGizmo(gizmo.yGizmo, layer);

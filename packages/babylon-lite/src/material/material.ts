@@ -29,6 +29,29 @@ export interface MaterialRenderFeatures {
     features2?: number;
 }
 
+/** Optional stencil-test state baked into a material's main-pass pipeline. Shared by every concrete material kind
+ *  (Standard, PBR, Shader) so none has to depend on another. Lets one material WRITE the stencil buffer where it
+ *  draws (a mask) and another DISCARD fragments where the stencil was written — with NO dynamic stencil reference:
+ *  a writer uses `compare:"always"` + `passOp:"increment-clamp"` (stencil 0→1 where it draws); a tester uses
+ *  `compare:"equal"` (passes only where the stencil is still 0, i.e. NOT written), since the render pass's default
+ *  stencil reference is 0. Only takes effect on a stencil-capable depth target (the main color pass); ignored on
+ *  depth-only/shadow targets. Assigning `material.stencil` is inert until {@link enableMaterialStencil} is called
+ *  (the opt-in that keeps stencil-free scenes byte-identical) — call it once before `registerScene`. */
+export interface StencilState {
+    /** Stencil compare function, applied to front & back faces. Default `"always"`. */
+    readonly compare?: GPUCompareFunction;
+    /** Stencil operation when the stencil + depth tests both pass. Default `"keep"`. */
+    readonly passOp?: GPUStencilOperation;
+    /** Stencil operation when the stencil test fails. Default `"keep"`. */
+    readonly failOp?: GPUStencilOperation;
+    /** Stencil operation when the stencil test passes but depth fails. Default `"keep"`. */
+    readonly depthFailOp?: GPUStencilOperation;
+    /** Stencil read mask. Default `0xFF`. */
+    readonly readMask?: number;
+    /** Stencil write mask. Default `0xFF`. */
+    readonly writeMask?: number;
+}
+
 /** A lightweight render view over an editable source material.
  *  The view is also a Material: it inherits material state from {@link source}
  *  through the prototype chain and owns only render-feature bits. Keeping views
@@ -36,7 +59,7 @@ export interface MaterialRenderFeatures {
  *  scenes that never create views do not retain view-specific unwrap branches.
  *
  *  Specialized views (e.g. the Standard geometry MRT view) override
- *  {@link Material._buildGroup} with a view-specific builder whose
+ *  `_buildGroup` with a view-specific builder whose
  *  `_rebuildSingle` builds the right kind of Renderable — no per-family
  *  branching is required in the core render-task. */
 export interface MaterialView extends Material {

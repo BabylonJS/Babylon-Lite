@@ -6,7 +6,7 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { SceneContext } from "../../scene/scene.js";
-import type { Material } from "../material.js";
+import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
 import {
     _getPbrExts,
@@ -150,6 +150,9 @@ export interface PbrMaterialProps extends Material {
      *  (KHR_texture_transform). Stamped once by the glTF loader's slow path
      *  so the renderer doesn't re-scan 5 textures per mesh. */
     _hasUvTx?: boolean;
+    /** Optional stencil-test state baked into the main-pass pipeline. Lets this material write the stencil buffer
+     *  where it draws (mask) or discard where another material wrote it. Default none. See `StencilState`. */
+    stencil?: StencilState;
 }
 
 /** @internal Compute PBR material-only feature bits. Mesh/pass bits are added per renderable. */

@@ -32,6 +32,7 @@ declare const glyphStorageBrand: unique symbol;
 // can produce `GlyphCurves` values without importing `glyph-extraction.ts` or
 // pulling `text-shaper` into their bundle.
 
+/** Quadratic Bézier curve describing one segment of a glyph outline in font units. */
 export type QuadCurve = {
     readonly p0x: number;
     readonly p0y: number;
@@ -41,6 +42,7 @@ export type QuadCurve = {
     readonly p2y: number;
 };
 
+/** Axis-aligned glyph extents in font units, used to size the rendered quad and spatial curve bands. */
 export type GlyphBounds = {
     readonly xMin: number;
     readonly yMin: number;
@@ -48,6 +50,7 @@ export type GlyphBounds = {
     readonly yMax: number;
 };
 
+/** Complete outline data for one glyph id, ready to be packed into a `GlyphStorage` atlas. */
 export type GlyphCurves = {
     readonly glyphId: number;
     readonly curves: readonly QuadCurve[];

@@ -41,26 +41,38 @@ export interface AccessorView {
 
 export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: number): AccessorView {
     const accessor = json.accessors[accessorIdx];
-    const bufferView = json.bufferViews[accessor.bufferView];
     const componentCount = TYPE_SIZES[accessor.type] ?? 1;
-    const byteOffset = (bufferView.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
     const count = accessor.count;
+    const len = count * componentCount;
 
-    const baseOffset = binChunk.byteOffset + byteOffset;
-    const ab = binChunk.buffer;
-
+    let Ctor: Float32ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor | Uint8ArrayConstructor;
     switch (accessor.componentType) {
         case FLOAT:
-            return { _data: new F32(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = F32;
+            break;
         case UNSIGNED_SHORT:
-            return { _data: new U16(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = U16;
+            break;
         case UNSIGNED_INT:
-            return { _data: new U32(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = U32;
+            break;
         case UNSIGNED_BYTE:
-            return { _data: new U8(ab, baseOffset, count * componentCount), _count: count, _componentCount: componentCount };
+            Ctor = U8;
+            break;
         default:
             throw new Error(`Unsupported component type: ${accessor.componentType}`);
     }
+
+    // Spec: an accessor with no `bufferView` is zero-initialized (its values may be supplied by a `sparse`
+    // substitution or an extension) — return a zero-filled array instead of dereferencing a missing
+    // bufferView. Some skinned rigs ship all-zero morph-target POSITION/NORMAL accessors this way, which
+    // otherwise crashed the morph feature with `undefined.byteOffset`.
+    const data =
+        accessor.bufferView === undefined
+            ? new Ctor(len)
+            : new Ctor(binChunk.buffer as ArrayBuffer, binChunk.byteOffset + (json.bufferViews[accessor.bufferView].byteOffset ?? 0) + (accessor.byteOffset ?? 0), len);
+
+    return { _data: data, _count: count, _componentCount: componentCount };
 }
 
 // --- Image Extraction ---

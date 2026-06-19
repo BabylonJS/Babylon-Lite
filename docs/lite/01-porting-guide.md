@@ -323,6 +323,37 @@ onBeforeRender(scene, () => {
 
 ---
 
+## Material Stencil (opt-in)
+
+Babylon Lite supports a per-material stencil test baked into the main color pass — for masking effects
+like portals and decals (one material **writes** the stencil buffer where it draws, another **discards**
+fragments where the stencil was written). It is an explicit opt-in so stencil-free scenes stay
+byte-near-identical:
+
+```typescript
+import { createStandardMaterial, enableMaterialStencil, registerScene } from "@babylonjs/lite";
+
+// Writer: stamp the stencil buffer (0 → 1) everywhere it draws.
+const mask = createStandardMaterial();
+mask.stencil = { passOp: "increment-clamp" };
+
+// Tester: draw only where the stencil is still the pass's default reference of 0
+// (i.e. where the writer did NOT draw). No dynamic stencil reference needed.
+const masked = createStandardMaterial();
+masked.stencil = { compare: "equal" };
+
+enableMaterialStencil(); // ← opt-in, BEFORE registerScene
+await registerScene(scene);
+```
+
+`StencilState` accepts `compare`, `passOp`, `failOp`, `depthFailOp`, `readMask`, and `writeMask` (all
+optional; defaults `"always"` / `"keep"` / `0xff`). Stencil is applied only on a stencil-capable target (the
+main color pass) and ignored on depth-only/shadow passes. Without calling `enableMaterialStencil`, a
+material's `stencil` field is inert and the pipeline builders carry no stencil code — `enableMaterialStencil`
+is fully tree-shakable, so scenes that don't import it pay no bundle cost.
+
+---
+
 ## glTF / PBR Extensions
 
 Babylon Lite's glTF loader + PBR material understand the following extensions. Each

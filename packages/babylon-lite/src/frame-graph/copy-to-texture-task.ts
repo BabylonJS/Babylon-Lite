@@ -47,6 +47,7 @@ import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 
+/** Options used to create a copy-to-texture frame-graph task. Selects the source render target, the target or resolve target, and optional viewport / mip-level settings for blit and copy paths. */
 export interface CopyToTextureTaskConfig {
     name?: string;
     sourceTexture: RenderTarget;
@@ -178,6 +179,7 @@ function resetCache(device: GPUDevice): void {
     _shaderModules = new Map();
 }
 
+/** Create a frame-graph task that copies, blits, or resolves one render target color attachment into another. The task chooses the fastest valid path during `record()` based on the configured targets, samples, viewport, and mip level. */
 export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine: EngineContext, scene: SceneContext): CopyToTextureTask {
     const eng = engine as EngineContext;
     const sc = scene as SceneContext;

@@ -8,6 +8,17 @@ import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { UboField, UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderAttributeName, ShaderMaterial, ShaderSamplerDecl, ShaderUniformDecl } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
+import type { ResolvedStencil } from "../stencil-state.js";
+import type { StencilState } from "../material.js";
+
+/** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
+ *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
+ *  always null, and every stencil branch below folds away — stencil-free Shader scenes stay byte-identical. */
+let _stencilResolver: ((stencil: StencilState) => ResolvedStencil) | null = null;
+/** @internal Install the stencil resolver into the Shader pipeline (called by `enableMaterialStencil`). */
+export function _installShaderStencilResolver(resolve: (stencil: StencilState) => ResolvedStencil): void {
+    _stencilResolver = resolve;
+}
 
 export interface ShaderPipelineBindings {
     readonly group1BGL: GPUBindGroupLayout;
@@ -77,6 +88,7 @@ export function getOrCreateShaderPipeline(
     if (cached) {
         return cached;
     }
+    const stencil = material.stencil && _stencilResolver ? _stencilResolver(material.stencil) : null;
     const device = engine._device;
     const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
     const vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
@@ -119,6 +131,11 @@ export function getOrCreateShaderPipeline(
                       depthWriteEnabled: material.needAlphaBlending ? false : material.depthWrite,
                       ...(material.depthBias ? { depthBias: material.depthBias } : {}),
                       ...(material.depthBiasSlopeScale ? { depthBiasSlopeScale: material.depthBiasSlopeScale } : {}),
+                      // Pre-baked stencil sub-fields, resolved through the opt-in `_stencilResolver` hook above;
+                      // applied only on a stencil-capable target — a material reused in the depth32float
+                      // shadow/depth pass keeps plain depth state (no stencil → no format mismatch). `stencil`
+                      // is a local const that folds to null in stencil-free bundles, so this branch disappears.
+                      ...(stencil && sig._depthStencilFormat.includes("stencil") ? stencil._desc : {}),
                   },
               }
             : {}),

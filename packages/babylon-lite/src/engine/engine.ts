@@ -466,6 +466,7 @@ export function disposeEngine(engine: EngineContext): void {
     engine._device.destroy();
 }
 
+/** Render one frame for every surface registered on the engine. Updates each rendering context, records its GPU work into a shared command encoder, submits the frame, and publishes the total draw-call count. */
 export function renderFrame(engine: EngineContext, delta: number): void {
     const surfaces = engine.surfaces;
     // `surfaces` is typed as a non-empty tuple — the engine itself is always at

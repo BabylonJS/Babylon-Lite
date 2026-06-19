@@ -216,6 +216,7 @@ export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
+export { enableMaterialStencil } from "./material/enable-material-stencil.js";
 export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
@@ -350,7 +351,7 @@ export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";
 export { ObservableQuat } from "./math/observable-quat.js";
 export type { StandardMaterialProps, FogConfig } from "./material/standard/standard-material.js";
-export type { Material, MaterialRenderFeatures, MaterialView } from "./material/material.js";
+export type { Material, MaterialRenderFeatures, MaterialView, StencilState } from "./material/material.js";
 export type {
     ShaderMaterial,
     ShaderMaterialOptions,

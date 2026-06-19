@@ -69,15 +69,16 @@ export interface GeometryRendererTextureDescription {
     /** Which geometry value to write. */
     readonly type: GeometryTextureType;
     /** Per-attachment WebGPU format override. Defaults to
-     *  {@link GEOMETRY_TEXTURE_DESCRIPTIONS}[type].defaultFormat. */
+     *  `GEOMETRY_TEXTURE_DESCRIPTIONS[type].defaultFormat`. */
     readonly format?: GPUTextureFormat;
     /** Per-attachment clear-value override. Defaults to
-     *  {@link GEOMETRY_TEXTURE_DESCRIPTIONS}[type].clearValue. Use to match a
+     *  `GEOMETRY_TEXTURE_DESCRIPTIONS[type].clearValue`. Use to match a
      *  reference engine's clear behaviour (e.g. clear VIEW_DEPTH to 0 instead of
      *  the camera far plane to mirror BJS's PREPASS_DEPTH). */
     readonly clearValue?: GPUColor;
 }
 
+/** Configuration for a geometry-renderer frame-graph task. Describes the meshes, camera, target size, geometry texture attachments, and optional real-color output target used by the MRT pass. */
 export interface GeometryRendererTaskConfig {
     name?: string;
     /** Caster meshes. When omitted, defaults to `scene.meshes`. */
@@ -98,7 +99,7 @@ export interface GeometryRendererTaskConfig {
     reverseCulling?: boolean;
     /** Optional color render-target that receives the *real* (lit) material
      *  color, written as an additional color attachment alongside the geometry
-     *  data attachments. Must have the same {@link sampleCount} and resolved
+     *  data attachments. Must have the same `sampleCount` and resolved
      *  pixel size as the geometry MRT (size: `<surface>` with samples matching).
      *  When omitted, no real-color attachment is added to the pass.
      *

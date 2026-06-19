@@ -365,12 +365,14 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
         cz /= 8;
 
         let minX: number, maxX: number, minY: number, maxY: number, minEz: number, maxEz: number;
+        let stableRadius = 0;
         if (cfg._stabilizeCascades) {
             let radius = 0;
             for (const p of corners) {
                 radius = Math.max(radius, Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz));
             }
             radius = Math.ceil(radius * 16) / 16;
+            stableRadius = radius;
             minX = minY = minEz = -radius;
             maxX = maxY = maxEz = radius;
         } else {
@@ -414,6 +416,14 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
             if (cMinZ <= viewMaxZ) {
                 viewMinZ = Math.min(viewMinZ, cMinZ);
                 viewMaxZ = Math.min(viewMaxZ, cMaxZ);
+            }
+
+            // Stabilize Z: with stabilizeCascades the XY fit is a fixed bounding sphere (eye + extents
+            // are stable), but the caster-AABB tighten above moves the near/far planes whenever a caster moves
+            if (cfg._stabilizeCascades && stableRadius > 0) {
+                const zq = Math.max(0.5, stableRadius / 128);
+                viewMinZ = Math.floor(viewMinZ / zq) * zq;
+                viewMaxZ = Math.ceil(viewMaxZ / zq) * zq;
             }
         }
 

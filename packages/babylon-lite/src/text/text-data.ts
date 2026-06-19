@@ -22,6 +22,7 @@ declare const textDataBrand: unique symbol;
 
 // ─── Public value types ───────────────────────────────────────────────────
 
+/** Positioned glyph instance in pixel space, usually produced by layout before being packed into a `GlyphRun`. */
 export type PlacedGlyph = {
     readonly glyphId: number;
     /** Pixel position of glyph baseline origin. */
@@ -34,6 +35,7 @@ export type PlacedGlyph = {
     readonly color?: readonly [number, number, number, number];
 };
 
+/** Batch of placed glyphs that all use the same curve set and font-unit-to-pixel scale. */
 export type GlyphRun = {
     /** Which curve set this run's glyph ids index into. */
     readonly curveSet: CurveSetId;
@@ -85,6 +87,7 @@ export type TextDataUpdate =
 
 // ─── Branded public type + internal supporting types ──────────────────────
 
+/** Mutable text block data containing glyph runs and the packed per-glyph instance buffer consumed by text renderers. */
 export interface TextData {
     readonly [textDataBrand]: true;
     /** Live, in-insertion-order view of the runs currently rendered. Mutated by
@@ -673,6 +676,10 @@ export function createTextData(storage: GlyphStorage, runs?: readonly GlyphRun[]
     return data;
 }
 
+/** Apply an incremental edit to a `TextData`, such as adding, removing, replacing, or compacting runs.
+ *
+ *  @param data - Text data block to update.
+ *  @param update - Discriminated update operation to apply. */
 export function updateTextData(data: TextData, update: TextDataUpdate): void {
     switch (update.update) {
         case "reset": {

@@ -54,6 +54,7 @@ function rotatePoint(q: Quat, p: Vec3): Vec3 {
     return { x, y, z };
 }
 
+/** Options for the interactive bounding-box gizmo. */
 export interface BoundingBoxGizmoOptions {
     /** RGB colour for the wireframe + handle materials. Defaults to grey. */
     color?: [number, number, number];
@@ -66,6 +67,7 @@ export interface BoundingBoxGizmoOptions {
     rotationAnchorSize?: number;
 }
 
+/** Interactive bounding-box gizmo that can translate, rotate, and scale an attached node. */
 export interface BoundingBoxGizmo {
     readonly root: SceneNode;
     /** Currently attached node — set via `attachBoundingBoxGizmoToNode`. */
@@ -375,6 +377,12 @@ function applyRotation(node: SceneNode, ax: number, ay: number, az: number, angl
     rq.set(out[0], out[1], out[2], out[3]);
 }
 
+/** Create an interactive bounding-box gizmo in the utility layer.
+ * @param engine - Engine that owns the created meshes.
+ * @param layer - Utility layer that renders and picks the bounding-box handles.
+ * @param options - Visual size and color options for edges and handles.
+ * @returns A detached bounding-box gizmo ready to attach to a node.
+ */
 export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLayer, options: BoundingBoxGizmoOptions = {}): BoundingBoxGizmo {
     const color = options.color ?? [0.8, 0.8, 0.8];
     const edgeThickness = options.edgeThickness ?? 0.02;
@@ -993,6 +1001,9 @@ export function createBoundingBoxGizmo(engine: EngineContext, layer: UtilityLaye
     return gizmo;
 }
 
+/** Attach the bounding-box gizmo to a node, or detach it with `null`.
+ * Recomputes the current bounds immediately so handles match the new target.
+ */
 export function attachBoundingBoxGizmoToNode(gizmo: BoundingBoxGizmo, node: SceneNode | null): void {
     gizmo.attachedNode = node;
     gizmo._refresh();
@@ -1013,6 +1024,7 @@ export function attachBoundingBoxGizmoToNode(gizmo: BoundingBoxGizmo, node: Scen
     }
 }
 
+/** Dispose all meshes, observers, and pointer-drag registrations owned by the bounding-box gizmo. */
 export function disposeBoundingBoxGizmo(gizmo: BoundingBoxGizmo, layer: UtilityLayer): void {
     for (const d of gizmo._disposers) {
         d();

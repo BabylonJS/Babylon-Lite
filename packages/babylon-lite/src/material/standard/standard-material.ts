@@ -7,7 +7,7 @@
  */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
-import type { Material } from "../material.js";
+import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
 import {
     AMBIENT_USES_UV2,
@@ -38,6 +38,9 @@ export interface StandardMaterialProps extends Material {
      *  on top of the built-in Standard pipeline). Attach via `material.plugins = [plugin]`,
      *  then call `enableMaterialPlugins(scene)` before `registerScene`. */
     plugins?: MaterialPlugin[];
+    /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Default none.
+     *  See `StencilState`. */
+    stencil?: StencilState;
     diffuseColor: [number, number, number];
     alpha: number;
     specularColor: [number, number, number];

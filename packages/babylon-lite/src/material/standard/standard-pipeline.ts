@@ -14,6 +14,8 @@ import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps } from "./standard-material.js";
+import type { ResolvedStencil } from "../stencil-state.js";
+import type { StencilState } from "../material.js";
 import { _standardFeatureKey } from "./standard-material.js";
 import { getSceneBindGroupLayout, clearSceneBGLCache } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
@@ -35,6 +37,15 @@ import {
     _getStdExtsSorted,
 } from "./standard-flags.js";
 import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+
+/** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
+ *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
+ *  always null, and every stencil branch below folds away — stencil-free Standard scenes stay byte-identical. */
+let _stencilResolver: ((stencil: StencilState) => ResolvedStencil) | null = null;
+/** @internal Install the stencil resolver into the Standard pipeline (called by `enableMaterialStencil`). */
+export function _installStandardStencilResolver(resolve: (stencil: StencilState) => ResolvedStencil): void {
+    _stencilResolver = resolve;
+}
 
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
 // Converts feature bitmask → StandardTemplateConfig → ComposedShader.
@@ -76,6 +87,10 @@ export interface StandardShaderBindings {
     _shadowBGL: GPUBindGroupLayout | null;
     /** @internal */
     _composed: ComposedShader;
+    /** @internal Pre-baked partial depth-stencil descriptor for this material's stencil state. Present (and
+     *  the cache key carries the resolved `_key`) only when `enableMaterialStencil` was called — otherwise the
+     *  field is never assigned and the whole stencil path folds out of stencil-free bundles. */
+    _stencil?: Partial<GPUDepthStencilState>;
     /** @internal Per-sig pipeline cache. Key = `targetSignatureKey(sig)`. */
     _pipelines: Map<string, GPURenderPipeline>;
 }
@@ -120,10 +135,15 @@ export function getOrCreateStandardBindings(
     meshFeatures: number,
     fragments: ShaderFragment[] = [],
     shaderKey = "",
-    esmShadowDepthCode = ""
+    esmShadowDepthCode = "",
+    stencil: StencilState | null = null
 ): StandardShaderBindings {
     ensureDevice(engine);
-    const key = _standardFeatureKey(features, meshFeatures, shaderKey);
+    // Stencil state is baked into the GPU pipeline (no dynamic stencil ref), so two materials that differ only in
+    // stencil must NOT share bindings/pipelines — fold the resolved stencil token into the cache key. Resolution
+    // goes through the opt-in `_stencilResolver` hook, so non-stencil scenes fold this whole block away.
+    const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
+    const key = _standardFeatureKey(features, meshFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -152,6 +172,10 @@ export function getOrCreateStandardBindings(
         _composed: composed,
         _pipelines: new Map(),
     };
+    // Gated by the opt-in resolver so the field assignment folds out of stencil-free bundles entirely.
+    if (resolvedStencil) {
+        bindings._stencil = resolvedStencil._desc;
+    }
     _bindingsCache.set(key, bindings);
     return bindings;
 }
@@ -199,6 +223,11 @@ export function getOrCreateStandardPipeline(engine: EngineContext, sig: RenderTa
                       format: sig._depthStencilFormat,
                       depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
                       depthWriteEnabled: noColorOutput || esmShadowOutput || !needsBlend,
+                      // Pre-baked stencil sub-fields, applied only on a stencil-capable target — the same
+                      // material in the depth32float shadow/depth pass keeps plain depth state (no stencil → no
+                      // format mismatch). Gated on `_stencilResolver` (the opt-in hook) so the entire branch —
+                      // including the `bindings._stencil` reads — folds out of stencil-free bundles.
+                      ...(_stencilResolver && bindings._stencil && sig._depthStencilFormat.includes("stencil") ? bindings._stencil : {}),
                   },
               }
             : {}),

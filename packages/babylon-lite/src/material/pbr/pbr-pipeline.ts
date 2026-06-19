@@ -9,6 +9,8 @@
 
 import { CW } from "../../engine/gpu-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
+import type { ResolvedStencil } from "../stencil-state.js";
+import type { StencilState } from "../material.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { ComposedShader } from "../../shader/fragment-types.js";
 import type { EngineContext } from "../../engine/engine.js";
@@ -23,6 +25,15 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────
 
+/** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
+ *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
+ *  always null, and every stencil branch below folds away — stencil-free PBR scenes stay byte-identical. */
+let _stencilResolver: ((stencil: StencilState) => ResolvedStencil) | null = null;
+/** @internal Install the stencil resolver into the PBR pipeline (called by `enableMaterialStencil`). */
+export function _installPbrStencilResolver(resolve: (stencil: StencilState) => ResolvedStencil): void {
+    _stencilResolver = resolve;
+}
+
 interface _PbrShaderBindings {
     _features: number;
     _features2: number;
@@ -30,6 +41,10 @@ interface _PbrShaderBindings {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _composed: ComposedShader;
+    /** Pre-baked partial depth-stencil descriptor for this material's stencil state. Present (and the cache
+     *  key carries the resolved `_key`) only when `enableMaterialStencil` was called — otherwise the field is
+     *  never assigned and the whole stencil path folds out of stencil-free bundles. */
+    _stencil?: Partial<GPUDepthStencilState>;
     /** Per-sig pipeline cache. Key = `targetSignatureKey(sig)`. */
     _pipelines: Map<string, GPURenderPipeline>;
 }
@@ -61,10 +76,15 @@ export function getOrCreatePbrBindings(
     meshFeatures: number,
     sceneFeatures: number,
     composed: ComposedShader,
-    shaderKey = ""
+    shaderKey = "",
+    stencil: StencilState | null = null
 ): _PbrShaderBindings {
     ensureDevice(engine);
-    const key = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}`;
+    // Stencil state is baked into the GPU pipeline (no dynamic stencil ref), so two materials that differ only in
+    // stencil must NOT share bindings/pipelines — fold the resolved stencil token into the cache key. Resolution
+    // goes through the opt-in `_stencilResolver` hook, so non-stencil scenes fold this whole block away.
+    const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
+    const key = `${features}:${features2}:${meshFeatures}:${sceneFeatures}:${shaderKey}${resolvedStencil ? resolvedStencil._key : ""}`;
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -85,6 +105,10 @@ export function getOrCreatePbrBindings(
         _composed: composed,
         _pipelines: new Map(),
     };
+    // Gated by the opt-in resolver so the field assignment folds out of stencil-free bundles entirely.
+    if (resolvedStencil) {
+        bindings._stencil = resolvedStencil._desc;
+    }
     _bindingsCache.set(key, bindings);
     return bindings;
 }
@@ -129,6 +153,11 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
                       format: sig._depthStencilFormat,
                       depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
                       depthWriteEnabled: noColorOutput || esmShadowOutput || !hasAlpha,
+                      // Pre-baked stencil sub-fields, applied only on a stencil-capable target — the same
+                      // material in the depth32float shadow/depth pass keeps plain depth state (no stencil → no
+                      // format mismatch). Gated on `_stencilResolver` (the opt-in hook) so the entire branch —
+                      // including the `bindings._stencil` reads — folds out of stencil-free bundles.
+                      ...(_stencilResolver && bindings._stencil && sig._depthStencilFormat.includes("stencil") ? bindings._stencil : {}),
                   },
               }
             : {}),

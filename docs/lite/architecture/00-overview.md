@@ -53,6 +53,7 @@
 | [35-material-plugin.md](35-material-plugin.md)                     | Material Plugin          | Opt-in PBR/Standard material plugins, self-registration, zero-impact extension seam            |
 | [36-vertex-animation-texture.md](36-vertex-animation-texture.md)   | Vertex Animation Texture | VAT baking, texture-based skinning, per-instance + dual-clip-blend instancing, shadow casting  |
 | [37-text.md](37-text.md)                                           | Text                     | Slug GPU font: GlyphStorage + TextData + TextRenderable (3D) / TextRenderer (2D) + defaults    |
+| [39-material-stencil.md](39-material-stencil.md)                   | Material Stencil          | Opt-in `enableMaterialStencil` per-material stencil mask/test on Standard/PBR/Shader, zero-impact hook |
 
 ---
 

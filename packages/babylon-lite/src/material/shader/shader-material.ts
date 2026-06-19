@@ -1,5 +1,5 @@
 import { F32 } from "../../engine/typed-arrays.js";
-import type { Material } from "../material.js";
+import type { Material, StencilState } from "../material.js";
 import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Mat4 } from "../../math/types.js";
@@ -134,6 +134,10 @@ export interface ShaderMaterial extends Material {
     readonly depthOnlyFragment: boolean;
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
+    /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
+     *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
+     *  none. See `StencilState`. */
+    stencil?: StencilState;
     /** @internal */
     _uniformValues: Map<string, ShaderUniformSlot>;
     /** @internal */

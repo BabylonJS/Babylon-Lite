@@ -36,6 +36,7 @@ const CAMERA_BODY_SCALE = 0.05;
  *  this minimises the scene-223 parity MAD (0.39 → 0.07 at this value). */
 const FRUSTUM_EDGE_THICKNESS = 0.036;
 
+/** Options for the display-only camera gizmo. */
 export interface CameraGizmoOptions {
     /** RGB color for the camera body + frustum material.  Defaults to grey. */
     color?: [number, number, number];
@@ -48,6 +49,7 @@ export interface CameraGizmoOptions {
     displayBody?: boolean;
 }
 
+/** Display-only gizmo that visualizes an attached camera body and optional frustum. */
 export interface CameraGizmo {
     /** Root node — the gizmo follows the attached camera's world translation
      *  and orientation each frame. */
@@ -346,6 +348,9 @@ export function createCameraGizmo(engine: EngineContext, layer: UtilityLayer, op
     return gizmo;
 }
 
+/** Attach the camera gizmo to a camera, or detach it with `null`.
+ * The frustum wireframe is built lazily the first time a camera is attached.
+ */
 export function attachCameraGizmoToCamera(gizmo: CameraGizmo, camera: Camera | null): void {
     gizmo.attachedCamera = camera;
     if (camera) {
@@ -356,6 +361,7 @@ export function attachCameraGizmoToCamera(gizmo: CameraGizmo, camera: Camera | n
     }
 }
 
+/** Dispose all meshes and follow callbacks owned by the camera gizmo. */
 export function disposeCameraGizmo(gizmo: CameraGizmo, layer: UtilityLayer): void {
     gizmo._disposeFollow();
     for (const m of gizmo._meshes) {
