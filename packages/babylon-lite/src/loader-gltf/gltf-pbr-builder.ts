@@ -103,10 +103,14 @@ export function buildDefaultPbrTextures(
     mat: GltfMaterialData,
     sampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
-    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
+    getCachedTex: (bitmap: ImageBitmap, srgb: boolean, slotSampler?: GPUSampler) => Texture2D,
+    samplerFor?: (texInfo: any) => GPUSampler
 ): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
+    const def = mat._rawMatDef ?? {};
+    const pbr = def.pbrMetallicRoughness ?? {};
+    const sf = (texInfo: any): GPUSampler | undefined => (samplerFor ? samplerFor(texInfo) : undefined);
     const baseColorTexture = mat._baseColorImage
-        ? getCachedTex(mat._baseColorImage, true)
+        ? getCachedTex(mat._baseColorImage, true, sf(pbr.baseColorTexture))
         : (() => {
               const f = mat._baseColorFactor;
               return uploadTex(
@@ -118,18 +122,19 @@ export function buildDefaultPbrTextures(
                   new U8([linearToSrgbByte(f[0]), linearToSrgbByte(f[1]), linearToSrgbByte(f[2]), Math.round(Math.max(0, Math.min(1, f[3])) * 255)])
               );
           })();
-    const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false) : undefined;
-    const emissiveTexture = mat._emissiveImage ? getCachedTex(mat._emissiveImage, true) : undefined;
+    const normalTexture = mat._normalImage ? getCachedTex(mat._normalImage, false, sf(def.normalTexture)) : undefined;
+    const emissiveTexture = mat._emissiveImage ? getCachedTex(mat._emissiveImage, true, sf(def.emissiveTexture)) : undefined;
 
     const single = mat._metallicRoughnessImage ?? mat._occlusionImage;
+    const ormTexInfo = mat._metallicRoughnessImage ? pbr.metallicRoughnessTexture : def.occlusionTexture;
     let ormTexture: Texture2D;
     if (single && (!mat._metallicRoughnessImage || !mat._occlusionImage || mat._metallicRoughnessImage === mat._occlusionImage)) {
-        ormTexture = getCachedTex(single, false);
+        ormTexture = getCachedTex(single, false, sf(ormTexInfo));
     } else if (!single) {
         const clamp = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 255);
         ormTexture = uploadTex(engine, null, false, sampler, generateMipmaps, new U8([255, clamp(mat._roughnessFactor), clamp(mat._metallicFactor), 255]));
     } else {
-        ormTexture = getCachedTex(mat._metallicRoughnessImage!, false);
+        ormTexture = getCachedTex(mat._metallicRoughnessImage!, false, sf(pbr.metallicRoughnessTexture));
     }
     return { baseColorTexture, ormTexture, normalTexture, emissiveTexture };
 }

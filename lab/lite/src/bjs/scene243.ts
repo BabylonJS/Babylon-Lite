@@ -18,9 +18,14 @@ import "@babylonjs/loaders/glTF";
     await SceneLoader.AppendAsync("", "https://cx20.github.io/gltf-test/tutorialModels/EmissiveFireflies/glTF/EmissiveFireflies.gltf", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
+    scene.imageProcessingConfiguration.toneMappingEnabled = false;
+    scene.imageProcessingConfiguration.exposure = 1.0;
+    scene.imageProcessingConfiguration.contrast = 1.0;
 
     const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 5.63, new Vector3(0.063, 0.51, -0.079), scene);
     camera.fov = 0.8;
+    camera.minZ = 5.63 * 0.01;
+    camera.maxZ = 5.63 * 1000;
     camera.attachControl(canvas, true);
     scene.activeCamera = camera;
 

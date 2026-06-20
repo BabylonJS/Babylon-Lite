@@ -18,9 +18,14 @@ import "@babylonjs/loaders/glTF";
     await SceneLoader.AppendAsync("", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/PotOfCoalsAnimationPointer/glTF/PotOfCoalsAnimationPointer.gltf", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
+    scene.imageProcessingConfiguration.toneMappingEnabled = false;
+    scene.imageProcessingConfiguration.exposure = 1.0;
+    scene.imageProcessingConfiguration.contrast = 1.0;
 
     const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 0.19, new Vector3(0, 0.0256, 0), scene);
     camera.fov = 0.8;
+    camera.minZ = 0.19 * 0.01;
+    camera.maxZ = 0.19 * 1000;
     camera.attachControl(canvas, true);
     scene.activeCamera = camera;
 

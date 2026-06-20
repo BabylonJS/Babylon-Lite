@@ -11,12 +11,17 @@ async function main(): Promise<void> {
     const root = await loadGltf(engine, "https://cx20.github.io/gltf-test/tutorialModels/EmissiveFireflies/glTF/EmissiveFireflies.gltf");
     addToScene(scene, root);
 
-    await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", { skipSkybox: true, skipGround: true, brdfUrl: "/brdf-lut.png" });
-
     const cam = createArcRotateCamera(1.5707963, 1.5707963, 5.63, { x: 0.063, y: 0.51, z: -0.079 });
     cam.fov = 0.8;
+    cam.nearPlane = 5.63 * 0.01;
+    cam.farPlane = 5.63 * 1000;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
+
+    await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", { skipSkybox: true, skipGround: true, brdfUrl: "/brdf-lut.png" });
+    scene.imageProcessing.toneMappingEnabled = false;
+    scene.imageProcessing.exposure = 1;
+    scene.imageProcessing.contrast = 1;
 
     scene.fixedDeltaMs = 16.0;
     const params = new URLSearchParams(window.location.search);

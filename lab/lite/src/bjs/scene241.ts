@@ -18,9 +18,14 @@ import "@babylonjs/loaders/glTF";
     await SceneLoader.AppendAsync("", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/AnimationPointerUVs/glTF/AnimationPointerUVs.gltf", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
+    scene.imageProcessingConfiguration.toneMappingEnabled = false;
+    scene.imageProcessingConfiguration.exposure = 1.0;
+    scene.imageProcessingConfiguration.contrast = 1.0;
 
     const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 31.48, new Vector3(-0.113, 0.537, -0.031), scene);
     camera.fov = 0.8;
+    camera.minZ = 31.48 * 0.01;
+    camera.maxZ = 31.48 * 1000;
     camera.attachControl(canvas, true);
     scene.activeCamera = camera;
 

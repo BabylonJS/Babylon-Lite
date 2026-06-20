@@ -18,9 +18,14 @@ import "@babylonjs/loaders/glTF";
     await SceneLoader.AppendAsync("", "https://cx20.github.io/gltf-test/tutorialModels/TeapotsGalore/glTF/TeapotsGalore.gltf", scene);
 
     scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
+    scene.imageProcessingConfiguration.toneMappingEnabled = false;
+    scene.imageProcessingConfiguration.exposure = 1.0;
+    scene.imageProcessingConfiguration.contrast = 1.0;
 
     const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 1440.14, new Vector3(0, 6.649, 0), scene);
     camera.fov = 0.8;
+    camera.minZ = 1440.14 * 0.01;
+    camera.maxZ = 1440.14 * 1000;
     camera.attachControl(canvas, true);
     scene.activeCamera = camera;
 
