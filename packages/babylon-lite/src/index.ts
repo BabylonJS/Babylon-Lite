@@ -225,6 +225,11 @@ export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
 export type { MaterialVariantData } from "./loader-gltf/material-variants.js";
+// Decoder base-URL config for KHR_draco_mesh_compression / EXT_meshopt_compression.
+// The heavy decoder glue stays dynamic-imported (zero bytes for assets that don't
+// use it); only these tiny setters are statically reachable from the entry point.
+export { setDracoBaseUrl } from "./loader-gltf/draco-decode.js";
+export { setMeshoptBaseUrl } from "./loader-gltf/meshopt-decode.js";
 // ─── Hierarchy ───────────────────────────────────────────────────────
 export type { IWorldMatrixProvider, IParentable } from "./scene/parentable.js";
 export { setParent } from "./scene/set-parent.js";
@@ -261,6 +266,9 @@ export { setShadowTaskCasterMeshes } from "./frame-graph/shadow-inputs.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
+// Opt-in bone control for skinned models (near-zero bundle cost unless enableBoneControl is called).
+export { enableBoneControl, getBoneByName, setBonePosition, setBoneRotationQuaternion, setBoneScaling, setBoneVisible, clearBoneOverride } from "./skeleton/bone-control.js";
+export type { Skeleton, Bone } from "./skeleton/bone-control.js";
 export { createAnimationGroups, playAnimation, pauseAnimation, stopAnimation, goToFrame } from "./animation/animation-group.js";
 export { setAnimationWeight } from "./animation/animation-weight.js";
 export { crossFadeAnimationGroups, enablePropertyAnimationBlending, fadeAnimationWeight } from "./animation/weighted-pointer-mixer.js";
@@ -309,6 +317,10 @@ export { mat4Multiply } from "./math/mat4-multiply.js";
 export { mat4LookAtLH } from "./math/mat4-look-at-lh.js";
 export { mat4PerspectiveLH } from "./math/mat4-perspective-lh.js";
 export { mat4FromQuat } from "./math/mat4-from-quat.js";
+export { quatFromRotationMatrix } from "./math/quat-from-rotation-matrix.js";
+export { quatFromLookDirectionRH } from "./math/quat-from-look-direction-rh.js";
+export { mat4Decompose } from "./math/mat4-decompose.js";
+export type { DecomposedTransform } from "./math/mat4-decompose.js";
 export type { Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";

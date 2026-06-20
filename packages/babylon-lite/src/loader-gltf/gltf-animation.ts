@@ -138,7 +138,8 @@ export function parseAnimationData(
     meshes: Mesh[],
     parentMap: Map<number, number>,
     worldMatrixCache: Map<number, Mat4>,
-    nodeMap?: readonly (SceneNode | undefined)[]
+    nodeMap?: readonly (SceneNode | undefined)[],
+    boneOverrides?: ReadonlyMap<number, import("../skeleton/bone-control.js").BoneOverride>
 ): GltfAnimationData | null {
     if (!json.animations || json.animations.length === 0) {
         return null;
@@ -345,7 +346,7 @@ export function parseAnimationData(
     ) {
         return null;
     }
-    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices };
+    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides };
 }
 
 /** True if any clip animates a non-excluded node that has a live scene target —

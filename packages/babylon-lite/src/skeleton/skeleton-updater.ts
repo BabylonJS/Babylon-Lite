@@ -10,6 +10,8 @@ import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
+import type { BoneOverride } from "./bone-control.js";
+import { _boneApplier } from "./bone-control-hooks.js";
 
 // Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
 const _boneTmp = new F32(16);
@@ -78,7 +80,8 @@ export function createAnimationController(
     skeletons: readonly SkeletonBinding[],
     morphBindings: readonly MorphBinding[],
     nodeTargets?: readonly (AnimatedNodeTarget | undefined)[],
-    excludedNodeIndices?: ReadonlySet<number>
+    excludedNodeIndices?: ReadonlySet<number>,
+    boneOverrides?: ReadonlyMap<number, BoneOverride>
 ): AnimationController {
     const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
@@ -188,6 +191,14 @@ export function createAnimationController(
                           currentTRS[off + S_OFF] = n.sx;
                           currentTRS[off + S_OFF + 1] = n.sy;
                           currentTRS[off + S_OFF + 2] = n.sz;
+                      }
+
+                      // 1b. Apply user bone overrides (opt-in bone control) on top of
+                      // the rest pose, BEFORE channels so animation wins per-component.
+                      // Routed through a null hook so the apply code stays in the opt-in
+                      // bone-control chunk — bone-control-free bundles pay one branch.
+                      if (boneOverrides !== undefined && boneOverrides.size > 0) {
+                          _boneApplier?.(boneOverrides, currentTRS, numNodes);
                       }
 
                       // 2. Evaluate animation channels → override TRS

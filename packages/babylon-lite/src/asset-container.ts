@@ -3,6 +3,7 @@ import type { LightBase } from "./light/types.js";
 import type { AnimationGroup } from "./animation/animation-group.js";
 import type { MaterialVariantData } from "./loader-gltf/material-variants.js";
 import type { Mesh } from "./mesh/mesh.js";
+import type { Skeleton } from "./skeleton/bone-control.js";
 
 /**
  * Result returned by loadGltf / loadBabylon.
@@ -25,6 +26,10 @@ export interface AssetContainer {
     /** KHR_xmp_json_ld metadata. `packets` are the JSON-LD packets declared at the
      *  document level; `assetPacket` is the packet referenced by `asset` (if any). */
     xmpMetadata?: { packets: unknown[]; assetPacket?: unknown };
+    /** Bone-control handles, one per glTF skin. Present only when
+     *  `enableBoneControl()` was called before loading; otherwise `undefined`.
+     *  Drive bones via `getBoneByName()` + the `setBone*` functions. */
+    skeletons?: Skeleton[];
 }
 
 /**
