@@ -345,7 +345,8 @@ export function parseAnimationData(
     ) {
         return null;
     }
-    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices };
+    const nodeNames: readonly (string | undefined)[] = (json.nodes ?? []).map((n: { name?: string }) => n?.name);
+    return { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames };
 }
 
 /** True if any clip animates a non-excluded node that has a live scene target —

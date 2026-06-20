@@ -65,6 +65,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Node Material | ✅ | ✅ | NME snippet parser with lab-proven core, compatibility, PBR, math/modes, color, UV/texture/procedural, normal/screen/depth/matrix/scene-state, loop, and storage blocks (Scenes 60-89) |
 | Shader Material | ✅ | ✅ | WGSL-only ShaderMaterial with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163) |
 | Material Plugins | ✅ | ✅ | Opt-in enableMaterialPlugins() — custom WGSL injection on PBR/Standard, zero bundle cost when unused (Scene 217) |
+| Material Stencil | ✅ | ✅ | Opt-in enableMaterialStencil() — per-material stencil write/test (mask & discard) on Standard/PBR/Shader; zero bundle cost when unused |
 | PBR Clear Coat | ✅ | ✅ | Scene 19 |
 | PBR Sheen | ✅ | ✅ | Scene 21 |
 | PBR Anisotropy | ✅ | ✅ | Scene 23 |
@@ -142,6 +143,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Cubic Spline | ✅ | ✅ |  |
 | Deterministic Seek | ✅ | ✅ | Fixed-timestep for parity testing |
 | Animation Blending | ✅ | ✅ | Weighted blend, cross-fade, and additive animation groups (Scenes 155-158) |
+| Animation Masking | ✅ | ✅ | AnimationGroupMask include/exclude target-name filtering; opt-in, zero bundle cost when unused (Scene 251) |
 | Animation Events | — | ✅ |  |
 | Animation Weights | ✅ | ✅ | AnimationGroup weight control through AnimationManager |
 | Vertex Animation Textures (VAT) | ✅ | ✅ | Baked skeletal animation played on the GPU, incl. per-instance thin-instanced VAT (Scenes 218-219) |

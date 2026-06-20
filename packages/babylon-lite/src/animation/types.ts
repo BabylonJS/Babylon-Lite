@@ -124,6 +124,10 @@ export interface GltfAnimationData {
      *  matrices bake an `invMeshWorld` captured at load, so moving them at runtime
      *  would double-transform the skinned vertices). */
     readonly excludedNodeIndices: ReadonlySet<number>;
+    /** glTF node names indexed by node index (undefined for unnamed nodes). Used by
+     *  {@link AnimationGroupMask} to resolve include/exclude target names to the node
+     *  indices its channels animate. */
+    readonly nodeNames: readonly (string | undefined)[];
 }
 
 // ─── GPU-side data objects attached to Mesh ─────────────────────────────────
