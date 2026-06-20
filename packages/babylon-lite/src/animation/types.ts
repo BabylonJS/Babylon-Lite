@@ -2,7 +2,6 @@
 // Designed for zero-allocation per-frame evaluation.
 
 import type { Mat4 } from "../math/types.js";
-import type { BoneOverride } from "../skeleton/bone-control.js";
 
 // Interpolation modes (numeric for fast comparison in hot path)
 export const INTERP_LINEAR = 0;
@@ -128,8 +127,9 @@ export interface GltfAnimationData {
     /** Shared node-index → bone override map, present only when `enableBoneControl()`
      *  installed bone control. Handed to every AnimationController so a playing clip
      *  honours user bone overrides (animation wins per-component). `undefined` on the
-     *  default path. */
-    readonly boneOverrides?: ReadonlyMap<number, BoneOverride>;
+     *  default path. Typed as `unknown` value to keep the internal `BoneOverride`
+     *  shape out of the public API surface. */
+    readonly boneOverrides?: ReadonlyMap<number, unknown>;
 }
 
 // ─── GPU-side data objects attached to Mesh ─────────────────────────────────
