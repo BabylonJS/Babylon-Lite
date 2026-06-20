@@ -180,6 +180,40 @@ export class Vector3 {
         return new Vector3(-this.x, -this.y, -this.z);
     }
 
+    public minimizeInPlace(other: Vector3): this {
+        return this.minimizeInPlaceFromFloats(other.x, other.y, other.z);
+    }
+
+    public maximizeInPlace(other: Vector3): this {
+        return this.maximizeInPlaceFromFloats(other.x, other.y, other.z);
+    }
+
+    public minimizeInPlaceFromFloats(x: number, y: number, z: number): this {
+        if (x < this.x) {
+            this.x = x;
+        }
+        if (y < this.y) {
+            this.y = y;
+        }
+        if (z < this.z) {
+            this.z = z;
+        }
+        return this;
+    }
+
+    public maximizeInPlaceFromFloats(x: number, y: number, z: number): this {
+        if (x > this.x) {
+            this.x = x;
+        }
+        if (y > this.y) {
+            this.y = y;
+        }
+        if (z > this.z) {
+            this.z = z;
+        }
+        return this;
+    }
+
     public length(): number {
         return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
     }
@@ -257,12 +291,27 @@ export class Vector3 {
         return new Vector3(array[offset] ?? 0, array[offset + 1] ?? 0, array[offset + 2] ?? 0);
     }
 
+    public static FromArrayToRef<T extends Vector3>(array: ArrayLike<number>, offset: number, result: T): T {
+        result.set(array[offset] ?? 0, array[offset + 1] ?? 0, array[offset + 2] ?? 0);
+        return result;
+    }
+
+    public static FromFloatsToRef<T extends Vector3>(x: number, y: number, z: number, result: T): T {
+        result.set(x, y, z);
+        return result;
+    }
+
     public static Dot(a: Vector3, b: Vector3): number {
         return a.x * b.x + a.y * b.y + a.z * b.z;
     }
 
     public static Cross(a: Vector3, b: Vector3): Vector3 {
-        return new Vector3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+        return Vector3.CrossToRef(a, b, new Vector3());
+    }
+
+    public static CrossToRef<T extends Vector3>(a: Vector3, b: Vector3, result: T): T {
+        result.set(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+        return result;
     }
 
     public static Distance(a: Vector3, b: Vector3): number {
@@ -277,12 +326,17 @@ export class Vector3 {
     }
 
     public static Lerp(start: Vector3, end: Vector3, amount: number): Vector3 {
-        return new Vector3(start.x + (end.x - start.x) * amount, start.y + (end.y - start.y) * amount, start.z + (end.z - start.z) * amount);
+        return Vector3.LerpToRef(start, end, amount, new Vector3());
+    }
+
+    public static LerpToRef<T extends Vector3>(start: Vector3, end: Vector3, amount: number, result: T): T {
+        result.set(start.x + (end.x - start.x) * amount, start.y + (end.y - start.y) * amount, start.z + (end.z - start.z) * amount);
+        return result;
     }
 
     /** Midpoint between two vectors. */
     public static Center(a: Vector3, b: Vector3): Vector3 {
-        return new Vector3((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+        return Vector3.CenterToRef(a, b, new Vector3());
     }
 
     /** Midpoint between two vectors, written into `ref`. */
@@ -291,19 +345,34 @@ export class Vector3 {
     }
 
     public static Normalize(vector: Vector3): Vector3 {
-        return vector.clone().normalize();
+        return Vector3.NormalizeToRef(vector, new Vector3());
+    }
+
+    public static NormalizeToRef<T extends Vector3>(vector: Vector3, result: T): T {
+        const len = vector.length();
+        if (len === 0) {
+            result.set(0, 0, 0);
+        } else {
+            result.set(vector.x / len, vector.y / len, vector.z / len);
+        }
+        return result;
     }
 
     public static Minimize(a: Vector3, b: Vector3): Vector3 {
-        return new Vector3(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z));
+        return a.clone().minimizeInPlace(b);
     }
 
     public static Maximize(a: Vector3, b: Vector3): Vector3 {
-        return new Vector3(Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z));
+        return a.clone().maximizeInPlace(b);
     }
 
     /** Transform a coordinate (point) by a matrix using the row-vector convention. */
     public static TransformCoordinates(vector: Vector3, transformation: Matrix): Vector3 {
+        return Vector3.TransformCoordinatesToRef(vector, transformation, new Vector3());
+    }
+
+    /** Transform a coordinate (point) by a matrix using the row-vector convention. */
+    public static TransformCoordinatesToRef<T extends Vector3>(vector: Vector3, transformation: Matrix, result: T): T {
         const m = transformation.m;
         const x = vector.x;
         const y = vector.y;
@@ -312,16 +381,23 @@ export class Vector3 {
         const ry = x * m[1]! + y * m[5]! + z * m[9]! + m[13]!;
         const rz = x * m[2]! + y * m[6]! + z * m[10]! + m[14]!;
         const rw = 1 / (x * m[3]! + y * m[7]! + z * m[11]! + m[15]!);
-        return new Vector3(rx * rw, ry * rw, rz * rw);
+        result.set(rx * rw, ry * rw, rz * rw);
+        return result;
     }
 
     /** Transform a direction (normal) by a matrix, ignoring translation. */
     public static TransformNormal(vector: Vector3, transformation: Matrix): Vector3 {
+        return Vector3.TransformNormalToRef(vector, transformation, new Vector3());
+    }
+
+    /** Transform a direction (normal) by a matrix, ignoring translation. */
+    public static TransformNormalToRef<T extends Vector3>(vector: Vector3, transformation: Matrix, result: T): T {
         const m = transformation.m;
         const x = vector.x;
         const y = vector.y;
         const z = vector.z;
-        return new Vector3(x * m[0]! + y * m[4]! + z * m[8]!, x * m[1]! + y * m[5]! + z * m[9]!, x * m[2]! + y * m[6]! + z * m[10]!);
+        result.set(x * m[0]! + y * m[4]! + z * m[8]!, x * m[1]! + y * m[5]! + z * m[9]!, x * m[2]! + y * m[6]! + z * m[10]!);
+        return result;
     }
 }
 

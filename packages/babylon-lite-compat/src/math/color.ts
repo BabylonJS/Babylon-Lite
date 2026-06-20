@@ -152,10 +152,6 @@ export class Color4 {
         return this.r === other.r && this.g === other.g && this.b === other.b && this.a === other.a;
     }
 
-    public toColor3(): Color3 {
-        return new Color3(this.r, this.g, this.b);
-    }
-
     public asArray(): [number, number, number, number] {
         return [this.r, this.g, this.b, this.a];
     }
