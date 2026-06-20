@@ -195,10 +195,16 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
 
     // Otherwise treat the bytes as a JSON glTF document.
     const json = JSON.parse(new TextDecoder().decode(buffer));
-    const bufferDef = json.buffers?.[0];
+    const buffers = json.buffers ?? [];
     let binChunk: DataView;
-    if (bufferDef?.uri) {
-        binChunk = new DV(await fetch(resolveBufferUri(bufferDef.uri, baseUrl)).then((r) => r.arrayBuffer()));
+    if (buffers.length > 1) {
+        // Multi-buffer glTF (e.g. separate geometry/animation/skin .bin files): fetch all,
+        // concatenate, and rewrite bufferView offsets so the single-binChunk reader still works.
+        // Lazy-imported so single-buffer/GLB assets (the common case) pay zero bytes for it.
+        const { loadMultiBuffer } = await import("./gltf-multi-buffer.js");
+        binChunk = await loadMultiBuffer(json, baseUrl);
+    } else if (buffers[0]?.uri) {
+        binChunk = new DV(await fetch(resolveBufferUri(buffers[0].uri, baseUrl)).then((r) => r.arrayBuffer()));
     } else {
         binChunk = new DV(new ArrayBuffer(0));
     }
@@ -207,8 +213,9 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
 
 /** Resolve a glTF buffer `uri` to a fetchable URL. With a base URL (the source was a URL string), relative
  *  `.bin` paths resolve against it. Without one (ArrayBuffer/Blob source), only self-contained `data:`/
- *  absolute URIs are resolvable — a bare relative path has no base and throws a clear error. */
-function resolveBufferUri(uri: string, baseUrl: string): string {
+ *  absolute URIs are resolvable — a bare relative path has no base and throws a clear error.
+ *  @internal */
+export function resolveBufferUri(uri: string, baseUrl: string): string {
     if (baseUrl) {
         return new URL(uri, baseUrl + "x").href;
     }

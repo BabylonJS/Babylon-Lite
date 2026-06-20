@@ -1774,7 +1774,7 @@
         "id": 206,
         "slug": "scene206-floating-origin-cutout-billboards",
         "name": "Scene 206 - LWR Cutout Billboards",
-        "maxMad": 1.0,
+        "maxMad": 1,
         "maxRawKB": 65,
         "description": "Alpha-tested, depth-writing billboard cards at world (~5e6, *, ~5e6) with useFloatingOrigin=true - exercises the cutout billboard upload path that bakes the camera position into every anchor.",
         "tags": ["hpm", "lwr", "floating-origin", "sprites", "billboards", "depth"],
@@ -1937,7 +1937,7 @@
         "id": 223,
         "slug": "scene223-camera-light-gizmos",
         "name": "Scene 223 — Camera + Light Gizmos",
-        "maxMad": 2.0,
+        "maxMad": 2,
         "maxRawKB": 70,
         "description": "Display-only CameraGizmo + a LightGizmo for every supported light type (hemispheric, point, spot, directional) over a ground plane, rendered through a utility-layer overlay. Static scene — no scripted interaction.",
         "tags": ["std", "gizmo", "display"],
@@ -1996,5 +1996,115 @@
         "description": "Minimal glTF tutorial asset whose single triangle primitive omits `indices`. Verifies Lite expands non-indexed triangle primitives to identity indices before GPU upload so the existing indexed draw path remains fast and unchanged.",
         "tags": ["pbr", "gltf", "non-indexed"],
         "skipPerf": true
+    },
+    {
+        "id": 240,
+        "slug": "scene240-animated-triangle",
+        "name": "Scene 240 — AnimatedTriangle",
+        "maxMad": 1,
+        "description": "AnimatedTriangle.gltf — cx20 gltf-test. multi-buffer load fixed; parity WIP (material-less default-material IBL).",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 241,
+        "slug": "scene241-animation-pointer-uvs",
+        "name": "Scene 241 — AnimationPointerUVs",
+        "maxMad": 1,
+        "description": "AnimationPointerUVs.gltf — cx20 gltf-test. near-perfect (MAD ~1.0).",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 242,
+        "slug": "scene242-clearcoat-test",
+        "name": "Scene 242 — ClearCoatTest",
+        "maxMad": 1,
+        "description": "ClearCoatTest.gltf — cx20 gltf-test. renders clearcoat matrix correctly; brightness/IBL-reflection WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 243,
+        "slug": "scene243-emissive-fireflies",
+        "name": "Scene 243 — EmissiveFireflies",
+        "maxMad": 1,
+        "description": "EmissiveFireflies.gltf — cx20 gltf-test. renders; material-factor pointer parity WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 244,
+        "slug": "scene244-morph-stress-test",
+        "name": "Scene 244 — MorphStressTest",
+        "maxMad": 1,
+        "description": "MorphStressTest.gltf — cx20 gltf-test. morph renders; parity WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 245,
+        "slug": "scene245-pot-of-coals-animation-pointer",
+        "name": "Scene 245 — PotOfCoalsAnimationPointer",
+        "maxMad": 1,
+        "description": "PotOfCoalsAnimationPointer.gltf — cx20 gltf-test. renders; parity WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 246,
+        "slug": "scene246-recursive-skeletons",
+        "name": "Scene 246 — RecursiveSkeletons",
+        "maxMad": 1,
+        "description": "RecursiveSkeletons.gltf — cx20 gltf-test. recursive skeletons render; parity WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 247,
+        "slug": "scene247-simple-skin",
+        "name": "Scene 247 — SimpleSkin",
+        "maxMad": 1,
+        "description": "SimpleSkin.gltf — cx20 gltf-test. multi-buffer load fixed; skinned material-less renders black (skinned-normals IBL) WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 248,
+        "slug": "scene248-teapots-galore",
+        "name": "Scene 248 — TeapotsGalore",
+        "maxMad": 1,
+        "description": "TeapotsGalore.gltf — cx20 gltf-test. gpu instancing renders; parity WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 249,
+        "slug": "scene249-texture-settings-test",
+        "name": "Scene 249 — TextureSettingsTest",
+        "maxMad": 1,
+        "description": "TextureSettingsTest.gltf — cx20 gltf-test. renders; Lite ignores glTF sampler wrap modes (clamp/mirror) WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
+    },
+    {
+        "id": 250,
+        "slug": "scene250-vertex-color-alpha-clip-test",
+        "name": "Scene 250 — VertexColorAlphaClipTest",
+        "maxMad": 1,
+        "description": "VertexColorAlphaClipTest.gltf — cx20 gltf-test. renders; vertex-color alpha-clip parity WIP.",
+        "tags": ["gltf"],
+        "skipPerf": true,
+        "skipParity": true
     }
 ]
