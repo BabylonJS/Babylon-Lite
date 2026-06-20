@@ -16,6 +16,8 @@ export interface PointerUvTexture {
     vScale?: number;
     uOffset?: number;
     vOffset?: number;
+    /** KHR_texture_transform rotation (radians) — drives the UV matrix's rotation. */
+    uAng?: number;
 }
 
 /** Minimal mutable view of a runtime material a pointer can animate. Bumping
@@ -90,18 +92,29 @@ const _registry: [RegExp, PointerFactory][] = [
             };
         },
     ],
-    // /materials/{m}/.../KHR_texture_transform/{offset|scale} — animated UV scroll
-    // (vec2). Mutates the slot texture's uOffset/vOffset (or uScale/vScale) and
-    // bumps the material's UBO version so the renderable re-uploads the UV matrix.
+    // /materials/{m}/.../KHR_texture_transform/{offset|scale|rotation} — animated UV
+    // transform. offset/scale are vec2; rotation is a scalar (radians). Mutates the
+    // slot texture's uOffset/vOffset, uScale/vScale, or uAng and bumps the material's
+    // UBO version so the renderable re-uploads the UV matrix.
     [
-        /^\/materials\/(\d+)\/(pbrMetallicRoughness\/baseColorTexture|pbrMetallicRoughness\/metallicRoughnessTexture|emissiveTexture|normalTexture|occlusionTexture)\/extensions\/KHR_texture_transform\/(offset|scale)$/,
+        /^\/materials\/(\d+)\/(pbrMetallicRoughness\/baseColorTexture|pbrMetallicRoughness\/metallicRoughnessTexture|emissiveTexture|normalTexture|occlusionTexture)\/extensions\/KHR_texture_transform\/(offset|scale|rotation)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
             const tex = mat?.[TX_SLOT[m[2]!]!] as PointerUvTexture | undefined;
             if (!mat || !tex) {
                 return null;
             }
-            const isScale = m[3] === "scale";
+            const kind = m[3];
+            if (kind === "rotation") {
+                return {
+                    arity: 1,
+                    writer: (out, off) => {
+                        tex.uAng = out[off]!;
+                        mat._uboVersion++;
+                    },
+                };
+            }
+            const isScale = kind === "scale";
             return {
                 arity: 2,
                 writer: (out, off) => {
