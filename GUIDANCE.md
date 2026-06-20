@@ -177,6 +177,19 @@ When a parity diff exists on specific meshes:
 5. **Compare shaders** — extract the fragment shader from both captures and diff the key statements (lighting equation, reflection computation, alpha handling).
 6. **Fix and verify** — make the fix, re-run the isolated scene to confirm the specific mesh now matches, then run the full parity test.
 
+### 1c. glTF Loader Parity Root-Causes (Recurring)
+
+Hard-won gotchas that have each caused multiple parity failures. Check these first when a glTF scene renders black, garbled, exploded, or mis-coloured:
+
+- **Interleaved vertex attributes must honor `bufferView.byteStride`.** `resolveAccessor` reads a _tight_ typed-array view and ignores stride. Any feature that calls it on a strided source reads padding / a neighbouring attribute and corrupts the result. Each attribute family needs its own de-stride: skinned rigs interleave `JOINTS_0`/`WEIGHTS_0` (mis-read → exploded or mis-posed mesh — see `gltf-feature-skeleton.ts`); `COLOR_0` is often interleaved _and_ normalized `UNSIGNED_BYTE`/VEC4 (mis-read → rainbow garbage — see `resolveColorVec3` in `gltf-interleave.ts`). The tight path de-strides via `gltf-interleave.ts`; mirror its handling for any new attribute consumer.
+- **A primitive without `NORMAL` needs generated normals on _every_ path.** The tight loader calls `computeSmoothNormals`; the interleaved path previously zero-filled, yielding `normalize(0)` = NaN → pure-black lit fragments (material-less skinned meshes hit this). Always synthesize normals, never zero-fill.
+- **`KHR_animation_pointer` material-factor targets need their UBO slot to pre-exist.** Material flags (e.g. `PBR2_HAS_BASE_COLOR_FACTOR`, `PBR_HAS_EMISSIVE_COLOR`) are computed at first render from `!!mat.field`. Seed the animated field during load (before first render) or the pointer animates nothing. `emissiveColor` is stored pre-multiplied (`factor × strength`); keep factor and strength separate so either pointer can recombine.
+
+### 1d. Parity-Harness Gotcha — BJS Loading Overlay (Mandatory)
+
+`page.locator("canvas").screenshot()` captures whatever HTML composites over the canvas box, **including Babylon's `babylonjsLoadingDiv` spinner**. A still-fading overlay darkens the whole frame by a scene-dependent amount and silently inflates MAD (worst on heavy scenes). In BJS reference scenes that import `@babylonjs/core/Loading/loadingScreen` (a required side-effect for some assets), no-op the overlay right after engine init: `engine.displayLoadingUI = function () {};`. For IBL-only test scenes, render the **same flat `clearColor` in both engines** (a buffer clear is pixel-identical across BJS/Lite, unlike a skybox whose projected geometry diverges at arbitrary framings) so the full-image compare passes with no background masking.
+
+
 ### 2. Iterative Scene-Based Evolution
 
 - Engine is built progressively, one reference scene at a time.

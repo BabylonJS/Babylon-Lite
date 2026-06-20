@@ -317,6 +317,20 @@ Design constraints:
   paths (Draco, `KHR_texture_basisu` de-stride) bypass it.
 - Validated by Scene 210 (`XmpMetadataRoundedCube`, genuinely interleaved).
 
+Per-attribute correctness (each was a real parity bug — Scenes 246/247):
+
+- **`COLOR_0`** cannot be GPU-strided directly: glTF permits VEC4 and/or normalized
+  `UNSIGNED_BYTE`/`SHORT`, but the pipeline binds a single `float32x3` layout. Binding
+  a ubyte/VEC4 source as `float32x3` reads adjacent bytes as floats (rainbow garbage).
+  `resolveColorVec3` always de-strides + normalizes COLOR_0 to a tight `float32x3`.
+- **Absent `NORMAL`** must be synthesized, never zero-filled — a zero normal yields
+  `normalize(0)` = NaN → pure-black lit fragments. `buildInterleavedPartial` calls the
+  caller-supplied `computeSmoothNormals` (lazily imported only when NORMAL is missing).
+- **`JOINTS_0`/`WEIGHTS_0`** are read by `gltf-feature-skeleton.ts`, not this module,
+  via `resolveAccessor` — which assumes tight packing. Skinned rigs that interleave
+  them with a `byteStride` are de-strided there (`resolveAttr`), or half the joint
+  indices/weights come from padding → exploded / mis-posed mesh.
+
 ### `EXT_meshopt_compression` + `KHR_mesh_quantization` (`gltf-feature-meshopt.ts`, `gltf-ext-quantization.ts`)
 
 `EXT_meshopt_compression` bufferViews are decoded by a dynamically-imported meshopt
