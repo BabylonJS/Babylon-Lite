@@ -11,17 +11,15 @@ async function main(): Promise<void> {
     const root = await loadGltf(engine, "https://cx20.github.io/gltf-test/tutorialModels/VertexColorAlphaClipTest/glTF/VertexColorAlphaClipTest.gltf");
     addToScene(scene, root);
 
+    scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
+    await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", { skipSkybox: true, skipGround: true, brdfUrl: "/brdf-lut.png" });
+
     const cam = createArcRotateCamera(1.5707963, 1.5707963, 28.22, { x: 0, y: 0.728, z: 0 });
     cam.fov = 0.8;
     cam.nearPlane = 28.22 * 0.01;
     cam.farPlane = 28.22 * 1000;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
-
-    await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", { skipSkybox: true, skipGround: true, brdfUrl: "/brdf-lut.png" });
-    scene.imageProcessing.toneMappingEnabled = false;
-    scene.imageProcessing.exposure = 1;
-    scene.imageProcessing.contrast = 1;
 
 
     await registerScene(scene);

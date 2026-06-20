@@ -1,4 +1,6 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
+import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import "@babylonjs/core/Helpers/sceneHelpers";
@@ -12,15 +14,17 @@ import "@babylonjs/loaders/glTF";
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
+    engine.displayLoadingUI = function () {};
 
     const scene = new Scene(engine);
 
     await SceneLoader.AppendAsync("", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/SimpleSkin/glTF/SimpleSkin.gltf", scene);
 
-    scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
-    scene.imageProcessingConfiguration.toneMappingEnabled = false;
-    scene.imageProcessingConfiguration.exposure = 1.0;
-    scene.imageProcessingConfiguration.contrast = 1.0;
+    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
+    const envTex = await new Promise<CubeTexture>((resolve) => {
+        const tex = new CubeTexture("https://assets.babylonjs.com/environments/environmentSpecular.env", scene, null, false, null, function onLoad() { resolve(tex); }, null, undefined, true);
+    });
+    scene.environmentTexture = envTex;
 
     const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 3.35, new Vector3(0, 1, 0), scene);
     camera.fov = 0.8;
