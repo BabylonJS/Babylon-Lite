@@ -10,6 +10,8 @@ export const MSH_HAS_VERTEX_COLOR = 1 << 6;
 export const MSH_HAS_UV2 = 1 << 7;
 export const MSH_RECEIVE_SHADOWS = 1 << 8;
 export const MSH_VAT = 1 << 9;
+/** Mesh has no NORMAL attribute → must be flat-shaded (glTF spec). */
+export const MSH_FLAT_NORMAL = 1 << 10;
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
@@ -45,6 +47,9 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     }
     if (gpu.uv2Buffer) {
         features |= MSH_HAS_UV2;
+    }
+    if ((mesh as { _flatNormal?: boolean })._flatNormal) {
+        features |= MSH_FLAT_NORMAL;
     }
     if (receiveShadows) {
         features |= MSH_RECEIVE_SHADOWS;

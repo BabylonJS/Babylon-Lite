@@ -265,6 +265,9 @@ export function buildInterleavedPartial(
         uvs = new F32(vertexCount * 2);
     }
 
+    // No NORMAL attribute (neither tight nor strided) → flat-shade per the glTF spec.
+    const flatNormal = !nrm._tight && !vb._n;
+
     return {
         _positions: positions,
         _normals: normals,
@@ -272,6 +275,7 @@ export function buildInterleavedPartial(
         _uvs: uvs,
         _uv2s: uv2s,
         _colors: colors,
+        _flatNormal: flatNormal,
         _indices: indices,
         _vertexCount: vertexCount,
         _indexCount: indices.length,
@@ -335,6 +339,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         skeleton: null,
         morphTargets: null,
         _gpu: gpu,
+        _flatNormal: m._flatNormal,
     } as unknown as Mesh;
     initMeshTransform(mesh);
 

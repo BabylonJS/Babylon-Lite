@@ -41,6 +41,7 @@ import {
     MSH_HAS_INSTANCE_COLOR,
     MSH_HAS_VERTEX_COLOR,
     MSH_HAS_UV2,
+    MSH_FLAT_NORMAL,
 } from "../mesh-features.js";
 
 interface PbrComposerDeps {
@@ -57,6 +58,9 @@ interface PbrComposerDeps {
     readonly _createPbrTemplateExt: typeof import("./pbr-template-ext.js").createPbrTemplateExt | null;
     readonly _anisoExt: typeof import("./fragments/anisotropy-fragment.js") | null;
     readonly _iblSkyboxCalc: string;
+    /** Flat-normal WGSL (face normal from derivatives), dynamically loaded by pbr-renderable only
+     *  when a no-NORMAL mesh is present; "" otherwise so normal-having scenes bundle zero bytes. */
+    readonly _flatNormalWgsl: string;
     readonly _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null;
     readonly _shadowLights: readonly { readonly lightIndex: number; readonly shadowType: import("./fragments/pbr-shadow-fragment.js").PbrShadowLightSlot["shadowType"] }[];
     readonly _createThinInstanceFragment: ((hasColor: boolean) => ShaderFragment) | null;
@@ -90,6 +94,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
+        _flatNormalWgsl,
         _createPbrShadowFragment,
         _shadowLights,
         _createThinInstanceFragment,
@@ -153,6 +158,8 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _multiLightWGSL,
             _multiLightLoop,
             _normalMode: hasNormal ? "tangent" : hasCotangent ? "cotangent" : "none",
+            _flatGeometricNormal: !_hasAnyNormal && hasMesh(MSH_FLAT_NORMAL),
+            _flatNormalWgsl,
             _hasEmissiveTexture,
             _hasSpecGloss: has(PBR_HAS_SPEC_GLOSS),
             _hasDoubleSided: has(PBR_HAS_DOUBLE_SIDED),

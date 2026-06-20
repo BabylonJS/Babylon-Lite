@@ -46,6 +46,8 @@ export interface GltfMeshData {
     _uv2s: Float32Array | null;
     /** @internal */
     _colors: Float32Array | null;
+    /** @internal Primitive had no NORMAL attribute → flat-shade (glTF spec). */
+    _flatNormal?: boolean;
     /** @internal */
     _indices: Uint16Array | Uint32Array;
     /** @internal */
@@ -458,6 +460,7 @@ async function extractAllMeshes(
                 _uvs: uvData ? (uvData._data as Float32Array) : new F32(posData._count * 2),
                 _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
                 _colors: colors,
+                _flatNormal: !normData,
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: indices.length,
@@ -615,6 +618,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     skeleton: null,
                     morphTargets: null,
                     _gpu: gpu,
+                    _flatNormal: m._flatNormal,
                 } as unknown as Mesh;
                 initMeshTransform(mesh);
 
