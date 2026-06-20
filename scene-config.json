@@ -2001,7 +2001,7 @@
         "id": 240,
         "slug": "scene240-animated-triangle",
         "name": "Scene 240 — AnimatedTriangle",
-        "maxMad": 4,
+        "maxMad": 0.2,
         "description": "AnimatedTriangle.gltf — cx20 gltf-test. Node-rotation animation; material-less no-NORMAL mesh (smooth normals).",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2010,7 +2010,7 @@
         "id": 241,
         "slug": "scene241-animation-pointer-uvs",
         "name": "Scene 241 — AnimationPointerUVs",
-        "maxMad": 4,
+        "maxMad": 1.3,
         "description": "AnimationPointerUVs.gltf — cx20 gltf-test. KHR_animation_pointer UV-transform across 82 materials.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2019,7 +2019,7 @@
         "id": 242,
         "slug": "scene242-clearcoat-test",
         "name": "Scene 242 — ClearCoatTest",
-        "maxMad": 4,
+        "maxMad": 0.2,
         "description": "ClearCoatTest.gltf — cx20 gltf-test. KHR_materials_clearcoat.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2028,7 +2028,7 @@
         "id": 243,
         "slug": "scene243-emissive-fireflies",
         "name": "Scene 243 — EmissiveFireflies",
-        "maxMad": 3,
+        "maxMad": 0.2,
         "description": "EmissiveFireflies.gltf — cx20 gltf-test. KHR_animation_pointer material emissiveFactor/emissiveStrength/baseColorFactor.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2037,7 +2037,7 @@
         "id": 244,
         "slug": "scene244-morph-stress-test",
         "name": "Scene 244 — MorphStressTest",
-        "maxMad": 3,
+        "maxMad": 0.2,
         "description": "MorphStressTest.gltf — cx20 gltf-test. Morph-target weight animation.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2046,7 +2046,7 @@
         "id": 245,
         "slug": "scene245-pot-of-coals-animation-pointer",
         "name": "Scene 245 — PotOfCoalsAnimationPointer",
-        "maxMad": 3,
+        "maxMad": 0.2,
         "description": "PotOfCoalsAnimationPointer.gltf — cx20 gltf-test. KHR_animation_pointer texture-transform rotation.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2055,7 +2055,7 @@
         "id": 246,
         "slug": "scene246-recursive-skeletons",
         "name": "Scene 246 — RecursiveSkeletons",
-        "maxMad": 6,
+        "maxMad": 0.2,
         "description": "RecursiveSkeletons.gltf — cx20 gltf-test. Deep recursive skeletons; interleaved JOINTS/WEIGHTS/COLOR_0.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2064,7 +2064,7 @@
         "id": 247,
         "slug": "scene247-simple-skin",
         "name": "Scene 247 — SimpleSkin",
-        "maxMad": 6,
+        "maxMad": 0.2,
         "description": "SimpleSkin.gltf — cx20 gltf-test. Material-less skinned mesh; interleaved JOINTS/WEIGHTS, no-NORMAL smooth normals.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2073,7 +2073,7 @@
         "id": 248,
         "slug": "scene248-teapots-galore",
         "name": "Scene 248 — TeapotsGalore",
-        "maxMad": 4,
+        "maxMad": 0.4,
         "description": "TeapotsGalore.gltf — cx20 gltf-test. EXT_mesh_gpu_instancing, top-down view.",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2082,7 +2082,7 @@
         "id": 249,
         "slug": "scene249-texture-settings-test",
         "name": "Scene 249 — TextureSettingsTest",
-        "maxMad": 6,
+        "maxMad": 0.2,
         "description": "TextureSettingsTest.gltf — cx20 gltf-test. glTF sampler wrap/filter modes (clamp/mirror/repeat).",
         "tags": ["gltf"],
         "skipPerf": true
@@ -2091,7 +2091,7 @@
         "id": 250,
         "slug": "scene250-vertex-color-alpha-clip-test",
         "name": "Scene 250 — VertexColorAlphaClipTest",
-        "maxMad": 3,
+        "maxMad": 0.2,
         "description": "VertexColorAlphaClipTest.gltf — cx20 gltf-test. Vertex-color alpha with alpha-clip.",
         "tags": ["gltf"],
         "skipPerf": true
