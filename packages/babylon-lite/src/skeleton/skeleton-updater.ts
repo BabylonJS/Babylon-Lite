@@ -81,7 +81,7 @@ export function createAnimationController(
     morphBindings: readonly MorphBinding[],
     nodeTargets?: readonly (AnimatedNodeTarget | undefined)[],
     excludedNodeIndices?: ReadonlySet<number>,
-    boneOverrides?: ReadonlyMap<number, BoneOverride>
+    boneOverrides?: ReadonlyMap<number, unknown>
 ): AnimationController {
     const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
@@ -198,7 +198,7 @@ export function createAnimationController(
                       // Routed through a null hook so the apply code stays in the opt-in
                       // bone-control chunk — bone-control-free bundles pay one branch.
                       if (boneOverrides !== undefined && boneOverrides.size > 0) {
-                          _boneApplier?.(boneOverrides, currentTRS, numNodes);
+                          _boneApplier?.(boneOverrides as ReadonlyMap<number, BoneOverride>, currentTRS, numNodes);
                       }
 
                       // 2. Evaluate animation channels → override TRS

@@ -13,9 +13,27 @@ import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
  * @returns A new `{ x, y, z, w }` quaternion.
  */
 export function quatFromLookDirectionRH(forward: Vec3, up: Vec3): Quat {
-    // right = up × forward. Rotation matrix columns are (right, up, forward).
-    const rx = up.y * forward.z - up.z * forward.y;
-    const ry = up.z * forward.x - up.x * forward.z;
-    const rz = up.x * forward.y - up.y * forward.x;
-    return _quatFromRotationBasis(rx, up.x, forward.x, ry, up.y, forward.y, rz, up.z, forward.z);
+    // Orthonormalize the basis so the result is a pure rotation even if the inputs
+    // are non-unit or slightly non-orthogonal. For valid (unit, orthogonal) inputs
+    // this is a no-op and matches Babylon.js exactly.
+    let fx = forward.x,
+        fy = forward.y,
+        fz = forward.z;
+    const fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl;
+    fy /= fl;
+    fz /= fl;
+    // right = up × forward (normalized)
+    let rx = up.y * fz - up.z * fy;
+    let ry = up.z * fx - up.x * fz;
+    let rz = up.x * fy - up.y * fx;
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    rx /= rl;
+    ry /= rl;
+    rz /= rl;
+    // up = forward × right (orthonormal by construction). Matrix columns are (right, up, forward).
+    const ux = fy * rz - fz * ry;
+    const uy = fz * rx - fx * rz;
+    const uz = fx * ry - fy * rx;
+    return _quatFromRotationBasis(rx, ux, fx, ry, uy, fy, rz, uz, fz);
 }
