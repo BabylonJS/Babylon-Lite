@@ -240,6 +240,10 @@ export interface SheenProps {
     intensity?: number;
     /** Optional sheen tint texture (modulates sheen color). Loaded via loadTexture2D(). */
     texture?: Texture2D;
+    /** Optional separate sheen roughness texture (KHR_materials_sheen sheenRoughnessTexture).
+     *  When present, sheen roughness is read from this texture's A channel at its own UV
+     *  (with its own KHR_texture_transform, animatable) instead of the color texture's A. */
+    roughnessTexture?: Texture2D;
     /** When true (recommended for glTF), applies proper sheen albedo scaling
      *  on the base layer and treats the sheen texture as already-linear (no pow).
      *  When false (default, legacy), applies pow(rgb, 2.2) to the sheen texture

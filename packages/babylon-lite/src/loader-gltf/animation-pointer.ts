@@ -104,8 +104,11 @@ function resolveExtTexture(mat: PointerMaterial, ext: string, field: string): Po
         case "KHR_materials_anisotropy/anisotropyTexture":
             return privateTexture(m.anisotropy, "texture");
         case "KHR_materials_sheen/sheenColorTexture":
-        case "KHR_materials_sheen/sheenRoughnessTexture":
             return privateTexture(m.sheen, "texture");
+        case "KHR_materials_sheen/sheenRoughnessTexture":
+            // Drive the separate roughness texture when present; otherwise roughness shares
+            // the colour texture (.a), so fall back to animating that single sheen texture.
+            return privateTexture(m.sheen, (m.sheen as { roughnessTexture?: unknown })?.roughnessTexture ? "roughnessTexture" : "texture");
         case "KHR_materials_clearcoat/clearcoatTexture":
             return privateTexture(m.clearCoat, "texture");
         case "KHR_materials_clearcoat/clearcoatRoughnessTexture":
