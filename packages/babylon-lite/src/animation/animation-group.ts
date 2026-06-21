@@ -3,6 +3,7 @@
 
 import type { EngineContext } from "../engine/engine.js";
 import type { AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
+import type { AnimationGroupMask } from "./animation-group-mask.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
@@ -41,6 +42,12 @@ export interface AnimationGroup {
     loopAnimation: boolean;
     /** Weighted contribution used by AnimationManager mixing (default 1). */
     weight: number;
+    /** Optional include/exclude target-name mask. When set, only targets the mask retains
+     *  animate; masked-out targets stay at their bind/rest pose. Matched by glTF node /
+     *  bone name. See {@link createAnimationGroupMask}. To update an active mask, change
+     *  its `mode`/`disabled`, replace its `names` array, or reassign `group.mask`;
+     *  in-place same-length edits of `names` are not picked up. */
+    mask?: AnimationGroupMask;
     /** @internal Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
@@ -99,12 +106,13 @@ function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationControlle
     ctrl.playing = group.isPlaying;
     ctrl.speedRatio = group.speedRatio;
     ctrl.loop = group.loopAnimation;
+    ctrl._setMask?.(group.mask ?? null);
 }
 
 /** Create AnimationGroup(s) from parsed glTF animation data.
  *  Returns one group per animation clip. */
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[] {
-    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides } = animData;
+    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames, boneOverrides } = animData;
     const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
     const hasNodeWriteback = clips.some((c) =>
         c.channels.some(
@@ -120,7 +128,7 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
     }
 
     return clips.map((clip, clipIndex) => {
-        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides);
+        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,

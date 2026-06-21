@@ -175,9 +175,34 @@ export interface AnimationGroup {
     speedRatio: number;                    // default 1
     loopAnimation: boolean;               // default true
     weight: number;                        // default 1
+    mask?: AnimationGroupMask;             // optional include/exclude target-name filter
     _stopped: boolean;
     readonly _ctrl?: AnimationController;
 }
+```
+
+### AnimationGroupMask
+
+An optional include/exclude filter attached to a group via `group.mask`. When set, only the
+targets the mask **retains** animate; masked-out targets stay at their bind/rest pose (matching
+Babylon.js, which pauses those targets). Targets are matched by glTF node / bone **name** (exact,
+case-sensitive). Fully opt-in: the first call to `createAnimationGroupMask` is what activates the
+controller's masking path, so animated scenes that never create a mask pay zero bundle bytes.
+
+```typescript
+export enum AnimationGroupMaskMode {
+    Include = 0, // only the listed names animate
+    Exclude = 1, // all but the listed names animate
+}
+
+export interface AnimationGroupMask {
+    mode: AnimationGroupMaskMode;
+    names: string[];      // target (node/bone) names
+    disabled: boolean;    // when true the mask is ignored (everything animates)
+}
+
+export function createAnimationGroupMask(names?: string[], mode?: AnimationGroupMaskMode): AnimationGroupMask;
+export function animationGroupMaskRetainsTarget(mask: AnimationGroupMask, name: string): boolean;
 ```
 
 ### Functions
@@ -185,6 +210,8 @@ export interface AnimationGroup {
 ```typescript
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[];
 export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineContext): void;
+export function createAnimationGroupMask(names?: string[], mode?: AnimationGroupMaskMode): AnimationGroupMask;
+export function animationGroupMaskRetainsTarget(mask: AnimationGroupMask, name: string): boolean;
 export function createAnimationManager(options?: AnimationManagerOptions): AnimationManager;
 export function createAnimationTask(update: AnimationTaskUpdate, options?: AnimationTaskOptions): AnimationTask;
 export function addAnimationTask(manager: AnimationManager, task: AnimationTask): void;
@@ -377,6 +404,20 @@ setAnimationWeight(sadPose, 0.35);
 enableAnimationBlending(manager);
 ```
 
+Mask out part of a skeleton (only the retained targets animate; the rest hold their bind pose):
+
+```typescript
+const walk = xbot.animationGroups!.find((group) => group.name === "walk")!;
+
+// Exclude the legs → the hips, spine, and arms walk while the legs stay at bind pose.
+walk.mask = createAnimationGroupMask(
+    ["mixamorig:LeftUpLeg", "mixamorig:LeftLeg", "mixamorig:LeftFoot", "mixamorig:RightUpLeg", "mixamorig:RightLeg", "mixamorig:RightFoot"],
+    AnimationGroupMaskMode.Exclude
+);
+playAnimation(walk);
+// Include mode instead lists the only targets that should animate.
+```
+
 ### AnimationGroup Creation
 
 `createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. All groups auto-play by default (matching BJS behavior).
@@ -453,6 +494,8 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `AnimationGroup.loopAnimation` | `group.loopAnimation` |
 | `AnimationGroup.weight` / `setWeightForAllAnimatables()` | `setAnimationWeight(group, weight)`; call `enableAnimationBlending(manager)` for weighted glTF skeleton clips |
 | `AnimationGroup.MakeAnimationAdditive(group, frame)` | `setAnimationAdditive(group, { referenceFrame: frame })` |
+| `AnimationGroup.mask = new AnimationGroupMask(names, mode)` | `group.mask = createAnimationGroupMask(names, mode)` |
+| `AnimationGroupMask` / `AnimationGroupMaskMode` / `mask.retainsTarget(name)` | `AnimationGroupMask` / `AnimationGroupMaskMode` / `animationGroupMaskRetainsTarget(mask, name)` |
 | manual property weighted blending | `enablePropertyAnimationBlending(manager)` + `setAnimationWeight(group, weight)` |
 | manual weight ramp / blending speed | `fadeAnimationWeight(manager, group, { to, durationMs })` |
 | manual cross-fade | `crossFadeAnimationGroups(manager, from, to, { durationMs })` |
@@ -499,6 +542,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `types.ts` | All animation data types, interpolation/path constants, GPU-attached data interfaces |
 | `evaluate.ts` | Keyframe interpolation engine (LINEAR, STEP, CUBICSPLINE); binary search; zero-allocation |
 | `animation-group.ts` | User-facing AnimationGroup factory; wraps AnimationController per clip |
+| `animation-group-mask.ts` | Opt-in include/exclude target-name mask (`AnimationGroupMask`); installs the controller's mask resolver on first use |
 | `animation-manager.ts` | Generic animation task scheduler; no 2D, 3D, glTF, or property-animation runtime imports |
 | `animation-group-task.ts` | AnimationGroup-to-AnimationTask adapter, owner tracking, and `getAnimationGroups()` lookup |
 | `property-animation.ts` | Manual property animation clip builder and property path binding |

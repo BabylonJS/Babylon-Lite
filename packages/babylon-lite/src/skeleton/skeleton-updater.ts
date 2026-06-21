@@ -5,6 +5,7 @@ import { F32, I32, U8 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { AnimationClip, NodeRest, SkeletonBinding, AnimatedNodeTarget } from "../animation/types.js";
 import type { MorphBinding } from "../animation/types.js";
+import type { AnimationGroupMask } from "../animation/animation-group-mask.js";
 import { PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE, PATH_WEIGHTS, PATH_POINTER } from "../animation/types.js";
 import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
@@ -15,6 +16,16 @@ import { _boneApplier } from "./bone-control-hooks.js";
 
 // Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
 const _boneTmp = new F32(16);
+
+/** Resolver that maps an {@link AnimationGroupMask} to per-node skip flags. Installed by
+ *  `createAnimationGroupMask` (animation-group-mask.ts) on first use; stays null otherwise
+ *  so the controller's masking branch tree-shakes for scenes that never mask. */
+type AnimationMaskResolver = (mask: AnimationGroupMask, nodeNames: readonly (string | undefined)[], out: Uint8Array, numNodes: number) => void;
+let _maskResolver: AnimationMaskResolver | null = null;
+/** @internal Install the animation-mask resolver (called by `createAnimationGroupMask`). */
+export function _installAnimationMaskResolver(resolver: AnimationMaskResolver): void {
+    _maskResolver = resolver;
+}
 
 // RH→LH root transform (same as load-gltf.ts): diag(-1, 1, 1, 1)
 // prettier-ignore
@@ -64,6 +75,9 @@ export interface AnimationController {
     speedRatio: number;
     /** Whether animation loops (default true). */
     loop: boolean;
+    /** @internal Apply an include/exclude target-name mask (or null to clear). Resolves the
+     *  mask's names to the node indices whose channels should be skipped this playback. */
+    _setMask?(mask: AnimationGroupMask | null): void;
     /** @internal Debug: node world matrices (numNodes × 16 floats, column-major). */
     readonly _debugWorldMat?: Float32Array;
     /** @internal Debug: node names. */
@@ -95,6 +109,19 @@ export function createAnimationController(
     excludedNodeIndices: ReadonlySet<number> | undefined,
     boneOverrides: ReadonlyMap<number, unknown> | undefined
 ): AnimationController;
+// Further overload adding the optional animation-mask node names. A separate overload (not
+// an appended param on the bone-control overload above) so that overload's API-report lines
+// stay byte-identical — see report-api-changes.ts.
+export function createAnimationController(
+    clip: AnimationClip,
+    nodes: readonly NodeRest[],
+    skeletons: readonly SkeletonBinding[],
+    morphBindings: readonly MorphBinding[],
+    nodeTargets: readonly (AnimatedNodeTarget | undefined)[] | undefined,
+    excludedNodeIndices: ReadonlySet<number> | undefined,
+    boneOverrides: ReadonlyMap<number, unknown> | undefined,
+    nodeNames?: readonly (string | undefined)[]
+): AnimationController;
 export function createAnimationController(
     clip: AnimationClip,
     nodes: readonly NodeRest[],
@@ -102,7 +129,8 @@ export function createAnimationController(
     morphBindings: readonly MorphBinding[],
     nodeTargets?: readonly (AnimatedNodeTarget | undefined)[],
     excludedNodeIndices?: ReadonlySet<number>,
-    boneOverrides?: ReadonlyMap<number, unknown>
+    boneOverrides?: ReadonlyMap<number, unknown>,
+    nodeNames?: readonly (string | undefined)[]
 ): AnimationController {
     const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
@@ -163,11 +191,48 @@ export function createAnimationController(
 
     let cachedEngine: EngineContext | undefined;
 
+    // ── Animation mask (include/exclude targets by name) ──────────────────────────
+    // `maskedNodes[i] = 1` marks node i's channels to be skipped this playback, so the
+    // node keeps its rest-pose TRS (matching Babylon.js, which pauses masked targets).
+    // The resolver is installed only when a scene creates a mask (createAnimationGroupMask),
+    // so unmasked scenes keep `_maskResolver` null and this whole branch tree-shakes.
+    // `maskedNodes` is allocated lazily on first real mask use — zero cost otherwise.
+    let maskedNodes: Uint8Array | null = null;
+    let maskActive = false;
+    let cMask: AnimationGroupMask | null = null;
+    let cNames: readonly string[] | null = null;
+    let cLen = -1;
+    let cMode = -1;
+    let cDisabled = false;
+
+    const _setMask = (mask: AnimationGroupMask | null): void => {
+        if (!mask || mask.disabled || !nodeNames || !_maskResolver) {
+            maskActive = false;
+            return;
+        }
+        const names = mask.names;
+        if (mask === cMask && names === cNames && names.length === cLen && mask.mode === cMode && mask.disabled === cDisabled) {
+            maskActive = true;
+            return;
+        }
+        cMask = mask;
+        cNames = names;
+        cLen = names.length;
+        cMode = mask.mode;
+        cDisabled = mask.disabled;
+        if (!maskedNodes) {
+            maskedNodes = new U8(numNodes);
+        }
+        _maskResolver(mask, nodeNames, maskedNodes, numNodes);
+        maskActive = true;
+    };
+
     const ctrl: AnimationController = {
         time: 0,
         playing: true,
         speedRatio: 1,
         loop: true,
+        _setMask,
         _debugWorldMat: worldMat,
 
         tick:
@@ -225,6 +290,13 @@ export function createAnimationController(
                       // 2. Evaluate animation channels → override TRS
                       for (let channelIndex = 0; channelIndex < clip.channels.length; channelIndex++) {
                           const ch = clip.channels[channelIndex]!;
+                          // Skip channels whose target node is masked out — the node keeps its
+                          // rest-pose TRS from step 1 (matches Babylon.js pausing masked targets).
+                          // Gated on `_maskResolver` so the entire branch (and `maskActive` /
+                          // `maskedNodes`) folds away for bundles that never create a mask.
+                          if (_maskResolver !== null && maskActive && ch.nodeIdx >= 0 && maskedNodes![ch.nodeIdx]) {
+                              continue;
+                          }
                           const sampler = clip.samplers[ch.samplerIdx]!;
                           const base = ch.nodeIdx * TRS_STRIDE;
                           switch (ch.path) {

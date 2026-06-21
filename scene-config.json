@@ -2096,5 +2096,15 @@
         "description": "VertexColorAlphaClipTest.gltf — cx20 gltf-test. Vertex-color alpha with alpha-clip.",
         "tags": ["gltf"],
         "skipPerf": true
+    },
+    {
+        "id": 251,
+        "slug": "scene251-animation-mask",
+        "name": "Scene 251 — Animation Mask (Xbot walk, frozen legs)",
+        "maxMad": 0.05,
+        "maxRawKB": 89,
+        "description": "Xbot 'walk' clip with an AnimationGroupMask (Exclude mode) listing the lower-body bones (legs + feet/toes). Everything animates except those, so the hips, spine, and arms walk while the legs hold their bind pose. Validates AnimationGroupMask include/exclude semantics against Babylon.js. Frozen at a deterministic frame.",
+        "tags": ["gltf", "skeleton", "animation", "animation-mask"],
+        "skipPerf": true
     }
 ]
