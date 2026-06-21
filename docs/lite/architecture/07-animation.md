@@ -186,7 +186,7 @@ export interface AnimationGroup {
 An optional include/exclude filter attached to a group via `group.mask`. When set, only the
 targets the mask **retains** animate; masked-out targets stay at their bind/rest pose (matching
 Babylon.js, which pauses those targets). Targets are matched by glTF node / bone **name** (exact,
-case-sensitive). Fully opt-in: importing `createAnimationGroupMask` is what activates the
+case-sensitive). Fully opt-in: the first call to `createAnimationGroupMask` is what activates the
 controller's masking path, so animated scenes that never create a mask pay zero bundle bytes.
 
 ```typescript

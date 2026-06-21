@@ -44,8 +44,9 @@ export interface AnimationGroup {
     weight: number;
     /** Optional include/exclude target-name mask. When set, only targets the mask retains
      *  animate; masked-out targets stay at their bind/rest pose. Matched by glTF node /
-     *  bone name. See {@link createAnimationGroupMask}. Re-assign (or replace) the mask to
-     *  apply changes. */
+     *  bone name. See {@link createAnimationGroupMask}. To update an active mask, change
+     *  its `mode`/`disabled`, replace its `names` array, or reassign `group.mask`;
+     *  in-place same-length edits of `names` are not picked up. */
     mask?: AnimationGroupMask;
     /** @internal Debug: internal animation controller. */
     readonly _ctrl?: AnimationController;

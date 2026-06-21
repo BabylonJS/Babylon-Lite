@@ -3,8 +3,8 @@
 // attached to an AnimationGroup (group.mask) and filters which targets animate.
 // Pure state — no methods; behaviour lives in standalone functions.
 //
-// Fully opt-in: importing `createAnimationGroupMask` installs the resolver the
-// animation controller uses to skip masked targets. Animated scenes that never
+// Fully opt-in: the first call to `createAnimationGroupMask` installs the resolver
+// the animation controller uses to skip masked targets. Animated scenes that never
 // create a mask don't pull this module, so the controller's masking branch folds
 // away — they stay byte-identical.
 
@@ -27,8 +27,13 @@ export enum AnimationGroupMaskMode {
  * and case-sensitive. Masked-out targets are left untouched and therefore stay at their
  * bind/rest pose (matching Babylon.js, which pauses those targets).
  *
- * Pure state: create with {@link createAnimationGroupMask}, mutate `names` / `mode` /
- * `disabled` directly, and read membership with {@link animationGroupMaskRetainsTarget}.
+ * Pure state: create with {@link createAnimationGroupMask} and read membership with
+ * {@link animationGroupMaskRetainsTarget}. To change an active mask, toggle `mode` or
+ * `disabled`, or replace the `names` array (assign a new array, or push/pop): the
+ * controller re-resolves whenever `mode`, `disabled`, the `names` array reference, or
+ * its length changes. Editing `names` in place at the same length (e.g. `names[0] = …`
+ * or reordering) is NOT detected — assign a new `names` array, or reassign `group.mask`,
+ * to apply such a change.
  */
 export interface AnimationGroupMask {
     /** How `names` is interpreted (Include vs Exclude). */
