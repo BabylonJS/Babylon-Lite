@@ -14,7 +14,7 @@ import type { BlockEmitter, NodeExpr } from "../node-types.js";
 import { NME_LIGHTING_HELPER_KEY, NME_LIGHTING_HELPER_WGSL } from "./_lighting-helper.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 
-const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(
     block: Parameters<BlockEmitter["emit"]>[0],

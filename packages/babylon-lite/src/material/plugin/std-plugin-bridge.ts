@@ -18,7 +18,7 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { StdExt } from "../standard/standard-flags.js";
 import type { StandardMaterialProps } from "../standard/standard-material.js";
-import { _computeStandardMaterialFeatures, standardGroupBuilder } from "../standard/standard-material.js";
+import { _computeStandardMaterialFeatures, getStandardGroupBuilder } from "../standard/standard-material.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
@@ -117,7 +117,7 @@ export function registerStdPlugins(meshes: readonly Mesh[], engine: EngineContex
     register(stdPluginExt);
     for (const m of meshes) {
         const mat = m.material as (StandardMaterialProps & { plugins?: MaterialPlugin[]; _renderFeatures?: { features: number }; _buildGroup?: unknown }) | null;
-        if (mat?.plugins?.length && mat._buildGroup === standardGroupBuilder) {
+        if (mat?.plugins?.length && mat._buildGroup === getStandardGroupBuilder()) {
             const idx = _indexFor(mat.plugins, engine);
             mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) | (idx << PLUGIN_INDEX_SHIFT) };
         }

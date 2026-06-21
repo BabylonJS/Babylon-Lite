@@ -20,57 +20,66 @@ const _STD_MAT_EXTS: ReadonlyArray<readonly [keyof StandardMaterialProps, () => 
     ["reflectionCubeTexture", () => import("./fragments/std-cube-reflection-fragment.js"), "stdCubeReflectionExt"],
 ];
 
-export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
-    const hasTI = meshes.some((m) => !!m.thinInstances);
-    const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
-    const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
+/** Lazily-created singleton standard-material {@link MeshGroupBuilder}. Lazy-init
+ *  keeps the module free of top-level side effects so a scene that uses no standard
+ *  material tree-shakes the builder (and its renderable graph) away. */
+let _standardGroupBuilder: MeshGroupBuilder | null = null;
+export function getStandardGroupBuilder(): MeshGroupBuilder {
+    if (_standardGroupBuilder) {
+        return _standardGroupBuilder;
+    }
+    const builder: MeshGroupBuilder = async (scene, meshes) => {
+        const hasTI = meshes.some((m) => !!m.thinInstances);
+        const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
+        const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
 
-    let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
-    let tiFragment: any;
-    let shadowFragment: any;
-    let cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
+        let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
+        let tiFragment: any;
+        let shadowFragment: any;
+        let cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
 
-    const imports: Promise<any>[] = [];
-    if (hasTI) {
-        imports.push(
-            import("../../mesh/thin-instance-gpu.js").then((m) => {
-                tiSync = m.syncThinInstanceBuffers;
-            }),
-            import("../../shader/fragments/thin-instance-fragment.js").then((m) => {
-                tiFragment = m.createThinInstanceFragment;
-            })
-        );
-        // GPU culling helper — fetched only when a thin-instance mesh opted in, so
-        // non-culling scenes never load it (and its compute-cull dependency chain).
-        if (hasCulling) {
+        const imports: Promise<any>[] = [];
+        if (hasTI) {
             imports.push(
-                import("../../mesh/thin-instance-cull-binding.js").then((m) => {
-                    cull = m;
+                import("../../mesh/thin-instance-gpu.js").then((m) => {
+                    tiSync = m.syncThinInstanceBuffers;
+                }),
+                import("../../shader/fragments/thin-instance-fragment.js").then((m) => {
+                    tiFragment = m.createThinInstanceFragment;
+                })
+            );
+            // GPU culling helper — fetched only when a thin-instance mesh opted in, so
+            // non-culling scenes never load it (and its compute-cull dependency chain).
+            if (hasCulling) {
+                imports.push(
+                    import("../../mesh/thin-instance-cull-binding.js").then((m) => {
+                        cull = m;
+                    })
+                );
+            }
+        }
+        if (hasShadow) {
+            imports.push(
+                import("./fragments/std-shadow-fragment.js").then((m) => {
+                    shadowFragment = m.createStdShadowFragment;
                 })
             );
         }
-    }
-    if (hasShadow) {
-        imports.push(
-            import("./fragments/std-shadow-fragment.js").then((m) => {
-                shadowFragment = m.createStdShadowFragment;
-            })
-        );
-    }
-    for (const [prop, load, key] of _STD_MAT_EXTS) {
-        if (meshes.some((m) => !!(m.material as any)[prop])) {
-            imports.push(load().then((mod) => _registerStdExt(mod[key])));
+        for (const [prop, load, key] of _STD_MAT_EXTS) {
+            if (meshes.some((m) => !!(m.material as any)[prop])) {
+                imports.push(load().then((mod) => _registerStdExt(mod[key])));
+            }
         }
-    }
-    if (imports.length > 0) {
-        await Promise.all(imports);
-    }
+        if (imports.length > 0) {
+            await Promise.all(imports);
+        }
 
-    const renderableMod = await import("./standard-renderable.js");
-    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, cull });
-    // Wire the per-mesh rebuild closure used by material swap + per-pass override.
-    standardGroupBuilder._rebuildSingle = result.rebuildSingle;
-    return result;
-};
-
-standardGroupBuilder._materialFamily = "standard";
+        const renderableMod = await import("./standard-renderable.js");
+        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, cull });
+        // Wire the per-mesh rebuild closure used by material swap + per-pass override.
+        builder._rebuildSingle = result.rebuildSingle;
+        return result;
+    };
+    builder._materialFamily = "standard";
+    return (_standardGroupBuilder = builder);
+}

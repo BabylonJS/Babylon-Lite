@@ -113,8 +113,13 @@ export interface RaycastResult {
     body: PhysicsBody | null;
 }
 
-/** Ignore-none body filter handle: a single zero body id. */
-const IGNORE_NONE = [BigInt(0)];
+/** Ignore-none body filter handle: a single zero body id. Lazily built — a
+ *  module-level `BigInt(0)` call is a module-init side effect that would defeat
+ *  the package's `sideEffects: false` contract. */
+let _ignoreNone: bigint[] | null = null;
+function ignoreNone(): bigint[] {
+    return (_ignoreNone ??= [BigInt(0)]);
+}
 
 /** Lazily create (and cache on the world) the single-hit Havok query collector. */
 function getCollector(world: PhysicsWorld): any {
@@ -144,7 +149,7 @@ export function shapeProximity(world: PhysicsWorld, query: ShapeProximityQuery):
     const hknp = world._hknp;
     const collector = getCollector(world);
     const { position: p, rotation: r } = query;
-    const hkQuery = [query.shape._hkShape, [p.x, p.y, p.z], [r.x, r.y, r.z, r.w], query.maxDistance, query.shouldHitTriggers ?? false, IGNORE_NONE];
+    const hkQuery = [query.shape._hkShape, [p.x, p.y, p.z], [r.x, r.y, r.z, r.w], query.maxDistance, query.shouldHitTriggers ?? false, ignoreNone()];
     hknp.HP_World_ShapeProximityWithCollector(world._hkWorld, collector, hkQuery);
 
     if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
@@ -175,7 +180,7 @@ export function shapeCast(world: PhysicsWorld, query: ShapeCastQuery): ShapeCast
     const hknp = world._hknp;
     const collector = getCollector(world);
     const { rotation: r, startPosition: s, endPosition: e } = query;
-    const hkQuery = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, IGNORE_NONE];
+    const hkQuery = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, ignoreNone()];
     hknp.HP_World_ShapeCastWithCollector(world._hkWorld, collector, hkQuery);
 
     if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
@@ -209,7 +214,7 @@ export function physicsRaycast(world: PhysicsWorld, from: Vec3, to: Vec3, query:
     const collector = getCollector(world);
     const membership = query.membership ?? ~0;
     const collideWith = query.collideWith ?? ~0;
-    const hkQuery = [[from.x, from.y, from.z], [to.x, to.y, to.z], [membership, collideWith], query.shouldHitTriggers ?? false, IGNORE_NONE];
+    const hkQuery = [[from.x, from.y, from.z], [to.x, to.y, to.z], [membership, collideWith], query.shouldHitTriggers ?? false, ignoreNone()];
     hknp.HP_World_CastRayWithCollector(world._hkWorld, collector, hkQuery);
 
     if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {

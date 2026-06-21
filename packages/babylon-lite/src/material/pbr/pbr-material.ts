@@ -27,18 +27,26 @@ import {
     PBR_HAS_SPEC_GLOSS,
 } from "./pbr-flags.js";
 
-/** Lazy-imports the PBR renderable builder and builds the pipeline.
- *  Thin instances are handled by the fragment composer automatically. */
-export const pbrGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
-    const envTex = (scene as SceneContext)._envTextures;
-    const renderableMod = await import("./pbr-renderable.js");
-    const result = await renderableMod.buildPbrRenderables(scene, meshes, envTex);
-    // Wire the per-mesh rebuild closure used by material swap + per-pass override.
-    pbrGroupBuilder._rebuildSingle = result.rebuildSingle;
-    return result;
-};
-
-pbrGroupBuilder._materialFamily = "pbr";
+/** Lazily-created singleton PBR {@link MeshGroupBuilder}. Lazy-imports the PBR
+ *  renderable builder and builds the pipeline. Thin instances are handled by the
+ *  fragment composer automatically. Lazy-init keeps the module free of top-level
+ *  side effects so a scene that uses no PBR material tree-shakes it away. */
+let _pbrGroupBuilder: MeshGroupBuilder | null = null;
+export function getPbrGroupBuilder(): MeshGroupBuilder {
+    if (_pbrGroupBuilder) {
+        return _pbrGroupBuilder;
+    }
+    const builder: MeshGroupBuilder = async (scene, meshes) => {
+        const envTex = (scene as SceneContext)._envTextures;
+        const renderableMod = await import("./pbr-renderable.js");
+        const result = await renderableMod.buildPbrRenderables(scene, meshes, envTex);
+        // Wire the per-mesh rebuild closure used by material swap + per-pass override.
+        builder._rebuildSingle = result.rebuildSingle;
+        return result;
+    };
+    builder._materialFamily = "pbr";
+    return (_pbrGroupBuilder = builder);
+}
 
 /** User-facing properties for a physically based (metallic-roughness) material.
  *  Create one manually via `createPbrMaterial()` or let `loadGltf()` build it.
@@ -357,7 +365,7 @@ export interface SubSurfaceProps {
 export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMaterialProps {
     const mat = {
         ...props,
-        _buildGroup: pbrGroupBuilder,
+        _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
     return mat;

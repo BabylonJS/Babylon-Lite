@@ -4,7 +4,7 @@
  *  `PbrGeometryMaterialView`. The view carries the per-task attachment
  *  list, target-texture intent, optional `gp` UBO (shared across the task's
  *  materials), and reverse-culling flag. The view also shadows
- *  {@link Material._buildGroup} with {@link pbrGeometryGroupBuilder} so that
+ *  {@link Material._buildGroup} with {@link getPbrGeometryGroupBuilder} so that
  *  the geometry renderer task materialises a {@link Renderable} through the
  *  PBR geometry renderable infrastructure — no view-aware branching needed
  *  in core render-task.
@@ -18,7 +18,7 @@ import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import { PBR_HAS_ALPHA_BLEND, PBR2_GEOMETRY_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
-import { pbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
+import { getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
 import { _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
 
 /** Per-task ordered attachment list driving the geometry template. The array
@@ -79,7 +79,7 @@ export function _setActivePbrGeometryAttachments(att: readonly GeometryTextureTy
  *  - Clears `PBR_HAS_ALPHA_BLEND`: the geometry pipeline drives blending per
  *    attachment via the pipeline color-target state, not via the PBR
  *    fragment's source-over color output.
- *  - Shadows `_buildGroup` with {@link pbrGeometryGroupBuilder} so the
+ *  - Shadows `_buildGroup` with {@link getPbrGeometryGroupBuilder} so the
  *    natural `material._buildGroup._rebuildSingle` dispatch in
  *    `resolvePendingMeshes` builds a geometry-MRT renderable for this view.
  *  - Registers the PBR geometry extension (idempotent) so subsequent
@@ -97,6 +97,6 @@ export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: 
     Object.defineProperty(view, "_emitColor", { value: config.emitColor, enumerable: false });
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
-    Object.defineProperty(view, "_buildGroup", { value: pbrGeometryGroupBuilder, enumerable: false });
+    Object.defineProperty(view, "_buildGroup", { value: getPbrGeometryGroupBuilder(), enumerable: false });
     return view;
 }

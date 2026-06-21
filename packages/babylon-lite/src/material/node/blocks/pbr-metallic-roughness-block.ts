@@ -2,7 +2,7 @@ import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } 
 import { MAX_LIGHTS } from "../../../light/types.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
-const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(block: NodeBlock, inputName: string, fallback: string, target: "vec3f" | "f32", stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): string {
     const input = block.inputs.get(inputName);

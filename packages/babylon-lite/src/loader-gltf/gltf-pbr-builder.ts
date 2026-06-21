@@ -7,7 +7,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { pbrGroupBuilder } from "../material/pbr/pbr-material.js";
+import { getPbrGroupBuilder } from "../material/pbr/pbr-material.js";
 import type { GltfMaterialData, GltfMatExtCtx } from "./gltf-material.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { mipLevelCount } from "../texture/mip-count.js";
@@ -86,7 +86,7 @@ export function assemblePbrProps(
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3], alphaCutOff: mat._alphaCutoff } : undefined),
         ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
-        _buildGroup: pbrGroupBuilder,
+        _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
 }

@@ -4,7 +4,7 @@
  *  `StandardGeometryMaterialView`. The view carries the per-task attachment
  *  list, target-texture intent, optional `gp` UBO (shared across the task's
  *  materials), and reverse-culling flag. The view also shadows
- *  {@link Material._buildGroup} with {@link standardGeometryGroupBuilder} so
+ *  {@link Material._buildGroup} with {@link getStandardGeometryGroupBuilder} so
  *  that `RenderTask.addMesh` (and the geometry renderer task) materialize a
  *  {@link Renderable} through the shared standard geometry renderable
  *  infrastructure — no view-aware branching required in core render-task.
@@ -17,7 +17,7 @@ import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import { GEOMETRY_OUTPUT, MATERIAL_ALPHA_BLEND } from "./standard-flags.js";
 import type { StandardMaterialProps } from "./standard-material.js";
-import { standardGeometryGroupBuilder } from "./standard-geometry-renderable.js";
+import { getStandardGeometryGroupBuilder } from "./standard-geometry-renderable.js";
 
 /** Per-task ordered attachment list driving the geometry template. The array
  *  index is the MRT color-attachment slot used in `@location(i)`. */
@@ -62,7 +62,7 @@ export interface StandardGeometryMaterialView extends MaterialView {
  *  - Clears `MATERIAL_ALPHA_BLEND`: the geometry pipeline drives blending per
  *    attachment via the pipeline color-target state, not via the standard
  *    fragment's source-over color output.
- *  - Shadows `_buildGroup` with {@link standardGeometryGroupBuilder} so the
+ *  - Shadows `_buildGroup` with {@link getStandardGeometryGroupBuilder} so the
  *    natural `material._buildGroup._rebuildSingle` dispatch in
  *    `resolvePendingMeshes` builds a geometry-MRT renderable for this view. */
 export function createStandardGeometryMaterialView(source: StandardMaterialProps, config: StandardGeometryViewConfig): StandardGeometryMaterialView {
@@ -72,6 +72,6 @@ export function createStandardGeometryMaterialView(source: StandardMaterialProps
     Object.defineProperty(view, "_emitColor", { value: config.emitColor, enumerable: false });
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
-    Object.defineProperty(view, "_buildGroup", { value: standardGeometryGroupBuilder, enumerable: false });
+    Object.defineProperty(view, "_buildGroup", { value: getStandardGeometryGroupBuilder(), enumerable: false });
     return view;
 }

@@ -1,9 +1,8 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import type { Material, StencilState } from "../material.js";
-import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Mat4 } from "../../math/types.js";
-import { shaderGroupBuilder } from "./shader-group-builder.js";
+import { getShaderGroupBuilder } from "./shader-group-builder.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. */
 export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";
@@ -291,7 +290,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
-        _buildGroup: shaderGroupBuilder as MeshGroupBuilder,
+        _buildGroup: getShaderGroupBuilder(),
         _uboVersion: 0,
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,

@@ -41,18 +41,27 @@ import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
 import type { NodeGeometryMaterialView } from "./node-geometry-view.js";
 
-/** Singleton {@link MeshGroupBuilder} that node geometry views point at via their
- *  overridden `_buildGroup`. The async builder body is unreachable — geometry
- *  views are dispatched per-mesh via the geometry renderer task which calls
- *  `_rebuildSingle` directly. */
-export const nodeGeometryGroupBuilder: MeshGroupBuilder = (async () => {
-    throw new Error("node-geometry view does not support scene group building");
-}) as MeshGroupBuilder;
-nodeGeometryGroupBuilder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-    const view = (materialOverride ?? mesh.material) as NodeGeometryMaterialView;
-    return buildNodeGeometryRenderable(scene, mesh, view);
-};
-nodeGeometryGroupBuilder._materialFamily = "node";
+/** Lazily-created singleton {@link MeshGroupBuilder} that node geometry views point
+ *  at via their overridden `_buildGroup`. The async builder body is unreachable —
+ *  geometry views are dispatched per-mesh via the geometry renderer task which calls
+ *  `_rebuildSingle` directly. Lazy-init keeps the module free of top-level side
+ *  effects (the builder is built only when a node-geometry view is created), so an
+ *  unused node-geometry path tree-shakes away. */
+let _nodeGeometryGroupBuilder: MeshGroupBuilder | null = null;
+export function getNodeGeometryGroupBuilder(): MeshGroupBuilder {
+    if (_nodeGeometryGroupBuilder) {
+        return _nodeGeometryGroupBuilder;
+    }
+    const builder = (async () => {
+        throw new Error("node-geometry view does not support scene group building");
+    }) as MeshGroupBuilder;
+    builder._materialFamily = "node";
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+        const view = (materialOverride ?? mesh.material) as NodeGeometryMaterialView;
+        return buildNodeGeometryRenderable(scene, mesh, view);
+    };
+    return (_nodeGeometryGroupBuilder = builder);
+}
 
 /** Shared per-view geometry resources, computed once and cached on the view. */
 interface NodeGeometryViewResources {

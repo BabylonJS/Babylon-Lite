@@ -44,17 +44,26 @@ import type { PbrGeometryMaterialView } from "./pbr-geometry-view.js";
 import { composePbrGeometryShader, _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
 import { _setActivePbrGeometryAttachments } from "./pbr-geometry-view.js";
 
-/** Singleton {@link MeshGroupBuilder} that geometry views point at via their
- *  overridden `_buildGroup`. The async builder body is unreachable —
- *  geometry views are dispatched per-mesh via `_rebuildSingle` directly. */
-export const pbrGeometryGroupBuilder: MeshGroupBuilder = (async () => {
-    throw new Error("pbr-geometry view does not support scene group building");
-}) as MeshGroupBuilder;
-pbrGeometryGroupBuilder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-    const view = (materialOverride ?? mesh.material) as PbrGeometryMaterialView;
-    return buildPbrGeometryRenderable(scene, mesh, view);
-};
-pbrGeometryGroupBuilder._materialFamily = "pbr";
+/** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
+ *  via their overridden `_buildGroup`. The async builder body is unreachable —
+ *  geometry views are dispatched per-mesh via `_rebuildSingle` directly. Lazy-init
+ *  keeps the module free of top-level side effects so an unused geometry path
+ *  tree-shakes away. */
+let _pbrGeometryGroupBuilder: MeshGroupBuilder | null = null;
+export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
+    if (_pbrGeometryGroupBuilder) {
+        return _pbrGeometryGroupBuilder;
+    }
+    const builder = (async () => {
+        throw new Error("pbr-geometry view does not support scene group building");
+    }) as MeshGroupBuilder;
+    builder._materialFamily = "pbr";
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+        const view = (materialOverride ?? mesh.material) as PbrGeometryMaterialView;
+        return buildPbrGeometryRenderable(scene, mesh, view);
+    };
+    return (_pbrGeometryGroupBuilder = builder);
+}
 
 interface PbrGeometryViewResources {
     _composed: ComposedShader;

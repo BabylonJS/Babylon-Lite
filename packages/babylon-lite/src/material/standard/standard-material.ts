@@ -190,4 +190,4 @@ export interface FogConfig {
 
 export { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 export { createStandardMaterial } from "./create-standard-material.js";
-export { standardGroupBuilder } from "./standard-group-builder.js";
+export { getStandardGroupBuilder } from "./standard-group-builder.js";

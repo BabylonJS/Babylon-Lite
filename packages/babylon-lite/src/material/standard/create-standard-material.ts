@@ -1,5 +1,5 @@
 import type { StandardMaterialProps } from "./standard-material.js";
-import { standardGroupBuilder } from "./standard-group-builder.js";
+import { getStandardGroupBuilder } from "./standard-group-builder.js";
 
 /** Create StandardMaterial with Babylon defaults. */
 export function createStandardMaterial(): StandardMaterialProps {
@@ -35,7 +35,7 @@ export function createStandardMaterial(): StandardMaterialProps {
         uvScale: [1, 1],
         backFaceCulling: true,
         disableLighting: false,
-        _buildGroup: standardGroupBuilder,
+        _buildGroup: getStandardGroupBuilder(),
         _uboVersion: 0,
     } as StandardMaterialProps;
 }

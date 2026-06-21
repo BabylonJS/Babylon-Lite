@@ -4,7 +4,7 @@
  *  `NodeGeometryMaterialView`. The view carries the per-task attachment list,
  *  optional `gp` UBO (camera near/far, shared across the task's materials), and
  *  reverse-culling flag, and shadows {@link Material._buildGroup} with
- *  {@link nodeGeometryGroupBuilder} so the geometry renderer task materialises a
+ *  {@link getNodeGeometryGroupBuilder} so the geometry renderer task materialises a
  *  {@link Renderable} through the node geometry renderable infrastructure — no
  *  view-aware branching needed in core render-task.
  *
@@ -18,7 +18,7 @@ import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import { NODE_GEOMETRY_OUTPUT } from "./node-flags.js";
 import type { NodeMaterial } from "./node-material.js";
-import { nodeGeometryGroupBuilder } from "./node-geometry-renderable.js";
+import { getNodeGeometryGroupBuilder } from "./node-geometry-renderable.js";
 
 /** Per-task ordered attachment list driving the geometry template. The array
  *  index is the MRT color-attachment slot used in `@location(i)`. */
@@ -54,7 +54,7 @@ export interface NodeGeometryMaterialView extends MaterialView {
 
 /** Wrap a NodeMaterial as a geometry-output view.
  *  - Sets the `NODE_GEOMETRY_OUTPUT` feature bit.
- *  - Shadows `_buildGroup` with {@link nodeGeometryGroupBuilder} so the natural
+ *  - Shadows `_buildGroup` with {@link getNodeGeometryGroupBuilder} so the natural
  *    `material._buildGroup._rebuildSingle` dispatch builds a geometry-MRT
  *    renderable for this view. */
 export function createNodeGeometryMaterialView(source: NodeMaterial, config: NodeGeometryViewConfig): NodeGeometryMaterialView {
@@ -66,6 +66,6 @@ export function createNodeGeometryMaterialView(source: NodeMaterial, config: Nod
     Object.defineProperty(view, "_geometryAttachments", { value: config.attachments, enumerable: false });
     Object.defineProperty(view, "_gpUBO", { value: config.gpUBO ?? null, enumerable: false });
     Object.defineProperty(view, "_reverseCulling", { value: config.reverseCulling ?? false, enumerable: false });
-    Object.defineProperty(view, "_buildGroup", { value: nodeGeometryGroupBuilder, enumerable: false });
+    Object.defineProperty(view, "_buildGroup", { value: getNodeGeometryGroupBuilder(), enumerable: false });
     return view;
 }

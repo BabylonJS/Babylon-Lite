@@ -14,7 +14,7 @@ import { MAX_LIGHTS } from "../../light/types.js";
 import type { Varying } from "../../shader/fragment-types.js";
 
 const SHADOW_FACTORS_TYPE = `array<f32, ${MAX_LIGHTS}>`;
-const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 /** @internal */
 export interface ShadowBinding {

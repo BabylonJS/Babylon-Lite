@@ -49,19 +49,27 @@ import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES } from "../mesh-features.js";
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 
-/** Singleton {@link MeshGroupBuilder} that geometry views point at via their
- *  overridden `_buildGroup`. The async builder body is unreachable — geometry
- *  views are dispatched per-mesh via {@link RenderTask.addMesh} which calls
+/** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
+ *  via their overridden `_buildGroup`. The async builder body is unreachable —
+ *  geometry views are dispatched per-mesh via {@link RenderTask.addMesh} which calls
  *  `_rebuildSingle` directly. Centralizing the per-mesh factory here means
- *  `resolvePendingMeshes` doesn't need any view-aware branching. */
-export const standardGeometryGroupBuilder: MeshGroupBuilder = (async () => {
-    throw new Error("standard-geometry view does not support scene group building");
-}) as MeshGroupBuilder;
-standardGeometryGroupBuilder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-    const view = (materialOverride ?? mesh.material) as StandardGeometryMaterialView;
-    return buildStandardGeometryRenderable(scene, mesh, view);
-};
-standardGeometryGroupBuilder._materialFamily = "standard";
+ *  `resolvePendingMeshes` doesn't need any view-aware branching. Lazy-init keeps the
+ *  module free of top-level side effects so an unused geometry path tree-shakes away. */
+let _standardGeometryGroupBuilder: MeshGroupBuilder | null = null;
+export function getStandardGeometryGroupBuilder(): MeshGroupBuilder {
+    if (_standardGeometryGroupBuilder) {
+        return _standardGeometryGroupBuilder;
+    }
+    const builder = (async () => {
+        throw new Error("standard-geometry view does not support scene group building");
+    }) as MeshGroupBuilder;
+    builder._materialFamily = "standard";
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+        const view = (materialOverride ?? mesh.material) as StandardGeometryMaterialView;
+        return buildStandardGeometryRenderable(scene, mesh, view);
+    };
+    return (_standardGeometryGroupBuilder = builder);
+}
 
 /** Per-(task, source-material, mesh-variant) shared resources lazily attached
  *  to the view. Cached on `view._geometry` (Map keyed by mesh-variant bits) to
