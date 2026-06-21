@@ -10,6 +10,8 @@ import { evaluateSampler } from "../animation/evaluate.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
 import type { Mat4Storage } from "../math/types.js";
+import type { BoneOverride } from "./bone-control.js";
+import { _boneApplier } from "./bone-control-hooks.js";
 
 // Scratch 4x4 used during bone-matrix composition; reused across frames + bones.
 const _boneTmp = new F32(16);
@@ -79,6 +81,28 @@ export function createAnimationController(
     morphBindings: readonly MorphBinding[],
     nodeTargets?: readonly (AnimatedNodeTarget | undefined)[],
     excludedNodeIndices?: ReadonlySet<number>
+): AnimationController;
+// Overload with the optional opt-in bone-control override map. Kept as a separate
+// overload so the original signature's API-report lines stay byte-identical (the
+// breaking-change diff treats an appended param on the multi-line render as a
+// changed last-param line — see report-api-changes.ts).
+export function createAnimationController(
+    clip: AnimationClip,
+    nodes: readonly NodeRest[],
+    skeletons: readonly SkeletonBinding[],
+    morphBindings: readonly MorphBinding[],
+    nodeTargets: readonly (AnimatedNodeTarget | undefined)[] | undefined,
+    excludedNodeIndices: ReadonlySet<number> | undefined,
+    boneOverrides: ReadonlyMap<number, unknown> | undefined
+): AnimationController;
+export function createAnimationController(
+    clip: AnimationClip,
+    nodes: readonly NodeRest[],
+    skeletons: readonly SkeletonBinding[],
+    morphBindings: readonly MorphBinding[],
+    nodeTargets?: readonly (AnimatedNodeTarget | undefined)[],
+    excludedNodeIndices?: ReadonlySet<number>,
+    boneOverrides?: ReadonlyMap<number, unknown>
 ): AnimationController {
     const requiresEngine = skeletons.length > 0 || morphBindings.length > 0;
     const numNodes = nodes.length;
@@ -188,6 +212,14 @@ export function createAnimationController(
                           currentTRS[off + S_OFF] = n.sx;
                           currentTRS[off + S_OFF + 1] = n.sy;
                           currentTRS[off + S_OFF + 2] = n.sz;
+                      }
+
+                      // 1b. Apply user bone overrides (opt-in bone control) on top of
+                      // the rest pose, BEFORE channels so animation wins per-component.
+                      // Routed through a null hook so the apply code stays in the opt-in
+                      // bone-control chunk — bone-control-free bundles pay one branch.
+                      if (boneOverrides !== undefined && boneOverrides.size > 0) {
+                          _boneApplier?.(boneOverrides as ReadonlyMap<number, BoneOverride>, currentTRS, numNodes);
                       }
 
                       // 2. Evaluate animation channels → override TRS

@@ -61,8 +61,26 @@ export interface AssetContainer {
 
   /** KHR_materials_variants data. Use selectVariant() / getVariantNames() to interact. */
   materialVariants?: MaterialVariantData;
+
+  /** Bone-control handles (one per glTF skin). Populated only after enableBoneControl();
+   *  drive bones via getBoneByName() + setBone*(). See module 13 (Skeleton). */
+  skeletons?: Skeleton[];
 }
 ```
+
+### Compressed-geometry decoder base URLs (`draco-decode.ts`, `meshopt-decode.ts`)
+
+```typescript
+/** Override where draco_decoder.js / draco_decoder.wasm are fetched (default: site root "/"). */
+export function setDracoBaseUrl(url: string): void;
+/** Override where meshopt_decoder.js is fetched (default: site root "/"). */
+export function setMeshoptBaseUrl(url: string): void;
+```
+
+Both decoders lazy-load their glue/WASM via `<script>` injection on first use, so non-Draco /
+non-meshopt scenes pay zero bytes. Call the setter before loading an asset that triggers the
+codec to self-host the decoder (e.g. avoid a cross-origin CDN). Equivalent to KTX2's
+`setKtx2DecoderUrl`.
 
 ### `load-gltf.ts`
 

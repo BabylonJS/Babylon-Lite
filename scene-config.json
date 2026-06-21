@@ -411,6 +411,16 @@
         "compatParity": true
     },
     {
+        "id": 99,
+        "slug": "scene99-bone-control",
+        "name": "Scene 99 — Bone Control",
+        "maxMad": 0.02,
+        "maxRawKB": 89.2,
+        "description": "Xbot skinned model at bind pose with the whole left arm hidden via opt-in bone control (enableBoneControl + setBoneVisible collapses the bone sub-tree). Parity against BJS bone local-matrix collapse.",
+        "tags": ["gltf", "skeleton", "bone-control"],
+        "skipPerf": true
+    },
+    {
         "id": 40,
         "slug": "scene40-physics",
         "name": "Scene 40 — Physics",

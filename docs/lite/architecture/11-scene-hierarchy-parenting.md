@@ -27,6 +27,21 @@ interface IParentable {
 
 Zero runtime code — interfaces are erased at compile time.
 
+### Reparenting (`scene/set-parent.ts`)
+
+```typescript
+// Reparent while preserving world-space transform (Babylon.js TransformNode.setParent).
+// Accepts any SceneNode (mesh, transform node, camera, light), not just Mesh.
+export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null): void;
+```
+
+`setParent` snapshots the child's world matrix, sets `child.parent`, then writes back the
+local TRS (via `mat4Decompose`, so the rotation is a quaternion — no lossy Euler round-trip).
+It also keeps the scene-graph `children` arrays in sync: the child is removed from its old
+parent's `children` and appended to the new parent's, so traversal helpers (`setMeshVisible`
+cascade, cloning, camera bounds) see the new hierarchy. Setting `child.parent` directly drives
+the transform math but does **not** touch `children` — push manually if you need traversal too.
+
 ### TransformNode (`scene/transform-node.ts`)
 
 ```typescript

@@ -20,6 +20,7 @@ import { onBeforeRender } from "../scene/scene-core.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
 import { mat4Scale } from "../math/mat4-scale.js";
+import { mat4Decompose } from "../math/mat4-decompose.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
@@ -943,7 +944,7 @@ export function addPhysicsShapeChildFromParent(world: PhysicsWorld, container: P
         throw new Error("Cannot add physics child shape from a singular parent transform.");
     }
     const childToParent = mat4Multiply(invParent, childNode.worldMatrix as Mat4);
-    const transform = decomposeMatrix(childToParent);
+    const transform = mat4Decompose(childToParent);
     addPhysicsShapeChild(world, container, child, transform.translation, transform.rotation, transform.scale);
 }
 
@@ -1025,61 +1026,6 @@ function buildMassProperties(world: PhysicsWorld, body: PhysicsBody): any[] {
         }
     }
     return [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]];
-}
-
-function decomposeMatrix(m: Mat4): { translation: Vec3; rotation: Quat; scale: Vec3 } {
-    const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
-    const sy = Math.hypot(m[4]!, m[5]!, m[6]!);
-    const sz = Math.hypot(m[8]!, m[9]!, m[10]!);
-    const invSx = sx > 1e-8 ? 1 / sx : 0;
-    const invSy = sy > 1e-8 ? 1 / sy : 0;
-    const invSz = sz > 1e-8 ? 1 / sz : 0;
-    const r00 = m[0]! * invSx;
-    const r01 = m[4]! * invSy;
-    const r02 = m[8]! * invSz;
-    const r10 = m[1]! * invSx;
-    const r11 = m[5]! * invSy;
-    const r12 = m[9]! * invSz;
-    const r20 = m[2]! * invSx;
-    const r21 = m[6]! * invSy;
-    const r22 = m[10]! * invSz;
-
-    let x: number;
-    let y: number;
-    let z: number;
-    let w: number;
-    const trace = r00 + r11 + r22;
-    if (trace > 0) {
-        const s = Math.sqrt(trace + 1) * 2;
-        w = 0.25 * s;
-        x = (r21 - r12) / s;
-        y = (r02 - r20) / s;
-        z = (r10 - r01) / s;
-    } else if (r00 > r11 && r00 > r22) {
-        const s = Math.sqrt(1 + r00 - r11 - r22) * 2;
-        w = (r21 - r12) / s;
-        x = 0.25 * s;
-        y = (r01 + r10) / s;
-        z = (r02 + r20) / s;
-    } else if (r11 > r22) {
-        const s = Math.sqrt(1 + r11 - r00 - r22) * 2;
-        w = (r02 - r20) / s;
-        x = (r01 + r10) / s;
-        y = 0.25 * s;
-        z = (r12 + r21) / s;
-    } else {
-        const s = Math.sqrt(1 + r22 - r00 - r11) * 2;
-        w = (r10 - r01) / s;
-        x = (r02 + r20) / s;
-        y = (r12 + r21) / s;
-        z = 0.25 * s;
-    }
-    const invLen = 1 / Math.hypot(x, y, z, w);
-    return {
-        translation: { x: m[12]!, y: m[13]!, z: m[14]! },
-        rotation: { x: x * invLen, y: y * invLen, z: z * invLen, w: w * invLen },
-        scale: { x: sx, y: sy, z: sz },
-    };
 }
 
 // ─── Body control (impulse / velocity / motion type / transform) ─────

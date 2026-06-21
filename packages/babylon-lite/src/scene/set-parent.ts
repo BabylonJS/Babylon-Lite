@@ -1,4 +1,4 @@
-/** Set a mesh's parent while preserving its current world-space position.
+/** Set a node's parent while preserving its current world-space position.
  *  Equivalent to Babylon.js TransformNode.setParent().
  *
  *  Computes the child's current world matrix, sets the parent,
@@ -8,27 +8,55 @@
  *  Standalone function for tree-shaking — only bundled when used. */
 
 import type { Mesh } from "../mesh/mesh.js";
+import type { SceneNode } from "./scene-node.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { mat4Multiply } from "../math/mat4-multiply.js";
+import { mat4Decompose } from "../math/mat4-decompose.js";
 import type { Mat4 } from "../math/types.js";
+
+/** Scene-graph nodes (mesh, transform node, camera, light) expose a `children`
+ *  array that traversal helpers walk (`setMeshVisible` cascade, `cloneTransformNode`,
+ *  camera AABB). A foreign `IWorldMatrixProvider` may not, so probe structurally. */
+function childrenOf(node: IWorldMatrixProvider | null): SceneNode[] | null {
+    const kids = (node as { children?: unknown } | null)?.children;
+    return Array.isArray(kids) ? (kids as SceneNode[]) : null;
+}
 
 /**
  * Reparents `child` while preserving its current world-space transform, mirroring
- * Babylon.js `TransformNode.setParent()`.
- * @param child - The mesh to reparent.
+ * Babylon.js `TransformNode.setParent()`. Also keeps the scene-graph `children`
+ * arrays consistent: the child is removed from its previous parent's `children`
+ * and appended to the new parent's, so traversal helpers see the new hierarchy.
+ * @param child - The node to reparent (mesh, transform node, or any scene node).
  * @param parent - The new parent (any world-matrix provider), or `null` to detach to world space.
  */
-export function setParent(child: Mesh, parent: IWorldMatrixProvider | null): void {
+export function setParent(child: Mesh, parent: IWorldMatrixProvider | null): void;
+export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null): void;
+export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null): void {
     // 1. Snapshot child's current world matrix
     const childWorld: Mat4 = child.worldMatrix;
 
-    // 2. Set the parent
-    child.parent = parent;
+    // 2. Set the parent and keep the `children` arrays in sync (only when the
+    //    link actually changes, so we never duplicate or drop entries).
+    if (child.parent !== parent) {
+        const oldChildren = childrenOf(child.parent);
+        if (oldChildren) {
+            const i = oldChildren.indexOf(child);
+            if (i >= 0) {
+                oldChildren.splice(i, 1);
+            }
+        }
+        child.parent = parent;
+        const newChildren = childrenOf(parent);
+        if (newChildren && newChildren.indexOf(child) < 0) {
+            newChildren.push(child);
+        }
+    }
 
     // 3. If parent is null, the child's local = its old world transform
     if (!parent) {
-        decomposeInto(childWorld, child);
+        applyLocal(childWorld, child);
         return;
     }
 
@@ -41,44 +69,16 @@ export function setParent(child: Mesh, parent: IWorldMatrixProvider | null): voi
         return;
     }
 
-    const newLocal = mat4Multiply(invParent, childWorld);
-
     // 5. Decompose newLocal into position/rotation/scaling and apply
-    decomposeInto(newLocal, child);
+    applyLocal(mat4Multiply(invParent, childWorld), child);
 }
 
-/** Extract position, rotation (Euler XYZ), and scale from a 4×4 matrix
- *  and write them into a mesh's observable properties. */
-function decomposeInto(m: Mat4, mesh: Mesh): void {
-    // Position = translation column
-    mesh.position.set(m[12]!, m[13]!, m[14]!);
-
-    // Column scale lengths
-    const sx = Math.sqrt(m[0]! * m[0]! + m[1]! * m[1]! + m[2]! * m[2]!);
-    const sy = Math.sqrt(m[4]! * m[4]! + m[5]! * m[5]! + m[6]! * m[6]!);
-    const sz = Math.sqrt(m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!);
-
-    if (sx > 1e-6 && sy > 1e-6 && sz > 1e-6) {
-        // Normalized rotation matrix columns
-        const r00 = m[0]! / sx,
-            r01 = m[4]! / sy,
-            r02 = m[8]! / sz;
-        const r10 = m[1]! / sx,
-            r11 = m[5]! / sy,
-            r12 = m[9]! / sz;
-        const r22 = m[10]! / sz;
-
-        // Euler XYZ (matching BJS decompose convention)
-        const ry = Math.asin(Math.max(-1, Math.min(1, r02)));
-        let rx: number, rz: number;
-        if (Math.abs(r02) < 0.9999) {
-            rx = Math.atan2(-r12, r22);
-            rz = Math.atan2(-r01, r00);
-        } else {
-            rx = Math.atan2(r10, r11);
-            rz = 0;
-        }
-        mesh.rotation.set(rx, ry, rz);
-        mesh.scaling.set(sx, sy, sz);
-    }
+/** Decompose a local matrix and write it into a node's observable TRS. Writes the
+ *  rotation as a quaternion directly (the source of truth) — avoids the lossy
+ *  Euler round-trip near gimbal lock. */
+function applyLocal(m: Mat4, node: SceneNode): void {
+    const { translation, rotation, scale } = mat4Decompose(m);
+    node.position.set(translation.x, translation.y, translation.z);
+    node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    node.scaling.set(scale.x, scale.y, scale.z);
 }
