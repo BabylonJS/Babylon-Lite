@@ -39,6 +39,15 @@ export function _installPointerHandlers(parser: PointerChannelParser, converter:
     _convertSampler = converter;
 }
 
+/** Registration seam for MATERIAL pointer targets (`/materials/...`). Installed by
+ *  the separately-gated gltf-pointer-material feature so node-only pointer assets
+ *  (e.g. CubeVisibility) never bundle the material registry + ext-texture resolver.
+ *  Consulted only when the node parser above returns null for a pointer. */
+let _resolveMaterialPointer: PointerChannelParser | null = null;
+export function _installMaterialPointerResolver(resolver: PointerChannelParser): void {
+    _resolveMaterialPointer = resolver;
+}
+
 /** Convert sampler input/output to Float32Array. Default: reinterpret existing
  *  Float32 accessor as Float32Array (legacy behaviour; fast but requires
  *  aligned Float32 data). KHR_animation_pointer installs a converter that
@@ -169,10 +178,15 @@ export function parseAnimationData(
             // (installed by gltf-feature-animation-pointer on side-effect import).
             const ptr = c.target?.extensions?.KHR_animation_pointer?.pointer;
             if (ptr) {
-                if (!_parsePointerChannel) {
+                if (!_parsePointerChannel && !_resolveMaterialPointer) {
                     continue;
                 }
-                const ch = _parsePointerChannel(ptr, c, nodeMap, json, meshes);
+                // Node pointers (TRS / visibility) resolve in the eager parser; material
+                // pointers (`/materials/...`) fall through to the lazily-installed resolver.
+                let ch = _parsePointerChannel ? _parsePointerChannel(ptr, c, nodeMap, json, meshes) : null;
+                if (!ch && _resolveMaterialPointer) {
+                    ch = _resolveMaterialPointer(ptr, c, nodeMap, json, meshes);
+                }
                 if (ch) {
                     channels.push(ch);
                     pointerChannelCount++;

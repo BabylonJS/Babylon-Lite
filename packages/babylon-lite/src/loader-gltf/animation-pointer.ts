@@ -2,7 +2,6 @@
  *  Handlers are registered incrementally (one per parity scene). Unknown
  *  pointers return null and warn once. */
 import type { SceneNode } from "../scene/scene-node.js";
-import { setSubtreeVisible } from "../scene/visibility.js";
 
 export interface ResolvedPointer {
     writer: (output: Float32Array, offset: number) => void;
@@ -185,25 +184,6 @@ function uvTransformWriter(mat: PointerMaterial, tex: PointerUvTexture, kind: st
 }
 
 const _registry: [RegExp, PointerFactory][] = [
-    // /nodes/{n}/extensions/KHR_node_visibility/visible — scalar (0 = hidden).
-    // The setter cascade handles descendants per the KHR_node_visibility spec
-    // and bumps the module-scoped visibility epoch so the engine invalidates
-    // its cached render bundle.
-    [
-        /^\/nodes\/(\d+)\/extensions\/KHR_node_visibility\/visible$/,
-        (m, ctx) => {
-            const n = ctx.nodes[+m[1]!];
-            if (!n) {
-                return null;
-            }
-            return {
-                arity: 1,
-                writer: (out, off) => {
-                    setSubtreeVisible(n, out[off]! !== 0);
-                },
-            };
-        },
-    ],
     // /materials/{m}/.../KHR_texture_transform/{offset|scale|rotation} — animated UV
     // transform. offset/scale are vec2; rotation is a scalar (radians). Mutates the
     // slot texture's uOffset/vOffset, uScale/vScale, or uAng and bumps the material's

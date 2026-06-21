@@ -56,6 +56,14 @@ const _features: [Trigger, Loader][] = [
     [M + "variants", () => import("./gltf-feature-variants.js")],
     ["KHR_node_visibility", () => import("./gltf-ext-node-visibility.js")],
     ["KHR_animation_pointer", () => import("./gltf-feature-animation-pointer.js")],
+    // Material pointer targets (`/materials/...`) — split from the node-pointer feature
+    // above so node-only pointer assets (e.g. CubeVisibility) don't bundle the material
+    // registry + ext-texture resolver. Triggered only when a channel targets a material.
+    [
+        (j) =>
+            !!j.animations?.some((a: any) => a.channels?.some((c: any) => (c.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined)?.startsWith("/materials/"))),
+        () => import("./gltf-pointer-material.js"),
+    ],
     ["EXT_mesh_gpu_instancing", () => import("./gltf-feature-gpu-instancing.js")],
     ["KHR_xmp_json_ld", () => import("./gltf-feature-xmp.js")],
 ];
