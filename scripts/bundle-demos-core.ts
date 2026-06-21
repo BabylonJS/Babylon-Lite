@@ -26,7 +26,6 @@ import {
     labDir,
     srcDir,
     outDir,
-    wgslMinifyPlugin,
     terserPropertyManglePlugin,
     isLiteBundleExternal,
     writeBundleInfo,
@@ -36,6 +35,7 @@ import {
     LITE_BUNDLE_TARGET,
     NAME_POLYFILL,
 } from "./bundle-scenes-core";
+import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import { fetchDemoAssets } from "./demo-fetchers";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");

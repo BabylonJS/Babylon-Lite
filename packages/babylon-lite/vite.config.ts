@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, statSy
 import dts from "vite-plugin-dts";
 import remapping from "@ampproject/remapping";
 import { trimInternalDts } from "../../scripts/vite-trim-internal-dts";
+import { wgslMinifyPlugin } from "../../scripts/wgsl-minify-plugin";
 
 /**
  * api-extractor's trim pass works around #4260 by dropping top-level imports kept
@@ -329,6 +330,11 @@ export default defineConfig(({ mode }) => {
             build: {
                 outDir: BROWSER_OUT_DIR,
                 emptyOutDir: true,
+                // Match the scene/demo bundle harness (LITE_BUNDLE_TARGET) so the package
+                // output is transformed identically to a source build. Crucially, "esnext"
+                // emits NATIVE class fields; a lower target downlevels them to esbuild's
+                // `__publicField` helper, bloating every class and diverging from source.
+                target: "esnext",
                 // Sourcemaps ON so Rollup composes `minifyBrowserChunks`'s esbuild
                 // minify map with each chunk's chunk→source map, emitting a `.js.map`
                 // that maps the minified browser bundle back to TypeScript source.
@@ -351,6 +357,13 @@ export default defineConfig(({ mode }) => {
                 },
             },
             plugins: [
+                // `mangle: false` — strip WGSL whitespace/comments but do NOT short-rename
+                // identifiers (the per-chunk mangler is unsafe across the package's many
+                // code-split chunks). `templates: false` — only minify `?raw` `.wgsl` files,
+                // not inline backtick-template WGSL: this output is not esbuild-minified, so
+                // the template minifier would corrupt raw source, and the scene/demo harness
+                // already minifies inline templates once when it bundles this output.
+                wgslMinifyPlugin({ mangle: false, templates: false }),
                 minifyBrowserChunks(),
                 dts({
                     rollupTypes: !isWatch,
@@ -370,6 +383,10 @@ export default defineConfig(({ mode }) => {
         build: {
             outDir: LIB_OUT_DIR,
             emptyOutDir: true,
+            // "esnext" => native class fields (no `__publicField` helper), matching the
+            // bundle harness so a consumer of `lib/` gets byte-for-byte what a source
+            // build produces.
+            target: "esnext",
             sourcemap: true,
             minify: false as const,
             lib: {
@@ -386,6 +403,6 @@ export default defineConfig(({ mode }) => {
                 },
             },
         },
-        plugins: [emitPackageJson(), emitThirdPartyNotices()],
+        plugins: [wgslMinifyPlugin({ mangle: false, templates: false }), emitPackageJson(), emitThirdPartyNotices()],
     };
 });
