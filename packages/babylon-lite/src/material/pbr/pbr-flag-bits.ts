@@ -86,3 +86,6 @@ export const PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP = 1 << 23;
 /** Translucency color/intensity texture carries a KHR_texture_transform. Adds
  *  `translucencyUVm`/`translucencyUVt` UBO fields + transformed-UV sampling. */
 export const PBR2_HAS_TRANSLUCENCY_UV_TX = 1 << 24;
+/** A clearcoat texture (intensity/roughness/normal) carries a KHR_texture_transform.
+ *  Adds per-texture cc UV-transform UBO fields + transformed-UV sampling. */
+export const PBR2_CC_UV_TX = 1 << 25;
