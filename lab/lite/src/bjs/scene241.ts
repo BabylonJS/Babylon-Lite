@@ -30,10 +30,10 @@ import "@babylonjs/loaders/glTF";
     scene.imageProcessingConfiguration.contrast = 1.2;
     scene.imageProcessingConfiguration.toneMappingEnabled = true;
 
-    const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 31.48, new Vector3(-0.113, 0.537, -0.031), scene);
+    const camera = new ArcRotateCamera("camera", 1.5707963, 1.5707963, 16, new Vector3(-0.113, 0.537, -0.031), scene);
     camera.fov = 0.8;
-    camera.minZ = 31.48 * 0.01;
-    camera.maxZ = 31.48 * 1000;
+    camera.minZ = 16 * 0.01;
+    camera.maxZ = 16 * 1000;
     camera.attachControl(canvas, true);
     scene.activeCamera = camera;
 

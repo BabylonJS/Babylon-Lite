@@ -14,10 +14,10 @@ async function main(): Promise<void> {
     scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
     await loadEnvironment(scene, "https://assets.babylonjs.com/environments/environmentSpecular.env", { skipSkybox: true, skipGround: true, brdfUrl: "/brdf-lut.png" });
 
-    const cam = createArcRotateCamera(1.5707963, 1.5707963, 31.48, { x: -0.113, y: 0.537, z: -0.031 });
+    const cam = createArcRotateCamera(1.5707963, 1.5707963, 16, { x: -0.113, y: 0.537, z: -0.031 });
     cam.fov = 0.8;
-    cam.nearPlane = 31.48 * 0.01;
-    cam.farPlane = 31.48 * 1000;
+    cam.nearPlane = 16 * 0.01;
+    cam.farPlane = 16 * 1000;
     scene.camera = cam;
     attachControl(cam, canvas, scene);
 
