@@ -111,7 +111,7 @@ function syncControllerFromGroup(group: AnimationGroup, ctrl: AnimationControlle
 /** Create AnimationGroup(s) from parsed glTF animation data.
  *  Returns one group per animation clip. */
 export function createAnimationGroups(animData: GltfAnimationData): AnimationGroup[] {
-    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames } = animData;
+    const { clips, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames, boneOverrides } = animData;
     const hasPointer = clips.some((c) => c.channels.some((ch) => ch.path === PATH_POINTER));
     const hasNodeWriteback = clips.some((c) =>
         c.channels.some(
@@ -127,7 +127,7 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
     }
 
     return clips.map((clip, clipIndex) => {
-        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, nodeNames);
+        const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,

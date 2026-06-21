@@ -128,6 +128,12 @@ export interface GltfAnimationData {
      *  {@link AnimationGroupMask} to resolve include/exclude target names to the node
      *  indices its channels animate. */
     readonly nodeNames: readonly (string | undefined)[];
+    /** Shared node-index → bone override map, present only when `enableBoneControl()`
+     *  installed bone control. Handed to every AnimationController so a playing clip
+     *  honours user bone overrides (animation wins per-component). `undefined` on the
+     *  default path. Typed as `unknown` value to keep the internal `BoneOverride`
+     *  shape out of the public API surface. */
+    readonly boneOverrides?: ReadonlyMap<number, unknown>;
 }
 
 // ─── GPU-side data objects attached to Mesh ─────────────────────────────────

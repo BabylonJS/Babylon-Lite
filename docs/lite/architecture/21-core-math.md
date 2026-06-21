@@ -123,6 +123,19 @@ export function mat4Compose(
   qx: number, qy: number, qz: number, qw: number,
   sx: number, sy: number, sz: number,
 ): Mat4;
+
+/** Decompose a column-major affine Mat4 into translation/rotation(quaternion)/scale.
+ *  Shared by setParent() and the Havok compound-shape path. */
+export function mat4Decompose(m: Mat4): { translation: Vec3; rotation: Quat; scale: Vec3 };
+
+/** Unit quaternion from the rotation part of a column-major Mat4 (Babylon.js
+ *  `Quaternion.FromRotationMatrix`). The upper-left 3×3 must be a pure rotation. */
+export function quatFromRotationMatrix(matrix: Mat4): Quat;
+
+/** Unit quaternion orienting local +Z onto `forward` and +Y onto `up`, right-handed
+ *  (`right = up × forward`); Babylon.js `Quaternion.FromLookDirectionRH`. Inputs are
+ *  orthonormalized, so non-unit / slightly non-orthogonal vectors still give a pure rotation. */
+export function quatFromLookDirectionRH(forward: Vec3, up: Vec3): Quat;
 ```
 
 ### Color Functions (`color.ts`)

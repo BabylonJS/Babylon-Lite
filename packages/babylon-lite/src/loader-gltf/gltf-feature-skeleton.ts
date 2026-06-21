@@ -3,6 +3,7 @@
 
 import type { GltfFeature } from "./gltf-feature.js";
 import { resolveAccessor } from "./gltf-parser.js";
+import { _boneBuilder } from "../skeleton/bone-control-hooks.js";
 
 /** Resolve a vertex attribute by name, preferring any pre-decoded
  *  (e.g. Draco) data over the raw accessor. */
@@ -36,6 +37,22 @@ const feature: GltfFeature = {
         const skin = extractSkin(json, binChunk, node.skin, meshData._worldMatrix, parentMap, worldMatrixCache);
         const boneData = computeBoneTextureData(skin);
         mesh.skeleton = createSkeleton(ctx._engine, joints, weights, skin.jointNodes.length, boneData, joints1, weights1);
+
+        // When bone control is enabled, lazily create the asset-wide override map
+        // here (per-mesh hook runs before any per-asset hook) so the animation feature
+        // and the bone-control builder share the same map race-free.
+        if (_boneBuilder && !ctx._boneOverrides) {
+            ctx._boneOverrides = new Map();
+        }
+    },
+    async applyAsset(meshes, _root, ctx) {
+        // Bone control is opt-in: with the builder hook absent (default), no public
+        // skeleton handles are built and `container.skeletons` stays undefined — the
+        // whole bone-control implementation tree-shakes away.
+        if (!_boneBuilder || !ctx._boneOverrides) {
+            return {};
+        }
+        return _boneBuilder(ctx, meshes, ctx._boneOverrides);
     },
 };
 export default feature;

@@ -195,6 +195,59 @@ The glTF loader (`load-gltf.ts`) integrates skeleton creation:
 
 All skeleton/animation modules are **dynamically imported** — only loaded when glTF contains skins or animations.
 
+## Bone Control (opt-in)
+
+`bone-control.ts` adds a user-facing API to override individual bone transforms on a
+loaded skinned model — the Lite equivalent of manipulating `skeleton.bones[i]` in
+Babylon.js (e.g. "scale a bone to 0 to hide its sub-tree", or pose a bone the playing
+clip does not animate).
+
+It is **opt-in and near-zero bundle cost when unused**: the always-fetched skeleton /
+animation chunk references it only through two null hooks (`bone-control-hooks.ts`).
+Calling `enableBoneControl()` installs the implementation; until then the whole module
+(handle building, eager bake, override application) tree-shakes away.
+
+```typescript
+// Public API (index.ts)
+export function enableBoneControl(): void;                  // call ONCE before loading
+export function getBoneByName(skeleton: Skeleton, name: string): Bone | undefined;
+export function setBonePosition(skeleton: Skeleton, bone: Bone, x, y, z): void;
+export function setBoneRotationQuaternion(skeleton: Skeleton, bone: Bone, x, y, z, w): void;
+export function setBoneScaling(skeleton: Skeleton, bone: Bone, x, y, z): void;
+export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void; // scale→0 hide
+export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void;
+export interface Skeleton { readonly bones: readonly Bone[]; /* +@internal */ }
+export interface Bone { readonly name: string; /* +@internal */ }
+```
+
+```typescript
+enableBoneControl();                                  // ← before loadGltf
+const character = await loadGltf(engine, "character.glb");
+addToScene(scene, character);
+const skel = character.skeletons![0];                 // one per glTF skin
+const head = getBoneByName(skel, "Head");
+if (head) setBoneVisible(skel, head, false);          // hide the head + everything under it
+```
+
+### Semantics
+
+- **Eager bake.** Each `setBone*` immediately recomputes the asset's bone matrices from
+  the rest pose + overrides and uploads the bone textures, so overrides apply even with
+  **no** animation playing (static models).
+- **Animation wins per-component.** When a clip plays, the per-frame tick re-applies
+  overrides right after the rest reset and **before** channel evaluation, so any component
+  a clip animates overwrites the override; components the clip does not touch keep it.
+- **One handle per skin, re-bakes every mesh.** A glTF skin split across multiple meshes
+  (e.g. Xbot's `Beta_Joints` + `Beta_Surface`) produces one bone texture *per mesh* in
+  Lite, hence one `Skeleton` handle per skinned mesh on `container.skeletons`. The override
+  map is asset-wide and the eager bake re-bakes **all** of the asset's bone textures, so a
+  single `setBone*` updates every mesh that shares the skin — matching Babylon.js's shared
+  `Skeleton`.
+
+The internal `BoneOverride` map type is kept off the public API surface: public boundaries
+(`createAnimationController`, `GltfAnimationData.boneOverrides`) type it as
+`ReadonlyMap<number, unknown>` and the internal hook casts back.
+
 ## Babylon.js Equivalence Map
 
 | Babylon.js | Babylon Lite |
@@ -206,6 +259,9 @@ All skeleton/animation modules are **dynamically imported** — only loaded when
 | `Mesh.useBones` | Presence of `mesh.skeleton` property |
 | 4-bone: `matricesIndices`, `matricesWeights` | `jointsBuffer`, `weightsBuffer` |
 | 8-bone: `matricesIndicesExtra`, `matricesWeightsExtra` | `joints1Buffer`, `weights1Buffer` |
+| `bone.setRotationQuaternion()` / `bone.setScale()` / pose a bone | `setBoneRotationQuaternion()` / `setBoneScaling()` (after `enableBoneControl()`) |
+| Scale a bone to 0 to hide its sub-tree | `setBoneVisible(skel, bone, false)` |
+| `skeleton.bones.find(b => b.name === ...)` | `getBoneByName(skeleton, name)` |
 
 ## Dependencies
 
@@ -231,3 +287,6 @@ All skeleton/animation modules are **dynamically imported** — only loaded when
 |---|---|
 | `create-skeleton.ts` | GPU resource factory: creates bone texture + joint/weight vertex buffers from parsed glTF skin data |
 | `skeleton-updater.ts` | Per-frame animation evaluation: keyframe interpolation → hierarchy traversal → bone matrix computation → GPU upload |
+| `skeleton-pose.ts` | Shared bake primitives (topo order, rest reset, world matrices, bone-texture upload) used by the opt-in eager bone-control bake |
+| `bone-control.ts` | Opt-in bone-control API: `enableBoneControl`, `getBoneByName`, `setBone*`, eager bake + per-frame override applier |
+| `bone-control-hooks.ts` | Two null hooks (`_boneBuilder`, `_boneApplier`) so the always-fetched chunk references bone control without bundling it |
