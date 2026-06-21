@@ -229,27 +229,6 @@ export function resolveBufferUri(uri: string, baseUrl: string): string {
     }
 }
 
-/** Map a glTF textureInfo's sampler (wrapS/wrapT/magFilter/minFilter) to a WebGPU sampler
- *  descriptor. glTF wrap: 33071 CLAMP_TO_EDGE, 33648 MIRRORED_REPEAT, else REPEAT.
- *  glTF filter: 9728 NEAREST else LINEAR; min/mip from the combined min filter enum. */
-function gltfTexSamplerDesc(json: any, texInfo: any): GPUSamplerDescriptor {
-    const s = json.textures?.[texInfo.index]?.sampler != null ? json.samplers?.[json.textures[texInfo.index].sampler] : undefined;
-    const wrap = (m: number | undefined): GPUAddressMode => (m === 33071 ? "clamp-to-edge" : m === 33648 ? "mirror-repeat" : "repeat");
-    const minF: number | undefined = s?.minFilter;
-    const minNearest = minF === 9728 || minF === 9984 || minF === 9986;
-    const mipNearest = minF === 9984 || minF === 9985;
-    const magLinear = s?.magFilter !== 9728;
-    return {
-        magFilter: magLinear ? "linear" : "nearest",
-        minFilter: minNearest ? "nearest" : "linear",
-        mipmapFilter: mipNearest ? "nearest" : "linear",
-        addressModeU: wrap(s?.wrapS),
-        addressModeV: wrap(s?.wrapT),
-        // WebGPU forbids anisotropy unless all filters are linear.
-        maxAnisotropy: magLinear && !minNearest ? 4 : 1,
-    };
-}
-
 /** Cheap superset gate: returns true iff the asset can possibly trigger at least
  *  one optional glTF feature. Every `_features` predicate in gltf-feature-registry
  *  is implied by one of these buckets (all hasExt/hasMatExt features require a
@@ -393,11 +372,7 @@ async function extractAllMeshes(
             // first need — non-interleaved assets never fetch it. Tight primitives
             // fall through to the path below (byte-identical to non-interleaved).
             if (!decoded && _strided(primitive)) {
-                // Lazily load smooth-normal generation only when this interleaved
-                // primitive omits NORMAL (rare) — keeps gltf-normals out of the
-                // bundle for the common interleaved-with-normals case.
-                const smoothNormals = primitive.attributes?.NORMAL === undefined ? (await import("./gltf-normals.js")).computeSmoothNormals : undefined;
-                const ip = (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx, smoothNormals);
+                const ip = (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
                 if (ip) {
                     matPromises.push(getMat(primitive.material));
                     partials.push(ip);
@@ -499,33 +474,37 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
         addressModeV: "repeat",
         maxAnisotropy: 4,
     });
-    // Resolve the GPU sampler for a glTF textureInfo, honoring the texture's glTF
-    // sampler (wrapS/wrapT/magFilter/minFilter). getOrCreateSampler dedupes, so
-    // repeated descriptors reuse one GPU sampler.
-    const samplerFor = (texInfo: any): GPUSampler => (texInfo == null ? sampler : getOrCreateSampler(engine, gltfTexSamplerDesc(json, texInfo)));
+    // Per-texture glTF samplers (wrap/filter) are honored only when the asset declares a
+    // NON-default sampler (clamp/mirror wrap, or nearest filtering); the common case
+    // (default repeat/linear) uses the single shared sampler above and the master-identical
+    // buildDefaultPbrTextures path. Both the descriptor logic AND the sampler-aware texture
+    // builder are lazy so default-sampler assets pay zero bundle bytes for the feature.
+    let samplerFor: ((texInfo: any) => GPUSampler) | undefined;
+    let buildSampledPbrTextures: typeof import("./gltf-sampler-desc.js").buildSampledPbrTextures | undefined;
+    if (json.samplers?.some((s: any) => s.wrapS > 10497 || s.wrapT > 10497 || s.magFilter === 9728 || (s.minFilter != null && s.minFilter !== 9729 && s.minFilter !== 9987))) {
+        const mod = await import("./gltf-sampler-desc.js");
+        samplerFor = mod.makeSamplerFor(engine, json, sampler);
+        buildSampledPbrTextures = mod.buildSampledPbrTextures;
+    }
 
     await ensureMipmapModule();
     const meshFeatures = features.filter((f) => f.applyMesh);
 
-    // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb, sampler).
-    const texCache = new Map<GPUSampler, Map<number, Texture2D>>();
+    // Texture cache: shared textures uploaded once, keyed by (bitmap, srgb).
+    const texCache = new Map<number, Texture2D>();
     let texId = 0;
     const bitmapIds = new Map<ImageBitmap, number>();
 
-    function getCachedTexture(bitmap: ImageBitmap, srgb: boolean, slotSampler: GPUSampler = sampler): Texture2D {
+    function getCachedTexture(bitmap: ImageBitmap, srgb: boolean): Texture2D {
         let id = bitmapIds.get(bitmap);
         if (id === undefined) {
             bitmapIds.set(bitmap, (id = texId++));
         }
         const key = id * 2 + +srgb;
-        let bySampler = texCache.get(slotSampler);
-        if (!bySampler) {
-            texCache.set(slotSampler, (bySampler = new Map()));
-        }
-        let tex = bySampler.get(key);
+        let tex = texCache.get(key);
         if (!tex) {
-            tex = uploadTex(engine, bitmap, srgb, slotSampler, _generateMipmaps!);
-            bySampler.set(key, tex);
+            tex = uploadTex(engine, bitmap, srgb, sampler, _generateMipmaps!);
+            texCache.set(key, tex);
         }
         return tex;
     }
@@ -578,7 +557,9 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 const tex = extMod.buildDefaultPbrTexturesExt(engine, mat, sampler, _generateMipmaps!, getCachedTexture, wrapTex);
                 return extMod.assemblePbrPropsExt(mat, tex, extLayers);
             }
-            const tex = buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture, samplerFor);
+            const tex = buildSampledPbrTextures
+                ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!)
+                : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
             return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
         })();
         builtMaterialCache.set(mat, cached);

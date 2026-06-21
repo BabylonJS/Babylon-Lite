@@ -24,6 +24,7 @@ import { initMeshTransform } from "../mesh/mesh.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
+import { computeSmoothNormals } from "./gltf-normals.js";
 import type { GltfMeshData } from "./load-gltf.js";
 
 const FLOAT = 5126;
@@ -170,14 +171,7 @@ function resolveColorVec4(json: any, binChunk: DataView, idx: number): Float32Ar
  *  (they feed device-lost recovery), but no current asset interleaves them.
  *  COLOR_0 is always normalized to a tight float32x3 buffer (see
  *  {@link resolveColorVec4}). Tight attributes resolve exactly like the core loader. */
-export function buildInterleavedPartial(
-    json: any,
-    binChunk: DataView,
-    primitive: any,
-    worldMatrix: Mat4,
-    nodeIdx: number,
-    computeSmoothNormals?: (positions: Float32Array, indices: Uint16Array | Uint32Array, vertexCount: number) => Float32Array
-): Omit<GltfMeshData, "_material"> | undefined {
+export function buildInterleavedPartial(json: any, binChunk: DataView, primitive: any, worldMatrix: Mat4, nodeIdx: number): Omit<GltfMeshData, "_material"> | undefined {
     const attrs = primitive.attributes;
 
     // Per-primitive gate: bail (→ tight path) unless a vertex attribute is strided.
@@ -250,16 +244,12 @@ export function buildInterleavedPartial(
     // Absent (not merely strided) NORMAL: generate smooth normals to match the core
     // loader's tight path. A zero-filled normal buffer makes every lit fragment's
     // worldNormal NaN/black — e.g. a material-less skinned mesh whose interleaved
-    // JOINTS/WEIGHTS route it here (SimpleSkin). `computeSmoothNormals` is passed in
-    // lazily by the caller only when NORMAL is missing, so non-affected interleaved
-    // scenes pay zero bundle cost. Falls back to a bindable zero buffer if unavailable.
+    // JOINTS/WEIGHTS route it here (SimpleSkin). computeSmoothNormals is statically
+    // imported by this lazy interleave chunk, so non-interleaved scenes (which never
+    // load this module) pay zero bundle cost for it.
     if (!normals && !vb._n) {
-        if (computeSmoothNormals) {
-            const tightPos = positions ?? (vb._p ? destrideToTight(vb._p) : new F32(vertexCount * 3));
-            normals = computeSmoothNormals(tightPos, indices, vertexCount);
-        } else {
-            normals = new F32(vertexCount * 3);
-        }
+        const tightPos = positions ?? (vb._p ? destrideToTight(vb._p) : new F32(vertexCount * 3));
+        normals = computeSmoothNormals(tightPos, indices, vertexCount);
     }
     if (!uvs && !vb._u) {
         uvs = new F32(vertexCount * 2);
