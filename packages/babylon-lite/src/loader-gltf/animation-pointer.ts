@@ -67,12 +67,17 @@ export interface PointerContext {
 type PointerFactory = (match: RegExpExecArray, ctx: PointerContext) => ResolvedPointer | null;
 
 // Maps a KHR_texture_transform pointer's texture-slot segment to the material field.
+// NOTE: metallicRoughnessTexture is intentionally absent. Babylon.js has a long-standing
+// loader bug — its KHR_animation_pointer registration for the MR texture transform omits the
+// `/extensions/KHR_texture_transform/` path segment (and adds a stray leading slash), so the
+// interpolation is never attached and BJS silently skips animating the MR texture transform
+// (offset/scale/rotation stay frozen at their static load-time values). We match BJS for parity
+// and likewise do NOT animate the MR texture transform.
 const TX_SLOT: Record<string, keyof PointerMaterial> = {
     "pbrMetallicRoughness/baseColorTexture": "baseColorTexture",
     emissiveTexture: "emissiveTexture",
     normalTexture: "normalTexture",
     occlusionTexture: "ormTexture",
-    "pbrMetallicRoughness/metallicRoughnessTexture": "ormTexture",
 };
 
 /** Resolve a glTF material-extension texture slot to the runtime PBR material's
@@ -168,7 +173,7 @@ const _registry: [RegExp, PointerFactory][] = [
     // slot texture's uOffset/vOffset, uScale/vScale, or uAng and bumps the material's
     // UBO version so the renderable re-uploads the UV matrix.
     [
-        /^\/materials\/(\d+)\/(pbrMetallicRoughness\/baseColorTexture|pbrMetallicRoughness\/metallicRoughnessTexture|emissiveTexture|normalTexture|occlusionTexture)\/extensions\/KHR_texture_transform\/(offset|scale|rotation)$/,
+        /^\/materials\/(\d+)\/(pbrMetallicRoughness\/baseColorTexture|emissiveTexture|normalTexture|occlusionTexture)\/extensions\/KHR_texture_transform\/(offset|scale|rotation)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
             const slot = m[2]!;
