@@ -87,38 +87,63 @@ const TX_SLOT: Record<string, keyof PointerMaterial> = {
  *  shader ignores). */
 function resolveExtTexture(mat: PointerMaterial, ext: string, field: string): PointerUvTexture | undefined {
     const m = mat as unknown as {
-        iridescence?: { texture?: PointerUvTexture; thicknessTexture?: PointerUvTexture };
-        sheen?: { texture?: PointerUvTexture };
-        clearCoat?: { texture?: PointerUvTexture; roughnessTexture?: PointerUvTexture; bumpTexture?: PointerUvTexture };
+        iridescence?: Record<string, unknown>;
+        sheen?: Record<string, unknown>;
+        clearCoat?: Record<string, unknown>;
         reflectanceTexture?: PointerUvTexture;
         metallicReflectanceTexture?: PointerUvTexture;
-        subsurface?: { translucency?: { colorTexture?: PointerUvTexture; intensityTexture?: PointerUvTexture } };
+        subsurface?: { translucency?: Record<string, unknown> };
     };
     switch (`${ext}/${field}`) {
         case "KHR_materials_iridescence/iridescenceTexture":
-            return m.iridescence?.texture;
+            return privateTexture(m.iridescence, "texture");
         case "KHR_materials_iridescence/iridescenceThicknessTexture":
-            return m.iridescence?.thicknessTexture;
+            return privateTexture(m.iridescence, "thicknessTexture");
         case "KHR_materials_sheen/sheenColorTexture":
         case "KHR_materials_sheen/sheenRoughnessTexture":
-            return m.sheen?.texture;
+            return privateTexture(m.sheen, "texture");
         case "KHR_materials_clearcoat/clearcoatTexture":
-            return m.clearCoat?.texture;
+            return privateTexture(m.clearCoat, "texture");
         case "KHR_materials_clearcoat/clearcoatRoughnessTexture":
-            return m.clearCoat?.roughnessTexture;
+            return privateTexture(m.clearCoat, "roughnessTexture");
         case "KHR_materials_clearcoat/clearcoatNormalTexture":
-            return m.clearCoat?.bumpTexture;
+            return privateTexture(m.clearCoat, "bumpTexture");
         case "KHR_materials_specular/specularTexture":
-            return m.metallicReflectanceTexture;
+            return privateTexture(m as unknown as Record<string, unknown>, "metallicReflectanceTexture");
         case "KHR_materials_specular/specularColorTexture":
-            return m.reflectanceTexture;
+            return privateTexture(m as unknown as Record<string, unknown>, "reflectanceTexture");
         case "KHR_materials_diffuse_transmission/diffuseTransmissionColorTexture":
-            return m.subsurface?.translucency?.colorTexture;
+            return privateTexture(m.subsurface?.translucency, "colorTexture");
         case "KHR_materials_diffuse_transmission/diffuseTransmissionTexture":
-            return m.subsurface?.translucency?.intensityTexture;
+            return privateTexture(m.subsurface?.translucency, "intensityTexture");
         default:
             return undefined;
     }
+}
+
+/** Make a material's animated texture wrapper a private copy so that mutating its
+ *  per-texture UV-transform fields (uOffset/uScale/uAng…) never leaks into other
+ *  materials that share the same cached GPU texture wrapper. This happens when one
+ *  image (e.g. a packed ORM/occlusion texture, or a sheen texture) is reused across
+ *  several materials and only some of them animate its KHR_texture_transform — the
+ *  shared wrapper would otherwise be mutated for all of them. The clone shares GPU
+ *  resources (texture/view/sampler) via object spread; only the transform fields
+ *  become independent. Idempotent via `_animPriv` so multiple channels
+ *  (offset/scale/rotation) on the same slot reuse one private wrapper.
+ *  @param parent - The object holding the texture slot (the material, or an extension
+ *  sub-object such as `material.sheen`).
+ *  @param key - The slot field name on `parent`. */
+function privateTexture(parent: Record<string, unknown> | undefined, key: string): PointerUvTexture | undefined {
+    const cur = parent?.[key] as (PointerUvTexture & { _animPriv?: true }) | undefined;
+    if (!cur) {
+        return undefined;
+    }
+    if (cur._animPriv) {
+        return cur;
+    }
+    const clone = { ...(cur as object), _animPriv: true } as PointerUvTexture & { _animPriv: true };
+    parent![key] = clone;
+    return clone;
 }
 
 /** Build an offset/scale/rotation UV-transform writer for a resolved texture. */
@@ -176,11 +201,17 @@ const _registry: [RegExp, PointerFactory][] = [
         /^\/materials\/(\d+)\/(pbrMetallicRoughness\/baseColorTexture|emissiveTexture|normalTexture|occlusionTexture)\/extensions\/KHR_texture_transform\/(offset|scale|rotation)$/,
         (m, ctx) => {
             const mat = ctx.materials?.[+m[1]!];
+            if (!mat) {
+                return null;
+            }
             const slot = m[2]!;
             // orm-unpack: when occlusion has its own UV carrier (independent transform), drive
             // that; otherwise occlusion shares the single ORM transform (TX_SLOT fallback).
-            const tex = (slot === "occlusionTexture" && mat?.occlusionTexture ? mat.occlusionTexture : mat?.[TX_SLOT[slot]!]) as PointerUvTexture | undefined;
-            if (!mat || !tex) {
+            const field: keyof PointerMaterial = slot === "occlusionTexture" && mat.occlusionTexture ? "occlusionTexture" : TX_SLOT[slot]!;
+            // Isolate the animated slot so mutating its UV transform can't leak into other
+            // materials that share the same cached texture wrapper (e.g. a reused ORM image).
+            const tex = privateTexture(mat as unknown as Record<string, unknown>, field as string);
+            if (!tex) {
                 return null;
             }
             return uvTransformWriter(mat, tex, m[3]);
