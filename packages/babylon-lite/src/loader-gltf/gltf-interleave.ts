@@ -323,14 +323,14 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
  *  retention) so the core loader's tight path stays byte-identical to the
  *  non-interleaved engine — keeping interleave bytes out of every glTF scene that
  *  doesn't use it. */
-export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps): Mesh {
+export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string): Mesh {
     const gpu = buildInterleavedGpu(engine, m);
 
     // AABB: fold strided positions straight from the slice; tight positions normally.
     const [boundMin, boundMax] = m._vb!._p ? computeAabbStrided(m._vb!._p, m._worldMatrix) : computeAabb(m._positions!, m._worldMatrix);
 
     const mesh = {
-        name: `gltf_mesh_${index}`,
+        name: name || `gltf_mesh_${index}`,
         material,
         receiveShadows: false,
         boundMin,

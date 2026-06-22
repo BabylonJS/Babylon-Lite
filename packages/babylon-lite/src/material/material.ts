@@ -5,6 +5,7 @@
  *  factors), while the shared `_buildGroup` hook lets the renderer dispatch
  *  materials through a common path. */
 import type { MeshGroupBuilder } from "../render/renderable.js";
+import type { LiteMetadata } from "../metadata.js";
 
 /** Base material interface — the polymorphic anchor shared by every concrete
  *  material kind (Standard, PBR, Shader, Node). Concrete materials add their own
@@ -16,6 +17,8 @@ export interface Material {
     /** Optional human-readable name. Populated by loaders from the source asset
      *  (e.g. the glTF material name) so callers can look a material up by name. */
     name?: string;
+    /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
+    metadata?: LiteMetadata;
     /** @internal Material-owned render feature bits. Mesh-owned bits are computed per renderable. */
     _renderFeatures?: MaterialRenderFeatures;
     /** @internal Monotonic material UBO version. Renderables track their last seen value independently. */

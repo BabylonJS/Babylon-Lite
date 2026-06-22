@@ -383,6 +383,7 @@ setShadowTaskCasterMeshes(shadowGenerator: ShadowGenerator, casterMeshes: readon
 // Animation
 createAnimationController(skeleton, scene): AnimationController
 createAnimationGroups(gltfData, meshes, scene): AnimationGroup[]
+goToFrame(group: AnimationGroup, frame: number, engine?: EngineContext): void
 
 // Hierarchy
 setParent(child: IParentable, parent: IWorldMatrixProvider | null, scene: SceneContext): void
@@ -739,8 +740,19 @@ interface AnimationController {
 }
 interface AnimationGroup {
     name: string;
-    play(loop?: boolean): void;
-    stop(): void;
+    duration: number; // seconds
+    currentTime: number; // seconds
+    targetedAnimations: readonly TargetedAnimation[];
+    isPlaying: boolean;
+    speedRatio: number;
+    loopAnimation: boolean;
+    weight: number;
+}
+interface TargetedAnimation {
+    target?: object;
+    targetName?: string;
+    nodeIndex?: number;
+    path: string;
 }
 interface AnimationClip {
     /* keyframe data */

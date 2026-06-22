@@ -171,13 +171,21 @@ export interface AnimationGroup {
     readonly duration: number;             // seconds
     readonly frameRate: number;            // used by goToFrame()
     isPlaying: boolean;
-    currentFrame: number;                  // current time in seconds (not frames!)
+    currentTime: number;                   // seconds
+    readonly targetedAnimations: readonly TargetedAnimation[];
     speedRatio: number;                    // default 1
     loopAnimation: boolean;               // default true
     weight: number;                        // default 1
     mask?: AnimationGroupMask;             // optional include/exclude target-name filter
     _stopped: boolean;
     readonly _ctrl?: AnimationController;
+}
+
+export interface TargetedAnimation {
+    readonly target?: object;
+    readonly targetName?: string;
+    readonly nodeIndex?: number;
+    readonly path: string;
 }
 ```
 
@@ -282,9 +290,9 @@ A module-level `[0,0,0,1]` array is reused for quaternion slerp output to avoid 
 
 ### Frame Timing Model
 
-- `AnimationGroup.currentFrame` stores time in **seconds** (not frame numbers, despite the name — matches BJS convention)
+- `AnimationGroup.currentTime` stores time in **seconds**
 - `goToFrame(frame)` converts frame number to seconds with the group's `frameRate`, immediately evaluates the pose when possible, then pauses
-- `tickAnimation(group, deltaMs, engine?)` advances `group.currentFrame += (deltaMs / 1000) * speedRatio` and syncs the internal controller only for evaluation/upload
+- `tickAnimation(group, deltaMs, engine?)` advances `group.currentTime += (deltaMs / 1000) * speedRatio` and syncs the internal controller only for evaluation/upload
 - Duration is in seconds (max sampler input timestamp)
 - Looping wraps via modulo within the active range: `time = from + ((time - from) % (to - from))`
 - glTF groups default to 60fps; property groups inherit the `PropertyAnimationClip.frameRate`
@@ -397,7 +405,7 @@ setAnimationAdditive(headShake, { referenceFrame: 0 });
 setAnimationWeight(headShake, 0.6);
 
 setAnimationAdditive(sadPose, { referenceFrame: 0 });
-sadPose.currentFrame = 2 / sadPose.frameRate;
+sadPose.currentTime = 2 / sadPose.frameRate;
 pauseAnimation(sadPose);
 setAnimationWeight(sadPose, 0.35);
 
@@ -473,10 +481,10 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
                       upload bone matrices + morph weights
 ```
 
-- **STOPPED**: `group.isPlaying = false`, `group.currentFrame = 0`, `group._stopped = true`. `tickAnimation()` returns immediately.
+- **STOPPED**: `group.isPlaying = false`, `group.currentTime = 0`, `group._stopped = true`. `tickAnimation()` returns immediately.
 - **PLAYING**: `group.isPlaying = true`. Each `tickAnimation()` advances time, evaluates samplers, uploads GPU data.
 - **PAUSED**: `group.isPlaying = false`. `tickAnimation()` still evaluates (ensures pose is current) but doesn't advance time.
-- **goToFrame(f)**: Sets `group.currentFrame = f / group.frameRate`, evaluates the pose immediately for manual property clips (or engine-backed clips when an engine is provided), then pauses.
+- **goToFrame(f)**: Sets `group.currentTime = f / group.frameRate`, evaluates the pose immediately for manual property clips (or engine-backed clips when an engine is provided), then pauses.
 
 ## Babylon.js Equivalence Map
 

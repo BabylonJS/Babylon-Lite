@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     const seekTime = parseFloat(new URLSearchParams(window.location.search).get("seekTime") || "");
     if (Number.isFinite(seekTime)) {
         for (const group of activeGroups) {
-            group.currentFrame = group === sadPose ? POSE_TIME : seekTime;
+            group.currentTime = group === sadPose ? POSE_TIME : seekTime;
             pauseAnimation(group);
         }
         canvas.dataset.animationFrozen = "true";
@@ -97,7 +97,7 @@ function setAdditivePose(group: AnimationGroup, weight: number): void {
     playAnimation(group);
     setAnimationAdditive(group, { referenceFrame: 0 });
     setAnimationWeight(group, weight);
-    group.currentFrame = POSE_TIME;
+    group.currentTime = POSE_TIME;
     pauseAnimation(group);
 }
 

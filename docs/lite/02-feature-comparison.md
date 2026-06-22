@@ -239,7 +239,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | MSFT_lod | — | ✅ | Discrete level-of-detail |
 | MSFT_minecraftMesh | — | ✅ | Minecraft-style voxel meshes |
 | MSFT_audio_emitter | — | ✅ | Legacy positional audio |
-| ExtrasAsMetadata | — | ✅ | Promote glTF `extras` to runtime metadata |
+| ExtrasAsMetadata | ✅ | ✅ | Promote glTF `extras` to `metadata.gltf.extras` |
 
 ---
 

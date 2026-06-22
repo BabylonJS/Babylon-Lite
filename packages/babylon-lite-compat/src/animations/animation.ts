@@ -441,7 +441,7 @@ export class AnimationGroup {
     public get animatables(): Array<{ masterFrame: number }> {
         if (this._lite) {
             const frameRate = this._lite.frameRate ?? 60;
-            return [{ masterFrame: this._lite.currentFrame * frameRate }];
+            return [{ masterFrame: this._lite.currentTime * frameRate }];
         }
         return [];
     }
@@ -467,7 +467,7 @@ export class AnimationGroup {
         if (this._lite) {
             const frameRate = this._lite.frameRate ?? 60;
             if (from !== undefined) {
-                this._lite.currentFrame = from / frameRate;
+                this._lite.currentTime = from / frameRate;
             }
             this._lite.speedRatio = speedRatio;
             this._lite.loopAnimation = loop;

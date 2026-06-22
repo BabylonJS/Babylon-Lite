@@ -173,8 +173,8 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
     const { root, nodeMap } = buildNodeHierarchy(json, meshes, meshDatas);
     ctx._nodeMap = nodeMap;
 
-    // Run every feature's per-asset hook (animations, variants, …) and merge
-    // the returned AssetContainer fragments. `entities` is appended (never
+    // Run every feature's per-asset hook (animations, variants, metadata, …) and
+    // merge the returned AssetContainer fragments. `entities` is appended (never
     // overwritten) so features like KHR_lights_punctual can contribute lights
     // without trampling the root TransformNode.
     const assetFragments = await Promise.all(features.flatMap((f) => (f.applyAsset ? [f.applyAsset(meshes, root, ctx)] : [])));
@@ -218,10 +218,11 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
  *  `loadGltfFeatures` would return `[]` anyway — letting the core loader skip the
  *  registry import entirely and keep its ~24 feature import-thunks out of the
  *  bundle for plain metallic-roughness assets. */
-function assetUsesGltfFeatures(json: any): boolean {
-    return !!(
+function assetUsesGltfFeatures(json: any) {
+    return (
         json.extensionsUsed?.length ||
         json.animations?.length ||
+        JSON.stringify(json).includes("extras") ||
         (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
         anyPrimitive(json, (p) => !!p.targets?.length) ||
         needsOrmComposite(json)
@@ -341,10 +342,12 @@ async function extractAllMeshes(
             continue;
         }
 
-        const mesh = json.meshes[node.mesh];
+        const meshIndex = node.mesh as number;
+        const mesh = json.meshes[meshIndex];
         const worldMatrix = computeNodeWorldMatrix(json, nodeIdx, parentMap, worldMatrixCache);
 
-        for (const primitive of mesh.primitives) {
+        for (let primitiveIndex = 0; primitiveIndex < mesh.primitives.length; primitiveIndex++) {
+            const primitive = mesh.primitives[primitiveIndex];
             const attrs = primitive.attributes;
             const decoded = decodedPrimitives.get(primitive);
 
@@ -551,13 +554,14 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
     const meshes = await Promise.all(
         meshDatas.map(async (m, i): Promise<Mesh> => {
             const material = await buildPbrFromGltfMat(m._material);
+            const meshName = json.meshes[json.nodes[m._nodeIndex].mesh].name;
 
             // Interleaved meshes are fully built by the dynamic module (kept out of
             // this bundle for non-interleaved scenes). The tight path below is
             // byte-identical to the non-interleaved engine.
             let mesh: Mesh;
             if (m._vb) {
-                mesh = (await loadInterleave()).buildInterleavedMesh(engine, m, i, material) as Mesh;
+                mesh = (await loadInterleave()).buildInterleavedMesh(engine, m, i, material, meshName) as Mesh;
             } else {
                 const [boundMin, boundMax] = computeAabb(m._positions!, m._worldMatrix);
                 const gpu: MeshGPU = {
@@ -573,7 +577,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 };
 
                 mesh = {
-                    name: `gltf_mesh_${i}`,
+                    name: meshName || `gltf_mesh_${i}`,
                     material,
                     receiveShadows: false,
                     boundMin,

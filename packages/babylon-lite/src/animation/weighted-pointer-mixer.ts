@@ -206,7 +206,7 @@ function validateWeight(weight: number): number {
 
 function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropertyMixer, deltaMs: number): number {
     if (group.isPlaying) {
-        group.currentFrame += (deltaMs / 1000) * group.speedRatio;
+        group.currentTime += (deltaMs / 1000) * group.speedRatio;
     }
 
     const fromTime = Math.max(0, Math.min(mixer[MIX_FROM], mixer[MIX_DURATION]));
@@ -217,14 +217,14 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
     }
 
     if (group.loopAnimation) {
-        group.currentFrame = fromTime + ((group.currentFrame - fromTime) % duration);
-        if (group.currentFrame < fromTime) {
-            group.currentFrame += duration;
+        group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
+        if (group.currentTime < fromTime) {
+            group.currentTime += duration;
         }
     } else {
-        group.currentFrame = Math.min(Math.max(group.currentFrame, fromTime), toTime);
+        group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
     }
-    return group.currentFrame;
+    return group.currentTime;
 }
 
 function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationPropertyRuntimeTrack): WeightedPointerBucket {

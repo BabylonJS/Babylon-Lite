@@ -309,6 +309,22 @@ export { crossVec3 } from "./math/cross-vec3.js";
 export { lengthVec3 } from "./math/length-vec3.js";
 export { negateVec3 } from "./math/negate-vec3.js";
 export { lerpVec3 } from "./math/lerp-vec3.js";
+export {
+    addVec3InPlace,
+    addVec3ToRef,
+    crossVec3InPlace,
+    crossVec3ToRef,
+    lerpVec3InPlace,
+    lerpVec3ToRef,
+    negateVec3InPlace,
+    negateVec3ToRef,
+    normalizeVec3InPlace,
+    normalizeVec3ToRef,
+    scaleVec3InPlace,
+    scaleVec3ToRef,
+    subVec3InPlace,
+    subVec3ToRef,
+} from "./math/vec3-ref.js";
 export { writeVec3 } from "./math/write-vec3.js";
 export { mat4Translation } from "./math/mat4-translation.js";
 export { mat4Identity } from "./math/mat4-identity.js";
@@ -326,6 +342,7 @@ export type { DecomposedTransform } from "./math/mat4-decompose.js";
 export type { Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
+export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./math/color.js";
@@ -404,7 +421,7 @@ export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-s
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
-export type { AnimationGroup } from "./animation/animation-group.js";
+export type { AnimationGroup, TargetedAnimation } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";
 export type {
     AnimationKeyframe,

@@ -4,6 +4,7 @@
  *  scaling, parent, worldMatrix, worldMatrixVersion, and children. */
 
 import type { Mat4 } from "../math/types.js";
+import type { LiteMetadata } from "../metadata.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Identity } from "../math/mat4-identity.js";
@@ -42,6 +43,8 @@ export interface SceneNode {
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
      *  Cascade is materialized at write-time by `setSubtreeVisible`. */
     visible?: boolean;
+    /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
+    metadata?: LiteMetadata;
 }
 
 // ─── Math helpers ─────────────────────────────────────────────────────

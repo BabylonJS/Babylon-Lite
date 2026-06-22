@@ -51,6 +51,7 @@ const _features: [Trigger, Loader][] = [
     [(j) => !!j.skins?.length && anyPrimitive(j, (p) => p.attributes?.JOINTS_0 !== undefined), () => import("./gltf-feature-skeleton.js")],
     [(j) => anyPrimitive(j, (p) => !!p.targets?.length), () => import("./gltf-feature-morph.js")],
     // Per-asset features
+    [hasGltfExtras, () => import("./gltf-feature-extras.js")],
     ["KHR_lights_punctual", () => import("./gltf-feature-lights-punctual.js")],
     [(j) => !!j.animations?.length, () => import("./gltf-feature-animations.js")],
     [M + "variants", () => import("./gltf-feature-variants.js")],
@@ -65,4 +66,8 @@ export async function loadGltfFeatures(json: any): Promise<GltfFeature[]> {
     const used: string[] = json.extensionsUsed ?? [];
     const mods = await Promise.all(_features.flatMap(([t, load]) => ((typeof t === "string" ? used.includes(t) : t(json)) ? [load()] : [])));
     return mods.map((m) => m.default);
+}
+
+function hasGltfExtras(json: any): boolean {
+    return JSON.stringify(json).includes("extras");
 }

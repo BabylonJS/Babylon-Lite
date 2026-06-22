@@ -23,17 +23,22 @@ describe("Property animation", () => {
         ]);
 
         const group = createPropertyAnimationGroup(manager, target, clip, { fromFrame: 0, toFrame: 20, loop: true });
+        expect(group.currentTime).toBe(0);
+        expect(group.targetedAnimations).toEqual([{ target: target.position, path: "x" }]);
 
         updateAnimationManager(manager, 0);
         expect(target.position.x).toBe(2);
 
         updateAnimationManager(manager, 1000);
+        expect(group.currentTime).toBe(1);
         expect(target.position.x).toBe(-2);
 
         goToFrame(group, 10);
+        expect(group.currentTime).toBe(1);
         expect(target.position.x).toBe(-2);
 
         goToFrame(group, 0);
+        expect(group.currentTime).toBe(0);
         expect(target.position.x).toBe(2);
 
         updateAnimationManager(manager, 1000);

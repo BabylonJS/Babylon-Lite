@@ -383,6 +383,7 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | `EXT_meshopt_compression` | ✅ | Auto-detected; meshopt-decodes vertex/index buffers via a dynamically-imported decoder (Scene 211) |
 | `KHR_mesh_quantization` | ✅ | Auto-detected; normalized/quantized vertex attributes uploaded with native typed formats (Scene 211) |
 | `KHR_xmp_json_ld` | ✅ | Auto-detected; JSON-LD metadata packets surfaced on `AssetContainer.xmpMetadata` with zero render impact (Scene 210) |
+| `ExtrasAsMetadata` | ✅ | Promotes glTF node, mesh, primitive, and material `extras` to `metadata.gltf.extras` |
 | Interleaved vertex buffers | ✅ | Genuine GPU-level interleave: a strided `bufferView` is uploaded once and bound to each attribute slot via `arrayStride`/offset — no CPU de-interleave or asset rewrite (Scene 210) |
 | Subsurface translucency + thickness | ✅ | `createPbrMaterial({ subsurface: { translucency, thickness } })` |
 | Specular anti-aliasing | ✅ | Auto-on for glTF; manual: `createPbrMaterial({ enableSpecularAA: true })` |

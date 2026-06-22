@@ -83,8 +83,8 @@ async function main(): Promise<void> {
 
     const seekTime = parseFloat(new URLSearchParams(window.location.search).get("seekTime") || "");
     if (Number.isFinite(seekTime)) {
-        positiveGroup.currentFrame = seekTime;
-        negativeGroup.currentFrame = seekTime;
+        positiveGroup.currentTime = seekTime;
+        negativeGroup.currentTime = seekTime;
         pauseAnimation(positiveGroup);
         pauseAnimation(negativeGroup);
         updateAnimationManager(manager, 0);
