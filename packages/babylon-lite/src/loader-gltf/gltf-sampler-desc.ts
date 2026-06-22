@@ -38,42 +38,25 @@ export function makeSamplerFor(engine: EngineContext, json: any, defaultSampler:
     return (texInfo: any): GPUSampler => (texInfo == null ? defaultSampler : getOrCreateSampler(engine, gltfTexSamplerDesc(json, texInfo)));
 }
 
-/** Sampler-aware variant of buildDefaultPbrTextures. Mirrors the core fast path but uploads
- *  each texture with the GPU sampler resolved from its glTF textureInfo (wrap/filter), so
- *  clamp/mirror/nearest assets render correctly. Lazy-loaded only for non-default-sampler
- *  assets — the common path stays byte-identical to master in the entry chunk.
+/** Sampler-aware variant of buildDefaultPbrTextures. Mirrors the core fast path but wraps
+ *  each shared GPU texture with the sampler resolved from its glTF textureInfo (wrap/filter),
+ *  so clamp/mirror/nearest assets render correctly without re-uploading identical images.
+ *  Lazy-loaded only for non-default-sampler assets — the common path stays byte-identical.
  *  @internal */
 export function buildSampledPbrTextures(
     engine: EngineContext,
     mat: GltfMaterialData,
     defaultSampler: GPUSampler,
     generateMipmaps: GenerateMipmapsFn,
-    samplerFor: (texInfo: any) => GPUSampler
+    samplerFor: (texInfo: any) => GPUSampler,
+    getCachedTex: (bitmap: ImageBitmap, srgb: boolean) => Texture2D
 ): { baseColorTexture: Texture2D; ormTexture: Texture2D; normalTexture: Texture2D | undefined; emissiveTexture: Texture2D | undefined } {
     const def = mat._rawMatDef ?? {};
     const pbr = def.pbrMetallicRoughness ?? {};
-    // Cache keyed by sampler → (bitmapId*2+srgb), so the same image reused with one sampler
-    // uploads once. Local to this asset (custom-sampler assets are rare and small).
-    const cache = new Map<GPUSampler, Map<number, Texture2D>>();
-    const ids = new Map<ImageBitmap, number>();
-    let next = 0;
     const cached = (bitmap: ImageBitmap, srgb: boolean, texInfo: any): Texture2D => {
         const s = samplerFor(texInfo);
-        let bySampler = cache.get(s);
-        if (!bySampler) {
-            cache.set(s, (bySampler = new Map()));
-        }
-        let id = ids.get(bitmap);
-        if (id === undefined) {
-            ids.set(bitmap, (id = next++));
-        }
-        const key = id * 2 + +srgb;
-        let tex = bySampler.get(key);
-        if (!tex) {
-            tex = uploadTex(engine, bitmap, srgb, s, generateMipmaps);
-            bySampler.set(key, tex);
-        }
-        return tex;
+        const tex = getCachedTex(bitmap, srgb);
+        return s === defaultSampler ? tex : { ...tex, sampler: s };
     };
 
     const baseColorTexture = mat._baseColorImage

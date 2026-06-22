@@ -570,7 +570,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                 return extMod.assemblePbrPropsExt(mat, tex, extLayers);
             }
             const tex = buildSampledPbrTextures
-                ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!)
+                ? buildSampledPbrTextures(engine, mat, sampler, _generateMipmaps!, samplerFor!, getCachedTexture)
                 : buildDefaultPbrTextures(engine, mat, sampler, _generateMipmaps!, getCachedTexture);
             return assemblePbrProps(mat, tex.baseColorTexture, tex.ormTexture, tex.normalTexture, tex.emissiveTexture, extLayers);
         })();

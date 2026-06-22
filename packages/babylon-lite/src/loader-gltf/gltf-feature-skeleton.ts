@@ -2,14 +2,8 @@
  *  core loader doesn't carry any skinning-related code for non-skinned assets. */
 
 import type { GltfFeature } from "./gltf-feature.js";
-import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
-import { F32, U32, U16, U8 } from "../engine/typed-arrays.js";
+import { resolveAccessor } from "./gltf-parser.js";
 import { _boneBuilder } from "../skeleton/bone-control-hooks.js";
-
-const FLOAT = 5126;
-const UNSIGNED_SHORT = 5123;
-const UNSIGNED_INT = 5125;
-const COMP_BYTES: Record<number, number> = { 5121: 1, 5123: 2, 5125: 4, 5126: 4 };
 
 /** Resolve a vertex attribute by name, preferring any pre-decoded
  *  (e.g. Draco) data over the raw accessor. De-strides interleaved sources:
@@ -17,7 +11,7 @@ const COMP_BYTES: Record<number, number> = { 5121: 1, 5123: 2, 5125: 4, 5126: 4 
  *  in skinned rigs that pack both into one bufferView with a byteStride — would
  *  otherwise read neighbouring/padding bytes and corrupt the skin (wrong joint
  *  indices → exploded or mis-posed mesh). */
-function resolveAttr(name: string, primitive: any, decoded: any, json: any, binChunk: DataView): ArrayBufferView | null {
+function resolveAttr(name: string, primitive: any, decoded: any, json: any, binChunk: DataView): ArrayBufferView | null | Promise<ArrayBufferView> {
     if (decoded && decoded._attributes.has(name)) {
         return decoded._attributes.get(name)!;
     }
@@ -27,34 +21,13 @@ function resolveAttr(name: string, primitive: any, decoded: any, json: any, binC
     }
     const accessor = json.accessors[idx];
     const bv = accessor.bufferView !== undefined ? json.bufferViews[accessor.bufferView] : undefined;
-    const componentCount = TYPE_SIZES[accessor.type] ?? 1;
-    const compBytes = COMP_BYTES[accessor.componentType] ?? 4;
+    const compBytes = accessor.componentType === 5126 || accessor.componentType === 5125 ? 4 : accessor.componentType === 5123 || accessor.componentType === 5122 ? 2 : 1;
     const stride = bv?.byteStride;
-    if (bv === undefined || stride === undefined || stride === componentCount * compBytes) {
+    // JOINTS_n and WEIGHTS_n are glTF VEC4 attributes.
+    if (bv === undefined || stride === undefined || stride === 4 * compBytes) {
         return resolveAccessor(json, binChunk, idx)._data as ArrayBufferView;
     }
-
-    // Interleaved source: copy each element into a tight array, honoring byteStride.
-    const ct = accessor.componentType;
-    const count = accessor.count;
-    const Ctor = ct === FLOAT ? F32 : ct === UNSIGNED_INT ? U32 : ct === UNSIGNED_SHORT ? U16 : U8;
-    const out = new Ctor(count * componentCount);
-    const base = (bv.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-    for (let v = 0; v < count; v++) {
-        const row = base + v * stride;
-        for (let c = 0; c < componentCount; c++) {
-            const off = row + c * compBytes;
-            out[v * componentCount + c] =
-                ct === FLOAT
-                    ? binChunk.getFloat32(off, true)
-                    : ct === UNSIGNED_INT
-                      ? binChunk.getUint32(off, true)
-                      : ct === UNSIGNED_SHORT
-                        ? binChunk.getUint16(off, true)
-                        : binChunk.getUint8(off);
-        }
-    }
-    return out;
+    return import("./gltf-strided-attribute.js").then((m) => m.copyStridedAttribute(accessor, bv, binChunk, 4, compBytes));
 }
 
 const feature: GltfFeature = {
@@ -67,13 +40,13 @@ const feature: GltfFeature = {
         }
         const primitive = meshData._primitive;
         const decoded = meshData._decoded;
-        const joints = resolveAttr("JOINTS_0", primitive, decoded, json, binChunk) as Uint16Array | Uint8Array | null;
-        const weights = resolveAttr("WEIGHTS_0", primitive, decoded, json, binChunk) as Float32Array | null;
+        const joints = (await resolveAttr("JOINTS_0", primitive, decoded, json, binChunk)) as Uint16Array | Uint8Array | null;
+        const weights = (await resolveAttr("WEIGHTS_0", primitive, decoded, json, binChunk)) as Float32Array | null;
         if (!joints || !weights) {
             return;
         }
-        const joints1 = resolveAttr("JOINTS_1", primitive, decoded, json, binChunk) as Uint16Array | Uint8Array | null;
-        const weights1 = resolveAttr("WEIGHTS_1", primitive, decoded, json, binChunk) as Float32Array | null;
+        const joints1 = (await resolveAttr("JOINTS_1", primitive, decoded, json, binChunk)) as Uint16Array | Uint8Array | null;
+        const weights1 = (await resolveAttr("WEIGHTS_1", primitive, decoded, json, binChunk)) as Float32Array | null;
 
         const [{ extractSkin, computeBoneTextureData }, { createSkeleton }] = await Promise.all([import("./gltf-animation.js"), import("../skeleton/create-skeleton.js")]);
         const skin = extractSkin(json, binChunk, node.skin, meshData._worldMatrix, parentMap, worldMatrixCache);
