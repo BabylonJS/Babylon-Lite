@@ -59,6 +59,19 @@ function isIgnoredBundleModule(id: string): boolean {
     return /(?:^|\/)(?:text-shaper|manifold|recast-navigation)[-/]/.test(clean) || /(?:^|\/)@recast-navigation\//.test(clean);
 }
 
+/** Whether an emitted scene-bundle CHUNK file is a bundled third-party WASM/shaping
+ *  runtime (text-shaper, manifold-3d, @recast-navigation). Scene chunk filenames take
+ *  the `scene<N>-<name>-<hash>.js` form, so the vendor name appears as an interior
+ *  segment delimited by `-` (e.g. `scene170-recast-navigation-CYBQI-zY-….js`). These
+ *  vendor runtimes ship pre-built emscripten glue whose `_`-prefixed internals must NOT
+ *  be touched by the first-party property mangler — mangling them corrupts the glue
+ *  (e.g. breaks recast's WASM init). A real consumer never runs that mangler, so this
+ *  only affects the in-repo measurement harness. */
+export function isVendorRuntimeChunkFile(file: string): boolean {
+    const clean = file.replace(/\\/g, "/").split("/").pop() ?? file;
+    return /(?:^|[-/])(?:text-shaper|manifold|recast-navigation)-/.test(clean);
+}
+
 export function findIgnoredBundleModules(bundleInfoDir: string, scene: string, runtimeChunks: Iterable<string>): IgnoredBundleModule[] {
     const infoPath = resolve(bundleInfoDir, `${scene}.json`);
     if (!existsSync(infoPath)) {

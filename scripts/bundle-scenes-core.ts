@@ -14,7 +14,7 @@ import { execFileSync } from "child_process";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
-import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
+import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, isVendorRuntimeChunkFile, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 
 /**
@@ -30,6 +30,14 @@ export function terserPropertyManglePlugin(): Plugin {
 
             for (const [, chunk] of Object.entries(bundle)) {
                 if (chunk.type !== "chunk") continue;
+
+                // Skip bundled third-party WASM/shaping runtimes (text-shaper, manifold,
+                // recast-navigation). Their pre-built emscripten glue uses many `_`-prefixed
+                // internal names that this first-party mangler would rewrite, corrupting the
+                // runtime (e.g. recast's WASM init throws "… is not a function"). A real
+                // consumer of `build/lib` never runs this mangler, so excluding these chunks
+                // here keeps the measurement build aligned with what consumers actually ship.
+                if (isVendorRuntimeChunkFile(chunk.fileName)) continue;
 
                 // Dynamically extract WASM import binding names from emscripten
                 // glue code.  These are property keys in the env object that the

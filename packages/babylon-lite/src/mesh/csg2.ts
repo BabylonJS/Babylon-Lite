@@ -173,7 +173,15 @@ export function createCsg2FromMesh(mesh: Mesh, materialSlot = 0): Csg2Solid {
     manifoldMesh.merge();
 
     try {
-        return solidFromManifold(new runtime.Manifold(manifoldMesh), numProp);
+        // manifold-3d's `setup()` replaces `Manifold` with a factory function,
+        // `function (mesh) { const m = new ManifoldCtor(mesh); …; return m; }`, that has no
+        // `this` reference. A downstream esbuild/terser minifier (the dist build, or any
+        // consumer bundling `build/lib`) rewrites such a function expression into an arrow
+        // function, which is NOT constructable — so `new runtime.Manifold(mesh)` throws
+        // "Manifold is not a constructor". The wrapper returns the solid whether invoked with
+        // or without `new`, so call it as a plain factory to stay robust under minification.
+        const manifoldFactory = runtime.Manifold as unknown as (mesh: ManifoldMesh) => Manifold;
+        return solidFromManifold(manifoldFactory(manifoldMesh), numProp);
     } catch (err) {
         throw new Error(`Error while creating CSG2 from mesh "${mesh.name}".`, { cause: err });
     }
