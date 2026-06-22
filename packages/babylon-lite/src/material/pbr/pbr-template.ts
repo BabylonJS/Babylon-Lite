@@ -62,6 +62,10 @@ export interface PbrTemplateConfig {
     /** Normal map mode (default: "none") */
     /** @internal */
     readonly _normalMode?: "tangent" | "cotangent" | "none";
+    /** @internal Mesh has no NORMAL attribute → flat-shade via screen-space derivatives (glTF spec). */
+    readonly _flatGeometricNormal?: boolean;
+    /** @internal Flat-normal WGSL (from flat-normal-wgsl.ts), lazily supplied only when a no-NORMAL mesh exists. */
+    readonly _flatNormalWgsl?: string;
     /** Has emissive texture */
     /** @internal */
     readonly _hasEmissiveTexture?: boolean;
@@ -155,6 +159,8 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _multiLightWGSL = "",
         _multiLightLoop = "",
         _normalMode = "none",
+        _flatGeometricNormal = false,
+        _flatNormalWgsl = "",
         _hasEmissiveTexture = false,
         _hasSpecGloss = false,
         _hasDoubleSided = false,
@@ -341,6 +347,12 @@ let det=max(dot(tangent_ct,tangent_ct),dot(bitangent_ct,bitangent_ct));
 let invmax=select(inverseSqrt(det),0.0,det==0.0);
 let cotangentFrame=mat3x3<f32>(tangent_ct*invmax,bitangent_ct*invmax,N_geom);
 var N=normalize(cotangentFrame*normalize(${normalRefCt}));`;
+    } else if (_flatGeometricNormal && _flatNormalWgsl) {
+        // glTF spec: a primitive without a NORMAL attribute MUST be flat-shaded.
+        // WGSL (face normal from screen-space derivatives, oriented to the viewer)
+        // is supplied lazily by pbr-renderable from flat-normal-wgsl.ts — kept out
+        // of this shared template so normal-having scenes pay zero bundle cost.
+        normalBlock = `${_flatNormalWgsl}`;
     } else {
         normalBlock = `let N_geom=normalize(input.worldNormal);
 var N=N_geom;`;

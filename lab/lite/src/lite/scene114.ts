@@ -86,11 +86,13 @@ function createMarkerBoxMesh(engine: EngineContext, name: string, color: ColorTu
     ];
     const bright = toLinearColor(displayColor);
     const dark = toLinearColor([displayColor[0] * MARKER_BOTTOM_SHADE, displayColor[1] * MARKER_BOTTOM_SHADE, displayColor[2] * MARKER_BOTTOM_SHADE]);
-    const colors = new Float32Array(box.vertexCount * 3);
+    const colors = new Float32Array(box.vertexCount * 4);
     for (let face = 0; face < 6; face++) {
         const faceColor = face === 5 ? dark : bright;
         for (let vertex = 0; vertex < 4; vertex++) {
-            colors.set(faceColor, (face * 4 + vertex) * 3);
+            const offset = (face * 4 + vertex) * 4;
+            colors.set(faceColor, offset);
+            colors[offset + 3] = 1;
         }
     }
     return createMeshFromData(engine, name, box.positions, box.normals, box.indices, box.uvs, undefined, undefined, colors);

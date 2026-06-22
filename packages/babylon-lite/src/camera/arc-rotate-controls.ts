@@ -156,9 +156,9 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * Returns a cleanup function to remove all listeners and the beforeRender hook.
  */
 export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void {
-    const angularSensibility = 1000; // Babylon default
-    const panningSensibility = 50; // Babylon default (pixels per unit)
-    const wheelPrecision = 3; // Babylon default
+    const angularSensibility = camera.angularSensibility ?? 1000; // Babylon default; HIGHER = slower orbit
+    const panningSensibility = camera.panningSensibility ?? 50; // Babylon default (pixels per unit); LOWER = faster pan
+    const wheelPrecision = camera.wheelPrecision ?? 3; // Babylon default; HIGHER = slower zoom
 
     const ROTATION_EPSILON = 0.001;
     const RADIUS_EPSILON = 0.001;

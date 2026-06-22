@@ -301,7 +301,10 @@ const ext: GltfFeature = {
             uploadBasisuTexture(data, ctx, data.normalTexture, false),
             uploadBasisuTexture(data, ctx, data.emissiveTexture, true),
             uploadBasisuTexture(data, ctx, data.specularTexture, false),
-            uploadBasisuTexture(data, ctx, data.specularColorTexture, true),
+            // specularColorTexture → reflectanceTexture: load LINEAR so the GPU does not
+            // sRGB-decode on sample; the reflectance shader applies its own pow(2.2)
+            // (BJS toLinearSpace parity). sRGB-format here would gamma-decode twice.
+            uploadBasisuTexture(data, ctx, data.specularColorTexture, false),
         ]);
         const out: Partial<PbrMaterialProps> = {
             ...(baseColorTexture ? { baseColorTexture } : undefined),

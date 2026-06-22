@@ -24,13 +24,21 @@ function makeRefractionMod(
     dispersionSampleWgsl: string | undefined
 ): string {
     const thicknessScaleLine = hasVolume || hasThicknessMap ? `let ts=max(length(mesh.world[0].xyz),max(length(mesh.world[1].xyz),length(mesh.world[2].xyz)));` : ``;
+    const mapUvDecl = hasMap
+        ? `let refractionMapUV=vec2<f32>(dot(material.refractionMapUVm.xy,input.uv),dot(material.refractionMapUVm.zw,input.uv))+material.refractionMapUVt.xy;\n`
+        : ``;
+    const thickUvDecl = hasThicknessMap
+        ? `let thicknessUV=vec2<f32>(dot(material.thicknessUVm.xy,input.uv),dot(material.thicknessUVm.zw,input.uv))+material.thicknessUVt.xy;\n`
+        : ``;
     const thicknessLine = hasThicknessMap
-        ? `let ths=textureSample(thicknessTexture_,thicknessSampler_,input.uv).${useGltfThicknessChannel ? "g" : "r"};
+        ? `let ths=textureSample(thicknessTexture_,thicknessSampler_,thicknessUV).${useGltfThicknessChannel ? "g" : "r"};
 let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
         : hasVolume
           ? `let th=material.refractionParams.z*ts;`
           : `let th=material.refractionParams.z;`;
-    const textureLine = hasMap ? `let ri=material.refractionParams.x*textureSample(refractionMapTexture,refractionMapSampler,input.uv).r;` : `let ri=material.refractionParams.x;`;
+    const textureLine = hasMap
+        ? `let ri=material.refractionParams.x*textureSample(refractionMapTexture,refractionMapSampler,refractionMapUV).r;`
+        : `let ri=material.refractionParams.x;`;
     const absorptionLine = hasVolume ? `let ab=exp(material.volumeParams.rgb*th);` : ``;
     const refractionLine = hasVolume
         ? `let fr=er*surfaceAlbedo*(ri*ab)*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`
@@ -50,7 +58,7 @@ let er=textureSampleLevel(refractionTexture,refractionSampler_,ruv,lv).rgb*mater
 
     return `{
 ${thicknessScaleLine}
-${textureLine}
+${mapUvDecl}${thickUvDecl}${textureLine}
 ${thicknessLine}
 let ro=1.0-ri;
 let ra=mix(alphaG,0.0,clamp(material.refractionParams.w*3.0-2.0,0.0,1.0));
@@ -78,6 +86,15 @@ function createRefractionRttFragment(
     if (hasThicknessMap) {
         uboFields.push({ _name: "thicknessParams", _type: "vec4<f32>" as const });
     }
+    // Per-texture UV transforms (KHR_texture_transform on transmissionTexture / thicknessTexture),
+    // animatable via KHR_animation_pointer. Emitted whenever the map is present; identity when the
+    // texture carries no transform (sample at input.uv), so non-transformed scenes are unchanged.
+    if (hasMap) {
+        uboFields.push({ _name: "refractionMapUVm", _type: "vec4<f32>" as const }, { _name: "refractionMapUVt", _type: "vec4<f32>" as const });
+    }
+    if (hasThicknessMap) {
+        uboFields.push({ _name: "thicknessUVm", _type: "vec4<f32>" as const }, { _name: "thicknessUVt", _type: "vec4<f32>" as const });
+    }
     const bindings = [
         { _name: "refractionTexture", _type: { _kind: "texture", _textureType: "texture_2d<f32>" } as const, _visibility: 2 },
         { _name: "refractionSampler_", _type: { _kind: "sampler", _samplerType: "sampler" } as const, _visibility: 2 },
@@ -103,6 +120,41 @@ function createRefractionRttFragment(
             ? { AI: makeRefractionMod(hasVolume, hasMap, hasThicknessMap, useGltfThicknessChannel, hasDispersion, dispersionSampleWgsl), ...LINEAR_IMAGE_PROCESSING_SLOTS }
             : { AI: makeRefractionMod(hasVolume, hasMap, hasThicknessMap, useGltfThicknessChannel, hasDispersion, dispersionSampleWgsl) },
     };
+}
+
+function writeRefractionUvTransform(
+    data: Float32Array,
+    offsets: ReadonlyMap<string, number>,
+    name: string,
+    tex: { uScale?: number; vScale?: number; uAng?: number; uOffset?: number; vOffset?: number } | undefined
+): void {
+    const mOff = offsets.get(`${name}m`);
+    const tOff = offsets.get(`${name}t`);
+    if (mOff === undefined || tOff === undefined) {
+        return;
+    }
+    const mi = mOff / 4;
+    const ti = tOff / 4;
+    const sx = tex?.uScale ?? 1;
+    const sy = tex?.vScale ?? 1;
+    const ang = tex?.uAng ?? 0;
+    if (ang === 0) {
+        data[mi] = sx;
+        data[mi + 1] = 0;
+        data[mi + 2] = 0;
+        data[mi + 3] = sy;
+    } else {
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        data[mi] = c * sx;
+        data[mi + 1] = s * sy;
+        data[mi + 2] = -s * sx;
+        data[mi + 3] = c * sy;
+    }
+    data[ti] = tex?.uOffset ?? 0;
+    data[ti + 1] = tex?.vOffset ?? 0;
+    data[ti + 2] = 0;
+    data[ti + 3] = 0;
 }
 
 function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: ReadonlyMap<string, number>): void {
@@ -143,6 +195,9 @@ function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: 
         data[to] = min;
         data[to + 1] = max - min;
     }
+
+    writeRefractionUvTransform(data, offsets, "refractionMapUV", refr.texture);
+    writeRefractionUvTransform(data, offsets, "thicknessUV", thick?.texture);
 }
 
 /** Build the PBR refraction/transmission extension. When the scene contains a

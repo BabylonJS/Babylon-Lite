@@ -77,3 +77,14 @@ export const PBR2_HAS_DISPERSION = 1 << 20;
  *  colour. Consumed only by the geometry-renderer task; PBR scenes without
  *  geometry rendering never set this bit. */
 export const PBR2_GEOMETRY_OUTPUT = 1 << 21;
+// ─── Extension-local features2 bits (1<<22 .. 1<<28) ────────────────
+// RESERVED here but DEFINED inside their lazy fragment modules so the constants
+// are never retained in the entry/shared chunk for scenes that don't load those
+// fragments (literally zero bundle movement). Do not reuse these bits.
+//   1<<22  PBR2_HAS_TRANSLUCENCY_COLOR_MAP      (subsurface-fragment.ts)
+//   1<<23  PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP  (subsurface-fragment.ts)
+//   1<<24  PBR2_HAS_TRANSLUCENCY_UV_TX          (subsurface-fragment.ts)
+//   1<<25  PBR2_CC_UV_TX                        (clearcoat-fragment.ts)
+//   1<<26  PBR2_REFL_UV_TX                      (reflectance-fragment.ts)
+//   1<<27  PBR2_HAS_ANISO_TEX                    (anisotropy-fragment.ts)
+//   1<<28  PBR2_OCCL_UV_SPLIT                   (uv-transform-fragment.ts + pbr-template-ext.ts)

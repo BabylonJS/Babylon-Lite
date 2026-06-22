@@ -38,6 +38,7 @@ const _features: [Trigger, Loader][] = [
     [M + "emissive_strength", () => import("./gltf-ext-emissive-strength.js")],
     [M + "sheen", () => import("./gltf-ext-sheen.js")],
     [M + "anisotropy", () => import("./gltf-ext-anisotropy.js")],
+    [M + "diffuse_transmission", () => import("./gltf-ext-diffuse-transmission.js")],
     [M + "unlit", () => import("./gltf-ext-unlit.js")],
     [M + "pbrSpecularGlossiness", () => import("./gltf-ext-spec-gloss.js")],
     // Dielectric cluster (ior/specular/transmission/volume/dispersion) — any of the five triggers the

@@ -17,7 +17,7 @@
  *  - clearcoatNormalTexture (tangent-space normal, perturbs coat normal)
  */
 
-import type { ShaderFragment, BindingDecl } from "../../../shader/fragment-types.js";
+import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import {
@@ -29,6 +29,11 @@ import {
     PBR2_CC_NORMAL_MAP,
     PBR2_CC_F0_REMAP_OFF,
 } from "../pbr-flag-bits.js";
+
+// Clearcoat-only features2 bit (reserved in pbr-flag-bits.ts). Defined here, not
+// in the shared flag module, for zero bundle movement on scenes that never load
+// this lazy fragment.
+const PBR2_CC_UV_TX = 1 << 25;
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -49,15 +54,16 @@ return f0 + (1.0 - f0) * (t2 * t2 * t);
 }
 `;
 
-const CC_INT_TEX = `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, input.uv).r`;
+const ccUvExpr = (name: string): string => `(vec2<f32>(dot(material.${name}m.xy, input.uv), dot(material.${name}m.zw, input.uv)) + material.${name}t.xy)`;
+const CC_INT_TEX = (uv: string): string => `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, ${uv}).r`;
 const CC_INT_PLAIN = `material.ccParams.x`;
-const CC_ROUGH_TEX = `clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, input.uv).g, 0.0, 1.0)`;
+const CC_ROUGH_TEX = (uv: string): string => `clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, ${uv}).g, 0.0, 1.0)`;
 const CC_ROUGH_PLAIN = `material.ccParams.y`;
 
 // WGSL fragment: coat-layer normal. Computes ccN (coat world-space normal)
 // using a locally-derived cotangent frame from world-position and UV derivatives.
 // Emitted in /*AC*/ so ccN is in scope for direct + IBL blocks.
-const CC_NORMAL_COMPUTE = `
+const CC_NORMAL_COMPUTE = (uv: string): string => `
 let cc_dp1 = dpdx(input.worldPos);
 let cc_dp2 = dpdy(input.worldPos);
 let cc_duv1 = dpdx(input.uv);
@@ -69,7 +75,7 @@ let cc_bFrame = -(cc_dp2perp * cc_duv1.y + cc_dp1perp * cc_duv2.y);
 let cc_det = max(dot(cc_tFrame, cc_tFrame), dot(cc_bFrame, cc_bFrame));
 let cc_invmax = select(inverseSqrt(cc_det), 0.0, cc_det == 0.0);
 let cc_frame = mat3x3<f32>(cc_tFrame * cc_invmax, cc_bFrame * cc_invmax, N_geom);
-let ccNormSampleRaw = textureSample(ccNormalTexture, ccNormalSampler_, input.uv).rgb * 2.0 - 1.0;
+let ccNormSampleRaw = textureSample(ccNormalTexture, ccNormalSampler_, ${uv}).rgb * 2.0 - 1.0;
 let ccNormScale = material.ccParams.z;
 var ccN = normalize(cc_frame * normalize(ccNormSampleRaw * vec3<f32>(ccNormScale, ccNormScale, 1.0)));
 `;
@@ -167,15 +173,19 @@ export function createClearcoatFragment(features: number, features2: number, has
     const hasRoughnessMap = (features2 & PBR2_CC_ROUGH_MAP) !== 0;
     const hasNormalMap = (features2 & PBR2_CC_NORMAL_MAP) !== 0;
     const disableF0Remap = (features2 & PBR2_CC_F0_REMAP_OFF) !== 0;
-    const intensityExpr = hasIntensityMap ? CC_INT_TEX : CC_INT_PLAIN;
-    const roughnessExpr = hasRoughnessMap ? CC_ROUGH_TEX : CC_ROUGH_PLAIN;
+    const hasUvTx = (features2 & PBR2_CC_UV_TX) !== 0;
+    const intUv = hasUvTx ? ccUvExpr("ccIntUV") : "input.uv";
+    const roughUv = hasUvTx ? ccUvExpr("ccRoughUV") : "input.uv";
+    const normUv = hasUvTx ? ccUvExpr("ccNormUV") : "input.uv";
+    const intensityExpr = hasIntensityMap ? CC_INT_TEX(intUv) : CC_INT_PLAIN;
+    const roughnessExpr = hasRoughnessMap ? CC_ROUGH_TEX(roughUv) : CC_ROUGH_PLAIN;
     const slots: Partial<Record<string, string>> = {
         MF: disableF0Remap ? "" : makeF0Remap(intensityExpr),
         AD: makeDirectMod(intensityExpr, roughnessExpr, hasNormalMap),
         BL: `var ccDirectAttenuation = 1.0;\nvar ccDirectSpecularTerm = vec3<f32>(0.0);`,
     };
     if (hasNormalMap) {
-        slots.AC = CC_NORMAL_COMPUTE;
+        slots.AC = CC_NORMAL_COMPUTE(normUv);
     }
     // AI and NI are mutually exclusive — only one path runs
     if (hasIbl) {
@@ -198,7 +208,8 @@ export function createClearcoatFragment(features: number, features2: number, has
         (hasNormalMap ? "N" : "") +
         (disableF0Remap ? "X" : "") +
         (hasSpecularAA ? "A" : "") +
-        (hasBaseNormalMap ? "B" : "");
+        (hasBaseNormalMap ? "B" : "") +
+        (hasUvTx ? "U" : "");
     const bindings: BindingDecl[] = [];
     if (hasIntensityMap) {
         bindings.push(
@@ -219,14 +230,27 @@ export function createClearcoatFragment(features: number, features2: number, has
         );
     }
 
+    const uboFields: UboField[] = [
+        { _name: "ccParams", _type: "vec4<f32>" },
+        { _name: "ccRefractionParams", _type: "vec4<f32>" },
+    ];
+    if (hasUvTx) {
+        if (hasIntensityMap) {
+            uboFields.push({ _name: "ccIntUVm", _type: "vec4<f32>" }, { _name: "ccIntUVt", _type: "vec4<f32>" });
+        }
+        if (hasRoughnessMap) {
+            uboFields.push({ _name: "ccRoughUVm", _type: "vec4<f32>" }, { _name: "ccRoughUVt", _type: "vec4<f32>" });
+        }
+        if (hasNormalMap) {
+            uboFields.push({ _name: "ccNormUVm", _type: "vec4<f32>" }, { _name: "ccNormUVt", _type: "vec4<f32>" });
+        }
+    }
+
     return {
         _id: suffix ? `clearcoat-${suffix}` : "clearcoat",
         _dependencies: deps.length > 0 ? deps : undefined,
 
-        _uboFields: [
-            { _name: "ccParams", _type: "vec4<f32>" },
-            { _name: "ccRefractionParams", _type: "vec4<f32>" },
-        ],
+        _uboFields: uboFields,
 
         _bindings: bindings,
 
@@ -253,6 +277,44 @@ export function writeClearcoatUBO(data: Float32Array, material: PbrMaterialProps
     data[off + 5] = 1 / ior;
     data[off + 6] = a;
     data[off + 7] = b;
+
+    writeCcUvTransform(data, offsets, "ccIntUV", cc.texture);
+    writeCcUvTransform(data, offsets, "ccRoughUV", cc.roughnessTexture);
+    writeCcUvTransform(data, offsets, "ccNormUV", cc.bumpTexture);
+}
+
+/** Write a 2x2 UV matrix (vec4) + translate (vec4) for a clearcoat texture. */
+function writeCcUvTransform(
+    data: Float32Array,
+    offsets: ReadonlyMap<string, number>,
+    name: string,
+    tex: { uScale?: number; vScale?: number; uAng?: number; uOffset?: number; vOffset?: number } | undefined
+): void {
+    const mOff = offsets.get(`${name}m`);
+    const tOff = offsets.get(`${name}t`);
+    if (mOff === undefined || tOff === undefined) {
+        return;
+    }
+    const sx = tex?.uScale ?? 1;
+    const sy = tex?.vScale ?? 1;
+    const ang = tex?.uAng ?? 0;
+    const mi = mOff / 4;
+    if (ang === 0) {
+        data[mi] = sx;
+        data[mi + 1] = 0;
+        data[mi + 2] = 0;
+        data[mi + 3] = sy;
+    } else {
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        data[mi] = c * sx;
+        data[mi + 1] = s * sy;
+        data[mi + 2] = -s * sx;
+        data[mi + 3] = c * sy;
+    }
+    const ti = tOff / 4;
+    data[ti] = tex?.uOffset ?? 0;
+    data[ti + 1] = tex?.vOffset ?? 0;
 }
 
 const CC_TEX: ReadonlyArray<readonly [number, "texture" | "roughnessTexture" | "bumpTexture"]> = [
@@ -275,6 +337,14 @@ export const pbrExt: PbrExt = {
             if (cc[key]) {
                 f2 |= flag;
             }
+        }
+        const ccHasTx = (t: { _hasTx?: boolean } | undefined): boolean => !!t?._hasTx;
+        if (
+            ccHasTx(cc.texture as { _hasTx?: boolean } | undefined) ||
+            ccHasTx(cc.roughnessTexture as { _hasTx?: boolean } | undefined) ||
+            ccHasTx(cc.bumpTexture as { _hasTx?: boolean } | undefined)
+        ) {
+            f2 |= PBR2_CC_UV_TX;
         }
         if (cc.useF0Remap === false) {
             f2 |= PBR2_CC_F0_REMAP_OFF;

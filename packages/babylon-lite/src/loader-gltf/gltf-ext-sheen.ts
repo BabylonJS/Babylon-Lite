@@ -13,6 +13,16 @@ const ext: GltfFeature = {
             return null;
         }
         const tex = await ctx._texture(s.sheenColorTexture, true);
+        // Separate sheenRoughnessTexture (roughness in .a). Only load when it is a
+        // distinct texture object from sheenColorTexture; when they reference the same
+        // texture, roughness is read from the color texture's .a (sheen.texture) as before.
+        const roughInfo = s.sheenRoughnessTexture;
+        const sameAsColor =
+            roughInfo &&
+            s.sheenColorTexture &&
+            roughInfo.index === s.sheenColorTexture.index &&
+            roughInfo.extensions?.KHR_texture_transform === s.sheenColorTexture.extensions?.KHR_texture_transform;
+        const roughnessTexture = roughInfo && !sameAsColor ? await ctx._texture(roughInfo, false) : undefined;
         return {
             sheen: {
                 isEnabled: true,
@@ -20,6 +30,7 @@ const ext: GltfFeature = {
                 roughness: s.sheenRoughnessFactor ?? 0,
                 intensity: 1,
                 texture: tex,
+                ...(roughnessTexture ? { roughnessTexture } : undefined),
                 albedoScaling: true,
             },
         };

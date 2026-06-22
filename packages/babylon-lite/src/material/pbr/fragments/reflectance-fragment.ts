@@ -8,13 +8,54 @@
  * conditional texture bindings, F0 computation, and occlusion handling.
  */
 
-import type { ShaderFragment, BindingDecl } from "../../../shader/fragment-types.js";
+import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV2 } from "../pbr-flag-bits.js";
 
+// Reflectance-only features2 bit (reserved in pbr-flag-bits.ts). Defined here,
+// not in the shared flag module, for zero bundle movement on scenes that never
+// load this lazy fragment.
+const PBR2_REFL_UV_TX = 1 << 26;
+
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
+
+const reflUvExpr = (name: string): string => `(vec2<f32>(dot(material.${name}m.xy, input.uv), dot(material.${name}m.zw, input.uv)) + material.${name}t.xy)`;
+
+/** Write a 2x2 UV matrix (vec4) + translate (vec4) for a reflectance texture. */
+function writeReflUvTransform(
+    data: Float32Array,
+    offsets: ReadonlyMap<string, number>,
+    name: string,
+    tex: { uScale?: number; vScale?: number; uAng?: number; uOffset?: number; vOffset?: number } | undefined
+): void {
+    const mOff = offsets.get(`${name}m`);
+    const tOff = offsets.get(`${name}t`);
+    if (mOff === undefined || tOff === undefined) {
+        return;
+    }
+    const sx = tex?.uScale ?? 1;
+    const sy = tex?.vScale ?? 1;
+    const ang = tex?.uAng ?? 0;
+    const mi = mOff / 4;
+    if (ang === 0) {
+        data[mi] = sx;
+        data[mi + 1] = 0;
+        data[mi + 2] = 0;
+        data[mi + 3] = sy;
+    } else {
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        data[mi] = c * sx;
+        data[mi + 1] = s * sy;
+        data[mi + 2] = -s * sx;
+        data[mi + 3] = c * sy;
+    }
+    const ti = tOff / 4;
+    data[ti] = tex?.uOffset ?? 0;
+    data[ti + 1] = tex?.vOffset ?? 0;
+}
 
 /** Write the reflectance-extension material-UBO slice
  *  (occlusionStrength, metallicF0Factor, specularWeight, metallicReflectanceColor).
@@ -33,6 +74,9 @@ export function writeReflectanceUBO(data: Float32Array, material: PbrMaterialPro
     data[off + 4] = mrc ? mrc[0]! : 1.0;
     data[off + 5] = mrc ? mrc[1]! : 1.0;
     data[off + 6] = mrc ? mrc[2]! : 1.0;
+
+    writeReflUvTransform(data, offsets, "reflUV", material.reflectanceTexture);
+    writeReflUvTransform(data, offsets, "mrReflUV", material.metallicReflectanceTexture);
 }
 
 /**
@@ -45,7 +89,8 @@ export function createReflectanceFragment(
     hasMetallicReflectanceMap: boolean,
     hasReflectanceMap: boolean,
     useAlphaOnlyMR: boolean,
-    hasOcclusionUv2: boolean = false
+    hasOcclusionUv2: boolean = false,
+    hasUvTx: boolean = false
 ): ShaderFragment {
     const bindings: BindingDecl[] = [];
     if (hasMetallicReflectanceMap) {
@@ -61,25 +106,28 @@ export function createReflectanceFragment(
         );
     }
 
+    const reflUv = hasUvTx ? reflUvExpr("reflUV") : "input.uv";
+    const mrReflUv = hasUvTx ? reflUvExpr("mrReflUV") : "input.uv";
+
     // Build F0 computation code
     let f0Code = `var mrFactors = vec4<f32>(material.metallicReflectanceColor, material.metallicF0Factor);
 var specularWeight = material.specularWeight;`;
     if (hasReflectanceMap) {
         f0Code += `
-{ let rSample = textureSample(reflectanceMap, reflectanceMapSampler, input.uv);
+{ let rSample = textureSample(reflectanceMap, reflectanceMapSampler, ${reflUv});
   let rLinear = pow(rSample.rgb, vec3<f32>(2.2));
   mrFactors = vec4<f32>(mrFactors.rgb * rLinear, mrFactors.a); }`;
     }
     if (hasMetallicReflectanceMap) {
         if (!useAlphaOnlyMR) {
             f0Code += `
-{ let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, input.uv);
+{ let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, ${mrReflUv});
   let mrLinear = pow(mrSample.rgb, vec3<f32>(2.2));
   mrFactors = vec4<f32>(mrFactors.rgb * mrLinear, mrFactors.a * mrSample.a);
   specularWeight *= mrSample.a; }`;
         } else {
             f0Code += `
-{ let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, input.uv);
+{ let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, ${mrReflUv});
   mrFactors = vec4<f32>(mrFactors.rgb, mrFactors.a * mrSample.a);
   specularWeight *= mrSample.a; }`;
         }
@@ -93,17 +141,27 @@ var colorF0 = mix(dielectricColorF0, metallicColorF0, metallic);
 let colorF90 = vec3<f32>(mix(specularWeight, 1.0, metallic));
 let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surfaceReflectivityColor) * (1.0 - metallic);`;
 
-    return {
-        _id: "reflectance",
+    const uboFields: UboField[] = [
+        { _name: "occlusionStrength", _type: "f32" },
+        { _name: "metallicF0Factor", _type: "f32" },
+        { _name: "specularWeight", _type: "f32" },
+        { _name: "_mrPad1", _type: "f32" },
+        { _name: "metallicReflectanceColor", _type: "vec3<f32>" },
+        { _name: "_mrPad2", _type: "f32" },
+    ];
+    if (hasUvTx) {
+        if (hasReflectanceMap) {
+            uboFields.push({ _name: "reflUVm", _type: "vec4<f32>" }, { _name: "reflUVt", _type: "vec4<f32>" });
+        }
+        if (hasMetallicReflectanceMap) {
+            uboFields.push({ _name: "mrReflUVm", _type: "vec4<f32>" }, { _name: "mrReflUVt", _type: "vec4<f32>" });
+        }
+    }
 
-        _uboFields: [
-            { _name: "occlusionStrength", _type: "f32" },
-            { _name: "metallicF0Factor", _type: "f32" },
-            { _name: "specularWeight", _type: "f32" },
-            { _name: "_mrPad1", _type: "f32" },
-            { _name: "metallicReflectanceColor", _type: "vec3<f32>" },
-            { _name: "_mrPad2", _type: "f32" },
-        ],
+    return {
+        _id: hasUvTx ? "reflectance-U" : "reflectance",
+
+        _uboFields: uboFields,
 
         _bindings: bindings,
 
@@ -141,6 +199,10 @@ export const pbrExt: PbrExt = {
         if ((f !== 0 || f2 & PBR2_HAS_REFLECTANCE_FACTORS) && m.useOnlyMetallicFromMetallicReflectanceTexture) {
             f |= PBR_HAS_USE_ALPHA_ONLY_MR;
         }
+        const refHasTx = (t: { _hasTx?: boolean } | undefined): boolean => !!t?._hasTx;
+        if (f !== 0 && (refHasTx(m.reflectanceTexture as { _hasTx?: boolean } | undefined) || refHasTx(m.metallicReflectanceTexture as { _hasTx?: boolean } | undefined))) {
+            f2 |= PBR2_REFL_UV_TX;
+        }
         return { f, f2 };
     },
     frag(ctx) {
@@ -150,7 +212,13 @@ export const pbrExt: PbrExt = {
         if (!hasMR && !hasR && !hasFactors) {
             return null;
         }
-        return createReflectanceFragment(hasMR, hasR, (ctx._features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0, (ctx._features2 & PBR2_HAS_UV2) !== 0);
+        return createReflectanceFragment(
+            hasMR,
+            hasR,
+            (ctx._features & PBR_HAS_USE_ALPHA_ONLY_MR) !== 0,
+            (ctx._features2 & PBR2_HAS_UV2) !== 0,
+            (ctx._features2 & PBR2_REFL_UV_TX) !== 0
+        );
     },
     writeUbo: writeReflectanceUBO as PbrExt["writeUbo"],
     bind(ctx, entries, b) {

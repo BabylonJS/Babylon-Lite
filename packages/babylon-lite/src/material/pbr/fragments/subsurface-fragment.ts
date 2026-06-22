@@ -11,11 +11,18 @@
  *  - IBL: irradiance reduced by (1 - intensity), transmittance-weighted contribution added
  */
 
-import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP, PBR2_HAS_THICKNESS_GLTF_CHANNEL } from "../pbr-flag-bits.js";
+
+// Subsurface-only features2 bits (reserved in pbr-flag-bits.ts). Defined here,
+// not in the shared flag module, so they aren't retained in the entry/shared
+// chunk for scenes that never load this lazy fragment (zero bundle movement).
+const PBR2_HAS_TRANSLUCENCY_COLOR_MAP = 1 << 22;
+const PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP = 1 << 23;
+const PBR2_HAS_TRANSLUCENCY_UV_TX = 1 << 24;
 
 const SS_HELPERS = `
 fn transmittanceBRDF_Burley(tintColor: vec3<f32>, diffusionDistance: vec3<f32>, thickness: f32) -> vec3<f32> {
@@ -38,14 +45,30 @@ var ssIntensity = 0.0;`;
 // AT: sample thickness + compute transmittance.
 // Channel: R by default (matches existing non-glTF path); G when the glTF
 // KHR_materials_volume flag is on (spec mandates G channel).
-function makeThicknessBlock(hasThicknessMap: boolean, useGltfChannel: boolean): string {
+function makeThicknessBlock(hasThicknessMap: boolean, useGltfChannel: boolean, hasColorMap: boolean, hasIntensityMap: boolean, hasUvTx: boolean): string {
     const chan = useGltfChannel ? "g" : "r";
     const texSample = hasThicknessMap ? `let thicknessSample = textureSample(thicknessTexture_, thicknessSampler_, input.uv).${chan};` : `let thicknessSample = 1.0;`;
-    return `${texSample}
+    // The translucency color and intensity textures each carry their own
+    // KHR_texture_transform (driven live by animation pointers), so they are
+    // sampled with independent transformed UVs.
+    let uvDecl = "";
+    let colorUv = "input.uv";
+    let intensityUv = "input.uv";
+    if (hasUvTx && hasColorMap) {
+        uvDecl += `let ssColorUV = vec2<f32>(dot(material.translucencyColorUVm.xy, input.uv), dot(material.translucencyColorUVm.zw, input.uv)) + material.translucencyColorUVt.xy;\n`;
+        colorUv = "ssColorUV";
+    }
+    if (hasUvTx && hasIntensityMap) {
+        uvDecl += `let ssIntUV = vec2<f32>(dot(material.translucencyIntensityUVm.xy, input.uv), dot(material.translucencyIntensityUVm.zw, input.uv)) + material.translucencyIntensityUVt.xy;\n`;
+        intensityUv = "ssIntUV";
+    }
+    const colorMul = hasColorMap ? ` * textureSample(translucencyColorTexture_, translucencyColorSampler_, ${colorUv}).rgb` : ``;
+    const intensityMul = hasIntensityMap ? ` * textureSample(translucencyIntensityTexture_, translucencyIntensitySampler_, ${intensityUv}).a` : ``;
+    return `${uvDecl}${texSample}
 let ssThickness = max(material.subsurfaceParams.y + thicknessSample * material.subsurfaceParams.z, 0.000001);
-let ssTranslucencyColor = material.subsurfaceParams3.rgb;
+let ssTranslucencyColor = material.subsurfaceParams3.rgb${colorMul};
 let ssDiffDist = material.subsurfaceParams2.rgb;
-ssIntensity = material.subsurfaceParams.x;
+ssIntensity = material.subsurfaceParams.x${intensityMul};
 ssTransmittance = transmittanceBRDF_Burley(ssTranslucencyColor, ssDiffDist, ssThickness) * ssIntensity;`;
 }
 
@@ -93,17 +116,48 @@ const STAGE_FRAGMENT = 0x2;
  * @param useGltfThicknessChannel - Sample the thickness texture's G channel
  *        (KHR_materials_volume) instead of R (BJS default).
  */
-export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boolean, useGltfThicknessChannel: boolean): ShaderFragment {
-    const bindings = hasThicknessMap
-        ? [
-              { _name: "thicknessTexture_", _type: { _kind: "texture" as const, _textureType: "texture_2d<f32>" as const }, _visibility: STAGE_FRAGMENT },
-              { _name: "thicknessSampler_", _type: { _kind: "sampler" as const, _samplerType: "sampler" as const }, _visibility: STAGE_FRAGMENT },
-          ]
-        : [];
+export function createSubsurfaceFragment(
+    hasThicknessMap: boolean,
+    hasIbl: boolean,
+    useGltfThicknessChannel: boolean,
+    hasColorMap: boolean,
+    hasIntensityMap: boolean,
+    hasUvTx: boolean
+): ShaderFragment {
+    const tex2d = { _kind: "texture" as const, _textureType: "texture_2d<f32>" as const };
+    const samp = { _kind: "sampler" as const, _samplerType: "sampler" as const };
+    const bindings: BindingDecl[] = [];
+    if (hasThicknessMap) {
+        bindings.push({ _name: "thicknessTexture_", _type: tex2d, _visibility: STAGE_FRAGMENT }, { _name: "thicknessSampler_", _type: samp, _visibility: STAGE_FRAGMENT });
+    }
+    if (hasColorMap) {
+        bindings.push(
+            { _name: "translucencyColorTexture_", _type: tex2d, _visibility: STAGE_FRAGMENT },
+            { _name: "translucencyColorSampler_", _type: samp, _visibility: STAGE_FRAGMENT }
+        );
+    }
+    if (hasIntensityMap) {
+        bindings.push(
+            { _name: "translucencyIntensityTexture_", _type: tex2d, _visibility: STAGE_FRAGMENT },
+            { _name: "translucencyIntensitySampler_", _type: samp, _visibility: STAGE_FRAGMENT }
+        );
+    }
+
+    const uboFields: UboField[] = [
+        { _name: "subsurfaceParams", _type: "vec4<f32>" },
+        { _name: "subsurfaceParams2", _type: "vec4<f32>" },
+        { _name: "subsurfaceParams3", _type: "vec4<f32>" },
+    ];
+    if (hasUvTx && hasColorMap) {
+        uboFields.push({ _name: "translucencyColorUVm", _type: "vec4<f32>" }, { _name: "translucencyColorUVt", _type: "vec4<f32>" });
+    }
+    if (hasUvTx && hasIntensityMap) {
+        uboFields.push({ _name: "translucencyIntensityUVm", _type: "vec4<f32>" }, { _name: "translucencyIntensityUVt", _type: "vec4<f32>" });
+    }
 
     const slots: Partial<Record<string, string>> = {
         SV: SS_SCOPE_VARS,
-        AT: makeThicknessBlock(hasThicknessMap, useGltfThicknessChannel),
+        AT: makeThicknessBlock(hasThicknessMap, useGltfThicknessChannel, hasColorMap, hasIntensityMap, hasUvTx),
         AD: SS_DIRECT,
     };
     if (hasIbl) {
@@ -121,11 +175,7 @@ export function createSubsurfaceFragment(hasThicknessMap: boolean, hasIbl: boole
         _id: "subsurface",
         _dependencies: deps.length > 0 ? deps : undefined,
         _bindings: bindings.length > 0 ? bindings : undefined,
-        _uboFields: [
-            { _name: "subsurfaceParams", _type: "vec4<f32>" as const },
-            { _name: "subsurfaceParams2", _type: "vec4<f32>" as const },
-            { _name: "subsurfaceParams3", _type: "vec4<f32>" as const },
-        ],
+        _uboFields: uboFields,
         _helperFunctions: SS_HELPERS,
         _fragmentSlots: slots,
     };
@@ -154,6 +204,45 @@ export function writeSubsurfaceUBO(data: Float32Array, ss: SubSurfaceProps, offs
     data[off3] = tc[0]!;
     data[off3 + 1] = tc[1]!;
     data[off3 + 2] = tc[2]!;
+
+    // Per-texture UV transforms (each KHR_texture_transform driven live by
+    // animation pointers). Same mat2+translate layout as the iridescence writer.
+    writeSsUvTransform(data, offsets, "translucencyColorUV", trans.colorTexture);
+    writeSsUvTransform(data, offsets, "translucencyIntensityUV", trans.intensityTexture);
+}
+
+/** Write a 2x2 UV matrix (vec4) + translate (vec4) for a translucency texture. */
+function writeSsUvTransform(
+    data: Float32Array,
+    offsets: ReadonlyMap<string, number>,
+    name: string,
+    tex: { uScale?: number; vScale?: number; uAng?: number; uOffset?: number; vOffset?: number } | undefined
+): void {
+    const mOff = offsets.get(`${name}m`);
+    const tOff = offsets.get(`${name}t`);
+    if (mOff === undefined || tOff === undefined) {
+        return;
+    }
+    const sx = tex?.uScale ?? 1;
+    const sy = tex?.vScale ?? 1;
+    const ang = tex?.uAng ?? 0;
+    const mi = mOff / 4;
+    if (ang === 0) {
+        data[mi] = sx;
+        data[mi + 1] = 0;
+        data[mi + 2] = 0;
+        data[mi + 3] = sy;
+    } else {
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        data[mi] = c * sx;
+        data[mi + 1] = s * sy;
+        data[mi + 2] = -s * sx;
+        data[mi + 3] = c * sy;
+    }
+    const ti = tOff / 4;
+    data[ti] = tex?.uOffset ?? 0;
+    data[ti + 1] = tex?.vOffset ?? 0;
 }
 
 export const pbrExt: PbrExt = {
@@ -161,16 +250,26 @@ export const pbrExt: PbrExt = {
     phase: "fragment",
     detect(mat) {
         const m = mat as PbrMaterialProps;
-        if (!m.subsurface?.translucency) {
+        const trans = m.subsurface?.translucency;
+        if (!trans) {
             return { f: 0, f2: 0 };
         }
         let f = PBR_HAS_SUBSURFACE;
         let f2 = 0;
-        if (m.subsurface.thickness?.texture) {
+        if (m.subsurface!.thickness?.texture) {
             f |= PBR_HAS_THICKNESS_MAP;
         }
-        if (m.subsurface.thickness?.useGlTFChannel) {
+        if (m.subsurface!.thickness?.useGlTFChannel) {
             f2 |= PBR2_HAS_THICKNESS_GLTF_CHANNEL;
+        }
+        if (trans.colorTexture) {
+            f2 |= PBR2_HAS_TRANSLUCENCY_COLOR_MAP;
+        }
+        if (trans.intensityTexture) {
+            f2 |= PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP;
+        }
+        if ((trans.colorTexture as { _hasTx?: boolean } | undefined)?._hasTx || (trans.intensityTexture as { _hasTx?: boolean } | undefined)?._hasTx) {
+            f2 |= PBR2_HAS_TRANSLUCENCY_UV_TX;
         }
         return { f, f2 };
     },
@@ -178,7 +277,14 @@ export const pbrExt: PbrExt = {
         if (!(ctx._features & PBR_HAS_SUBSURFACE)) {
             return null;
         }
-        return createSubsurfaceFragment((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0, ctx._hasIbl, (ctx._features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0);
+        return createSubsurfaceFragment(
+            (ctx._features & PBR_HAS_THICKNESS_MAP) !== 0,
+            ctx._hasIbl,
+            (ctx._features2 & PBR2_HAS_THICKNESS_GLTF_CHANNEL) !== 0,
+            (ctx._features2 & PBR2_HAS_TRANSLUCENCY_COLOR_MAP) !== 0,
+            (ctx._features2 & PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP) !== 0,
+            (ctx._features2 & PBR2_HAS_TRANSLUCENCY_UV_TX) !== 0
+        );
     },
     writeUbo(data, mat, offsets) {
         const m = mat as PbrMaterialProps;
@@ -187,8 +293,23 @@ export const pbrExt: PbrExt = {
         }
     },
     bind(ctx, entries, b) {
+        const ss = (ctx._material as PbrMaterialProps).subsurface;
         if ((ctx._features & PBR_HAS_THICKNESS_MAP) !== 0) {
-            const tex = (ctx._material as PbrMaterialProps).subsurface?.thickness?.texture as Texture2D | undefined;
+            const tex = ss?.thickness?.texture as Texture2D | undefined;
+            if (tex) {
+                entries.push({ binding: b++, resource: tex.view });
+                entries.push({ binding: b++, resource: tex.sampler });
+            }
+        }
+        if ((ctx._features2 & PBR2_HAS_TRANSLUCENCY_COLOR_MAP) !== 0) {
+            const tex = ss?.translucency?.colorTexture as Texture2D | undefined;
+            if (tex) {
+                entries.push({ binding: b++, resource: tex.view });
+                entries.push({ binding: b++, resource: tex.sampler });
+            }
+        }
+        if ((ctx._features2 & PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP) !== 0) {
+            const tex = ss?.translucency?.intensityTexture as Texture2D | undefined;
             if (tex) {
                 entries.push({ binding: b++, resource: tex.view });
                 entries.push({ binding: b++, resource: tex.sampler });
@@ -197,9 +318,15 @@ export const pbrExt: PbrExt = {
         return b;
     },
     textures(mat, out) {
-        const t = (mat as PbrMaterialProps).subsurface?.thickness?.texture;
-        if (t) {
-            out.push(t);
+        const ss = (mat as PbrMaterialProps).subsurface;
+        if (ss?.thickness?.texture) {
+            out.push(ss.thickness.texture);
+        }
+        if (ss?.translucency?.colorTexture) {
+            out.push(ss.translucency.colorTexture);
+        }
+        if (ss?.translucency?.intensityTexture) {
+            out.push(ss.translucency.intensityTexture);
         }
     },
 };

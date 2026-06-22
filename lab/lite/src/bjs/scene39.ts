@@ -13,6 +13,10 @@ import "@babylonjs/loaders/glTF";
     const engine = new WebGPUEngine(canvas, { antialias: true, adaptToDeviceRatio: true });
     await engine.initAsync();
 
+    // Parity harness screenshots the canvas; suppress the loading overlay so the
+    // spinner can't be captured and inflate MAD (mirrors the other BJS ref scenes).
+    engine.displayLoadingUI = function () {};
+
     const scene = new Scene(engine);
 
     await SceneLoader.AppendAsync(

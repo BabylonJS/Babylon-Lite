@@ -35,6 +35,13 @@ export interface ArcRotateCamera extends Camera, IWorldMatrixProvider, IParentab
     /** Inertia coefficient for panning (0 = instant stop, 0.9 = default). */
     panningInertia: number;
 
+    /** Mouse-drag orbit sensitivity (HIGHER = slower rotation). Babylon default 1000. */
+    angularSensibility: number;
+    /** Right-drag panning sensitivity in pixels-per-unit (LOWER = faster pan). Babylon default 50. */
+    panningSensibility: number;
+    /** Wheel-zoom sensitivity (HIGHER = slower zoom). Babylon default 3. */
+    wheelPrecision: number;
+
     /** Per-frame inertial offsets — accumulated by input, applied & decayed each frame. */
     inertialAlphaOffset: number;
     inertialBetaOffset: number;
@@ -131,6 +138,9 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
 
         inertia: 0.9,
         panningInertia: 0.9,
+        angularSensibility: 1000,
+        panningSensibility: 50,
+        wheelPrecision: 3,
         inertialAlphaOffset: 0,
         inertialBetaOffset: 0,
         inertialRadiusOffset: 0,

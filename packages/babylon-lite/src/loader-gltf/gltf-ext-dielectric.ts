@@ -52,7 +52,12 @@ const ext: GltfFeature = {
 
         const [specTex, specColTex, thickTex, transTex] = await Promise.all([
             ctx._texture(eSp?.specularTexture, false),
-            ctx._texture(eSp?.specularColorTexture, true),
+            // specularColorTexture is sRGB-encoded, but the reflectance shader applies its
+            // own pow(2.2) (matching BJS toLinearSpace on a gammaSpace texture). Load it as
+            // a LINEAR-format texture so the GPU does NOT also sRGB-decode on sample — else
+            // the dielectric tint is gamma-decoded twice (too dark/saturated), as seen on
+            // AnimationPointerUVs col4 specularColorTexture spheres.
+            ctx._texture(eSp?.specularColorTexture, false),
             ctx._texture(eVol?.thicknessTexture, false),
             ctx._texture(eTx?.transmissionTexture, false),
         ]);

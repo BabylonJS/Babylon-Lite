@@ -240,6 +240,10 @@ export interface SheenProps {
     intensity?: number;
     /** Optional sheen tint texture (modulates sheen color). Loaded via loadTexture2D(). */
     texture?: Texture2D;
+    /** Optional separate sheen roughness texture (KHR_materials_sheen sheenRoughnessTexture).
+     *  When present, sheen roughness is read from this texture's A channel at its own UV
+     *  (with its own KHR_texture_transform, animatable) instead of the color texture's A. */
+    roughnessTexture?: Texture2D;
     /** When true (recommended for glTF), applies proper sheen albedo scaling
      *  on the base layer and treats the sheen texture as already-linear (no pow).
      *  When false (default, legacy), applies pow(rgb, 2.2) to the sheen texture
@@ -274,6 +278,10 @@ export interface AnisotropyProps {
     intensity?: number;
     /** Anisotropy direction in tangent space (u, v). Default [1, 0]. */
     direction?: [number, number];
+    /** KHR_materials_anisotropy anisotropyTexture (linear). RG = per-texel direction
+     *  (×2-1, rotated by `direction`), B = per-texel strength (multiplies `intensity`).
+     *  May carry a KHR_texture_transform that an animation pointer can drive. */
+    texture?: Texture2D;
 }
 
 /** Translucency sub-feature. Presence enables translucency (no isEnabled boolean). */
@@ -282,6 +290,12 @@ export interface TranslucencyProps {
     intensity?: number;
     /** Translucency color (linear RGB). Tints the transmitted light. Default [1,1,1]. */
     color?: [number, number, number];
+    /** Translucency color texture (sampled sRGB). RGB multiplies `color`.
+     *  KHR_materials_diffuse_transmission.diffuseTransmissionColorTexture. */
+    colorTexture?: Texture2D;
+    /** Translucency intensity texture. Alpha channel multiplies `intensity`.
+     *  KHR_materials_diffuse_transmission.diffuseTransmissionTexture. */
+    intensityTexture?: Texture2D;
     /** Diffusion distance for the Burley transmittance BRDF. Controls how far
      *  light travels through the material per RGB channel. Default [1,1,1]. */
     diffusionDistance?: [number, number, number];

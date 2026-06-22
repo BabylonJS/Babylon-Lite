@@ -27,6 +27,7 @@ import { initMeshTransform } from "../mesh/mesh.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
+import { computeSmoothNormals } from "./gltf-normals.js";
 import type { GltfMeshData } from "./load-gltf.js";
 
 const FLOAT = 5126;
@@ -131,6 +132,38 @@ function destrideToTight(il: AccessorInterleave): Float32Array {
     return out;
 }
 
+/** Resolve COLOR_0 to a tight float32 VEC4 [0,1] buffer — the vertex-color layout the
+ *  PBR pipeline binds (float32x4: rgb modulates base color, a modulates alpha). glTF
+ *  COLOR_0 may be VEC3 or VEC4, FLOAT or normalized UNSIGNED_BYTE/SHORT, and (here)
+ *  interleaved with a byteStride. Binding the raw strided/ubyte source as float32x4
+ *  reads neighbouring bytes as floats (garbage / rainbow colors). This normalizes
+ *  integer types to [0,1], gives a VEC3 source alpha = 1, and de-strides — mirroring
+ *  the tight path's normalizeColorToVec4. Reads relative to `binChunk`. */
+function resolveColorVec4(json: any, binChunk: DataView, idx: number): Float32Array {
+    const accessor = json.accessors[idx];
+    const ct = accessor.componentType;
+    const cb = COMP_BYTES[ct] ?? 4;
+    const comps = TYPE_SIZES[accessor.type] ?? 4;
+    const bv = json.bufferViews[accessor.bufferView];
+    const stride = bv.byteStride ?? comps * cb;
+    const inv = ct === UNSIGNED_BYTE ? 1 / 255 : ct === UNSIGNED_SHORT ? 1 / 65535 : 1;
+    const base = (bv.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+    const out = new F32(accessor.count * 4);
+    for (let v = 0; v < accessor.count; v++) {
+        const row = base + v * stride;
+        for (let c = 0; c < 4; c++) {
+            if (c === 3 && comps < 4) {
+                out[v * 4 + 3] = 1;
+                break;
+            }
+            const off = row + c * cb;
+            const raw = ct === FLOAT ? binChunk.getFloat32(off, true) : ct === UNSIGNED_SHORT ? binChunk.getUint16(off, true) : binChunk.getUint8(off);
+            out[v * 4 + c] = raw * inv;
+        }
+    }
+    return out;
+}
+
 /** Build a mesh-data partial for a primitive, but ONLY if it actually sources
  *  ≥1 attribute from an interleaved (strided) bufferView. Returns `undefined`
  *  for fully-tight primitives so the caller falls back to its tight path.
@@ -138,9 +171,10 @@ function destrideToTight(il: AccessorInterleave): Float32Array {
  *  Strided POSITION/NORMAL/TEXCOORD_0 attributes keep their raw slice in `_vb`
  *  (for genuine GPU interleaving) and leave the tight CPU field `null` — the
  *  de-strided copy is materialized lazily on first CPU read (see
- *  {@link installLazyCpu}). Strided TANGENT/TEXCOORD_1/COLOR are eagerly
- *  de-strided (they feed device-lost recovery), but no current asset interleaves
- *  them. Tight attributes resolve exactly like the core loader. */
+ *  {@link installLazyCpu}). Strided TANGENT/TEXCOORD_1 are eagerly de-strided
+ *  (they feed device-lost recovery), but no current asset interleaves them.
+ *  COLOR_0 is always normalized to a tight float32x3 buffer (see
+ *  {@link resolveColorVec4}). Tight attributes resolve exactly like the core loader. */
 export function buildInterleavedPartial(json: any, binChunk: DataView, primitive: any, worldMatrix: Mat4, nodeIdx: number): Omit<GltfMeshData, "_material"> | undefined {
     const attrs = primitive.attributes;
 
@@ -190,24 +224,17 @@ export function buildInterleavedPartial(json: any, binChunk: DataView, primitive
     vb._t = tan._il;
     const uv2 = resolveOne("TEXCOORD_1", true);
     vb._u2 = uv2._il;
-    const col = resolveOne("COLOR_0", true);
-    vb._c = col._il;
+    // COLOR_0 is always materialized as a tight float32x4 [0,1] buffer (see
+    // resolveColorVec4) — never bound strided — so ubyte/ushort/VEC3 sources don't
+    // misalign against the pipeline's float32x4 vertex-color layout.
+    const colorIdx = attrs["COLOR_0"];
+    const colors = colorIdx !== undefined ? resolveColorVec4(json, binChunk, colorIdx) : null;
 
     const positions = pos._tight;
     let normals = nrm._tight;
     let uvs = uv._tight;
     const tangents = tan._tight;
     const uv2s = uv2._tight;
-    const colors = col._tight;
-
-    // Absent (not merely strided) NORMAL/UV need a tight zero-filled buffer so the
-    // GPU has a bindable vertex buffer — matches the core loader's tight path.
-    if (!normals && !vb._n) {
-        normals = new F32(vertexCount * 3);
-    }
-    if (!uvs && !vb._u) {
-        uvs = new F32(vertexCount * 2);
-    }
 
     const idxData = primitive.indices !== undefined ? resolveAccessor(json, binChunk, primitive.indices) : null;
     const indices = idxData
@@ -218,6 +245,23 @@ export function buildInterleavedPartial(json: any, binChunk: DataView, primitive
               : new U16(idxData._data.buffer, idxData._data.byteOffset, idxData._count)
         : createSequentialIndices(vertexCount);
 
+    // Absent (not merely strided) NORMAL: generate smooth normals to match the core
+    // loader's tight path. A zero-filled normal buffer makes every lit fragment's
+    // worldNormal NaN/black — e.g. a material-less skinned mesh whose interleaved
+    // JOINTS/WEIGHTS route it here (SimpleSkin). computeSmoothNormals is statically
+    // imported by this lazy interleave chunk, so non-interleaved scenes (which never
+    // load this module) pay zero bundle cost for it.
+    if (!normals && !vb._n) {
+        const tightPos = positions ?? (vb._p ? destrideToTight(vb._p) : new F32(vertexCount * 3));
+        normals = computeSmoothNormals(tightPos, indices, vertexCount);
+    }
+    if (!uvs && !vb._u) {
+        uvs = new F32(vertexCount * 2);
+    }
+
+    // No NORMAL attribute (neither tight nor strided) → flat-shade per the glTF spec.
+    const flatNormal = !nrm._tight && !vb._n;
+
     return {
         _positions: positions,
         _normals: normals,
@@ -225,6 +269,7 @@ export function buildInterleavedPartial(json: any, binChunk: DataView, primitive
         _uvs: uvs,
         _uv2s: uv2s,
         _colors: colors,
+        _flatNormal: flatNormal,
         _indices: indices,
         _vertexCount: vertexCount,
         _indexCount: indices.length,
@@ -293,6 +338,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         skeleton: null,
         morphTargets: null,
         _gpu: gpu,
+        _flatNormal: m._flatNormal,
     } as unknown as Mesh;
     initMeshTransform(mesh);
 

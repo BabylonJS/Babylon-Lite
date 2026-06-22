@@ -104,6 +104,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     let hasAnyUvTransform = false;
     let hasAnyUv2 = false;
     let hasAnyVertexColor = false;
+    let hasAnyFlatNormal = false;
     for (let i = 0; i < meshes.length; i++) {
         const m = meshes[i]!;
         const mat = m.material as PbrMaterialProps & { _hasReflExt?: boolean; _hasUvTx?: boolean };
@@ -127,6 +128,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         // UV2 only counts when occlusion samples texcoord 1.
         hasAnyUv2 ||= !!m._gpu.uv2Buffer && mat.occlusionTexCoord === 1;
         hasAnyVertexColor ||= !!m._gpu.colorBuffer;
+        hasAnyFlatNormal ||= !!(m as { _flatNormal?: boolean })._flatNormal;
     }
 
     // ── Dynamically import fragment creators based on scene capabilities ──
@@ -141,6 +143,14 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             const sky = await import("./fragments/ibl-skybox-wgsl.js");
             _iblSkyboxCalc = sky.IBL_SKYBOX_CALCULATION;
         }
+    }
+
+    // Flat-normal WGSL is only loaded when at least one mesh lacks a NORMAL attribute
+    // (glTF flat-shading) — normal-having scenes bundle zero bytes.
+    let _flatNormalWgsl = "";
+    if (hasAnyFlatNormal) {
+        const flatNormal = await import("./fragments/flat-normal-wgsl.js");
+        _flatNormalWgsl = flatNormal.FLAT_NORMAL_WGSL;
     }
 
     // Light/shadow helpers stay dynamic so single-light and non-shadow bundles stay lean.
@@ -286,6 +296,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _createPbrTemplateExt,
         _anisoExt,
         _iblSkyboxCalc,
+        _flatNormalWgsl,
         _createPbrShadowFragment,
         _shadowLights: shadowLights,
         _createThinInstanceFragment,

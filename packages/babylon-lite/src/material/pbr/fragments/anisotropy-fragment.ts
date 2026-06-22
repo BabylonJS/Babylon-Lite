@@ -6,8 +6,19 @@
  * non-anisotropy PBR bundles lean.
  */
 
+import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
+
+const STAGE_FRAGMENT = 0x2;
+
+// Extension-local features2 bit (reserved as 1<<27 in pbr-flag-bits.ts). Defined here
+// — not in the shared flag module — so scenes that never load this lazy fragment carry
+// zero bytes for it. Set when the material has a KHR_materials_anisotropy anisotropyTexture
+// (per-texel direction RG + strength B). Always pairs anisotropyUVm/anisotropyUVt so an
+// animated KHR_texture_transform on the texture is honoured.
+const PBR2_HAS_ANISO_TEX = 1 << 27;
+export { PBR2_HAS_ANISO_TEX };
 
 export const ANISO_BRDF_FUNCTIONS = `
 const RECIPROCAL_PI: f32 = 0.3183098861837907;
@@ -30,45 +41,59 @@ return 0.5 / (lambdaV + lambdaL);
 }
 `;
 
-/** Generate anisotropy tangent/bitangent computation block for the given normal mode. */
-export function makeAnisotropyTBBlock(hasNormal: boolean): string {
+/** Generate anisotropy tangent/bitangent computation block for the given normal mode.
+ *  Declares function-scope `anisoIntensityF` (used by direct DG + IBL bent normal). When
+ *  `hasTexture`, samples the anisotropyTexture for per-texel direction (RG) and strength (B)
+ *  per KHR_materials_anisotropy: dir = rotate(normalize(tex.rg*2-1), materialDir); strength *= tex.b. */
+export function makeAnisotropyTBBlock(hasNormal: boolean, hasTexture: boolean = false): string {
+    const texSample = hasTexture
+        ? `let anisoUV = vec2<f32>(dot(material.anisotropyUVm.xy, input.uv), dot(material.anisotropyUVm.zw, input.uv)) + material.anisotropyUVt.xy;
+let anisoTexData = textureSample(anisotropyTexture_, anisotropySampler_, anisoUV).rgb;
+anisoIntensityF = anisoIntensityF * anisoTexData.b;
+let anisoNdir = normalize(anisoTexData.rg * 2.0 - vec2<f32>(1.0));
+anisoDir2 = vec2<f32>(anisoDir2.x * anisoNdir.x - anisoDir2.y * anisoNdir.y, anisoDir2.y * anisoNdir.x + anisoDir2.x * anisoNdir.y);
+`
+        : "";
+    const pre = `var anisoIntensityF = material.anisotropyParams.x;
+var anisoDir2 = vec2<f32>(material.anisotropyParams.y, material.anisotropyParams.z);
+${texSample}`;
     if (hasNormal) {
-        return `var anisoT = normalize(input.worldTangent);
+        return `${pre}var anisoT = normalize(input.worldTangent);
 var anisoB = normalize(input.worldBitangent);
 {
-let anisoDir = normalize(vec2<f32>(material.anisotropyParams.y, material.anisotropyParams.z));
+let anisoDir = normalize(anisoDir2);
 anisoT = normalize(anisoT * anisoDir.x + anisoB * anisoDir.y);
 anisoB = normalize(cross(N, anisoT));
 }`;
     }
-    // Cotangent frame from UV screen-space derivatives — matches BJS cotangent_frame()
-    // BJS negates dpdy via (-yFactor_) where yFactor_=1 in WebGPU
-    return `var anisoT: vec3<f32>;
+    // Cotangent frame from UV screen-space derivatives. Must be built IDENTICALLY to the
+    // normal-map cotangent frame in pbr-template.ts (geometric normal, +dpdy, negated
+    // bitangent) so the anisotropy tangent agrees with BJS, which derives the anisotropy
+    // T/B from the same TBN used for normal mapping. The shading normal N is used only for
+    // the third column (matching BJS `mat3(normalize(TBN[0]),normalize(TBN[1]),normalize(N))`).
+    return `${pre}var anisoT: vec3<f32>;
 var anisoB: vec3<f32>;
 {
+let aniso_Ngeom = normalize(input.worldNormal);
 let aniso_dp1 = dpdx(input.worldPos);
-let aniso_dp2 = -dpdy(input.worldPos);
+let aniso_dp2 = dpdy(input.worldPos);
 let aniso_duv1 = dpdx(input.uv);
-let aniso_duv2 = -dpdy(input.uv);
-let aniso_dp2perp = cross(aniso_dp2, N);
-let aniso_dp1perp = cross(N, aniso_dp1);
-var aniso_t = aniso_dp2perp * aniso_duv1.x + aniso_dp1perp * aniso_duv2.x;
-var aniso_b = aniso_dp2perp * aniso_duv1.y + aniso_dp1perp * aniso_duv2.y;
-let aniso_det = max(dot(aniso_t, aniso_t), dot(aniso_b, aniso_b));
+let aniso_duv2 = dpdy(input.uv);
+let aniso_dp2perp = cross(aniso_dp2, aniso_Ngeom);
+let aniso_dp1perp = cross(aniso_Ngeom, aniso_dp1);
+let aniso_tct = aniso_dp2perp * aniso_duv1.x + aniso_dp1perp * aniso_duv2.x;
+let aniso_bct = -(aniso_dp2perp * aniso_duv1.y + aniso_dp1perp * aniso_duv2.y);
+let aniso_det = max(dot(aniso_tct, aniso_tct), dot(aniso_bct, aniso_bct));
 let aniso_inv = select(inverseSqrt(aniso_det), 0.0, aniso_det == 0.0);
-aniso_t *= aniso_inv;
-aniso_b *= aniso_inv;
-let aniso_tn = normalize(aniso_t);
-let aniso_bn = normalize(aniso_b);
-let anisoTBN = mat3x3<f32>(aniso_tn, aniso_bn, N);
-let anisoDir = vec3<f32>(material.anisotropyParams.y, material.anisotropyParams.z, 0.0);
+let anisoTBN = mat3x3<f32>(normalize(aniso_tct * aniso_inv), normalize(aniso_bct * aniso_inv), N);
+let anisoDir = vec3<f32>(anisoDir2.x, anisoDir2.y, 0.0);
 anisoT = normalize(anisoTBN * anisoDir);
 anisoB = normalize(cross(anisoTBN[2], anisoT));
 }`;
 }
 
 /** Anisotropic D/G replacement for single-light direct lighting. */
-export const ANISO_DIRECT_DG = `let aniso_alphaTB = getAnisotropicRoughness(directAlphaG, material.anisotropyParams.x);
+export const ANISO_DIRECT_DG = `let aniso_alphaTB = getAnisotropicRoughness(directAlphaG, anisoIntensityF);
 let dl_TdotH = dot(anisoT, H); let dl_BdotH = dot(anisoB, H);
 let dl_TdotV = dot(anisoT, V); let dl_BdotV = dot(anisoB, V);
 let dl_TdotL = dot(anisoT, L); let dl_BdotL = dot(anisoB, L);
@@ -76,19 +101,39 @@ let D = D_GGX_Anisotropic(NdotH, dl_TdotH, dl_BdotH, aniso_alphaTB);
 let G = V_GGXCorrelated_Anisotropic(NdotL, NdotV, dl_TdotV, dl_BdotV, dl_TdotL, dl_BdotL, aniso_alphaTB);`;
 
 /** IBL bent normal computation for anisotropic reflection. */
-export const ANISO_BENT_NORMAL = `let anisoIntensity = material.anisotropyParams.x;
-var anisoBentNormal = cross(anisoB, V);
+export const ANISO_BENT_NORMAL = `var anisoBentNormal = cross(anisoB, V);
 anisoBentNormal = normalize(cross(anisoBentNormal, anisoB));
-let anisoSq = 1.0 - anisoIntensity * (1.0 - roughness);
+let anisoSq = 1.0 - anisoIntensityF * (1.0 - roughness);
 let anisoA = anisoSq * anisoSq * anisoSq * anisoSq;
 anisoBentNormal = normalize(mix(anisoBentNormal, N, anisoA));
 let R_raw = reflect(-V, anisoBentNormal);`;
 
-/** Anisotropy extension — template-only (contributes no ShaderFragment or bindings);
- *  present solely to write its material-UBO slice through the unified ext registry. */
+/** Anisotropy extension. Writes its material-UBO slice (anisotropyParams, and when an
+ *  anisotropyTexture is present, anisotropyUVm/anisotropyUVt) and — only for the textured
+ *  case — contributes the texture binding + UV-transform UBO fields via `frag()`. The
+ *  anisotropic BRDF / tangent-frame WGSL is injected through the template strings above. */
 export const pbrExt: PbrExt = {
     id: "anisotropy",
     phase: "fragment",
+    detect(mat) {
+        const aniso = (mat as PbrMaterialProps).anisotropy;
+        return { f: 0, f2: aniso?.isEnabled && aniso.texture ? PBR2_HAS_ANISO_TEX : 0 };
+    },
+    frag(ctx) {
+        if ((ctx._features2 & PBR2_HAS_ANISO_TEX) === 0) {
+            return null;
+        }
+        const bindings: BindingDecl[] = [
+            { _name: "anisotropyTexture_", _type: { _kind: "texture", _textureType: "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
+            { _name: "anisotropySampler_", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
+        ];
+        const uboFields: UboField[] = [
+            { _name: "anisotropyUVm", _type: "vec4<f32>" },
+            { _name: "anisotropyUVt", _type: "vec4<f32>" },
+        ];
+        const frag: ShaderFragment = { _id: "anisotropy-tex", _bindings: bindings, _uboFields: uboFields };
+        return frag;
+    },
     writeUbo(data: Float32Array, material: unknown, offsets: ReadonlyMap<string, number>): void {
         const aniso = (material as PbrMaterialProps).anisotropy;
         if (!aniso?.isEnabled || !offsets.has("anisotropyParams")) {
@@ -99,5 +144,50 @@ export const pbrExt: PbrExt = {
         data[off] = aniso.intensity ?? 1.0;
         data[off + 1] = dir[0]!;
         data[off + 2] = dir[1]!;
+
+        // Per-texture UV transform (KHR_texture_transform on anisotropyTexture), animatable.
+        const mOff = offsets.get("anisotropyUVm");
+        const tOff = offsets.get("anisotropyUVt");
+        if (mOff === undefined || tOff === undefined) {
+            return;
+        }
+        const tex = aniso.texture;
+        const sx = tex?.uScale ?? 1;
+        const sy = tex?.vScale ?? 1;
+        const ang = tex?.uAng ?? 0;
+        const mi = mOff / 4;
+        const ti = tOff / 4;
+        if (ang === 0) {
+            data[mi] = sx;
+            data[mi + 1] = 0;
+            data[mi + 2] = 0;
+            data[mi + 3] = sy;
+        } else {
+            const c = Math.cos(ang);
+            const s = Math.sin(ang);
+            data[mi] = c * sx;
+            data[mi + 1] = s * sy;
+            data[mi + 2] = -s * sx;
+            data[mi + 3] = c * sy;
+        }
+        data[ti] = tex?.uOffset ?? 0;
+        data[ti + 1] = tex?.vOffset ?? 0;
+        data[ti + 2] = 0;
+        data[ti + 3] = 0;
+    },
+    bind(ctx, entries, b) {
+        const aniso = (ctx._material as PbrMaterialProps).anisotropy;
+        if ((ctx._features2 & PBR2_HAS_ANISO_TEX) === 0 || !aniso?.texture) {
+            return b;
+        }
+        entries.push({ binding: b++, resource: aniso.texture.view });
+        entries.push({ binding: b++, resource: aniso.texture.sampler });
+        return b;
+    },
+    textures(mat, out) {
+        const aniso = (mat as PbrMaterialProps).anisotropy;
+        if (aniso?.texture) {
+            out.push(aniso.texture);
+        }
     },
 };

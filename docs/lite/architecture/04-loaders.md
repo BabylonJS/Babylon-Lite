@@ -335,6 +335,25 @@ Design constraints:
   paths (Draco, `KHR_texture_basisu` de-stride) bypass it.
 - Validated by Scene 210 (`XmpMetadataRoundedCube`, genuinely interleaved).
 
+Per-attribute correctness (each was a real parity bug — Scenes 246/247):
+
+- **`COLOR_0`** cannot be GPU-strided directly: glTF permits VEC3/VEC4 and/or normalized
+  `UNSIGNED_BYTE`/`SHORT`, but the pipeline binds a single `float32x4` layout. Binding a
+  ubyte/VEC3 source as `float32x4` reads adjacent bytes as floats (rainbow garbage).
+  `resolveColorVec4` always de-strides + normalizes COLOR_0 to a tight `float32x4` (rgb
+  modulates base color, **a modulates fragment alpha** — vertex-color alpha-clip/blend; a
+  VEC3 source gets `a = 1`).
+- **Absent `NORMAL`** must be synthesized, never zero-filled — a zero normal yields
+  `normalize(0)` = NaN → pure-black lit fragments. `buildInterleavedPartial` calls the
+  caller-supplied `computeSmoothNormals` (lazily imported only when NORMAL is missing).
+  The mesh is also tagged `_flatNormal` so the PBR shader flat-shades it via screen-space
+  `worldPos` derivatives (glTF spec: no-`NORMAL` → flat), matching BJS — see
+  `material/pbr/fragments/flat-normal-wgsl.ts` (lazily loaded; zero bytes otherwise).
+- **`JOINTS_0`/`WEIGHTS_0`** are read by `gltf-feature-skeleton.ts`, not this module,
+  via `resolveAccessor` — which assumes tight packing. Skinned rigs that interleave
+  them with a `byteStride` are de-strided there (`resolveAttr`), or half the joint
+  indices/weights come from padding → exploded / mis-posed mesh.
+
 ### `EXT_meshopt_compression` + `KHR_mesh_quantization` (`gltf-feature-meshopt.ts`, `gltf-ext-quantization.ts`)
 
 `EXT_meshopt_compression` bufferViews are decoded by a dynamically-imported meshopt
