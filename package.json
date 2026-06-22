@@ -32,6 +32,7 @@
         "test:parity-cloud": "tsx scripts/run-browserstack.ts playwright test --config config/playwright.parity-cloud.config.ts",
         "test:perf-cloud": "tsx scripts/run-browserstack.ts playwright test --config config/playwright.perf-cloud.config.ts tests/lite/perf/perf-regression.spec.ts",
         "validate:release-markers": "tsx scripts/validate-pr-release-markers.ts",
+        "validate:bundle-manifest": "tsx scripts/validate-bundle-manifest.ts",
         "report:api-changes": "tsx scripts/report-api-changes.ts",
         "gen:feature-doc": "tsx scripts/gen-feature-comparison.ts",
         "gen:feature-doc:check": "tsx scripts/gen-feature-comparison.ts --check",

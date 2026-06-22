@@ -147,6 +147,35 @@ stages:
                       fi
                   displayName: "Tag published npm version"
 
+                # --- GitHub release ---------------------------------------------
+                # Publish a GitHub release for the just-pushed npm tag, attaching a
+                # zip of the built @babylonjs/lite package (dist/ contents). Skipped
+                # in dry-run mode because the underlying tag is never pushed.
+                - script: |
+                      set -euo pipefail
+
+                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
+                      ( cd ./packages/babylon-lite/dist && zip -r "$ZIP_PATH" . )
+                      echo "Created release archive: $ZIP_PATH"
+                  displayName: "Zip @babylonjs/lite dist for release"
+                  condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
+
+                - task: GitHubRelease@1
+                  displayName: "Create GitHub release"
+                  condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      action: "create"
+                      target: "$(Build.SourceVersion)"
+                      tagSource: "userSpecifiedTag"
+                      tag: "npm-lite-v$(PACKAGE_VERSION)"
+                      title: "@babylonjs/lite v$(PACKAGE_VERSION)"
+                      releaseNotesSource: "inline"
+                      releaseNotesInline: "Automated release of @babylonjs/lite v$(PACKAGE_VERSION)."
+                      assets: "$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
+                      addChangeLog: false
+
                 # --- @babylonjs/lite-compat -------------------------------------
                 # The compatibility layer publishes each build as
                 # `<lite-version>-preview` under npm's default `latest` dist-tag.
