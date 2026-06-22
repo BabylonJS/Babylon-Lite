@@ -36,6 +36,29 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual(["export declare function createMesh(name: string): Mesh;"]);
     });
 
+    it("treats a const literal widening to its primitive base as additive", () => {
+        const diff = apiDiff('export const VERSION = "0.1.0";', "export const VERSION: string;");
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("treats numeric and boolean const literal widening as additive", () => {
+        expect(breakingApiLines(apiDiff("export const MAX = 100;", "export const MAX: number;"))).toEqual([]);
+        expect(breakingApiLines(apiDiff("export const ENABLED = true;", "export const ENABLED: boolean;"))).toEqual([]);
+    });
+
+    it("flags a const widening to an unrelated type as breaking", () => {
+        const diff = apiDiff('export const VERSION = "0.1.0";', "export const VERSION: number;");
+
+        expect(breakingApiLines(diff)).toEqual(['export const VERSION = "0.1.0";']);
+    });
+
+    it("flags a renamed const as breaking", () => {
+        const diff = apiDiff('export const VERSION = "0.1.0";', "export const REVISION: string;");
+
+        expect(breakingApiLines(diff)).toEqual(['export const VERSION = "0.1.0";']);
+    });
+
     it("does not flag purely added API lines", () => {
         const diff = [
             "diff --git a/target.api.md b/current.api.md",

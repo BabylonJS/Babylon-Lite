@@ -365,11 +365,59 @@ function isNonBreakingOptionalParameterExpansion(removedLine: string, addedLine:
     return addedSignature.parameters.slice(removedSignature.parameters.length).every(isOptionalParameter);
 }
 
+const CONST_LITERAL_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*) = (.+);$/;
+const CONST_TYPED_PATTERN = /^export (?:declare )?const ([A-Za-z_$][\w$]*): (.+);$/;
+
+/**
+ * Widen a literal initializer (as it appears in an `.api.md` const line) to the
+ * primitive base type the TypeScript compiler would infer for it without an
+ * explicit annotation. Returns `undefined` for initializers we cannot classify
+ * (object/array/enum/call expressions, etc.), which keeps the change classified
+ * as breaking by default.
+ */
+function widenLiteralType(literal: string): string | undefined {
+    const trimmed = literal.trim();
+    if (/^(['"]).*\1$/.test(trimmed) || trimmed.startsWith("`")) {
+        return "string";
+    }
+    if (trimmed === "true" || trimmed === "false") {
+        return "boolean";
+    }
+    if (/^-?\d[\d_]*n$/.test(trimmed)) {
+        return "bigint";
+    }
+    if (/^-?(?:0[xob][0-9a-f_]+|(?:\d[\d_]*)?\.?\d[\d_]*(?:e[+-]?\d+)?)$/i.test(trimmed)) {
+        return "number";
+    }
+    return undefined;
+}
+
+/**
+ * Treat a `const` whose only change is its literal type widening to that
+ * literal's primitive base type as non-breaking — e.g.
+ * `export const VERSION = "0.1.0";` → `export const VERSION: string;`. This is
+ * what happens when a const that used to hold a compile-time literal is computed
+ * at build time instead (its declared type widens from `"0.1.0"` to `string`).
+ * Value consumers are unaffected and only the exact-literal *type* is lost, so
+ * we classify it as additive rather than breaking.
+ */
+function isNonBreakingConstLiteralWidening(removedLine: string, addedLine: string): boolean {
+    const removed = CONST_LITERAL_PATTERN.exec(removedLine);
+    const added = CONST_TYPED_PATTERN.exec(addedLine);
+    if (!removed || !added || removed[1] !== added[1]) {
+        return false;
+    }
+    return widenLiteralType(removed[2]!) === added[2]!.trim();
+}
+
 export function breakingApiLines(diff: string): string[] {
     const removedLines = collectChangedApiLines(diff, "-");
     const addedLines = collectChangedApiLines(diff, "+");
 
-    return removedLines.filter((removedLine) => !addedLines.some((addedLine) => isNonBreakingOptionalParameterExpansion(removedLine, addedLine)));
+    return removedLines.filter(
+        (removedLine) =>
+            !addedLines.some((addedLine) => isNonBreakingOptionalParameterExpansion(removedLine, addedLine) || isNonBreakingConstLiteralWidening(removedLine, addedLine))
+    );
 }
 
 function truncateDiff(diff: string): string {
