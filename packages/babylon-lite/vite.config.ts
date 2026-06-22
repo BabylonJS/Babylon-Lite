@@ -50,8 +50,12 @@ const LIB_OUT_DIR = "build/lib";
  * Emit a publish-ready package.json into the build root and copy the README and
  * LICENSE alongside it so the published package is complete. `exports`/`main`/
  * `module` point at `lib/` because that is the module-granular tree bundlers should
- * resolve; `jsdelivr`/`unpkg` point at the prebundled `dist/` tree so a bare CDN URL
- * (`https://cdn.jsdelivr.net/npm/@babylonjs/lite`) serves the browser-ready build.
+ * resolve. The `files` allowlist intentionally OMITS the prebundled `dist/` tree: a
+ * direct (non-bundler) import of dist's barrel statically pulls every feature chunk,
+ * so it does not deliver per-feature lazy loading and is excluded from the package
+ * for now. dist is still built locally (it generates the shared `index.d.ts`), just
+ * not shipped — re-add it (with a `./browser` export + `jsdelivr`/`unpkg`) once it
+ * has real dynamic-import feature boundaries.
  */
 function emitPackageJson(): Plugin {
     return {
@@ -76,13 +80,8 @@ function emitPackageJson(): Plugin {
                         types: "./index.d.ts",
                         import: "./lib/index.js",
                     },
-                    "./browser": {
-                        types: "./index.d.ts",
-                        import: "./dist/index.js",
-                    },
                 },
-                jsdelivr: "./dist/index.js",
-                unpkg: "./dist/index.js",
+                files: ["lib", "index.d.ts", "THIRD_PARTY_NOTICES.txt"],
                 sideEffects: false,
             };
             writeFileSync(resolve(PACKAGE_ROOT, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
