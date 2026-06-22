@@ -15,8 +15,8 @@ import {
     type SpatialTarget,
     type SpatialSubNode,
     type SpatialListener,
-    type SpatialHost,
 } from "../../../../packages/babylon-lite/src/audio/spatial.js";
+import type { AudioGraphHost } from "../../../../packages/babylon-lite/src/audio/host-types.js";
 import { createAudioSignal } from "../../../../packages/babylon-lite/src/audio/audio-signal.js";
 import { MockAudioBuffer } from "./web-audio-mock.js";
 import { mat4Translation } from "../../../../packages/babylon-lite/src/math/mat4-translation.js";
@@ -25,7 +25,7 @@ const asGain = (node: unknown) => node as unknown as MockGainNode;
 const asPanner = (node: unknown) => node as unknown as MockPannerNode;
 const asListener = (l: unknown) => l as unknown as MockAudioListener;
 // The graph/engine store narrow structural slots; the spatial module owns the full nodes.
-const spat = (host: SpatialHost) => host._graph._spatial as unknown as SpatialSubNode;
+const spat = (host: AudioGraphHost) => host._graph._spatial as unknown as SpatialSubNode;
 const lis = (engine: { _listener: unknown }) => engine._listener as unknown as SpatialListener;
 
 async function makeEngine() {

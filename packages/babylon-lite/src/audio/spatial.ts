@@ -24,10 +24,8 @@
 import { type AudioEngine } from "./audio-engine.js";
 import { type RampParam, createRampParam, isRamping, setRampTarget } from "./audio-param.js";
 import { type AudioSignal } from "./audio-signal.js";
-import { type SoundSubGraph } from "./sound-sub-graph.js";
-import type { StaticSound } from "./static-sound.js";
-import type { StreamingSound } from "./streaming-sound.js";
-import type { AudioBus } from "./audio-bus.js";
+import { rebuildSoundSubGraphHead } from "./sound-sub-graph.js";
+import { type AudioGraphHost, type AudioGraphHostState } from "./host-types.js";
 import { type Mat4, type Quat, type Vec3 } from "../math/types.js";
 import { mat4Decompose } from "../math/mat4-decompose.js";
 
@@ -403,23 +401,10 @@ function updateAttachedSubNode(node: SpatialSubNode): void {
 // ─── Sub-graph splicing ──────────────────────────────────────────────
 
 /**
- * A sound or bus that can be spatialized. Public spatial functions accept any
- * of these; the panner sub-node is spliced into the host's sub-graph on demand.
- */
-export type SpatialHost = StaticSound | StreamingSound | AudioBus;
-
-/** Structural view of a host's sub-graph carrier, used internally. @internal */
-interface SpatialGraphHost {
-    /** @internal */ _engine: AudioEngine;
-    /** @internal */ _graph: SoundSubGraph;
-    /** @internal */ _instances?: Set<{ _volumeNode: AudioNode }>;
-}
-
-/**
  * Lazily build the panner sub-node and splice it into the host's sub-graph,
  * reconnecting any live instances. Idempotent.
  */
-function ensureSpatialSubNode(host: SpatialGraphHost): SpatialSubNode {
+function ensureSpatialSubNode(host: AudioGraphHostState): SpatialSubNode {
     const graph = host._graph;
     if (graph._spatial) {
         // The graph stores a structural slot; this feature module owns the full node.
@@ -430,22 +415,10 @@ function ensureSpatialSubNode(host: SpatialGraphHost): SpatialSubNode {
 
     const node = createSpatialSubNode(host._engine);
     connectSpatialOutput(node, graph._volume);
-
-    const oldHead = graph._in;
-    graph._in = node._inputNode;
     graph._spatial = node;
 
-    // Reconnect live instances from the old head (the volume node) to the panner input.
-    if (host._instances) {
-        for (const instance of host._instances) {
-            try {
-                instance._volumeNode.disconnect(oldHead);
-            } catch {
-                // Instance may not yet be connected; ignore.
-            }
-            instance._volumeNode.connect(node._inputNode);
-        }
-    }
+    // Recompute the head and reconnect live instances (handles spatial+stereo parallel routing).
+    rebuildSoundSubGraphHead(graph, host._instances);
 
     return node;
 }
@@ -458,7 +431,7 @@ function ensureSpatialSubNode(host: SpatialGraphHost): SpatialSubNode {
  * @param host - A `StaticSound` or `AudioBus`.
  * @param options - Spatial options (position, distance model, cone, attach, …).
  */
-export function enableSpatial(host: SpatialHost, options: SpatialSoundOptions = {}): void {
+export function enableSpatial(host: AudioGraphHost, options: SpatialSoundOptions = {}): void {
     const node = ensureSpatialSubNode(host);
     configureSubNode(node, options);
     if (options.attachedTo) {
@@ -472,7 +445,7 @@ export function enableSpatial(host: SpatialHost, options: SpatialSoundOptions = 
  * @param host - A `StaticSound` or `AudioBus`.
  * @param position - World-space position.
  */
-export function setSpatialPosition(host: SpatialHost, position: Vec3): void {
+export function setSpatialPosition(host: AudioGraphHost, position: Vec3): void {
     const node = ensureSpatialSubNode(host);
     node._position = { x: position.x, y: position.y, z: position.z };
     updateSubNodePosition(node);
@@ -483,7 +456,7 @@ export function setSpatialPosition(host: SpatialHost, position: Vec3): void {
  * @param host - A `StaticSound` or `AudioBus`.
  * @param orientation - Facing direction.
  */
-export function setSpatialOrientation(host: SpatialHost, orientation: Vec3): void {
+export function setSpatialOrientation(host: AudioGraphHost, orientation: Vec3): void {
     const node = ensureSpatialSubNode(host);
     node._orientation = { x: orientation.x, y: orientation.y, z: orientation.z };
     node._lastQuat = { x: node._rotationQuaternion.x, y: node._rotationQuaternion.y, z: node._rotationQuaternion.z, w: node._rotationQuaternion.w };
@@ -498,7 +471,7 @@ export function setSpatialOrientation(host: SpatialHost, orientation: Vec3): voi
  * @param worldTarget - The transform to follow.
  * @param type - Which transform components to follow. Defaults to `"positionAndRotation"`.
  */
-export function attachSpatialTarget(target: SpatialHost | AudioEngine, worldTarget: SpatialTarget, type?: SpatialAttachmentType): void {
+export function attachSpatialTarget(target: AudioGraphHost | AudioEngine, worldTarget: SpatialTarget, type?: SpatialAttachmentType): void {
     if (isEngine(target)) {
         const listener = ensureSpatialListener(target);
         attachListener(listener, worldTarget, type);
@@ -513,7 +486,7 @@ export function attachSpatialTarget(target: SpatialHost | AudioEngine, worldTarg
  * transform.
  * @param target - A `StaticSound`, `AudioBus`, or the `AudioEngine` (listener).
  */
-export function detachSpatialTarget(target: SpatialHost | AudioEngine): void {
+export function detachSpatialTarget(target: AudioGraphHost | AudioEngine): void {
     if (isEngine(target)) {
         if (target._listener) {
             detachListener(target._listener as SpatialListener);
@@ -611,7 +584,7 @@ export function setSpatialAutoUpdate(engine: AudioEngine, enabled: boolean, minU
     engine._disposers.push(stop);
 }
 
-function isEngine(target: SpatialHost | AudioEngine): target is AudioEngine {
+function isEngine(target: AudioGraphHost | AudioEngine): target is AudioEngine {
     return "_spatialUpdaters" in target;
 }
 

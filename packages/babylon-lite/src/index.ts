@@ -714,7 +714,12 @@ export {
     updateSpatialAudio,
     setSpatialAutoUpdate,
 } from "./audio/spatial.js";
-export type { SpatialSoundOptions, SpatialListenerOptions, SpatialTarget, SpatialAttachmentType, SpatialHost } from "./audio/spatial.js";
+export type { SpatialSoundOptions, SpatialListenerOptions, SpatialTarget, SpatialAttachmentType } from "./audio/spatial.js";
+export { enableStereo, setStereoPan } from "./audio/stereo.js";
+export type { StereoSoundOptions } from "./audio/stereo.js";
+export { enableAnalyzer, getByteFrequencyData, getFloatFrequencyData } from "./audio/analyzer.js";
+export type { AudioAnalyzerOptions } from "./audio/analyzer.js";
+export type { AudioGraphHost } from "./audio/host-types.js";
 export { createSoundBufferAsync } from "./audio/sound-buffer.js";
 export type { SoundBuffer, SoundSource, SoundBufferOptions } from "./audio/sound-buffer.js";
 export type { AudioSignal } from "./audio/audio-signal.js";

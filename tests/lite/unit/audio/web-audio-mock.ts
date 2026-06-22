@@ -78,6 +78,43 @@ export class MockPannerNode extends MockAudioNode {
     }
 }
 
+export class MockStereoPannerNode extends MockAudioNode {
+    public readonly pan = new MockAudioParam(0);
+    public constructor(public readonly context: MockBaseAudioContext) {
+        super();
+    }
+}
+
+export class MockAnalyserNode extends MockAudioNode {
+    public fftSize = 2048;
+    public minDecibels = -100;
+    public maxDecibels = -30;
+    public smoothingTimeConstant = 0.8;
+    public constructor(public readonly context: MockBaseAudioContext) {
+        super();
+    }
+
+    public get frequencyBinCount(): number {
+        return this.fftSize / 2;
+    }
+
+    public getByteFrequencyData(array: Uint8Array): void {
+        array.fill(0);
+    }
+
+    public getFloatFrequencyData(array: Float32Array): void {
+        array.fill(this.minDecibels);
+    }
+
+    public getByteTimeDomainData(array: Uint8Array): void {
+        array.fill(128);
+    }
+
+    public getFloatTimeDomainData(array: Float32Array): void {
+        array.fill(0);
+    }
+}
+
 export class MockAudioListener {
     public readonly positionX = new MockAudioParam(0);
     public readonly positionY = new MockAudioParam(0);
@@ -301,7 +338,7 @@ interface InstalledGlobals {
 }
 
 const SAVED: InstalledGlobals = {};
-const KEYS = ["AudioContext", "OfflineAudioContext", "GainNode", "AudioBufferSourceNode", "AudioBuffer", "Audio", "PannerNode"];
+const KEYS = ["AudioContext", "OfflineAudioContext", "GainNode", "AudioBufferSourceNode", "AudioBuffer", "Audio", "PannerNode", "StereoPannerNode", "AnalyserNode"];
 
 const STREAMING_SAVED: InstalledGlobals = {};
 const STREAMING_KEYS = ["Audio", "MediaElementAudioSourceNode", "document"];
@@ -339,6 +376,8 @@ export function installWebAudioMock(): void {
     g.AudioBufferSourceNode = MockAudioBufferSourceNode;
     g.AudioBuffer = MockAudioBuffer;
     g.PannerNode = MockPannerNode;
+    g.StereoPannerNode = MockStereoPannerNode;
+    g.AnalyserNode = MockAnalyserNode;
     // Leave `Audio` undefined so `isAudioFormatValid` treats formats as valid in tests.
     g.Audio = undefined;
 }
