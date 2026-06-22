@@ -413,6 +413,44 @@ export class MockDocument {
     }
 }
 
+/** Records 2D-canvas draw calls for the visualizer tests. */
+export class MockCanvasContext2D {
+    public fillStyle = "";
+    public strokeStyle = "";
+    public lineWidth = 1;
+    public fillRectCount = 0;
+    public strokeCount = 0;
+    public moveToCount = 0;
+    public lineToCount = 0;
+    public lastFillStyle = "";
+
+    public fillRect(): void {
+        this.fillRectCount++;
+        this.lastFillStyle = this.fillStyle;
+    }
+    public beginPath(): void {}
+    public moveTo(): void {
+        this.moveToCount++;
+    }
+    public lineTo(): void {
+        this.lineToCount++;
+    }
+    public stroke(): void {
+        this.strokeCount++;
+    }
+    public clearRect(): void {}
+}
+
+/** Minimal `<canvas>` mock exposing a recording 2D context. */
+export class MockCanvas {
+    public width = 300;
+    public height = 150;
+    public readonly context2d = new MockCanvasContext2D();
+    public getContext(type: string): MockCanvasContext2D | null {
+        return type === "2d" ? this.context2d : null;
+    }
+}
+
 interface InstalledGlobals {
     [key: string]: unknown;
 }

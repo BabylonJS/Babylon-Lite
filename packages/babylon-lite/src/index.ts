@@ -717,13 +717,15 @@ export {
 export type { SpatialSoundOptions, SpatialListenerOptions, SpatialTarget, SpatialAttachmentType } from "./audio/spatial.js";
 export { enableStereo, setStereoPan } from "./audio/stereo.js";
 export type { StereoSoundOptions } from "./audio/stereo.js";
-export { enableAnalyzer, getByteFrequencyData, getFloatFrequencyData } from "./audio/analyzer.js";
+export { enableAnalyzer, getByteFrequencyData, getFloatFrequencyData, getByteTimeDomainData, getFloatTimeDomainData } from "./audio/analyzer.js";
 export type { AudioAnalyzerOptions } from "./audio/analyzer.js";
 export type { AudioGraphHost } from "./audio/host-types.js";
 export { createSoundSourceAsync, createMicrophoneSoundSourceAsync, setSoundSourceVolume, disposeSoundSource } from "./audio/sound-source.js";
 export type { AudioInputSource, SoundSourceOptions } from "./audio/sound-source.js";
 export { createUnmuteUI, setUnmuteUIEnabled, disposeUnmuteUI } from "./audio/unmute-ui.js";
 export type { UnmuteUI, UnmuteUIOptions } from "./audio/unmute-ui.js";
+export { createAudioVisualizer, renderAudioVisualizerFrame, startAudioVisualizer, stopAudioVisualizer, disposeAudioVisualizer } from "./audio/visualizer.js";
+export type { AudioVisualizer, AudioVisualizerOptions, AudioVisualizerMode } from "./audio/visualizer.js";
 export { createSoundBufferAsync } from "./audio/sound-buffer.js";
 export type { SoundBuffer, SoundSource, SoundBufferOptions } from "./audio/sound-buffer.js";
 export type { AudioSignal } from "./audio/audio-signal.js";

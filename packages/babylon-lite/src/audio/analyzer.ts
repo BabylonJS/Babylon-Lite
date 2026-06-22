@@ -125,3 +125,25 @@ export function getByteFrequencyData(host: AudioGraphHost, out: Uint8Array): voi
 export function getFloatFrequencyData(host: AudioGraphHost, out: Float32Array): void {
     ensureAnalyzerSubNode(host)._node.getFloatFrequencyData(out as Float32Array<ArrayBuffer>);
 }
+
+/**
+ * Writes the current time-domain (waveform) data as unsigned bytes into `out`,
+ * building the analyzer tap on first use. Each sample is centered on `128`.
+ * `out` should be sized to the analyzer's `fftSize`.
+ * @param host - A `StaticSound`, `StreamingSound`, or `AudioBus`.
+ * @param out - Destination buffer; values are written in place.
+ */
+export function getByteTimeDomainData(host: AudioGraphHost, out: Uint8Array): void {
+    ensureAnalyzerSubNode(host)._node.getByteTimeDomainData(out as Uint8Array<ArrayBuffer>);
+}
+
+/**
+ * Writes the current time-domain (waveform) data as floats in `[-1, 1]` into
+ * `out`, building the analyzer tap on first use. `out` should be sized to the
+ * analyzer's `fftSize`.
+ * @param host - A `StaticSound`, `StreamingSound`, or `AudioBus`.
+ * @param out - Destination buffer; values are written in place.
+ */
+export function getFloatTimeDomainData(host: AudioGraphHost, out: Float32Array): void {
+    ensureAnalyzerSubNode(host)._node.getFloatTimeDomainData(out as Float32Array<ArrayBuffer>);
+}

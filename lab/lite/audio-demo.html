@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Babylon Lite — Audio Demo</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                min-height: 100%;
+                background: #101014;
+                color: #e6e6e6;
+                font-family: system-ui, sans-serif;
+            }
+            main {
+                max-width: 900px;
+                margin: 0 auto;
+                padding: 24px;
+            }
+            h1 {
+                font-size: 1.4rem;
+                font-weight: 600;
+            }
+            p.lead {
+                color: #9aa0a6;
+            }
+            canvas {
+                width: 100%;
+                height: 300px;
+                display: block;
+                background: #101014;
+                border: 1px solid #2a2a30;
+                border-radius: 8px;
+            }
+            .controls {
+                display: flex;
+                gap: 12px;
+                margin: 16px 0;
+                flex-wrap: wrap;
+            }
+            button {
+                font-size: 0.95rem;
+                padding: 10px 18px;
+                border: none;
+                border-radius: 6px;
+                background: #4fc3f7;
+                color: #06222e;
+                cursor: pointer;
+            }
+            button:hover {
+                filter: brightness(1.08);
+            }
+            button#stop {
+                background: #444;
+                color: #e6e6e6;
+            }
+            #status {
+                margin-top: 12px;
+                color: #9aa0a6;
+                min-height: 1.2em;
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1>Babylon Lite — Audio Visualizer Demo</h1>
+            <p class="lead">
+                A manual showcase of the ported AudioV2 engine: a looping synthesized tone and a live microphone input, drawn with the real-time frequency-bar + waveform
+                visualizer.
+            </p>
+            <canvas id="viz" width="900" height="300"></canvas>
+            <div class="controls">
+                <button id="tone" type="button">Play tone</button>
+                <button id="mic" type="button">Use microphone</button>
+                <button id="stop" type="button">Stop</button>
+            </div>
+            <div id="status"></div>
+        </main>
+        <script type="module" src="/lite/src/demos/audio-demo.ts"></script>
+    </body>
+</html>

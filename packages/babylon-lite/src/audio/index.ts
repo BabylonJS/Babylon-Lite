@@ -43,7 +43,7 @@ export type { SpatialSoundOptions, SpatialListenerOptions, SpatialTarget, Spatia
 export { enableStereo, setStereoPan } from "./stereo.js";
 export type { StereoSoundOptions } from "./stereo.js";
 
-export { enableAnalyzer, getByteFrequencyData, getFloatFrequencyData } from "./analyzer.js";
+export { enableAnalyzer, getByteFrequencyData, getFloatFrequencyData, getByteTimeDomainData, getFloatTimeDomainData } from "./analyzer.js";
 export type { AudioAnalyzerOptions } from "./analyzer.js";
 
 export type { AudioGraphHost } from "./host-types.js";
@@ -53,6 +53,9 @@ export type { AudioInputSource, SoundSourceOptions } from "./sound-source.js";
 
 export { createUnmuteUI, setUnmuteUIEnabled, disposeUnmuteUI } from "./unmute-ui.js";
 export type { UnmuteUI, UnmuteUIOptions } from "./unmute-ui.js";
+
+export { createAudioVisualizer, renderAudioVisualizerFrame, startAudioVisualizer, stopAudioVisualizer, disposeAudioVisualizer } from "./visualizer.js";
+export type { AudioVisualizer, AudioVisualizerOptions, AudioVisualizerMode } from "./visualizer.js";
 
 export { createSoundBufferAsync } from "./sound-buffer.js";
 export type { SoundBuffer, SoundSource, SoundBufferOptions } from "./sound-buffer.js";
