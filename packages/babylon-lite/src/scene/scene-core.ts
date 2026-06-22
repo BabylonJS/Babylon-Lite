@@ -408,7 +408,8 @@ export async function registerScene(scene: SceneContext): Promise<void> {
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
     if (surface._renderingContexts.length > 0) {
-        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(surface, ctx);
+        const overlay = await import("./swapchain-overlay.js");
+        overlay.configureSwapchainOverlayScene(surface, ctx);
     }
     registerRenderingContext(surface, ctx);
 }
@@ -430,7 +431,8 @@ export async function registerSceneWithShadowSupport(scene: SceneContext): Promi
     await Promise.all(ctx._frameGraph._tasks.map((task) => task._preload?.()).filter((preload): preload is Promise<void> => preload !== undefined));
     ctx._frameGraph.build();
     if (surface._renderingContexts.length > 0) {
-        (await import("./swapchain-overlay.js")).configureSwapchainOverlayScene(surface, ctx);
+        const overlay = await import("./swapchain-overlay.js");
+        overlay.configureSwapchainOverlayScene(surface, ctx);
     }
     registerRenderingContext(surface, ctx);
 }

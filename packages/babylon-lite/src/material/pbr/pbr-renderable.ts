@@ -149,7 +149,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // (glTF flat-shading) — normal-having scenes bundle zero bytes.
     let _flatNormalWgsl = "";
     if (hasAnyFlatNormal) {
-        _flatNormalWgsl = (await import("./fragments/flat-normal-wgsl.js")).FLAT_NORMAL_WGSL;
+        const flatNormal = await import("./fragments/flat-normal-wgsl.js");
+        _flatNormalWgsl = flatNormal.FLAT_NORMAL_WGSL;
     }
 
     // Light/shadow helpers stay dynamic so single-light and non-shadow bundles stay lean.

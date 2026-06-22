@@ -21,6 +21,8 @@ import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { DecodedPrimitive, GltfFeature, GltfLoadCtx } from "./gltf-feature.js";
 import type { TextureWrapFn } from "./gltf-pbr-builder.js";
 import { assemblePbrProps, buildDefaultPbrTextures, identityTexWrap, runMatExts, uploadTex } from "./gltf-pbr-builder.js";
+import type * as GltfColorNormalize from "./gltf-color-normalize.js";
+import type * as GltfFeatureRegistry from "./gltf-feature-registry.js";
 import type * as GltfPbrBuilderExt from "./gltf-pbr-builder-ext.js";
 
 /** Dynamically-imported interleave module — loaded only when an asset actually
@@ -29,6 +31,16 @@ type InterleaveModule = typeof import("./gltf-interleave.js");
 let _interleavePromise: Promise<InterleaveModule> | undefined;
 function loadInterleave(): Promise<InterleaveModule> {
     return (_interleavePromise ??= import("./gltf-interleave.js"));
+}
+
+let _gltfFeatureRegistryPromise: Promise<typeof GltfFeatureRegistry> | undefined;
+function importGltfFeatureRegistry(): Promise<typeof GltfFeatureRegistry> {
+    return (_gltfFeatureRegistryPromise ??= import("./gltf-feature-registry.js"));
+}
+
+let _colorNormalizePromise: Promise<typeof GltfColorNormalize> | undefined;
+function importColorNormalize(): Promise<typeof GltfColorNormalize> {
+    return (_colorNormalizePromise ??= import("./gltf-color-normalize.js"));
 }
 
 /** Parsed mesh data ready for GPU upload. */
@@ -108,7 +120,7 @@ export async function loadGltf(engine: EngineContext, source: string | ArrayBuff
     // the asset can possibly trigger a feature — so plain metallic-roughness
     // GLBs (no extensions/animations/skins/morphs/ORM-composite) never fetch the
     // registry. Core loader knows zero feature names.
-    const features = assetUsesGltfFeatures(json) ? await (await import("./gltf-feature-registry.js")).loadGltfFeatures(json) : [];
+    const features = assetUsesGltfFeatures(json) ? await (await importGltfFeatureRegistry()).loadGltfFeatures(json) : [];
 
     // Pre-parse hooks (EXT_meshopt_compression decompression, KHR_mesh_quantization
     // dequantization) may rewrite bufferViews/accessors and hand back a replacement
@@ -191,8 +203,8 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
     // object URLs (blob:…), OPFS handles, and extensionless sources are detected correctly. The length guard
     // keeps an empty/too-short input failing with the JSON/GLB parse error below, not a DataView RangeError.
     if (buffer.byteLength >= 4 && new DV(buffer).getUint32(0, true) === 0x46546c67) {
-        const { parseGlbContainer } = await import("./gltf-glb-parser.js");
-        return { ...parseGlbContainer(buffer), baseUrl };
+        const glb = await import("./gltf-glb-parser.js");
+        return { ...glb.parseGlbContainer(buffer), baseUrl };
     }
 
     // Otherwise treat the bytes as a JSON glTF document.
@@ -203,8 +215,8 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
         // Multi-buffer glTF (e.g. separate geometry/animation/skin .bin files): fetch all,
         // concatenate, and rewrite bufferView offsets so the single-binChunk reader still works.
         // Lazy-imported so single-buffer/GLB assets (the common case) pay zero bytes for it.
-        const { loadMultiBuffer } = await import("./gltf-multi-buffer.js");
-        binChunk = await loadMultiBuffer(json, baseUrl);
+        const multiBuffer = await import("./gltf-multi-buffer.js");
+        binChunk = await multiBuffer.loadMultiBuffer(json, baseUrl);
     } else if (buffers[0]?.uri) {
         binChunk = new DV(await fetch(resolveBufferUri(buffers[0].uri, baseUrl)).then((r) => r.arrayBuffer()));
     } else {
@@ -410,7 +422,7 @@ async function extractAllMeshes(
             // (otherwise every vertex misaligns -> garbage/black); a VEC3 source gets a=1.
             // The normalizer is imported lazily on first need — colorless assets never fetch it
             // (the runtime caches the module, so the per-primitive import() resolves instantly).
-            const colors = colorData ? (await import("./gltf-color-normalize.js")).normalizeColorToVec4(colorData._data, colorData._count, colorData._componentCount) : null;
+            const colors = colorData ? (await importColorNormalize()).normalizeColorToVec4(colorData._data, colorData._count, colorData._componentCount) : null;
 
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
