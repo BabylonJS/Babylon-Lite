@@ -333,6 +333,86 @@ export class MockMediaElementAudioSourceNode extends MockAudioNode {
     }
 }
 
+export class MockMediaStreamTrack {
+    public stopped = false;
+    public stop(): void {
+        this.stopped = true;
+    }
+}
+
+export class MockMediaStream {
+    public constructor(public readonly tracks: MockMediaStreamTrack[] = [new MockMediaStreamTrack()]) {}
+    public getTracks(): MockMediaStreamTrack[] {
+        return this.tracks;
+    }
+}
+
+export class MockMediaStreamAudioSourceNode extends MockAudioNode {
+    public readonly mediaStream: MockMediaStream;
+    public constructor(
+        public readonly context: MockBaseAudioContext,
+        options: { mediaStream: MockMediaStream }
+    ) {
+        super();
+        this.mediaStream = options.mediaStream;
+    }
+}
+
+/** Minimal DOM element mock for the unmute-UI tests. */
+export class MockDomElement {
+    public className = "";
+    public id = "";
+    public readonly style: Record<string, string> = {};
+    public offsetTop = 0;
+    public removed = false;
+    public readonly children: unknown[] = [];
+    private _listeners: { [type: string]: Array<() => void> } = {};
+
+    public constructor(public readonly tagName = "") {}
+
+    public appendChild(node: unknown): unknown {
+        this.children.push(node);
+        return node;
+    }
+
+    public remove(): void {
+        this.removed = true;
+    }
+
+    public addEventListener(type: string, cb: () => void): void {
+        (this._listeners[type] ??= []).push(cb);
+    }
+
+    public removeEventListener(type: string, cb: () => void): void {
+        const list = this._listeners[type];
+        if (list) {
+            const i = list.indexOf(cb);
+            if (i !== -1) {
+                list.splice(i, 1);
+            }
+        }
+    }
+
+    /** Test helper — dispatch a registered event (e.g. "click"). */
+    public fire(type: string): void {
+        for (const cb of (this._listeners[type] ?? []).slice()) {
+            cb();
+        }
+    }
+}
+
+/** Minimal `document` mock for the unmute-UI tests. */
+export class MockDocument {
+    public readonly head = new MockDomElement("head");
+    public readonly body = new MockDomElement("body");
+    public createElement(tag: string): MockDomElement {
+        return new MockDomElement(tag);
+    }
+    public createTextNode(text: string): { nodeValue: string } {
+        return { nodeValue: text };
+    }
+}
+
 interface InstalledGlobals {
     [key: string]: unknown;
 }
@@ -388,4 +468,64 @@ export function uninstallWebAudioMock(): void {
     for (const key of KEYS) {
         g[key] = SAVED[key];
     }
+}
+
+const MIC_SAVED: InstalledGlobals = {};
+
+/**
+ * Installs microphone mocks: `MediaStreamAudioSourceNode` + a `navigator` with
+ * `mediaDevices.getUserMedia`. Pass `{ deny: true }` to simulate denied access.
+ */
+export function installMicrophoneMocks(opts: { deny?: boolean; stream?: MockMediaStream } = {}): MockMediaStream {
+    const g = globalThis as unknown as InstalledGlobals;
+    MIC_SAVED.MediaStreamAudioSourceNode = g.MediaStreamAudioSourceNode;
+    MIC_SAVED.navigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+
+    const stream = opts.stream ?? new MockMediaStream();
+    g.MediaStreamAudioSourceNode = MockMediaStreamAudioSourceNode;
+    // `navigator` is a getter-only global in Node — redefine it.
+    Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        writable: true,
+        value: {
+            mediaDevices: {
+                getUserMedia: async () => {
+                    if (opts.deny) {
+                        throw new Error("Permission denied");
+                    }
+                    return stream;
+                },
+            },
+        },
+    });
+    return stream;
+}
+
+/** Restores the globals modified by {@link installMicrophoneMocks}. */
+export function uninstallMicrophoneMocks(): void {
+    const g = globalThis as unknown as InstalledGlobals;
+    g.MediaStreamAudioSourceNode = MIC_SAVED.MediaStreamAudioSourceNode;
+    const desc = MIC_SAVED.navigator as PropertyDescriptor | undefined;
+    if (desc) {
+        Object.defineProperty(globalThis, "navigator", desc);
+    } else {
+        delete (globalThis as unknown as Record<string, unknown>).navigator;
+    }
+}
+
+const DOM_SAVED: InstalledGlobals = {};
+
+/** Installs a minimal `document` mock for the unmute-UI tests; returns it. */
+export function installDomMock(): MockDocument {
+    const g = globalThis as unknown as InstalledGlobals;
+    DOM_SAVED.document = g.document;
+    const doc = new MockDocument();
+    g.document = doc;
+    return doc;
+}
+
+/** Restores the global `document` modified by {@link installDomMock}. */
+export function uninstallDomMock(): void {
+    const g = globalThis as unknown as InstalledGlobals;
+    g.document = DOM_SAVED.document;
 }

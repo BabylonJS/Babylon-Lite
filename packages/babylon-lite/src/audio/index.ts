@@ -48,6 +48,12 @@ export type { AudioAnalyzerOptions } from "./analyzer.js";
 
 export type { AudioGraphHost } from "./host-types.js";
 
+export { createSoundSourceAsync, createMicrophoneSoundSourceAsync, setSoundSourceVolume, disposeSoundSource } from "./sound-source.js";
+export type { AudioInputSource, SoundSourceOptions } from "./sound-source.js";
+
+export { createUnmuteUI, setUnmuteUIEnabled, disposeUnmuteUI } from "./unmute-ui.js";
+export type { UnmuteUI, UnmuteUIOptions } from "./unmute-ui.js";
+
 export { createSoundBufferAsync } from "./sound-buffer.js";
 export type { SoundBuffer, SoundSource, SoundBufferOptions } from "./sound-buffer.js";
 

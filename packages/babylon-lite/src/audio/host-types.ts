@@ -13,9 +13,10 @@ import type { SoundSubGraph } from "./sound-sub-graph.js";
 import type { StaticSound } from "./static-sound.js";
 import type { StreamingSound } from "./streaming-sound.js";
 import type { AudioBus } from "./audio-bus.js";
+import type { AudioInputSource } from "./sound-source.js";
 
-/** A sound or bus that can carry spatial, stereo, or analyzer sub-nodes. */
-export type AudioGraphHost = StaticSound | StreamingSound | AudioBus;
+/** A sound, source, or bus that can carry spatial, stereo, or analyzer sub-nodes. */
+export type AudioGraphHost = StaticSound | StreamingSound | AudioBus | AudioInputSource;
 
 /** Structural view of a host's engine + sub-graph, used by feature builders. @internal */
 export interface AudioGraphHostState {
