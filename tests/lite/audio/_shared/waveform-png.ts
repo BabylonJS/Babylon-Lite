@@ -128,8 +128,14 @@ export interface GoldenComparison {
 export function comparePngBuffers(actualBuffer: Buffer, goldenBuffer: Buffer, perChannelTolerance = 8, searchRadius = 2): { mismatchFraction: number; totalPixels: number } {
     const actual = PNG.sync.read(actualBuffer);
     const golden = PNG.sync.read(goldenBuffer);
-    const w = Math.min(actual.width, golden.width);
-    const h = Math.min(actual.height, golden.height);
+    // A dimension mismatch is a hard failure: comparing only the overlapping
+    // region (via `Math.min`) could let a size regression slip through with an
+    // artificially low mismatch fraction.
+    if (actual.width !== golden.width || actual.height !== golden.height) {
+        return { mismatchFraction: 1, totalPixels: Math.max(actual.width * actual.height, golden.width * golden.height) };
+    }
+    const w = actual.width;
+    const h = actual.height;
     const total = w * h;
 
     const matchesAt = (ax: number, ay: number): boolean => {

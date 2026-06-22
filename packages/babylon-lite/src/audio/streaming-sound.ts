@@ -507,8 +507,11 @@ function _onCanPlayThrough(instance: StreamingInstance): void {
 }
 
 function _onMediaEnded(instance: StreamingInstance): void {
+    // Capture the state before the transition: `_setStreamingInstanceState`
+    // overwrites `_state` to `Stopped`, so the paused check must read it first.
+    const wasPaused = instance._state === SoundState.Paused;
     _setStreamingInstanceState(instance, SoundState.Stopped);
-    if (instance._state !== SoundState.Paused) {
+    if (!wasPaused) {
         instance._onEnded._notify(instance);
     }
 }

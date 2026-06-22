@@ -64,7 +64,7 @@ export interface AudioEngine {
     readonly currentTime: number;
     /** Fires whenever {@link state} changes. */
     readonly onStateChanged: AudioSignal<AudioEngineState>;
-    /** Fires on the first qualifying user gesture (click). */
+    /** Fires on every qualifying user gesture (click), not just the first. */
     readonly onUserGesture: AudioSignal<void>;
 
     /** @internal */ readonly _ctx: BaseAudioContext;

@@ -8,7 +8,11 @@
 
 let fileExtensionRegex: RegExp | null = null;
 
-/** Extracts a lowercase 3–4 char file extension (before any query string). @internal */
+/**
+ * Extracts the 3–4 char file extension (before any query string), exactly as
+ * written in the URL — not lowercased, matching AudioV2 `_FileExtensionRegex`.
+ * @internal
+ */
 export function getFileExtension(url: string): string | undefined {
     fileExtensionRegex ??= new RegExp("\\.(\\w{3,4})($|\\?)");
     return url.match(fileExtensionRegex)?.[1];
