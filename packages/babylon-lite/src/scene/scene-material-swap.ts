@@ -3,6 +3,9 @@ import type { SceneContext } from "./scene-core.js";
 /** @internal Drain _materialSwapQueue: dispose old resources and rebuild renderables. */
 export function processMaterialSwaps(scene: SceneContext): void {
     const q = scene._materialSwapQueue;
+    if (q.length === 0) {
+        return;
+    }
     const device = scene.surface.engine._device;
     for (const mesh of q) {
         const old = scene._meshDisposables.get(mesh);
