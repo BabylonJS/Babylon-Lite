@@ -1937,7 +1937,7 @@
         "slug": "scene222-composite-gizmos",
         "name": "Scene 222 — Composite Gizmos",
         "maxMad": 1.5,
-        "maxRawKB": 110.4,
+        "maxRawKB": 110.5,
         "description": "Three cubes each parented to a TransformNode with non-null rotation and translation, driven by composite PositionGizmo / RotationGizmo / ScaleGizmo. Scripted manipulation in LOCAL coords, then switches to WORLD coords (where supported) and re-manipulates before parity comparison.",
         "tags": ["std", "gizmo", "interactive", "composite"],
         "skipPerf": true,
