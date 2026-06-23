@@ -79,6 +79,12 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual(["readonly weights: Float32Array<ArrayBuffer>;"]);
     });
 
+    it("still flags a non-default backing-buffer change as breaking", () => {
+        const diff = apiDiff("readonly weights: Float32Array<ArrayBuffer>;", "readonly weights: Float32Array<SharedArrayBuffer>;");
+
+        expect(breakingApiLines(diff)).toEqual(["readonly weights: Float32Array<ArrayBuffer>;"]);
+    });
+
     it("does not flag purely added API lines", () => {
         const diff = [
             "diff --git a/target.api.md b/current.api.md",
