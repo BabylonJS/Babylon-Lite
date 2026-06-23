@@ -36,7 +36,7 @@ import {
     ESM_SHADOW_OUTPUT,
     _getStdExtsSorted,
 } from "./standard-flags.js";
-import { MSH_HAS_MORPH_TARGETS, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -56,6 +56,7 @@ export function _installStandardStencilResolver(resolve: (stencil: StencilState)
  *  @param fragments - Optional extra fragments (e.g. thin-instance). */
 export function composeStandardShader(features: number, _meshFeatures = 0, fragments: ShaderFragment[] = [], esmShadowDepthCode = ""): ComposedShader {
     const has = (bit: number) => (features & bit) !== 0;
+    const pc = fragments[0]?._pc;
     const template = createStandardTemplate(
         {
             _diffuse: has(HAS_DIFFUSE_TEXTURE),
@@ -65,16 +66,12 @@ export function composeStandardShader(features: number, _meshFeatures = 0, fragm
             _disableLighting: has(DISABLE_LIGHTING),
             _noColorOutput: has(NO_COLOR_OUTPUT),
             _esmShadowOutput: has(ESM_SHADOW_OUTPUT),
-            _hasMorph: (_meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0,
+            _hasMorph: !!pc,
         },
         esmShadowDepthCode
     );
     let composed = composeShader(template, fragments);
-    for (const f of fragments) {
-        if (f._postCompose) {
-            composed = f._postCompose(composed);
-        }
-    }
+    pc && (composed = pc(composed));
     return composed;
 }
 
@@ -267,7 +264,6 @@ export function createStandardMeshBindGroup(
     const needsUV = (features & NEEDS_UV) !== 0;
     const hasDiffuseTex = (features & HAS_DIFFUSE_TEXTURE) !== 0;
     const esmShadowOutput = (features & ESM_SHADOW_OUTPUT) !== 0;
-    const hasMorph = (bindings._meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0;
 
     // Sequential numbering matches composer output:
     // meshUBO(0) → morph vertex bindings → material UBO → diffuse → uv → esm → exts.
@@ -276,7 +272,7 @@ export function createStandardMeshBindGroup(
 
     // Morph bindings are fragment vertex bindings, so the composer places them
     // immediately after the mesh UBO and before the material UBO.
-    if (hasMorph && morphTargets) {
+    if (morphTargets) {
         entries.push({ binding: nextBinding++, resource: { buffer: morphTargets.deltasBuffer } }, { binding: nextBinding++, resource: { buffer: morphTargets.weightsBuffer } });
     }
 

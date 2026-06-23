@@ -81,6 +81,6 @@ export function createMorphFragment(): ShaderFragment {
             VR: MORPH_PRE_SKINNING,
         },
 
-        _postCompose: patchMorphStorage,
+        _pc: patchMorphStorage,
     };
 }

@@ -160,11 +160,8 @@ export interface ShaderFragment {
     /** @internal Code injected at named fragment slots */
     readonly _fragmentSlots?: Partial<Record<FragmentSlot, string>>;
 
-    /** @internal Optional post-composition rewrite of the composed shader (WGSL + BGL).
-     *  Invoked by material pipelines (PBR/Standard) — NOT by the generic composer — so
-     *  storage-buffer support stays out of `shader-composer.ts`. Used by the morph
-     *  fragment to flip its placeholder `uniform` bindings to read-only `storage`. */
-    readonly _postCompose?: (composed: ComposedShader) => ComposedShader;
+    /** @internal Optional material-owned post-compose patch. */
+    readonly _pc?: (composed: ComposedShader) => ComposedShader;
 }
 
 // ── Shader template ─────────────────────────────────────────────

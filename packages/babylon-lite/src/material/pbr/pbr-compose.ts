@@ -200,11 +200,13 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _iblSkyboxCalc: has(PBR_HAS_SKYBOX) ? _iblSkyboxCalc : "",
         };
         // Registration order defines iteration order; callers register in composer-matching order.
+        let pc: ((composed: ComposedShader) => ComposedShader) | undefined;
         for (const regExt of _getPbrExts().values()) {
             if (regExt.frag) {
                 const fr = regExt.frag(fragCtx);
                 if (fr) {
                     frags.push(fr);
+                    pc ||= fr._pc;
                 }
             }
         }
@@ -217,11 +219,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         }
 
         let composed = composeShader(template, frags);
-        for (const f of frags) {
-            if (f._postCompose) {
-                composed = f._postCompose(composed);
-            }
-        }
+        pc && (composed = pc(composed));
         cache.set(ckey, composed);
         return composed;
     };

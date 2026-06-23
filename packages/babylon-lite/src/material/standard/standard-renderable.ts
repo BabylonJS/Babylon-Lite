@@ -81,6 +81,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
+        // Keep morph first: composeStandardShader uses the first fragment's patch
+        // to switch the placeholder morph bindings to storage buffers.
+        if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
+            frags.push(morphFragment());
+        }
         for (const ext of _getStdExts().values()) {
             if (features & ext._feature) {
                 const f = ext._frag(features);
@@ -90,12 +95,6 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
         }
         let shaderKey = "";
-        // Morph targets are mesh-driven (gated on MSH_HAS_MORPH_TARGETS), like
-        // thin instances and shadows. The morph fragment defines morphedPos/
-        // morphedNorm which the morph-aware template variant consumes.
-        if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
-            frags.push(morphFragment());
-        }
         if (meshFeatures & MSH_RECEIVE_SHADOWS && shadowFragment) {
             const slots = shadowLights.map((sl) => ({ lightIndex: sl.lightIndex, shadowType: sl.shadowType }));
             shaderKey = _standardShaderVariantKey(slots);
@@ -131,7 +130,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, meshFeatures & MSH_HAS_MORPH_TARGETS ? (mesh.morphTargets ?? null) : null);
+        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
