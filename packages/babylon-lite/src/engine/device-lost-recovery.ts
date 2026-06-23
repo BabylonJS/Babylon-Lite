@@ -35,7 +35,7 @@ interface MutableSkeleton {
 }
 
 interface MutableMorphTargets {
-    texture: GPUTexture;
+    deltasBuffer: GPUBuffer;
     weightsBuffer: GPUBuffer;
 }
 

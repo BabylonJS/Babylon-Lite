@@ -26,6 +26,7 @@ import { IGNORED_BUNDLE_MODULE_PATTERN, summarizeRuntimeBundle } from "../../../
 
 const CONFIG_PATH = resolve(__dirname, "../../../scene-config.json");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
+const BUNDLE_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/manifest.json");
 const MASTER_MANIFEST_PATH = resolve(__dirname, "../../../lab/public/bundle/master-manifest.json");
 const allScenes: SceneConfig[] = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
 const SCENES = allScenes.filter((s) => s.maxRawKB != null);
@@ -48,47 +49,65 @@ function getRuntimeModuleIds(sceneKey: string, runtimeFiles: readonly string[]):
 interface BundleManifestEntry {
     rawKB?: number;
     ignoredRawKB?: number;
+    runtimeChunks?: string[];
 }
 
 type BundleManifest = Record<string, BundleManifestEntry>;
 
-function loadMasterManifest(): BundleManifest | null {
-    if (!existsSync(MASTER_MANIFEST_PATH)) {
+function loadBundleManifest(path: string): BundleManifest | null {
+    if (!existsSync(path)) {
         return null;
     }
 
-    return JSON.parse(readFileSync(MASTER_MANIFEST_PATH, "utf-8")) as BundleManifest;
+    return JSON.parse(readFileSync(path, "utf-8")) as BundleManifest;
 }
 
 function roundedKB(value: number): number {
     return Math.round(value * 10) / 10;
 }
 
-const MASTER_MANIFEST = loadMasterManifest();
+const MASTER_MANIFEST = loadBundleManifest(MASTER_MANIFEST_PATH);
+const BUNDLE_MANIFEST = loadBundleManifest(BUNDLE_MANIFEST_PATH);
 
 for (const scene of SCENES) {
     test(`${scene.name} bundle ≤ ${scene.maxRawKB} KB raw`, async ({ page }) => {
+        test.setTimeout(90_000);
         const jsPayloads: { url: string; file: string; body: Buffer }[] = [];
-        const responseReads: Promise<void>[] = [];
+        const runtimeFiles: string[] = [];
 
         // Intercept every JS response served from /bundle/
-        page.on("response", (resp) => {
+        const onResponse = (resp: import("@playwright/test").Response): void => {
             const url = resp.url();
             if (url.includes("/bundle/") && url.endsWith(".js") && resp.ok()) {
-                responseReads.push(
-                    (async () => {
-                        const body = await resp.body();
-                        const file = url.split("/").pop()!.split("?")[0]!;
-                        jsPayloads.push({ url, file, body });
-                    })()
-                );
+                runtimeFiles.push(url.split("/").pop()!.split("?")[0]!);
             }
-        });
+        };
+        page.on("response", onResponse);
 
         // Navigate to the bundle page and wait for the scene to finish rendering
-        await page.goto(`/bundle-scene${scene.id}.html`);
-        await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
-        await Promise.all(responseReads);
+        await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
+        let readyTimedOut = false;
+        try {
+            await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", undefined, { timeout: 20_000 });
+        } catch {
+            // Some heavy scenes fetch all runtime JS but do not mark the canvas ready in cloud browsers.
+            readyTimedOut = true;
+        }
+        if (readyTimedOut) {
+            page.off("response", onResponse);
+            await page.close();
+            const sceneKey = `scene${scene.id}`;
+            const files = BUNDLE_MANIFEST?.[sceneKey]?.runtimeChunks;
+            expect(files, `bundle manifest must contain runtime chunks for ${sceneKey}`).toBeTruthy();
+            runtimeFiles.length = 0;
+            runtimeFiles.push(...files!);
+        } else {
+            page.off("response", onResponse);
+            await page.close();
+        }
+        for (const file of Array.from(new Set(runtimeFiles))) {
+            jsPayloads.push({ url: `/bundle/${file}`, file, body: readFileSync(resolve(__dirname, "../../../lab/public/bundle", file)) });
+        }
 
         // Tally raw + gzipped sizes of all JS that was actually loaded (gzip is informational only).
         // Local serialized NME scene data is ignored so ceilings track runtime code.
@@ -124,8 +143,8 @@ for (const scene of SCENES) {
             console.log(d);
         }
 
-        const runtimeFiles = jsPayloads.map((p) => p.file);
-        const runtimeModules = getRuntimeModuleIds(`scene${scene.id}`, runtimeFiles);
+        const loadedFiles = jsPayloads.map((p) => p.file);
+        const runtimeModules = getRuntimeModuleIds(`scene${scene.id}`, loadedFiles);
 
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 

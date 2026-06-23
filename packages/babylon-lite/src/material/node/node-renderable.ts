@@ -7,7 +7,7 @@
  */
 
 import { F32, U32, U8 } from "../../engine/typed-arrays.js";
-import { TU, BU } from "../../engine/gpu-flags.js";
+import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -22,32 +22,29 @@ import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
-// Per-engine cached no-op morph target: a 1×1 rgba32float texture + a UBO with
-// count=0 + sensible texWidth/rowsPerBand. Meshes without their own morph
+// Per-engine cached no-op morph target: an empty deltas storage buffer + a
+// weights buffer whose header has count=0. Meshes without their own morph
 // targets reuse this so materials that contain a MorphTargetsBlock still work
-// (the WGSL loops over `count` and passes through when zero).
-const emptyMorphByEngine = new WeakMap<EngineContext, { texture: GPUTexture; weightsBuffer: GPUBuffer }>();
-function getEmptyMorph(engine: EngineContext): { texture: GPUTexture; weightsBuffer: GPUBuffer } {
-    const cached = emptyMorphByEngine.get(engine);
+// (the WGSL loops over `count` and passes through when zero). Lazily initialized
+// to avoid a module-level allocation that defeats tree-shaking (see GUIDANCE §4).
+let emptyMorphByEngine: WeakMap<EngineContext, { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer }> | null = null;
+function getEmptyMorph(engine: EngineContext): { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } {
+    const cache = (emptyMorphByEngine ??= new WeakMap());
+    const cached = cache.get(engine);
     if (cached) {
         return cached;
     }
-    const texture = engine._device.createTexture({
-        label: "node-morph-empty",
-        size: [1, 1],
-        format: "rgba32float",
-        usage: TU.TEXTURE_BINDING | TU.COPY_DST,
-    });
-    engine._device.queue.writeTexture({ texture }, new F32([0, 0, 0, 0]).buffer, { bytesPerRow: 16 }, { width: 1, height: 1 });
-    const ubo = new ArrayBuffer(32);
-    const u32 = new U32(ubo, 16, 4);
+    // Deltas buffer is never read (count=0); a small zero-filled storage buffer suffices.
+    const deltasBuffer = engine._device.createBuffer({ label: "node-morph-empty-deltas", size: 24, usage: BU.STORAGE | BU.COPY_DST });
+    // Weights buffer: 16-byte header (count=0, vertexCount=1) + one unused weight slot.
+    const header = new ArrayBuffer(20);
+    const u32 = new U32(header, 0, 2);
     u32[0] = 0; // count
-    u32[1] = 1; // texWidth
-    u32[2] = 1; // rowsPerBand
-    const weightsBuffer = engine._device.createBuffer({ label: "node-morph-empty-ubo", size: 32, usage: BU.UNIFORM | BU.COPY_DST });
-    engine._device.queue.writeBuffer(weightsBuffer, 0, new U8(ubo));
-    const entry = { texture, weightsBuffer };
-    emptyMorphByEngine.set(engine, entry);
+    u32[1] = 1; // vertexCount
+    const weightsBuffer = engine._device.createBuffer({ label: "node-morph-empty-weights", size: header.byteLength, usage: BU.STORAGE | BU.COPY_DST });
+    engine._device.queue.writeBuffer(weightsBuffer, 0, new U8(header));
+    const entry = { deltasBuffer, weightsBuffer };
+    cache.set(engine, entry);
     return entry;
 }
 
@@ -152,8 +149,8 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 entries.push({ binding: tb._sampBinding, resource: tex.sampler });
             }
             if (compile._morphBindings !== null) {
-                const mt = (_mesh as { morphTargets?: { texture: GPUTexture; weightsBuffer: GPUBuffer } | null }).morphTargets ?? getEmptyMorph(engine);
-                entries.push({ binding: compile._morphBindings._textureBinding, resource: mt.texture.createView() });
+                const mt = (_mesh as { morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null }).morphTargets ?? getEmptyMorph(engine);
+                entries.push({ binding: compile._morphBindings._deltasBinding, resource: { buffer: mt.deltasBuffer } });
                 entries.push({ binding: compile._morphBindings._uboBinding, resource: { buffer: mt.weightsBuffer } });
             }
             if (compile._envBindings) {

@@ -190,7 +190,7 @@ export function createPbrMeshBindGroup(
     materialUBO: GPUBuffer,
     material: PbrMaterialProps,
     env: EnvironmentTextures | null,
-    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { texture: GPUTexture; weightsBuffer?: GPUBuffer } | null } | null,
+    meshCtx: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null,
     refractionTexture?: Texture2D | null
 ): GPUBindGroup {
     const device = engine._device;

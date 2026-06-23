@@ -176,6 +176,22 @@ export async function createNavigationPluginAsync(options?: { locateFile?: (url:
     };
 }
 
+/**
+ * Release the native navmesh resources a plugin holds: the navmesh query, the navmesh, and the tile cache (if
+ * one was built). These are Detour objects living on the wasm heap — they are NOT reclaimed by JS garbage
+ * collection, so dropping the plugin reference alone leaks them. Call this when a navmesh is rebuilt or a
+ * plugin is discarded. Idempotent and safe on a plugin that never built a navmesh.
+ */
+export function disposeNavigationPlugin(plugin: NavigationPlugin): void {
+    const internal = plugin as { _navMesh?: any; _navMeshQuery?: any; _tileCache?: any };
+    internal._navMeshQuery?.destroy?.();
+    internal._tileCache?.destroy?.();
+    internal._navMesh?.destroy?.();
+    internal._navMeshQuery = undefined;
+    internal._tileCache = undefined;
+    internal._navMesh = undefined;
+}
+
 // ─── NavMesh ─────────────────────────────────────────────────────────
 
 /**

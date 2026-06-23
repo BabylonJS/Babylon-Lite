@@ -61,8 +61,8 @@ export interface NodeCompileResult {
     readonly _nodeUboBinding: number | null;
     /** @internal Per-texture binding slots assigned by the pipeline builder. */
     readonly _textureBindings: ReadonlyArray<{ readonly _name: string; readonly _texBinding: number; readonly _sampBinding: number }>;
-    /** @internal Slots for the morph-target texture + weights UBO, or `null` when no MorphTargetsBlock is present. */
-    readonly _morphBindings: { readonly _textureBinding: number; readonly _uboBinding: number } | null;
+    /** @internal Slots for the morph-target deltas + weights storage buffers, or `null` when no MorphTargetsBlock is present. */
+    readonly _morphBindings: { readonly _deltasBinding: number; readonly _uboBinding: number } | null;
     /** @internal Slot assignments for env IBL bindings within group 1, when state.usesEnv is true. */
     readonly _envBindings: {
         /** @internal */
@@ -268,34 +268,32 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
 @group(0) @binding(1) var<uniform> nmeLights: lightsUniforms;`
         : "";
 
-    // Morph-target bindings (vertex-only). Two slots: texture atlas + weights UBO.
-    let _morphBindings: { _textureBinding: number; _uboBinding: number } | null = null;
+    // Morph-target bindings (vertex-only). Two slots: deltas storage buffer + weights storage buffer.
+    let _morphBindings: { _deltasBinding: number; _uboBinding: number } | null = null;
     const morphWgslDecls: string[] = [];
     if (state.usesMorphTargets) {
-        const _textureBinding = nextBinding++;
+        const _deltasBinding = nextBinding++;
         const _uboBinding = nextBinding++;
-        _morphBindings = { _textureBinding, _uboBinding };
+        _morphBindings = { _deltasBinding, _uboBinding };
         morphWgslDecls.push(
-            `@group(1) @binding(${_textureBinding}) var morphTargets: texture_2d<f32>;`,
-            `struct morphUniforms { weights: vec4<f32>, count: u32, texWidth: u32, rowsPerBand: u32, _p0: u32 };`,
-            `@group(1) @binding(${_uboBinding}) var<uniform> morph: morphUniforms;`,
-            // Helpers are emitted inline (module-scope) so they can reference `morph` + `morphTargets`.
-            `fn nme_morph_coord(vi: u32) -> vec2<i32> { let col = i32(vi % morph.texWidth); let row = i32(vi / morph.texWidth); return vec2<i32>(col, row); }`,
+            `struct morphDeltasUniforms { d: array<f32> };`,
+            `@group(1) @binding(${_deltasBinding}) var<storage, read> morphDeltas: morphDeltasUniforms;`,
+            `struct morphUniforms { count: u32, vertexCount: u32, _p0: u32, _p1: u32, weights: array<f32> };`,
+            `@group(1) @binding(${_uboBinding}) var<storage, read> morph: morphUniforms;`,
+            // Helpers are emitted inline (module-scope) so they can reference `morph` + `morphDeltas`.
             `fn nme_morphPosition(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
                 `    var acc = base;\n` +
-                `    let co = nme_morph_coord(vi);\n` +
                 `    for (var i = 0u; i < morph.count; i = i + 1u) {\n` +
-                `        let posBase = i32(i * 2u) * i32(morph.rowsPerBand);\n` +
-                `        acc = acc + morph.weights[i] * textureLoad(morphTargets, vec2<i32>(co.x, posBase + co.y), 0).xyz;\n` +
+                `        let b = (i * morph.vertexCount + vi) * 6u;\n` +
+                `        acc = acc + morph.weights[i] * vec3<f32>(morphDeltas.d[b], morphDeltas.d[b + 1u], morphDeltas.d[b + 2u]);\n` +
                 `    }\n` +
                 `    return acc;\n` +
                 `}`,
             `fn nme_morphNormal(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
                 `    var acc = base;\n` +
-                `    let co = nme_morph_coord(vi);\n` +
                 `    for (var i = 0u; i < morph.count; i = i + 1u) {\n` +
-                `        let normBase = i32(i * 2u + 1u) * i32(morph.rowsPerBand);\n` +
-                `        acc = acc + morph.weights[i] * textureLoad(morphTargets, vec2<i32>(co.x, normBase + co.y), 0).xyz;\n` +
+                `        let b = (i * morph.vertexCount + vi) * 6u;\n` +
+                `        acc = acc + morph.weights[i] * vec3<f32>(morphDeltas.d[b + 3u], morphDeltas.d[b + 4u], morphDeltas.d[b + 5u]);\n` +
                 `    }\n` +
                 `    return acc;\n` +
                 `}`
@@ -479,14 +477,14 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
     }
     if (_morphBindings !== null) {
         meshBglEntries.push({
-            binding: _morphBindings._textureBinding,
+            binding: _morphBindings._deltasBinding,
             visibility: SS.VERTEX,
-            texture: { sampleType: "unfilterable-float", viewDimension: "2d" },
+            buffer: { type: "read-only-storage" },
         });
         meshBglEntries.push({
             binding: _morphBindings._uboBinding,
             visibility: SS.VERTEX,
-            buffer: { type: "uniform", minBindingSize: 32 },
+            buffer: { type: "read-only-storage" },
         });
     }
     if (_envBindings) {

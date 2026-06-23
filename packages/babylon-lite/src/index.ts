@@ -677,6 +677,7 @@ export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, Character
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {
     createNavigationPluginAsync,
+    disposeNavigationPlugin,
     createNavMesh,
     createNavMeshFromSources,
     createDebugNavMeshGeometry,
