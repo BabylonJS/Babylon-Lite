@@ -65,6 +65,12 @@ export interface SpriteAtlasPackOptions {
     maxWidthPx?: number;
     /** Min/mag filter for the packed texture. Default `"nearest"`. */
     sampling?: SpriteSampling;
+    /** Pack into an sRGB texture (`rgba8unorm-srgb`) so the GPU decodes the stored
+     *  sRGB-encoded RGB to linear on sample. Use when the frame pixels are sRGB color
+     *  (the common case for glyph/UI atlases) and the renderer composites in linear
+     *  space (i.e. an sRGB render target). Alpha is unaffected. Default `false` —
+     *  raw `rgba8unorm`, matching straight-bytes blending. */
+    srgb?: boolean;
     premultipliedAlpha?: boolean;
     /** Pre-allocate the atlas texture at this `[width, height]` regardless of initial-content
      *  size, leaving headroom for later `appendSpriteAtlasFrames` calls (which never grow the
@@ -223,6 +229,7 @@ export function createSpriteAtlasFromFrames(engine: EngineContext, sources: read
     const texture = createTexture2DFromPixels(engine, data, atlasWidth, atlasHeight, {
         minFilter: sampling,
         magFilter: sampling,
+        srgb: options.srgb ?? false,
     });
 
     const frames = new Array<SpriteFrame>(sources.length);

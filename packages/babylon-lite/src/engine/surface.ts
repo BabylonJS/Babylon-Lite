@@ -7,6 +7,15 @@ export function isDomCanvas(canvas: RenderCanvas): canvas is HTMLCanvasElement {
     return "clientWidth" in canvas;
 }
 
+/** @internal Map a configurable canvas format to its sRGB sibling (e.g. `bgra8unorm`
+ *  → `bgra8unorm-srgb`). Already-`-srgb` formats are returned unchanged. WebGPU does
+ *  not accept a `*-srgb` format directly in `GPUCanvasContext.configure()`, so the
+ *  swapchain is configured with the base format plus `viewFormats: [srgbFormat]` and
+ *  rendered through an sRGB view — see {@link _buildSurface}. */
+export function toSrgbFormat(format: GPUTextureFormat): GPUTextureFormat {
+    return format.endsWith("-srgb") ? format : (`${format}-srgb` as GPUTextureFormat);
+}
+
 /** @internal Monotonic source for {@link SurfaceContext._uniqueId}. Module-scoped so every
  *  surface created in this runtime (engine primary surfaces + auxiliary surfaces) gets a
  *  process-unique, stable identifier independent of its canvas size. */
@@ -30,7 +39,10 @@ export interface SurfaceContext {
     /** Canvas this surface presents to. */
     readonly canvas: RenderCanvas;
     /** Swapchain texture format for this surface. Use as the `format` for offscreen
-     *  RTs that will be composited onto this surface. */
+     *  RTs that will be composited onto this surface. When sRGB is enabled (see
+     *  {@link SurfaceOptions.srgb}) this is the `*-srgb` view format that pipelines and
+     *  the swapchain `RenderTarget` render through, not the format passed to
+     *  `GPUCanvasContext.configure()` (that is {@link _configureFormat}). */
     readonly format: GPUTextureFormat;
     /** MSAA sample count for the main render pass into this surface (1 or 4). */
     readonly msaaSamples: number;
@@ -60,6 +72,12 @@ export interface SurfaceContext {
 
     /** @internal */
     _context: GPUCanvasContext;
+    /** @internal Format passed to `GPUCanvasContext.configure()`. Equals {@link format}
+     *  unless sRGB is enabled, in which case this is the configurable base format
+     *  (e.g. `bgra8unorm`) while {@link format} is its `*-srgb` view. Every
+     *  `context.configure()` call (initial build, device-loss recovery, screenshot
+     *  COPY_SRC promotion) configures this format with `viewFormats: [format]`. */
+    _configureFormat: GPUTextureFormat;
     /** @internal */
     _alphaMode: GPUCanvasAlphaMode;
     /** @internal Registered rendering contexts in render order for this surface
@@ -107,8 +125,18 @@ export interface SurfaceOptions {
      *  (clear color with `alpha < 1` will let HTML content underneath show through).
      *  Defaults to `"opaque"`. */
     alphaMode?: GPUCanvasAlphaMode;
-    /** Override the swapchain format. Defaults to `navigator.gpu.getPreferredCanvasFormat()`. */
+    /** Override the swapchain format. Defaults to `navigator.gpu.getPreferredCanvasFormat()`.
+     *  Must be a format accepted by `GPUCanvasContext.configure()` (i.e. not a `*-srgb`
+     *  format — use {@link srgb} for that). */
     format?: GPUTextureFormat;
+    /** Render the swapchain through an sRGB view so the GPU applies linear→sRGB encoding
+     *  on store (and decodes sRGB→linear when sampling sRGB textures), making alpha
+     *  blending — e.g. text/sprite anti-aliasing — gamma-correct. The canvas is configured
+     *  with the base format plus `viewFormats: [<format>-srgb]`, and pipelines target the
+     *  `*-srgb` view. Color fed to renderers should be linear (e.g. via
+     *  `packedSrgbToLinearRgba`), and color textures sampled for blending should use an
+     *  sRGB format. Defaults to `false`. */
+    srgb?: boolean;
     /** Clamps the effective device pixel ratio used for the swapchain backing store.
      *  Defaults to unclamped (full devicePixelRatio). */
     maxDevicePixelRatio?: number;
@@ -148,7 +176,15 @@ export function _buildSurface(engine: EngineContext, canvas: RenderCanvas, optio
     if (!context) {
         throw new Error("WebGPU context not available");
     }
-    const format = options?.format ?? navigator.gpu.getPreferredCanvasFormat();
+    const configureFormat = options?.format ?? navigator.gpu.getPreferredCanvasFormat();
+    // sRGB swapchain: WebGPU rejects a `*-srgb` format in `configure()`, so configure the
+    // base format and render through the `*-srgb` view (set as `surface.format`, which
+    // pipelines + the swapchain RT consume). The GPU then encodes linear→sRGB on store,
+    // making blend math gamma-correct. `viewFormats` always lists the render format; in the
+    // non-sRGB case it equals the base format, which is a no-op (no reinterpretation, so
+    // framebuffer compression is unaffected) and lets every `configure()` site stay
+    // branch-free.
+    const renderFormat = options?.srgb ? toSrgbFormat(configureFormat) : configureFormat;
     const alphaMode: GPUCanvasAlphaMode = options?.alphaMode ?? "opaque";
     // Plain RENDER_ATTACHMENT swapchain by default — deliberately no COPY_SRC. Marking the
     // swapchain copyable can force some drivers to drop lossless framebuffer compression, so
@@ -156,22 +192,23 @@ export function _buildSurface(engine: EngineContext, canvas: RenderCanvas, optio
     // reconfigures the primary surface's swapchain with COPY_SRC on first use (see
     // `engine/screenshot-readback.ts`), keeping the public API unchanged while costing
     // non-capturing surfaces nothing.
-    context.configure({ device: engine._device, format, alphaMode });
+    context.configure({ device: engine._device, format: configureFormat, alphaMode, viewFormats: [renderFormat] });
     const msaaSamples: 1 | 4 = options?.msaaSamples === 1 ? 1 : 4;
     // Surface-owned swapchain target — a color-only, single-sample RT that wraps the
     // canvas texture. `_eager` so `buildRenderTarget` skips it; the surface refreshes
     // its textures each frame from `context.getCurrentTexture()`.
-    const scRT = createRenderTarget({ lbl: "swapchain", format, samples: 1, size: { width: 0, height: 0 } });
+    const scRT = createRenderTarget({ lbl: "swapchain", format: renderFormat, samples: 1, size: { width: 0, height: 0 } });
     scRT._eager = true;
     return {
         engine,
         canvas,
-        format,
+        format: renderFormat,
         msaaSamples,
         scRT,
         maxDevicePixelRatio: options?.maxDevicePixelRatio ?? Infinity,
         _uniqueId: _nextSurfaceId++,
         _context: context,
+        _configureFormat: configureFormat,
         _alphaMode: alphaMode,
         _renderingContexts: [],
     };
@@ -186,7 +223,10 @@ export function _refreshScRT(surface: SurfaceContext): void {
     const tex = surface._context.getCurrentTexture();
     const swap = surface.scRT;
     swap._colorTexture = tex;
-    swap._colorView = tex.createView();
+    // View format must match the pipelines + scRT descriptor. With sRGB enabled the canvas
+    // texture is the base format with `[srgbFormat]` view formats, so we render through the
+    // sRGB view; without sRGB this equals the texture's own format (always a legal view).
+    swap._colorView = tex.createView({ format: surface.format });
     swap._width = tex.width;
     swap._height = tex.height;
 }

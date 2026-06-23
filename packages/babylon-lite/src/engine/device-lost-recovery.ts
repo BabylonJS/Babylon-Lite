@@ -196,7 +196,13 @@ async function recoverDevice(engine: EngineContext, state: RecoveryState): Promi
         // RENDER_ATTACHMENT-only.
         for (const surface of engine.surfaces) {
             const usage = surface._swapchainCopySrc ? TU.RENDER_ATTACHMENT | TU.COPY_SRC : TU.RENDER_ATTACHMENT;
-            surface._context.configure({ device: engine._device, format: surface.format, alphaMode: surface._alphaMode, usage });
+            surface._context.configure({
+                device: engine._device,
+                format: surface._configureFormat,
+                alphaMode: surface._alphaMode,
+                usage,
+                viewFormats: [surface.format],
+            });
             _refreshScRT(surface);
         }
         clearSceneBGLCache();

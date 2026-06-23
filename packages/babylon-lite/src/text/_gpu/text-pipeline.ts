@@ -105,7 +105,13 @@ export function getOrCreateTextPipeline(
                 {
                     format,
                     blend: {
-                        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+                        // Premultiplied-alpha blend. The Slug fragment shader outputs
+                        // `vColor * coverage` — i.e. RGB already premultiplied by coverage
+                        // (and alpha = coverage) — so the color blend must use srcFactor
+                        // `one` (NOT `src-alpha`, which would multiply by coverage a second
+                        // time and render anti-aliased edges as coverage², too dark). The
+                        // alpha channel already uses `one` for the same reason.
+                        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                         alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
                     },
                 },
