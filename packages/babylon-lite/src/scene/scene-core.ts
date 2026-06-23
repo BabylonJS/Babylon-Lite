@@ -5,7 +5,7 @@ import type { Camera } from "../camera/camera.js";
 import type { LightBase } from "../light/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
-import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap } from "./mesh-scene-registry.js";
+import { registerMeshScene, unregisterMeshScene, enqueueMaterialSwap, warmMaterialSwaps } from "./mesh-scene-registry.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
 import type { ShadowGenerator } from "../shadow/shadow-generator.js";
 import type { FogConfig } from "../material/standard/standard-material.js";
@@ -389,6 +389,10 @@ export async function buildScene(scene: SceneContext): Promise<void> {
     ctx._materialSwapQueue.length = 0;
     ctx._renderableVersion++;
     ctx._built = true;
+    // Warm the material-swap processor now (boot) so the FIRST runtime mesh add / material
+    // change drains synchronously instead of being dropped for one frame while its lazy chunk
+    // loads — the cause of the one-frame "first edit blinks the mesh out" gap.
+    warmMaterialSwaps(ctx);
 }
 
 /**

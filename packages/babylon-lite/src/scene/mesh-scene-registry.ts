@@ -16,21 +16,33 @@ import type { SceneContext } from "./scene-core.js";
  *  is side-effect-free, so symbol-level tree-shaking applies regardless of file boundaries.) */
 let _meshScenes: WeakMap<Mesh, Set<SceneContext>> | null = null;
 
+/** @internal Kick the lazy load of the material-swap processor (a separate, always-shipped
+ *  chunk) so `scene._processSwaps` is set before the per-frame drain needs it. The import is
+ *  async, so the FIRST swap in a scene's life would otherwise be dropped for one frame — the
+ *  drain (`ctx._processSwaps?.(ctx)`) is a no-op until the chunk resolves, while a paired
+ *  synchronous `removeFromScene` of the old mesh has already taken effect. That one-frame gap
+ *  is the "first edit makes the mesh blink out" bug. Warmed eagerly at scene build (boot), it
+ *  has resolved long before any runtime add/material-swap, so the drain runs synchronously. */
+export function warmMaterialSwaps(scene: SceneContext): void {
+    if (scene._processSwaps) {
+        return;
+    }
+    void import("./scene-material-swap.js").then((m) => {
+        scene._processSwaps = m.processMaterialSwaps;
+    });
+}
+
 /** @internal Queue a mesh for renderable (re)build on the next frame's material-swap drain.
  *  Shared by the material setter (runtime material change) and addToScene (runtime mesh add).
  *  Dedup is per-(scene, mesh) via swap-queue membership — a single shared mesh may be queued
- *  in several scenes at once. Lazily loads the swap processor so scenes that never mutate at
- *  runtime don't pull it into their bundle. */
+ *  in several scenes at once. The processor is normally warmed at scene build; warm again here
+ *  as a fallback for the (rare) first mutation on a scene that skipped the build warm-up. */
 export function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
     if (scene._materialSwapQueue.indexOf(mesh) >= 0) {
         return;
     }
     scene._materialSwapQueue.push(mesh);
-    if (!scene._processSwaps) {
-        void import("./scene-material-swap.js").then((m) => {
-            scene._processSwaps = m.processMaterialSwaps;
-        });
-    }
+    warmMaterialSwaps(scene);
 }
 
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
