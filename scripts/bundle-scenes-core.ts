@@ -131,6 +131,45 @@ export const srcDir = resolve(ROOT, "packages/babylon-lite/src");
 // at their call sites.)
 export const libDir = resolve(ROOT, "packages/babylon-lite/build/lib");
 const LIB_FALLBACK_ENV = "LITE_BUNDLE_ALLOW_SRC_FALLBACK";
+const BUNDLE_SCENES_ENV = "BUNDLE_SCENES";
+
+function parseSceneSelectionArg(): string | null {
+    const argv = process.argv.slice(2);
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i]!;
+        if (arg === "--scene" || arg === "--scenes") {
+            return argv[i + 1] ?? null;
+        }
+        if (arg.startsWith("--scene=")) {
+            return arg.slice("--scene=".length);
+        }
+        if (arg.startsWith("--scenes=")) {
+            return arg.slice("--scenes=".length);
+        }
+    }
+    return process.env[BUNDLE_SCENES_ENV] ?? null;
+}
+
+function normalizeSceneSelection(raw: string | null): Set<string> | null {
+    if (!raw) {
+        return null;
+    }
+
+    const names = raw
+        .split(/[,\s]+/)
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => (/^\d+$/.test(name) ? `scene${name}` : name));
+
+    return names.length > 0 ? new Set(names) : null;
+}
+
+function selectRequestedScenes(allScenes: readonly string[], requested: Set<string> | null): string[] {
+    if (!requested) {
+        return [...allScenes];
+    }
+    return allScenes.filter((scene) => requested.has(scene));
+}
 
 /** Fail fast with an actionable message if the package's `build/lib` output (which the
  *  scene bundles are measured against) hasn't been built yet. */
@@ -821,11 +860,21 @@ export async function buildBundleScenes(): Promise<void> {
     // Scenes are bundled against the built `build/lib` tree by default; old baseline
     // worktrees can opt into TS-source fallback via LITE_BUNDLE_ALLOW_SRC_FALLBACK=true.
     const liteAliasDir = resolveLiteAliasDir();
+    const requestedSceneNames = normalizeSceneSelection(parseSceneSelectionArg());
+    const scenesToBuild = selectRequestedScenes(SCENES, requestedSceneNames);
+    const bjsScenesRequested = selectRequestedScenes(BJS_SCENES, requestedSceneNames);
+    const knownSceneNames = new Set<string>([...SCENES, ...BJS_SCENES]);
+    if (requestedSceneNames) {
+        const unknown = [...requestedSceneNames].filter((scene) => !knownSceneNames.has(scene));
+        if (unknown.length > 0) {
+            throw new Error(`Unknown bundle scene(s): ${unknown.join(", ")}.`);
+        }
+    }
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).
     mkdirSync(outDir, { recursive: true });
     writeMasterBundleManifest();
-    for (const scene of SCENES) {
+    for (const scene of scenesToBuild) {
         ensureBundleHtmlImportMap(scene);
     }
 
@@ -968,25 +1017,27 @@ export async function buildBundleScenes(): Promise<void> {
     }
 
     // Only build BJS scenes whose sizes aren't already cached in the manifest
-    const bjsScenesToBuild = BJS_SCENES.filter((bjsScene) => {
-        const liteScene = bjsScene.replace("bjs-", "");
-        const cached = existingManifest[liteScene];
-        if (cached?.bjsRawKB == null) {
-            return true;
-        }
-        const sourcePath = bjsSceneEntry(liteScene);
-        const bundlePath = resolve(outDir, `${bjsScene}.js`);
-        if (!existsSync(bundlePath)) {
-            return true;
-        }
-        return statSync(sourcePath).mtimeMs > statSync(bundlePath).mtimeMs;
-    });
+    const bjsScenesToBuild = requestedSceneNames
+        ? bjsScenesRequested
+        : BJS_SCENES.filter((bjsScene) => {
+              const liteScene = bjsScene.replace("bjs-", "");
+              const cached = existingManifest[liteScene];
+              if (cached?.bjsRawKB == null) {
+                  return true;
+              }
+              const sourcePath = bjsSceneEntry(liteScene);
+              const bundlePath = resolve(outDir, `${bjsScene}.js`);
+              if (!existsSync(bundlePath)) {
+                  return true;
+              }
+              return statSync(sourcePath).mtimeMs > statSync(bundlePath).mtimeMs;
+          });
 
     // Build sequentially — parallel Vite build() calls within the same process
     // cause race conditions (0-byte chunk files, stale measurements on Windows).
-    const totalScenes = SCENES.length + bjsScenesToBuild.length;
+    const totalScenes = scenesToBuild.length + bjsScenesToBuild.length;
     let built = 0;
-    for (const scene of SCENES) {
+    for (const scene of scenesToBuild) {
         built++;
         const tScene = performance.now();
         console.log(`[${built}/${totalScenes}] Building ${scene}...`);
@@ -1013,11 +1064,11 @@ export async function buildBundleScenes(): Promise<void> {
         return;
     }
     const tMeasure = performance.now();
-    const manifest = await measureLiveSizes();
+    const manifest = await measureLiveSizes(scenesToBuild, bjsScenesToBuild, requestedSceneNames == null);
     console.log(`Live measurement completed in ${elapsed(tMeasure)}`);
 
     console.log("\n=== Per-scene bundle sizes (live runtime measurement) ===");
-    for (const scene of SCENES) {
+    for (const scene of scenesToBuild) {
         const s = manifest[scene];
         if (s) {
             let line = `  ${scene}: ${s.rawKB} KB raw, ${s.gzipKB} KB gzip`;
@@ -1033,7 +1084,7 @@ export async function buildBundleScenes(): Promise<void> {
  * bundle-sceneN.html, and measure only the /bundle/*.js bytes that are
  * actually fetched at runtime.
  */
-async function measureLiveSizes(): Promise<BundleManifest> {
+async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
     const manifestPath = resolve(outDir, MANIFEST_FILE);
@@ -1080,7 +1131,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
         // Measure Lite scenes (write after each)
-        for (const scene of SCENES) {
+        for (const scene of liteScenes) {
             const tPage = performance.now();
             const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
             manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
@@ -1090,7 +1141,7 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         }
 
         // Measure BJS scenes — skip if sizes already cached in manifest
-        for (const bjsScene of BJS_SCENES) {
+        for (const bjsScene of bjsScenes) {
             const liteScene = bjsScene.replace("bjs-", "");
             if (manifest[liteScene]?.bjsRawKB != null) {
                 console.log(`  ${bjsScene}: ${manifest[liteScene]!.bjsRawKB} KB raw, ${manifest[liteScene]!.bjsGzipKB} KB gzip (cached)`);
@@ -1118,8 +1169,8 @@ async function measureLiveSizes(): Promise<BundleManifest> {
         server.close();
     }
 
-    if (!process.env.BUNDLE_SCENES) {
-        const currentScenes = new Set(SCENES);
+    if (pruneManifest) {
+        const currentScenes = new Set(liteScenes);
         for (const scene of Object.keys(manifest)) {
             if (!currentScenes.has(scene)) {
                 delete manifest[scene];
