@@ -20,7 +20,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
         sk.weights1Buffer?.destroy();
     }
     if (mesh.morphTargets) {
-        mesh.morphTargets.texture.destroy();
+        mesh.morphTargets.deltasBuffer.destroy();
         mesh.morphTargets.weightsBuffer.destroy();
     }
 }

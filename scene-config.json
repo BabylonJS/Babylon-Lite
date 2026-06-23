@@ -27,7 +27,7 @@
         "slug": "scene3-fog",
         "name": "Scene 3 — Fog + Skybox",
         "maxMad": 0.01,
-        "maxRawKB": 53.5,
+        "maxRawKB": 54,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
         "tags": ["fog", "procedural", "std"],
         "skipPerf": true
@@ -372,7 +372,7 @@
         "slug": "scene36-basis-texture",
         "name": "Scene 36 — Basis Universal Texture",
         "maxMad": 0.5,
-        "maxRawKB": 51.1,
+        "maxRawKB": 52,
         "description": "Box with a .basis texture as diffuse+emissive. Transcoder fetched from the BJS CDN; auto-selects BC7/ASTC/ETC2/BC3/RGBA32 per device. Matches PG #4RN0VF.",
         "tags": ["std", "procedural", "basis"],
         "skipPerf": true,
@@ -2115,6 +2115,17 @@
         "maxRawKB": 89,
         "description": "Xbot 'walk' clip with an AnimationGroupMask (Exclude mode) listing the lower-body bones (legs + feet/toes). Everything animates except those, so the hips, spine, and arms walk while the legs hold their bind pose. Validates AnimationGroupMask include/exclude semantics against Babylon.js. Frozen at a deterministic frame.",
         "tags": ["gltf", "skeleton", "animation", "animation-mask"],
+        "skipPerf": true
+    },
+    {
+        "id": 252,
+        "slug": "scene252-standard-material-morph",
+        "name": "Scene 252 — StandardMaterial Morph Target",
+        "maxMad": 0.05,
+        "maxRegionMad": 0.05,
+        "maxRawKB": 54,
+        "description": "StandardMaterial sphere deformed into a teardrop by a single position morph target, directional light. Validates morph-target support on StandardMaterial against Babylon.js.",
+        "tags": ["std", "procedural", "morph"],
         "skipPerf": true
     }
 ]

@@ -146,11 +146,12 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
 
     return clips.map((clip, clipIndex) => {
         const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
+        const started = clipIndex === 0;
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,
             frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
-            isPlaying: true,
+            isPlaying: started,
             currentTime: 0,
             targetedAnimations: clip.channels.map((ch) => {
                 const nodeIndex = ch.nodeIdx >= 0 ? ch.nodeIdx : undefined;
@@ -165,11 +166,9 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
             loopAnimation: true,
             weight: 1,
             _ctrl: ctrl,
-            _stopped: false,
+            _stopped: !started,
         };
-        if (skeletons[0]) {
-            group._gltfMixer = [clip, nodes, skeletons];
-        }
+        group._gltfMixer = [clip, nodes, skeletons];
         return group;
     });
 }

@@ -24,10 +24,12 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     const hasTI = meshes.some((m) => !!m.thinInstances);
     const hasCulling = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled);
     const hasShadow = meshes.some((m) => m.receiveShadows) && scene.lights.some((l: { shadowGenerator?: unknown }) => !!l.shadowGenerator);
+    const hasMorph = meshes.some((m) => !!m.morphTargets);
 
     let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
     let tiFragment: any;
     let shadowFragment: any;
+    let morphFragment: any;
     let cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
 
     const imports: Promise<any>[] = [];
@@ -57,6 +59,13 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
             })
         );
     }
+    if (hasMorph) {
+        imports.push(
+            import("../../shader/fragments/morph-fragment-core.js").then((m) => {
+                morphFragment = m.createMorphFragment;
+            })
+        );
+    }
     for (const [prop, load, key] of _STD_MAT_EXTS) {
         if (meshes.some((m) => !!(m.material as any)[prop])) {
             imports.push(load().then((mod) => _registerStdExt(mod[key])));
@@ -67,7 +76,7 @@ export const standardGroupBuilder: MeshGroupBuilder = async (scene, meshes) => {
     }
 
     const renderableMod = await import("./standard-renderable.js");
-    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, cull });
+    const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, shadowFragment, morphFragment, cull });
     // Wire the per-mesh rebuild closure used by material swap + per-pass override.
     standardGroupBuilder._rebuildSingle = result.rebuildSingle;
     return result;
