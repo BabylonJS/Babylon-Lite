@@ -463,6 +463,19 @@ stages:
                       npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (tests)"
 
+                # Verifies docs/lite/02-feature-comparison.md is in sync with its
+                # source of truth (lab/lite/docs/feature-comparison.html). The check
+                # exits non-zero either when the doc is OUT OF SYNC or when generation
+                # itself fails (e.g. malformed HTML). On failure, emit a task.logissue
+                # so the error surfaces in the ADO build's Errors summary (the GitHub
+                # check links here via "Details"); the step log above has the specifics.
+                - script: |
+                      if ! pnpm gen:feature-doc:check; then
+                          echo "##vso[task.logissue type=error;sourcepath=docs/lite/02-feature-comparison.md]Feature-comparison doc check failed (see the step log above for details). If it reports OUT OF SYNC, run 'pnpm gen:feature-doc' and commit the result; otherwise fix the reported generation error."
+                          exit 1
+                      fi
+                  displayName: "Feature-comparison doc in sync"
+
           # ──────────────────────────────────────────────────────────────
           # Job 7: Compat Layer (@babylonjs/lite-compat)
           # ──────────────────────────────────────────────────────────────

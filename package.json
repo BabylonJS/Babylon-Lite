@@ -36,7 +36,6 @@
         "report:api-changes": "tsx scripts/report-api-changes.ts",
         "gen:feature-doc": "tsx scripts/gen-feature-comparison.ts",
         "gen:feature-doc:check": "tsx scripts/gen-feature-comparison.ts --check",
-        "sync:feature-doc": "tsx scripts/open-feature-doc-sync-pr.ts",
         "build:perf-baseline": "tsx scripts/build-perf-baseline.ts",
         "lint": "eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit && tsc -p lab/tsconfig.typecheck.json --noEmit && tsc -p tests/lite/tsconfig.json --noEmit",
         "lint:fix": "eslint . --fix",
