@@ -36,7 +36,7 @@ function applyMorphPositions(mesh: Mesh, out: Float32Array): void {
     }
 
     const vertexCount = out.length / 3;
-    const targetCount = Math.min(morph.count, morph.targets.length, 4);
+    const targetCount = Math.min(morph.count, morph.targets.length);
     for (let t = 0; t < targetCount; t++) {
         const weight = morph.weights[t] ?? 0;
         if (weight === 0) {
@@ -59,7 +59,7 @@ function applyMorphNormals(mesh: Mesh, out: Float32Array): void {
     }
 
     const vertexCount = out.length / 3;
-    const targetCount = Math.min(morph.count, morph.targets.length, 4);
+    const targetCount = Math.min(morph.count, morph.targets.length);
     for (let t = 0; t < targetCount; t++) {
         const weight = morph.weights[t] ?? 0;
         const normals = morph.targets[t]!.normals;

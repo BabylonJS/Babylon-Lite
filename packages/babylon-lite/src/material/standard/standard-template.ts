@@ -67,6 +67,8 @@ export interface StandardTemplateConfig {
     readonly _noColorOutput?: boolean;
     /** @internal Generate a fragment stage that runs discard/alpha-test logic and writes ESM shadow color. */
     readonly _esmShadowOutput?: boolean;
+    /** @internal Has morph targets — switches the vertex shader to morphedPos/morphedNorm (defined by the morph fragment's VR slot). */
+    readonly _hasMorph?: boolean;
 }
 
 /**
@@ -74,7 +76,7 @@ export interface StandardTemplateConfig {
  * The template contains slot markers that the composer fills.
  */
 export function createStandardTemplate(config: StandardTemplateConfig, esmShadowDepthCode = ""): ShaderTemplate {
-    const { _diffuse, _needsUV, _needsUV2, _diffuseUsesUV2, _disableLighting, _noColorOutput, _esmShadowOutput } = config;
+    const { _diffuse, _needsUV, _needsUV2, _diffuseUsesUV2, _disableLighting, _noColorOutput, _esmShadowOutput, _hasMorph } = config;
 
     // ── Base vertex attributes ──────────────────────────────────
     const _baseVertexAttributes: VertexAttribute[] = [
@@ -140,6 +142,12 @@ export function createStandardTemplate(config: StandardTemplateConfig, esmShadow
     // Vertex UBO struct definitions (must be before binding declarations)
     const vertexUboStructs = _needsUV ? `struct upUniforms { u: vec4<f32>, }` : "";
 
+    // When morph targets are active, the morph fragment's VR slot defines
+    // morphedPos/morphedNorm. The base template uses those in place of the
+    // raw vertex attributes; otherwise it falls back to position/normal.
+    const posVar = _hasMorph ? "morphedPos" : "position";
+    const normVar = _hasMorph ? "morphedNorm" : "normal";
+
     const _vertexTemplate = `/*SU*/
 /*MU*/
 @group(1) @binding(0) var<uniform> mesh: MeshUniforms;
@@ -154,10 +162,10 @@ var out: VertexOutput;
 /*VR*/
 var finalWorld = mesh.world;
 /*VW*/
-let worldPos4 = finalWorld * vec4<f32>(position, 1.0);
+let worldPos4 = finalWorld * vec4<f32>(${posVar}, 1.0);
 out.vp = worldPos4.xyz;
 let normalWorld = mat3x3<f32>(finalWorld[0].xyz, finalWorld[1].xyz, finalWorld[2].xyz);
-out.vn = normalize(normalWorld * normal);
+out.vn = normalize(normalWorld * ${normVar});
 out.clipPos = scene.viewProjection * worldPos4;
 out.vf = (scene.view * worldPos4).xyz;
 ${uvPassthrough}
