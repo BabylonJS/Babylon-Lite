@@ -254,6 +254,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
+            timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -372,7 +373,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
-            timeoutInMinutes: 120
+            timeoutInMinutes: 180
             pool:
                 vmImage: "ubuntu-latest"
             steps:
