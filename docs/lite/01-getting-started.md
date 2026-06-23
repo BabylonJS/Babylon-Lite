@@ -2,7 +2,7 @@
 
 This guide gets you from `npm install` to a rendered 3D scene, and — just as importantly — gives you the **mental model** for how Babylon Lite is designed so the rest of the API feels predictable.
 
-> New here? Read **[Welcome](00-welcome.md)** first for the big picture and the "which engine should I use?" decision tree. This page assumes you've decided to build with Lite.
+> New here? Read **[Welcome](/lite)** first for the big picture and the "which engine should I use?" decision tree. This page assumes you've decided to build with Lite.
 
 ---
 
@@ -168,7 +168,7 @@ await registerScene(scene);
 await startEngine(engine);
 ```
 
-This is the BoomBox scene from the **[Welcome](00-welcome.md)** page — the same model, lights, and IBL, in a handful of lines.
+This is the BoomBox scene from the **[Welcome](/lite)** page — the same model, lights, and IBL, in a handful of lines.
 
 ---
 
@@ -177,10 +177,10 @@ This is the BoomBox scene from the **[Welcome](00-welcome.md)** page — the sam
 A few orientation notes for patterns that differ from Babylon.js. These are pointers, not full references — follow the links for depth.
 
 - **Adding and removing things.** `addToScene(scene, entity)` registers; `removeFromScene(scene, entity)` is the counterpart to BJS's `dispose()`. The scene owns lifetimes — remove an entity and it stops rendering.
-- **Reusing geometry across many objects.** Lite does **not** implement the classic `InstancedMesh` API. Instead, draw many copies of one mesh in a single GPU call with **thin instances** — pass a flat `Float32Array` of per-instance matrices via `setThinInstances(mesh, data, count)` (and optional per-instance colors). This is the idiomatic, high-performance way to populate a scene with repeated props. See **[Thin Instances](architecture/12-thin-instances.md)**.
-- **Parenting and hierarchies.** Build transform hierarchies with `createTransformNode()` and parent nodes to it; world matrices propagate lazily. `cloneTransformNode()` duplicates a node subtree. See **[Scene Hierarchy & Parenting](architecture/11-scene-hierarchy-parenting.md)**.
+- **Reusing geometry across many objects.** Lite does **not** implement the classic `InstancedMesh` API. Instead, draw many copies of one mesh in a single GPU call with **thin instances** — pass a flat `Float32Array` of per-instance matrices via `setThinInstances(mesh, data, count)` (and optional per-instance colors). This is the idiomatic, high-performance way to populate a scene with repeated props. See **[Thin Instances](/lite/architecture/12-thin-instances)**.
+- **Parenting and hierarchies.** Build transform hierarchies with `createTransformNode()` and parent nodes to it; world matrices propagate lazily. `cloneTransformNode()` duplicates a node subtree. See **[Scene Hierarchy & Parenting](/lite/architecture/11-scene-hierarchy-parenting)**.
 - **Hiding things.** Toggle a node and its descendants with `setSubtreeVisible(node, false)` rather than disposing — useful for object pooling and show/hide without paying re-upload costs.
-- **Animation.** glTF animation clips arrive on the asset container as **animation groups** that `addToScene()` registers automatically; play, pause, seek, and loop them. See **[Animation](architecture/07-animation.md)**.
+- **Animation.** glTF animation clips arrive on the asset container as **animation groups** that `addToScene()` registers automatically; play, pause, seek, and loop them. See **[Animation](/lite/architecture/07-animation)**.
 
 ---
 
@@ -188,9 +188,9 @@ A few orientation notes for patterns that differ from Babylon.js. These are poin
 
 You now have the mental model and a running scene. From here:
 
-- 🔁 **[Porting Guide](03-porting-guide.md)** — a side-by-side API map for translating a Babylon.js scene to Lite.
-- 📊 **[Feature Comparison](02-feature-comparison.md)** — exactly what Lite covers today, what's partial, and what's missing.
-- 🧱 **[Architecture docs](architecture/)** — deep dives into every subsystem, ordered from most to least commonly needed.
+- 🔁 **[Porting Guide](/lite/03-porting-guide)** — a side-by-side API map for translating a Babylon.js scene to Lite.
+- 📊 **[Feature Comparison](/lite/02-feature-comparison)** — exactly what Lite covers today, what's partial, and what's missing.
+- 🧱 **[Architecture docs](/lite/architecture/00-overview)** — deep dives into every subsystem, ordered from most to least commonly needed.
 - 🌐 **[github.com/BabylonJS/Babylon-Lite](https://github.com/BabylonJS/Babylon-Lite)** — browse the source and the scene gallery.
 
 Found something missing or confusing? **[Open an issue](https://github.com/BabylonJS/Babylon-Lite/issues)** — early feedback directly shapes the roadmap. 💙
