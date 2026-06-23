@@ -410,13 +410,64 @@ function isNonBreakingConstLiteralWidening(removedLine: string, addedLine: strin
     return widenLiteralType(removed[2]!) === added[2]!.trim();
 }
 
+/**
+ * The TypedArray / buffer-view types that TypeScript 5.7 made generic over their
+ * backing buffer (`Float32Array` → `Float32Array<TArrayBuffer extends ArrayBufferLike>`).
+ * Older TypeScript libs render these without a type argument, so when the API-report
+ * baseline is built from a merge base that predates the TS bump, every typed-array
+ * member shows up as a removed/changed line (`Float32Array` ↔ `Float32Array<ArrayBuffer>`).
+ * That is a pure rendering change, not a public API break.
+ */
+const GENERIC_TYPED_ARRAY_NAMES = [
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Uint16Array",
+    "Int32Array",
+    "Uint32Array",
+    "Float16Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+];
+
+const GENERIC_TYPED_ARRAY_PATTERN = new RegExp(`\\b(${GENERIC_TYPED_ARRAY_NAMES.join("|")})<[^<>]*>`, "g");
+
+/**
+ * Drop the explicit buffer type argument from TypedArray types so two reports compare
+ * equal regardless of which TypeScript lib emitted them (e.g. `Float32Array<ArrayBuffer>`
+ * → `Float32Array`).
+ */
+function normalizeTypedArrayGenerics(line: string): string {
+    return line.replace(GENERIC_TYPED_ARRAY_PATTERN, "$1");
+}
+
+/**
+ * Treat a member whose only change is a TypedArray gaining or losing its TS 5.7 buffer
+ * type argument (e.g. `Float32Array` ↔ `Float32Array<ArrayBuffer>`) as non-breaking.
+ * The runtime type is unchanged; only the lib's textual rendering differs.
+ */
+function isNonBreakingTypedArrayGenericWidening(removedLine: string, addedLine: string): boolean {
+    if (removedLine === addedLine) {
+        return false;
+    }
+    return normalizeTypedArrayGenerics(removedLine) === normalizeTypedArrayGenerics(addedLine);
+}
+
 export function breakingApiLines(diff: string): string[] {
     const removedLines = collectChangedApiLines(diff, "-");
     const addedLines = collectChangedApiLines(diff, "+");
 
     return removedLines.filter(
         (removedLine) =>
-            !addedLines.some((addedLine) => isNonBreakingOptionalParameterExpansion(removedLine, addedLine) || isNonBreakingConstLiteralWidening(removedLine, addedLine))
+            !addedLines.some(
+                (addedLine) =>
+                    isNonBreakingOptionalParameterExpansion(removedLine, addedLine) ||
+                    isNonBreakingConstLiteralWidening(removedLine, addedLine) ||
+                    isNonBreakingTypedArrayGenericWidening(removedLine, addedLine)
+            )
     );
 }
 
