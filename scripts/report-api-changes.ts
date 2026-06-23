@@ -54,15 +54,27 @@ function packageDir(projectRoot: string): string {
     return resolve(projectRoot, "packages/babylon-lite");
 }
 
+function findBuiltEntryPoint(packageDir: string): string {
+    // Try well-known output locations in preference order so this works for
+    // both the current branch (build/index.d.ts after relocateDts) and older
+    // checkouts where the output was in dist/ (e.g. the master baseline).
+    for (const candidate of ["build/index.d.ts", "dist/index.d.ts"]) {
+        const full = resolve(packageDir, candidate);
+        if (existsSync(full)) {
+            return full;
+        }
+    }
+    throw new Error(
+        `Cannot generate API report: no built index.d.ts found under ${packageDir} ` +
+            `(checked build/index.d.ts and dist/index.d.ts).`
+    );
+}
+
 function generateApiReport(projectRoot: string, outputDir: string): string {
     const currentPackageDir = packageDir(projectRoot);
-    const entryPoint = resolve(currentPackageDir, "build/index.d.ts");
+    const entryPoint = findBuiltEntryPoint(currentPackageDir);
     const reportFolder = resolve(outputDir, "approved");
     const reportTempFolder = resolve(outputDir, "temp");
-
-    if (!existsSync(entryPoint)) {
-        throw new Error(`Cannot generate API report because ${entryPoint} does not exist.`);
-    }
 
     mkdirSync(reportFolder, { recursive: true });
     mkdirSync(reportTempFolder, { recursive: true });
