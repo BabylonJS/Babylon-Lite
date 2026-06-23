@@ -59,6 +59,32 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual(['export const VERSION = "0.1.0";']);
     });
 
+    it("treats a TypedArray gaining its TS 5.7 buffer type argument as additive", () => {
+        expect(breakingApiLines(apiDiff("readonly weights: Float32Array;", "readonly weights: Float32Array<ArrayBuffer>;"))).toEqual([]);
+        expect(breakingApiLines(apiDiff("readonly weights: Float32Array<ArrayBuffer>;", "readonly weights: Float32Array;"))).toEqual([]);
+    });
+
+    it("treats TypedArray buffer-argument changes inside composite types as additive", () => {
+        const diff = apiDiff(
+            "readonly targets: readonly { positions: Float32Array; normals: Float32Array | null }[];",
+            "readonly targets: readonly { positions: Float32Array<ArrayBuffer>; normals: Float32Array<ArrayBuffer> | null }[];"
+        );
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("still flags a genuine TypedArray element-type change as breaking", () => {
+        const diff = apiDiff("readonly weights: Float32Array<ArrayBuffer>;", "readonly weights: Float64Array<ArrayBuffer>;");
+
+        expect(breakingApiLines(diff)).toEqual(["readonly weights: Float32Array<ArrayBuffer>;"]);
+    });
+
+    it("still flags a non-default backing-buffer change as breaking", () => {
+        const diff = apiDiff("readonly weights: Float32Array<ArrayBuffer>;", "readonly weights: Float32Array<SharedArrayBuffer>;");
+
+        expect(breakingApiLines(diff)).toEqual(["readonly weights: Float32Array<ArrayBuffer>;"]);
+    });
+
     it("does not flag purely added API lines", () => {
         const diff = [
             "diff --git a/target.api.md b/current.api.md",
