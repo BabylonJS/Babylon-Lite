@@ -38,6 +38,22 @@ const NODE_TRS_PATH: Record<string, TargetPath> = {
 // the PbrMaterialProps carrying `_uboVersion` + the UV-transform texture slots.
 let _matMapKey: readonly Mesh[] | null = null;
 let _matMap: (PointerMaterial | undefined)[] = [];
+
+// Punctual-light property pointers — writers live in animation-pointer-lights.ts.
+const _LIGHT_POINTER_RE = /^\/extensions\/KHR_lights_punctual\/lights\/\d+\/(?:color|intensity|range|spot\/outerConeAngle)$/;
+// Material factor / extension pointers — writers + load-time seeding live in
+// animation-pointer-ext.ts.
+const _MAT_EXT_POINTER_RE =
+    /^\/materials\/\d+\/(?:pbrMetallicRoughness\/metallicFactor|normalTexture\/scale|occlusionTexture\/strength|extensions\/KHR_materials_(?:transmission|ior|volume|iridescence)\/)/;
+// Animated baseColorFactor white-fallback pointer — handling lives in
+// animation-pointer-basecolor.ts.
+const _BASE_COLOR_POINTER_RE = /^\/materials\/\d+\/pbrMetallicRoughness\/baseColorFactor$/;
+
+// Populated in preParse from the lazily-imported sub-modules, so materialMap + applyMaterial
+// can delegate without re-importing. Each sub-module is fetched only when its pointer is
+// present, so a node-only scene (scene34) loads none of them.
+let _matExtMod: typeof import("./animation-pointer-ext.js") | null = null;
+let _baseColorMod: typeof import("./animation-pointer-basecolor.js") | null = null;
 function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | undefined)[] {
     if (meshes === _matMapKey) {
         return _matMap;
@@ -110,6 +126,9 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
             }
         }
     }
+    // Material factor / extension seeding (transmission, IOR, volume, occlusion strength)
+    // lives in the lazy module loaded by preParse only when such a pointer is present.
+    _matExtMod?.seedExtMaterials(json, map);
     _matMap = map;
     return map;
 }
@@ -128,7 +147,7 @@ _installPointerHandlers(
             return { samplerIdx: c.sampler, nodeIdx: +trs[1]!, path: NODE_TRS_PATH[trs[2]!]! };
         }
         // Only build the material map when a non-node pointer is actually present.
-        const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes) });
+        const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
         if (!resolved) {
             return null;
         }
@@ -172,5 +191,51 @@ _installPointerHandlers(
     }
 );
 
-const feature: GltfFeature = { id: "KHR_animation_pointer" };
+const feature: GltfFeature = {
+    id: "KHR_animation_pointer",
+    // Raw glTF material defs whose pbrMetallicRoughness/baseColorFactor is animated.
+    // Collected here (where `json` is available) and consumed in applyMaterial (which
+    // only receives the GltfMaterialData). Both hooks live in this lazy feature module,
+    // so non-pointer scenes pay zero bytes for the white-fallback handling.
+    async preParse(json: any) {
+        let hasLightPointer = false;
+        let hasMatExtPointer = false;
+        let hasBaseColorPointer = false;
+        for (const anim of json.animations ?? []) {
+            for (const ch of anim.channels ?? []) {
+                const ptr = ch.target?.extensions?.KHR_animation_pointer?.pointer as string | undefined;
+                if (!ptr) {
+                    continue;
+                }
+                if (_BASE_COLOR_POINTER_RE.test(ptr)) {
+                    hasBaseColorPointer = true;
+                }
+                if (_LIGHT_POINTER_RE.test(ptr)) {
+                    hasLightPointer = true;
+                }
+                if (_MAT_EXT_POINTER_RE.test(ptr)) {
+                    hasMatExtPointer = true;
+                }
+            }
+        }
+        // Each pointer-writer set lives in its own module fetched only when its pointer is
+        // present, so a scene that animates just node visibility (scene34) or only lights
+        // (scene39) never loads the others — minimal bundle movement for the unused features.
+        if (hasBaseColorPointer) {
+            _baseColorMod = await import("./animation-pointer-basecolor.js");
+            _baseColorMod.collectBaseColorDefs(json);
+        }
+        if (hasLightPointer) {
+            await import("./animation-pointer-lights.js");
+        }
+        if (hasMatExtPointer) {
+            _matExtMod = await import("./animation-pointer-ext.js");
+        }
+    },
+    // Animated baseColorFactor on untextured materials needs a white 1×1 fallback so the
+    // factor isn't double-applied; the logic lives in the lazy base-color module loaded above.
+    async applyMaterial(mat) {
+        return _baseColorMod?.whiteFallback(mat) ?? null;
+    },
+};
 export default feature;

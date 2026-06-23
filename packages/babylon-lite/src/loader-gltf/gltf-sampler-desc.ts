@@ -16,6 +16,12 @@ function gltfTexSamplerDesc(json: any, texInfo: any): GPUSamplerDescriptor {
     const minF: number | undefined = s?.minFilter;
     const minNearest = minF === 9728 || minF === 9984 || minF === 9986;
     const mipNearest = minF === 9984 || minF === 9985;
+    // glTF non-mipmap min filters (9728 NEAREST, 9729 LINEAR) mean "sample mip 0 only".
+    // The shared uploaded GPU texture always carries a full mip chain, so clamp the LOD
+    // to 0 for these filters (matching BJS `noMipmap`); otherwise a minified texture
+    // (e.g. small SDF text in a top-down view) would sample blurred mips and render
+    // softer/darker than BJS. Mipmapped filters (9984–9987) leave LOD unclamped.
+    const noMip = minF === 9728 || minF === 9729;
     const magLinear = s?.magFilter !== 9728;
     return {
         magFilter: magLinear ? "linear" : "nearest",
@@ -23,9 +29,11 @@ function gltfTexSamplerDesc(json: any, texInfo: any): GPUSamplerDescriptor {
         mipmapFilter: mipNearest ? "nearest" : "linear",
         addressModeU: wrap(s?.wrapS),
         addressModeV: wrap(s?.wrapT),
+        ...(noMip ? { lodMaxClamp: 0 } : undefined),
         // WebGPU forbids anisotropy unless mag/min/mip filters are ALL linear; gate on
         // every filter (incl. mipNearest, e.g. glTF LINEAR_MIPMAP_NEAREST) or createSampler throws.
-        maxAnisotropy: magLinear && !minNearest && !mipNearest ? 4 : 1,
+        // Also disable it for the clamped-mip path (single LOD → anisotropy is meaningless).
+        maxAnisotropy: magLinear && !minNearest && !mipNearest && !noMip ? 4 : 1,
     };
 }
 
@@ -35,7 +43,17 @@ function gltfTexSamplerDesc(json: any, texInfo: any): GPUSamplerDescriptor {
  *  `texInfo == null` (factor textures) falls back to `defaultSampler`.
  *  @internal */
 export function makeSamplerFor(engine: EngineContext, json: any, defaultSampler: GPUSampler): (texInfo: any) => GPUSampler {
-    return (texInfo: any): GPUSampler => (texInfo == null ? defaultSampler : getOrCreateSampler(engine, gltfTexSamplerDesc(json, texInfo)));
+    return (texInfo: any): GPUSampler => {
+        if (texInfo == null) {
+            return defaultSampler;
+        }
+        const desc = gltfTexSamplerDesc(json, texInfo);
+        // A non-mipmap sampler (lodMaxClamp 0) is created directly: the shared cache key omits
+        // the LOD clamp, so caching it there could alias a full-mip sampler with identical
+        // filter/wrap. These are rare (SDF/UI textures), so per-call creation is cheaper than
+        // growing the universal sampler key — which would move every non-glTF scene's bundle.
+        return desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+    };
 }
 
 /** Sampler-aware variant of buildDefaultPbrTextures. Mirrors the core fast path but wraps

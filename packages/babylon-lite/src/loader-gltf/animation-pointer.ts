@@ -37,6 +37,27 @@ export interface PointerMaterial {
     emissiveColor?: [number, number, number];
     /** Runtime base-color factor (linear RGBA). */
     baseColorFactor?: [number, number, number, number];
+    roughnessFactor?: number;
+    metallicF0Factor?: number;
+    specularWeight?: number;
+    /** @internal Runtime material needs the reflectance extension shader path. */
+    _hasReflExt?: boolean;
+    /** Runtime glTF normalTexture.scale (drives the lazy normal-scale shader mod). */
+    normalTextureScale?: number;
+    /** Runtime glTF occlusionTexture.strength (applied by the lazy reflectance ext). */
+    occlusionStrength?: number;
+    transmissive?: boolean;
+    subsurface?: {
+        refraction?: { intensity?: number; indexOfRefraction?: number; useThicknessAsDepth?: boolean };
+        thickness?: { min?: number; max?: number; useGlTFChannel?: boolean };
+        tint?: { color?: [number, number, number]; atDistance?: number };
+    };
+    iridescence?: {
+        isEnabled?: boolean;
+        intensity?: number;
+        indexOfRefraction?: number;
+        maximumThickness?: number;
+    };
     /** @internal Animated glTF emissiveFactor, kept separate so an emissiveStrength
      *  pointer can recombine without losing the factor (and vice-versa). */
     _animEmissiveFactor?: [number, number, number];
@@ -62,9 +83,11 @@ export interface PointerContext {
     nodes: readonly (SceneNode | undefined)[];
     /** Runtime materials indexed by glTF material index (built by the pointer feature). */
     materials?: readonly (PointerMaterial | undefined)[];
+    /** @internal glTF JSON object key used to resolve KHR_lights_punctual definitions. */
+    _json?: object;
 }
 
-type PointerFactory = (match: RegExpExecArray, ctx: PointerContext) => ResolvedPointer | null;
+export type PointerFactory = (match: RegExpExecArray, ctx: PointerContext) => ResolvedPointer | null;
 
 // Maps a KHR_texture_transform pointer's texture-slot segment to the material field.
 // NOTE: metallicRoughnessTexture is intentionally absent. Babylon.js has a long-standing
@@ -302,6 +325,13 @@ const _registry: [RegExp, PointerFactory][] = [
         },
     ],
 ];
+
+/** Append extended (lazily-loaded) pointer handlers to the resolver registry.
+ *  Called once by animation-pointer-ext.ts on import. ES-module caching makes the
+ *  import idempotent, so the handlers are appended exactly once per process. */
+export function _appendPointerHandlers(handlers: [RegExp, PointerFactory][]): void {
+    _registry.push(...handlers);
+}
 
 const _warned = new Set<string>();
 
