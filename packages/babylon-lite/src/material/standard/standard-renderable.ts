@@ -20,7 +20,7 @@ import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
@@ -42,6 +42,8 @@ export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
     shadowFragment?: (shadowLights: import("./fragments/std-shadow-fragment.js").ShadowLightSlot[]) => ShaderFragment;
+    /** Present only when at least one mesh in the build has morph targets. */
+    morphFragment?: () => ShaderFragment;
     /** Present only when the scene has at least one culling-enabled thin-instance mesh. */
     cull?: typeof import("../../mesh/thin-instance-cull-binding.js");
 }
@@ -52,7 +54,7 @@ export interface StdFragmentFactories {
 export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[], factories: StdFragmentFactories): MeshGroupBuildResult {
     const engine = scene.surface.engine;
     const device = engine._device;
-    const { tiSync, tiFragment, shadowFragment, cull } = factories;
+    const { tiSync, tiFragment, shadowFragment, cull, morphFragment } = factories;
 
     // Collect per-light shadow info.
     const shadowLights: { lightIndex: number; shadowType: "esm" | "pcf" | "csm"; gen: ShadowGenerator }[] = [];
@@ -79,6 +81,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
+        // Keep morph first: composeStandardShader uses the first fragment's patch
+        // to switch the placeholder morph bindings to storage buffers.
+        if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
+            frags.push(morphFragment());
+        }
         for (const ext of _getStdExts().values()) {
             if (features & ext._feature) {
                 const f = ext._frag(features);
@@ -123,7 +130,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat);
+        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;

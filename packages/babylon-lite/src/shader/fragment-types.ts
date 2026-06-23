@@ -159,6 +159,9 @@ export interface ShaderFragment {
 
     /** @internal Code injected at named fragment slots */
     readonly _fragmentSlots?: Partial<Record<FragmentSlot, string>>;
+
+    /** @internal Optional material-owned post-compose patch. */
+    readonly _pc?: (composed: ComposedShader) => ComposedShader;
 }
 
 // ── Shader template ─────────────────────────────────────────────
