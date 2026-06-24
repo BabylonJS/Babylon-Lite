@@ -6,6 +6,7 @@
     "scripts": {
         "dev": "pnpm --filter @babylon-lite/parity-harness dev",
         "dev:playground": "pnpm --filter @babylon-lite/playground dev",
+        "dev:playground:watch": "pnpm --filter @babylon-lite/playground dev:watch",
         "build:playground": "pnpm --filter @babylon-lite/playground build",
         "dev:lab": "pnpm build:bundle-scenes && tsx scripts/build-bundle-demos.ts && pnpm --filter @babylon-lite/lab dev",
         "build": "pnpm --filter babylon-lite build",

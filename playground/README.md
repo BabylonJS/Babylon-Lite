@@ -112,12 +112,32 @@ playground/
 | Command (in `playground/`) | What it does                                              |
 | -------------------------- | -------------------------------------------------------- |
 | `pnpm dev`                 | `build:engine` + `build:types`, then start the dev server |
+| `pnpm dev:watch`           | Like `dev`, but rebuilds the engine on core source changes |
 | `pnpm build`               | `build:engine` + `build:types`, then build the app        |
 | `pnpm build:engine`        | Build the self-hosted nightly engine into `public/engine/dev/` |
+| `pnpm build:engine:watch`  | Same, but rebuild on every `packages/babylon-lite/src` change |
 | `pnpm build:types`         | Roll up the engine `.d.ts` for Monaco IntelliSense        |
 
 `build:engine` and `build:types` run automatically before `dev`/`build` (via
 `predev`/`prebuild`).
+
+### Developing the engine and playground together
+
+`pnpm dev` builds the self-hosted "nightly" engine bundle **once** at startup, so
+edits under `packages/babylon-lite/src` are not reflected until you restart. For a
+live loop, use:
+
+```bash
+pnpm dev:playground:watch   # from the repo root
+# or, inside playground/:
+pnpm dev:watch
+```
+
+This runs the engine build in `--watch` mode alongside the dev server: change a core
+source file, wait for the rebuild (a few seconds), and reload the page to pick it up.
+Monaco's IntelliSense type declarations are generated once up front (the api-extractor
+pass is too slow to run per keystroke); re-run `pnpm build:types` if you change the
+engine's public API and want refreshed editor hints.
 
 ### Engine versions
 

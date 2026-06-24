@@ -5,9 +5,11 @@
     "type": "module",
     "scripts": {
         "build:engine": "vite build --config vite.engine.config.ts",
+        "build:engine:watch": "vite build --config vite.engine.config.ts --watch",
         "build:types": "tsx scripts/build-engine-types.ts",
         "predev": "pnpm build:engine && pnpm build:types",
         "dev": "vite",
+        "dev:watch": "pnpm build:types && tsx scripts/dev-watch.ts",
         "prebuild": "pnpm build:engine && pnpm build:types",
         "build": "vite build"
     },
