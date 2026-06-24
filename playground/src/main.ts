@@ -5,6 +5,7 @@ import { Runner, type RunnerMessage } from "./runner";
 import { EXAMPLES, DEFAULT_SNIPPET } from "./examples";
 import { saveSnippet, loadSnippet, permalinkFor, snippetIdFromHash, type SnippetMeta } from "./snippets";
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
+import { NIGHTLY, engineUrlForVersion, fetchPublishedVersions } from "./versions";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const previewHost = document.getElementById("previewHost") as HTMLElement;
@@ -12,6 +13,7 @@ const consoleEl = document.getElementById("console") as HTMLElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
 const formatBtn = document.getElementById("formatBtn") as HTMLButtonElement;
 const examplesEl = document.getElementById("examples") as HTMLSelectElement;
+const versionEl = document.getElementById("versionSelect") as HTMLSelectElement;
 const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
 const saveDetailsBtn = document.getElementById("saveDetailsBtn") as HTMLButtonElement;
 const saveDialog = document.getElementById("saveDialog") as HTMLDialogElement;
@@ -36,6 +38,10 @@ let currentMeta: SnippetMeta = {};
 
 // Host bridge, only created in embed mode (see below).
 let embedHost: EmbedHost | null = null;
+
+// The engine version the runner loads (`"nightly"` self-hosted by default, or a
+// published version from the CDN).
+let currentVersion = NIGHTLY;
 
 function appendConsole(level: string, text: string): void {
     const line = document.createElement("div");
@@ -98,7 +104,7 @@ async function run(): Promise<void> {
     try {
         const code = await transpile(editor.getValue());
         appendConsole("system", "Running…");
-        await runner.run(code);
+        await runner.run(code, engineUrlForVersion(currentVersion));
     } catch (err) {
         appendConsole("error", err instanceof Error ? (err.stack ?? err.message) : String(err));
     } finally {
@@ -137,6 +143,30 @@ examplesEl.addEventListener("change", () => {
 
 formatBtn.addEventListener("click", () => editor.format());
 runBtn.addEventListener("click", () => void run());
+
+// Engine version selector: "Nightly" plus published releases (loaded from the CDN).
+function addVersionOption(value: string, label: string): void {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    versionEl.appendChild(option);
+}
+addVersionOption(NIGHTLY, "Nightly (latest source)");
+versionEl.value = NIGHTLY;
+
+versionEl.addEventListener("change", () => {
+    currentVersion = versionEl.value;
+    void run();
+});
+
+void (async () => {
+    const versions = await fetchPublishedVersions();
+    for (const version of versions) {
+        addVersionOption(version, `v${version}`);
+    }
+    // Keep the current selection (defaults to nightly) after populating.
+    versionEl.value = currentVersion;
+})();
 
 async function save(meta: SnippetMeta): Promise<void> {
     saveBtn.disabled = true;

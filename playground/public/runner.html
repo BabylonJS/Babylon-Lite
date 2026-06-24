@@ -5,16 +5,19 @@
         <title>Lite Playground Runner</title>
         <!--
           The import map resolves the bare `@babylonjs/lite` specifier used by user
-          snippets to the self-hosted "nightly" engine bundle. Pinned versions will
-          swap this for a CDN URL in a later phase. It must appear before any module
-          import so the browser applies it to the blob module created below.
+          snippets to an engine bundle. The URL is provided per run via `?engine=`
+          (the version selector): self-hosted nightly by default, or a CDN URL
+          (esm.sh) for a pinned published version. Injected here, before any module
+          import, so the browser applies it to the blob module created below.
         -->
-        <script type="importmap">
-            {
-                "imports": {
-                    "@babylonjs/lite": "/engine/dev/index.js"
-                }
-            }
+        <script>
+            (function () {
+                var engine = new URLSearchParams(location.search).get("engine") || "/engine/dev/index.js";
+                var map = document.createElement("script");
+                map.type = "importmap";
+                map.textContent = JSON.stringify({ imports: { "@babylonjs/lite": engine } });
+                document.head.appendChild(map);
+            })();
         </script>
         <style>
             html,

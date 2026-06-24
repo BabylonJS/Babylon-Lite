@@ -1,0 +1,99 @@
+# Azure Pipelines — Babylon Lite Playground Deployment
+#
+# Builds the standalone Lite playground (editor + self-hosted "nightly" engine)
+# and deploys the generated static site to its own subdomain,
+# liteplayground.babylonjs.com, through the Babylon deployment server.
+#
+# The self-hosted engine bundle is stamped with the latest published version as
+# `<version>-nightly` (see playground/vite.engine.config.ts), resolved from the
+# newest `npm-lite-v*` git tag — so `fetchDepth: 0` below is required to make the
+# tags available. Re-running on each master push (and ideally chained after the
+# npm-publish pipeline) keeps nightly tracking the latest release.
+#
+# NOTE FOR DEVOPS: the deployment-server parameters below (deploymentPath /
+# storageAccount / cdnEndpoint / cdnProfile) must be set to the values that back
+# the liteplayground.babylonjs.com subdomain. The placeholders mirror the demos
+# pipeline shape; confirm the actual storage account, container path, and CDN
+# endpoint/profile for the subdomain before enabling this pipeline.
+
+trigger:
+    branches:
+        include:
+            - master
+
+pr: none
+
+variables:
+    - group: BabylonJS-Deployment
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "9.15.4"
+    - name: CI
+      value: "true"
+    # TODO(devops): set these to the subdomain's storage/CDN backing values.
+    - name: deploymentPath
+      value: cdn/liteplayground
+    - name: storageAccount
+      value: babylonsnapshots
+    - name: cdnEndpoint
+      value: liteplayground
+    - name: cdnProfile
+      value: babylonjscdn
+
+stages:
+    - stage: DeployPlayground
+      displayName: "Deploy Lite Playground"
+      jobs:
+          - job: BuildAndDeploy
+            displayName: "Build and Deploy Lite Playground"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                # fetchDepth: 0 fetches full history + tags so the engine build can
+                # resolve the latest npm-lite-v* tag for nightly version stamping.
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm build:playground
+                  displayName: "Build the playground (engine + app)"
+
+                - script: |
+                      set -euo pipefail
+
+                      DIST_DIR="$(System.DefaultWorkingDirectory)/playground/dist"
+                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/lite-playground.zip"
+
+                      if ! test -d "$DIST_DIR"; then
+                        echo "No playground build output found at $DIST_DIR"
+                        exit 1
+                      fi
+
+                      mkdir -p "$(Build.ArtifactStagingDirectory)"
+                      cd "$DIST_DIR"
+                      zip -r "$ZIP_PATH" .
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                        -H "Content-Type: multipart/form-data" \
+                        -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
+                        -F "path=$(deploymentPath)" \
+                        -F "storageAccount=$(storageAccount)" \
+                        -F "cdnEndpoint=$(cdnEndpoint)" \
+                        -F "cdnProfile=$(cdnProfile)" \
+                        -F "zip=@$ZIP_PATH"
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=$(cdnEndpoint)&profileName=$(cdnProfile)" --fail-with-body -i -X POST \
+                        -H "Authorization: Bearer $(DEPLOY_TOKEN)"
+                  displayName: "Upload playground to deployment server"

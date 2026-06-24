@@ -300,6 +300,7 @@ body {
 
 /* Embed mode: compact chrome, host drives via postMessage. */
 body.embed #examples,
+body.embed #versionSelect,
 body.embed #formatBtn,
 body.embed .save-group {
     display: none;

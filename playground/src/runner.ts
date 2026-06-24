@@ -32,11 +32,11 @@ export class Runner {
     };
 
     /** Replace the iframe with a fresh one and run the given transpiled module code. */
-    async run(code: string): Promise<void> {
+    async run(code: string, engineUrl?: string): Promise<void> {
         const frame = document.createElement("iframe");
         frame.setAttribute("sandbox", "allow-scripts allow-same-origin");
         const ready = this.waitForReady(frame);
-        frame.src = "/runner.html";
+        frame.src = engineUrl ? `/runner.html?engine=${encodeURIComponent(engineUrl)}` : "/runner.html";
 
         if (this.frame) {
             this.frame.remove();
