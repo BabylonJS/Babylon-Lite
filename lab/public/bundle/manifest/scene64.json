@@ -1,0 +1,16 @@
+{
+  "rawKB": 56.6,
+  "gzipKB": 23.5,
+  "ignoredRawKB": 4.3,
+  "runtimeChunks": [
+    "scene64-_math-factory-DFVyS8gB.js",
+    "scene64-fragment-output-CfRmfbPv.js",
+    "scene64-input-block-CmvPVsv0.js",
+    "scene64-morph-targets-CsnL5CDS.js",
+    "scene64-node-registry-BGlOKEWI.js",
+    "scene64-node-renderable-DM-jNZon.js",
+    "scene64-transform-block-C-HoggRW.js",
+    "scene64-vertex-output-C7G5u6Y0.js",
+    "scene64.js"
+  ]
+}

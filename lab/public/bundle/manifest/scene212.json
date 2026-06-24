@@ -1,0 +1,21 @@
+{
+  "rawKB": 102.6,
+  "gzipKB": 41.1,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene212-generate-mipmaps-BA4GCk3y.js",
+    "scene212-gltf-ext-dielectric-C6hvXXiF.js",
+    "scene212-gltf-feature-registry-Bl0XFXnM.js",
+    "scene212-gltf-glb-parser-DpbXuAuC.js",
+    "scene212-ibl-fragment-CeRrvT96.js",
+    "scene212-ibl-skybox-wgsl-CFIBOHHx.js",
+    "scene212-pbr-refraction-BTE2tTbA.js",
+    "scene212-pbr-renderable-B47bWcbm.js",
+    "scene212-pbr-transmission-ext-DjcWFMaG.js",
+    "scene212-reflectance-fragment-Bc1MZN1G.js",
+    "scene212-refraction-dispersion-wgsl-BKvBCmZU.js",
+    "scene212-rgbd-decode-XvCcjKVH.js",
+    "scene212-scene-uniforms-FTYH6Ct0.js",
+    "scene212.js"
+  ]
+}

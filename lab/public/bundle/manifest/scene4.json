@@ -1,0 +1,16 @@
+{
+  "rawKB": 72.6,
+  "gzipKB": 28.5,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene4-esm-shadow-view-7yqUFA1x.js",
+    "scene4-generate-mipmaps-C5qTY_Nn.js",
+    "scene4-material-view-Dua1bl7W.js",
+    "scene4-no-color-view-jut7SxNQ.js",
+    "scene4-shadow-task-DKE6tIG9.js",
+    "scene4-standard-renderable-C-a_tPgC.js",
+    "scene4-std-shadow-fragment-pwyXRo4i.js",
+    "scene4-wgsl-helpers-CwHFFXvt.js",
+    "scene4.js"
+  ]
+}

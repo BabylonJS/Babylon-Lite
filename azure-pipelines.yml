@@ -198,9 +198,10 @@ stages:
                       SKIP_BJS: "true"
 
                 # Enforce that any PR which moves per-scene bundle sizes also
-                # commits the regenerated manifest. The build step above rewrites
-                # the working-tree manifest with fresh measurements; this compares
-                # it (rounded to whole KB) against the version committed at HEAD.
+                # commits the regenerated per-scene manifest files. The build step
+                # above rewrites the working-tree per-scene manifest with fresh
+                # measurements; this compares them (rounded to whole KB) against the
+                # versions committed at HEAD.
                 - script: pnpm validate:bundle-manifest
                   displayName: "Validate bundle manifest is committed"
 

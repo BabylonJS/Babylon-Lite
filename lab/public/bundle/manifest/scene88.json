@@ -1,0 +1,27 @@
+{
+  "rawKB": 60.4,
+  "gzipKB": 26.8,
+  "ignoredRawKB": 6.4,
+  "runtimeChunks": [
+    "scene88-_math-factory-DFVyS8gB.js",
+    "scene88-add-block-D7fV2syB.js",
+    "scene88-divide-block-BvpeJ80F.js",
+    "scene88-fragment-output-CfRmfbPv.js",
+    "scene88-input-block-NiGRHl6P.js",
+    "scene88-loop-block-csHtAvnG.js",
+    "scene88-multiply-block-CsAITn0r.js",
+    "scene88-node-registry-BW7Y4VrF.js",
+    "scene88-node-registry-extra-compat-NqgyiD-S.js",
+    "scene88-node-registry-extra-math-BzNJZp4Y.js",
+    "scene88-node-renderable-v4TQefyV.js",
+    "scene88-step-block-sbiWJXfG.js",
+    "scene88-storage-read-block-DkBAxglb.js",
+    "scene88-storage-write-block-BSqc-AKf.js",
+    "scene88-subtract-block-ogYRTPIx.js",
+    "scene88-transform-block-DEElVmaV.js",
+    "scene88-vector-merger-YcC3xFyg.js",
+    "scene88-vector-splitter-BMf4DQi8.js",
+    "scene88-vertex-output-C7G5u6Y0.js",
+    "scene88.js"
+  ]
+}

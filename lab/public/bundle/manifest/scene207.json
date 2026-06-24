@@ -1,0 +1,17 @@
+{
+  "rawKB": 59.6,
+  "gzipKB": 24,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene207-_mat4-storage-f64-B_0HYOAx.js",
+    "scene207-floating-origin-CoOl2-Do.js",
+    "scene207-material-view-Dua1bl7W.js",
+    "scene207-no-color-view-BJnjfxE3.js",
+    "scene207-pack-mat4-with-offset-BS-Lz8k7.js",
+    "scene207-shadow-task-SxovdLRJ.js",
+    "scene207-standard-renderable-Q6qXJ1fg.js",
+    "scene207-std-shadow-fragment-pwyXRo4i.js",
+    "scene207-wgsl-helpers-CwHFFXvt.js",
+    "scene207.js"
+  ]
+}

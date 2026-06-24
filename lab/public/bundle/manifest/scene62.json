@@ -1,0 +1,17 @@
+{
+  "rawKB": 60,
+  "gzipKB": 25.3,
+  "ignoredRawKB": 5.3,
+  "runtimeChunks": [
+    "scene62-_math-factory-DFVyS8gB.js",
+    "scene62-fragment-output-CfRmfbPv.js",
+    "scene62-generate-mipmaps-BPTGASCY.js",
+    "scene62-input-block-BgDpnyI_.js",
+    "scene62-node-registry-Br5texho.js",
+    "scene62-node-renderable-DoWmDOzM.js",
+    "scene62-texture-block-qpJiHpPr.js",
+    "scene62-transform-block-BSlYzxBO.js",
+    "scene62-vertex-output-C7G5u6Y0.js",
+    "scene62.js"
+  ]
+}

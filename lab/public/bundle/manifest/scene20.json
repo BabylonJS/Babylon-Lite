@@ -1,0 +1,18 @@
+{
+  "rawKB": 78.7,
+  "gzipKB": 33,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene20-background-dds-skybox-DlAfEH4G.js",
+    "scene20-background-ground-B3tKJanB.js",
+    "scene20-cubemap-skybox-material-B495OxWx.js",
+    "scene20-emissive-fragment-D2vDlPTz.js",
+    "scene20-ibl-fragment-CeRrvT96.js",
+    "scene20-pbr-renderable-BRQTl8vS.js",
+    "scene20-rgbd-decode-ChiiPMbr.js",
+    "scene20-scene-uniforms-FTYH6Ct0.js",
+    "scene20-singlelight-hemispheric-wgsl-TLZaCFzg.js",
+    "scene20-wgsl-helpers-CkUi9P9Q.js",
+    "scene20.js"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "rawKB": 54,
+  "gzipKB": 21.6,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene3-scene-uniforms-FTYH6Ct0.js",
+    "scene3-skybox-renderable-B-1mAKv9.js",
+    "scene3-standard-renderable-7jpxQTFQ.js",
+    "scene3-wgsl-helpers-DkIRJkUm.js",
+    "scene3.js"
+  ]
+}

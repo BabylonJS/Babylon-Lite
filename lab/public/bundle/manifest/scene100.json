@@ -1,0 +1,10 @@
+{
+  "rawKB": 50.3,
+  "gzipKB": 20.2,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene100-standard-renderable-Buv_s4dX.js",
+    "scene100-wgsl-helpers-CwHFFXvt.js",
+    "scene100.js"
+  ]
+}

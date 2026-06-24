@@ -1,0 +1,15 @@
+{
+  "rawKB": 51.1,
+  "gzipKB": 20.8,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene204-_mat4-storage-f64-7Hs0bt2y.js",
+    "scene204-floating-origin-GYPpgH2l.js",
+    "scene204-pack-mat4-with-offset-BS-Lz8k7.js",
+    "scene204-standard-renderable-CEqz6rMQ.js",
+    "scene204-thin-instance-fragment-CBn2miAC.js",
+    "scene204-thin-instance-gpu-BPglyyv5.js",
+    "scene204-wgsl-helpers-CwHFFXvt.js",
+    "scene204.js"
+  ]
+}

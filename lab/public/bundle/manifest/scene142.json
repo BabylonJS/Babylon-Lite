@@ -1,0 +1,10 @@
+{
+  "rawKB": 61.1,
+  "gzipKB": 22.8,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene142-standard-renderable-COIztMWN.js",
+    "scene142-wgsl-helpers-CwHFFXvt.js",
+    "scene142.js"
+  ]
+}

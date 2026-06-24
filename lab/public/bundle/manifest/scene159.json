@@ -1,0 +1,9 @@
+{
+  "rawKB": 37.1,
+  "gzipKB": 14.7,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene159-shader-renderable-BUEFGVVk.js",
+    "scene159.js"
+  ]
+}

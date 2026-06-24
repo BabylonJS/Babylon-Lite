@@ -1,0 +1,22 @@
+{
+  "rawKB": 101.9,
+  "gzipKB": 41.6,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene12-create-skeleton-Cjf80v3R.js",
+    "scene12-generate-mipmaps-Bsp4UQ3D.js",
+    "scene12-gltf-animation-BDKbEYQd.js",
+    "scene12-gltf-feature-animations-Bfc5iW7L.js",
+    "scene12-gltf-feature-registry-BydKPGWF.js",
+    "scene12-gltf-feature-skeleton-CN1CorcX.js",
+    "scene12-gltf-glb-parser-BrsOlymf.js",
+    "scene12-ibl-fragment-CeRrvT96.js",
+    "scene12-pbr-renderable-Bo7mvJtD.js",
+    "scene12-reflectance-fragment-Kimqnape.js",
+    "scene12-rgbd-decode-BLiTLohS.js",
+    "scene12-scene-uniforms-FTYH6Ct0.js",
+    "scene12-singlelight-directional-wgsl-DhnkgLEx.js",
+    "scene12-skeleton-fragment-HQ02KgI1.js",
+    "scene12.js"
+  ]
+}

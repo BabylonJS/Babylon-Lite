@@ -1,0 +1,16 @@
+{
+  "rawKB": 58.6,
+  "gzipKB": 24.6,
+  "ignoredRawKB": 6.4,
+  "runtimeChunks": [
+    "scene63-_math-factory-DFVyS8gB.js",
+    "scene63-fragment-output-CfRmfbPv.js",
+    "scene63-input-block-DtZeDmLA.js",
+    "scene63-light-block-CgTopKLU.js",
+    "scene63-node-registry-rFrgV52w.js",
+    "scene63-node-renderable-g-XatlpZ.js",
+    "scene63-transform-block-CvEP0L-h.js",
+    "scene63-vertex-output-C7G5u6Y0.js",
+    "scene63.js"
+  ]
+}

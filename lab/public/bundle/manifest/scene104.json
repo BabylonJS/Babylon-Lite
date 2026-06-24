@@ -1,0 +1,15 @@
+{
+  "rawKB": 100.6,
+  "gzipKB": 39,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene104-generate-mipmaps-BGv6wRC-.js",
+    "scene104-gltf-feature-registry-r97kCXhW.js",
+    "scene104-gltf-glb-parser-BJfNq64D.js",
+    "scene104-shader-composer-CgJmQyJj.js",
+    "scene104-standard-renderable-BYZDGzK-.js",
+    "scene104-std-lightmap-fragment-BtZeffyx.js",
+    "scene104-wgsl-helpers-CwHFFXvt.js",
+    "scene104.js"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "rawKB": 57.5,
+  "gzipKB": 27.4,
+  "ignoredRawKB": 9.7,
+  "runtimeChunks": [
+    "scene78-_math-factory-DFVyS8gB.js",
+    "scene78-add-block-DDaKmlqd.js",
+    "scene78-arc-tan2-block-wXN99ItN.js",
+    "scene78-cross-block-u5Q1qf8C.js",
+    "scene78-distance-block-B1WTietT.js",
+    "scene78-divide-block-nD6bFgJA.js",
+    "scene78-fragment-output-CfRmfbPv.js",
+    "scene78-fresnel-block-Bf13eDZ4.js",
+    "scene78-input-block-BCPfEm1m.js",
+    "scene78-length-block-BD-DmMg-.js",
+    "scene78-mod-block-CXuPIZet.js",
+    "scene78-multiply-block-DKKfQJFj.js",
+    "scene78-node-registry-CUYEywnK.js",
+    "scene78-node-registry-extra-math-CKvWkhfv.js",
+    "scene78-node-renderable-BF_kvyY9.js",
+    "scene78-normalize-block-BUk4O2XX.js",
+    "scene78-reciprocal-block-DilmIM2-.js",
+    "scene78-reflect-block-CSAIYNw5.js",
+    "scene78-refract-block-DiC9i5qf.js",
+    "scene78-subtract-block-CDvP6OoU.js",
+    "scene78-transform-block-Jjo6o9u1.js",
+    "scene78-vector-merger-YcC3xFyg.js",
+    "scene78-vector-splitter-BMf4DQi8.js",
+    "scene78-vertex-output-C7G5u6Y0.js",
+    "scene78.js"
+  ]
+}

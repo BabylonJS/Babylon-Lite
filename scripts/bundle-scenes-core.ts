@@ -186,7 +186,14 @@ function resolveLiteAliasDir(): string {
 
     throw new Error(`Missing ${libIndex}.\n` + "Build the package first: `pnpm --filter babylon-lite build:lib` (or `pnpm build`).");
 }
+// Distributed per-scene manifest: the tracked source of truth is one JSON file
+// per scene under `lab/public/bundle/manifest/`. A single aggregate
+// `manifest.json` is still generated (gitignored) for runtime consumers (lab UI,
+// bundle-size test, report script, static lab site). `MANIFEST_GIT_PATH` is the
+// legacy single-file path, kept only for reading pre-migration master refs.
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
+const MANIFEST_DIR_GIT_PATH = "lab/public/bundle/manifest";
+const MANIFEST_DIR = "manifest";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
 export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
@@ -241,18 +248,104 @@ function orderBundleManifest(manifest: BundleManifest): BundleManifest {
     return ordered;
 }
 
-function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
-    const errors: string[] = [];
-    for (const ref of refs) {
+/** Absolute path to a scene's tracked per-scene manifest file. */
+function perSceneManifestPath(scene: string): string {
+    return resolve(outDir, MANIFEST_DIR, `${scene}.json`);
+}
+
+/**
+ * Read the tracked per-scene manifest files (`manifest/<scene>.json`) into a
+ * single aggregate map. This is the source of truth seed for incremental builds.
+ */
+export function readCurrentBundleManifest(): BundleManifest {
+    const dir = resolve(outDir, MANIFEST_DIR);
+    const manifest: BundleManifest = {};
+    if (!existsSync(dir)) return manifest;
+    for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        const scene = file.slice(0, -".json".length);
         try {
-            const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
-            return { ref, manifest: JSON.parse(json) as BundleManifest };
-        } catch (err) {
-            errors.push(`${ref}: ${err instanceof Error ? err.message : String(err)}`);
+            manifest[scene] = JSON.parse(readFileSync(resolve(dir, file), "utf-8")) as BundleManifestEntry;
+        } catch {
+            /* skip malformed per-scene file */
         }
     }
+    return manifest;
+}
 
-    console.warn(`Could not read ${MANIFEST_GIT_PATH} from master refs; bundle delta UI will not have a master baseline. ${errors.join(" | ")}`);
+/**
+ * Atomically write JSON to `path` (sibling temp file + rename). The lab UI and
+ * concurrent readers may hold the destination open; rename never truncates it
+ * and survives transient Windows file locks (errno -4094 / EBUSY).
+ */
+function atomicWriteJson(path: string, json: string): void {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmpPath = `${path}.tmp`;
+    for (let attempt = 0; ; attempt++) {
+        try {
+            writeFileSync(tmpPath, json);
+            renameSync(tmpPath, path);
+            return;
+        } catch (err) {
+            if (attempt >= 5) throw err;
+            const wait = Date.now() + 50 * (attempt + 1);
+            while (Date.now() < wait) {
+                /* brief synchronous backoff before retrying the atomic write */
+            }
+        }
+    }
+}
+
+/** Write a single scene's tracked per-scene manifest file. */
+function writePerSceneManifest(scene: string, entry: BundleManifestEntry): void {
+    atomicWriteJson(perSceneManifestPath(scene), `${JSON.stringify(entry, null, 2)}\n`);
+}
+
+/** Write the generated (gitignored) aggregate `manifest.json` for runtime consumers. */
+function writeAggregateBundleManifest(manifest: BundleManifest): void {
+    atomicWriteJson(resolve(outDir, MANIFEST_FILE), JSON.stringify(orderBundleManifest(manifest), null, 2));
+}
+
+function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
+    // Preferred: distributed per-scene tracked files under `manifest/`.
+    try {
+        const list = execFileSync("git", ["ls-tree", "-r", "--name-only", ref, "--", MANIFEST_DIR_GIT_PATH], {
+            cwd: ROOT,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "pipe"],
+        });
+        const files = list
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.endsWith(".json"));
+        if (files.length > 0) {
+            const manifest: BundleManifest = {};
+            for (const file of files) {
+                const scene = file.slice(file.lastIndexOf("/") + 1, -".json".length);
+                const json = execFileSync("git", ["show", `${ref}:${file}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+                manifest[scene] = JSON.parse(json) as BundleManifestEntry;
+            }
+            return manifest;
+        }
+    } catch {
+        /* fall through to the legacy single-file layout */
+    }
+    // Legacy single-file fallback for pre-migration master refs.
+    try {
+        const json = execFileSync("git", ["show", `${ref}:${MANIFEST_GIT_PATH}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+        return JSON.parse(json) as BundleManifest;
+    } catch {
+        return null;
+    }
+}
+
+function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
+    for (const ref of refs) {
+        const manifest = readMasterBundleManifestFromRef(ref);
+        if (manifest) return { ref, manifest };
+    }
+
+    console.warn(`Could not read ${MANIFEST_DIR_GIT_PATH} from master refs (${refs.join(", ")}); bundle delta UI will not have a master baseline.`);
     return null;
 }
 
@@ -1005,16 +1098,8 @@ export async function buildBundleScenes(): Promise<void> {
         rmSync(sceneOutDir, { recursive: true, force: true });
     }
 
-    // Load existing current manifest to check for cached BJS sizes.
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
-    let existingManifest: BundleManifest = {};
-    if (existsSync(manifestPath)) {
-        try {
-            existingManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        } catch {
-            /* start fresh */
-        }
-    }
+    // Load existing per-scene manifest files to check for cached BJS sizes.
+    const existingManifest: BundleManifest = readCurrentBundleManifest();
 
     // Only build BJS scenes whose sizes aren't already cached in the manifest
     const bjsScenesToBuild = requestedSceneNames
@@ -1087,41 +1172,17 @@ export async function buildBundleScenes(): Promise<void> {
 async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readonly string[], pruneManifest = true): Promise<BundleManifest> {
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
-    const manifestPath = resolve(outDir, MANIFEST_FILE);
 
-    // Load existing manifest so we can update incrementally (UI can refresh mid-build)
-    let manifest: BundleManifest = {};
-    if (existsSync(manifestPath)) {
-        try {
-            manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-        } catch {
-            /* start fresh */
-        }
-    }
+    // Seed from the tracked per-scene manifest files so subset builds preserve
+    // other scenes' entries and the live UI can refresh mid-build.
+    const manifest: BundleManifest = readCurrentBundleManifest();
 
-    function flush(): void {
-        // The lab UI may fetch manifest.json mid-build, so a plain writeFileSync (which truncates
-        // the live file) can collide with a concurrent reader and surface as a transient Windows
-        // file-lock error (errno -4094 UNKNOWN / EBUSY). Write a sibling temp file and rename it
-        // into place — rename is atomic and never truncates the file readers hold open. Retry a few
-        // times to ride out any residual lock (e.g. AV scanning the freshly written file).
-        const json = JSON.stringify(orderBundleManifest(manifest), null, 2);
-        const tmpPath = `${manifestPath}.tmp`;
-        for (let attempt = 0; ; attempt++) {
-            try {
-                writeFileSync(tmpPath, json);
-                renameSync(tmpPath, manifestPath);
-                return;
-            } catch (err) {
-                if (attempt >= 5) {
-                    throw err;
-                }
-                const wait = Date.now() + 50 * (attempt + 1);
-                while (Date.now() < wait) {
-                    /* brief synchronous backoff before retrying the atomic write */
-                }
-            }
-        }
+    // Persist a single scene's tracked per-scene file, then refresh the generated
+    // aggregate `manifest.json` that runtime consumers (lab UI, tests) read.
+    function flushScene(scene: string): void {
+        const entry = manifest[scene];
+        if (entry) writePerSceneManifest(scene, entry);
+        writeAggregateBundleManifest(manifest);
     }
 
     try {
@@ -1135,7 +1196,7 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
             const tPage = performance.now();
             const { rawKB, gzipKB, ignoredRawKB, chunks } = await measurePage(browser, port, scene, `lite/bundle-${scene}.html`, "/bundle/");
             manifest[scene] = { ...manifest[scene], rawKB, gzipKB, ignoredRawKB, runtimeChunks: chunks };
-            flush();
+            flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
             console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})`);
         }
@@ -1159,7 +1220,7 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
             if (manifest[liteScene]) {
                 manifest[liteScene].bjsRawKB = rawKB;
                 manifest[liteScene].bjsGzipKB = gzipKB;
-                flush();
+                flushScene(liteScene);
             }
             console.log(`  measured ${bjsScene}: ${rawKB} KB raw, ${gzipKB} KB gzip (${elapsed(tPage)})`);
         }
@@ -1174,9 +1235,10 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         for (const scene of Object.keys(manifest)) {
             if (!currentScenes.has(scene)) {
                 delete manifest[scene];
+                rmSync(perSceneManifestPath(scene), { force: true });
             }
         }
-        flush();
+        writeAggregateBundleManifest(manifest);
     }
 
     return manifest;

@@ -1,0 +1,10 @@
+{
+  "rawKB": 49.6,
+  "gzipKB": 19.9,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene40-standard-renderable-CYGiOwyw.js",
+    "scene40-wgsl-helpers-CwHFFXvt.js",
+    "scene40.js"
+  ]
+}

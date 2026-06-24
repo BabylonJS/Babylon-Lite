@@ -1,0 +1,10 @@
+{
+  "rawKB": 53.7,
+  "gzipKB": 21.5,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene101-standard-renderable-BAYncetB.js",
+    "scene101-wgsl-helpers-CwHFFXvt.js",
+    "scene101.js"
+  ]
+}

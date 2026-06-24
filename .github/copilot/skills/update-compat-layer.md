@@ -299,11 +299,12 @@ bundle sizes.** In practice this means:
   tree-shakeable accessor in Lite (imported only by compat) is the preferred fix.
 
 **You must prove the zero-impact claim before finishing**: build the scene bundles
-and confirm the bundle-size manifest is unchanged versus the committed baseline:
+and confirm the per-scene bundle-size manifest is unchanged versus the committed
+baseline:
 
 ```
 pnpm build:bundle-scenes
-git diff --stat -- lab/public/bundle/manifest.json   # must be empty
+git diff --stat -- lab/public/bundle/manifest/   # must be empty
 ```
 
 If the manifest diff is non-empty, the Lite addition is **not** tree-shakeable —
@@ -437,7 +438,7 @@ keep it free of links to internal docs (it ships to npm).
   consumer that doesn't import it.
 - Any Lite-core addition made to support compat **must be 100% tree-shakeable
   (zero bundle-size impact)** and proven so via `pnpm build:bundle-scenes` +
-  `git diff --stat -- lab/public/bundle/manifest.json` (empty diff). Never modify
+  `git diff --stat -- lab/public/bundle/manifest/` (empty diff). Never modify
   an existing Lite function/module that scene bundles already pull in.
 - Do not run `pnpm test:perf` or the Lite parity suite; they are unrelated to
   compat work.

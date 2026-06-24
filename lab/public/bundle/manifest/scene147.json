@@ -1,0 +1,19 @@
+{
+  "rawKB": 102.6,
+  "gzipKB": 41,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene147-directional-light-CwjabfgT.js",
+    "scene147-generate-mipmaps-BfjMA7hX.js",
+    "scene147-gltf-feature-lights-punctual-DdmW_Vp5.js",
+    "scene147-gltf-feature-registry-CRHPISh7.js",
+    "scene147-gltf-glb-parser-BPCGAatE.js",
+    "scene147-gltf-light-pointer-state-B7kFTRxK.js",
+    "scene147-multilight-wgsl-CLgjeQ_G.js",
+    "scene147-pbr-geometry-view-S4y70Lc9.js",
+    "scene147-pbr-renderable-C06WCsFt.js",
+    "scene147-shader-composer-B51nefZQ.js",
+    "scene147-ubo-layout-Cs5YvLYZ.js",
+    "scene147.js"
+  ]
+}

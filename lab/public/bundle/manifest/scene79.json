@@ -1,0 +1,26 @@
+{
+  "rawKB": 61.1,
+  "gzipKB": 27.6,
+  "ignoredRawKB": 8.1,
+  "runtimeChunks": [
+    "scene79-_math-factory-DFVyS8gB.js",
+    "scene79-add-block-BJURU1WJ.js",
+    "scene79-conditional-block-BfEAF5L6.js",
+    "scene79-curve-block-CStLhZYq.js",
+    "scene79-divide-block-CY1pX0X7.js",
+    "scene79-fragment-output-CfRmfbPv.js",
+    "scene79-input-block-BlC907Cr.js",
+    "scene79-multiply-block-CHVCDqxQ.js",
+    "scene79-nlerp-block-DCTQwLVE.js",
+    "scene79-node-registry-CJ482XCy.js",
+    "scene79-node-registry-extra-math-Dw_l0pN0.js",
+    "scene79-node-renderable-ISWSeBbm.js",
+    "scene79-random-number-block-Cc5cHymD.js",
+    "scene79-transform-block-Dt_QHxTW.js",
+    "scene79-vector-merger-YcC3xFyg.js",
+    "scene79-vector-splitter-BMf4DQi8.js",
+    "scene79-vertex-output-C7G5u6Y0.js",
+    "scene79-wave-block-cFABXFxd.js",
+    "scene79.js"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "rawKB": 78.1,
+  "gzipKB": 31.5,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene217-multilight-wgsl-D_ZZ-Nk7.js",
+    "scene217-pbr-renderable-yBNCHTYO.js",
+    "scene217-shader-composer-BFQxgkqp.js",
+    "scene217-standard-renderable-DGQZW6Se.js",
+    "scene217-wgsl-helpers-CwHFFXvt.js",
+    "scene217.js"
+  ]
+}

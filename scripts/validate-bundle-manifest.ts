@@ -1,16 +1,18 @@
 /**
- * Validate that the committed bundle-size manifest is up to date.
+ * Validate that the committed per-scene bundle-size manifest is up to date.
  *
  * A PR that changes runtime code (or scenes) such that per-scene bundle sizes
- * move MUST also commit the regenerated `lab/public/bundle/manifest.json`.
- * GUIDANCE.md makes this mandatory so reviewers can see size deltas in the diff
- * and the tracked baseline stays in sync with the code.
+ * move MUST also commit the regenerated per-scene manifest files under
+ * `lab/public/bundle/manifest/<scene>.json`. GUIDANCE.md makes this mandatory so
+ * reviewers can see size deltas in the diff and the tracked baseline stays in
+ * sync with the code. The manifest is distributed (one file per scene) so PRs
+ * touching different scenes do not collide on a single shared manifest file.
  *
  * This script is meant to run in CI AFTER `pnpm build:bundle-scenes`, which
- * overwrites the working-tree manifest with freshly measured sizes. It compares
- * that freshly built manifest against the version committed at `git HEAD`. Sizes
- * are rounded to whole KB before comparison (matching the PR delta comment), so
- * sub-KB gzip jitter does not cause spurious failures.
+ * overwrites the working-tree per-scene files with freshly measured sizes. It
+ * compares those freshly built files against the versions committed at `git
+ * HEAD`. Sizes are rounded to whole KB before comparison (matching the PR delta
+ * comment), so sub-KB gzip jitter does not cause spurious failures.
  *
  * It also compares each scene's `runtimeChunks` set. Chunk filenames carry a
  * content hash, so they change whenever a PR alters code that actually lands in
@@ -22,10 +24,12 @@
  * Usage: npx tsx scripts/validate-bundle-manifest.ts
  */
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
 
-const MANIFEST_REL_PATH = "lab/public/bundle/manifest.json";
+const MANIFEST_DIR_REL_PATH = "lab/public/bundle/manifest";
+// Legacy single-file path, kept to validate against pre-migration HEAD commits.
+const LEGACY_MANIFEST_REL_PATH = "lab/public/bundle/manifest.json";
 
 interface ManifestEntry {
     rawKB?: number;
@@ -61,48 +65,89 @@ function diffRuntimeChunks(committed: string[] | undefined, built: string[] | un
     return parts.join("  ");
 }
 
-function parseManifest(text: string, source: string): Manifest {
+function parseJson<T>(text: string, source: string): T {
     try {
-        return JSON.parse(text) as Manifest;
+        return JSON.parse(text) as T;
     } catch (err) {
         throw new Error(`Failed to parse ${source} as JSON: ${(err as Error).message}`);
     }
 }
 
-function readBuiltManifest(absPath: string): Manifest {
-    if (!existsSync(absPath)) {
-        throw new Error(`Freshly built manifest not found at ${absPath}. Did 'pnpm build:bundle-scenes' run first?`);
-    }
-    return parseManifest(readFileSync(absPath, "utf-8"), "built manifest");
+function sceneFromFile(file: string): string {
+    const base = file.slice(file.lastIndexOf("/") + 1);
+    return base.slice(0, -".json".length);
 }
 
+/** Read the freshly built per-scene manifest files from the working tree. */
+function readBuiltManifest(rootDir: string): Manifest {
+    const dir = resolve(rootDir, MANIFEST_DIR_REL_PATH);
+    if (!existsSync(dir)) {
+        throw new Error(`Freshly built manifest dir not found at ${dir}. Did 'pnpm build:bundle-scenes' run first?`);
+    }
+    const manifest: Manifest = {};
+    for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        manifest[sceneFromFile(file)] = parseJson<ManifestEntry>(readFileSync(resolve(dir, file), "utf-8"), `built ${file}`);
+    }
+    return manifest;
+}
+
+/**
+ * Read the committed per-scene manifest from `git HEAD`. Returns null only when
+ * neither the distributed dir nor the legacy single file exists at HEAD.
+ */
 function readCommittedManifest(rootDir: string): Manifest | null {
-    let text: string;
+    // Preferred: distributed per-scene files under manifest/.
+    let listing = "";
     try {
-        text = execFileSync("git", ["show", `HEAD:${MANIFEST_REL_PATH}`], {
+        listing = execFileSync("git", ["ls-tree", "-r", "--name-only", "HEAD", "--", MANIFEST_DIR_REL_PATH], {
             cwd: rootDir,
             encoding: "utf-8",
             stdio: ["ignore", "pipe", "ignore"],
         });
     } catch {
-        // `git show` failed: the manifest does not exist at HEAD (e.g. a
-        // brand-new file not yet committed). Only this case maps to null.
+        listing = "";
+    }
+    const files = listing
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.endsWith(".json"));
+    if (files.length > 0) {
+        const manifest: Manifest = {};
+        for (const file of files) {
+            const text = execFileSync("git", ["show", `HEAD:${file}`], { cwd: rootDir, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+            manifest[sceneFromFile(file)] = parseJson<ManifestEntry>(text, `committed ${file}`);
+        }
+        return manifest;
+    }
+
+    // Legacy single-file fallback (pre-migration HEAD): the legacy
+    // manifest.json is an aggregate map (scene -> entry), so parse it as a
+    // whole Manifest rather than a single entry.
+    let text: string;
+    try {
+        text = execFileSync("git", ["show", `HEAD:${LEGACY_MANIFEST_REL_PATH}`], {
+            cwd: rootDir,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+    } catch {
         return null;
     }
-    // Parse OUTSIDE the catch so a corrupt committed manifest surfaces as a real
-    // error instead of being silently reported as "not committed at HEAD".
-    return parseManifest(text, "committed manifest");
+    return parseJson<Manifest>(text, "committed legacy manifest");
 }
 
 function main(): void {
     const rootDir = resolve(__dirname, "..");
-    const builtPath = resolve(rootDir, MANIFEST_REL_PATH);
 
-    const built = readBuiltManifest(builtPath);
+    const built = readBuiltManifest(rootDir);
     const committed = readCommittedManifest(rootDir);
 
     if (committed === null) {
-        console.error(`Bundle manifest validation FAILED: ${MANIFEST_REL_PATH} is not committed at HEAD.\n` + `Run 'pnpm build:bundle-scenes' and commit the generated manifest.`);
+        console.error(
+            `Bundle manifest validation FAILED: no committed manifest found under ${MANIFEST_DIR_REL_PATH}/ at HEAD.\n` +
+                `Run 'pnpm build:bundle-scenes' and commit the generated per-scene manifest files.`
+        );
         process.exit(1);
     }
 
@@ -139,9 +184,9 @@ function main(): void {
 
     if (mismatches.length > 0) {
         console.error(
-            `Bundle manifest validation FAILED: ${MANIFEST_REL_PATH} is stale.\n` +
-                `This PR changes per-scene bundle output but did not commit an updated manifest.\n` +
-                `Run 'pnpm build:bundle-scenes' locally and commit the regenerated ${MANIFEST_REL_PATH}.\n\n` +
+            `Bundle manifest validation FAILED: per-scene manifest under ${MANIFEST_DIR_REL_PATH}/ is stale.\n` +
+                `This PR changes per-scene bundle output but did not commit the updated manifest files.\n` +
+                `Run 'pnpm build:bundle-scenes' locally and commit the regenerated ${MANIFEST_DIR_REL_PATH}/<scene>.json files.\n\n` +
                 `Differences (committed vs rebuilt; sizes rounded to whole KB):\n` +
                 mismatches.join("\n")
         );

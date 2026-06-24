@@ -1,0 +1,20 @@
+{
+  "rawKB": 76.4,
+  "gzipKB": 32.2,
+  "ignoredRawKB": 9.6,
+  "runtimeChunks": [
+    "scene67-_math-factory-DFVyS8gB.js",
+    "scene67-fragment-output-CfRmfbPv.js",
+    "scene67-input-block-C3R5NLd7.js",
+    "scene67-node-env-qYXpqh6a.js",
+    "scene67-node-registry-HEYWs9TG.js",
+    "scene67-node-renderable-k2UZR_0E.js",
+    "scene67-pbr-metallic-roughness-block-D4ponzyR.js",
+    "scene67-pbr-mr-helper-core-B-eTRTiT.js",
+    "scene67-reflection-block-CIXuH-z0.js",
+    "scene67-rgbd-decode-B40kelZF.js",
+    "scene67-transform-block-rM3lkwUr.js",
+    "scene67-vertex-output-C7G5u6Y0.js",
+    "scene67.js"
+  ]
+}

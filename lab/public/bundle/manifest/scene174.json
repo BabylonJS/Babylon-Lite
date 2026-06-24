@@ -1,0 +1,16 @@
+{
+  "rawKB": 96.4,
+  "gzipKB": 39.4,
+  "ignoredRawKB": 1485.2,
+  "runtimeChunks": [
+    "scene174-generate-mipmaps-oyz7Zcb3.js",
+    "scene174-gltf-glb-parser-V10AO6Mf.js",
+    "scene174-pbr-renderable-khVBcoiw.js",
+    "scene174-recast-navigation-CYBQI-zY-Dry_z7x_.js",
+    "scene174-shader-composer-CgJmQyJj.js",
+    "scene174-singlelight-hemispheric-wgsl-STW_78f5.js",
+    "scene174-standard-renderable-CwcJW6qL.js",
+    "scene174-wgsl-helpers-CwHFFXvt.js",
+    "scene174.js"
+  ]
+}

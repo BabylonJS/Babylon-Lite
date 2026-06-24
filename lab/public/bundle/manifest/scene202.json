@@ -1,0 +1,13 @@
+{
+  "rawKB": 49.3,
+  "gzipKB": 20,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene202-_mat4-storage-f64-Cxw5KwUZ.js",
+    "scene202-floating-origin-BG1gyRgj.js",
+    "scene202-pack-mat4-with-offset-BS-Lz8k7.js",
+    "scene202-standard-renderable-C6pqEWwQ.js",
+    "scene202-wgsl-helpers-CwHFFXvt.js",
+    "scene202.js"
+  ]
+}

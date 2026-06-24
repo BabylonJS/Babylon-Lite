@@ -29,9 +29,11 @@ reference/**/final-ours.png
 reference/**/*-capture.json
 reference/**/diff*.png
 reference/**/debug-*.png
-lab/public/bundle/
-!lab/public/bundle/manifest.json
+lab/public/bundle/*
+!lab/public/bundle/manifest/
 !lab/public/bundle/demos-manifest.json
+lab/public/bundle/manifest/*
+!lab/public/bundle/manifest/*.json
 lab/public/bundle-baseline/
 lab/bundle-baseline-scene*.html
 lab/lite/bundle-baseline-scene*.html

@@ -1,0 +1,16 @@
+{
+  "rawKB": 72.9,
+  "gzipKB": 30.4,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene6-background-dds-skybox-i2gF1l8F.js",
+    "scene6-background-ground-C0q6rWk5.js",
+    "scene6-cubemap-skybox-material-VKHB2CT9.js",
+    "scene6-ibl-fragment-CeRrvT96.js",
+    "scene6-pbr-renderable-BIlUSx8l.js",
+    "scene6-rgbd-decode-DltNvrvh.js",
+    "scene6-scene-uniforms-FTYH6Ct0.js",
+    "scene6-wgsl-helpers-CkUi9P9Q.js",
+    "scene6.js"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "rawKB": 60.6,
+  "gzipKB": 24.3,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene18-generate-mipmaps-CORvzSVx.js",
+    "scene18-material-view-Dua1bl7W.js",
+    "scene18-no-color-view-DPM4VP7h.js",
+    "scene18-shadow-task-t_t6oLxe.js",
+    "scene18-standard-renderable-M2ivaWTL.js",
+    "scene18-std-shadow-fragment-pwyXRo4i.js",
+    "scene18-wgsl-helpers-CwHFFXvt.js",
+    "scene18.js"
+  ]
+}

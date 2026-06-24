@@ -1,0 +1,18 @@
+{
+  "rawKB": 85.8,
+  "gzipKB": 35.6,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene17-generate-mipmaps-DdI_QVIx.js",
+    "scene17-ibl-fragment-CeRrvT96.js",
+    "scene17-pbr-renderable-CDuISd9d.js",
+    "scene17-rgbd-decode-aydmE8bD.js",
+    "scene17-shader-composer-Bga-tI-0.js",
+    "scene17-singlelight-hemispheric-wgsl-DXh7-K43.js",
+    "scene17-standard-renderable-DhjJVqDv.js",
+    "scene17-thin-instance-fragment-CBn2miAC.js",
+    "scene17-thin-instance-gpu-BthweFeQ.js",
+    "scene17-wgsl-helpers-CwHFFXvt.js",
+    "scene17.js"
+  ]
+}

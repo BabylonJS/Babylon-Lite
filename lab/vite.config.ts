@@ -229,6 +229,38 @@ function serveReferenceImages(): Plugin {
                         return;
                     }
                 }
+                // Serve the generated aggregate bundle manifest. The tracked source of
+                // truth is one file per scene under public/bundle/manifest/; the single
+                // aggregate manifest.json is a (gitignored) build output. On a fresh
+                // checkout it hasn't been built yet, so synthesize it on the fly from the
+                // per-scene files so the Bundle tab is populated without a full build.
+                if (url === "/bundle/manifest.json") {
+                    const aggregatePath = resolve(__dirname, "public/bundle/manifest.json");
+                    if (existsSync(aggregatePath) && statSync(aggregatePath).isFile()) {
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        createReadStream(aggregatePath).pipe(res);
+                        return;
+                    }
+                    const perSceneDir = resolve(__dirname, "public/bundle/manifest");
+                    if (existsSync(perSceneDir)) {
+                        const files = readdirSync(perSceneDir)
+                            .filter((f) => f.endsWith(".json"))
+                            .sort((a, b) => (parseInt(a.replace(/\D/g, ""), 10) || 0) - (parseInt(b.replace(/\D/g, ""), 10) || 0));
+                        const manifest: Record<string, unknown> = {};
+                        for (const file of files) {
+                            try {
+                                manifest[file.slice(0, -".json".length)] = JSON.parse(readFileSync(resolve(perSceneDir, file), "utf-8"));
+                            } catch {
+                                /* skip malformed per-scene file */
+                            }
+                        }
+                        res.setHeader("Content-Type", "application/json");
+                        res.setHeader("Cache-Control", "no-cache");
+                        res.end(JSON.stringify(manifest));
+                        return;
+                    }
+                }
                 // Serve pre-built bundle JS (scenes + demos) directly from lab/public/bundle.
                 // Vite caches the public-file list at startup and never refreshes it for paths
                 // matching `server.watch.ignored` (which includes **/public/bundle/**). So any
@@ -317,7 +349,23 @@ function serveReferenceImages(): Plugin {
                             return null;
                         }
                     };
-                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json"));
+                    // Newest mtime across the tracked per-scene manifest files, used as a
+                    // fallback when the generated aggregate manifest.json isn't built yet.
+                    const dirNewestMtime = (dir: string): number | null => {
+                        try {
+                            if (!existsSync(dir)) return null;
+                            let newest: number | null = null;
+                            for (const file of readdirSync(dir)) {
+                                if (!file.endsWith(".json")) continue;
+                                const m = mtime(resolve(dir, file));
+                                if (m != null && (newest == null || m > newest)) newest = m;
+                            }
+                            return newest;
+                        } catch {
+                            return null;
+                        }
+                    };
+                    sig.bundle = mtime(resolve(__dirname, "public/bundle/manifest.json")) ?? dirNewestMtime(resolve(__dirname, "public/bundle/manifest"));
                     sig.bundleMaster = mtime(resolve(__dirname, "public/bundle/master-manifest.json"));
                     sig.perf = mtime(resolve(__dirname, "public/perf-manifest.json"));
                     try {

@@ -1,0 +1,31 @@
+{
+  "rawKB": 70.3,
+  "gzipKB": 33.2,
+  "ignoredRawKB": 11.4,
+  "runtimeChunks": [
+    "scene83-_math-factory-DFVyS8gB.js",
+    "scene83-add-block-UCPu1UI3.js",
+    "scene83-ambient-occlusion-block-CsWCvd0D.js",
+    "scene83-color-merger-0HZ9FICW.js",
+    "scene83-derivative-block-CJk1WuGL.js",
+    "scene83-fragment-output-CfRmfbPv.js",
+    "scene83-generate-mipmaps-B34mqnUx.js",
+    "scene83-height-to-normal-block-CQM_Hw2Y.js",
+    "scene83-image-source-Bl5Ls-FU.js",
+    "scene83-input-block-PzznsC_q.js",
+    "scene83-light-block-BI8u6d_3.js",
+    "scene83-multiply-block-G4bDy_QN.js",
+    "scene83-node-renderable-BRWJEZYD.js",
+    "scene83-normal-blend-block-BVPL4brK.js",
+    "scene83-perturb-normal-Bqx-TYaB.js",
+    "scene83-scale-block-6qtIvFiz.js",
+    "scene83-tbn-block-BXQIIlg4.js",
+    "scene83-texture-block-qpJiHpPr.js",
+    "scene83-transform-block-EAeL1dVS.js",
+    "scene83-trigonometry-block-CB8Kv2Ma.js",
+    "scene83-vector-merger-YcC3xFyg.js",
+    "scene83-vector-splitter-BMf4DQi8.js",
+    "scene83-vertex-output-C7G5u6Y0.js",
+    "scene83.js"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "rawKB": 90.5,
+  "gzipKB": 36.1,
+  "ignoredRawKB": 13.3,
+  "runtimeChunks": [
+    "scene69-_math-factory-DFVyS8gB.js",
+    "scene69-clearcoat-block-BPLkmxQ1.js",
+    "scene69-fragment-output-CfRmfbPv.js",
+    "scene69-input-block-DlAP62bA.js",
+    "scene69-node-env-CLyiyONV.js",
+    "scene69-node-registry-C4wezeMX.js",
+    "scene69-node-renderable-_qBfcMle.js",
+    "scene69-pbr-metallic-roughness-block-full-DTeJOcfz.js",
+    "scene69-reflection-block-CIXuH-z0.js",
+    "scene69-rgbd-decode-Buimsxf_.js",
+    "scene69-sheen-block-DPtS9jU8.js",
+    "scene69-transform-block-9HPeqD3I.js",
+    "scene69-vertex-output-C7G5u6Y0.js",
+    "scene69.js"
+  ]
+}

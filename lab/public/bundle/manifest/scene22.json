@@ -1,0 +1,20 @@
+{
+  "rawKB": 97.6,
+  "gzipKB": 39.3,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene22-esm-shadow-view-BpdnPOo5.js",
+    "scene22-generate-mipmaps-lVgsOxSX.js",
+    "scene22-material-view-Dua1bl7W.js",
+    "scene22-multilight-wgsl-CMCDx0s-.js",
+    "scene22-no-color-view-01ao4R7m.js",
+    "scene22-pbr-renderable-CRTgVmTn.js",
+    "scene22-pbr-shadow-fragment-CSEDArnD.js",
+    "scene22-shader-composer-Bga-tI-0.js",
+    "scene22-shadow-fragment-core-Dbe1xNkt.js",
+    "scene22-shadow-task-Yvrdp5XB.js",
+    "scene22-standard-renderable-DFYGplzb.js",
+    "scene22-wgsl-helpers-CwHFFXvt.js",
+    "scene22.js"
+  ]
+}
