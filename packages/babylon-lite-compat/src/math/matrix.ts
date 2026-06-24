@@ -111,7 +111,12 @@ export class Matrix {
         sc.y = Math.sqrt(m[4]! * m[4]! + m[5]! * m[5]! + m[6]! * m[6]!);
         sc.z = Math.sqrt(m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!);
 
-        if (this.determinant() <= 0) {
+        // The handedness flip only depends on the 3x3 rotation/scale submatrix;
+        // translation (row 3) does not affect the determinant sign. A strict
+        // `< 0` check leaves singular matrices (det exactly 0) untouched rather
+        // than applying an arbitrary `scale.y` mirror.
+        const det3 = m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) - m[1]! * (m[4]! * m[10]! - m[6]! * m[8]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!);
+        if (det3 < 0) {
             sc.y *= -1;
         }
 
@@ -126,8 +131,26 @@ export class Matrix {
             const sx = 1 / sc.x;
             const sy = 1 / sc.y;
             const sz = 1 / sc.z;
-            const rotMat = Matrix.FromValues(m[0]! * sx, m[1]! * sx, m[2]! * sx, 0, m[4]! * sy, m[5]! * sy, m[6]! * sy, 0, m[8]! * sz, m[9]! * sz, m[10]! * sz, 0, 0, 0, 0, 1);
-            Quaternion.FromRotationMatrixToRef(rotMat, rotation);
+            // Reuse a scratch matrix to avoid allocating per decompose() call,
+            // which is typically invoked per-node per-frame.
+            const r = (decomposeRotationScratch ??= new Matrix()).m;
+            r[0] = m[0]! * sx;
+            r[1] = m[1]! * sx;
+            r[2] = m[2]! * sx;
+            r[3] = 0;
+            r[4] = m[4]! * sy;
+            r[5] = m[5]! * sy;
+            r[6] = m[6]! * sy;
+            r[7] = 0;
+            r[8] = m[8]! * sz;
+            r[9] = m[9]! * sz;
+            r[10] = m[10]! * sz;
+            r[11] = 0;
+            r[12] = 0;
+            r[13] = 0;
+            r[14] = 0;
+            r[15] = 1;
+            Quaternion.FromRotationMatrixToRef(decomposeRotationScratch!, rotation);
         }
 
         return true;
@@ -284,6 +307,8 @@ export class Matrix {
         return this;
     }
 }
+
+let decomposeRotationScratch: Matrix | null = null;
 
 type Mat16 = [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number];
 

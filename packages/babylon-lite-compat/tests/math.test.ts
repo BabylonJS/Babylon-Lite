@@ -201,12 +201,18 @@ describe("Matrix", () => {
         expect(outScale.y).toBeCloseTo(3, 5);
         expect(outScale.z).toBeCloseTo(4, 5);
         expect(outTrans.asArray()).toEqual([7, -2, 11]);
-        // Quaternion sign can flip; compare the rotation effect on a basis vector.
-        const fromOut = Vector3.TransformNormal(new Vector3(1, 0, 0), Matrix.Compose(new Vector3(1, 1, 1), outRot, new Vector3()));
-        const fromRef = Vector3.TransformNormal(new Vector3(1, 0, 0), Matrix.Compose(new Vector3(1, 1, 1), rotation, new Vector3()));
-        expect(fromOut.x).toBeCloseTo(fromRef.x, 5);
-        expect(fromOut.y).toBeCloseTo(fromRef.y, 5);
-        expect(fromOut.z).toBeCloseTo(fromRef.z, 5);
+        // Quaternion sign can flip; compare the rotation effect on two
+        // non-collinear basis vectors so an incorrect rotation about any axis is
+        // caught (a single basis vector misses errors about that same axis).
+        const rotOut = Matrix.Compose(new Vector3(1, 1, 1), outRot, new Vector3());
+        const rotRef = Matrix.Compose(new Vector3(1, 1, 1), rotation, new Vector3());
+        for (const basis of [new Vector3(1, 0, 0), new Vector3(0, 1, 0)]) {
+            const fromOut = Vector3.TransformNormal(basis, rotOut);
+            const fromRef = Vector3.TransformNormal(basis, rotRef);
+            expect(fromOut.x).toBeCloseTo(fromRef.x, 5);
+            expect(fromOut.y).toBeCloseTo(fromRef.y, 5);
+            expect(fromOut.z).toBeCloseTo(fromRef.z, 5);
+        }
     });
 
     it("returns false from decompose when a scale axis collapses to zero", () => {
@@ -241,8 +247,11 @@ describe("Quaternion", () => {
         const src = Quaternion.RotationYawPitchRoll(0.4, -0.6, 1.1).normalize();
         const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
         const back = Quaternion.FromRotationMatrix(rotMat);
-        // Quaternions q and -q represent the same rotation; align signs before comparing.
-        const sign = back.w * src.w < 0 ? -1 : 1;
+        // Quaternions q and -q represent the same rotation; align signs using
+        // the full 4-component dot product (relying on `w` alone misbehaves when
+        // `w` is near 0).
+        const dot = back.x * src.x + back.y * src.y + back.z * src.z + back.w * src.w;
+        const sign = dot < 0 ? -1 : 1;
         expect(back.x * sign).toBeCloseTo(src.x, 5);
         expect(back.y * sign).toBeCloseTo(src.y, 5);
         expect(back.z * sign).toBeCloseTo(src.z, 5);
