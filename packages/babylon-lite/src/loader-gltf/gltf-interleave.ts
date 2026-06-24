@@ -164,6 +164,32 @@ function resolveColorVec4(json: any, binChunk: DataView, idx: number): Float32Ar
     return out;
 }
 
+/** Resolve TEXCOORD_0/_1 to a tight float32 VEC2 [0,1] buffer. glTF UVs may be
+ *  FLOAT or normalized UNSIGNED_BYTE/SHORT, and (here) interleaved with a
+ *  byteStride. The pipeline binds UVs as float32x2, so an integer/strided source
+ *  read raw misaligns every vertex (garbage UVs → wrong texturing). This
+ *  normalizes integer types to [0,1] and de-strides — mirroring the tight path's
+ *  normalizeUvToVec2. Reads relative to `binChunk`. */
+function resolveUvVec2(json: any, binChunk: DataView, idx: number): Float32Array {
+    const accessor = json.accessors[idx];
+    const ct = accessor.componentType;
+    const cb = COMP_BYTES[ct] ?? 4;
+    const bv = json.bufferViews[accessor.bufferView];
+    const stride = bv.byteStride ?? 2 * cb;
+    const inv = ct === UNSIGNED_BYTE ? 1 / 255 : ct === UNSIGNED_SHORT ? 1 / 65535 : 1;
+    const base = (bv.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+    const out = new F32(accessor.count * 2);
+    for (let v = 0; v < accessor.count; v++) {
+        const row = base + v * stride;
+        for (let c = 0; c < 2; c++) {
+            const off = row + c * cb;
+            const raw = ct === FLOAT ? binChunk.getFloat32(off, true) : ct === UNSIGNED_SHORT ? binChunk.getUint16(off, true) : binChunk.getUint8(off);
+            out[v * 2 + c] = raw * inv;
+        }
+    }
+    return out;
+}
+
 /** Build a mesh-data partial for a primitive, but ONLY if it actually sources
  *  ≥1 attribute from an interleaved (strided) bufferView. Returns `undefined`
  *  for fully-tight primitives so the caller falls back to its tight path.
@@ -218,7 +244,13 @@ export function buildInterleavedPartial(json: any, binChunk: DataView, primitive
     vertexCount = pos._count;
     const nrm = resolveOne("NORMAL", false);
     vb._n = nrm._il;
-    const uv = resolveOne("TEXCOORD_0", false);
+    // A normalized UNSIGNED_BYTE/SHORT TEXCOORD_0 is materialized as a tight float32x2 [0,1] buffer
+    // (never bound strided), so integer UVs don't misalign against the float32x2 vertex layout.
+    const uvIdx = attrs["TEXCOORD_0"];
+    const uv: { _tight: Float32Array | null; _il?: AccessorInterleave; _count: number } =
+        uvIdx !== undefined && json.accessors[uvIdx].componentType !== FLOAT
+            ? { _tight: resolveUvVec2(json, binChunk, uvIdx), _count: json.accessors[uvIdx].count }
+            : resolveOne("TEXCOORD_0", false);
     vb._u = uv._il;
     const tan = resolveOne("TANGENT", true);
     vb._t = tan._il;

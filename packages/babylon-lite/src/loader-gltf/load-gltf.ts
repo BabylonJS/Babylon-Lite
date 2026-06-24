@@ -403,6 +403,20 @@ async function extractAllMeshes(
             // (the runtime caches the module, so the per-primitive import() resolves instantly).
             const colors = colorData ? (await importColorNormalize()).normalizeColorToVec4(colorData._data, colorData._count, colorData._componentCount) : null;
 
+            // TEXCOORD_0/_1 may be FLOAT or a normalized UNSIGNED_BYTE/SHORT accessor; the vertex
+            // pipeline binds UVs as float32x2, so integer UVs are denormalized to [0,1] (reusing the
+            // lazily-imported color/UV normalizer). Float UVs (the common case) pass through untouched.
+            const uvs = uvData
+                ? uvData._data instanceof F32
+                    ? (uvData._data as Float32Array)
+                    : (await importColorNormalize()).normalizeUvToVec2(uvData._data, uvData._count)
+                : new F32(posData._count * 2);
+            const uv2s = uv2Data
+                ? uv2Data._data instanceof F32
+                    ? (uv2Data._data as Float32Array)
+                    : (await importColorNormalize()).normalizeUvToVec2(uv2Data._data, uv2Data._count)
+                : null;
+
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
                 ? idxData._data instanceof U32
@@ -423,8 +437,8 @@ async function extractAllMeshes(
                 _positions: posData._data as Float32Array,
                 _normals: normals,
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
-                _uvs: uvData ? (uvData._data as Float32Array) : new F32(posData._count * 2),
-                _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
+                _uvs: uvs,
+                _uv2s: uv2s,
                 _colors: colors,
                 _flatNormal: !normData,
                 _indices: indices,

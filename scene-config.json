@@ -2160,5 +2160,16 @@
         "description": "glTF Node_NegativeScale_01: two textured shapes, one mirrored via a negative-determinant matrix. Validates triangle-winding reversal for negative-determinant world transforms (glTF-Asset-Generator Category D); Lite previously culled the wrong faces on the mirrored copy.",
         "tags": ["gltf", "transform"],
         "skipPerf": true
+    },
+    {
+        "id": 258,
+        "slug": "scene258-interleaved-uv",
+        "name": "Scene 258 — Interleaved UV",
+        "maxMad": 0.1,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 82.7,
+        "description": "glTF Buffer_Interleaved_03: a textured plane whose POSITION/COLOR_0/TEXCOORD_0 are interleaved, with TEXCOORD_0 a normalized UNSIGNED_BYTE accessor. Validates denormalization of non-float UVs on the tight and interleaved loader paths (glTF-Asset-Generator Category E); Lite previously garbled the UVs and mis-mapped the texture.",
+        "tags": ["gltf", "interleaved"],
+        "skipPerf": true
     }
 ]
