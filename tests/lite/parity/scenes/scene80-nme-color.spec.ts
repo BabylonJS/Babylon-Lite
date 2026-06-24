@@ -12,7 +12,7 @@ test("Scene 80 — NME color operation blocks match Babylon.js reference", async
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 80 });
 
-    await page.goto("/scene80.html");
+    await page.goto("scene80.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

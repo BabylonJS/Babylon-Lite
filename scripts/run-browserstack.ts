@@ -16,6 +16,15 @@ const args = process.argv.slice(2).join(" ");
 // Tell the SDK where to find browserstack.yml (not at root).
 process.env.BROWSERSTACK_CONFIG_FILE = resolve(__dirname, "../config/browserstack.yml");
 
+// Drive the Local tunnel (browserstack.yml `browserstackLocal: ${BROWSERSTACK_LOCAL}`).
+// When parity runs against a public static site (PARITY_BASE_URL set), the remote
+// browser loads pages over the public internet and scene assets come from public
+// CDNs, so no tunnel is needed. Otherwise tests hit a local dev server and the
+// tunnel is required. Respect an explicit BROWSERSTACK_LOCAL if the caller set one.
+if (process.env.BROWSERSTACK_LOCAL == null) {
+    process.env.BROWSERSTACK_LOCAL = process.env.PARITY_BASE_URL ? "false" : "true";
+}
+
 if (!process.env.BROWSERSTACK_BUILD_NAME) {
     if (args.includes("perf-cloud")) {
         process.env.BROWSERSTACK_BUILD_NAME = "Babylon-Lite Perf";

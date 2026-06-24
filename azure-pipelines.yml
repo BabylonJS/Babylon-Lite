@@ -398,14 +398,32 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
-                # Run parity tests via BrowserStack (macOS Chrome with real WebGPU)
-                # browserstack-node-sdk handles connection & local tunnel
-                # Requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY
-                # from the BabylonJS-BrowserStack variable group
+                # Build a self-contained static parity site (scene pages with
+                # bundled JS). Deployed to a build-isolated public path so the
+                # remote BrowserStack browser can load pages directly — no Local
+                # tunnel, removing the dominant source of parity-run variance.
+                - script: pnpm build:lab-site
+                  displayName: "Build static parity site"
+                  env:
+                      LAB_BASE_PATH: "/lite/$(Build.BuildNumber)/parity-lab/"
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(System.DefaultWorkingDirectory)/lab/dist
+                      deployPath: lite/$(Build.BuildNumber)/parity-lab
+                      siteName: "Parity"
+                      postComment: false
+
+                # Run parity tests via BrowserStack (macOS Chrome with real WebGPU).
+                # PARITY_BASE_URL points the remote browser at the public static
+                # site above; the runner then disables the Local tunnel. Requires
+                # BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY from the
+                # BabylonJS-BrowserStack variable group.
                 - script: pnpm test:parity-cloud
                   displayName: "Run parity tests (BrowserStack)"
                   env:
                       HEADLESS: "true"
+                      PARITY_BASE_URL: "$(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/parity-lab/lite/"
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
 

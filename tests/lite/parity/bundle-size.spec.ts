@@ -85,7 +85,7 @@ for (const scene of SCENES) {
         page.on("response", onResponse);
 
         // Navigate to the bundle page and wait for the scene to finish rendering
-        await page.goto(`/bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
+        await page.goto(`bundle-scene${scene.id}.html`, { waitUntil: "domcontentloaded" });
         let readyTimedOut = false;
         try {
             await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", undefined, { timeout: 20_000 });

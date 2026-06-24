@@ -22,7 +22,7 @@ test("Scene 174 — Navigation Off-Mesh Connections matches Babylon.js reference
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 174, queryParams: "freeze=1", timeout: 180_000 });
 
-    await page.goto(`/scene174.html?freeze=1`);
+    await page.goto(`scene174.html?freeze=1`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

@@ -89,7 +89,7 @@ test("Scene 224 — Bounding Box Gizmo matches Babylon.js reference (determinist
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
         const bjsPage = await ctx.newPage();
-        await bjsPage.goto("/babylon-ref-scene224.html?nocam=1");
+        await bjsPage.goto("babylon-ref-scene224.html?nocam=1");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
         await bjsPage.waitForTimeout(500);
@@ -103,7 +103,7 @@ test("Scene 224 — Bounding Box Gizmo matches Babylon.js reference (determinist
         await ctx.close();
     }
 
-    await page.goto("/scene224.html?nocam=1");
+    await page.goto("scene224.html?nocam=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
     await applyPose(page);

@@ -18,7 +18,7 @@ test("Scene 229 — non-indexed glTF triangle matches Babylon.js reference", asy
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 229 });
 
-    await page.goto("/scene229.html");
+    await page.goto("scene229.html");
     await waitForCanvasReady(page, { timeout: 60_000, label: "Scene 229 Lite" });
     await page.waitForTimeout(500);
 

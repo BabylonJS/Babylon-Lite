@@ -13,7 +13,7 @@ test("Scene 155 — manual weighted animation blend matches Babylon.js reference
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 155, seekTime: SEEK_TIME, timeout: 60_000, settleMs: 500 });
 
-    await page.goto(`/scene155.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene155.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

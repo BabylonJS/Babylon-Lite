@@ -22,7 +22,7 @@ test("Scene 173 — Navigation Dynamic Obstacles matches Babylon.js reference", 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 173, queryParams: "freeze=1", timeout: 180_000 });
 
-    await page.goto(`/scene173.html?freeze=1`);
+    await page.goto(`scene173.html?freeze=1`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

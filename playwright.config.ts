@@ -35,6 +35,11 @@ export default defineConfig({
     retries: 2,
     workers: 2,
     use: {
+        // Scene specs navigate with baseURL-relative paths (e.g. "scene1.html")
+        // so the same specs work locally and against a path-prefixed public host
+        // (see config/playwright.parity-cloud.config.ts). Relative goto() requires
+        // a baseURL, so define it here for local/CI Chrome runs.
+        baseURL: `http://localhost:${labTestPort}/`,
         channel: "chrome",
         headless,
         viewport: { width: 1280, height: 720 },

@@ -29,7 +29,7 @@ test("Scene 16 — GPU culling renders identically to non-culled golden", async 
     // Golden is scene16's (shared); capture if missing.
     await captureGolden(browser, { sceneId: 16 });
 
-    await page.goto("/scene16.html?culling");
+    await page.goto("scene16.html?culling");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

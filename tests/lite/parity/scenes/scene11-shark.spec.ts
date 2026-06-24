@@ -24,7 +24,7 @@ test("Scene 11 — Shark GLB matches Babylon.js reference", async ({ page }, tes
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 11, seekTime: 1.91, timeout: 120_000 });
 
-    await page.goto(`/scene11.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene11.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);

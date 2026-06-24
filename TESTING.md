@@ -95,6 +95,11 @@ pnpm build:bundle-scenes
 pnpm test:parity-cloud
 ```
 
+In CI, parity pages are served from a public, build-isolated static site
+(`pnpm build:lab-site` + upload) and the remote browser loads them directly via
+`PARITY_BASE_URL` — no Local tunnel. Without `PARITY_BASE_URL` (e.g. running
+locally), a Vite dev server is started and reached through the Local tunnel.
+
 ### Golden References
 
 Golden images are committed in `reference/lite/` and compared against Lite renders.
@@ -226,7 +231,13 @@ pnpm test:bundle-size
 | Platform          | macOS Sonoma                         |
 | Browser           | Chrome latest                        |
 | Parallel sessions | 1                                    |
-| Local tunnel      | Enabled (tests hit `localhost:5174`) |
+| Local tunnel      | Conditional (see below)              |
+
+**Local tunnel:** Driven by `browserstackLocal: ${BROWSERSTACK_LOCAL}`, which
+`scripts/run-browserstack.ts` sets automatically. When `PARITY_BASE_URL` is set
+(CI parity), the remote browser loads pages from a public static site and assets
+come from public CDNs, so the tunnel is disabled. Otherwise it defaults to
+enabled so a local dev server (`localhost:5174`) is reachable.
 
 Credentials are read from environment variables:
 

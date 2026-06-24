@@ -12,7 +12,7 @@ test("Scene 90 — CSG operations match Babylon.js reference", async ({ page }, 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 90, timeout: 90_000, settleMs: 1000 });
 
-    await page.goto("/scene90.html");
+    await page.goto("scene90.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

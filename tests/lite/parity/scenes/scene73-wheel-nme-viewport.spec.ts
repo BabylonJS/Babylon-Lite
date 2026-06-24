@@ -13,7 +13,7 @@ test("Scene 73 — CarbonFiberWheel PBR vs NME viewports matches Babylon.js refe
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 73, force: true, timeout: 60_000, settleMs: 1500 });
 
-    await page.goto("/scene73.html");
+    await page.goto("scene73.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

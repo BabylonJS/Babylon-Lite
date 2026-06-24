@@ -22,7 +22,7 @@ test("Scene 7 — ChibiRex Animated matches Babylon.js reference", async ({ page
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 7, seekTime: 2, timeout: 120_000 });
 
-    await page.goto("/scene7.html?seekTime=2");
+    await page.goto("scene7.html?seekTime=2");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(200);

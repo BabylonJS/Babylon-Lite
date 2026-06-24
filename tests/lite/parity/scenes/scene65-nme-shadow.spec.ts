@@ -20,7 +20,7 @@ test("Scene 65 — NME shadow receive matches Babylon.js reference", async ({ pa
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 65 });
 
-    await page.goto("/scene65.html");
+    await page.goto("scene65.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

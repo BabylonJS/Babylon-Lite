@@ -13,7 +13,7 @@ test("Scene 153 - autonomous AnimationManager runs without a Lite scene", async 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 153, seekTime: SEEK_TIME, timeout: 60_000, settleMs: 100 });
 
-    await page.goto(`/scene153.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene153.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(100);
@@ -29,7 +29,7 @@ test("Scene 153 - autonomous AnimationManager runs without a Lite scene", async 
 });
 
 test("Scene 153 - autonomous AnimationManager advances on its own RAF loop", async ({ page }) => {
-    await page.goto("/scene153.html");
+    await page.goto("scene153.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
 
     const first = await page.locator("canvas").evaluate((canvas) => Number((canvas as HTMLCanvasElement).dataset.animatedX));
@@ -40,7 +40,7 @@ test("Scene 153 - autonomous AnimationManager advances on its own RAF loop", asy
 });
 
 test("Scene 153 - Babylon.js reference advances automatically", async ({ page }) => {
-    await page.goto("/babylon-ref-scene153.html");
+    await page.goto("babylon-ref-scene153.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
 
     const first = await page.locator("canvas").evaluate((canvas) => Number((canvas as HTMLCanvasElement).dataset.animatedX));

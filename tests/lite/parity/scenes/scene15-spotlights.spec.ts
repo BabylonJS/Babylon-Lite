@@ -21,7 +21,7 @@ test("Scene 15 — SpotLights + Ground matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 15 });
 
-    await page.goto("/scene15.html");
+    await page.goto("scene15.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

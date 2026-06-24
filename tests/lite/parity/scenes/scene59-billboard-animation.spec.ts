@@ -10,7 +10,7 @@ const SEEK_TIME = 0.72;
 test.skip(!!sceneConfig.skipParity, "Scene 59 skipped via skipParity in scene-config.json");
 
 test("Scene 59 — billboard sprite animation matches Babylon.js reference", async ({ page }, testInfo) => {
-    await page.goto(`/scene59.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene59.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

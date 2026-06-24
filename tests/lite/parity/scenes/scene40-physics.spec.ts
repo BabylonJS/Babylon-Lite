@@ -25,7 +25,7 @@ async function captureBjsReference(browser: Browser): Promise<string> {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await context.newPage();
 
-    await bjsPage.goto(`/babylon-ref-scene40.html${CAPTURE_QUERY}`);
+    await bjsPage.goto(`babylon-ref-scene40.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 40 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 40 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
     await bjsPage.locator("canvas").screenshot({ path: LIVE_REF });
@@ -39,7 +39,7 @@ test("Scene 40 — Physics matches Babylon.js reference", async ({ page }) => {
     const browser = page.context().browser()!;
     const referencePath = await captureBjsReference(browser);
 
-    await page.goto(`/scene40.html${CAPTURE_QUERY}`);
+    await page.goto(`scene40.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(page, { timeout: 50_000, label: "Scene 40 Lite" });
     await waitForCanvasReady(page, { timeout: 50_000, label: `Scene 40 Lite at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
 

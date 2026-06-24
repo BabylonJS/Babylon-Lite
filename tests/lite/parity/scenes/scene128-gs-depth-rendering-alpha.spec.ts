@@ -14,7 +14,7 @@ test("Scene 128 — GS alpha-blended depth rendering matches Babylon.js referenc
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 128, timeout: 150_000, settleMs: 800 });
 
-    await page.goto("/scene128.html");
+    await page.goto("scene128.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 150_000 });
     await page.waitForFunction(() => !document.getElementById("loader-overlay"), { timeout: 5_000 }).catch(() => undefined);
     await page.waitForTimeout(500);

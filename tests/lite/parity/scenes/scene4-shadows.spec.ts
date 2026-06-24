@@ -23,7 +23,7 @@ test("Scene 4 — Shadows matches Babylon.js reference", async ({ page }, testIn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 4 });
 
-    await page.goto("/scene4.html");
+    await page.goto("scene4.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

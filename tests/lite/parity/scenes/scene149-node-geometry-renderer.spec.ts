@@ -14,7 +14,7 @@ test("Scene 149 — node-material geometry renderer task matches Babylon.js refe
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 149, timeout: 120_000, settleMs: 5_000 });
 
-    await page.goto("/scene149.html");
+    await page.goto("scene149.html");
     await waitForCanvasReady(page, { timeout: 120_000, label: "Scene 149 Lite" });
     await page.waitForTimeout(500);
 

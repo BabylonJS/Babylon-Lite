@@ -19,7 +19,7 @@ test("Scene 114 — Morph/Skeleton Picking matches Babylon.js reference", async 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 114, timeout: 90_000, settleMs: 1_000 });
 
-    await page.goto("/scene114.html");
+    await page.goto("scene114.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 90_000 });
     await page.waitForTimeout(500);
 

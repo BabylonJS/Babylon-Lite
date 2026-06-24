@@ -18,7 +18,7 @@ test("Scene 70 — NME PBR Anisotropy matches Babylon.js reference", async ({ pa
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 70 });
 
-    await page.goto("/scene70.html");
+    await page.goto("scene70.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

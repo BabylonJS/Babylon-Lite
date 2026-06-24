@@ -23,7 +23,7 @@ test("Scene 97 — sprite multiply blend matches Babylon.js reference", async ({
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 97, settleMs: 500 });
 
-    await page.goto("/scene97.html");
+    await page.goto("scene97.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

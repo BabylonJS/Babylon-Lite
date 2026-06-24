@@ -133,7 +133,7 @@ test("Scene 221 — Rotation gizmo camembert visible mid-drag", async ({ page },
     if (!fs.existsSync(ROTATION_GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
         const bjsPage = await ctx.newPage();
-        await bjsPage.goto("/babylon-ref-scene221.html");
+        await bjsPage.goto("babylon-ref-scene221.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
         await bjsPage.waitForTimeout(500);
@@ -144,7 +144,7 @@ test("Scene 221 — Rotation gizmo camembert visible mid-drag", async ({ page },
         await ctx.close();
     }
 
-    await page.goto("/scene221.html");
+    await page.goto("scene221.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
     await performRotationMidDrag(page);
@@ -171,7 +171,7 @@ test("Scene 221 — Pointer Drags matches Babylon.js reference (post scripted dr
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
         const bjsPage = await ctx.newPage();
-        await bjsPage.goto("/babylon-ref-scene221.html");
+        await bjsPage.goto("babylon-ref-scene221.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
         await bjsPage.waitForTimeout(500);
@@ -184,7 +184,7 @@ test("Scene 221 — Pointer Drags matches Babylon.js reference (post scripted dr
     }
 
     // ── Drive Lite through the same drag set and capture ──
-    await page.goto("/scene221.html");
+    await page.goto("scene221.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
     const before = await readCubeSnapshot(page);

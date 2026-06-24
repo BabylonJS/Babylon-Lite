@@ -15,7 +15,7 @@ test("Scene 152 — unified AnimationManager drives glTF and manual groups", asy
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 152, seekTime: SEEK_TIME, timeout: 120_000 });
 
-    await page.goto(`/scene152.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene152.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
@@ -33,7 +33,7 @@ test("Scene 152 — unified AnimationManager drives glTF and manual groups", asy
 test("Scene 152 — Babylon.js reference advances glTF and camera animations live", async ({ page }) => {
     test.setTimeout(120_000);
 
-    await page.goto("/babylon-ref-scene152.html");
+    await page.goto("babylon-ref-scene152.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
 
     const first = await page.locator("canvas").evaluate((canvas) => ({

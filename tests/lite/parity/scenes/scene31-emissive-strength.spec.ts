@@ -19,7 +19,7 @@ test("Scene 31 — KHR_materials_emissive_strength matches Babylon.js reference"
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 31 });
 
-    await page.goto("/scene31.html");
+    await page.goto("scene31.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

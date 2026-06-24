@@ -28,7 +28,7 @@ test("Scene 219 — per-instance VAT shark matches Babylon.js live-skeleton refe
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 219, seekTime: Number(SEEK_TIME), timeout: 180_000 });
 
-    await page.goto(`/scene219.html?seekTime=${SEEK_TIME}`);
+    await page.goto(`scene219.html?seekTime=${SEEK_TIME}`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);

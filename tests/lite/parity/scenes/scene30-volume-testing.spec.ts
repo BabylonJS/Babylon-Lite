@@ -19,7 +19,7 @@ test("Scene 30 — KHR_materials_volume_testing matches Babylon.js reference", a
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 30 });
 
-    await page.goto("/scene30.html");
+    await page.goto("scene30.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

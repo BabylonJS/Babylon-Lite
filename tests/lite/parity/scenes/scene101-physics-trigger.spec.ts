@@ -28,7 +28,7 @@ async function captureBjsData(browser: Browser): Promise<{ entered: string | und
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await context.newPage();
 
-    await bjsPage.goto(`/babylon-ref-scene101.html${CAPTURE_QUERY}`);
+    await bjsPage.goto(`babylon-ref-scene101.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: "Scene 101 BJS reference" });
     await waitForCanvasReady(bjsPage, { timeout: 50_000, label: `Scene 101 BJS reference at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
 
@@ -49,7 +49,7 @@ test("Scene 101 — Physics trigger volume matches Babylon.js reference", async 
     expect(bjs.entered, "BJS TRIGGER_ENTERED should have fired").toBe("true");
     expect(bjs.exited, "BJS TRIGGER_EXITED should have fired").toBe("true");
 
-    await page.goto(`/scene101.html${CAPTURE_QUERY}`);
+    await page.goto(`scene101.html${CAPTURE_QUERY}`);
     await waitForCanvasReady(page, { timeout: 50_000, label: "Scene 101 Lite" });
     await waitForCanvasReady(page, { timeout: 50_000, label: `Scene 101 Lite at frame ${CAPTURE_FRAME}`, flag: "captureReady", pollMs: 100 });
 

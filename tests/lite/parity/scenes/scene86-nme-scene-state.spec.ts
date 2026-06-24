@@ -12,7 +12,7 @@ test("Scene 86 — NME scene/mesh state blocks match Babylon.js reference", asyn
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 86 });
 
-    await page.goto("/scene86.html");
+    await page.goto("scene86.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

@@ -320,7 +320,7 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const bjsPage = await context.newPage();
     const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
-    await bjsPage.goto(`/babylon-ref-scene${opts.sceneId}.html${urlParams}`);
+    await bjsPage.goto(`babylon-ref-scene${opts.sceneId}.html${urlParams}`);
 
     // Wait for the BJS reference scene to signal ready (or surface its error).
     await waitForCanvasReady(bjsPage, { timeout, label: `captureGolden: BJS reference scene ${opts.sceneId}` });

@@ -14,7 +14,7 @@ test("Scene 148 — Depth of Field post-process matches Babylon.js reference", a
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 148, timeout: 120_000, settleMs: 5_000 });
 
-    await page.goto("/scene148.html");
+    await page.goto("scene148.html");
     await waitForCanvasReady(page, { timeout: 120_000, label: "Scene 148 Lite" });
     await page.waitForTimeout(500);
 

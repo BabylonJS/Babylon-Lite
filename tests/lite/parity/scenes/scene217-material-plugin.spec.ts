@@ -17,7 +17,7 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 217 skipped via skipParity in scene-config.json");
 
 test("Scene 217 — Material plugin (BlackAndWhite) matches Babylon.js reference", async ({ page }, testInfo) => {
-    await page.goto("/scene217.html");
+    await page.goto("scene217.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

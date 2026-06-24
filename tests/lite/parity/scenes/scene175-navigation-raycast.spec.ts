@@ -22,7 +22,7 @@ test("Scene 175 — Navigation Raycast matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 175, queryParams: "freeze=1", timeout: 180_000 });
 
-    await page.goto(`/scene175.html?freeze=1`);
+    await page.goto(`scene175.html?freeze=1`);
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 

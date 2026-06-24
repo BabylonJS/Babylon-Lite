@@ -220,7 +220,17 @@ function escapeRegExp(value: string): string {
 
 function rewriteRootRelativeUrls(text: string, basePath: string): string {
     const prefixes = ROOT_RELATIVE_PREFIXES.map(escapeRegExp).join("|");
-    return text.replace(new RegExp(`(["'=(:\\s])/((${prefixes})(?=[/"'.?#)\\s]|[0-9A-Za-z_-]))`, "g"), `$1${basePath}$2`);
+    const re = new RegExp(`(["'=(:\\s])/((${prefixes})(?=[/"'.?#)\\s]|[0-9A-Za-z_-]))`, "g");
+    return text.replace(re, (match, delim: string, rest: string, _prefix: string, offset: number, full: string) => {
+        // Skip URLs Vite already prefixed (e.g. its bundled asset references). The
+        // base path itself can begin with a reserved prefix (e.g. "/lite/<build>/..."),
+        // so without this guard those URLs would be prefixed a second time.
+        const urlStart = offset + delim.length;
+        if (full.startsWith(basePath, urlStart)) {
+            return match;
+        }
+        return `${delim}${basePath}${rest}`;
+    });
 }
 
 function rewriteFilesForBasePath(dir: string, basePath: string): void {

@@ -24,7 +24,7 @@ test("Scene 33 — KHR_lights_punctual matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 33 });
 
-    await page.goto("/scene33.html");
+    await page.goto("scene33.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(1000);
 

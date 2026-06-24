@@ -24,7 +24,7 @@ test("Scene 9 — Sponza (.babylon) matches Babylon.js reference", async ({ page
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 9, timeout: 120_000 });
 
-    await page.goto("/scene9.html");
+    await page.goto("scene9.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 

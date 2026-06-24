@@ -18,7 +18,7 @@ test("Scene 5 — Alien PBR + Skeleton Animation matches Babylon.js reference", 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 5, seekTime: 2 });
 
-    await page.goto("/scene5.html?seekTime=2");
+    await page.goto("scene5.html?seekTime=2");
 
     // Wait for canvas ready, then wait for exact frame 300 freeze signal
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });

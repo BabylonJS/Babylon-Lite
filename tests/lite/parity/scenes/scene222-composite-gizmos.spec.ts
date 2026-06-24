@@ -138,7 +138,7 @@ test("Scene 222 — Composite Gizmos matches Babylon.js reference (local→world
     if (!fs.existsSync(GOLDEN_REF) || process.env.RECAPTURE_GOLDEN) {
         const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
         const bjsPage = await ctx.newPage();
-        await bjsPage.goto("/babylon-ref-scene222.html");
+        await bjsPage.goto("babylon-ref-scene222.html");
         await bjsPage.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
         await bjsPage.waitForFunction(() => !document.getElementById("babylonjsLoadingDiv"), { timeout: 10_000 }).catch(() => undefined);
         await bjsPage.waitForTimeout(500);
@@ -150,7 +150,7 @@ test("Scene 222 — Composite Gizmos matches Babylon.js reference (local→world
         await ctx.close();
     }
 
-    await page.goto("/scene222.html");
+    await page.goto("scene222.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(500);
     const before = await readCubeSnapshot(page);

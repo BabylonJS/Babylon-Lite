@@ -22,7 +22,7 @@ test("Scene 209 — Floating-origin physics matches Babylon.js reference", async
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 209 });
 
-    await page.goto("/scene209.html");
+    await page.goto("scene209.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 50_000 });
     await page.waitForTimeout(500);
 

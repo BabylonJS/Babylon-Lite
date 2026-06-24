@@ -12,7 +12,7 @@ test("Scene 76 — EffectWrapper texture binding matches Babylon.js reference", 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 76, timeout: 30_000, settleMs: 500 });
 
-    await page.goto("/scene76.html");
+    await page.goto("scene76.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     await page.waitForTimeout(600);
 

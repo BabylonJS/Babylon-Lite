@@ -12,7 +12,7 @@ test("Scene 79 — NME conditions/curves/waves/random match Babylon.js reference
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 79, force: true });
 
-    await page.goto("/scene79.html");
+    await page.goto("scene79.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

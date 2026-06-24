@@ -23,7 +23,7 @@ test("Scene 216 — PBR fog matches Babylon.js reference", async ({ page }, test
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 216, force: true });
 
-    await page.goto("/scene216.html");
+    await page.goto("scene216.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

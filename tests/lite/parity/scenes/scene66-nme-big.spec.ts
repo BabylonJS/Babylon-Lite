@@ -24,7 +24,7 @@ test("Scene 66 — NME full playground matches Babylon.js reference", async ({ p
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 66, queryParams: "freeze=1", timeout: 120_000 });
 
-    await page.goto("/scene66.html?freeze=1");
+    await page.goto("scene66.html?freeze=1");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 120_000 });
     await page.waitForTimeout(500);
 

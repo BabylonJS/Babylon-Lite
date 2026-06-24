@@ -15,7 +15,7 @@ test("Scene 241 — AnimationPointerUVs matches Babylon.js reference", async ({ 
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 241, seekTime: 2, timeout: 90_000 });
 
-    await page.goto("/scene241.html?seekTime=2");
+    await page.goto("scene241.html?seekTime=2");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);

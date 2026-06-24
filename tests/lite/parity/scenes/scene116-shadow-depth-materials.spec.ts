@@ -18,7 +18,7 @@ test("Scene 116 - Shadow Depth Materials matches Babylon.js reference", async ({
     const browser = page.context().browser()!;
     await captureGolden(browser, { sceneId: 116, timeout: 60_000, settleMs: 1_000 });
 
-    await page.goto("/scene116.html");
+    await page.goto("scene116.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 60_000 });
     await page.waitForTimeout(500);
 
