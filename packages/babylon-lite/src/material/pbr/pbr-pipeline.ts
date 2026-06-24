@@ -19,7 +19,7 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { _PbrBindCtx, PbrExt } from "./pbr-flags.js";
 import { _getPbrExtsSorted, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBLE_SIDED, PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
-import { MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_REVERSE_WINDING } from "../mesh-features.js";
+import { MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_REVERSE_WINDING, MSH_TOPOLOGY_SHIFT, MSH_INDEX_U32 } from "../mesh-features.js";
 import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
@@ -143,6 +143,14 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     // triangle winding, so back-face culling must cull the FRONT face instead. Matches BJS, which
     // flips sideOrientation when the world matrix determinant is negative.
     const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
+    // Non-triangle-list primitive topology (glTF POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP). Points
+    // and lines have no faces to cull; for a strip the material's culling still applies.
+    const topoIdx = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
+    const topology: GPUPrimitiveTopology =
+        topoIdx === 1 ? "point-list" : topoIdx === 2 ? "line-list" : topoIdx === 3 ? "line-strip" : topoIdx === 4 ? "triangle-strip" : "triangle-list";
+    const noCull = topoIdx >= 1 && topoIdx <= 3;
+    // Indexed strip draws need stripIndexFormat to match the index buffer.
+    const stripIndexFormat: GPUIndexFormat | undefined = topoIdx >= 3 ? (meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16") : undefined;
 
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
@@ -178,7 +186,12 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : reverseWinding ? "front" : "back", frontFace: "ccw" },
+        primitive: {
+            topology,
+            ...(stripIndexFormat ? { stripIndexFormat } : undefined),
+            cullMode: noCull || hasDoubleSided ? ("none" as GPUCullMode) : reverseWinding ? "front" : "back",
+            frontFace: "ccw",
+        },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

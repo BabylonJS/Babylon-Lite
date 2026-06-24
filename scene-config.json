@@ -2192,5 +2192,16 @@
         "description": "glTF Material_03: a flat plane with a dark base and a full-white emissiveFactor [1,1,1] but no emissive texture. Validates that emissiveFactor is applied when there is no emissive texture (glTF-Asset-Generator Category F); Lite previously dropped it and rendered the surface dark.",
         "tags": ["gltf", "pbr", "emissive"],
         "skipPerf": true
+    },
+    {
+        "id": 260,
+        "slug": "scene260-triangle-strip",
+        "name": "Scene 260 — Triangle Strip",
+        "maxMad": 0.1,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 80,
+        "description": "glTF Mesh_PrimitiveMode_11: a quad drawn as a TRIANGLE_STRIP (primitive mode 5) with uint32 indices. Validates non-triangle-list primitive topologies (glTF-Asset-Generator Category C); Lite hardcoded a triangle-list pipeline and rendered POINTS/LINES/strips garbled. The loader now reads the primitive mode and the pipeline honors the matching WebGPU topology.",
+        "tags": ["gltf", "topology"],
+        "skipPerf": true
     }
 ]

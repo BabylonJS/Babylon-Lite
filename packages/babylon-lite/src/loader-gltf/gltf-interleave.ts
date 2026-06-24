@@ -371,6 +371,7 @@ export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, ind
         morphTargets: null,
         _gpu: gpu,
         _flatNormal: m._flatNormal,
+        ...(m._topology ? { _topology: m._topology } : undefined),
     } as unknown as Mesh;
     initMeshTransform(mesh);
 

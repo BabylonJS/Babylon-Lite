@@ -60,6 +60,10 @@ export interface GltfMeshData {
     _colors: Float32Array | null;
     /** @internal Primitive had no NORMAL attribute → flat-shade (glTF spec). */
     _flatNormal?: boolean;
+    /** @internal Non-triangle-list primitive topology index (1=points, 2=lines,
+     *  3=line-strip, 4=triangle-strip) from the glTF primitive `mode`. Undefined =
+     *  triangle-list (the default). LINE_LOOP/TRIANGLE_FAN are unsupported (so is BJS). */
+    _topology?: number;
     /** @internal */
     _indices: Uint16Array | Uint32Array;
     /** @internal */
@@ -433,6 +437,12 @@ async function extractAllMeshes(
             // always provide NORMAL (the common case) never bundle or fetch this code.
             const normals = normData ? (normData._data as Float32Array) : normalsHelper!.computeSmoothNormals(posData._data as Float32Array, indices, posData._count);
 
+            // glTF primitive `mode` → non-triangle-list topology index (1=points, 2=lines,
+            // 3=line-strip, 4=triangle-strip). Triangle-list (mode 4 / unset) and the
+            // unsupported LINE_LOOP(2)/TRIANGLE_FAN(6) leave `_topology` undefined.
+            const _pm = primitive.mode;
+            const _topology = _pm === 0 ? 1 : _pm === 1 ? 2 : _pm === 3 ? 3 : _pm === 5 ? 4 : undefined;
+
             partials.push({
                 _positions: posData._data as Float32Array,
                 _normals: normals,
@@ -441,6 +451,7 @@ async function extractAllMeshes(
                 _uv2s: uv2s,
                 _colors: colors,
                 _flatNormal: !normData,
+                ...(_topology ? { _topology } : undefined),
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: indices.length,
@@ -606,6 +617,7 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     morphTargets: null,
                     _gpu: gpu,
                     _flatNormal: m._flatNormal,
+                    ...(m._topology ? { _topology: m._topology } : undefined),
                 } as unknown as Mesh;
                 initMeshTransform(mesh);
 

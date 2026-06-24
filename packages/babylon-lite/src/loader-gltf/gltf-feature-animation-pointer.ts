@@ -132,34 +132,32 @@ function materialMap(json: any, meshes: readonly Mesh[]): (PointerMaterial | und
     return map;
 }
 
-_installPointerHandlers(
-    (ptr, c, nodeMap, json, meshes) => {
-        if (!nodeMap) {
-            return null;
-        }
-        // A /nodes/{n}/{translation|rotation|scale|weights} pointer is semantically
-        // identical to a standard glTF channel on node n. Emit a standard channel so it
-        // flows through the proven topological node-TRS / morph writeback (which moves the
-        // node AND its descendants) instead of an opaque per-node writer.
-        const trs = /^\/nodes\/(\d+)\/(translation|rotation|scale|weights)$/.exec(ptr);
-        if (trs) {
-            return { samplerIdx: c.sampler, nodeIdx: +trs[1]!, path: NODE_TRS_PATH[trs[2]!]! };
-        }
-        // Only build the material map when a non-node pointer is actually present.
-        const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
-        if (!resolved) {
-            return null;
-        }
-        const ch: AnimationChannel = {
-            samplerIdx: c.sampler,
-            nodeIdx: -1,
-            path: PATH_POINTER,
-            pointerWriter: resolved.writer,
-            pointerArity: resolved.arity,
-        };
-        return ch;
+_installPointerHandlers((ptr, c, nodeMap, json, meshes) => {
+    if (!nodeMap) {
+        return null;
     }
-);
+    // A /nodes/{n}/{translation|rotation|scale|weights} pointer is semantically
+    // identical to a standard glTF channel on node n. Emit a standard channel so it
+    // flows through the proven topological node-TRS / morph writeback (which moves the
+    // node AND its descendants) instead of an opaque per-node writer.
+    const trs = /^\/nodes\/(\d+)\/(translation|rotation|scale|weights)$/.exec(ptr);
+    if (trs) {
+        return { samplerIdx: c.sampler, nodeIdx: +trs[1]!, path: NODE_TRS_PATH[trs[2]!]! };
+    }
+    // Only build the material map when a non-node pointer is actually present.
+    const resolved = resolveAnimationPointer(ptr, { nodes: nodeMap, materials: materialMap(json, meshes), _json: json });
+    if (!resolved) {
+        return null;
+    }
+    const ch: AnimationChannel = {
+        samplerIdx: c.sampler,
+        nodeIdx: -1,
+        path: PATH_POINTER,
+        pointerWriter: resolved.writer,
+        pointerArity: resolved.arity,
+    };
+    return ch;
+});
 
 const feature: GltfFeature = {
     id: "KHR_animation_pointer",
