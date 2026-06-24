@@ -102,8 +102,9 @@ function hasNonFloatAnimSampler(json: any): boolean {
  *  negative 3x3 determinant. Such a node (or a child of one) can flip a mesh's
  *  net world determinant positive, reversing its triangle winding. Gates the
  *  lazy negative-winding feature so positive-scale / pure-TRS assets never load
- *  it. A positive-determinant `matrix` node over-triggers harmlessly (the
- *  feature then finds a non-positive determinant per mesh and flags nothing). */
+ *  it. A negative-determinant node whose meshes' net world determinant stays
+ *  negative over-triggers harmlessly (the feature then finds a non-positive
+ *  determinant per mesh and flags nothing). */
 function hasNegDetNode(json: any): boolean {
     return !!(json.nodes as any[] | undefined)?.some((n) => {
         if (n.scale) {

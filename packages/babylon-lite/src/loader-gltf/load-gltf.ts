@@ -202,8 +202,9 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
     const isUrl = typeof source === "string";
     // Resolve the source to an absolute URL so external .bin / image URIs resolve correctly even when the
     // caller passes a root-relative ("/models/foo.gltf") or document-relative path — `new URL(uri, base)`
-    // downstream requires an absolute base. Absolute inputs (https://…) are returned unchanged.
-    const baseUrl = isUrl ? new URL(".", new URL(source, location.href)).href : "";
+    // downstream requires an absolute base. Absolute inputs (https://…) are returned unchanged. In a
+    // non-DOM context (Node / a worker without `location`) fall back to a plain directory-prefix base.
+    const baseUrl = !isUrl ? "" : typeof location !== "undefined" ? new URL(".", new URL(source, location.href)).href : source.slice(0, source.lastIndexOf("/") + 1);
     const buffer = isUrl ? await fetch(source).then((r) => r.arrayBuffer()) : source instanceof Blob ? await source.arrayBuffer() : source;
 
     // Classify by the GLB magic ("glTF" = 0x46546c67, little-endian) rather than the URL extension, so
