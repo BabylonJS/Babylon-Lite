@@ -65,9 +65,9 @@ function diffRuntimeChunks(committed: string[] | undefined, built: string[] | un
     return parts.join("  ");
 }
 
-function parseEntry(text: string, source: string): ManifestEntry {
+function parseJson<T>(text: string, source: string): T {
     try {
-        return JSON.parse(text) as ManifestEntry;
+        return JSON.parse(text) as T;
     } catch (err) {
         throw new Error(`Failed to parse ${source} as JSON: ${(err as Error).message}`);
     }
@@ -87,7 +87,7 @@ function readBuiltManifest(rootDir: string): Manifest {
     const manifest: Manifest = {};
     for (const file of readdirSync(dir)) {
         if (!file.endsWith(".json")) continue;
-        manifest[sceneFromFile(file)] = parseEntry(readFileSync(resolve(dir, file), "utf-8"), `built ${file}`);
+        manifest[sceneFromFile(file)] = parseJson<ManifestEntry>(readFileSync(resolve(dir, file), "utf-8"), `built ${file}`);
     }
     return manifest;
 }
@@ -116,12 +116,14 @@ function readCommittedManifest(rootDir: string): Manifest | null {
         const manifest: Manifest = {};
         for (const file of files) {
             const text = execFileSync("git", ["show", `HEAD:${file}`], { cwd: rootDir, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-            manifest[sceneFromFile(file)] = parseEntry(text, `committed ${file}`);
+            manifest[sceneFromFile(file)] = parseJson<ManifestEntry>(text, `committed ${file}`);
         }
         return manifest;
     }
 
-    // Legacy single-file fallback (pre-migration HEAD).
+    // Legacy single-file fallback (pre-migration HEAD): the legacy
+    // manifest.json is an aggregate map (scene -> entry), so parse it as a
+    // whole Manifest rather than a single entry.
     let text: string;
     try {
         text = execFileSync("git", ["show", `HEAD:${LEGACY_MANIFEST_REL_PATH}`], {
@@ -132,7 +134,7 @@ function readCommittedManifest(rootDir: string): Manifest | null {
     } catch {
         return null;
     }
-    return parseEntry(text, "committed legacy manifest") as Manifest;
+    return parseJson<Manifest>(text, "committed legacy manifest");
 }
 
 function main(): void {
