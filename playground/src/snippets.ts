@@ -11,10 +11,12 @@ const SNIPPET_SERVER_BASE = "https://snippet.babylonjs.com";
 // The snippet server requires `application/json` to persist the payload, but its
 // CORS preflight only succeeds for an allow-list of babylonjs.com origins — a
 // browser POST from any other origin (e.g. localhost) is blocked. In dev we
-// therefore route through a same-origin `/snippet` path that Vite proxies
-// server-side (no browser CORS). In production the playground must be served from
-// an allow-listed origin (or front a same-origin proxy at deploy time).
-const SNIPPET_SERVER_URL = import.meta.env.DEV ? "/snippet" : SNIPPET_SERVER_BASE;
+// therefore route through a same-origin `/snippet-api` path that Vite proxies
+// server-side (no browser CORS). `/snippet-api` (not `/snippet`) keeps the
+// `/snippet/ID/v/VERSION` app routes free for SPA navigation. In production the
+// playground must be served from an allow-listed origin (or front a same-origin
+// proxy at deploy time).
+const SNIPPET_SERVER_URL = import.meta.env.DEV ? "/snippet-api" : SNIPPET_SERVER_BASE;
 const ENGINE_TAG = "WebGPU-Lite";
 const MANIFEST_VERSION = 2;
 const LITE_KIND = "babylon-lite";
@@ -203,9 +205,31 @@ export async function loadSnippet(snippetId: string): Promise<LoadedSnippet> {
     };
 }
 
-/** Build the shareable playground permalink for a snippet id. */
-export function permalinkFor(snippetId: string): string {
-    return `${location.origin}${location.pathname}#${snippetId}`;
+/** Build the shareable playground permalink for a snippet revision. */
+export function permalinkFor(id: string, version: string): string {
+    return `${location.origin}${snippetPath(id, version)}`;
+}
+
+/** The path-based URL for a snippet revision, e.g. `/snippet/XKIIYQ/v/0`. */
+export function snippetPath(id: string, version: string): string {
+    return `/snippet/${id}/v/${version}`;
+}
+
+/** Parse a `/snippet/ID/v/VERSION` pathname, or `null` when it isn't one. */
+export function parseSnippetPath(pathname: string): { id: string; version: string } | null {
+    const match = pathname.match(/^\/snippet\/([^/]+)\/v\/([^/]+)\/?$/);
+    return match ? { id: match[1]!, version: match[2]! } : null;
+}
+
+/** Split a combined snippet id (`"XKIIYQ"` or `"XKIIYQ#3"`) into id + revision. */
+export function splitSnippetId(snippetId: string): { id: string; version: string } {
+    const hash = snippetId.indexOf("#");
+    return hash >= 0 ? { id: snippetId.slice(0, hash), version: snippetId.slice(hash + 1) } : { id: snippetId, version: "0" };
+}
+
+/** Combine an id and revision into the snippet-server lookup id (rev 0 omitted). */
+export function combineSnippetId(id: string, version: string): string {
+    return version && version !== "0" ? `${id}#${version}` : id;
 }
 
 /** Parse the snippet id from a URL hash (e.g. `"#XKIIYQ#3"` → `"XKIIYQ#3"`). */

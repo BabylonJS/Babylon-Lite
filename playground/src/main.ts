@@ -1,10 +1,23 @@
 import "./styles.css";
 import { createEditor, registerEngineTypes } from "./editor";
 import { mountFileTabs } from "./file-tabs";
+import { mountSplitter } from "./split";
 import { transpile } from "./transpile";
+import { downloadProject } from "./download";
 import { Runner, type RunnerMessage } from "./runner";
 import { EXAMPLES, DEFAULT_PROJECT, projectFor } from "./examples";
-import { saveSnippet, loadSnippet, permalinkFor, snippetIdFromHash, type SnippetMeta, type Project } from "./snippets";
+import {
+    saveSnippet,
+    loadSnippet,
+    permalinkFor,
+    snippetPath,
+    parseSnippetPath,
+    snippetIdFromHash,
+    splitSnippetId,
+    combineSnippetId,
+    type SnippetMeta,
+    type Project,
+} from "./snippets";
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
 import { NIGHTLY, engineUrlForVersion, fetchPublishedVersions } from "./versions";
 
@@ -12,8 +25,10 @@ const editorContainer = document.getElementById("editor") as HTMLElement;
 const fileTabsContainer = document.getElementById("fileTabs") as HTMLElement;
 const previewHost = document.getElementById("previewHost") as HTMLElement;
 const consoleEl = document.getElementById("console") as HTMLElement;
+const splitEl = document.getElementById("split") as HTMLElement;
+const splitter = document.getElementById("splitter") as HTMLElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
-const formatBtn = document.getElementById("formatBtn") as HTMLButtonElement;
+const downloadBtn = document.getElementById("downloadBtn") as HTMLButtonElement;
 const examplesEl = document.getElementById("examples") as HTMLSelectElement;
 const versionEl = document.getElementById("versionSelect") as HTMLSelectElement;
 const saveBtn = document.getElementById("saveBtn") as HTMLButtonElement;
@@ -33,9 +48,10 @@ if (embedMode) {
     document.body.classList.add("embed", `embed-${embedMode}`);
 }
 
-// The id of the snippet currently loaded/saved, so re-saving creates a new
-// revision of the same snippet rather than a brand-new one.
+// The id + revision of the snippet currently loaded/saved, so re-saving creates a
+// new revision of the same snippet and the URL reflects `/snippet/ID/v/VERSION`.
 let currentSnippetId: string | null = null;
+let currentSnippetVersion = "0";
 let currentMeta: SnippetMeta = {};
 
 // Host bridge, only created in embed mode (see below).
@@ -121,10 +137,24 @@ async function run(): Promise<void> {
 
 const editor = createEditor(editorContainer, DEFAULT_PROJECT.files, DEFAULT_PROJECT.entry, () => void run());
 mountFileTabs(fileTabsContainer, editor);
+// The runner-only embed hides the editor, so there's nothing to resize there.
+if (embedMode !== "runner") {
+    mountSplitter(splitEl, splitter);
+}
 
 /** Current editor content as a saveable project. */
 function currentProject(): Project {
     return { files: editor.getFiles(), entry: editor.getEntry() };
+}
+
+/** Forget any loaded snippet and reset the URL to the app root. */
+function resetToUnsaved(): void {
+    currentSnippetId = null;
+    currentSnippetVersion = "0";
+    currentMeta = {};
+    if (location.hash || location.pathname !== "/") {
+        history.replaceState(null, "", "/");
+    }
 }
 
 // Populate the examples picker.
@@ -139,18 +169,26 @@ examplesEl.addEventListener("change", () => {
     const example = EXAMPLES.find((candidate) => candidate.id === examplesEl.value);
     if (example) {
         // Loading an example starts a fresh, unsaved snippet.
-        currentSnippetId = null;
-        currentMeta = {};
-        if (location.hash) {
-            history.replaceState(null, "", location.pathname + location.search);
-        }
+        resetToUnsaved();
         editor.setFiles(projectFor(example).files, projectFor(example).entry);
         void run();
     }
 });
 
-formatBtn.addEventListener("click", () => editor.format());
 runBtn.addEventListener("click", () => void run());
+
+downloadBtn.addEventListener("click", () => {
+    downloadBtn.disabled = true;
+    showToast("Packaging download…");
+    void downloadProject(currentProject(), currentVersion, currentMeta.name ?? "")
+        .then(() => {
+            toastEl.hidden = true;
+        })
+        .catch((err: unknown) => showToast(err instanceof Error ? err.message : "Failed to build download", true))
+        .finally(() => {
+            downloadBtn.disabled = false;
+        });
+});
 
 // Engine version selector: "Nightly" plus published releases (loaded from the CDN).
 function addVersionOption(value: string, label: string): void {
@@ -182,10 +220,11 @@ async function save(meta: SnippetMeta): Promise<void> {
     showToast("Saving…");
     try {
         const result = await saveSnippet(currentProject(), meta, currentSnippetId ?? undefined);
-        currentSnippetId = result.snippetId;
+        currentSnippetId = result.id;
+        currentSnippetVersion = result.version;
         currentMeta = meta;
-        history.replaceState(null, "", `#${result.snippetId}`);
-        const link = permalinkFor(result.snippetId);
+        history.replaceState(null, "", snippetPath(result.id, result.version));
+        const link = permalinkFor(result.id, result.version);
         try {
             await navigator.clipboard.writeText(link);
             showToast("Link copied to clipboard");
@@ -219,28 +258,45 @@ saveDialog.addEventListener("submit", () => {
     });
 });
 
-async function loadFromHash(): Promise<boolean> {
+async function loadFromUrl(): Promise<boolean> {
     // Inline content handed off from an embed via `#code=<base64url>`. The fragment
     // carries either a project JSON (`{files,entry}`) or, for legacy links, raw source.
     const inline = decodeCodeHash(location.hash);
     if (inline !== null) {
         currentSnippetId = null;
+        currentSnippetVersion = "0";
         currentMeta = {};
         const project = parseProject(inline);
         editor.setFiles(project.files, project.entry);
-        history.replaceState(null, "", location.pathname + location.search);
+        history.replaceState(null, "", "/");
         return true;
     }
-    const snippetId = snippetIdFromHash(location.hash);
-    if (!snippetId) {
-        return false;
+    // Path form `/snippet/ID/v/VERSION` (canonical) — load and keep the URL.
+    const fromPath = parseSnippetPath(location.pathname);
+    if (fromPath) {
+        return loadSnippetInto(fromPath.id, fromPath.version, false);
     }
+    // Legacy hash form `#ID[#REV]` — load, then rewrite to the path form.
+    const hashId = snippetIdFromHash(location.hash);
+    if (hashId) {
+        const { id, version } = splitSnippetId(hashId);
+        return loadSnippetInto(id, version, true);
+    }
+    return false;
+}
+
+/** Load a snippet revision into the editor, optionally rewriting the URL to the path form. */
+async function loadSnippetInto(id: string, version: string, rewriteUrl: boolean): Promise<boolean> {
     showToast("Loading snippet…");
     try {
-        const snippet = await loadSnippet(snippetId);
-        currentSnippetId = snippetId;
+        const snippet = await loadSnippet(combineSnippetId(id, version));
+        currentSnippetId = id;
+        currentSnippetVersion = version;
         currentMeta = { name: snippet.name, description: snippet.description, tags: snippet.tags };
         editor.setFiles(snippet.files, snippet.entry);
+        if (rewriteUrl) {
+            history.replaceState(null, "", snippetPath(id, version));
+        }
         toastEl.hidden = true;
         return true;
     } catch (err) {
@@ -266,7 +322,8 @@ function parseProject(payload: string): Project {
 // playground (preferring a saved snippet id, falling back to inline `#code=`).
 openFullBtn.addEventListener("click", (event) => {
     event.preventDefault();
-    window.open(openInPlaygroundUrl(JSON.stringify(currentProject()), currentSnippetId), "_blank", "noopener");
+    const snippet = currentSnippetId ? { id: currentSnippetId, version: currentSnippetVersion } : null;
+    window.open(openInPlaygroundUrl(JSON.stringify(currentProject()), snippet), "_blank", "noopener");
 });
 
 // In embed mode, expose the postMessage API so a host page can drive the
@@ -275,6 +332,7 @@ if (embedMode) {
     embedHost = new EmbedHost(embedMode, {
         loadCode: (code, runAfter) => {
             currentSnippetId = null;
+            currentSnippetVersion = "0";
             currentMeta = {};
             // The embed API is single-file: replace just the entry file's content.
             const files = editor.getFiles();
@@ -298,7 +356,7 @@ void registerEngineTypes();
 
 // Boot: load a shared snippet if the URL has one, else the default snippet.
 void (async () => {
-    await loadFromHash();
+    await loadFromUrl();
     void run();
     embedHost?.ready();
 })();

@@ -12,7 +12,8 @@
         "build": "vite build"
     },
     "dependencies": {
-        "babylon-lite": "workspace:*"
+        "babylon-lite": "workspace:*",
+        "fflate": "^0.8.2"
     },
     "devDependencies": {
         "@webgpu/types": "^0.1.52",

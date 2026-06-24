@@ -26,6 +26,15 @@ export function engineUrlForVersion(version: string): string {
 }
 
 /**
+ * The CDN specifier baked into a *downloaded* project's import map. The self-hosted
+ * nightly bundle isn't reachable outside the playground, so a download targeting
+ * nightly pins to esm.sh's latest published release; an explicit version pins to it.
+ */
+export function downloadEngineUrl(version: string): string {
+    return version === NIGHTLY ? "https://esm.sh/@babylonjs/lite" : `https://esm.sh/@babylonjs/lite@${version}`;
+}
+
+/**
  * Fetch the list of published `@babylonjs/lite` versions, newest first, excluding
  * pre-releases. Returns an empty list if the registry can't be reached so the
  * selector can still offer nightly.

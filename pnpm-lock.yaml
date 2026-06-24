@@ -212,6 +212,9 @@ importers:
       babylon-lite:
         specifier: workspace:*
         version: link:../packages/babylon-lite
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.2
     devDependencies:
       '@webgpu/types':
         specifier: ^0.1.52

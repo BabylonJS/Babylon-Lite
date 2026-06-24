@@ -45,10 +45,16 @@ function resolveRelative(importer: string, request: string, files: Record<string
     return candidates.find((candidate) => files[candidate] !== undefined);
 }
 
+/** Bare specifiers already pointing at a URL are left untouched. */
+function isUrlSpecifier(path: string): boolean {
+    return /^https?:\/\//.test(path) || path.startsWith("//");
+}
+
 /**
- * esbuild plugin that resolves the project's own files from an in-memory map and
- * keeps `@babylonjs/lite` (and any other bare specifier) external, so the runner
- * iframe's import map resolves the engine at run time.
+ * esbuild plugin that resolves the project's own files from an in-memory map.
+ * `@babylonjs/lite` (and its subpaths) stay external so the runner iframe's import
+ * map resolves the engine at run time; any *other* bare package import is rewritten
+ * to an esm.sh CDN URL so external npm packages work without an import-map entry.
  */
 function virtualFilesPlugin(files: Record<string, string>): esbuild.Plugin {
     return {
@@ -68,8 +74,11 @@ function virtualFilesPlugin(files: Record<string, string>): esbuild.Plugin {
                     }
                     return { path: resolved, namespace: "virtual" };
                 }
-                // Any other bare specifier is left external for the import map / CDN.
-                return { path: args.path, external: true };
+                if (isUrlSpecifier(args.path)) {
+                    return { path: args.path, external: true };
+                }
+                // Any other bare specifier loads from the esm.sh CDN at run time.
+                return { path: `https://esm.sh/${args.path}`, external: true };
             });
 
             build.onLoad({ filter: /.*/, namespace: "virtual" }, (args) => {

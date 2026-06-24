@@ -128,11 +128,44 @@ body {
     cursor: default;
 }
 
+/* Square icon buttons (toolbar actions). */
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem;
+    width: 2.1rem;
+    height: 2.1rem;
+}
+
+.btn-icon svg {
+    display: block;
+}
+
 .split {
     flex: 1 1 auto;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 6px 1fr;
     min-height: 0;
+}
+
+/* Draggable divider between the editor and preview panes. */
+.splitter {
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+    touch-action: none;
+}
+
+.splitter::after {
+    content: "";
+    position: absolute;
+    inset: 0 -3px;
+}
+
+.splitter:hover,
+.splitter.is-dragging {
+    background: var(--accent);
 }
 
 .pane {
@@ -408,7 +441,7 @@ body {
 /* Embed mode: compact chrome, host drives via postMessage. */
 body.embed #examples,
 body.embed #versionSelect,
-body.embed #formatBtn,
+body.embed #downloadBtn,
 body.embed .save-group {
     display: none;
 }
@@ -422,7 +455,8 @@ body.embed .toolbar {
 }
 
 /* Runner-only embed: hide the editor, give the canvas the full width. */
-body.embed-runner .pane-editor {
+body.embed-runner .pane-editor,
+body.embed-runner .splitter {
     display: none;
 }
 

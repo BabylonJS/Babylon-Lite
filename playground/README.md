@@ -54,8 +54,10 @@ flowchart LR
   (the dot on each tab).
 - **Transpile** (`src/transpile.ts`) — `esbuild-wasm` bundles the project's files
   in-browser, starting from the entry file and resolving relative imports from an
-  in-memory file map while keeping `@babylonjs/lite` external. An inline source map
-  keeps runtime stacks mapped to the original files.
+  in-memory file map while keeping `@babylonjs/lite` external. Any *other* bare
+  package import is rewritten to an `https://esm.sh/<pkg>` CDN URL so external npm
+  packages work without configuration. An inline source map keeps runtime stacks
+  mapped to the original files.
 - **Runner** (`src/runner.ts` + `public/runner.html`) — a sandboxed iframe hosts the
   WebGPU canvas and an import map resolving `@babylonjs/lite` to the chosen engine
   bundle. Each run recreates the iframe (clean teardown); it relays `console` /
@@ -64,15 +66,21 @@ flowchart LR
   engine source into a self-contained ESM under `public/engine/dev/` ("nightly"). The
   version selector can instead load any published release on demand from the esm.sh
   CDN — no redeploy needed.
-- **Glue** (`src/main.ts`) — wires the toolbar (examples, format, version selector,
-  save), the run loop, snippet save/load + deep links, and embed mode.
+- **Resizable layout** (`src/split.ts`) — a draggable divider between the editor and
+  preview panes; the chosen ratio is persisted in `localStorage` and arrow keys nudge
+  it for keyboard users.
+- **Download** (`src/download.ts`) — exports the current project as a runnable zip
+  (`index.html` + bundled `main.js` + any same-origin assets it references), with the
+  engine resolved from esm.sh via an import map.
+- **Glue** (`src/main.ts`) — wires the icon toolbar (examples, version selector,
+  save, download, run), the run loop, snippet save/load + deep links, and embed mode.
 
 ### Project layout
 
 ```
 playground/
-├─ index.html                # App shell + toolbar + save dialog
-├─ vite.config.ts            # App dev server (port 5175) + /snippet dev proxy
+├─ index.html                # App shell + icon toolbar + save dialog
+├─ vite.config.ts            # App dev server (port 5175) + /snippet-api dev proxy
 ├─ vite.engine.config.ts     # Builds the self-hosted "nightly" engine bundle
 ├─ examples/                 # Larger example sources, imported via ?raw
 │  ├─ torus-states.ts        #   (see "Adding examples" below)
@@ -87,7 +95,9 @@ playground/
    ├─ main.ts                # App glue: toolbar, run loop, snippets, embed, versions
    ├─ editor.ts              # Monaco multi-model setup + engine-typed IntelliSense
    ├─ file-tabs.ts           # Horizontal file-tab bar (add/rename/delete/entry)
-   ├─ transpile.ts           # esbuild-wasm multi-file bundle → ESM
+   ├─ split.ts               # Draggable editor/preview divider (persisted ratio)
+   ├─ transpile.ts           # esbuild-wasm multi-file bundle → ESM (esm.sh externals)
+   ├─ download.ts            # Export the project as a runnable zip
    ├─ runner.ts              # Owns/recreates the runner iframe
    ├─ examples.ts            # Example registry (inline snippets + ?raw imports)
    ├─ snippets.ts            # Save/load against the Babylon snippet server
@@ -144,6 +154,19 @@ keeping `@babylonjs/lite` external (resolved by the runner's import map). The
 
 All files are persisted in the snippet manifest's `files` map, so saving and
 loading round-trips the whole project.
+
+### Importing npm packages
+
+Any bare import other than `@babylonjs/lite` is rewritten to an
+`https://esm.sh/<pkg>` URL at bundle time, so external ESM packages work with no
+configuration:
+
+```ts
+import seedrandom from "seedrandom"; // → https://esm.sh/seedrandom at run time
+```
+
+`@babylonjs/lite` is special-cased: it stays on the selected engine (self-hosted
+nightly or the pinned esm.sh release). Absolute `https://` imports are left as-is.
 
 ## Adding examples
 
@@ -205,7 +228,9 @@ Examples execute inside the sandboxed runner iframe, so they must:
    (e.g. `@babylonjs/lite/loader-gltf/draco-decode.js`) won't resolve — the runner
    import map maps only `@babylonjs/lite`.
 3. **Reference assets by absolute CDN URL** (e.g. `https://assets.babylonjs.com/…`)
-   or from `public/` (e.g. `"/brdf-lut.png"`). No app-relative/local asset paths.
+   or from `public/` (e.g. `"/brdf-lut.png"`). Root-absolute (`/…`) assets are
+   served by the playground and are bundled into the zip by **Download**; absolute
+   `https://` assets stay remote.
 4. **Be self-contained** — no page-specific DOM (loading overlays, toggles,
    `canvas.dataset.*`); end with `main().catch((err) => console.error(err))`.
 
@@ -213,21 +238,52 @@ The first three are conventions (not lint-enforced); the `Example` shape itself 
 type-checked. After adding an example, run it from the picker to confirm it boots
 (the engine logs `Babylon Lite v… - WebGPU engine`) and renders.
 
+## Toolbar
+
+The toolbar uses icon buttons (hover for a tooltip / read the `aria-label`):
+
+- **Examples** / **Engine version** — the two dropdowns.
+- **Save** (floppy) + caret — save & copy link; the caret opens **Save with details…**.
+- **Download** (down-arrow) — export the project as a runnable zip (see below).
+- **Run** (play) — run the current code (also Ctrl/Cmd+Enter).
+
+There's no Format button: format with **Shift+Alt+F** or the editor's right-click
+**Format Document**. Drag the divider between the editor and preview to resize them
+(the ratio is remembered); arrow keys nudge it when it's focused.
+
 ## Snippets
 
 Snippets are saved to and loaded from the Babylon snippet server
 (`snippet.babylonjs.com`), the same store the classic playground uses.
 
 - **Save** (toolbar) — stores the current code and copies a permalink
-  (`<origin>/#<id>`) to the clipboard. **Save with details…** (the caret) also
-  captures a title, description, and tags.
+  (`<origin>/snippet/<id>/v/<rev>`) to the clipboard, updating the address bar to
+  that path. **Save with details…** (the caret) also captures a title, description,
+  and tags.
 - **Revisions** — re-saving a loaded snippet creates a new revision of the same id
-  (`#<id>#<rev>`) rather than a brand-new snippet.
-- **Load** — opening a `#<id>` (or `#<id>#<rev>`) permalink loads that snippet.
+  (the URL's `/v/<rev>` increments) rather than a brand-new snippet.
+- **Load** — opening a `/snippet/<id>/v/<rev>` URL loads that snippet. Legacy
+  `#<id>` / `#<id>#<rev>` hash links still load and are rewritten to the path form.
 
 Snippets use the classic V2 manifest envelope plus a `kind: "babylon-lite"` marker,
 so the format stays interoperable with the classic loader while letting the Lite
 playground reject snippets authored for the classic engine.
+
+## Download
+
+The **Download** button exports the current project as a self-contained zip:
+
+- `index.html` — a minimal host with the canvas and an import map resolving
+  `@babylonjs/lite` to esm.sh (the selected version, or latest for nightly).
+- `main.js` — the esbuild bundle (relative imports inlined; other npm packages
+  already pointing at esm.sh URLs).
+- Any **same-origin assets** the scene references by a root-absolute path
+  (e.g. `/brdf-lut.png`) are fetched and bundled, with the reference rewritten to a
+  relative path.
+
+Serve the folder (e.g. `npx serve`) and open `index.html` — it runs the scene
+exactly as in the playground. An internet connection is still needed for the engine
+(esm.sh) and any remote `https://` assets.
 
 ## Embedding
 
@@ -286,11 +342,12 @@ window.addEventListener("message", (e) => {
 
 ### Deep links
 
-- `#<id>` / `#<id>#<rev>` — load a saved snippet (see Snippets).
+- `/snippet/<id>/v/<rev>` — load a saved snippet (the canonical permalink form).
+- `#<id>` / `#<id>#<rev>` — legacy hash links; still load, then rewrite to the path form.
 - `#code=<base64url>` — load an inline project (base64url of the project JSON, or
   plain source for legacy links). The embed's **Open in Lite Playground** button
-  uses this (or a snippet id when saved) to hand the current project off to the
-  full standalone playground in a new tab.
+  uses this (or a `/snippet/<id>/v/<rev>` link when saved) to hand the current
+  project off to the full standalone playground in a new tab.
 
 ## Deployment
 
@@ -305,10 +362,17 @@ chaining it after the npm-publish pipeline keeps it tracking the latest release.
 Because the site is served from the domain root (a subdomain, not a subpath), all
 runtime URLs resolve cleanly and no `base` rewriting is needed.
 
+Snippet permalinks use real paths (`/snippet/<id>/v/<rev>`), so the host must serve
+`index.html` for unknown non-file routes (SPA history fallback). The Vite dev server
+and `vite preview` do this automatically; a static CDN needs an equivalent rewrite
+rule (any path without a file extension → `/index.html`). The dev snippet-server
+proxy is mounted at `/snippet-api` (not `/snippet`) specifically so it doesn't
+shadow the `/snippet/*` app routes.
+
 **Snippet saving in production:** saves POST directly to `snippet.babylonjs.com`,
 whose CORS preflight is origin-allow-listed. `liteplayground.babylonjs.com` must be
 added to that allow-list for saving to work in production (loading/sharing via GET
-already works cross-origin). In local dev a same-origin Vite proxy (`/snippet`)
+already works cross-origin). In local dev a same-origin Vite proxy (`/snippet-api`)
 bypasses the preflight.
 
 ## Troubleshooting
@@ -318,8 +382,8 @@ bypasses the preflight.
   server fails loudly instead of drifting; free the port or stop the other process.
 - **"WebGPU not supported"** — use a WebGPU-capable browser (Chrome/Edge 113+). In
   some environments WebGPU needs to be enabled explicitly.
-- **Saving fails locally** — dev routes saves through the Vite `/snippet` proxy to
-  bypass the snippet server's origin-allow-listed preflight. If saves fail, confirm
+- **Saving fails locally** — dev routes saves through the Vite `/snippet-api` proxy
+  to bypass the snippet server's origin-allow-listed preflight. If saves fail, confirm
   the dev server (not a static preview) is serving the app.
 - **Stale engine after pulling changes** — rebuild the nightly bundle with
   `pnpm build:engine` (it also runs automatically via `predev`/`prebuild`).

@@ -8,6 +8,8 @@
 // All messages carry `channel: "babylon-lite-playground"` so they never collide
 // with the internal runner-iframe protocol or unrelated host traffic.
 
+import { snippetPath } from "./snippets";
+
 export const EMBED_CHANNEL = "babylon-lite-playground";
 
 export type EmbedMode = "runner" | "split";
@@ -141,13 +143,14 @@ export function decodeCodeHash(hash: string): string | null {
 
 /**
  * Build a deep link that opens the full standalone playground (no embed) with the
- * given content — preferring a saved snippet id, falling back to an inline
- * `#code=` fragment. The fragment carries the whole project as JSON so multi-file
- * snippets survive the handoff; {@link decodeCodeHash} returns that JSON string
- * (or plain source for legacy single-file links) for the caller to interpret.
+ * given content. A saved snippet uses the path form `/snippet/ID/v/VERSION`;
+ * otherwise the whole project is carried inline as JSON in a `#code=` fragment
+ * (legacy single-file links carry plain source). {@link decodeCodeHash} returns
+ * that JSON string for the caller to interpret.
  */
-export function openInPlaygroundUrl(payload: string, snippetId: string | null): string {
-    const base = `${location.origin}${location.pathname}`;
-    const fragment = snippetId ? snippetId : `${CODE_HASH_PREFIX}${encodeCodeHash(payload)}`;
-    return `${base}#${fragment}`;
+export function openInPlaygroundUrl(payload: string, snippet: { id: string; version: string } | null): string {
+    if (snippet) {
+        return `${location.origin}${snippetPath(snippet.id, snippet.version)}`;
+    }
+    return `${location.origin}/#${CODE_HASH_PREFIX}${encodeCodeHash(payload)}`;
 }

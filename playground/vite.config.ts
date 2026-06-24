@@ -21,11 +21,13 @@ export default defineConfig({
             // Same-origin proxy to the Babylon snippet server. The server only
             // accepts `application/json` saves and its CORS preflight is
             // origin-allow-listed (localhost is rejected), so we proxy
-            // server-side in dev to bypass the browser preflight.
-            "/snippet": {
+            // server-side in dev to bypass the browser preflight. The prefix is
+            // `/snippet-api` (not `/snippet`) so the `/snippet/ID/v/VERSION` app
+            // routes fall through to Vite's SPA fallback instead of the proxy.
+            "/snippet-api": {
                 target: "https://snippet.babylonjs.com",
                 changeOrigin: true,
-                rewrite: (path) => path.replace(/^\/snippet/, ""),
+                rewrite: (path) => path.replace(/^\/snippet-api/, ""),
             },
         },
     },
