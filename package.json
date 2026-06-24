@@ -5,6 +5,9 @@
     "packageManager": "pnpm@9.15.4",
     "scripts": {
         "dev": "pnpm --filter @babylon-lite/parity-harness dev",
+        "dev:playground": "pnpm --filter @babylon-lite/playground dev",
+        "dev:playground:watch": "pnpm --filter @babylon-lite/playground dev:watch",
+        "build:playground": "pnpm --filter @babylon-lite/playground build",
         "dev:lab": "pnpm build:bundle-scenes && tsx scripts/build-bundle-demos.ts && pnpm --filter @babylon-lite/lab dev",
         "build": "pnpm --filter babylon-lite build",
         "build:lib": "pnpm --filter babylon-lite build:lib",
@@ -38,7 +41,7 @@
         "gen:feature-doc": "tsx scripts/gen-feature-comparison.ts",
         "gen:feature-doc:check": "tsx scripts/gen-feature-comparison.ts --check",
         "build:perf-baseline": "tsx scripts/build-perf-baseline.ts",
-        "lint": "eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit && tsc -p lab/tsconfig.typecheck.json --noEmit && tsc -p tests/lite/tsconfig.json --noEmit",
+        "lint": "eslint . && tsc -p packages/babylon-lite/tsconfig.json --noEmit && tsc -p lab/tsconfig.typecheck.json --noEmit && tsc -p playground/tsconfig.json --noEmit && tsc -p tests/lite/tsconfig.json --noEmit",
         "lint:fix": "eslint . --fix",
         "typecheck:lab": "tsc -p lab/tsconfig.typecheck.json --noEmit",
         "typecheck:tests": "tsc -p tests/lite/tsconfig.json --noEmit",

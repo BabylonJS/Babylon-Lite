@@ -32,6 +32,8 @@ Open **http://localhost:5174** to browse the scene gallery.
 | Command                    | Description                                                   |
 | -------------------------- | ------------------------------------------------------------- |
 | `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                |
+| `pnpm dev:playground`     | Start the Lite Playground dev server (http://localhost:5175)   |
+| `pnpm build:playground`   | Build the Lite Playground into `playground/dist`               |
 | `pnpm build`               | Build the `babylon-lite` library                              |
 | `pnpm build:bundle-scenes` | Generate production bundles + per-scene `manifest/` for the gallery |
 | `pnpm test`                | Build bundle scenes, then run parity and bundle-size tests    |
@@ -44,7 +46,8 @@ Open **http://localhost:5174** to browse the scene gallery.
 
 ```
 packages/babylon-lite/   # The engine library
-lab/         # Scene gallery & dev playground (Vite)
+lab/         # Scene gallery & internal dev harness (Vite)
+playground/  # Lite Playground — public editor/runner app (see playground/README.md)
 tests/lite/unit/              # Vitest unit tests (pure Node.js, no GPU)
 tests/lite/plumbing/          # Playwright GPU integration tests (dispose, material-swap)
 tests/lite/parity/scenes/     # Playwright visual parity tests (pixel-diff)

@@ -1,0 +1,68 @@
+// Engine version selection for the playground runtime.
+//
+// The runner resolves the bare `@babylonjs/lite` import to an engine bundle URL
+// chosen here: the self-hosted "nightly" bundle (built from workspace source and
+// served alongside the app) by default, or a specific published release loaded on
+// demand from the esm.sh CDN. Switching versions only changes the import URL — no
+// redeploy is needed to target a released version.
+
+/** Sentinel value for the self-hosted, source-tracking engine build. */
+export const NIGHTLY = "nightly";
+
+/** URL of the self-hosted nightly engine bundle (served at the app root). */
+export const NIGHTLY_ENGINE_URL = "/engine/dev/index.js";
+
+const REGISTRY_URL = "https://registry.npmjs.org/@babylonjs/lite";
+
+/** How many recent published versions to offer in the selector. */
+const MAX_VERSIONS = 20;
+
+/** Resolve the engine bundle URL for a selected version (`"nightly"` or a semver). */
+export function engineUrlForVersion(version: string): string {
+    if (version === NIGHTLY) {
+        return NIGHTLY_ENGINE_URL;
+    }
+    return `https://esm.sh/@babylonjs/lite@${version}`;
+}
+
+/**
+ * The CDN specifier baked into a *downloaded* project's import map. The self-hosted
+ * nightly bundle isn't reachable outside the playground, so a download targeting
+ * nightly pins to esm.sh's latest published release; an explicit version pins to it.
+ */
+export function downloadEngineUrl(version: string): string {
+    return version === NIGHTLY ? "https://esm.sh/@babylonjs/lite" : `https://esm.sh/@babylonjs/lite@${version}`;
+}
+
+/**
+ * Fetch the list of published `@babylonjs/lite` versions, newest first, excluding
+ * pre-releases. Returns an empty list if the registry can't be reached so the
+ * selector can still offer nightly.
+ */
+export async function fetchPublishedVersions(): Promise<string[]> {
+    try {
+        const response = await fetch(REGISTRY_URL, { headers: { Accept: "application/vnd.npm.install-v1+json" } });
+        if (!response.ok) {
+            return [];
+        }
+        const data = (await response.json()) as { versions?: Record<string, unknown> };
+        const versions = Object.keys(data.versions ?? {}).filter((version) => !version.includes("-"));
+        versions.sort(compareSemver);
+        return versions.reverse().slice(0, MAX_VERSIONS);
+    } catch {
+        return [];
+    }
+}
+
+/** Ascending semver comparison for `MAJOR.MINOR.PATCH` release versions. */
+function compareSemver(a: string, b: string): number {
+    const pa = a.split(".").map(Number);
+    const pb = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) {
+        const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (diff !== 0) {
+            return diff;
+        }
+    }
+    return 0;
+}
