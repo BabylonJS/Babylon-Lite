@@ -232,9 +232,22 @@ function assetUsesGltfFeatures(json: any) {
         JSON.stringify(json).includes("extras") ||
         (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
         anyPrimitive(json, (p) => !!p.targets?.length) ||
-        // A negative-scale node, or any node using a raw `matrix`, may need the negative-winding
-        // feature (precise per-node determinant test happens in the registry predicate).
-        (json.nodes as any[] | undefined)?.some((n: any) => (n.scale && n.scale[0] * n.scale[1] * n.scale[2] < 0) || n.matrix !== undefined) ||
+        // A node with a negative-determinant local transform (odd negative scale, or a `matrix`
+        // with negative 3x3 determinant) may need the negative-winding feature. This mirrors the
+        // registry's `hasNegDetNode` predicate so a positive-determinant `matrix` node — extremely
+        // common, e.g. TextureSettingsTest — does NOT needlessly pull the feature registry.
+        (json.nodes as any[] | undefined)?.some((n: any) =>
+            n.scale
+                ? n.scale[0] * n.scale[1] * n.scale[2] < 0
+                : n.matrix
+                  ? n.matrix[0] * (n.matrix[5] * n.matrix[10] - n.matrix[6] * n.matrix[9]) +
+                        n.matrix[1] * (n.matrix[6] * n.matrix[8] - n.matrix[4] * n.matrix[10]) +
+                        n.matrix[2] * (n.matrix[4] * n.matrix[9] - n.matrix[5] * n.matrix[8]) <
+                    0
+                  : false
+        ) ||
+        // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP).
+        anyPrimitive(json, (p) => p.mode !== undefined && p.mode !== 4) ||
         needsOrmComposite(json)
     );
 }
@@ -367,7 +380,7 @@ async function extractAllMeshes(
             // first need — non-interleaved assets never fetch it. Tight primitives
             // fall through to the path below (byte-identical to non-interleaved).
             if (!decoded && _strided(primitive)) {
-                const ip = (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
+                const ip = await (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
                 if (ip) {
                     matPromises.push(getMat(primitive.material));
                     partials.push(ip);
@@ -437,12 +450,6 @@ async function extractAllMeshes(
             // always provide NORMAL (the common case) never bundle or fetch this code.
             const normals = normData ? (normData._data as Float32Array) : normalsHelper!.computeSmoothNormals(posData._data as Float32Array, indices, posData._count);
 
-            // glTF primitive `mode` → non-triangle-list topology index (1=points, 2=lines,
-            // 3=line-strip, 4=triangle-strip). Triangle-list (mode 4 / unset) and the
-            // unsupported LINE_LOOP(2)/TRIANGLE_FAN(6) leave `_topology` undefined.
-            const _pm = primitive.mode;
-            const _topology = _pm === 0 ? 1 : _pm === 1 ? 2 : _pm === 3 ? 3 : _pm === 5 ? 4 : undefined;
-
             partials.push({
                 _positions: posData._data as Float32Array,
                 _normals: normals,
@@ -451,7 +458,6 @@ async function extractAllMeshes(
                 _uv2s: uv2s,
                 _colors: colors,
                 _flatNormal: !normData,
-                ...(_topology ? { _topology } : undefined),
                 _indices: indices,
                 _vertexCount: posData._count,
                 _indexCount: indices.length,
@@ -617,7 +623,6 @@ async function uploadMeshes(meshDatas: GltfMeshData[], features: GltfFeature[], 
                     morphTargets: null,
                     _gpu: gpu,
                     _flatNormal: m._flatNormal,
-                    ...(m._topology ? { _topology: m._topology } : undefined),
                 } as unknown as Mesh;
                 initMeshTransform(mesh);
 

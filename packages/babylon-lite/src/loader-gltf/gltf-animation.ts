@@ -6,7 +6,7 @@
  *  via the registration seam below, so scenes that don't declare the extension
  *  pay zero bytes for pointer resolution.
  */
-import { F32, U8, I8, I16 } from "../engine/typed-arrays.js";
+import { F32 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding, AnimatedNodeTarget } from "../animation/types.js";
@@ -34,25 +34,25 @@ export function _installPointerHandlers(parser: PointerChannelParser): void {
     _parsePointerChannel = parser;
 }
 
-/** Convert a sampler input/output accessor to a tightly-packed Float32Array.
- *  Aligned Float32 sources (the overwhelmingly common case) are reinterpreted
- *  in place for free. Non-Float32 sources — normalized signed BYTE/SHORT
- *  rotation output (glTF-Asset-Generator Animation_SamplerType), normalized
- *  UNSIGNED_BYTE node-visibility flags, etc. — are denormalized per the glTF
- *  spec into a fresh array. Only animated assets load this module, so the
- *  non-Float32 branch costs nothing for static scenes. */
+/** Registration seam for the non-Float32 / normalized sampler converter. Installed only by the lazy
+ *  `gltf-sampler-denorm` module — loaded when an animation sampler accessor is non-float (e.g.
+ *  glTF-Asset-Generator Animation_SamplerType normalized BYTE/SHORT rotation) or by
+ *  KHR_animation_pointer. When never installed, `toSamplerFloat32` folds to the aligned-Float32 fast
+ *  path, so plain float-sampler animations stay byte-identical. */
+export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
+let _convertSampler: SamplerConverter | null = null;
+export function _installSamplerConverter(converter: SamplerConverter): void {
+    _convertSampler = converter;
+}
+
+/** Convert a sampler input/output accessor to a tightly-packed Float32Array. Aligned Float32 sources
+ *  (the overwhelmingly common case) are reinterpreted in place for free; non-Float32 / normalized
+ *  sources are handled by the lazily-installed converter. */
 function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: boolean): Float32Array {
-    if (src instanceof F32) {
-        return new F32(src.buffer, src.byteOffset, length);
+    if (_convertSampler) {
+        return _convertSampler(src, length, normalized);
     }
-    const out = new F32(length);
-    const div = src instanceof I8 ? 127 : src instanceof I16 ? 32767 : src instanceof U8 ? 255 : 65535;
-    const signed = src instanceof I8 || src instanceof I16;
-    const s = src as unknown as { [i: number]: number };
-    for (let i = 0; i < length; i++) {
-        out[i] = normalized ? (signed ? Math.max(s[i]! / div, -1) : s[i]! / div) : s[i]!;
-    }
-    return out;
+    return new F32(src.buffer as ArrayBuffer, src.byteOffset, length);
 }
 
 /** Parsed skin/skeleton data. */

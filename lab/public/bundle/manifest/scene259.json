@@ -1,0 +1,17 @@
+{
+  "rawKB": 77,
+  "gzipKB": 31.8,
+  "ignoredRawKB": 0,
+  "runtimeChunks": [
+    "scene259-emissive-fragment-DxwEm_rR.js",
+    "scene259-flat-normal-wgsl-Cm9mM4tC.js",
+    "scene259-generate-mipmaps-wilchULP.js",
+    "scene259-gltf-json-asset-B8LRpaMY.js",
+    "scene259-gltf-normals-DYhLwXNX.js",
+    "scene259-ibl-fragment-CeRrvT96.js",
+    "scene259-pbr-renderable-CxvQFxxd.js",
+    "scene259-rgbd-decode-lYDuKaAU.js",
+    "scene259-scene-uniforms-FTYH6Ct0.js",
+    "scene259.js"
+  ]
+}

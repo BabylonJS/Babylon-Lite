@@ -4,17 +4,18 @@
  *  scene that doesn't declare the extension pays zero bytes for pointer
  *  resolution, the non-Float32 sampler converter, or the visibility cascade.
  *
- *  On side-effect import this module installs two callbacks into gltf-animation:
- *   1. A pointer-channel parser (resolves the JSON pointer to a writer fn).
- *   2. A sampler converter that handles the non-Float32/misaligned accessor
- *      cases the fast path in gltf-animation can't express (e.g. the 11-byte
- *      UNSIGNED_BYTE visibility accessor in CubeVisibility.glb).
+ *  On side-effect import this module installs a pointer-channel parser into
+ *  gltf-animation (resolves the JSON pointer to a writer fn) and pulls in the
+ *  lazy sampler converter (`gltf-sampler-denorm`) that handles the
+ *  non-Float32/misaligned accessor cases the fast path can't express (e.g. the
+ *  11-byte UNSIGNED_BYTE visibility accessor in CubeVisibility.glb).
  *
  *  Node-visibility and node-TRS pointers resolve here directly. Material
  *  pointer targets (texture-transform offset/scale/rotation, factors, …) are
  *  resolved by `resolveAnimationPointer` in animation-pointer.ts, invoked from
  *  the pointer-channel parser installed below. */
 
+import "./gltf-sampler-denorm.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { AnimationChannel, TargetPath } from "../animation/types.js";

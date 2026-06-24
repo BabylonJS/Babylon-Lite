@@ -12,18 +12,19 @@ export const MSH_RECEIVE_SHADOWS = 1 << 8;
 export const MSH_VAT = 1 << 9;
 /** Mesh has no NORMAL attribute → must be flat-shaded (glTF spec). */
 export const MSH_FLAT_NORMAL = 1 << 10;
-/** Mesh world transform has a positive determinant (mirrored vs the RH→LH root):
- *  its triangle winding is reversed, so back-face culling must flip (cull "front"). */
-export const MSH_REVERSE_WINDING = 1 << 11;
-/** Non-triangle-list primitive topology, encoded as a 3-bit index in bits 12-14
- *  (1=point-list, 2=line-list, 3=line-strip, 4=triangle-strip; 0=triangle-list).
- *  Set from the glTF primitive `mode`; the PBR pipeline maps it to the GPU topology. */
-export const MSH_TOPOLOGY_SHIFT = 12;
-export const MSH_TOPOLOGY_MASK = 7 << MSH_TOPOLOGY_SHIFT;
-/** A line-strip / triangle-strip mesh uses a uint32 index buffer (vs uint16). WebGPU
- *  needs the pipeline's `stripIndexFormat` to match the index buffer for indexed strip
- *  draws. Set only for strip topologies, so non-strip meshes are unaffected. */
-export const MSH_INDEX_U32 = 1 << 15;
+// Bits 11-15 (negative-winding + 3-bit topology index + uint32-strip flag) are owned by the lazy
+// glTF primitive feature: their constants live in pbr-primitive-resolver.ts and are encoded via the
+// `_meshFeatureExtra` hook below, so triangle-list positive-winding scenes never bundle that code.
+
+/** Extra mesh-feature encoder, installed only by the glTF primitive feature (topology +
+ *  negative-winding bits). Module-local with a single exported setter: when no such mesh is in the
+ *  bundle the setter tree-shakes, the bundler proves this is always null, and the `_meshFeatureExtra`
+ *  call below folds away — every common mesh keeps `_computeMeshFeatures` byte-identical. */
+let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;
+/** @internal Install the extra mesh-feature encoder (called by the glTF primitive feature). */
+export function _installMeshFeatureExtra(encode: (mesh: Mesh) => number): void {
+    _meshFeatureExtra = encode;
+}
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
@@ -63,20 +64,11 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     if ((mesh as { _flatNormal?: boolean })._flatNormal) {
         features |= MSH_FLAT_NORMAL;
     }
-    if ((mesh as { _reverseWinding?: boolean })._reverseWinding) {
-        features |= MSH_REVERSE_WINDING;
-    }
-    const topo = (mesh as { _topology?: number })._topology;
-    if (topo) {
-        features |= topo << MSH_TOPOLOGY_SHIFT;
-        // Strips (3=line-strip, 4=triangle-strip) need the pipeline stripIndexFormat to match the
-        // index buffer; flag uint32 so the pipeline picks the right format. Lite always draws indexed.
-        if (topo >= 3 && gpu.indexFormat === "uint32") {
-            features |= MSH_INDEX_U32;
-        }
-    }
     if (receiveShadows) {
         features |= MSH_RECEIVE_SHADOWS;
+    }
+    if (_meshFeatureExtra) {
+        features |= _meshFeatureExtra(mesh);
     }
     return features;
 }

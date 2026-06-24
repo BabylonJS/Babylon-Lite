@@ -10,7 +10,9 @@ import { _boneBuilder } from "../skeleton/bone-control-hooks.js";
  *  glTF allows WEIGHTS to be FLOAT or normalized UNSIGNED_BYTE / UNSIGNED_SHORT;
  *  the skinning pipeline binds weights as `float32x4`, so integer weights read
  *  raw (0..255 / 0..65535) explode the skin (mesh collapses → blank render).
- *  Float sources pass through untouched (zero cost for the common case). */
+ *  Float sources pass through untouched (zero cost for the common case). Kept
+ *  inline (not lazily imported): the denorm is smaller than a dynamic-import
+ *  thunk, and it only ships in the already skin-gated feature chunk. */
 function weightsToFloat32(w: ArrayBufferView): Float32Array {
     if (w instanceof F32) {
         return w;

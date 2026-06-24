@@ -19,7 +19,7 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { _PbrBindCtx, PbrExt } from "./pbr-flags.js";
 import { _getPbrExtsSorted, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import { PBR_HAS_NORMAL_MAP, PBR_HAS_EMISSIVE, PBR_HAS_SPEC_GLOSS, PBR_HAS_DOUBLE_SIDED, PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
-import { MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_REVERSE_WINDING, MSH_TOPOLOGY_SHIFT, MSH_INDEX_U32 } from "../mesh-features.js";
+import { MSH_HAS_TANGENTS, MSH_HAS_UV2 } from "../mesh-features.js";
 import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
@@ -44,6 +44,17 @@ let _pbrFallbackResolver: ((engine: EngineContext) => Texture2D) | null = null;
 /** @internal Install the factor-only fallback-texture resolver (called by `createPbrMaterial`). */
 export function _installPbrFallbackResolver(resolve: (engine: EngineContext) => Texture2D): void {
     _pbrFallbackResolver = resolve;
+}
+
+/** Primitive-state resolver, installed only by the glTF primitive feature (non-triangle topology
+ *  or negative-winding meshes). Module-local with a single exported setter: when no such mesh is in
+ *  the bundle the setter tree-shakes, the bundler proves this is always null, and the
+ *  `_primitiveResolver ? … : { topology: "triangle-list", … }` ternary below folds to the plain
+ *  triangle-list default — every triangle-list PBR scene (e.g. BoomBox) stays byte-identical. */
+let _primitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
+/** @internal Install the primitive-state resolver (called by the glTF primitive feature). */
+export function _installPbrPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
+    _primitiveResolver = resolve;
 }
 
 interface _PbrShaderBindings {
@@ -139,18 +150,6 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
     const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
     const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
-    // A mirrored mesh (positive world determinant, e.g. KHR negative node scale) has reversed
-    // triangle winding, so back-face culling must cull the FRONT face instead. Matches BJS, which
-    // flips sideOrientation when the world matrix determinant is negative.
-    const reverseWinding = (meshFeatures & MSH_REVERSE_WINDING) !== 0;
-    // Non-triangle-list primitive topology (glTF POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP). Points
-    // and lines have no faces to cull; for a strip the material's culling still applies.
-    const topoIdx = (meshFeatures >> MSH_TOPOLOGY_SHIFT) & 7;
-    const topology: GPUPrimitiveTopology =
-        topoIdx === 1 ? "point-list" : topoIdx === 2 ? "line-list" : topoIdx === 3 ? "line-strip" : topoIdx === 4 ? "triangle-strip" : "triangle-list";
-    const noCull = topoIdx >= 1 && topoIdx <= 3;
-    // Indexed strip draws need stripIndexFormat to match the index buffer.
-    const stripIndexFormat: GPUIndexFormat | undefined = topoIdx >= 3 ? (meshFeatures & MSH_INDEX_U32 ? "uint32" : "uint16") : undefined;
 
     const sceneBGL = getSceneBindGroupLayout(engine);
     const bgls: GPUBindGroupLayout[] = bindings._shadowBGL ? [sceneBGL, bindings._meshBGL, bindings._shadowBGL] : [sceneBGL, bindings._meshBGL];
@@ -186,12 +185,9 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: {
-            topology,
-            ...(stripIndexFormat ? { stripIndexFormat } : undefined),
-            cullMode: noCull || hasDoubleSided ? ("none" as GPUCullMode) : reverseWinding ? "front" : "back",
-            frontFace: "ccw",
-        },
+        primitive: _primitiveResolver
+            ? _primitiveResolver(meshFeatures, hasDoubleSided)
+            : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;
