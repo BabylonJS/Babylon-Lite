@@ -55,6 +55,7 @@
         "@playwright/test": "^1.58.2",
         "@types/node": "^25.9.1",
         "@types/pngjs": "^6.0.5",
+        "@types/webxr": "^0.5.24",
         "@webgpu/types": "^0.1.52",
         "browserstack-node-sdk": "^1.57.1",
         "dotenv": "^17.4.2",

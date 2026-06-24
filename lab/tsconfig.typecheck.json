@@ -7,5 +7,5 @@
       "babylon-lite/*": ["../packages/babylon-lite/src/*"]
     }
   },
-  "include": ["lite/src", "../packages/babylon-lite/src/vite-env.d.ts"]
+  "include": ["lite/src", "../packages/babylon-lite/src/vite-env.d.ts", "../packages/babylon-lite/src/xr/xr-webgpu-globals.d.ts"]
 }

@@ -129,6 +129,19 @@ export type { GeospatialControlOptions } from "./camera/geospatial-camera-contro
 export { flyGeospatialCameraToAsync } from "./camera/geospatial-camera-fly.js";
 export type { GeospatialFlyOptions } from "./camera/geospatial-camera-fly.js";
 
+// ─── WebXR (WebGPU binding — draft) ──────────────────────────────────
+// Forward-looking support for the immersive-web WebXR/WebGPU binding. The binding
+// (XRGPUBinding) is not yet implemented by any browser; gate UI on isXrSessionSupported.
+export { enterXr, exitXr } from "./xr/xr-session.js";
+export type { XrSessionContext, XrSessionOptions } from "./xr/xr-session.js";
+export type { XrGpuBinding, XrGpuBindingConstructor, XrGpuSubImage, XrGpuProjectionLayerInit } from "./xr/xr-webgpu-binding.js";
+export { isWebXrPresent, isWebGpuXrSupported, isXrSessionSupported } from "./xr/xr-support.js";
+export type { XrSessionMode, XrEye, XrHandedness, XrTargetRayMode, XrReferenceSpaceType } from "./xr/xr-support.js";
+export { createXrCamera, updateXrCameraForView } from "./xr/xr-camera.js";
+export type { XrCamera } from "./xr/xr-camera.js";
+export { createXrInputManager, updateXrInputPoses, disposeXrInputManager } from "./xr/xr-input.js";
+export type { XrInputManager, XrInputSource, XrInputCallbacks } from "./xr/xr-input.js";
+
 // ─── Lights ──────────────────────────────────────────────────────────
 export { createHemisphericLight } from "./light/hemispheric.js";
 export type { HemisphericLight } from "./light/hemispheric.js";

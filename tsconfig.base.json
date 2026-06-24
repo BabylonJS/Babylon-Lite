@@ -17,6 +17,6 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "types": ["@webgpu/types"]
+    "types": ["@webgpu/types", "webxr"]
   }
 }

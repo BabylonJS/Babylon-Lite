@@ -54,7 +54,7 @@ describe("build/index.d.ts", () => {
                 "--lib",
                 "es2022,dom,dom.iterable",
                 "--types",
-                "@webgpu/types",
+                "@webgpu/types,webxr",
                 DTS_PATH,
             ],
             {
