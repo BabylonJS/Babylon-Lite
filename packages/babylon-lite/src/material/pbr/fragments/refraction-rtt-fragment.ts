@@ -172,7 +172,7 @@ function writeRefractionUBO(data: Float32Array, mat: PbrMaterialProps, offsets: 
     const ior = refr.indexOfRefraction ?? 1.5;
     const thick = ss!.thickness;
     data[o + 1] = 1.0 / (refr.useThicknessAsDepth && thick?.max ? ior : 1.0);
-    data[o + 2] = refr.useThicknessAsDepth ? (thick?.max ?? 0.0) : 1.0;
+    data[o + 2] = refr.useThicknessAsDepth ? (thick?.max ?? 0.0) : 0.0;
     data[o + 3] = 1.0 / ior;
 
     const vOff = offsets.get("volumeParams");

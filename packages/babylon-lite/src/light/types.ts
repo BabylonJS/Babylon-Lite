@@ -30,6 +30,8 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
     readonly _writeLightUbo?: ((data: Float32Array, offset: number) => void) | undefined;
     /** @internal Monotonically increasing version — bumped when any UBO-relevant property changes. */
     readonly _lightVersion: number;
+    /** @internal Bumps `_lightVersion` after direct mutation of scalar/array light fields. */
+    readonly _bumpLightVersion?: (() => void) | undefined;
 }
 
 /** Maximum number of scene lights packed into the shared lights UBO.

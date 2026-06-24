@@ -192,7 +192,11 @@ export const pbrExt: PbrExt = {
             const hasNonDefaultF0 = m.metallicF0Factor != null && Math.abs(m.metallicF0Factor - 1) > 1e-6;
             const mrc = m.metallicReflectanceColor;
             const hasNonDefaultColor = mrc != null && (mrc[0] !== 1 || mrc[1] !== 1 || mrc[2] !== 1);
-            if (hasNonDefaultF0 || hasNonDefaultColor) {
+            // `_occlStrengthAnimated` (set lazily by the animation-pointer feature) routes an
+            // animated occlusionTexture.strength through this ext's occlusion mix slot. Reflectance
+            // factors stay default, so F0/albedo is identical to the base template path — only the
+            // `mix(1, orm.r, occlusionStrength)` is added. Non-animated scenes never set the flag.
+            if (hasNonDefaultF0 || hasNonDefaultColor || (m as { _occlStrengthAnimated?: boolean })._occlStrengthAnimated) {
                 f2 |= PBR2_HAS_REFLECTANCE_FACTORS;
             }
         }
