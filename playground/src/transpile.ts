@@ -16,6 +16,42 @@ function ensureInitialized(): Promise<void> {
 
 const LITE_SPECIFIER = "@babylonjs/lite";
 
+/** A single compile/bundle diagnostic mapped to a 1-based editor location. */
+export interface BuildDiagnostic {
+    file: string;
+    line: number;
+    column: number;
+    length: number;
+    message: string;
+}
+
+/** Thrown by {@link transpile} when esbuild reports build errors, carrying editor-mappable diagnostics. */
+export class TranspileError extends Error {
+    readonly diagnostics: BuildDiagnostic[];
+    constructor(diagnostics: BuildDiagnostic[]) {
+        const summary = diagnostics[0]?.message ?? "Build failed";
+        super(diagnostics.length > 1 ? `${summary} (+${diagnostics.length - 1} more)` : summary);
+        this.name = "TranspileError";
+        this.diagnostics = diagnostics;
+    }
+}
+
+function toDiagnostics(messages: readonly esbuild.Message[]): BuildDiagnostic[] {
+    return messages.map((message) => {
+        const location = message.location;
+        // esbuild prefixes virtual-namespace files as `virtual:<name>`; map back to the model name.
+        const file = (location?.file ?? "").replace(/^virtual:/, "").replace(/^\.?\//, "");
+        return {
+            file,
+            line: location?.line ?? 1,
+            // esbuild columns are 0-based byte offsets; Monaco is 1-based.
+            column: (location?.column ?? 0) + 1,
+            length: location?.length ?? 1,
+            message: message.text,
+        };
+    });
+}
+
 function loaderFor(name: string): esbuild.Loader {
     if (name.endsWith(".js") || name.endsWith(".jsx")) {
         return "jsx";
@@ -103,16 +139,25 @@ function virtualFilesPlugin(files: Record<string, string>): esbuild.Plugin {
  */
 export async function transpile(files: Record<string, string>, entry: string): Promise<string> {
     await ensureInitialized();
-    const result = await esbuild.build({
-        entryPoints: [entry],
-        bundle: true,
-        write: false,
-        format: "esm",
-        target: "esnext",
-        sourcemap: "inline",
-        plugins: [virtualFilesPlugin(files)],
-        logLevel: "silent",
-    });
+    let result: esbuild.BuildResult;
+    try {
+        result = await esbuild.build({
+            entryPoints: [entry],
+            bundle: true,
+            write: false,
+            format: "esm",
+            target: "esnext",
+            sourcemap: "inline",
+            plugins: [virtualFilesPlugin(files)],
+            logLevel: "silent",
+        });
+    } catch (err) {
+        const failure = err as esbuild.BuildFailure;
+        if (Array.isArray(failure?.errors) && failure.errors.length > 0) {
+            throw new TranspileError(toDiagnostics(failure.errors));
+        }
+        throw err;
+    }
     const output = result.outputFiles?.[0]?.text ?? "";
     return `${output}\n//# sourceURL=playground.js\n`;
 }

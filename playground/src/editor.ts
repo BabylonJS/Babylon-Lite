@@ -1,6 +1,7 @@
 import * as monaco from "monaco-editor";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import type { BuildDiagnostic } from "./transpile";
 // The WebGPU type definitions are bundled as raw text so Monaco can resolve the
 // ~90 `GPU*` types referenced by the engine's public surface (otherwise the engine
 // d.ts itself reports "cannot find name" errors). They declare global interfaces.
@@ -82,6 +83,14 @@ export interface PlaygroundEditor {
     format(): void;
     /** Subscribe to file-set / active-file changes (for the tab bar). */
     onChange(listener: () => void): void;
+    /** Subscribe to edits to any file's content (for autosave / dirty tracking). */
+    onContentChange(listener: () => void): void;
+    /** Show build errors as editor markers (red squiggles + Problems entries). */
+    setBuildMarkers(diagnostics: BuildDiagnostic[]): void;
+    /** Clear any build-error markers (e.g. after a successful run). */
+    clearBuildMarkers(): void;
+    /** Focus a file and move the cursor to a 1-based line/column. */
+    revealLocation(file: string, line: number, column: number): void;
 }
 
 function languageForFile(name: string): string {
@@ -111,7 +120,51 @@ export function createEditor(container: HTMLElement, files: Record<string, strin
     });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun);
 
+    const contentListeners: Array<() => void> = [];
+
     const emit = (): void => listeners.forEach((listener) => listener());
+    editor.onDidChangeModelContent(() => contentListeners.forEach((listener) => listener()));
+
+    const BUILD_MARKER_OWNER = "playground-build";
+
+    function clearBuildMarkers(): void {
+        for (const model of models.values()) {
+            monaco.editor.setModelMarkers(model, BUILD_MARKER_OWNER, []);
+        }
+    }
+
+    function setBuildMarkers(diagnostics: BuildDiagnostic[]): void {
+        const byFile = new Map<string, monaco.editor.IMarkerData[]>();
+        for (const diag of diagnostics) {
+            const list = byFile.get(diag.file) ?? [];
+            list.push({
+                severity: monaco.MarkerSeverity.Error,
+                message: diag.message,
+                startLineNumber: diag.line,
+                startColumn: diag.column,
+                endLineNumber: diag.line,
+                endColumn: diag.column + Math.max(1, diag.length),
+            });
+            byFile.set(diag.file, list);
+        }
+        clearBuildMarkers();
+        for (const [file, markers] of byFile) {
+            const model = models.get(file);
+            if (model) {
+                monaco.editor.setModelMarkers(model, BUILD_MARKER_OWNER, markers);
+            }
+        }
+    }
+
+    function revealLocation(file: string, line: number, column: number): void {
+        if (models.has(file)) {
+            setActive(file);
+        }
+        const position = { lineNumber: line, column };
+        editor.setPosition(position);
+        editor.revealPositionInCenter(position);
+        editor.focus();
+    }
 
     function modelUri(name: string): monaco.Uri {
         return monaco.Uri.parse(`file:///${name}`);
@@ -244,6 +297,10 @@ export function createEditor(container: HTMLElement, files: Record<string, strin
         removeFile,
         format: () => void editor.getAction("editor.action.formatDocument")?.run(),
         onChange: (listener: () => void) => listeners.push(listener),
+        onContentChange: (listener: () => void) => contentListeners.push(listener),
+        setBuildMarkers,
+        clearBuildMarkers,
+        revealLocation,
     };
 }
 

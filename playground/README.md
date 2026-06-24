@@ -268,14 +268,30 @@ type-checked. After adding an example, run it from the picker to confirm it boot
 
 The toolbar uses icon buttons (hover for a tooltip / read the `aria-label`):
 
+- **New** (document) — start a clean starter project. Prompts before discarding
+  unsaved edits.
 - **Examples** / **Engine version** — the two dropdowns.
 - **Save** (floppy) + caret — save & copy link; the caret opens **Save with details…**.
 - **Download** (down-arrow) — export the project as a runnable zip (see below).
 - **Run** (play) — run the current code (also Ctrl/Cmd+Enter).
 
+The preview pane also has two floating controls in its top-right corner: a live
+**FPS** readout and a **fullscreen** toggle for the canvas.
+
 There's no Format button: format with **Shift+Alt+F** or the editor's right-click
 **Format Document**. Drag the divider between the editor and preview to resize them
 (the ratio is remembered); arrow keys nudge it when it's focused.
+
+### Errors, autosave & the unsaved-changes guard
+
+- **Inline errors** — when a run fails to compile, esbuild's diagnostics are shown
+  as red markers in the editor (with entries in the Problems gutter) and as clickable
+  lines in the console; clicking one jumps the cursor to the offending file/line.
+- **Autosave** — edits are debounced to `localStorage` (`bl-pg-autosave`). If you
+  reload or reopen the app without a snippet/`#code=` URL, your last unsaved project is
+  restored automatically. Saving a snippet, loading one, or hitting **New** clears it.
+- **Unsaved-changes guard** — the browser warns before you close/reload the tab while
+  there are unsaved edits (standalone only; disabled in embed mode).
 
 ## Snippets
 

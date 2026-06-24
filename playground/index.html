@@ -12,6 +12,9 @@
             <header class="toolbar">
                 <div class="brand"><img class="brand-logo" src="/favicon.svg" alt="" width="22" height="22" /><span class="brand-text">Babylon <span>Lite</span> Playground</span><span class="beta-badge" title="This playground is in beta — expect rough edges">Beta</span></div>
                 <div class="actions">
+                    <button id="newBtn" class="btn btn-icon" title="New project" aria-label="New project">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                    </button>
                     <select id="examples" class="select" title="Load an example" aria-label="Examples"></select>
                     <select id="versionSelect" class="select" title="Engine version" aria-label="Engine version"></select>
                     <div class="save-group">
@@ -40,7 +43,14 @@
                 </section>
                 <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="Resize editor and preview" tabindex="0"></div>
                 <section class="pane pane-preview">
-                    <div class="preview-host" id="previewHost"></div>
+                    <div class="preview-host" id="previewHost">
+                        <div class="preview-overlay">
+                            <span id="fpsCounter" class="fps-counter" title="Frames per second" hidden>0 FPS</span>
+                            <button id="fullscreenBtn" class="overlay-btn" title="Toggle fullscreen" aria-label="Toggle fullscreen">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                            </button>
+                        </div>
+                    </div>
                     <div class="console" id="console" aria-live="polite"></div>
                 </section>
             </main>

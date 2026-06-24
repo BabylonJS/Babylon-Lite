@@ -177,6 +177,42 @@ export const EXAMPLES: Example[] = [
 
 export const DEFAULT_SNIPPET = EXAMPLES[0]!.code;
 
+// Minimal starting point for the "New" button — a single light + camera and one box,
+// enough to render immediately and give a clean slate to build from.
+const STARTER = `import {
+    addToScene,
+    attachControl,
+    createArcRotateCamera,
+    createBox,
+    createEngine,
+    createHemisphericLight,
+    createSceneContext,
+    registerScene,
+    startEngine,
+} from "@babylonjs/lite";
+
+async function main(): Promise<void> {
+    const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
+
+    const engine = await createEngine(canvas);
+    const scene = createSceneContext(engine);
+
+    const camera = createArcRotateCamera(-Math.PI / 2, 1.1, 5, { x: 0, y: 0, z: 0 });
+    scene.camera = camera;
+    attachControl(camera, canvas, scene);
+
+    addToScene(scene, createHemisphericLight([0, 1, 0], 1.0));
+
+    const box = createBox(engine, 1);
+    addToScene(scene, box);
+
+    await registerScene(scene);
+    await startEngine(engine);
+}
+
+main().catch((err) => console.error(err));
+`;
+
 /** Resolve an example to a multi-file project (single-file examples get one `index.ts`). */
 export function projectFor(example: Example): { files: Record<string, string>; entry: string } {
     if (example.files && example.entry) {
@@ -186,3 +222,6 @@ export function projectFor(example: Example): { files: Record<string, string>; e
 }
 
 export const DEFAULT_PROJECT = projectFor(EXAMPLES[0]!);
+
+/** Blank-slate project loaded by the "New" button. */
+export const STARTER_PROJECT: { files: Record<string, string>; entry: string } = { files: { "index.ts": STARTER }, entry: "index.ts" };

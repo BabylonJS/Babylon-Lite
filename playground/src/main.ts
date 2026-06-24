@@ -2,10 +2,10 @@ import "./styles.css";
 import { createEditor, registerEngineTypes } from "./editor";
 import { mountFileTabs } from "./file-tabs";
 import { mountSplitter } from "./split";
-import { transpile } from "./transpile";
+import { transpile, TranspileError } from "./transpile";
 import { downloadProject } from "./download";
 import { Runner, type RunnerMessage } from "./runner";
-import { EXAMPLES, DEFAULT_PROJECT, projectFor } from "./examples";
+import { EXAMPLES, DEFAULT_PROJECT, STARTER_PROJECT, projectFor } from "./examples";
 import {
     saveSnippet,
     loadSnippet,
@@ -28,6 +28,9 @@ const consoleEl = document.getElementById("console") as HTMLElement;
 const splitEl = document.getElementById("split") as HTMLElement;
 const splitter = document.getElementById("splitter") as HTMLElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
+const newBtn = document.getElementById("newBtn") as HTMLButtonElement;
+const fullscreenBtn = document.getElementById("fullscreenBtn") as HTMLButtonElement;
+const fpsCounter = document.getElementById("fpsCounter") as HTMLElement;
 const downloadBtn = document.getElementById("downloadBtn") as HTMLButtonElement;
 const examplesEl = document.getElementById("examples") as HTMLSelectElement;
 const versionEl = document.getElementById("versionSelect") as HTMLSelectElement;
@@ -73,6 +76,18 @@ function clearConsole(): void {
     consoleEl.replaceChildren();
 }
 
+/** Append a clickable build error that jumps the editor to the offending location. */
+function appendBuildError(file: string, line: number, column: number, text: string): void {
+    const lineEl = document.createElement("div");
+    lineEl.className = "line level-error clickable";
+    const where = file ? `${file}:${line}:${column}` : `:${line}:${column}`;
+    lineEl.textContent = `${where} — ${text}`;
+    lineEl.title = "Jump to error";
+    lineEl.addEventListener("click", () => editor.revealLocation(file, line, column));
+    consoleEl.appendChild(lineEl);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
 let toastTimer: number | undefined;
 function showToast(text: string, isError = false): void {
     toastEl.textContent = text;
@@ -95,6 +110,8 @@ const runner = new Runner(previewHost, (message: RunnerMessage) => {
             embedHost?.emit({ channel: "babylon-lite-playground", type: "error", text: message.text });
             break;
         case "stats":
+            fpsCounter.hidden = false;
+            fpsCounter.textContent = `${Math.round(message.fps)} FPS`;
             embedHost?.emit({ channel: "babylon-lite-playground", type: "stats", fps: message.fps });
             break;
         case "ran":
@@ -121,10 +138,19 @@ async function run(): Promise<void> {
     appendConsole("system", "Compiling…");
     try {
         const code = await transpile(editor.getFiles(), editor.getEntry());
+        editor.clearBuildMarkers();
         appendConsole("system", "Running…");
         await runner.run(code, engineUrlForVersion(currentVersion));
     } catch (err) {
-        appendConsole("error", err instanceof Error ? (err.stack ?? err.message) : String(err));
+        if (err instanceof TranspileError) {
+            editor.setBuildMarkers(err.diagnostics);
+            for (const diag of err.diagnostics) {
+                appendBuildError(diag.file, diag.line, diag.column, diag.message);
+            }
+        } else {
+            editor.clearBuildMarkers();
+            appendConsole("error", err instanceof Error ? (err.stack ?? err.message) : String(err));
+        }
     } finally {
         running = false;
         runBtn.disabled = false;
@@ -157,6 +183,81 @@ function resetToUnsaved(): void {
     }
 }
 
+// --- Local autosave + unsaved-changes guard ---------------------------------
+// Edits are debounced to localStorage so an accidental reload/close doesn't lose
+// work, and `beforeunload` warns while there are unsaved edits (standalone only).
+
+const AUTOSAVE_KEY = "bl-pg-autosave";
+
+interface Autosave {
+    files: Record<string, string>;
+    entry: string;
+    snippetId: string | null;
+    version: string;
+    meta: SnippetMeta;
+}
+
+let dirty = false;
+let autosaveTimer: number | undefined;
+
+function writeAutosave(): void {
+    const payload: Autosave = { ...currentProject(), snippetId: currentSnippetId, version: currentSnippetVersion, meta: currentMeta };
+    try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(payload));
+    } catch {
+        // Storage may be unavailable (private mode / quota); autosave is best-effort.
+    }
+}
+
+function clearAutosave(): void {
+    window.clearTimeout(autosaveTimer);
+    try {
+        localStorage.removeItem(AUTOSAVE_KEY);
+    } catch {
+        // ignore
+    }
+}
+
+function readAutosave(): Autosave | null {
+    try {
+        const raw = localStorage.getItem(AUTOSAVE_KEY);
+        if (!raw) {
+            return null;
+        }
+        const parsed = JSON.parse(raw) as Partial<Autosave>;
+        if (parsed && parsed.files && typeof parsed.files === "object" && typeof parsed.entry === "string") {
+            return { files: parsed.files, entry: parsed.entry, snippetId: parsed.snippetId ?? null, version: parsed.version ?? "0", meta: parsed.meta ?? {} };
+        }
+    } catch {
+        // Corrupt payload — ignore.
+    }
+    return null;
+}
+
+/** Mark the project as having unsaved edits (drives autosave + the unload guard). */
+function markDirty(): void {
+    dirty = true;
+    window.clearTimeout(autosaveTimer);
+    autosaveTimer = window.setTimeout(writeAutosave, 800);
+}
+
+/** Mark the project clean (after save / load / new) and drop the autosave snapshot. */
+function markClean(): void {
+    dirty = false;
+    clearAutosave();
+}
+
+editor.onContentChange(markDirty);
+
+if (!embedMode) {
+    window.addEventListener("beforeunload", (event) => {
+        if (dirty) {
+            event.preventDefault();
+            event.returnValue = "";
+        }
+    });
+}
+
 // Populate the examples picker.
 for (const example of EXAMPLES) {
     const option = document.createElement("option");
@@ -171,11 +272,34 @@ examplesEl.addEventListener("change", () => {
         // Loading an example starts a fresh, unsaved snippet.
         resetToUnsaved();
         editor.setFiles(projectFor(example).files, projectFor(example).entry);
+        markClean();
         void run();
     }
 });
 
 runBtn.addEventListener("click", () => void run());
+
+// New: discard the current project (with a guard if there are unsaved edits) and
+// load a clean starter scene.
+newBtn.addEventListener("click", () => {
+    if (dirty && !window.confirm("Discard unsaved changes and start a new project?")) {
+        return;
+    }
+    resetToUnsaved();
+    editor.setFiles(STARTER_PROJECT.files, STARTER_PROJECT.entry);
+    examplesEl.selectedIndex = -1;
+    markClean();
+    void run();
+});
+
+// Fullscreen the preview canvas (toggles in/out).
+fullscreenBtn.addEventListener("click", () => {
+    if (document.fullscreenElement) {
+        void document.exitFullscreen();
+    } else {
+        void previewHost.requestFullscreen?.();
+    }
+});
 
 downloadBtn.addEventListener("click", () => {
     downloadBtn.disabled = true;
@@ -223,6 +347,7 @@ async function save(meta: SnippetMeta): Promise<void> {
         currentSnippetId = result.id;
         currentSnippetVersion = result.version;
         currentMeta = meta;
+        markClean();
         history.replaceState(null, "", snippetPath(result.id, result.version));
         const link = permalinkFor(result.id, result.version);
         try {
@@ -268,6 +393,7 @@ async function loadFromUrl(): Promise<boolean> {
         currentMeta = {};
         const project = parseProject(inline);
         editor.setFiles(project.files, project.entry);
+        markClean();
         history.replaceState(null, "", "/");
         return true;
     }
@@ -294,6 +420,7 @@ async function loadSnippetInto(id: string, version: string, rewriteUrl: boolean)
         currentSnippetVersion = version;
         currentMeta = { name: snippet.name, description: snippet.description, tags: snippet.tags };
         editor.setFiles(snippet.files, snippet.entry);
+        markClean();
         if (rewriteUrl) {
             history.replaceState(null, "", snippetPath(id, version));
         }
@@ -354,9 +481,25 @@ if (embedMode) {
 // Load engine IntelliSense in the background; editing works regardless.
 void registerEngineTypes();
 
-// Boot: load a shared snippet if the URL has one, else the default snippet.
+// Boot: load a shared snippet if the URL has one, else restore autosaved work,
+// else fall back to the default snippet already in the editor.
 void (async () => {
-    await loadFromUrl();
+    const loadedFromUrl = await loadFromUrl();
+    if (!loadedFromUrl && !embedMode) {
+        const saved = readAutosave();
+        if (saved) {
+            currentSnippetId = saved.snippetId;
+            currentSnippetVersion = saved.version;
+            currentMeta = saved.meta;
+            editor.setFiles(saved.files, saved.entry);
+            examplesEl.selectedIndex = -1;
+            if (saved.snippetId) {
+                history.replaceState(null, "", snippetPath(saved.snippetId, saved.version));
+            }
+            dirty = true;
+            showToast("Restored unsaved work");
+        }
+    }
     void run();
     embedHost?.ready();
 })();
