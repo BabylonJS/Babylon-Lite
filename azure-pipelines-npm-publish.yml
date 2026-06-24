@@ -156,13 +156,13 @@ stages:
 
                 # --- GitHub release ---------------------------------------------
                 # Publish a GitHub release for the just-pushed npm tag, attaching a
-                # zip of the built @babylonjs/lite package (dist/ contents). Skipped
+                # zip of the built @babylonjs/lite package (build/ contents). Skipped
                 # in dry-run mode because the underlying tag is never pushed.
                 - script: |
                       set -euo pipefail
 
                       ZIP_PATH="$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
-                      ( cd ./packages/babylon-lite/dist && zip -r "$ZIP_PATH" . )
+                      ( cd ./packages/babylon-lite/build && zip -r "$ZIP_PATH" . )
                       echo "Created release archive: $ZIP_PATH"
                   displayName: "Zip @babylonjs/lite dist for release"
                   condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
