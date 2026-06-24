@@ -1570,3 +1570,369 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
         }
     });
 });
+
+// ─── Phase 3i: custom events + value interpolation ────────────────────────────
+
+describe("flow-graph blocks — events + interpolation Phase 3i", () => {
+    // ── SendCustomEvent / ReceiveCustomEvent ─────────────────────────────────
+
+    it("Send→Receive round-trip: matching eventId delivers named values", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                // SceneStart fires SendCustomEvent with {score: 42}
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "send", socket: "in" }] },
+                },
+                {
+                    id: "send",
+                    type: "SendCustomEvent",
+                    config: { eventId: "myEvent", valueNames: ["score"] },
+                    dataDefaults: { score: 42 },
+                    signalTargets: { out: [{ blockId: "recSent", socket: "in" }] },
+                },
+                // ReceiveCustomEvent (same eventId) wires to recorder
+                {
+                    id: "recv",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "myEvent", valueNames: ["score"] },
+                    signalTargets: { out: [{ blockId: "recRecv", socket: "in" }] },
+                },
+                { id: "recSent", type: RECORD, config: { label: "sent" } },
+                {
+                    id: "recRecv",
+                    type: RECORD,
+                    config: { label: "recv" },
+                    dataSources: { value: { blockId: "recv", socket: "score" } },
+                },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+
+        // send fired "sent" + receive triggered "recv"
+        expect(log.map((e) => e.label)).toContain("sent");
+        expect(log.map((e) => e.label)).toContain("recv");
+
+        const recvEntry = log.find((e) => e.label === "recv");
+        expect(recvEntry?.value).toBe(42);
+    });
+
+    it("Send→Receive: non-matching eventId does NOT trigger receiver", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "send", socket: "in" }] },
+                },
+                {
+                    id: "send",
+                    type: "SendCustomEvent",
+                    config: { eventId: "eventA", valueNames: ["x"] },
+                    dataDefaults: { x: 7 },
+                },
+                // Receiver listens on a DIFFERENT eventId — must NOT fire.
+                {
+                    id: "recv",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "eventB", valueNames: ["x"] },
+                    signalTargets: { out: [{ blockId: "rec", socket: "in" }] },
+                },
+                { id: "rec", type: RECORD, config: { label: "fired" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        // No record should appear — mismatched eventId is filtered out.
+        expect(log.filter((e) => e.label === "fired")).toHaveLength(0);
+    });
+
+    it("Send→Receive: matching receiver fires, mismatched receiver is silent", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "send", socket: "in" }] },
+                },
+                {
+                    id: "send",
+                    type: "SendCustomEvent",
+                    config: { eventId: "ping", valueNames: [] },
+                },
+                {
+                    id: "recvOk",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "ping" },
+                    signalTargets: { out: [{ blockId: "recOk", socket: "in" }] },
+                },
+                {
+                    id: "recvNo",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "pong" },
+                    signalTargets: { out: [{ blockId: "recNo", socket: "in" }] },
+                },
+                { id: "recOk", type: RECORD, config: { label: "ok" } },
+                { id: "recNo", type: RECORD, config: { label: "no" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(log.filter((e) => e.label === "ok")).toHaveLength(1);
+        expect(log.filter((e) => e.label === "no")).toHaveLength(0);
+    });
+
+    it("ReceiveCustomEvent fires both out and done signals", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "send", socket: "in" }] },
+                },
+                { id: "send", type: "SendCustomEvent", config: { eventId: "ev" } },
+                {
+                    id: "recv",
+                    type: "ReceiveCustomEvent",
+                    config: { eventId: "ev" },
+                    signalTargets: {
+                        out: [{ blockId: "recOut", socket: "in" }],
+                        done: [{ blockId: "recDone", socket: "in" }],
+                    },
+                },
+                { id: "recOut", type: RECORD, config: { label: "out" } },
+                { id: "recDone", type: RECORD, config: { label: "done" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(log.map((e) => e.label)).toContain("out");
+        expect(log.map((e) => e.label)).toContain("done");
+    });
+
+    // ── ValueInterpolation ────────────────────────────────────────────────────
+
+    it("ValueInterpolation: numeric lerp moves value toward target over ticks", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "interp", socket: "in" }] },
+                },
+                {
+                    id: "interp",
+                    type: "ValueInterpolation",
+                    config: { type: "number" },
+                    dataDefaults: { startValue: 0, endValue: 10, duration: 1 }, // 1 second
+                    signalTargets: {
+                        out: [{ blockId: "recOut", socket: "in" }],
+                        done: [{ blockId: "recDone", socket: "in" }],
+                    },
+                },
+                {
+                    id: "recOut",
+                    type: RECORD,
+                    config: { label: "out" },
+                    dataSources: { value: { blockId: "interp", socket: "value" } },
+                },
+                {
+                    id: "recDone",
+                    type: RECORD,
+                    config: { label: "done" },
+                    dataSources: { value: { blockId: "interp", socket: "value" } },
+                },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        // out fires immediately — value should be at startValue (0)
+        const outEntry = log.find((e) => e.label === "out");
+        expect(outEntry).toBeDefined();
+        expect(outEntry!.value).toBe(0);
+        expect(log.find((e) => e.label === "done")).toBeUndefined();
+
+        // Tick to 50% progress (500 ms of 1000 ms) → value ≈ 5
+        tickFlowGraph(rt, 500);
+        const interpBlock = rt.env.graph.blocks.find((b) => b.type === "ValueInterpolation")!;
+        const midValue = rt.context.connectionValues[`${interpBlock.id}:value`] as number;
+        expect(midValue).toBeGreaterThan(0);
+        expect(midValue).toBeLessThan(10);
+        expect(midValue).toBeCloseTo(5, 5);
+
+        // Tick past duration → done fires, value snaps to 10
+        tickFlowGraph(rt, 600); // total ~1100 ms exceeds the 1 s duration
+        expect(log.find((e) => e.label === "done")).toBeDefined();
+        expect(log.find((e) => e.label === "done")!.value).toBe(10);
+    });
+
+    it("ValueInterpolation: done fires exactly once even with extra ticks", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "interp", socket: "in" }] },
+                },
+                {
+                    id: "interp",
+                    type: "ValueInterpolation",
+                    config: { type: "number" },
+                    dataDefaults: { startValue: 0, endValue: 1, duration: 0.5 },
+                    signalTargets: { done: [{ blockId: "recDone", socket: "in" }] },
+                },
+                { id: "recDone", type: RECORD, config: { label: "done" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        tickFlowGraph(rt, 1000); // well past 500 ms
+        tickFlowGraph(rt, 1000);
+        expect(log.filter((e) => e.label === "done")).toHaveLength(1);
+    });
+
+    it("ValueInterpolation: Vec3 lerp produces correct intermediate and final components", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "interp", socket: "in" }] },
+                },
+                {
+                    id: "interp",
+                    type: "ValueInterpolation",
+                    config: { type: "Vector3" },
+                    dataDefaults: {
+                        startValue: { x: 0, y: 0, z: 0 },
+                        endValue: { x: 10, y: 20, z: 30 },
+                        duration: 1,
+                    },
+                    signalTargets: { done: [{ blockId: "recDone", socket: "in" }] },
+                },
+                {
+                    id: "recDone",
+                    type: RECORD,
+                    config: { label: "done" },
+                    dataSources: { value: { blockId: "interp", socket: "value" } },
+                },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        // Advance to halfway point (500 ms of 1 s).
+        tickFlowGraph(rt, 500);
+        const interpBlock = rt.env.graph.blocks.find((b) => b.type === "ValueInterpolation")!;
+        const mid = rt.context.connectionValues[`${interpBlock.id}:value`] as { x: number; y: number; z: number };
+        expect(mid.x).toBeCloseTo(5, 5);
+        expect(mid.y).toBeCloseTo(10, 5);
+        expect(mid.z).toBeCloseTo(15, 5);
+
+        // Tick past the end.
+        tickFlowGraph(rt, 600);
+        const done = log.find((e) => e.label === "done");
+        expect(done?.value).toEqual({ x: 10, y: 20, z: 30 });
+    });
+
+    it("ValueInterpolation: zero duration snaps to endValue synchronously", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "interp", socket: "in" }] },
+                },
+                {
+                    id: "interp",
+                    type: "ValueInterpolation",
+                    config: { type: "number" },
+                    dataDefaults: { startValue: 0, endValue: 99, duration: 0 },
+                    signalTargets: {
+                        out: [{ blockId: "recOut", socket: "in" }],
+                        done: [{ blockId: "recDone", socket: "in" }],
+                    },
+                },
+                {
+                    id: "recOut",
+                    type: RECORD,
+                    config: { label: "out" },
+                    dataSources: { value: { blockId: "interp", socket: "value" } },
+                },
+                {
+                    id: "recDone",
+                    type: RECORD,
+                    config: { label: "done" },
+                    dataSources: { value: { blockId: "interp", socket: "value" } },
+                },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        // Both out and done fire synchronously; value is already endValue.
+        expect(log.map((e) => e.label)).toContain("out");
+        expect(log.map((e) => e.label)).toContain("done");
+        expect(log.find((e) => e.label === "done")?.value).toBe(99);
+    });
+
+    it("ValueInterpolation: re-triggering in cancels the previous run", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: { out: [{ blockId: "interp", socket: "in" }] },
+                },
+                {
+                    id: "interp",
+                    type: "ValueInterpolation",
+                    config: { type: "number" },
+                    dataDefaults: { startValue: 0, endValue: 100, duration: 2 },
+                    signalTargets: { done: [{ blockId: "recDone", socket: "in" }] },
+                },
+                {
+                    id: "recDone",
+                    type: RECORD,
+                    config: { label: "done" },
+                    dataSources: { value: { blockId: "interp", socket: "value" } },
+                },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        tickFlowGraph(rt, 500); // half-way through first run
+
+        // Re-trigger with different endValue / duration via direct mutation of the
+        // socket defaults (the same technique used in the SetDelay cancel test).
+        const interpBlock = rt.env.graph.blocks.find((b) => b.type === "ValueInterpolation")!;
+        const endSock = interpBlock.dataIn.find((s) => s.name === "endValue")!;
+        (endSock as { defaultValue?: FgValue }).defaultValue = 200;
+        const durSock = interpBlock.dataIn.find((s) => s.name === "duration")!;
+        (durSock as { defaultValue?: FgValue }).defaultValue = 0.5;
+        rt.env.defs[interpBlock.type]!.execute!(interpBlock, rt.context, rt.env, "in");
+
+        tickFlowGraph(rt, 600); // past the new 500 ms duration
+        // done fires once for the second interpolation (first was canceled)
+        expect(log.filter((e) => e.label === "done")).toHaveLength(1);
+        expect(log.find((e) => e.label === "done")?.value).toBe(200);
+    });
+});

@@ -25,6 +25,10 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/events/scene-tick.js")).sceneTickDef;
         case FgBlockType.OnSelect:
             return async () => (await import("./blocks/events/on-select.js")).onSelectDef;
+        case FgBlockType.SendCustomEvent:
+            return async () => (await import("./blocks/events/send-custom-event.js")).sendCustomEventDef;
+        case FgBlockType.ReceiveCustomEvent:
+            return async () => (await import("./blocks/events/receive-custom-event.js")).receiveCustomEventDef;
 
         // ─── Control flow ─────────────────────────────────────────
         case FgBlockType.Branch:
@@ -271,6 +275,8 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/animation/play-animation.js")).playAnimationDef;
         case FgBlockType.StopAnimation:
             return async () => (await import("./blocks/animation/stop-animation.js")).stopAnimationDef;
+        case FgBlockType.ValueInterpolation:
+            return async () => (await import("./blocks/animation/value-interpolation.js")).valueInterpolationDef;
 
         // ─── Debug ────────────────────────────────────────────────
         case FgBlockType.ConsoleLog:

@@ -278,6 +278,37 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
         flowOutputs: { err: "error" },
     },
     "animation/stop": { block: FgBlockType.StopAnimation, valueInputs: { animation: "animation" }, flowOutputs: { err: "error" } },
+
+    // ─── Phase 3i event ops ────────────────────────────────────────────────────
+    // event/send: `configuration["event"]` holds the integer event-table index,
+    // copied into `config.eventId` as a scalar.  Value parameters from the glTF
+    // events table are a deferred Phase 3i+ item (parser doesn't yet read
+    // `json.events`, so sockets beyond the eventId are not wired from glTF).
+    "event/send": { block: FgBlockType.SendCustomEvent, configKeys: { event: "eventId" } },
+    // event/receive: same index → eventId mapping; glTF flow key `out` maps to
+    // the Lite `done` signal (BJS convention for event blocks).
+    "event/receive": { block: FgBlockType.ReceiveCustomEvent, configKeys: { event: "eventId" }, flowOutputs: { out: "done" } },
+
+    // ─── Phase 3i interpolation ops ───────────────────────────────────────────
+    // variable/interpolate: glTF `value` input → Lite `endValue`; `duration`
+    // passes through.  `useSlerp` config → `config.useSlerp` (boolean).
+    // Easing control points `p1`/`p2` (BezierCurveEasing) are deferred.
+    // Pointer/variable target wiring (SetProperty after done) is also deferred.
+    "variable/interpolate": {
+        block: FgBlockType.ValueInterpolation,
+        valueInputs: { value: "endValue", duration: "duration" },
+        configKeys: { useSlerp: "useSlerp" },
+        flowOutputs: { err: "error" },
+    },
+    // pointer/interpolate: same inputs; adds accessor resolution from the pointer
+    // configuration so the block can eventually write its `value` to a property.
+    "pointer/interpolate": {
+        block: FgBlockType.ValueInterpolation,
+        pointer: true,
+        valueInputs: { value: "endValue", duration: "duration" },
+        configKeys: { useSlerp: "useSlerp" },
+        flowOutputs: { err: "error" },
+    },
 };
 
 /** Babylon-extension ops (`declaration.extension === "BABYLON"`). */
