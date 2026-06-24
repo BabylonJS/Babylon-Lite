@@ -1188,7 +1188,7 @@
         "slug": "scene115-alien-picking-frame100",
         "name": "Scene 115 — Alien Picking Frame 100",
         "maxMad": 0.01,
-        "maxRawKB": 124.5,
+        "maxRawKB": 124.9,
         "description": "Precise picking validation on the animated Alien glTF at frame 100: BJS and Lite CPU PickInfo values drive a surface sphere and normal marker.",
         "tags": ["pbr", "gltf", "anim", "skeleton", "picking"],
         "skipPerf": true
@@ -1435,7 +1435,7 @@
         "slug": "scene152-gltf-manager",
         "name": "Scene 152 — Unified AnimationManager",
         "maxMad": 0.02,
-        "maxRawKB": 92.4,
+        "maxRawKB": 92.9,
         "description": "One explicit AnimationManager drives a glTF shark skeleton group and a manual camera orbit property group.",
         "tags": ["pbr", "gltf", "anim"],
         "skipPerf": true,
@@ -1829,7 +1829,7 @@
         "slug": "scene211-meshopt-brainstem",
         "name": "Scene 211 — BrainStem Meshopt",
         "maxMad": 0.2,
-        "maxRawKB": 88.2,
+        "maxRawKB": 88.7,
         "description": "KhronosGroup BrainStem (glTF-Meshopt-EXT) exercising EXT_meshopt_compression + KHR_mesh_quantization; skinned and animated, decoded via dynamic-imported loader features so non-meshopt scenes pay nothing. Frozen via seekTime for deterministic parity.",
         "tags": ["pbr", "gltf", "meshopt", "quantization", "skeleton", "animation"],
         "skipPerf": true,
@@ -1904,7 +1904,7 @@
         "slug": "scene218-vat",
         "name": "Scene 218 — Vertex Animation Texture (VAT)",
         "maxMad": 0.02,
-        "maxRawKB": 90.9,
+        "maxRawKB": 91.3,
         "description": "Baked vertex animation: the scene-11 shark's skeletal animation is pre-evaluated into one rgba32float texture (bakeVat) and played through the GPU VAT vertex path (mesh.vat) with NO live CPU skeleton - the vertex shader reads each bone matrix from the baked texture at the current frame row.",
         "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
         "skipPerf": true,
@@ -1915,7 +1915,7 @@
         "slug": "scene219-vat-instanced",
         "name": "Scene 219 — Per-instance VAT",
         "maxMad": 0.02,
-        "maxRawKB": 93.4,
+        "maxRawKB": 93.8,
         "description": "Per-instance VAT: the scene-11 shark baked to a VAT texture and rendered through the GPU thin-instance VAT path (one identity-matrix instance) frozen via ?seekTime. finalWorld = instanceMatrix * mesh.world * skin equals the plain skinned pose at identity, so it matches the BJS live-skeleton golden exactly.",
         "tags": ["vat", "animation", "skeleton", "instancing", "pbr", "gltf"],
         "skipPerf": true,
@@ -2126,6 +2126,17 @@
         "maxRawKB": 54,
         "description": "StandardMaterial sphere deformed into a teardrop by a single position morph target, directional light. Validates morph-target support on StandardMaterial against Babylon.js.",
         "tags": ["std", "procedural", "morph"],
+        "skipPerf": true
+    },
+    {
+        "id": 254,
+        "slug": "scene254-signed-accessor-animation",
+        "name": "Scene 254 — Signed Accessor Animation",
+        "maxMad": 0.15,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 91,
+        "description": "glTF Animation_SamplerType_01: rotation animation whose sampler output quaternions are a normalized signed BYTE accessor (componentType 5120). Validates loader support for signed BYTE/SHORT accessor component types (glTF-Asset-Generator Category A). Frozen at seekTime=2.0.",
+        "tags": ["gltf", "animation", "accessor"],
         "skipPerf": true
     }
 ]

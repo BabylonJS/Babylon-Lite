@@ -2,12 +2,11 @@
  *  Lazy-loaded animation/skin parsing for glTF.
  *  Dynamically imported by load-gltf.ts only when a glTF contains animations or skins.
  *
- *  This module is pointer-feature agnostic: KHR_animation_pointer (and the
- *  non-Float32 sampler conversion that CubeVisibility-style assets need) are
- *  installed via the registration seam below, so scenes that don't declare
- *  the extension pay zero bytes for it.
+ *  This module is pointer-feature agnostic: KHR_animation_pointer is installed
+ *  via the registration seam below, so scenes that don't declare the extension
+ *  pay zero bytes for pointer resolution.
  */
-import { F32 } from "../engine/typed-arrays.js";
+import { F32, U8, I8, I16 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { GltfAnimationData, AnimationClip, AnimationSampler, AnimationChannel, NodeRest, SkeletonBinding, MorphBinding, AnimatedNodeTarget } from "../animation/types.js";
@@ -22,8 +21,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 
 /** Registration seam for KHR_animation_pointer. The pointer feature module
  *  calls `_installPointerHandlers` on side-effect import; if never called,
- *  pointer channels are skipped and non-Float32 samplers fall back to the
- *  aliasing fast path (which throws on misaligned/short accessors). */
+ *  pointer channels are skipped. */
 export type PointerChannelParser = (
     ptr: string,
     channel: any,
@@ -31,23 +29,30 @@ export type PointerChannelParser = (
     json: any,
     meshes: readonly Mesh[]
 ) => AnimationChannel | null;
-export type SamplerConverter = (src: ArrayBufferView, length: number, normalized: boolean) => Float32Array;
 let _parsePointerChannel: PointerChannelParser | null = null;
-let _convertSampler: SamplerConverter | null = null;
-export function _installPointerHandlers(parser: PointerChannelParser, converter: SamplerConverter): void {
+export function _installPointerHandlers(parser: PointerChannelParser): void {
     _parsePointerChannel = parser;
-    _convertSampler = converter;
 }
 
-/** Convert sampler input/output to Float32Array. Default: reinterpret existing
- *  Float32 accessor as Float32Array (legacy behaviour; fast but requires
- *  aligned Float32 data). KHR_animation_pointer installs a converter that
- *  additionally handles non-Float32 / normalized accessors. */
+/** Convert a sampler input/output accessor to a tightly-packed Float32Array.
+ *  Aligned Float32 sources (the overwhelmingly common case) are reinterpreted
+ *  in place for free. Non-Float32 sources — normalized signed BYTE/SHORT
+ *  rotation output (glTF-Asset-Generator Animation_SamplerType), normalized
+ *  UNSIGNED_BYTE node-visibility flags, etc. — are denormalized per the glTF
+ *  spec into a fresh array. Only animated assets load this module, so the
+ *  non-Float32 branch costs nothing for static scenes. */
 function toSamplerFloat32(src: ArrayBufferView, length: number, normalized: boolean): Float32Array {
-    if (_convertSampler) {
-        return _convertSampler(src, length, normalized);
+    if (src instanceof F32) {
+        return new F32(src.buffer, src.byteOffset, length);
     }
-    return new F32(src.buffer, src.byteOffset, length);
+    const out = new F32(length);
+    const div = src instanceof I8 ? 127 : src instanceof I16 ? 32767 : src instanceof U8 ? 255 : 65535;
+    const signed = src instanceof I8 || src instanceof I16;
+    const s = src as unknown as { [i: number]: number };
+    for (let i = 0; i < length; i++) {
+        out[i] = normalized ? (signed ? Math.max(s[i]! / div, -1) : s[i]! / div) : s[i]!;
+    }
+    return out;
 }
 
 /** Parsed skin/skeleton data. */
