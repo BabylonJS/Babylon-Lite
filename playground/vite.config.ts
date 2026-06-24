@@ -17,6 +17,17 @@ export default defineConfig({
         // Fail loudly if 5175 is taken instead of silently drifting to another
         // port (which makes the printed URL not match what you opened).
         strictPort: true,
+        proxy: {
+            // Same-origin proxy to the Babylon snippet server. The server only
+            // accepts `application/json` saves and its CORS preflight is
+            // origin-allow-listed (localhost is rejected), so we proxy
+            // server-side in dev to bypass the browser preflight.
+            "/snippet": {
+                target: "https://snippet.babylonjs.com",
+                changeOrigin: true,
+                rewrite: (path) => path.replace(/^\/snippet/, ""),
+            },
+        },
     },
     build: {
         target: "esnext",

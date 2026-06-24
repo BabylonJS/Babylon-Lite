@@ -14,6 +14,10 @@
                 <div class="actions">
                     <select id="examples" class="select" title="Load an example" aria-label="Examples"></select>
                     <button id="formatBtn" class="btn" title="Format (Shift+Alt+F)">Format</button>
+                    <div class="save-group">
+                        <button id="saveBtn" class="btn" title="Save &amp; copy link">Save</button>
+                        <button id="saveDetailsBtn" class="btn btn-caret" title="Save with details…" aria-label="Save with details">▾</button>
+                    </div>
                     <button id="runBtn" class="btn btn-primary" title="Run (Ctrl/Cmd+Enter)">▶ Run</button>
                 </div>
             </header>
@@ -27,6 +31,28 @@
                 </section>
             </main>
         </div>
+        <dialog id="saveDialog" class="dialog">
+            <form method="dialog" class="dialog-form">
+                <h2>Save snippet</h2>
+                <label class="field">
+                    <span>Title</span>
+                    <input id="snippetName" type="text" autocomplete="off" placeholder="My Lite scene" />
+                </label>
+                <label class="field">
+                    <span>Description</span>
+                    <textarea id="snippetDescription" rows="3" placeholder="What does this show?"></textarea>
+                </label>
+                <label class="field">
+                    <span>Tags</span>
+                    <input id="snippetTags" type="text" autocomplete="off" placeholder="comma, separated" />
+                </label>
+                <div class="dialog-actions">
+                    <button type="button" id="saveDialogCancel" class="btn">Cancel</button>
+                    <button type="submit" id="saveDialogConfirm" class="btn btn-primary">Save &amp; copy link</button>
+                </div>
+            </form>
+        </dialog>
+        <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
         <script type="module" src="/src/main.ts"></script>
     </body>
 </html>

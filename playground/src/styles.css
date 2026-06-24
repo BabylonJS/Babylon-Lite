@@ -188,3 +188,105 @@ body {
 .console .level-system {
     color: var(--accent);
 }
+
+/* Save split-button */
+.save-group {
+    display: flex;
+}
+
+.save-group .btn {
+    border-radius: 0;
+}
+
+.save-group .btn:first-child {
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+}
+
+.btn-caret {
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    border-left: none;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+}
+
+/* Save dialog */
+.dialog {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    padding: 0;
+    width: min(28rem, 92vw);
+}
+
+.dialog::backdrop {
+    background: rgba(1, 4, 9, 0.6);
+}
+
+.dialog-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 1.25rem;
+}
+
+.dialog-form h2 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+}
+
+.field input,
+.field textarea {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.6rem;
+    resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+/* Toast */
+.toast {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    box-shadow: 0 8px 24px rgba(1, 4, 9, 0.5);
+    z-index: 10;
+}
+
+.toast.error {
+    border-color: var(--error);
+    color: var(--error);
+}
