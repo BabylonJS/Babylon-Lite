@@ -15,7 +15,7 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
+import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
 import { getViewProjectionMatrix } from "../camera/camera.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import { buildLightViewMatrix, casterVersionSum, createShadowCamera, multiply4x4, updateShadowCameraBase } from "./shadow-base.js";
@@ -70,8 +70,20 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     /** @internal Scene renderable version the cascade material views were built against. A material
      *  swap (plugin/receiver variant change) rebuilds the swapped mesh's renderable + UBOs but leaves
      *  this task's cached no-color material views pointing at the now-destroyed UBOs, so we rebuild when
-     *  it changes — not only when the caster SET changes. */
+     *  the MATERIAL EPOCH changes — not on every renderable-version bump (a geometry resize bumps the
+     *  renderable version without touching materials, and is handled by a cheap re-record instead). */
     _renderableVersion: number;
+    /** @internal Scene material epoch the cascade material views were built against (see `_renderableVersion`). */
+    _materialEpoch: number;
+    /** @internal Cached per-material no-color depth views, reused when a caster is added incrementally so a pure
+     *  caster-set change updates the existing cascade tasks instead of rebuilding and re-resolving every caster
+     *  (which leaked ~casters×cascades UBO handles each time the caster list was re-supplied). */
+    _materialViews: Map<Material, MaterialView>;
+    /** @internal Per-caster-material generation (`_csmGen`) snapshot at build. The incremental path is taken only
+     *  while every current caster's material gen is unchanged — i.e. no CASTER material was rebuilt (which would
+     *  leave its cached no-color view dangling). This is precise, unlike the global `_materialEpoch` which also
+     *  bumps for swaps of unrelated (non-caster) materials. */
+    _casterMatGens: Map<Material, number>;
 }
 
 export const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
@@ -90,11 +102,75 @@ export function ensureCsmShadowTaskState(
         if (existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
             return existing;
         }
-        // The caster set OR a material changed (a material swap rebuilds a caster's renderable + UBOs but
-        // leaves our cached no-color material views dangling at the destroyed UBOs — this is the
-        // "Buffer used in submit while destroyed" flood seen when planting a shadow-casting fern/agave,
-        // whose foliage material swaps variant on first render). Rebuild the cascade tasks below with the
-        // casters' CURRENT materials and return the NEW state — the caller swaps to it, so the OLD task is
+        // The caster set is unchanged and NO material was rebuilt/swapped since these tasks were built (the
+        // material epoch matches): the only thing that changed is geometry (e.g. resizeMeshGeometry reallocated
+        // a caster's GPU buffers, bumping the renderable version). The cascade tasks' cached no-color material
+        // views are still valid — only the bundles need refreshing to pick up the new buffer handles, which the
+        // shadow scheduler's execute() already does (it re-records when the renderable version moves). So adopt
+        // the new state markers and REUSE the existing tasks instead of recreating them — recreating tasks every
+        // geometry edit re-compiles pipelines + churns bind-groups/bundles for the whole caster set (multi-MB,
+        // never returned by the GPU allocator). Only a real material change (epoch bump) needs a full rebuild,
+        // because that destroys the caster UBOs the cached views point at.
+        if (existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
+            existing._renderableVersion = scene._renderableVersion;
+            return existing;
+        }
+        // The caster SET changed (different array). Decide INCREMENTAL vs full rebuild by whether any CURRENT
+        // caster's OWN material was rebuilt since we built (its cached no-color view would dangle) — tracked via
+        // a precise per-material gen, NOT the global `_materialEpoch` (which also bumps when an UNRELATED, non-
+        // caster material is swapped, e.g. a lit scene mesh added near a caster set re-supply). If NO caster
+        // material changed, update the cascade tasks IN PLACE: keep the unchanged casters' resolved depth packets
+        // (so nothing is destroyed — no "buffer used in submit while destroyed" — and nothing leaks — the old
+        // code re-resolved EVERY caster into fresh per-cascade UBO packets and never freed the prior ones,
+        // leaking ~casters×cascades handles every time the caster list was re-supplied, which a consumer may do
+        // per frame). Only add the new casters / drop departed ones (a regenerated caster's old packet is freed
+        // by removeFromScene when its mesh is disposed; a persistent caster simply keeps its packet).
+        let casterMatChanged = false;
+        for (const m of casterMeshes) {
+            const mat = m.material;
+            if (!mat) {
+                continue;
+            }
+            const stored = existing._casterMatGens.get(mat);
+            if (stored !== undefined && stored !== ((mat as { _csmGen?: number })._csmGen ?? 0)) {
+                casterMatChanged = true;
+                break;
+            }
+        }
+        if (!casterMatChanged) {
+            const prevSet = new Set(existing._casterMeshes);
+            const nextSet = new Set(casterMeshes);
+            const views = existing._materialViews;
+            const gens = existing._casterMatGens;
+            for (const m of existing._casterMeshes) {
+                if (!nextSet.has(m)) {
+                    for (const t of existing._tasks) {
+                        removeMeshFromTask(t, m);
+                    }
+                }
+            }
+            for (const m of casterMeshes) {
+                if (!prevSet.has(m) && m.material) {
+                    const view = getNoColorView(m.material, views);
+                    for (const t of existing._tasks) {
+                        t.addMesh(m, { material: view });
+                    }
+                    gens.set(m.material, (m.material as { _csmGen?: number })._csmGen ?? 0);
+                }
+            }
+            // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
+            for (const t of existing._tasks) {
+                t._lastVersion = -1;
+            }
+            existing._casterMeshes = casterMeshes;
+            existing._renderableVersion = scene._renderableVersion;
+            return existing;
+        }
+        // A CASTER material was actually rebuilt (a material swap rebuilds its renderable + UBOs but
+        // leaves our cached no-color material views dangling at the destroyed UBOs — the
+        // "Buffer used in submit while destroyed" flood seen when a caster's material swaps variant on first
+        // render). Rebuild the cascade tasks below with the casters' CURRENT materials and return the NEW
+        // state — the caller swaps to it, so the OLD task is
         // never recorded again. Its GPU buffers may still be referenced by a frame already submitted this
         // tick, so we must NOT dispose it synchronously; defer until the GPU drains the currently-submitted
         // work (onSubmittedWorkDone). Mirrors resizeMeshGeometry.
@@ -166,6 +242,14 @@ export function ensureCsmShadowTaskState(
         },
     };
 
+    // Snapshot each caster material's gen so the next caster-set change can tell whether a CASTER material was
+    // rebuilt (→ full rebuild) or only the set changed (→ incremental, keeping unchanged casters' packets).
+    const casterMatGens = new Map<Material, number>();
+    for (const m of casterMeshes) {
+        if (m.material) {
+            casterMatGens.set(m.material, (m.material as { _csmGen?: number })._csmGen ?? 0);
+        }
+    }
     return {
         _task: compositeTask,
         _tasks: tasks,
@@ -178,6 +262,9 @@ export function ensureCsmShadowTaskState(
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
         _renderableVersion: scene._renderableVersion,
+        _materialEpoch: scene._materialEpoch,
+        _materialViews: materialViews,
+        _casterMatGens: casterMatGens,
     };
 }
 
@@ -418,21 +505,42 @@ function _computeCsmCascades(engine: EngineContext, camera: Camera, light: Direc
                 viewMaxZ = Math.min(viewMaxZ, cMaxZ);
             }
 
-            // Stabilize Z: with stabilizeCascades the XY fit is a fixed bounding sphere (eye + extents
-            // are stable), but the caster-AABB tighten above moves the near/far planes whenever a caster moves
-            if (cfg._stabilizeCascades && stableRadius > 0) {
-                const zq = Math.max(0.5, stableRadius / 128);
-                viewMinZ = Math.floor(viewMinZ / zq) * zq;
-                viewMaxZ = Math.ceil(viewMaxZ / zq) * zq;
-            }
+            // Z is intentionally NOT quantized here. The caster-AABB fit (cMinZ/cMaxZ) is C0-continuous in the
+            // light direction — each is a min/max of linear functions of the light vector, so it has kinks but no
+            // jumps — meaning the near/far drift SMOOTHLY as the light rotates. A constant NDC depth bias maps to a
+            // WORLD bias of bias·(far−near), and the stored depths are likewise normalised by (far−near); the old
+            // `zq = max(0.5, radius/128)` floor/ceil snapped that range to a grid, so both the effective bias AND
+            // the stored depth STEPPED at each quantum boundary as the light direction changed — appearing as
+            // self-shadow acne that VIBRATES. Removing the quantize makes those steps a sub-millimetre, imperceptible
+            // drift, and still covers the moving-caster case it was added for (the range drifts, it never pops).
         }
 
         const proj0 = orthoOffCenterLH(minX, maxX, minY, maxY, viewMinZ, viewMaxZ);
         let transform = multiply4x4(proj0, view);
 
-        // Texel-snap: round the world origin to a shadow-map texel (always applied in BJS).
-        const ox = transform[12]! * (cfg._mapSize / 2);
-        const oy = transform[13]! * (cfg._mapSize / 2);
+        // Texel-snap: lock the shadow grid to world space so it does not crawl as the camera moves, by rounding a
+        // fixed WORLD anchor onto the shadow-map texel grid. BJS anchors the WORLD ORIGIN. With a STILL camera and
+        // a slowly ROTATING light that is the cause of the visible "vibration": the eye is recentred on the cascade
+        // centre every frame, so the snap residual is the anchor's offset from the centre measured along the light
+        // axes — and the world origin's offset from the centre is large (≈ the cascade's distance from origin), so
+        // its projection sweeps many texels per degree of light rotation and Math.round trips a full-texel correction
+        // again and again → the whole map pops/boils. We instead anchor the world-grid point NEAREST the cascade
+        // centre (cell = one texel in world units): it is still a fixed world point (a translating camera only ever
+        // sees whole-cell anchor switches, ≤ a sub-texel grid wiggle that PCF hides), but its offset from the centre
+        // is < 1 texel, so a full light rotation sweeps it < 1 texel → effectively no rotation pop. Non-stabilized
+        // path keeps the origin anchor (no stableRadius → no texel-world size to build the world grid from).
+        let aClipX = transform[12]!;
+        let aClipY = transform[13]!;
+        if (cfg._stabilizeCascades && stableRadius > 0) {
+            const texelWorld = (2 * stableRadius) / cfg._mapSize;
+            const ax = Math.round(cx / texelWorld) * texelWorld;
+            const ay = Math.round(cy / texelWorld) * texelWorld;
+            const az = Math.round(cz / texelWorld) * texelWorld;
+            aClipX = transform[0]! * ax + transform[4]! * ay + transform[8]! * az + transform[12]!;
+            aClipY = transform[1]! * ax + transform[5]! * ay + transform[9]! * az + transform[13]!;
+        }
+        const ox = aClipX * (cfg._mapSize / 2);
+        const oy = aClipY * (cfg._mapSize / 2);
         const offX = (Math.round(ox) - ox) * (2 / cfg._mapSize);
         const offY = (Math.round(oy) - oy) * (2 / cfg._mapSize);
         const snap = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, offX, offY, 0, 1]);

@@ -42,6 +42,10 @@ export function processMaterialSwaps(scene: SceneContext): void {
         if (!rebuild) {
             continue;
         }
+        // Per-material generation: the CSM caster-view cache keys off THIS (which material was rebuilt), not the
+        // global _materialEpoch (which also bumps when an unrelated material is swapped), so swapping a non-caster
+        // material doesn't force a full shadow rebuild. See ensureCsmShadowTaskState.
+        (mat as { _csmGen?: number })._csmGen = ((mat as { _csmGen?: number })._csmGen ?? 0) + 1;
         const renderable = rebuild(scene, mesh);
         // Insert by `order` so the renderable list stays sorted (frame-graph
         // tasks bucket opaque/direct/transparent at bind time).
@@ -53,4 +57,5 @@ export function processMaterialSwaps(scene: SceneContext): void {
     }
     q.length = 0;
     scene._renderableVersion++;
+    scene._materialEpoch++; // a caster's material UBOs were rebuilt → CSM-style view caches must fully rebuild
 }

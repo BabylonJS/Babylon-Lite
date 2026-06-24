@@ -16,11 +16,12 @@
  *  chunks — stay within their bundle-size ceilings. */
 
 import type { EngineContext } from "../engine/engine.js";
+import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { DrawUpdateContext, Renderable } from "../render/renderable.js";
 import type { Mesh } from "./mesh.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
-import { createTiCullState, destroyTiCullState, prepareTiCull } from "./thin-instance-gpu-culling.js";
+import { createTiCullState, destroyTiCullState, prepareTiCull, type ThinInstanceGpuCullState } from "./thin-instance-gpu-culling.js";
 
 /** Per-binding cull lifecycle. The renderable's `bind()` obtains one from
  *  `tryBind`, uses `update` as the binding's update, reads `cullDrawBufs` (the
@@ -36,12 +37,26 @@ export interface TiCullBinding {
     draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void;
 }
 
+/** @internal Renderable augmented with its per-signature cull-state cache (see `tryBind`). */
+type CullCachingRenderable = Renderable & { _tiCullStates?: WeakMap<RenderTargetSignature, ThinInstanceGpuCullState> };
+
 /** Create a per-binding cull lifecycle for one thin-instanced renderable binding,
  *  iff the mesh opts in and is not excluded (transparent / transmissive — v1 is
  *  opaque-only). Marks the renderable `_direct` so it leaves the cached opaque
  *  bundle; this is safe to do during `bind()` because buildBindings reads
  *  `_direct` only after `bind()` returns. Returns undefined when culling does not
- *  apply, so the caller falls back to a normal instanced draw. */
+ *  apply, so the caller falls back to a normal instanced draw.
+ *
+ *  The cull STATE (visible/args/params GPU buffers) is REUSED across re-binds: it
+ *  is cached on the renderable, keyed by the pass's render-target signature.
+ *  `buildBindings` re-binds every renderable on each `_renderableVersion` bump
+ *  (i.e. on ANY geometry edit anywhere in the scene), so allocating a fresh state
+ *  here each time both leaked the previous state's buffers (freed only on mesh
+ *  dispose) AND churned Dawn's allocator by reallocating these buffers every edit
+ *  — multi-MB per edit. Reusing keeps `ensureCullBuffers` a no-op when the
+ *  instance capacity is unchanged. Keying by signature keeps a renderable drawn
+ *  in several passes (e.g. main + shadow) on an independent cull state per pass.
+ *  Each cached state is freed once, on mesh disposal. */
 export function tryBind(
     renderable: Renderable,
     scene: SceneContext,
@@ -49,17 +64,29 @@ export function tryBind(
     engine: EngineContext,
     hasColor: boolean,
     excluded: boolean,
-    baseUpdate: ((context: DrawUpdateContext) => void) | undefined
+    baseUpdate: ((context: DrawUpdateContext) => void) | undefined,
+    signature: RenderTargetSignature
 ): TiCullBinding | undefined {
     const ti = mesh.thinInstances;
     if (excluded || !ti?._gpuCullingEnabled) {
         return undefined;
     }
     (renderable as { _direct?: boolean })._direct = true;
-    const state = createTiCullState();
-    scene._meshDisposables.get(mesh)?.push(() => {
-        destroyTiCullState(state);
-    });
+    const holder = renderable as CullCachingRenderable;
+    const cache = (holder._tiCullStates ??= new WeakMap());
+    let state = cache.get(signature);
+    if (!state) {
+        state = createTiCullState();
+        cache.set(signature, state);
+        const owned = state;
+        scene._meshDisposables.get(mesh)?.push(() => {
+            destroyTiCullState(owned);
+        });
+    } else {
+        // The mesh geometry may have been resized since the last bind (resizeMeshGeometry bumps the renderable
+        // version, which re-binds us); recompute the local bounding sphere so culling stays accurate.
+        state._localSphereReady = false;
+    }
     const binding: TiCullBinding = {
         cullDrawBufs: null,
         _args: null,

@@ -516,7 +516,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
                     ? createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh, sig._transmissionTexture)
                     : materialBindGroupStatic!;
                 // Opaque-only GPU culling (opt-in): tryBind returns a per-binding lifecycle or undefined.
-                const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update);
+                const cb = _cull?.tryBind(r, s, mesh, engine, hasTIColor, isTransparent || needsTaskRefraction, update, sig);
                 return {
                     renderable: r,
                     pipeline,

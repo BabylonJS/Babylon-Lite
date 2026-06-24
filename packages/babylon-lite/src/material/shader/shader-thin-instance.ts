@@ -157,7 +157,7 @@ function createShaderInstancedRenderable(
             const bindings = h.getOrCreateShaderPipelineBindings(eng, material);
             const vertexBuffers = [...bindings.vertexBuffers, ...instanceLayouts];
             const pipeline = h.getOrCreateShaderPipeline(eng, sig, material, bindings, variantKey, vertexBuffers, instanceAttrs);
-            const cb = cull?.tryBind(r, scene, mesh, eng, hasColor, isTransparent, update);
+            const cb = cull?.tryBind(r, scene, mesh, eng, hasColor, isTransparent, update, sig);
             return {
                 renderable: r,
                 pipeline,
