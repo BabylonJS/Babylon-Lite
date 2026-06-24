@@ -175,7 +175,13 @@ function resolveColorVec4(json: any, binChunk: DataView, idx: number): Float32Ar
  *  (they feed device-lost recovery), but no current asset interleaves them.
  *  COLOR_0 is always normalized to a tight float32x3 buffer (see
  *  {@link resolveColorVec4}). Tight attributes resolve exactly like the core loader. */
-export function buildInterleavedPartial(json: any, binChunk: DataView, primitive: any, worldMatrix: Mat4, nodeIdx: number): Omit<GltfMeshData, "_material"> | undefined {
+export async function buildInterleavedPartial(
+    json: any,
+    binChunk: DataView,
+    primitive: any,
+    worldMatrix: Mat4,
+    nodeIdx: number
+): Promise<Omit<GltfMeshData, "_material"> | undefined> {
     const attrs = primitive.attributes;
 
     // Per-primitive gate: bail (→ tight path) unless a vertex attribute is strided.
@@ -218,7 +224,13 @@ export function buildInterleavedPartial(json: any, binChunk: DataView, primitive
     vertexCount = pos._count;
     const nrm = resolveOne("NORMAL", false);
     vb._n = nrm._il;
-    const uv = resolveOne("TEXCOORD_0", false);
+    // A normalized UNSIGNED_BYTE/SHORT TEXCOORD_0 is materialized as a tight float32x2 [0,1] buffer
+    // (never bound strided), so integer UVs don't misalign against the float32x2 vertex layout.
+    const uvIdx = attrs["TEXCOORD_0"];
+    const uv: { _tight: Float32Array | null; _il?: AccessorInterleave; _count: number } =
+        uvIdx !== undefined && json.accessors[uvIdx].componentType !== FLOAT
+            ? { _tight: (await import("./gltf-uv-denorm.js")).resolveUvVec2(json, binChunk, uvIdx), _count: json.accessors[uvIdx].count }
+            : resolveOne("TEXCOORD_0", false);
     vb._u = uv._il;
     const tan = resolveOne("TANGENT", true);
     vb._t = tan._il;

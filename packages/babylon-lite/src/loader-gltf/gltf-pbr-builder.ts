@@ -69,7 +69,10 @@ export function assemblePbrProps(
     extLayers: Partial<PbrMaterialProps> | undefined
 ): PbrMaterialProps {
     const ef = mat._emissiveFactor;
-    const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
+    // emissiveFactor multiplies the emissive texture, so [1,1,1] is a no-op WHEN a texture is
+    // present. With no emissive texture, [1,1,1] is a real full-white emissive that must be applied
+    // (the glTF default is [0,0,0]) — otherwise the surface renders unlit/dark (Material_03).
+    const defaultFactor = (ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1);
     return {
         baseColorTexture,
         normalTexture,

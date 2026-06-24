@@ -12,6 +12,19 @@ export const MSH_RECEIVE_SHADOWS = 1 << 8;
 export const MSH_VAT = 1 << 9;
 /** Mesh has no NORMAL attribute → must be flat-shaded (glTF spec). */
 export const MSH_FLAT_NORMAL = 1 << 10;
+// Bits 11-15 (negative-winding + 3-bit topology index + uint32-strip flag) are owned by the lazy
+// glTF primitive feature: their constants live in pbr-primitive-resolver.ts and are encoded via the
+// `_meshFeatureExtra` hook below, so triangle-list positive-winding scenes never bundle that code.
+
+/** Extra mesh-feature encoder, installed only by the glTF primitive feature (topology +
+ *  negative-winding bits). Module-local with a single exported setter: when no such mesh is in the
+ *  bundle the setter tree-shakes, the bundler proves this is always null, and the `_meshFeatureExtra`
+ *  call below folds away — every common mesh keeps `_computeMeshFeatures` byte-identical. */
+let _meshFeatureExtra: ((mesh: Mesh) => number) | null = null;
+/** @internal Install the extra mesh-feature encoder (called by the glTF primitive feature). */
+export function _installMeshFeatureExtra(encode: (mesh: Mesh) => number): void {
+    _meshFeatureExtra = encode;
+}
 
 /** @internal Compute mesh/pass feature bits shared by material renderers. */
 export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number {
@@ -53,6 +66,9 @@ export function _computeMeshFeatures(mesh: Mesh, receiveShadows = false): number
     }
     if (receiveShadows) {
         features |= MSH_RECEIVE_SHADOWS;
+    }
+    if (_meshFeatureExtra) {
+        features |= _meshFeatureExtra(mesh);
     }
     return features;
 }
