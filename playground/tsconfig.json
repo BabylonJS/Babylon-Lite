@@ -5,5 +5,5 @@
         "rootDir": ".",
         "types": ["@webgpu/types", "vite/client"]
     },
-    "include": ["src", "vite.config.ts", "vite.engine.config.ts"]
+    "include": ["src", "scripts", "vite.config.ts", "vite.engine.config.ts"]
 }

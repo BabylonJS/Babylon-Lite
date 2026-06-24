@@ -22,6 +22,7 @@ export default tseslint.config(
             "reference/lite/**",
             "test-results/**",
             "scripts/**",
+            "playground/scripts/**",
             "**/public/**",
             "**/*.md",
             "**/*.html",

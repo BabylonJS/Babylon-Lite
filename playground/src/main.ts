@@ -1,13 +1,15 @@
 import "./styles.css";
-import { createEditor } from "./editor";
+import { createEditor, registerEngineTypes } from "./editor";
 import { transpile } from "./transpile";
 import { Runner, type RunnerMessage } from "./runner";
-import { DEFAULT_SNIPPET } from "./examples";
+import { EXAMPLES, DEFAULT_SNIPPET } from "./examples";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const previewHost = document.getElementById("previewHost") as HTMLElement;
 const consoleEl = document.getElementById("console") as HTMLElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
+const formatBtn = document.getElementById("formatBtn") as HTMLButtonElement;
+const examplesEl = document.getElementById("examples") as HTMLSelectElement;
 
 function appendConsole(level: string, text: string): void {
     const line = document.createElement("div");
@@ -58,7 +60,27 @@ async function run(): Promise<void> {
 
 const editor = createEditor(editorContainer, DEFAULT_SNIPPET, () => void run());
 
+// Populate the examples picker.
+for (const example of EXAMPLES) {
+    const option = document.createElement("option");
+    option.value = example.id;
+    option.textContent = example.label;
+    examplesEl.appendChild(option);
+}
+
+examplesEl.addEventListener("change", () => {
+    const example = EXAMPLES.find((candidate) => candidate.id === examplesEl.value);
+    if (example) {
+        editor.setValue(example.code);
+        void run();
+    }
+});
+
+formatBtn.addEventListener("click", () => editor.format());
 runBtn.addEventListener("click", () => void run());
+
+// Load engine IntelliSense in the background; editing works regardless.
+void registerEngineTypes();
 
 // Auto-run the default snippet on first load.
 void run();

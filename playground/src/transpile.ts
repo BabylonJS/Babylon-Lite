@@ -29,6 +29,10 @@ export async function transpile(source: string): Promise<string> {
         format: "esm",
         target: "esnext",
         sourcemap: "inline",
+        sourcefile: "playground.ts",
     });
-    return result.code;
+    // Name the module so runtime error stacks read `playground.ts:<line>` rather
+    // than an opaque `blob:` URL. esbuild's `transform` preserves line numbers,
+    // so the reported line matches the user's snippet line.
+    return `${result.code}\n//# sourceURL=playground.ts\n`;
 }

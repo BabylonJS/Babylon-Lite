@@ -62,6 +62,21 @@ body {
     gap: 0.5rem;
 }
 
+.select {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+}
+
+.select:hover {
+    border-color: var(--accent);
+}
+
 .btn {
     font: inherit;
     font-size: 0.85rem;
