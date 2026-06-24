@@ -57,6 +57,22 @@ body {
     color: var(--accent);
 }
 
+.brand .beta-badge {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    cursor: help;
+}
+
 .actions {
     display: flex;
     gap: 0.5rem;

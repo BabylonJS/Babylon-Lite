@@ -5,6 +5,9 @@ TypeScript with full IntelliSense, run it live on a WebGPU canvas, and save & sh
 snippets. No UMD, no bundler step at author time: snippets are transpiled and run
 straight in the browser.
 
+> **Beta.** The Lite Playground is in beta — expect rough edges and breaking
+> changes while the experience stabilizes.
+
 ## Requirements
 
 - A **WebGPU-capable browser** (Chrome/Edge 113+). Babylon Lite is WebGPU-only.
