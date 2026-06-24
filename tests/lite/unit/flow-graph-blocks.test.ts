@@ -728,6 +728,43 @@ describe("flow-graph blocks — animation", () => {
         startFlowGraph(rt);
         expect(stop).toHaveBeenCalledWith(group);
     });
+
+    it("StopAnimation with stopAtFrame defers the stop until the frame is reached", async () => {
+        const group = mockGroup();
+        (group as { frameRate: number }).frameRate = 60;
+        group.isPlaying = true;
+        const stop = vi.fn();
+        const stopAt = vi.fn();
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "stop", socket: "in" }] } },
+                {
+                    id: "stop",
+                    type: "StopAnimation",
+                    dataDefaults: { animation: 0, stopAtFrame: 30 },
+                    signalTargets: { out: [{ blockId: "o", socket: "in" }] },
+                },
+                { id: "o", type: RECORD, config: { label: "out" } },
+            ],
+            { wiring: { animations: [group], caps: { stopAnimation: stop, stopAnimationAt: stopAt } }, defs: { [RECORD]: recorderDef(log) } }
+        );
+        startFlowGraph(rt);
+        // out fires immediately; no immediate stop, deferred monitor armed.
+        expect(log.map((e) => e.label)).toEqual(["out"]);
+        expect(stop).not.toHaveBeenCalled();
+        expect(stopAt).not.toHaveBeenCalled();
+
+        // Not yet at the target frame.
+        group.currentTime = 0.25; // frame 15
+        tickFlowGraph(rt, 16);
+        expect(stopAt).not.toHaveBeenCalled();
+
+        // Reached the target frame (30 / 60 = 0.5s).
+        group.currentTime = 0.5;
+        tickFlowGraph(rt, 16);
+        expect(stopAt).toHaveBeenCalledWith(group, 30);
+    });
 });
 
 describe("flow-graph blocks — matrix/quaternion", () => {
@@ -984,6 +1021,27 @@ describe("flow-graph blocks — matrix/quaternion", () => {
         expect(r.y).toBeCloseTo(0, 5);
         expect(r.z).toBeCloseTo(Math.sin(Math.PI / 4), 5);
         expect(r.w).toBeCloseTo(Math.cos(Math.PI / 4), 5);
+    });
+
+    it("QuaternionMultiplication: Hamilton product i⊗j = k", async () => {
+        const i = { x: 1, y: 0, z: 0, w: 0 };
+        const j = { x: 0, y: 1, z: 0, w: 0 };
+        const r = (await evalOp("QuaternionMultiplication", { a: i, b: j })) as { x: number; y: number; z: number; w: number };
+        expect(r.x).toBeCloseTo(0, 8);
+        expect(r.y).toBeCloseTo(0, 8);
+        expect(r.z).toBeCloseTo(1, 8);
+        expect(r.w).toBeCloseTo(0, 8);
+    });
+
+    it("QuaternionMultiplication: two Y-axis 90° rotations compose to Y-axis 180°", async () => {
+        const s = Math.sin(Math.PI / 4);
+        const c = Math.cos(Math.PI / 4);
+        const q = { x: 0, y: s, z: 0, w: c };
+        const r = (await evalOp("QuaternionMultiplication", { a: q, b: q })) as { x: number; y: number; z: number; w: number };
+        expect(r.x).toBeCloseTo(0, 8);
+        expect(r.y).toBeCloseTo(1, 8);
+        expect(r.z).toBeCloseTo(0, 8);
+        expect(r.w).toBeCloseTo(0, 8);
     });
 });
 
@@ -1934,5 +1992,63 @@ describe("flow-graph blocks — events + interpolation Phase 3i", () => {
         // done fires once for the second interpolation (first was canceled)
         expect(log.filter((e) => e.label === "done")).toHaveLength(1);
         expect(log.find((e) => e.label === "done")?.value).toBe(200);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4 — ConsoleLog (flow/log + debug/log messageTemplate)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("flow-graph blocks — ConsoleLog", () => {
+    it("flow/log: logs the raw `message` input", async () => {
+        const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+        try {
+            const rt = await makeRuntime([
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "log", socket: "in" }] } },
+                { id: "log", type: "ConsoleLog", dataDefaults: { message: "hello" } },
+            ]);
+            startFlowGraph(rt);
+            expect(spy).toHaveBeenCalledWith("hello");
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("debug/log: expands `{name}` placeholders from named data inputs", async () => {
+        const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+        try {
+            const rt = await makeRuntime([
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "log", socket: "in" }] } },
+                {
+                    id: "log",
+                    type: "ConsoleLog",
+                    config: { messageTemplate: "x={x} y={y}" },
+                    dataDefaults: { x: 1, y: 2 },
+                },
+            ]);
+            startFlowGraph(rt);
+            expect(spy).toHaveBeenCalledWith("x=1 y=2");
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("debug/log: pulls placeholders from a `message` object's keys", async () => {
+        const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+        try {
+            const rt = await makeRuntime([
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "log", socket: "in" }] } },
+                {
+                    id: "log",
+                    type: "ConsoleLog",
+                    config: { messageTemplate: "pos={x},{y},{z}" },
+                    dataDefaults: { message: { x: 1, y: 2, z: 3 } as unknown as FgValue },
+                },
+            ]);
+            startFlowGraph(rt);
+            expect(spy).toHaveBeenCalledWith("pos=1,2,3");
+        } finally {
+            spy.mockRestore();
+        }
     });
 });

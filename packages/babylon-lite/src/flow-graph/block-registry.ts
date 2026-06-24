@@ -245,6 +245,8 @@ export function getBlockDef(type: string): (() => Promise<FgBlockDef>) | null {
             return async () => (await import("./blocks/math/axis-angle-from-quaternion.js")).axisAngleFromQuaternionDef;
         case FgBlockType.QuaternionFromDirections:
             return async () => (await import("./blocks/math/quaternion-from-directions.js")).quaternionFromDirectionsDef;
+        case FgBlockType.QuaternionMultiplication:
+            return async () => (await import("./blocks/math/quaternion-multiplication.js")).quaternionMultiplicationDef;
         case FgBlockType.BooleanToFloat:
             return async () => (await import("./blocks/conversion/boolean-to-float.js")).booleanToFloatDef;
         case FgBlockType.BooleanToInt:

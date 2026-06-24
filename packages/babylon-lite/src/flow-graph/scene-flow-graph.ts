@@ -8,7 +8,7 @@ import { onBeforeRender, onSceneDispose, type SceneContext } from "../scene/scen
 import type { FgRuntime } from "./runtime.js";
 import { createFgRuntime, disposeFlowGraph, startFlowGraph, tickFlowGraph } from "./runtime.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
-import { playAnimation as agPlay, stopAnimation as agStop } from "../animation/animation-group.js";
+import { playAnimation as agPlay, stopAnimation as agStop, goToFrame as agGoToFrame } from "../animation/animation-group.js";
 import type { FgCapabilities, LoadedFlowGraph } from "./context.js";
 
 /** Attach a flow-graph runtime to a scene. The runtime starts on the first
@@ -59,6 +59,9 @@ function sceneAnimationCaps(): FgCapabilities {
             agPlay(group);
         },
         stopAnimation: (group: AnimationGroup) => agStop(group),
+        // Halt at the requested frame (goToFrame sets currentTime + clears
+        // isPlaying), leaving the target posed at that frame rather than reset.
+        stopAnimationAt: (group: AnimationGroup, frame: number) => agGoToFrame(group, frame),
     };
 }
 

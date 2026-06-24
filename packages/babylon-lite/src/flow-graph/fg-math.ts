@@ -584,6 +584,23 @@ export function fgConjugate(a: FgValue): FgValue {
     return a;
 }
 
+/**
+ * Hamilton product of two quaternions, `a ⊗ b` (glTF `math/quatMul`). Self-
+ * contained (no core import) so the block chunk never shares a core module with
+ * non-flow-graph scene chunks. Convention matches BJS `Quaternion.multiply`
+ * (`a.multiply(b)`). Non-quaternion inputs return `a` unchanged. */
+export function fgQuatMul(a: FgValue, b: FgValue): FgValue {
+    if (isVec4(a) && isVec4(b)) {
+        return {
+            x: a.x * b.w + a.w * b.x + a.y * b.z - a.z * b.y,
+            y: a.y * b.w + a.w * b.y + a.z * b.x - a.x * b.z,
+            z: a.z * b.w + a.w * b.z + a.x * b.y - a.y * b.x,
+            w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+        } as Quat;
+    }
+    return a;
+}
+
 // ─── Matrix ops (Phase 3f) ────────────────────────────────────────────────────
 
 /**

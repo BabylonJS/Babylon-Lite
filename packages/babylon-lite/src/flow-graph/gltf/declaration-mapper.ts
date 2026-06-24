@@ -264,6 +264,10 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "math/quatFromAxisAngle": { block: FgBlockType.QuaternionFromAxisAngle, valueInputs: { axis: "a", angle: "b" } },
     "math/quatToAxisAngle": { block: FgBlockType.AxisAngleFromQuaternion },
     "math/quatFromDirections": { block: FgBlockType.QuaternionFromDirections },
+    // math/quatMul: BJS reuses the generic Multiply with config.type=Quaternion;
+    // Lite has a dedicated Hamilton-product block (generic Multiply is component-
+    // wise). glTF inputs `a`/`b` map to identically named sockets.
+    "math/quatMul": { block: FgBlockType.QuaternionMultiplication },
 
     "variable/get": { block: FgBlockType.GetVariable, variableConfigKey: "variable" },
     "variable/set": { block: FgBlockType.SetVariable, variableConfigKey: "variables", valueInputs: { value: "value" } },
@@ -278,6 +282,18 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
         flowOutputs: { err: "error" },
     },
     "animation/stop": { block: FgBlockType.StopAnimation, valueInputs: { animation: "animation" }, flowOutputs: { err: "error" } },
+    // animation/stopAt: defers the stop until playback reaches `stopAtFrame`.
+    // glTF `stopTime` (seconds) → `stopAtFrame` via the FPS transform.
+    "animation/stopAt": {
+        block: FgBlockType.StopAnimation,
+        valueInputs: { animation: "animation", stopTime: "stopAtFrame" },
+        valueTransform: { stopTime: FPS },
+        flowOutputs: { err: "error" },
+    },
+
+    // debug/log: core op (vs BABYLON-extension flow/log). The `message` config is
+    // a template with `{name}` placeholders that the ConsoleLog block expands.
+    "debug/log": { block: FgBlockType.ConsoleLog, configKeys: { message: "messageTemplate" } },
 
     // ─── Phase 3i event ops ────────────────────────────────────────────────────
     // event/send: `configuration["event"]` holds the integer event-table index,
@@ -334,4 +350,20 @@ export function getOpMapping(op: string, extension?: string): FgOpMapping | null
         return EXTENSION_OPS[extension]?.[op] ?? null;
     }
     return NATIVE_OPS[op] ?? null;
+}
+
+/** Every distinct Lite block type referenced by some op mapping (native or
+ *  extension). Used by a coverage guard to prove every mapped op resolves to a
+ *  registered block def. */
+export function allMappedBlockTypes(): FgBlockType[] {
+    const types = new Set<FgBlockType>();
+    for (const m of Object.values(NATIVE_OPS)) {
+        types.add(m.block);
+    }
+    for (const table of Object.values(EXTENSION_OPS)) {
+        for (const m of Object.values(table)) {
+            types.add(m.block);
+        }
+    }
+    return [...types];
 }

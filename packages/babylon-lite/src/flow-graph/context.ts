@@ -48,6 +48,8 @@ export interface FgCapabilities {
     readonly playAnimation?: (group: AnimationGroup, opts?: { speed?: number; loop?: boolean; from?: number; to?: number }) => void;
     /** Stop a playing animation group. */
     readonly stopAnimation?: (group: AnimationGroup) => void;
+    /** Halt a playing animation group at a specific frame (glTF `animation/stopAt`). */
+    readonly stopAnimationAt?: (group: AnimationGroup, frame: number) => void;
     /** Subscribe to an animation group's end; returns an unsubscribe fn. */
     readonly onAnimationEnd?: (group: AnimationGroup, cb: () => void) => () => void;
 }

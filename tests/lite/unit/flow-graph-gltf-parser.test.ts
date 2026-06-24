@@ -194,3 +194,21 @@ describe("KHR_interactivity parser — pointer templating & new ops", () => {
 
 // Silence the ConsoleLog block's console.log in the end-to-end run.
 vi.spyOn(console, "log").mockImplementation(() => {});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Coverage guard: every mapped glTF op must resolve to a registered block def.
+// Prevents adding an op mapping without wiring its block into the registry.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("declaration-mapper — block coverage", () => {
+    it("every mapped block type resolves to a registered, type-matching def", async () => {
+        const { allMappedBlockTypes } = await import("../../../packages/babylon-lite/src/flow-graph/gltf/declaration-mapper");
+        const { getBlockDef } = await import("../../../packages/babylon-lite/src/flow-graph/index");
+        for (const type of allMappedBlockTypes()) {
+            const factory = getBlockDef(type);
+            expect(factory, `no registry entry for mapped block type "${type}"`).toBeTruthy();
+            const def = await factory!();
+            expect(def.type).toBe(type);
+        }
+    });
+});

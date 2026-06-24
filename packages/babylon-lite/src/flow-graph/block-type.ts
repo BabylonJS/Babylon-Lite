@@ -142,6 +142,7 @@ export const enum FgBlockType {
     QuaternionFromAxisAngle = "QuaternionFromAxisAngle",
     AxisAngleFromQuaternion = "AxisAngleFromQuaternion",
     QuaternionFromDirections = "QuaternionFromDirections",
+    QuaternionMultiplication = "QuaternionMultiplication",
 
     // ─── Data / type conversion ───────────────────────────────
     BooleanToFloat = "BooleanToFloat",
