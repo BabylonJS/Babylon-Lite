@@ -1,0 +1,544 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg: #0d1117;
+    --bg-elevated: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent-strong: #1f6feb;
+    --error: #f85149;
+    --warn: #d29922;
+}
+
+html,
+body,
+#app {
+    height: 100%;
+    width: 100%;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.brand-logo {
+    display: block;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+}
+
+.brand-text > span {
+    color: var(--accent);
+}
+
+.brand .beta-badge {
+    display: inline-block;
+    margin-left: 0;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    cursor: help;
+}
+
+.actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.select {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+}
+
+.select:hover {
+    border-color: var(--accent);
+}
+
+.btn {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.9rem;
+    cursor: pointer;
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.btn:hover {
+    border-color: var(--accent);
+}
+
+.btn-primary {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: #fff;
+    font-weight: 600;
+}
+
+.btn-primary:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Square icon buttons (toolbar actions). */
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem;
+    width: 2.1rem;
+    height: 2.1rem;
+}
+
+.btn-icon svg {
+    display: block;
+}
+
+.split {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: 1fr 6px 1fr;
+    min-height: 0;
+}
+
+/* Draggable divider between the editor and preview panes. */
+.splitter {
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+    touch-action: none;
+}
+
+.splitter::after {
+    content: "";
+    position: absolute;
+    inset: 0 -3px;
+}
+
+.splitter:hover,
+.splitter.is-dragging {
+    background: var(--accent);
+}
+
+/* While dragging, stop the iframe/editor from swallowing pointer events so the
+   divider keeps tracking the cursor when it moves over the preview. */
+.split.is-resizing iframe,
+.split.is-resizing .pane-editor {
+    pointer-events: none;
+}
+
+.split.is-resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+.pane {
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+}
+
+.pane-editor {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.file-tabs {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: stretch;
+    gap: 1px;
+    overflow-x: auto;
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border);
+    height: 2.1rem;
+}
+
+.file-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    background: transparent;
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.file-tab.is-active {
+    color: var(--text);
+    background: var(--bg);
+}
+
+.file-tab-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    padding: 0;
+    border: 1px solid var(--text-dim);
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.file-tab.is-entry .file-tab-dot {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.file-tab-label {
+    cursor: pointer;
+}
+
+.file-tab-rename {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 0 0.2rem;
+    width: 8rem;
+}
+
+.file-tab-close {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0 0.15rem;
+}
+
+.file-tab-close:hover {
+    color: #ff6b6b;
+}
+
+.file-tab-add {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0 0.6rem;
+    flex: 0 0 auto;
+}
+
+.file-tab-add:hover {
+    color: var(--text);
+}
+
+#editor {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+}
+
+.pane-preview {
+    display: flex;
+    flex-direction: column;
+}
+
+.preview-host {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+    background: #000;
+}
+
+.preview-host iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+/* Overlay controls floating over the canvas (FPS + fullscreen). */
+.preview-overlay {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    pointer-events: none;
+}
+
+.preview-overlay > * {
+    pointer-events: auto;
+}
+
+.fps-counter {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    color: #e6edf3;
+    background: rgba(1, 4, 9, 0.65);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.15rem 0.4rem;
+}
+
+.overlay-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    color: #e6edf3;
+    background: rgba(1, 4, 9, 0.65);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.overlay-btn:hover {
+    background: rgba(1, 4, 9, 0.85);
+}
+
+.console {
+    flex: 0 0 auto;
+    height: 9rem;
+    overflow-y: auto;
+    background: #010409;
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    padding: 0.5rem 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.console .line {
+    padding: 0.05rem 0;
+}
+
+.console .level-error {
+    color: var(--error);
+}
+
+.console .clickable {
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+.console .clickable:hover {
+    text-decoration: underline;
+}
+
+.console .level-warn {
+    color: var(--warn);
+}
+
+.console .level-info,
+.console .level-log {
+    color: var(--text-dim);
+}
+
+.console .level-system {
+    color: var(--accent);
+}
+
+/* Save split-button */
+.save-group {
+    display: flex;
+}
+
+.save-group .btn {
+    border-radius: 0;
+}
+
+.save-group .btn:first-child {
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+}
+
+.btn-caret {
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+    border-left: none;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+}
+
+/* Save dialog */
+.dialog {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elevated);
+    color: var(--text);
+    padding: 0;
+    width: min(28rem, 92vw);
+}
+
+.dialog::backdrop {
+    background: rgba(1, 4, 9, 0.6);
+}
+
+.dialog-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 1.25rem;
+}
+
+.dialog-form h2 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+}
+
+.field input,
+.field textarea {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.6rem;
+    resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+/* Toast */
+.toast {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    box-shadow: 0 8px 24px rgba(1, 4, 9, 0.5);
+    z-index: 10;
+}
+
+.toast.error {
+    border-color: var(--error);
+    color: var(--error);
+}
+
+/* Open-in-playground link: only shown in embed mode. */
+#openFullBtn {
+    display: none;
+    text-decoration: none;
+    align-items: center;
+}
+
+/* Embed mode: compact chrome, host drives via postMessage. */
+body.embed #examples,
+body.embed #versionSelect,
+body.embed #downloadBtn,
+body.embed #newBtn,
+body.embed .preview-overlay,
+body.embed .save-group {
+    display: none;
+}
+
+body.embed #openFullBtn {
+    display: inline-flex;
+}
+
+body.embed .toolbar {
+    padding: 0.4rem 0.75rem;
+}
+
+/* Runner-only embed: hide the editor, give the canvas the full width. */
+body.embed-runner .pane-editor,
+body.embed-runner .splitter {
+    display: none;
+}
+
+body.embed-runner .split {
+    grid-template-columns: 1fr;
+}

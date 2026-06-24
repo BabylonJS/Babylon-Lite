@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Lite Playground Runner</title>
+        <!--
+          The import map resolves the bare `@babylonjs/lite` specifier used by user
+          snippets to an engine bundle. The URL is provided per run via `?engine=`
+          (the version selector): self-hosted nightly by default, or a CDN URL
+          (esm.sh) for a pinned published version. Injected here, before any module
+          import, so the browser applies it to the blob module created below.
+        -->
+        <script>
+            (function () {
+                var engine = new URLSearchParams(location.search).get("engine") || "/engine/dev/index.js";
+                var map = document.createElement("script");
+                map.type = "importmap";
+                map.textContent = JSON.stringify({ imports: { "@babylonjs/lite": engine } });
+                document.head.appendChild(map);
+            })();
+        </script>
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #000;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <script type="module">
+            const parent = window.parent;
+
+            function post(message) {
+                parent.postMessage(message, "*");
+            }
+
+            // Forward console output to the playground console panel.
+            for (const level of ["log", "info", "warn", "error"]) {
+                const original = console[level].bind(console);
+                console[level] = (...args) => {
+                    original(...args);
+                    post({ type: "console", level, text: args.map(format).join(" ") });
+                };
+            }
+
+            function format(value) {
+                if (typeof value === "string") {
+                    return value;
+                }
+                if (value instanceof Error) {
+                    return value.stack || `${value.name}: ${value.message}`;
+                }
+                try {
+                    return JSON.stringify(value);
+                } catch {
+                    return String(value);
+                }
+            }
+
+            window.addEventListener("error", (event) => {
+                post({ type: "error", text: event.error ? format(event.error) : event.message });
+            });
+            window.addEventListener("unhandledrejection", (event) => {
+                post({ type: "error", text: format(event.reason) });
+            });
+
+            window.addEventListener("message", async (event) => {
+                const message = event.data;
+                if (!message || message.type !== "run") {
+                    return;
+                }
+                const url = URL.createObjectURL(new Blob([message.code], { type: "text/javascript" }));
+                try {
+                    await import(/* @vite-ignore */ url);
+                    post({ type: "ran" });
+                } catch (err) {
+                    post({ type: "error", text: format(err) });
+                } finally {
+                    URL.revokeObjectURL(url);
+                }
+            });
+
+            // Engine-agnostic FPS: sample animation frames and report once a second.
+            let frames = 0;
+            let lastSample = performance.now();
+            function sampleFps(now) {
+                frames++;
+                if (now - lastSample >= 1000) {
+                    post({ type: "stats", fps: Math.round((frames * 1000) / (now - lastSample)) });
+                    frames = 0;
+                    lastSample = now;
+                }
+                requestAnimationFrame(sampleFps);
+            }
+            requestAnimationFrame(sampleFps);
+
+            // Signal readiness so the parent knows it can post code to a fresh frame.
+            post({ type: "ready" });
+        </script>
+    </body>
+</html>
