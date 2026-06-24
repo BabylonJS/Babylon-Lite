@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `5adc34dd972fbd37fcc8b4316a27e8ab3d05f6c8`
-- **Last sync date:** 2026-06-18
+- **Last synced BJS commit:** `608146f18dbf6ff9547f7b6ffe336cc3cbb5c33a`
+- **Last sync date:** 2026-06-24
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -68,8 +68,8 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | -------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------ |
 | `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
 | `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                               |
-| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts)                                                     |
-| `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts)                                                             |
+| `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`) |
+| `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `quatFromRotationMatrix`)        |
 | `Vector3.TransformCoordinates` / `TransformNormal` | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
 | `Vector3.Center` / `CenterToRef`                   | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
 | `Matrix.copyToArray`                               | ✅ Full    | [math/matrix.ts](src/math/matrix.ts)                                                             |
@@ -273,7 +273,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 
 | BJS API                              | Status           | Notes                                                                                                                                                             |
 | ------------------------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Skeleton` / `Bone`                  | ❌ Not supported | throwing stub; produced by glTF loader, not constructed                                                                                                           |
+| `Skeleton` / `Bone`                  | ❌ Not supported | throwing stub; produced by glTF loader, not constructed. Re-checked 2026-06-24: Lite's new opt-in bone-control API (`enableBoneControl` / `getBoneByName` / `setBone*` / `Skeleton` / `Bone`, #268) can read & pose a **loader-built** skeleton, but BJS `new Skeleton()/new Bone()` manual construction and sync skinned `scene.pick` (`applySkeleton`) are still absent, so scene 114 stays blocked and no compat wrapper is shippable yet |
 | `MorphTarget` / `MorphTargetManager` | ✅ Full          | morph ([morph/morph.ts](src/morph/morph.ts)) over Lite `createMorphTargets` / `setMorphTargetWeights` (absolute target positions → deltas, built at engine start) |
 
 ## Sprites
@@ -432,3 +432,16 @@ throwing stub rather than re-emulated. Manual structural weighted / cross-fade
 blending (157, 158) now work; the remaining tractable work is the assorted
 single-API gaps. The glTF model-framing cluster and the procedural
 large-world-rendering scenes are now resolved.
+
+> **Task 2 re-check (2026-06-24):** the new Lite capabilities landed since the last
+> sync — opt-in bone control (#268), `AnimationGroupMask` (#269), the AudioV2 port
+> (#273), physics collision/trigger events + raycast + character controller, the
+> standalone `loadKtx2Texture2D` (#263), per-material stencil (#257), and the
+> `mat4Decompose` / `quatFromRotationMatrix` / vec3-ref math helpers — were
+> cross-referenced against the blocker table above. **None clears a
+> previously-skipped scene's blocker:** scene 114 still needs _manual_
+> `Skeleton`/`Bone` construction plus sync skinned `scene.pick` (the new bone-control
+> API only poses loader-built skeletons); scene 40 is a compat-wrapper gap
+> (`PhysicsAggregate` not yet wrapped), not a Lite-core unblock; and audio scenes
+> have no pixel oracle. So no scene moved into the working list this run — Task 2 is
+> dormant, as expected when no Lite change unblocks a scene.

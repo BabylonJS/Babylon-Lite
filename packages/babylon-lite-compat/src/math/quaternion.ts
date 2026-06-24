@@ -5,7 +5,11 @@
  * Babylon Lite `{ x, y, z, w }` quaternion shape used on transform nodes.
  */
 
+import { quatFromRotationMatrix } from "babylon-lite";
+import type { Mat4 } from "babylon-lite";
+
 import { Vector3 } from "./vector.js";
+import type { Matrix } from "./matrix.js";
 
 export class Quaternion {
     public constructor(
@@ -60,6 +64,19 @@ export class Quaternion {
         return new Quaternion(-this.x, -this.y, -this.z, this.w);
     }
 
+    /**
+     * Babylon.js `Quaternion.fromRotationMatrix` — update this quaternion in place
+     * from the rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+     */
+    public fromRotationMatrix(matrix: Matrix): this {
+        const q = quatFromRotationMatrix(matrix.m as unknown as Mat4);
+        this.x = q.x;
+        this.y = q.y;
+        this.z = q.z;
+        this.w = q.w;
+        return this;
+    }
+
     public clone(): Quaternion {
         return new Quaternion(this.x, this.y, this.z, this.w);
     }
@@ -106,6 +123,29 @@ export class Quaternion {
 
     public static Identity(): Quaternion {
         return new Quaternion(0, 0, 0, 1);
+    }
+
+    /**
+     * Babylon.js `Quaternion.FromRotationMatrix` — create a new quaternion from the
+     * rotation part of `matrix`. Backed by Lite's `quatFromRotationMatrix`.
+     */
+    public static FromRotationMatrix(matrix: Matrix): Quaternion {
+        const result = new Quaternion();
+        Quaternion.FromRotationMatrixToRef(matrix, result);
+        return result;
+    }
+
+    /**
+     * Babylon.js `Quaternion.FromRotationMatrixToRef` — write the rotation part of
+     * `matrix` into `result`. Backed by Lite's `quatFromRotationMatrix`.
+     */
+    public static FromRotationMatrixToRef(matrix: Matrix, result: Quaternion): Quaternion {
+        const q = quatFromRotationMatrix(matrix.m as unknown as Mat4);
+        result.x = q.x;
+        result.y = q.y;
+        result.z = q.z;
+        result.w = q.w;
+        return result;
     }
 
     public static FromEulerAngles(x: number, y: number, z: number): Quaternion {

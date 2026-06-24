@@ -185,6 +185,36 @@ describe("Matrix", () => {
         const n = Vector3.TransformNormal(new Vector3(1, 0, 0), m);
         expect(n.asArray()).toEqual([1, 0, 0]);
     });
+
+    it("decomposes a TRS matrix back into scale, rotation, and translation", () => {
+        const scale = new Vector3(2, 3, 4);
+        const rotation = Quaternion.RotationYawPitchRoll(0.5, -0.3, 0.8);
+        const translation = new Vector3(7, -2, 11);
+        const m = Matrix.Compose(scale, rotation, translation);
+
+        const outScale = new Vector3();
+        const outRot = new Quaternion();
+        const outTrans = new Vector3();
+        expect(m.decompose(outScale, outRot, outTrans)).toBe(true);
+
+        expect(outScale.x).toBeCloseTo(2, 5);
+        expect(outScale.y).toBeCloseTo(3, 5);
+        expect(outScale.z).toBeCloseTo(4, 5);
+        expect(outTrans.asArray()).toEqual([7, -2, 11]);
+        // Quaternion sign can flip; compare the rotation effect on a basis vector.
+        const fromOut = Vector3.TransformNormal(new Vector3(1, 0, 0), Matrix.Compose(new Vector3(1, 1, 1), outRot, new Vector3()));
+        const fromRef = Vector3.TransformNormal(new Vector3(1, 0, 0), Matrix.Compose(new Vector3(1, 1, 1), rotation, new Vector3()));
+        expect(fromOut.x).toBeCloseTo(fromRef.x, 5);
+        expect(fromOut.y).toBeCloseTo(fromRef.y, 5);
+        expect(fromOut.z).toBeCloseTo(fromRef.z, 5);
+    });
+
+    it("returns false from decompose when a scale axis collapses to zero", () => {
+        const m = Matrix.Scaling(0, 1, 1);
+        const rot = new Quaternion(1, 2, 3, 4);
+        expect(m.decompose(undefined, rot, undefined)).toBe(false);
+        expect(rot.asArray()).toEqual([0, 0, 0, 1]);
+    });
 });
 
 describe("Quaternion", () => {
@@ -205,6 +235,29 @@ describe("Quaternion", () => {
         expect(q.length()).toBeGreaterThan(0);
         q.normalize();
         expect(q.length()).toBeCloseTo(1, 6);
+    });
+
+    it("round-trips through a rotation matrix via FromRotationMatrix", () => {
+        const src = Quaternion.RotationYawPitchRoll(0.4, -0.6, 1.1).normalize();
+        const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
+        const back = Quaternion.FromRotationMatrix(rotMat);
+        // Quaternions q and -q represent the same rotation; align signs before comparing.
+        const sign = back.w * src.w < 0 ? -1 : 1;
+        expect(back.x * sign).toBeCloseTo(src.x, 5);
+        expect(back.y * sign).toBeCloseTo(src.y, 5);
+        expect(back.z * sign).toBeCloseTo(src.z, 5);
+        expect(back.w * sign).toBeCloseTo(src.w, 5);
+    });
+
+    it("updates in place via fromRotationMatrix and FromRotationMatrixToRef", () => {
+        const src = Quaternion.RotationYawPitchRoll(-0.2, 0.9, 0.3).normalize();
+        const rotMat = Matrix.Compose(new Vector3(1, 1, 1), src, new Vector3());
+
+        const inPlace = new Quaternion(9, 9, 9, 9).fromRotationMatrix(rotMat);
+        const toRef = new Quaternion(9, 9, 9, 9);
+        const returned = Quaternion.FromRotationMatrixToRef(rotMat, toRef);
+        expect(returned).toBe(toRef);
+        expect(inPlace.asArray()).toEqual(toRef.asArray());
     });
 });
 
