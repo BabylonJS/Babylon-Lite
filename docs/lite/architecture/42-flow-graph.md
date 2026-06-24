@@ -832,8 +832,19 @@ mapper/parser to the full 168-op surface; add further `KHR_interactivity` parity
 scenes, `scene-config.json` entries, bundle ceilings. Run full `pnpm test`.
 
 **Phase 5+ (post-MVP, out of MVP scope):** remaining blocks toward full parity;
-BJS snippet/editor serialization format; multi-context coordinator; debugger
-hooks; physics/audio interactivity ops.
+multi-context coordinator; debugger hooks; physics/audio interactivity ops; and
+**BJS-native FlowGraph serialization parsing** (the editor / `FlowGraphCoordinator.serialize()`
+JSON — `{ allBlocks: [{ className, config, dataInputs/Outputs, signalInputs/Outputs }],
+executionContexts: [...] }`). The pure-data runtime already consumes any `FgGraph`,
+so this is a **second parser front-end** alongside `gltf/interactivity-parser.ts`,
+producing the same `FgGraph`. Concrete sub-tasks: (1) a parser reading
+`allBlocks` + the connection-point graph; (2) a `className → FgBlockType` map for
+the registry; (3) rich-type value de/serialization (Vec2/3, quaternion, matrix,
+integer); (4) a scene-object-reference binding layer (BJS serializes mesh/node/
+material refs by Babylon className + id/name — analogous to the glTF path-converter
+but for BJS's asset-ref scheme). Gated on actually needing BJS-editor interop, and
+on the format settling after #18455 (it is a BJS-*internal*, higher-churn format
+than the standardized glTF draft).
 
 ---
 
