@@ -1,0 +1,14 @@
+{
+  "saturday-weirdness": {
+    "rawKB": 23.3,
+    "gzipKB": 7.9
+  },
+  "mandelbulb": {
+    "rawKB": 23.3,
+    "gzipKB": 7.9
+  },
+  "just-another-cube": {
+    "rawKB": 12.2,
+    "gzipKB": 4.6
+  }
+}

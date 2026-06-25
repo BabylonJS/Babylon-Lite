@@ -176,7 +176,7 @@ export default tseslint.config(
     // Test files (lighter rules)
     // ===========================================
     {
-        files: ["tests/lite/**/*.ts", "**/*.test.ts", "**/*.spec.ts"],
+        files: ["tests/lite/**/*.ts", "tests/gl/**/*.ts", "**/*.test.ts", "**/*.spec.ts"],
         extends: [...tseslint.configs.recommended],
         languageOptions: {
             parser: tseslint.parser,

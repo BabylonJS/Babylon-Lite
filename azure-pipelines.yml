@@ -129,13 +129,45 @@ stages:
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
 
-                - script: npx vitest run --project unit
+                - script: npx vitest run --project unit --project gl-unit
                   displayName: "Run vitest unit tests"
                   env:
                       CI: "true"
 
                 - script: npx vitest run --project build
                   displayName: "Run vitest build-output tests"
+
+                - script: npx vitest run --project gl-build
+                  displayName: "Run vitest lite-gl build-output tests"
+
+                # lite-gl visual parity vs the Babylon ThinEngine reference. WebGL2
+                # runs headless (SwiftShader in CI, enabled by CI=true in
+                # playwright.config.ts), so no cloud browser is needed — unlike the
+                # WebGPU parity job below. Compares the live lite-gl render against the
+                # committed goldens in reference/gl/<slug>/babylon-ref-golden.png; those
+                # goldens MUST be generated with the same SwiftShader path
+                # (CI=true HEADLESS=true RECAPTURE_GOLDEN=true pnpm test:parity:gl) so
+                # the renderer matches. If a golden is missing the harness self-captures
+                # it live (the run still passes, but without a reviewed baseline).
+                - script: pnpm test:parity:gl
+                  displayName: "Run lite-gl parity tests"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+
+                # lite-gl perf vs the Babylon ThinEngine it replaces (same headless
+                # SwiftShader render — no cloud browser needed, and no committed golden
+                # required since both engines render live). Gates that lite-gl is not
+                # materially slower than Babylon; a generous margin absorbs CI software-
+                # rendering noise (where the lite-gl/Babylon ratio compresses) while
+                # still catching a gross regression. Writes the Perf-Regression manifest.
+                - script: pnpm test:perf-regression:gl
+                  displayName: "Run lite-gl perf regression"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+                      PERF_DURATION: "3"
+                      PERF_REGRESSION_PCT: "50"
 
                 - script: |
                       npx playwright test tests/lite/plumbing/dispose.spec.ts
@@ -464,6 +496,14 @@ stages:
                 - script: |
                       npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (tests)"
+
+                - script: |
+                      npx tsc -p packages/babylon-lite-gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (gl package)"
+
+                - script: |
+                      npx tsc -p tests/gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (gl tests)"
 
                 # Verifies docs/lite/02-feature-comparison.md is in sync with its
                 # source of truth (lab/lite/docs/feature-comparison.html). The check

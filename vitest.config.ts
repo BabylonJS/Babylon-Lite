@@ -27,6 +27,21 @@ export default defineConfig({
             {
                 extends: true,
                 test: {
+                    name: "gl-unit",
+                    include: ["tests/gl/unit/**/*.test.ts"],
+                },
+            },
+            {
+                extends: true,
+                test: {
+                    name: "gl-build",
+                    include: ["tests/gl/build/**/*.test.ts"],
+                    testTimeout: 300_000,
+                },
+            },
+            {
+                extends: true,
+                test: {
                     name: "compat",
                     include: ["packages/babylon-lite-compat/tests/**/*.test.ts"],
                 },

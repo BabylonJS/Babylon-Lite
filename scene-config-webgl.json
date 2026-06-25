@@ -1,1 +1,167 @@
-[]
+[
+    {
+        "id": 1,
+        "slug": "gl-gradient",
+        "name": "Scene 1 — Animated Gradient",
+        "description": "Fullscreen animated gradient rendered with @babylonjs/lite-gl (createEffect + EffectWrapper + cached uniform setters).",
+        "tags": ["effect", "shader", "procedural"],
+        "maxMad": 2.0,
+        "maxRawKB": 12,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 2,
+        "slug": "gl-plasma",
+        "name": "Scene 2 — Plasma",
+        "description": "Fullscreen procedural plasma effect rendered with @babylonjs/lite-gl, animated via the uTime uniform.",
+        "tags": ["effect", "shader", "procedural"],
+        "maxMad": 2.0,
+        "maxRawKB": 12,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 3,
+        "slug": "gl-textured",
+        "name": "Scene 3 — Textured Quad",
+        "description": "Two textures sampled in one custom fragment shader: a procedural checkerboard via createRawTexture and a generated PNG via loadTexture2D, blended by an animated wipe (setEffectTexture + setEffectFloat2).",
+        "tags": ["texture"],
+        "maxMad": 2.0,
+        "maxRawKB": 17,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 4,
+        "slug": "gl-sprites",
+        "name": "Scene 4 — Sprites",
+        "description": "A drifting, hue-cycling field of 64 tinted sprites drawn with the @babylonjs/lite-gl/sprites renderer over a procedural glow-disc sheet (identity view/projection maps sprite positions straight to clip space).",
+        "tags": ["sprites"],
+        "maxMad": 2.0,
+        "maxRawKB": 21,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 5,
+        "slug": "gl-blend-modes",
+        "name": "Scene 5 — Blend Modes",
+        "description": "Three overlapping disc clusters drawn with setBlendMode under GLBlendMode.ADD, ALPHA and PREMULTIPLIED — the additive cluster blooms bright where discs overlap.",
+        "tags": ["blend"],
+        "maxMad": 2.0,
+        "maxRawKB": 14,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 6,
+        "slug": "gl-html-texture",
+        "name": "Scene 6 — HTML-Element Texture",
+        "description": "An animated offscreen 2D canvas wrapped via @babylonjs/lite-gl/html-texture, re-uploaded each frame with updateHtmlElementTexture and sampled fullscreen (with an in-shader V-flip).",
+        "tags": ["texture", "dynamic"],
+        "maxMad": 2.0,
+        "maxRawKB": 15,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 7,
+        "slug": "gl-sine-bands",
+        "name": "Scene 7 — Sine Wave Bands",
+        "description": "Layered phase-shifted sine bands tinted by a cosine-gradient palette (createEffect + EffectWrapper). Original lite-gl reimplementation inspired by shadertoy.com/view/tffSDr.",
+        "tags": ["effect", "shader", "procedural"],
+        "maxMad": 3.0,
+        "maxRawKB": 13,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 8,
+        "slug": "gl-render-target",
+        "name": "Scene 8 — Render-to-Texture Round-Trip",
+        "description": "A procedural radial pattern rendered into an offscreen FBO via @babylonjs/lite-gl/render-target (createRenderTarget + bindRenderTarget), then sampled fullscreen to the screen with an aspect-corrected vignette — a deterministic render-to-texture round-trip.",
+        "tags": ["texture", "rtt"],
+        "maxMad": 2.0,
+        "maxRawKB": 17,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 9,
+        "slug": "gl-ping-pong-feedback",
+        "name": "Scene 9 — Ping-Pong Feedback",
+        "description": "A radial pattern evolved through 6 fixed ping-pong feedback iterations on a pair of offscreen render targets (createPingPong + swap from @babylonjs/lite-gl/render-target), then composited fullscreen with an aspect-corrected vignette — a deterministic frame-feedback round-trip.",
+        "tags": ["texture", "rtt"],
+        "maxMad": 2.0,
+        "maxRawKB": 18.5,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 10,
+        "slug": "gl-mesh",
+        "name": "Scene 10 — Indexed Mesh + Instancing",
+        "description": "An indexed mesh drawn from @babylonjs/lite-gl/mesh via the VAO-cached static-mesh path (createVertexBuffer + createIndexBuffer + createMeshVao + drawMesh) as several depth-tested instances, with setDepthState/setCullState — recording the attribute layout into one VAO so the per-frame draw is a single bind + drawElementsInstanced (no per-frame vertexAttribPointer).",
+        "tags": ["mesh", "depth"],
+        "maxMad": 2.0,
+        "maxRawKB": 15,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 11,
+        "slug": "gl-stencil",
+        "name": "Scene 11 — Stencil Masking",
+        "description": "A stencil mask written into an offscreen render target's stencil buffer (generateRenderTargetStencil from @babylonjs/lite-gl/depth-stencil + setStencilState), then a fullscreen pattern drawn only where the stencil test passes.",
+        "tags": ["stencil", "rtt"],
+        "maxMad": 2.0,
+        "maxRawKB": 20,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 12,
+        "slug": "gl-scissor",
+        "name": "Scene 12 — Scissor Rectangles",
+        "description": "Independent scissor-clipped clears and draws (setScissor/disableScissor) tiling the canvas into deterministic colored regions.",
+        "tags": ["scissor"],
+        "maxMad": 1.5,
+        "maxRawKB": 7,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 13,
+        "slug": "gl-dynamic-texture",
+        "name": "Scene 13 — Dynamic Texture",
+        "description": "A canvas-backed dynamic texture (createDynamicTexture + updateDynamicTexture from @babylonjs/lite-gl/dynamic-texture) re-uploaded from a deterministically drawn 2D canvas and sampled fullscreen.",
+        "tags": ["texture", "dynamic"],
+        "maxMad": 2.0,
+        "maxRawKB": 14.5,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 14,
+        "slug": "gl-float-rt",
+        "name": "Scene 14 — Float (HDR) Render Target",
+        "description": "A high-dynamic-range pattern (values > 1.0) rendered into a half-float render target (createFloatRenderTarget from @babylonjs/lite-gl/render-target), then tone-mapped to the LDR screen — the HDR opt-in counterpart of the RGBA8 render-target path.",
+        "tags": ["texture", "rtt", "hdr"],
+        "maxMad": 3.0,
+        "maxRawKB": 17.5,
+        "skipParity": false,
+        "skipPerf": false
+    },
+    {
+        "id": 15,
+        "slug": "gl-multi-sprite",
+        "name": "Scene 15 — Multiple Sprite Renderers",
+        "description": "Two @babylonjs/lite-gl/sprites renderers (a glow-disc layer and a ring layer) draw over a gradient background. Both compile the same sprite shader, so the source-keyed effect cache hands them ONE shared WebGLProgram and gl.useProgram is issued only once across the two — the redundant-useProgram fix in action.",
+        "tags": ["sprites"],
+        "maxMad": 2.0,
+        "maxRawKB": 21.5,
+        "skipParity": false,
+        "skipPerf": false
+    }
+]

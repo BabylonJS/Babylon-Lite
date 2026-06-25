@@ -1,0 +1,114 @@
+{
+    "name": "babylon-lite-gl",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Function-based, tree-shakeable WebGL2 micro-engine for fullscreen effects, sprites and dynamic textures — the WebGL counterpart of @babylonjs/lite.",
+    "keywords": [
+        "babylon",
+        "babylonjs",
+        "webgl",
+        "webgl2",
+        "effect",
+        "shader",
+        "sprite",
+        "lite",
+        "rendering"
+    ],
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/BabylonJS/Babylon-Lite.git",
+        "directory": "packages/babylon-lite-gl"
+    },
+    "homepage": "https://github.com/BabylonJS/Babylon-Lite/tree/main/packages/babylon-lite-gl",
+    "type": "module",
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "sideEffects": false,
+    "exports": {
+        ".": {
+            "import": "./src/index.ts",
+            "types": "./src/index.ts"
+        },
+        "./html-texture": {
+            "import": "./src/html-texture.ts",
+            "types": "./src/html-texture.ts"
+        },
+        "./sprites": {
+            "import": "./src/sprites.ts",
+            "types": "./src/sprites.ts"
+        },
+        "./render-target": {
+            "import": "./src/render-target.ts",
+            "types": "./src/render-target.ts"
+        },
+        "./mesh": {
+            "import": "./src/mesh.ts",
+            "types": "./src/mesh.ts"
+        },
+        "./depth-stencil": {
+            "import": "./src/depth-stencil.ts",
+            "types": "./src/depth-stencil.ts"
+        },
+        "./scissor": {
+            "import": "./src/scissor.ts",
+            "types": "./src/scissor.ts"
+        },
+        "./dynamic-texture": {
+            "import": "./src/dynamic-texture.ts",
+            "types": "./src/dynamic-texture.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "vite build",
+        "build:prod": "vite build --mode prod",
+        "dev": "vite build --watch"
+    },
+    "publishConfig": {
+        "main": "./dist/index.js",
+        "types": "./dist/index.d.ts",
+        "exports": {
+            ".": {
+                "import": "./dist/index.js",
+                "types": "./dist/index.d.ts"
+            },
+            "./html-texture": {
+                "import": "./dist/html-texture.js",
+                "types": "./dist/html-texture.d.ts"
+            },
+            "./sprites": {
+                "import": "./dist/sprites.js",
+                "types": "./dist/sprites.d.ts"
+            },
+            "./render-target": {
+                "import": "./dist/render-target.js",
+                "types": "./dist/render-target.d.ts"
+            },
+            "./mesh": {
+                "import": "./dist/mesh.js",
+                "types": "./dist/mesh.d.ts"
+            },
+            "./depth-stencil": {
+                "import": "./dist/depth-stencil.js",
+                "types": "./dist/depth-stencil.d.ts"
+            },
+            "./scissor": {
+                "import": "./dist/scissor.js",
+                "types": "./dist/scissor.d.ts"
+            },
+            "./dynamic-texture": {
+                "import": "./dist/dynamic-texture.js",
+                "types": "./dist/dynamic-texture.d.ts"
+            }
+        }
+    },
+    "devDependencies": {
+        "@microsoft/api-extractor": "^7.58.7",
+        "typescript": "^5.7.0",
+        "vite": "^6.0.0",
+        "vite-plugin-dts": "^4.5.4"
+    }
+}
