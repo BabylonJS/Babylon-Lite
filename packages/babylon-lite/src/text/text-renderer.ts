@@ -28,6 +28,13 @@ export interface TextLayerOptions {
     readonly order?: number;
     /** Alpha multiplier in [0, 1]. Default 1. */
     readonly opacity?: number;
+    /** Coverage gamma for anti-aliased edges. Raises per-pixel coverage to `1/coverageGamma`
+     *  before compositing, darkening/thickening anti-aliased edges to mimic the gamma-space
+     *  blending used by native text renderers (DirectWrite/CoreText "stem darkening"). Only
+     *  meaningful when rendering into an sRGB (linear-blended) surface, where correct linear
+     *  AA otherwise makes text look lighter/thinner than gamma-space rasterizers. Values \>1
+     *  thicken; 1 (default) is a no-op. Typical text values are ~1.8–2.2. */
+    readonly coverageGamma?: number;
     /** Default true. */
     readonly visible?: boolean;
 }
@@ -42,6 +49,8 @@ export interface TextLayer {
     scale: number;
     order: number;
     opacity: number;
+    /** Coverage gamma for anti-aliased edges (see `TextLayerOptions.coverageGamma`). Default 1. */
+    coverageGamma: number;
     visible: boolean;
     /** @internal Monotonic version bumped by helpers that mutate placement. */
     _version: number;
@@ -61,6 +70,7 @@ export function createTextLayer(data: TextData, options?: TextLayerOptions): Tex
         scale: options?.scale ?? 1,
         order: options?.order ?? 0,
         opacity: options?.opacity ?? 1,
+        coverageGamma: options?.coverageGamma ?? 1,
         visible: options?.visible ?? true,
         _version: 0,
     };
@@ -266,9 +276,11 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
         lg.uploadedViewportH = H;
     }
 
-    // Color uniform carries the whole-layer opacity as alpha (RGB = white). Per-glyph/per-run
-    // color comes from the instance `slugColor` attribute and is multiplied by this in the shader.
-    const col = new Float32Array([1, 1, 1, layer.opacity]);
+    // Color uniform carries the whole-layer opacity as alpha. The R slot (otherwise unused;
+    // RGB does not tint per-glyph color) carries the coverage-gamma reciprocal applied to
+    // anti-aliased edge coverage in the fragment shader. G/B stay 1.
+    const gammaInv = layer.coverageGamma > 0 ? 1 / layer.coverageGamma : 1;
+    const col = new Float32Array([gammaInv, 1, 1, layer.opacity]);
     device.queue.writeBuffer(lg.textU, 80, col.buffer as ArrayBuffer, col.byteOffset, 16);
 }
 

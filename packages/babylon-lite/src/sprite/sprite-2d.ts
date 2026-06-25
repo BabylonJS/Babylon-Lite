@@ -38,6 +38,20 @@ export interface Sprite2DLayerOptions {
     capacity?: number;
     blendMode?: SpriteBlendMode;
     opacity?: number;
+    /**
+     * Coverage gamma for anti-aliased edges (text rendering). When set to a value other than 1,
+     * the sampled texture alpha is raised to `1/coverageGamma` in the fragment shader, thickening
+     * anti-aliased edges to mimic the gamma-space blending of native text rasterizers
+     * (DirectWrite/CoreText "stem darkening"). Intended for glyph-atlas (bitmap text) layers drawn
+     * into an sRGB (linear-blended) surface, where correct linear AA otherwise makes text look
+     * lighter/thinner. Values \>1 thicken; 1 (default) is a no-op and ships the base fragment.
+     *
+     * The per-fragment `pow` is gated on this create-time opt-in (like `uvScroll`), so only gamma
+     * layers run it. The plumbing (one extra `Layer` UBO `vec4`, the gamma shader permutation, and
+     * this option field) is, however, in the always-loaded sprite path, so it adds a small fixed
+     * cost (~0.3 KB raw) to every sprite scene — reflected in the sprite-scene bundle ceilings.
+     */
+    coverageGamma?: number;
     visible?: boolean;
     order?: number;
     view?: Partial<Sprite2DView>;
@@ -97,6 +111,10 @@ export interface Sprite2DLayer {
     readonly depth: Sprite2DDepthMode;
     readonly blendMode: SpriteBlendMode;
     opacity: number;
+    /** Coverage gamma applied to anti-aliased edges; see `Sprite2DLayerOptions.coverageGamma`.
+     *  Default 1 (no-op). Read each frame into the layer UBO. Mutating it live changes the
+     *  thickness, but the per-fragment `pow` only runs on layers created with `coverageGamma !== 1`. */
+    coverageGamma: number;
     visible: boolean;
     order: number;
     view: Sprite2DView;
@@ -121,6 +139,13 @@ export interface Sprite2DLayer {
      * created with `uvScroll: true`, which widens the instance stride by two floats (`uvOffset.xy`).
      */
     readonly _uvScroll?: boolean;
+    /**
+     * @internal Opt-in coverage-gamma permutation flag; see `Sprite2DLayerOptions.coverageGamma`.
+     * **Absent** (not `false`) on plain layers — never default-initialized, so the always-loaded
+     * path keeps the base shader. Present (`true`) only when the layer was created with
+     * `coverageGamma !== 1`, which selects the shader permutation that applies `pow` to edge coverage.
+     */
+    readonly _coverageGamma?: boolean;
     /** Default NDC depth for newly added sprites; see `Sprite2DLayerOptions.layerZ`. */
     layerZ: number;
     readonly count: number;
@@ -266,6 +291,7 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
         depth,
         blendMode,
         opacity: opts.opacity ?? 1,
+        coverageGamma: opts.coverageGamma ?? 1,
         visible: opts.visible ?? true,
         order: opts.order ?? 0,
         view,
@@ -285,6 +311,11 @@ export function createSprite2DLayer(atlas: SpriteAtlas, opts: Sprite2DLayerOptio
     // caller opted in, so plain layers keep the field off the always-loaded path and read as narrow.
     if (uvScroll) {
         (layer as { _uvScroll?: boolean })._uvScroll = true;
+    }
+    // Zero-default-init discipline: the base layer never names `_coverageGamma`. Set it only when
+    // the caller opted into a non-identity gamma, so plain layers keep the base shader permutation.
+    if (opts.coverageGamma != null && opts.coverageGamma !== 1) {
+        (layer as { _coverageGamma?: boolean })._coverageGamma = true;
     }
     // Zero-default-init discipline: the base layer never names `customShader` / `shaderParams`.
     // When (and only when) a custom shader was supplied, the registered hook copies it on — the

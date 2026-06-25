@@ -1031,7 +1031,7 @@
         "slug": "scene96-sprite-uvoffset-parallax",
         "name": "Scene 96 — Sprite uvOffset Parallax",
         "maxMad": 0.02,
-        "maxRawKB": 16.2,
+        "maxRawKB": 16.5,
         "description": "20x9 pure-2D sprite grid sampling one tileable atlas tile (repeat wrap, nearest) where each horizontal band carries a different fixed per-sprite uvOffset (uvScroll), shifting the sampled UV in the vertex stage - the building block for parallax / infinite-scroll backgrounds.",
         "tags": ["sprites", "2d", "uvoffset"],
         "skipPerf": true,

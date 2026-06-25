@@ -9,14 +9,8 @@ import { DEPTH_INSTANCE_STRIDE_BYTES, DEPTH_UVSCROLL_STRIDE_BYTES, PURE_2D_INSTA
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
-    /** @internal */
-    _shaderModule: GPUShaderModule | null;
-    /** @internal */
-    _sceneShaderModule: GPUShaderModule | null;
-    /** @internal */
-    _shaderModuleUv: GPUShaderModule | null;
-    /** @internal */
-    _sceneShaderModuleUv: GPUShaderModule | null;
+    /** @internal Shader modules keyed by `${hasDepth}:${uvScroll}:${coverageGamma}` permutation. */
+    _shaderModules: Map<string, GPUShaderModule>;
     /** @internal */
     _pipelines: Map<string, GPURenderPipeline>;
 }
@@ -38,12 +32,15 @@ const SPRITE_DEPTH_OFFSET_BYTES = 52;
 const SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52;
 const SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56;
 
-function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
+function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean, coverageGamma = false): string {
+    // Coverage gamma (opt-in, text layers): raise sampled alpha to 1/coverageGamma (L.aa.x) so
+    // anti-aliased glyph edges composite heavier, mimicking gamma-space stem darkening. Gated at
+    // shader-build time — non-gamma layers ship the trivial textured fragment with no `pow`.
+    const coverageLine = coverageGamma ? `\nlet a = pow(s.a, L.aa.x);\nreturn vec4<f32>(s.rgb, a) * in.tint * L.opacityMul;` : `\nreturn s * in.tint * L.opacityMul;`;
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
-let s = textureSample(atlasTex, atlasSamp, in.uv);
-return s * in.tint * L.opacityMul;
+let s = textureSample(atlasTex, atlasSamp, in.uv);${coverageLine}
 }`;
 }
 
@@ -71,6 +68,10 @@ pivot: vec2<f32>,
 //   premultiplied:   (opacity, opacity, opacity, opacity) — RGB and A scale together
 // One uniform, no shader branch.
 opacityMul: vec4<f32>,
+// Coverage-gamma controls (text layers): .x = 1/coverageGamma applied to sampled alpha by the
+// coverage-gamma shader permutation. .yzw reserved. Always present (UBO is a fixed 64 bytes);
+// unused by the base shader permutation.
+aa: vec4<f32>,
 };
 ${group} @binding(0) var<uniform> L: Layer;
 ${group} @binding(1) var atlasTex: texture_2d<f32>;
@@ -181,10 +182,7 @@ function getSpritePipelineDeviceCache(engine: EngineContext, cache: SpritePipeli
     let deviceCache = cache._devices.get(engine._device);
     if (!deviceCache) {
         deviceCache = {
-            _shaderModule: null,
-            _sceneShaderModule: null,
-            _shaderModuleUv: null,
-            _sceneShaderModuleUv: null,
+            _shaderModules: new Map(),
             _pipelines: new Map(),
         };
         cache._devices.set(engine._device, deviceCache);
@@ -213,7 +211,8 @@ function spritePipelineKey(
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
     const uvKey = layer?._uvScroll ? "1" : "0";
-    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}`;
+    const cgKey = layer?._coverageGamma ? "1" : "0";
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
 function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
@@ -222,20 +221,16 @@ function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache
         return customModule;
     }
     const uvScroll = layer?._uvScroll === true;
-    if (hasDepth) {
-        if (uvScroll) {
-            cache._sceneShaderModuleUv ??= engine._device.createShaderModule({ code: makeSpriteWgsl(true, 1, true) });
-            return cache._sceneShaderModuleUv;
-        }
-        cache._sceneShaderModule ??= engine._device.createShaderModule({ code: makeSpriteWgsl(true, 1, false) });
-        return cache._sceneShaderModule;
+    const coverageGamma = layer?._coverageGamma === true;
+    const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}:${coverageGamma ? 1 : 0}`;
+    let module = cache._shaderModules.get(key);
+    if (!module) {
+        module = engine._device.createShaderModule({
+            code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll, coverageGamma),
+        });
+        cache._shaderModules.set(key, module);
     }
-    if (uvScroll) {
-        cache._shaderModuleUv ??= engine._device.createShaderModule({ code: makeSpriteWgsl(false, 0, true) });
-        return cache._shaderModuleUv;
-    }
-    cache._shaderModule ??= engine._device.createShaderModule({ code: makeSpriteWgsl(false, 0, false) });
-    return cache._shaderModule;
+    return module;
 }
 
 function buildSpritePipeline(
@@ -333,8 +328,8 @@ function buildSpritePipeline(
 // "grow instance buffer if needed", "upload dirty instance range",
 // "build the 12-float UBO", "writeBuffer only if changed" — is identical.
 
-/** Per-layer UBO size in bytes. 12 floats; struct alignment forced to 16 by `vec4<f32>` fields. */
-export const LAYER_UBO_BYTES = 48;
+/** Per-layer UBO size in bytes. 16 floats; struct alignment forced to 16 by `vec4<f32>` fields. */
+export const LAYER_UBO_BYTES = 64;
 /** Number of floats in the per-layer UBO scratch / lastUbo arrays. */
 export const LAYER_UBO_FLOATS = LAYER_UBO_BYTES / 4;
 
@@ -408,11 +403,12 @@ export function uploadSpriteInstances(device: GPUDevice, layer: Sprite2DLayer, i
 }
 
 /**
- * Fill `ubo` (12 floats) with the per-layer UBO contents from `layer` at the given
- * render-target dims. Layout matches the WGSL `Layer` struct (48 bytes total):
+ * Fill `ubo` (16 floats) with the per-layer UBO contents from `layer` at the given
+ * render-target dims. Layout matches the WGSL `Layer` struct (64 bytes total):
  *   [0..1]  viewPos.xy   [2] viewScale   [3] viewRot
  *   [4..5]  screenSize.xy   [6..7] pivot.xy
  *   [8..11] opacityMul.rgba (pre-shaped per blend mode)
+ *   [12]    1/coverageGamma (coverage-gamma layers only)   [13..15] reserved
  *
  * Depth-hosted layers keep per-sprite NDC depth on the per-instance vertex buffer
  * (slot [13] of `Sprite2DLayer._instanceData`), not in this UBO — a single
@@ -443,6 +439,10 @@ export function buildSpriteLayerUbo(layer: Sprite2DLayer, screenWidth: number, s
         ubo[10] = 1;
         ubo[11] = op;
     }
+    const g = layer.coverageGamma;
+    // aa.x = 1/coverageGamma; aa.yzw reserved (scratch UBO is zero-initialized and reused, so
+    // 13..15 stay 0 without explicit writes).
+    ubo[12] = g > 0 ? 1 / g : 1;
 }
 
 /**
