@@ -1,4 +1,4 @@
-// Plain-`tsc` build for @babylonjs/lite-gl — no bundler.
+// Plain-`tsc` build for @babylonjs/lite-gl — no bundler (see docs/gl/architecture/00-lite-gl.md for rationale).
 //
 // `tsc` (driven by tsconfig.json: `outDir: dist`, `stripInternal`) emits one
 // `.js` + `.d.ts` per source module straight into `dist/`, mirroring `src/`.
