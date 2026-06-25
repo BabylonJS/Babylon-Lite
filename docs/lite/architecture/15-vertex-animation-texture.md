@@ -1,4 +1,5 @@
 # Module: Vertex Animation Texture (VAT)
+
 > Package paths: `packages/babylon-lite/src/vat/` (baker + runtime), `packages/babylon-lite/src/material/pbr/fragments/vat-fragment.ts` (GPU vertex path)
 
 ## Purpose
@@ -24,22 +25,26 @@ export function attachVat(engine: EngineContext, mesh: Mesh, baked: VatBakeResul
 ### Types (`vat/vat-baker.ts`)
 
 ```typescript
-export interface VatClip { readonly fromRow: number; readonly frameCount: number; readonly fps: number; }
+export interface VatClip {
+    readonly fromRow: number;
+    readonly frameCount: number;
+    readonly fps: number;
+}
 
 export interface VatBakeResult {
-    readonly texture: GPUTexture;                  // rgba32float, (boneCount*4) x frameCount
+    readonly texture: GPUTexture; // rgba32float, (boneCount*4) x frameCount
     readonly boneCount: number;
     readonly frameCount: number;
-    readonly clips: Record<string, VatClip>;       // clip name -> row range
+    readonly clips: Record<string, VatClip>; // clip name -> row range
 }
 
 export interface VatHandle {
     readonly mesh: Mesh;
     readonly clips: Record<string, VatClip>;
-    play(clip: string, opts?: { offset?: number; fps?: number }): void;  // shared (non-instanced) playback
-    update(dtSeconds: number): void;                                      // advance the shared clock
-    setInstances(params: Float32Array): void;                            // per-instance single clip (4 floats/inst)
-    setInstancesBlend(params: Float32Array): void;                       // per-instance dual-clip blend (8 floats/inst)
+    play(clip: string, opts?: { offset?: number; fps?: number }): void; // shared (non-instanced) playback
+    update(dtSeconds: number): void; // advance the shared clock
+    setInstances(params: Float32Array): void; // per-instance single clip (4 floats/inst)
+    setInstancesBlend(params: Float32Array): void; // per-instance dual-clip blend (8 floats/inst)
 }
 ```
 
@@ -48,12 +53,12 @@ export interface VatHandle {
 ```typescript
 export interface VatData {
     boneCount: number;
-    texture: GPUTexture;                 // the baked bone texture
+    texture: GPUTexture; // the baked bone texture
     frameCount: number;
-    settingsBuffer: GPUBuffer;           // 32-byte UBO: params vec4 + clock vec4
-    jointsBuffer: GPUBuffer;             // reused from the (now-dropped) skeleton
+    settingsBuffer: GPUBuffer; // 32-byte UBO: params vec4 + clock vec4
+    jointsBuffer: GPUBuffer; // reused from the (now-dropped) skeleton
     weightsBuffer: GPUBuffer;
-    joints1Buffer: GPUBuffer | null;     // 8-bone
+    joints1Buffer: GPUBuffer | null; // 8-bone
     weights1Buffer: GPUBuffer | null;
     instanceTexture?: GPUTexture | null; // per-instance params ((2*instanceCount) x 1, two texels/instance)
 }
@@ -62,7 +67,7 @@ export interface VatData {
 ### Mesh feature bits (`material/mesh-features.ts`)
 
 ```typescript
-export const MSH_VAT = 1 << 9;             // mesh.vat present — the ONLY VAT mesh-feature bit
+export const MSH_VAT = 1 << 9; // mesh.vat present — the ONLY VAT mesh-feature bit
 // "Instanced VAT" needs NO dedicated bit: it is derived in the fragment from
 //   (MSH_VAT && MSH_HAS_THIN_INSTANCES)
 // so mesh-features.ts (a shared chunk fetched by every scene) is byte-identical for non-VAT scenes
@@ -107,11 +112,11 @@ The VAT `pbrExt` (`vat-fragment.ts`) is a **vertex-phase** PBR extension. It is 
 
 ### Group-1 vertex bindings (pushed by `pbrExt.bind`, in declaration order)
 
-| binding | resource | when |
-|---|---|---|
-| b   | `vatSampler` — `texture_2d<f32>` (unfilterable-float), vertex-visible | always (MSH_VAT) |
-| b+1 | `vat` — uniform buffer (settings UBO) | always |
-| b+2 | `vatInstanceTex` — `texture_2d<f32>` (unfilterable-float) | `MSH_VAT && MSH_HAS_THIN_INSTANCES` (instanceTexture set) |
+| binding | resource                                                              | when                                                      |
+| ------- | --------------------------------------------------------------------- | --------------------------------------------------------- |
+| b       | `vatSampler` — `texture_2d<f32>` (unfilterable-float), vertex-visible | always (MSH_VAT)                                          |
+| b+1     | `vat` — uniform buffer (settings UBO)                                 | always                                                    |
+| b+2     | `vatInstanceTex` — `texture_2d<f32>` (unfilterable-float)             | `MSH_VAT && MSH_HAS_THIN_INSTANCES` (instanceTexture set) |
 
 ### Vertex attributes / builtins
 
@@ -159,13 +164,13 @@ Because skinned-mesh `mesh.world` is identity (glTF loader, see `12-thin-instanc
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Lite VAT |
-|---|---|
-| `VertexAnimationBaker.bakeVertexData(ranges)` | `bakeVat(engine, mesh, groups)` |
-| `BakedVertexAnimationManager` (manager.time, setAnimationParameters) | `VatHandle` (`update`, `play`) |
-| `mesh.bakedVertexAnimationManager` | `mesh.vat` (`VatData`) |
-| `manager.texture` (VAT texture) | `VatBakeResult.texture` / `VatData.texture` |
-| Per-instance via `bakedVertexAnimationSettingsInstanced` buffer | `setInstances` / `setInstancesBlend` → `instanceTexture` (read by `instance_index`) |
+| Babylon.js                                                           | Lite VAT                                                                            |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `VertexAnimationBaker.bakeVertexData(ranges)`                        | `bakeVat(engine, mesh, groups)`                                                     |
+| `BakedVertexAnimationManager` (manager.time, setAnimationParameters) | `VatHandle` (`update`, `play`)                                                      |
+| `mesh.bakedVertexAnimationManager`                                   | `mesh.vat` (`VatData`)                                                              |
+| `manager.texture` (VAT texture)                                      | `VatBakeResult.texture` / `VatData.texture`                                         |
+| Per-instance via `bakedVertexAnimationSettingsInstanced` buffer      | `setInstances` / `setInstancesBlend` → `instanceTexture` (read by `instance_index`) |
 
 ## Dependencies
 

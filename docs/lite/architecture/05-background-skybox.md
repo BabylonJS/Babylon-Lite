@@ -1,5 +1,7 @@
 # Module: Background & Skybox
+
 > Package paths:
+>
 > - `packages/babylon-lite/src/material/pbr/background-material.ts` — Skybox material + cubemap skybox material factory + geometry generation
 > - `packages/babylon-lite/src/material/pbr/background-renderable.ts` — Skybox + Ground → Renderables orchestrator, scene size computation
 > - `packages/babylon-lite/src/material/pbr/background-ground.ts` — Ground material, geometry, texture loading, UBO
@@ -10,6 +12,7 @@
 > - `packages/babylon-lite/src/texture/cube-texture.ts` — 6-face cube texture loader
 >
 > Shaders:
+>
 > - `packages/babylon-lite/shaders/skybox.vertex.wgsl`, `skybox.fragment.wgsl` — Environment solid-color skybox
 > - `packages/babylon-lite/shaders/skybox-dds.vertex.wgsl`, `skybox-dds.fragment.wgsl` — DDS cubemap skybox
 > - `packages/babylon-lite/shaders/skybox-hdr.fragment.wgsl` — HDR cubemap skybox fragment
@@ -48,6 +51,7 @@ Early implementations incorrectly used a 24-vertex/36-index box with a cubemap r
 ### BJS ground diffuse texture (`backgroundGround.png`)
 
 BJS loads `https://assets.babylonjs.com/core/environments/backgroundGround.png`:
+
 - **1024×1024**, white RGB (255,255,255), radial alpha gradient
 - Center alpha = 255, edge alpha = 0
 - This texture drives the spatial variation in ground opacity — without it, the ground has uniform alpha
@@ -56,7 +60,7 @@ The texture URL is **not hardcoded in the engine**. Client code passes it via `l
 
 ```typescript
 await loadEnvironment(scene, envUrl, {
-  groundTextureUrl: 'https://assets.babylonjs.com/core/environments/backgroundGround.png',
+    groundTextureUrl: "https://assets.babylonjs.com/core/environments/backgroundGround.png",
 });
 ```
 
@@ -73,6 +77,7 @@ alpha = materialAlpha(0.9) × textureAlpha × fadeFactor²
 Where `fadeFactor = clamp(dot(normalW, viewDir) / 0.1, 0, 1)` (opacity fresnel).
 
 **Camera-dependent behavior:**
+
 - **Grazing angle** (camera at Y≈0, e.g. Scene 1): viewAngle → 0, fadeFactor → 0, alpha → 0 → ground invisible → clearColor shows through
 - **Elevated camera** (camera at Y=1.67, e.g. Scene 7): viewAngle > 0.1, fadeFactor → 1, alpha → `0.9 × textureAlpha` → ground partially visible with spatial variation from radial texture
 
@@ -95,16 +100,16 @@ Local normal `(0,0,1)` transforms to world `(0,1,0)` (pointing UP). Y offset = `
 
 ```typescript
 export async function loadEnvironment(
-  scene: SceneContext,
-  url: string,
-  options: {
-    brdfUrl: string;
-    groundTextureUrl?: string;
-    skipSkybox?: boolean;
-    skipGround?: boolean;
-    skyboxUrl?: string;
-    skyboxSize?: number;
-  },
+    scene: SceneContext,
+    url: string,
+    options: {
+        brdfUrl: string;
+        groundTextureUrl?: string;
+        skipSkybox?: boolean;
+        skipGround?: boolean;
+        skyboxUrl?: string;
+        skyboxSize?: number;
+    }
 ): Promise<EnvironmentTextures>;
 ```
 
@@ -115,23 +120,26 @@ The `groundTextureUrl` option is passed through to the ground builder, which fet
 ```typescript
 // --- Solid-Color Skybox ---
 export interface SkyboxMaterial {
-  getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
-  createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
+    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, env: EnvironmentTextures): GPUBindGroup;
 }
 export function createSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout): SkyboxMaterial;
 
 // --- Cubemap Skybox (shared by DDS + HDR variants) ---
 export interface CubemapSkyboxMaterial {
-  getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
-  createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
+    getPipeline(device: GPUDevice, format: GPUTextureFormat, msaaSamples: number): GPURenderPipeline;
+    createBindGroup(device: GPUDevice, meshUBO: GPUBuffer, cubeView: GPUTextureView, cubeSampler: GPUSampler): GPUBindGroup;
 }
-export function createCubemapSkyboxMaterial(
-  sceneBindGroupLayout: GPUBindGroupLayout, label: string, vertCode: string, fragCode: string,
-): CubemapSkyboxMaterial;
+export function createCubemapSkyboxMaterial(sceneBindGroupLayout: GPUBindGroupLayout, label: string, vertCode: string, fragCode: string): CubemapSkyboxMaterial;
 
 // --- Geometry ---
-export function createSkyboxBuffers(device: GPUDevice, S?: number): {
-  posBuffer: GPUBuffer; idxBuffer: GPUBuffer; idxCount: number;
+export function createSkyboxBuffers(
+    device: GPUDevice,
+    S?: number
+): {
+    posBuffer: GPUBuffer;
+    idxBuffer: GPUBuffer;
+    idxCount: number;
 };
 export function createBuf(device: GPUDevice, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer;
 export function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): Mat4;
@@ -141,30 +149,24 @@ export function buildSkyboxWorldMatrix(rootPosition: [number, number, number]): 
 
 ```typescript
 export interface BackgroundRenderableOptions {
-  skipSkybox?: boolean;   // Skip solid-color skybox (e.g. caller provides HDR/DDS skybox)
-  skipGround?: boolean;   // Skip ground plane rendering
-  skyboxSize?: number;    // Skybox size (matches BJS createDefaultEnvironment option)
+    skipSkybox?: boolean; // Skip solid-color skybox (e.g. caller provides HDR/DDS skybox)
+    skipGround?: boolean; // Skip ground plane rendering
+    skyboxSize?: number; // Skybox size (matches BJS createDefaultEnvironment option)
 }
 
 export async function buildBackgroundRenderables(
-  scene: SceneContext,
-  envTextures: EnvironmentTextures,
-  sceneBindGroupLayout: GPUBindGroupLayout,
-  sceneBindGroup: GPUBindGroup,
-  groundTextureUrl?: string,
-  options?: BackgroundRenderableOptions,
-  groundImagePromise?: Promise<ImageBitmap>,
+    scene: SceneContext,
+    envTextures: EnvironmentTextures,
+    sceneBindGroupLayout: GPUBindGroupLayout,
+    sceneBindGroup: GPUBindGroup,
+    groundTextureUrl?: string,
+    options?: BackgroundRenderableOptions,
+    groundImagePromise?: Promise<ImageBitmap>
 ): Promise<Renderable[]>;
 
-export function computeSceneSize(
-  scene: SceneContext,
-  userSkyboxSize?: number,
-): { groundSize: number; skyboxSize: number; rootPosition: [number, number, number] };
+export function computeSceneSize(scene: SceneContext, userSkyboxSize?: number): { groundSize: number; skyboxSize: number; rootPosition: [number, number, number] };
 
-export function computeSkyboxGeometry(
-  scene: SceneContext,
-  userSkyboxSize?: number,
-): { skyHalfSize: number; rootPosition: [number, number, number] };
+export function computeSkyboxGeometry(scene: SceneContext, userSkyboxSize?: number): { skyHalfSize: number; rootPosition: [number, number, number] };
 ```
 
 ### `background-ground.ts`
@@ -172,17 +174,17 @@ export function computeSkyboxGeometry(
 ```typescript
 /** Build the ground renderable for a PBR environment scene. */
 export async function buildGroundRenderable(
-  device: GPUDevice,
-  sceneBindGroupLayout: GPUBindGroupLayout,
-  format: GPUTextureFormat,
-  msaaSamples: number,
-  sceneBindGroup: GPUBindGroup,
-  groundSize: number,
-  rootPosition: [number, number, number],
-  primaryColor: [number, number, number],
-  groundTextureUrl?: string,
-  groundImagePromise?: Promise<ImageBitmap>,
-  enableNoise?: boolean,
+    device: GPUDevice,
+    sceneBindGroupLayout: GPUBindGroupLayout,
+    format: GPUTextureFormat,
+    msaaSamples: number,
+    sceneBindGroup: GPUBindGroup,
+    groundSize: number,
+    rootPosition: [number, number, number],
+    primaryColor: [number, number, number],
+    groundTextureUrl?: string,
+    groundImagePromise?: Promise<ImageBitmap>,
+    enableNoise?: boolean
 ): Promise<Renderable>;
 ```
 
@@ -191,12 +193,12 @@ export async function buildGroundRenderable(
 ```typescript
 /** Build a DDS cube skybox as a complete Renderable (order 0). */
 export async function buildDdsSkyboxRenderable(
-  scene: SceneContext,
-  sceneBindGroupLayout: GPUBindGroupLayout,
-  sceneBindGroup: GPUBindGroup,
-  skyboxTextureUrl?: string,  // default: backgroundSkybox.dds from BJS CDN
-  skyboxSize?: number,
-  enableNoise?: boolean,
+    scene: SceneContext,
+    sceneBindGroupLayout: GPUBindGroupLayout,
+    sceneBindGroup: GPUBindGroup,
+    skyboxTextureUrl?: string, // default: backgroundSkybox.dds from BJS CDN
+    skyboxSize?: number,
+    enableNoise?: boolean
 ): Promise<Renderable>;
 ```
 
@@ -204,13 +206,13 @@ export async function buildDdsSkyboxRenderable(
 
 ```typescript
 export function addDdsEnvironmentBackground(
-  scene: SceneContext,
-  options: {
-    skyboxUrl: string;
-    groundTextureUrl: string;
-    skyboxSize: number;
-    enableNoise?: boolean; // Default true; matches BJS BackgroundMaterial.enableNoise
-  },
+    scene: SceneContext,
+    options: {
+        skyboxUrl: string;
+        groundTextureUrl: string;
+        skyboxSize: number;
+        enableNoise?: boolean; // Default true; matches BJS BackgroundMaterial.enableNoise
+    }
 ): void;
 ```
 
@@ -221,11 +223,11 @@ This helper only orchestrates the existing DDS skybox and ground builders. Scene
 ```typescript
 /** Build an HDR cubemap skybox as a complete Renderable (order 0). */
 export function buildHdrSkyboxRenderable(
-  scene: SceneContext,
-  envTextures: EnvironmentTextures,
-  sceneBindGroupLayout: GPUBindGroupLayout,
-  sceneBindGroup: GPUBindGroup,
-  skyboxSize?: number,
+    scene: SceneContext,
+    envTextures: EnvironmentTextures,
+    sceneBindGroupLayout: GPUBindGroupLayout,
+    sceneBindGroup: GPUBindGroup,
+    skyboxSize?: number
 ): Renderable;
 ```
 
@@ -233,21 +235,21 @@ export function buildHdrSkyboxRenderable(
 
 ```typescript
 export interface SkyboxCubeMapGPU {
-  pipeline: GPURenderPipeline;
-  sceneBindGroup: GPUBindGroup;
-  meshBindGroup: GPUBindGroup;
-  sceneUBO: GPUBuffer;
-  meshUBO: GPUBuffer;
+    pipeline: GPURenderPipeline;
+    sceneBindGroup: GPUBindGroup;
+    meshBindGroup: GPUBindGroup;
+    sceneUBO: GPUBuffer;
+    meshUBO: GPUBuffer;
 }
 
 export function buildSkyboxCubeMapGPU(
-  device: GPUDevice,
-  format: GPUTextureFormat,
-  msaaSamples: number,
-  sceneUBO: GPUBuffer,
-  worldMatrix: Float32Array,
-  cubeView: GPUTextureView,
-  cubeSampler: GPUSampler,
+    device: GPUDevice,
+    format: GPUTextureFormat,
+    msaaSamples: number,
+    sceneUBO: GPUBuffer,
+    worldMatrix: Float32Array,
+    cubeView: GPUTextureView,
+    cubeSampler: GPUSampler
 ): SkyboxCubeMapGPU;
 ```
 
@@ -255,9 +257,9 @@ export function buildSkyboxCubeMapGPU(
 
 ```typescript
 export async function loadCubeTexture(
-  device: GPUDevice,
-  baseUrl: string,
-  extension?: string,  // default: '.jpg'
+    device: GPUDevice,
+    baseUrl: string,
+    extension?: string // default: '.jpg'
 ): Promise<{ texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler }>;
 ```
 
@@ -265,89 +267,89 @@ export async function loadCubeTexture(
 
 ### Skybox Pipeline (Solid-Color — Environment)
 
-| Setting | Value |
-|---|---|
+| Setting        | Value                                |
+| -------------- | ------------------------------------ |
 | Vertex buffers | 1: position (`float32x3`, stride 12) |
-| Topology | `triangle-list` |
-| Cull mode | `back` |
-| Front face | `ccw` |
-| Depth compare | `greater-equal` |
-| Depth write | **`false`** |
-| MSAA | `count = msaaSamples` |
-| Blend | None |
+| Topology       | `triangle-list`                      |
+| Cull mode      | `back`                               |
+| Front face     | `ccw`                                |
+| Depth compare  | `greater-equal`                      |
+| Depth write    | **`false`**                          |
+| MSAA           | `count = msaaSamples`                |
+| Blend          | None                                 |
 
 ### Cubemap Skybox Pipeline (DDS + HDR variants)
 
 Both DDS and HDR cubemap skyboxes use the same pipeline configuration via `createCubemapSkyboxMaterial` — only the shader sources differ.
 
-| Setting | Value |
-|---|---|
+| Setting        | Value                                |
+| -------------- | ------------------------------------ |
 | Vertex buffers | 1: position (`float32x3`, stride 12) |
-| Topology | `triangle-list` |
-| Cull mode | `back` |
-| Front face | `ccw` |
-| Depth compare | `greater-equal` |
-| Depth write | **`false`** |
-| MSAA | `count = msaaSamples` |
-| Blend | None |
+| Topology       | `triangle-list`                      |
+| Cull mode      | `back`                               |
+| Front face     | `ccw`                                |
+| Depth compare  | `greater-equal`                      |
+| Depth write    | **`false`**                          |
+| MSAA           | `count = msaaSamples`                |
+| Blend          | None                                 |
 
 ### Ground Pipeline
 
-| Setting | Value |
-|---|---|
+| Setting        | Value                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------- |
 | Vertex buffers | 3: position (`float32x3`, stride 12), normal (`float32x3`, stride 12), uv (`float32x2`, stride 8) |
-| Topology | `triangle-list` |
-| Cull mode | `back` |
-| Front face | `ccw` |
-| Depth compare | `greater-equal` |
-| Depth write | **`false`** |
-| MSAA | `count = msaaSamples` |
-| Blend | Premultiplied alpha: `src=one, dst=one-minus-src-alpha` (both color and alpha) |
+| Topology       | `triangle-list`                                                                                   |
+| Cull mode      | `back`                                                                                            |
+| Front face     | `ccw`                                                                                             |
+| Depth compare  | `greater-equal`                                                                                   |
+| Depth write    | **`false`**                                                                                       |
+| MSAA           | `count = msaaSamples`                                                                             |
+| Blend          | Premultiplied alpha: `src=one, dst=one-minus-src-alpha` (both color and alpha)                    |
 
 ### Skybox CubeMap Pipeline (StandardMaterial scenes)
 
-| Setting | Value |
-|---|---|
+| Setting        | Value                                                                 |
+| -------------- | --------------------------------------------------------------------- |
 | Vertex buffers | 2: position (`float32x3`, stride 12), normal (`float32x3`, stride 12) |
-| Topology | `triangle-list` |
-| Cull mode | **`none`** (sees inside of box) |
-| Front face | `ccw` |
-| Depth compare | `greater-equal` |
-| Depth write | `true` |
-| MSAA | `count = msaaSamples` |
-| Blend | None |
+| Topology       | `triangle-list`                                                       |
+| Cull mode      | **`none`** (sees inside of box)                                       |
+| Front face     | `ccw`                                                                 |
+| Depth compare  | `greater-equal`                                                       |
+| Depth write    | `true`                                                                |
+| MSAA           | `count = msaaSamples`                                                 |
+| Blend          | None                                                                  |
 
 ### Bind Group Layouts
 
 **Skybox Solid-Color (Group 1)**:
 
-| Binding | Visibility | Type | Resource |
-|---|---|---|---|
-| 0 | VERTEX \| FRAGMENT | Uniform buffer | Mesh UBO (96 bytes: world + primaryColor + skyOutputColor) |
+| Binding | Visibility         | Type           | Resource                                                   |
+| ------- | ------------------ | -------------- | ---------------------------------------------------------- |
+| 0       | VERTEX \| FRAGMENT | Uniform buffer | Mesh UBO (96 bytes: world + primaryColor + skyOutputColor) |
 
 **Cubemap Skybox — DDS + HDR (Group 1)** (shared layout via `createCubemapSkyboxMaterial`):
 
-| Binding | Visibility | Type | Resource |
-|---|---|---|---|
-| 0 | VERTEX \| FRAGMENT | Uniform buffer | Mesh UBO (see variant-specific sizes below) |
-| 1 | FRAGMENT | texture_cube | Cubemap texture (DDS or specular env cube) |
-| 2 | FRAGMENT | sampler (filtering) | Cubemap sampler |
+| Binding | Visibility         | Type                | Resource                                    |
+| ------- | ------------------ | ------------------- | ------------------------------------------- |
+| 0       | VERTEX \| FRAGMENT | Uniform buffer      | Mesh UBO (see variant-specific sizes below) |
+| 1       | FRAGMENT           | texture_cube        | Cubemap texture (DDS or specular env cube)  |
+| 2       | FRAGMENT           | sampler (filtering) | Cubemap sampler                             |
 
 **Ground (Group 1)**:
 
-| Binding | Visibility | Type | Resource |
-|---|---|---|---|
-| 0 | VERTEX \| FRAGMENT | Uniform buffer | Mesh UBO (96 bytes: world + primaryColor + alpha + backgroundCenter) |
-| 1 | FRAGMENT | texture_2d | Ground diffuse texture (loaded from URL) |
-| 2 | FRAGMENT | sampler (filtering) | Ground texture sampler (bilinear) |
+| Binding | Visibility         | Type                | Resource                                                             |
+| ------- | ------------------ | ------------------- | -------------------------------------------------------------------- |
+| 0       | VERTEX \| FRAGMENT | Uniform buffer      | Mesh UBO (96 bytes: world + primaryColor + alpha + backgroundCenter) |
+| 1       | FRAGMENT           | texture_2d          | Ground diffuse texture (loaded from URL)                             |
+| 2       | FRAGMENT           | sampler (filtering) | Ground texture sampler (bilinear)                                    |
 
 **Skybox CubeMap (Group 1)**:
 
-| Binding | Visibility | Type | Resource |
-|---|---|---|---|
-| 0 | VERTEX | Uniform buffer | Mesh UBO (world matrix only) |
-| 1 | FRAGMENT | texture_cube | Cube texture |
-| 2 | FRAGMENT | sampler | Cube sampler |
+| Binding | Visibility | Type           | Resource                     |
+| ------- | ---------- | -------------- | ---------------------------- |
+| 0       | VERTEX     | Uniform buffer | Mesh UBO (world matrix only) |
+| 1       | FRAGMENT   | texture_cube   | Cube texture                 |
+| 2       | FRAGMENT   | sampler        | Cube sampler                 |
 
 ## Internal Architecture
 
@@ -383,6 +385,7 @@ Matches BJS `EnvironmentHelper._setupSizes()` with `sizeAuto=true`:
 ### Skybox World Matrix (`buildSkyboxWorldMatrix`)
 
 Identity matrix translated to `rootPosition`:
+
 ```
 | 1  0  0  rootX |
 | 0  1  0  rootY |
@@ -406,58 +409,59 @@ Local normal `(0,0,+1)` → world normal `(0,+1,0)` (pointing UP).
 
 ### Mesh UBO Layout — Solid-Color Skybox (96 bytes)
 
-| Offset (bytes) | Size | WGSL Type | Field |
-|---|---|---|---|
-| 0 | 64 | `mat4x4<f32>` | `world` |
-| 64 | 12 | `vec3<f32>` | `primaryColor` |
-| 76 | 4 | `f32` | `_pad` |
-| 80 | 12 | `vec3<f32>` | `skyOutputColor` (pre-computed sRGB clearColor) |
-| 92 | 4 | `f32` | `_pad` |
+| Offset (bytes) | Size | WGSL Type     | Field                                           |
+| -------------- | ---- | ------------- | ----------------------------------------------- |
+| 0              | 64   | `mat4x4<f32>` | `world`                                         |
+| 64             | 12   | `vec3<f32>`   | `primaryColor`                                  |
+| 76             | 4    | `f32`         | `_pad`                                          |
+| 80             | 12   | `vec3<f32>`   | `skyOutputColor` (pre-computed sRGB clearColor) |
+| 92             | 4    | `f32`         | `_pad`                                          |
 
 ### Mesh UBO Layout — DDS Skybox (96 bytes)
 
-| Offset (bytes) | Size | WGSL Type | Field |
-|---|---|---|---|
-| 0 | 64 | `mat4x4<f32>` | `world` |
-| 64 | 12 | `vec3<f32>` | `primaryColor` |
-| 76 | 4 | `f32` | `exposureLinear` |
-| 80 | 4 | `f32` | `contrast` |
-| 84 | 12 | — | `_pad` |
+| Offset (bytes) | Size | WGSL Type     | Field            |
+| -------------- | ---- | ------------- | ---------------- |
+| 0              | 64   | `mat4x4<f32>` | `world`          |
+| 64             | 12   | `vec3<f32>`   | `primaryColor`   |
+| 76             | 4    | `f32`         | `exposureLinear` |
+| 80             | 4    | `f32`         | `contrast`       |
+| 84             | 12   | —             | `_pad`           |
 
 ### Mesh UBO Layout — HDR Skybox (112 bytes)
 
-| Offset (bytes) | Size | WGSL Type | Field |
-|---|---|---|---|
-| 0 | 64 | `mat4x4<f32>` | `world` |
-| 64 | 12 | `vec3<f32>` | `primaryColor` |
-| 76 | 4 | `f32` | `_pad` |
-| 80 | 12 | `vec3<f32>` | `skyOutputColor` (clearColor for fallback) |
-| 92 | 4 | `f32` | `_pad` |
-| 96 | 4 | `f32` | `exposureLinear` |
-| 100 | 4 | `f32` | `contrast` |
-| 104 | 8 | — | `_pad` |
+| Offset (bytes) | Size | WGSL Type     | Field                                      |
+| -------------- | ---- | ------------- | ------------------------------------------ |
+| 0              | 64   | `mat4x4<f32>` | `world`                                    |
+| 64             | 12   | `vec3<f32>`   | `primaryColor`                             |
+| 76             | 4    | `f32`         | `_pad`                                     |
+| 80             | 12   | `vec3<f32>`   | `skyOutputColor` (clearColor for fallback) |
+| 92             | 4    | `f32`         | `_pad`                                     |
+| 96             | 4    | `f32`         | `exposureLinear`                           |
+| 100            | 4    | `f32`         | `contrast`                                 |
+| 104            | 8    | —             | `_pad`                                     |
 
 ### Mesh UBO Layout — Ground (96 bytes, in `background-ground.ts`)
 
-| Offset (bytes) | Size | WGSL Type | Field |
-|---|---|---|---|
-| 0 | 64 | `mat4x4<f32>` | `world` |
-| 64 | 12 | `vec3<f32>` | `primaryColor` |
-| 76 | 4 | `f32` | `alpha` (default: 0.9, matches BJS `groundOpacity`) |
-| 80 | 12 | `vec3<f32>` | `backgroundCenter` (default: origin) |
-| 92 | 4 | `f32` | `_pad` |
+| Offset (bytes) | Size | WGSL Type     | Field                                               |
+| -------------- | ---- | ------------- | --------------------------------------------------- |
+| 0              | 64   | `mat4x4<f32>` | `world`                                             |
+| 64             | 12   | `vec3<f32>`   | `primaryColor`                                      |
+| 76             | 4    | `f32`         | `alpha` (default: 0.9, matches BJS `groundOpacity`) |
+| 80             | 12   | `vec3<f32>`   | `backgroundCenter` (default: origin)                |
+| 92             | 4    | `f32`         | `_pad`                                              |
 
 ### Mesh UBO Layout — CubeMap Skybox (64 bytes)
 
-| Offset (bytes) | Size | WGSL Type | Field |
-|---|---|---|---|
-| 0 | 64 | `mat4x4<f32>` | `world` |
+| Offset (bytes) | Size | WGSL Type     | Field   |
+| -------------- | ---- | ------------- | ------- |
+| 0              | 64   | `mat4x4<f32>` | `world` |
 
 ### DDS Skybox Architecture (`background-dds-skybox.ts`)
 
 Default DDS URL: `https://assets.babylonjs.com/core/environments/backgroundSkybox.dds`
 
 Pipeline:
+
 1. `computeSkyboxGeometry(scene, skyboxSize)` → `skyHalfSize`, `rootPosition`
 2. `buildSkyboxWorldMatrix(rootPosition)` → identity + translation
 3. `createSkyboxBuffers(device, skyHalfSize)` → box geometry
@@ -467,6 +471,7 @@ Pipeline:
 7. Return `Renderable` with order 0
 
 DDS cube texture loading:
+
 - Parse DDS header: `Int32Array(buf, 0, 32)` — width, height, mipCount
 - Handle DX10 extended header offset
 - Upload all mip levels per face (face-major layout, `rgba16float`, 8 bytes/pixel)
@@ -477,6 +482,7 @@ DDS cube texture loading:
 Samples the specular cubemap from `EnvironmentTextures` (already loaded by `loadHdrEnvironment`).
 
 Pipeline:
+
 1. `computeSkyboxGeometry(scene, skyboxSize)` → `skyHalfSize`, `rootPosition`
 2. `buildSkyboxWorldMatrix(rootPosition)` → identity + translation
 3. `createSkyboxBuffers(device, skyHalfSize)` → box geometry
@@ -488,6 +494,7 @@ Pipeline:
 ### Background Renderable Orchestrator (`background-renderable.ts`)
 
 Orchestrates the creation of background renderables:
+
 1. If `!options.skipSkybox`: creates solid-color skybox via `createSkyboxMaterial()`
 2. If `!options.skipGround`: dynamically imports `background-ground.js` → `buildGroundRenderable(..., enableNoise)`
 3. Ground is dynamically imported to enable tree-shaking for scenes without ground
@@ -516,11 +523,11 @@ The standard BJS ground texture is `backgroundGround.png` (1024×1024, white RGB
 
 ### Render Order
 
-| Renderable | Order | Notes |
-|---|---|---|
-| Skybox | 0 | Renders first (behind everything), writes depth |
-| PBR meshes | 100 (default) | Opaque objects |
-| Ground | 200 | Renders last (transparent), no depth write, alpha blend |
+| Renderable | Order         | Notes                                                   |
+| ---------- | ------------- | ------------------------------------------------------- |
+| Skybox     | 0             | Renders first (behind everything), writes depth         |
+| PBR meshes | 100 (default) | Opaque objects                                          |
+| Ground     | 200           | Renders last (transparent), no depth write, alpha blend |
 
 ## Shader Logic
 
@@ -579,33 +586,33 @@ if fogMode > 0:
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `loadEnvironment(scene, url, { groundTextureUrl })` | `scene.createDefaultEnvironment()` (loads env + ground texture internally) |
-| `createSkyboxMaterial()` | `BackgroundMaterial` with `REFLECTIONMAP_SKYBOX` (solid fallback) |
-| `createCubemapSkyboxMaterial()` | `BackgroundMaterial` with actual cubemap sampling |
-| `buildDdsSkyboxRenderable()` | `BackgroundMaterial` with `backgroundSkybox.dds` cubemap |
-| `buildHdrSkyboxRenderable()` | `BackgroundMaterial` with HDR cubemap from `HDRCubeTexture` |
-| `buildGroundRenderable()` | `BackgroundMaterial` ground mesh with `DIFFUSE + OPACITYFRESNEL + PREMULTIPLYALPHA` |
-| `createSkyboxBuffers(S)` | `BABYLON.BoxBuilder` (±S extents skybox, 24v/36i) |
-| `createGroundBuffers(groundSize)` | `BABYLON.PlaneBuilder` with `BACKSIDE` (4v/6i) |
-| `computeSceneSize()` | `EnvironmentHelper._getSceneSize()` + `_setupSizes()` |
-| `computeSkyboxGeometry()` | `EnvironmentHelper._setupSizes()` with `sizeAuto=true` |
-| `buildSkyboxWorldMatrix()` | `EnvironmentHelper._setupSkyboxMaterial()` world matrix |
-| `buildSkyboxCubeMapGPU()` | `StandardMaterial` + `CubeTexture(SKYBOX_MODE)` |
-| `loadCubeTexture()` | `new BABYLON.CubeTexture(url, scene)` |
-| `primaryColor` | `BackgroundMaterial.primaryColor` (#212121 linear → `[0.087, 0.087, 0.212]`) |
-| Ground Y offset `minY − 0.00001` | Babylon's computed `sceneSize / rootPosition` |
-| `mesh.alpha = 0.9` | `BackgroundMaterial.alpha` (default ground opacity) |
-| `mesh.backgroundCenter` | `BackgroundMaterial._primaryColor` (fresnel origin) |
-| Opacity Fresnel `viewAngle / 0.1` | `BackgroundMaterial.opacityFresnel` (start=0.1) |
-| Ground diffuse texture (URL) | `backgroundGround.png` loaded by `EnvironmentHelper` |
-| Ground blend `src=one, dst=one-minus-src-alpha` | Premultiplied alpha blend (BJS engine auto-set) |
-| `dither(seed, 0.5)` | `BackgroundMaterial.enableNoise` |
-| `skyOutputColor` UBO field | BJS cubemap sampled at max-mip (produces same result) |
-| DDS skybox `backgroundSkybox.dds` | BJS `createDefaultEnvironment` skybox DDS cubemap |
-| HDR skybox samples `specularCubeView` | BJS `HDRCubeTexture` skybox rendering |
-| CubeMap skybox `cullMode: 'none'` | `material.backFaceCulling = false` |
+| Babylon Lite                                        | Babylon.js                                                                          |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `loadEnvironment(scene, url, { groundTextureUrl })` | `scene.createDefaultEnvironment()` (loads env + ground texture internally)          |
+| `createSkyboxMaterial()`                            | `BackgroundMaterial` with `REFLECTIONMAP_SKYBOX` (solid fallback)                   |
+| `createCubemapSkyboxMaterial()`                     | `BackgroundMaterial` with actual cubemap sampling                                   |
+| `buildDdsSkyboxRenderable()`                        | `BackgroundMaterial` with `backgroundSkybox.dds` cubemap                            |
+| `buildHdrSkyboxRenderable()`                        | `BackgroundMaterial` with HDR cubemap from `HDRCubeTexture`                         |
+| `buildGroundRenderable()`                           | `BackgroundMaterial` ground mesh with `DIFFUSE + OPACITYFRESNEL + PREMULTIPLYALPHA` |
+| `createSkyboxBuffers(S)`                            | `BABYLON.BoxBuilder` (±S extents skybox, 24v/36i)                                   |
+| `createGroundBuffers(groundSize)`                   | `BABYLON.PlaneBuilder` with `BACKSIDE` (4v/6i)                                      |
+| `computeSceneSize()`                                | `EnvironmentHelper._getSceneSize()` + `_setupSizes()`                               |
+| `computeSkyboxGeometry()`                           | `EnvironmentHelper._setupSizes()` with `sizeAuto=true`                              |
+| `buildSkyboxWorldMatrix()`                          | `EnvironmentHelper._setupSkyboxMaterial()` world matrix                             |
+| `buildSkyboxCubeMapGPU()`                           | `StandardMaterial` + `CubeTexture(SKYBOX_MODE)`                                     |
+| `loadCubeTexture()`                                 | `new BABYLON.CubeTexture(url, scene)`                                               |
+| `primaryColor`                                      | `BackgroundMaterial.primaryColor` (#212121 linear → `[0.087, 0.087, 0.212]`)        |
+| Ground Y offset `minY − 0.00001`                    | Babylon's computed `sceneSize / rootPosition`                                       |
+| `mesh.alpha = 0.9`                                  | `BackgroundMaterial.alpha` (default ground opacity)                                 |
+| `mesh.backgroundCenter`                             | `BackgroundMaterial._primaryColor` (fresnel origin)                                 |
+| Opacity Fresnel `viewAngle / 0.1`                   | `BackgroundMaterial.opacityFresnel` (start=0.1)                                     |
+| Ground diffuse texture (URL)                        | `backgroundGround.png` loaded by `EnvironmentHelper`                                |
+| Ground blend `src=one, dst=one-minus-src-alpha`     | Premultiplied alpha blend (BJS engine auto-set)                                     |
+| `dither(seed, 0.5)`                                 | `BackgroundMaterial.enableNoise`                                                    |
+| `skyOutputColor` UBO field                          | BJS cubemap sampled at max-mip (produces same result)                               |
+| DDS skybox `backgroundSkybox.dds`                   | BJS `createDefaultEnvironment` skybox DDS cubemap                                   |
+| HDR skybox samples `specularCubeView`               | BJS `HDRCubeTexture` skybox rendering                                               |
+| CubeMap skybox `cullMode: 'none'`                   | `material.backFaceCulling = false`                                                  |
 
 ## Dependencies
 
@@ -620,53 +627,53 @@ if fogMode > 0:
 
 ## Test Specification
 
-| Test | Description |
-|---|---|
-| `createSkyboxBuffers` | 24 verts (72 floats), 36 indices |
-| `createSkyboxBuffers custom size` | Verify positions scale with `S` parameter |
-| `createGroundBuffers` | 4 verts, 4 normals, 4 UVs, 6 indices |
-| `skybox pipeline depth write false` | Verify solid-color skybox depth config |
-| `cubemap skybox pipeline depth write false` | Verify DDS/HDR skybox depth config |
-| `ground pipeline depth write false` | Verify depth write disabled |
-| `ground pipeline blend premultiplied` | src=one, dst=one-minus-src-alpha |
-| `ground pipeline 3 vertex buffers` | position + normal + uv |
-| `ground bind group has texture` | Binding 1 = texture_2d, binding 2 = sampler |
-| `ground fallback texture 1×1 white` | No URL → 1×1 RGBA(255,255,255,255) |
-| `skybox cubemap cull mode none` | Verify no culling for inside-box rendering |
-| `loadCubeTexture loads 6 faces` | Verify 6 URLs constructed with correct suffixes |
-| `loadCubeTexture mip count` | `floor(log2(size)) + 1` |
-| `computeSceneSize empty scene` | Returns defaults: groundSize=15, skyboxSize=20 |
-| `computeSceneSize with meshes` | Diagonal > 15 → groundSize=diagonal×2.2, skyboxSize=×1.5 |
-| `buildSkyboxWorldMatrix` | Identity + rootPosition translation |
-| `DDS skybox loads default URL` | Fetches backgroundSkybox.dds |
-| `DDS skybox UBO layout` | world + primaryColor + exposure + contrast = 96 bytes |
-| `HDR skybox uses specularCubeView` | Binds envTextures cube |
-| `HDR skybox UBO layout` | 112 bytes with exposure + contrast fields |
-| `buildBackgroundRenderables skipSkybox` | Only ground returned |
-| `buildBackgroundRenderables skipGround` | Only skybox returned |
-| `dither variance` | Output varies by ±0.5/255 |
-| `opacity fresnel at grazing` | fadeFactor → 0 at edge |
-| `opacity fresnel head-on` | fadeFactor → 1 |
-| Scene 1 full-image MAD ≤ 1 | Ground invisible (grazing), clearColor match |
-| Scene 7 full-image MAD ≤ 2 | Ground visible (elevated camera), texture spatial variation |
+| Test                                        | Description                                                 |
+| ------------------------------------------- | ----------------------------------------------------------- |
+| `createSkyboxBuffers`                       | 24 verts (72 floats), 36 indices                            |
+| `createSkyboxBuffers custom size`           | Verify positions scale with `S` parameter                   |
+| `createGroundBuffers`                       | 4 verts, 4 normals, 4 UVs, 6 indices                        |
+| `skybox pipeline depth write false`         | Verify solid-color skybox depth config                      |
+| `cubemap skybox pipeline depth write false` | Verify DDS/HDR skybox depth config                          |
+| `ground pipeline depth write false`         | Verify depth write disabled                                 |
+| `ground pipeline blend premultiplied`       | src=one, dst=one-minus-src-alpha                            |
+| `ground pipeline 3 vertex buffers`          | position + normal + uv                                      |
+| `ground bind group has texture`             | Binding 1 = texture_2d, binding 2 = sampler                 |
+| `ground fallback texture 1×1 white`         | No URL → 1×1 RGBA(255,255,255,255)                          |
+| `skybox cubemap cull mode none`             | Verify no culling for inside-box rendering                  |
+| `loadCubeTexture loads 6 faces`             | Verify 6 URLs constructed with correct suffixes             |
+| `loadCubeTexture mip count`                 | `floor(log2(size)) + 1`                                     |
+| `computeSceneSize empty scene`              | Returns defaults: groundSize=15, skyboxSize=20              |
+| `computeSceneSize with meshes`              | Diagonal > 15 → groundSize=diagonal×2.2, skyboxSize=×1.5    |
+| `buildSkyboxWorldMatrix`                    | Identity + rootPosition translation                         |
+| `DDS skybox loads default URL`              | Fetches backgroundSkybox.dds                                |
+| `DDS skybox UBO layout`                     | world + primaryColor + exposure + contrast = 96 bytes       |
+| `HDR skybox uses specularCubeView`          | Binds envTextures cube                                      |
+| `HDR skybox UBO layout`                     | 112 bytes with exposure + contrast fields                   |
+| `buildBackgroundRenderables skipSkybox`     | Only ground returned                                        |
+| `buildBackgroundRenderables skipGround`     | Only skybox returned                                        |
+| `dither variance`                           | Output varies by ±0.5/255                                   |
+| `opacity fresnel at grazing`                | fadeFactor → 0 at edge                                      |
+| `opacity fresnel head-on`                   | fadeFactor → 1                                              |
+| Scene 1 full-image MAD ≤ 1                  | Ground invisible (grazing), clearColor match                |
+| Scene 7 full-image MAD ≤ 2                  | Ground visible (elevated camera), texture spatial variation |
 
 ## File Manifest
 
-| File | Size | Purpose |
-|---|---|---|
-| `src/material/pbr/background-material.ts` | ~184 lines | Solid-color skybox material, cubemap skybox material factory, skybox geometry, shared buffer helpers, skybox world matrix |
-| `src/material/pbr/background-renderable.ts` | ~203 lines | Skybox + Ground orchestrator, scene size computation, `computeSkyboxGeometry` |
-| `src/material/pbr/background-ground.ts` | ~246 lines | Ground material factory, ground geometry, ground UBO, ground texture loader |
-| `src/material/pbr/background-dds-skybox.ts` | ~130 lines | DDS cubemap skybox renderable, DDS cube texture loader, DDS mesh UBO |
-| `src/material/pbr/background-hdr-skybox.ts` | ~84 lines | HDR cubemap skybox renderable, HDR mesh UBO |
-| `src/material/standard/skybox-cubemap.ts` | ~104 lines | CubeMap skybox pipeline + bind groups |
-| `src/texture/cube-texture.ts` | ~141 lines | 6-face cube texture loader with mipmap generation |
-| `shaders/skybox.vertex.wgsl` | ~38 lines | Local position passthrough for cubemap lookup |
-| `shaders/skybox.fragment.wgsl` | ~91 lines | Outputs pre-computed clearColor from UBO |
-| `shaders/skybox-dds.vertex.wgsl` | ~38 lines | DDS skybox vertex shader (position → local direction) |
-| `shaders/skybox-dds.fragment.wgsl` | ~91 lines | DDS cubemap sample + image processing |
-| `shaders/skybox-hdr.fragment.wgsl` | ~91 lines | HDR cubemap sample + image processing |
-| `shaders/background.vertex.wgsl` | ~48 lines | World transform, normal, UV passthrough for ground |
-| `shaders/background.ground.fragment.wgsl` | ~104 lines | Diffuse texture sampling, opacity Fresnel, premultiplied alpha, image processing |
-| `shaders/skybox-cubemap.vertex.wgsl` | ~38 lines | Object-space position for cube lookup + fog distance |
-| `shaders/skybox-cubemap.fragment.wgsl` | ~58 lines | Cube texture sample + fog |
+| File                                        | Size       | Purpose                                                                                                                   |
+| ------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `src/material/pbr/background-material.ts`   | ~184 lines | Solid-color skybox material, cubemap skybox material factory, skybox geometry, shared buffer helpers, skybox world matrix |
+| `src/material/pbr/background-renderable.ts` | ~203 lines | Skybox + Ground orchestrator, scene size computation, `computeSkyboxGeometry`                                             |
+| `src/material/pbr/background-ground.ts`     | ~246 lines | Ground material factory, ground geometry, ground UBO, ground texture loader                                               |
+| `src/material/pbr/background-dds-skybox.ts` | ~130 lines | DDS cubemap skybox renderable, DDS cube texture loader, DDS mesh UBO                                                      |
+| `src/material/pbr/background-hdr-skybox.ts` | ~84 lines  | HDR cubemap skybox renderable, HDR mesh UBO                                                                               |
+| `src/material/standard/skybox-cubemap.ts`   | ~104 lines | CubeMap skybox pipeline + bind groups                                                                                     |
+| `src/texture/cube-texture.ts`               | ~141 lines | 6-face cube texture loader with mipmap generation                                                                         |
+| `shaders/skybox.vertex.wgsl`                | ~38 lines  | Local position passthrough for cubemap lookup                                                                             |
+| `shaders/skybox.fragment.wgsl`              | ~91 lines  | Outputs pre-computed clearColor from UBO                                                                                  |
+| `shaders/skybox-dds.vertex.wgsl`            | ~38 lines  | DDS skybox vertex shader (position → local direction)                                                                     |
+| `shaders/skybox-dds.fragment.wgsl`          | ~91 lines  | DDS cubemap sample + image processing                                                                                     |
+| `shaders/skybox-hdr.fragment.wgsl`          | ~91 lines  | HDR cubemap sample + image processing                                                                                     |
+| `shaders/background.vertex.wgsl`            | ~48 lines  | World transform, normal, UV passthrough for ground                                                                        |
+| `shaders/background.ground.fragment.wgsl`   | ~104 lines | Diffuse texture sampling, opacity Fresnel, premultiplied alpha, image processing                                          |
+| `shaders/skybox-cubemap.vertex.wgsl`        | ~38 lines  | Object-space position for cube lookup + fog distance                                                                      |
+| `shaders/skybox-cubemap.fragment.wgsl`      | ~58 lines  | Cube texture sample + fog                                                                                                 |

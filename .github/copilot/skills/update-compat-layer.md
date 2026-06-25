@@ -13,11 +13,11 @@ change has come online that now makes a previously-blocked scene possible.
 The single source of truth for all three is
 `packages/babylon-lite-compat/COMPAT-STATUS.md`, which tracks them in three places:
 
-| Task | Goal                          | Tracked in `COMPAT-STATUS.md` by                                  |
-| ---- | ----------------------------- | ----------------------------------------------------------------- |
-| 1    | Upstream diffs                | the `Last synced BJS commit` + `Last sync date` markers           |
+| Task | Goal                             | Tracked in `COMPAT-STATUS.md` by                                  |
+| ---- | -------------------------------- | ----------------------------------------------------------------- |
+| 1    | Upstream diffs                   | the `Last synced BJS commit` + `Last sync date` markers           |
 | 2    | Lab-scene coverage (conditional) | the **Lab scene coverage** section (working list + blocker table) |
-| 3    | API parity                    | the per-area **status matrix** (a row per core/loaders symbol)    |
+| 3    | API parity                       | the per-area **status matrix** (a row per core/loaders symbol)    |
 
 ---
 
@@ -143,8 +143,8 @@ parity:
 
 > Don't conflate "no compat wrapper yet" with "Lite can't do it." A scene whose
 > native Lite port renders the feature is almost never a genuine `🔧 Needs Lite
-> core` — it just needs the wrapper. Only record a `🔧`/`❌` blocker after confirming
-> the Lite port itself cannot render it. But the trigger for *acting* on such a
+core` — it just needs the wrapper. Only record a `🔧`/`❌` blocker after confirming
+> the Lite port itself cannot render it. But the trigger for _acting_ on such a
 > scene is a **new** Lite capability this run; absent that, leave the blocker row as
 > the accurate record it already is.
 

@@ -2854,7 +2854,17 @@
             }
 
             function renderSceneCardImage(s, priorityAttrs) {
-                return '<img src="/lite/thumbnails/scene' + s.id + '.jpg" onerror="this.style.display=\'none\'" alt="' + s.name + '"' + priorityAttrs + ' decoding="async" />';
+                return (
+                    '<img src="' +
+                    expBasePath() +
+                    '/thumbnails/scene' +
+                    s.id +
+                    '.jpg" onerror="this.style.display=\'none\'" alt="' +
+                    s.name +
+                    '"' +
+                    priorityAttrs +
+                    ' decoding="async" />'
+                );
             }
 
             function renderFilterPills(containerId, toggleFnName) {
@@ -2953,7 +2963,9 @@
                         var sceneKey = "scene" + s.id;
                         var priorityAttrs = index < 6 ? ' loading="eager" fetchpriority="high"' : ' loading="lazy" fetchpriority="auto"';
                         return (
-                            '<a class="card" href="/lite/scene' +
+                            '<a class="card" href="' +
+                            expBasePath() +
+                            '/scene' +
                             s.id +
                             '.html" data-scene="' +
                             sceneKey +
@@ -2970,9 +2982,13 @@
                             '<div class="card-body">' +
                             "<h2>" +
                             s.name +
-                            ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/lite/babylon-ref-scene' +
-                            s.id +
-                            ".html','_blank');\">\u25b6 BJS Ref</span>" +
+                            (expHasBjsRef()
+                                ? ' <span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'' +
+                                  expBasePath() +
+                                  "/babylon-ref-scene" +
+                                  s.id +
+                                  ".html','_blank');\">\u25b6 BJS Ref</span>"
+                                : "") +
                             "</h2>" +
                             "<p>" +
                             s.description +
@@ -3203,7 +3219,9 @@
                         var tags = d.tags || [];
                         var searchAttr = escapeAttr(normalizeSearchText([demoKey, d.slug, d.name, d.description, tags.join(" ")].join(" ")));
                         return (
-                            '<a class="card" href="/lite/demo-' +
+                            '<a class="card" href="' +
+                            expBasePath() +
+                            '/demo-' +
                             d.slug +
                             '.html" data-scene="' +
                             demoKey +
@@ -3214,7 +3232,9 @@
                             '">' +
                             renderHideBtn(demoKey) +
                             '<div class="card-image">' +
-                            '<img src="/lite/thumbnails/demo-' +
+                            '<img src="' +
+                            expBasePath() +
+                            '/thumbnails/demo-' +
                             d.slug +
                             '.jpg" onerror="this.style.display=\'none\'" alt="' +
                             escapeAttr(d.name) +
@@ -3269,7 +3289,7 @@
             }
 
             function loadDemosManifest() {
-                fetchOptionalJson("/bundle/demos-manifest.json").then(function (manifest) {
+                fetchOptionalJson(currentExperienceConfig().demosManifestUrl).then(function (manifest) {
                     if (!manifest) return;
                     Object.keys(manifest).forEach(function (slug) {
                         var sizes = manifest[slug];
@@ -3292,10 +3312,17 @@
                 grid.innerHTML = config
                     .map(function (s) {
                         var sceneKey = "scene" + s.id;
+                        // Lite ships standalone per-scene bundle pages
+                        // (/lite/bundle-sceneN.html); the GL experience has none, so its
+                        // cards link to the live scene page (/gl/sceneN.html) instead.
+                        var bundleHref =
+                            LAB_EXPERIENCE === "webgl"
+                                ? expBasePath() + "/scene" + s.id + ".html"
+                                : expBasePath() + "/bundle-scene" + s.id + ".html";
                         return (
-                            '<a class="card" href="/lite/bundle-scene' +
-                            s.id +
-                            '.html" data-scene="' +
+                            '<a class="card" href="' +
+                            bundleHref +
+                            '" data-scene="' +
                             sceneKey +
                             '" data-tags="' +
                             s.tags.join(" ") +
@@ -3309,9 +3336,13 @@
                             '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();showBundleFiles(\'scene' +
                             s.id +
                             '\');" title="Show .ts files contributing to this bundle">\ud83d\udcc4 Files</span>' +
-                            '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'/lite/bundle-bjs-scene' +
-                            s.id +
-                            ".html','_blank');\" title=\"Open Babylon.js reference\lite\">\u25b6 BJS Ref</span>" +
+                            (expHasBjsRef()
+                                ? '<span class="pg-link" onclick="event.preventDefault();event.stopPropagation();window.open(\'' +
+                                  expBasePath() +
+                                  "/bundle-bjs-scene" +
+                                  s.id +
+                                  ".html','_blank');\" title=\"Open Babylon.js reference\">\u25b6 BJS Ref</span>"
+                                : "") +
                             "</div>" +
                             renderNote(s) +
                             "</div>" +
@@ -3599,8 +3630,8 @@
                     tags: s.tags || [],
                     maxMad: s.maxMad,
                     skipParity: !!s.skipParity,
-                    golden: "/lite/reference/" + s.slug + "/babylon-ref-golden.png",
-                    actual: "/lite/reference/" + s.slug + "/test-actual.png",
+                    golden: expBasePath() + "/reference/" + s.slug + "/babylon-ref-golden.png",
+                    actual: expBasePath() + "/reference/" + s.slug + "/test-actual.png",
                 };
             }
 
@@ -4025,11 +4056,24 @@
             }
 
             // ── Consolidated config fetch + init ──
+            // A missing JSON file is NOT a 404 under the Vite dev server — unknown
+            // paths fall through to the SPA fallback (HTTP 200 + text/html index.html),
+            // so calling r.json() on that HTML would throw. Treat any non-OK or
+            // non-JSON response as "no data yet" so a tab whose manifest hasn't been
+            // generated renders its empty state instead of crashing. Returns the parsed
+            // JSON object, or null.
+            function readJsonResponse(r) {
+                if (!r || !r.ok) return null;
+                var ct = (r.headers && typeof r.headers.get === "function" && r.headers.get("content-type")) || "";
+                if (ct.indexOf("application/json") === -1) return null;
+                return r.json().catch(function () {
+                    return null;
+                });
+            }
+
             function fetchOptionalJson(url) {
                 return fetch(url + "?t=" + Date.now(), { cache: "no-store" })
-                    .then(function (r) {
-                        return r.ok ? r.json() : null;
-                    })
+                    .then(readJsonResponse)
                     .catch(function () {
                         return null;
                     });
@@ -4401,14 +4445,20 @@
 
             function loadBundleManifest() {
                 Promise.all([
-                    fetch("/bundle/manifest.json?t=" + Date.now(), { cache: "no-store" }).then(function (r) {
-                        return r.json();
-                    }),
-                    fetchOptionalJson("/bundle/master-manifest.json"),
+                    fetch(currentExperienceConfig().bundleManifestUrl + "?t=" + Date.now(), { cache: "no-store" }).then(readJsonResponse),
+                    // The master baseline ("vs main branch") is a lite-only concept and
+                    // its path is the lite one; never fetch it for GL (it would compare
+                    // GL scene sizes against the unrelated lite master by sceneN key).
+                    expHasBjsRef() ? fetchOptionalJson("/bundle/master-manifest.json") : Promise.resolve(null),
                 ])
                     .then(function (r) {
                         var manifest = r[0];
                         var masterManifest = r[1];
+                        if (!manifest || typeof manifest !== "object") {
+                            // No bundle manifest yet (or SPA-fallback HTML). The tab's
+                            // gen-status block shows the "Click ⚙ Regenerate" empty state.
+                            return;
+                        }
                         setBundleMasterStatus(masterManifest);
                         updateBundleSummary(manifest, masterManifest);
                         var bjsCount = 0;
@@ -4490,13 +4540,11 @@
             }
 
             function loadPerfManifest() {
-                fetch("/perf-manifest.json")
-                    .then(function (r) {
-                        return r.ok ? r.json() : null;
-                    })
+                fetch(currentExperienceConfig().perfManifestUrl)
+                    .then(readJsonResponse)
                     .then(function (manifest) {
                         if (!manifest) {
-                            document.getElementById("perf-status").textContent = "No perf data yet \u2014 run pnpm test:perf";
+                            document.getElementById("perf-status").textContent = "No perf data yet \u2014 run " + genCommandFor("perf");
                             document.querySelectorAll("#perf-grid .perf-scene-card").forEach(function (card) {
                                 card.dataset.hasPerf = "0";
                             });
@@ -4518,10 +4566,10 @@
                             queueTabScrollRestore("perf");
                         }
                         var el = document.getElementById("perf-manifest-status");
-                        if (el) el.textContent = "\ud83d\udcca " + count + " scenes (pnpm test:perf to refresh)";
+                        if (el) el.textContent = "\ud83d\udcca " + count + " scenes (" + genCommandFor("perf") + " to refresh)";
                     })
                     .catch(function () {
-                        document.getElementById("perf-status").textContent = "No perf data yet \u2014 run pnpm test:perf";
+                        document.getElementById("perf-status").textContent = "No perf data yet \u2014 run " + genCommandFor("perf");
                         document.querySelectorAll("#perf-grid .perf-scene-card").forEach(function (card) {
                             card.dataset.hasPerf = "0";
                         });
@@ -4674,13 +4722,11 @@
                 saveLabState();
             }
             function loadPerfRegManifest() {
-                fetch("/perf-regression-manifest.json?t=" + Date.now())
-                    .then(function (r) {
-                        return r.ok ? r.json() : null;
-                    })
+                fetch(currentExperienceConfig().perfRegManifestUrl + "?t=" + Date.now())
+                    .then(readJsonResponse)
                     .then(function (manifest) {
                         if (!manifest || !manifest.scenes) {
-                            document.getElementById("perfreg-status").textContent = "No data \u2014 run pnpm test:perf-regression";
+                            document.getElementById("perfreg-status").textContent = "No data \u2014 run " + genCommandFor("perfreg");
                             return;
                         }
                         window._perfRegManifest = manifest;
@@ -4693,7 +4739,7 @@
                         }
                     })
                     .catch(function () {
-                        document.getElementById("perfreg-status").textContent = "No perf regression data yet — run pnpm test:perf-regression";
+                        document.getElementById("perfreg-status").textContent = "No perf regression data yet — run " + genCommandFor("perfreg");
                     });
             }
 
@@ -4720,6 +4766,31 @@
                 perf: { label: "Perf benchmarks", command: "pnpm test:perf", reload: loadPerfManifest },
                 perfreg: { label: "Perf regression data", command: "pnpm test:perf-regression", reload: loadPerfRegManifest },
             };
+            // Lite GL now ships parity + perf + bundle + demos + perf-regression
+            // tooling. Each Regenerate button launches the matching :gl command on the
+            // dev server (these strings mirror GL_TARGETS in lab/vite.config.ts, which
+            // is the source of truth for what actually runs). Demos are static config,
+            // so their Regenerate runs the cheap GL bundle build.
+            var TAB_GEN_GL_COMMANDS = {
+                parity: "pnpm test:parity:gl",
+                bundle: "pnpm build:bundle-scenes:gl",
+                demos: "pnpm build:bundle-scenes:gl",
+                perf: "pnpm test:perf:gl",
+                perfreg: "pnpm test:perf-regression:gl",
+            };
+            // Server-side experience key (matches /lab-api ?experience=gl|lite).
+            function expApiName() {
+                return LAB_EXPERIENCE === "webgl" ? "gl" : "lite";
+            }
+            // The command a Regenerate launches for the active experience.
+            function genCommandFor(target) {
+                if (LAB_EXPERIENCE === "webgl") return TAB_GEN_GL_COMMANDS[target] || null;
+                return (TAB_GEN_CONFIG[target] || {}).command || null;
+            }
+            // Whether the active experience has a tool for this target.
+            function genSupported(target) {
+                return !!genCommandFor(target);
+            }
             var _genPolling = {};
             var _genActive = {};
             var _genHeartbeat = {};
@@ -4838,13 +4909,13 @@
                 if (msg) {
                     var counts = target === "parity" && s.total ? " (" + (s.present || 0) + "/" + s.total + " scenes have reference images)" : "";
                     msg.innerHTML =
-                        "No " + cfg.label + " found yet" + counts + ". Click <strong>⚙ Regenerate</strong> above to run <code>" + cfg.command + "</code> on the dev server.";
+                        "No " + cfg.label + " found yet" + counts + ". Click <strong>⚙ Regenerate</strong> above to run <code>" + genCommandFor(target) + "</code> on the dev server.";
                 }
             }
 
             function refreshTabGenStatus(target) {
                 if (!TAB_GEN_CONFIG[target]) return Promise.resolve(null);
-                return fetch("/lab-api/gen-status?target=" + target, { cache: "no-store" })
+                return fetch("/lab-api/gen-status?target=" + target + "&experience=" + expApiName(), { cache: "no-store" })
                     .then(function (r) {
                         return r.ok ? r.json() : null;
                     })
@@ -4864,7 +4935,7 @@
                 _startGenHeartbeat(target);
                 var fails = 0;
                 var tick = function () {
-                    fetch("/lab-api/gen-status?target=" + target, { cache: "no-store" })
+                    fetch("/lab-api/gen-status?target=" + target + "&experience=" + expApiName(), { cache: "no-store" })
                         .then(function (r) {
                             return r.ok ? r.json() : null;
                         })
@@ -4908,6 +4979,15 @@
             function generateTabContent(target) {
                 var cfg = TAB_GEN_CONFIG[target];
                 if (!cfg) return;
+                if (!genSupported(target)) {
+                    // No tool for this target in the active experience (e.g. bundle /
+                    // demos / perf-regression on Lite GL). Don't launch the lite command.
+                    _showGenBlock(target, true);
+                    var umsg = _genEl(target, "msg");
+                    if (umsg) umsg.innerHTML = "<strong>" + cfg.label + "</strong> is not available for the Lite GL experience yet (no <code>:gl</code> tool).";
+                    return;
+                }
+                var genCmd = genCommandFor(target);
                 var btn = _genEl(target, "btn");
                 var msg = _genEl(target, "msg");
                 var regenBtn = _genToolbarBtn(target);
@@ -4917,11 +4997,11 @@
                 _showGenBlock(target, true);
                 if (btn) btn.disabled = true;
                 if (regenBtn) regenBtn.disabled = true;
-                if (msg) msg.innerHTML = "Generating " + cfg.label + " — running <code>" + cfg.command + "</code>…";
+                if (msg) msg.innerHTML = "Generating " + cfg.label + " — running <code>" + genCmd + "</code>…";
                 if (spinner) spinner.textContent = "⏳ Starting…";
                 if (logbar) logbar.style.display = "none";
-                _setGenLog(target, "Starting " + cfg.command + "…");
-                fetch("/lab-api/generate?target=" + target, { method: "POST" })
+                _setGenLog(target, "Starting " + genCmd + "…");
+                fetch("/lab-api/generate?target=" + target + "&experience=" + expApiName(), { method: "POST" })
                     .then(function (r) {
                         return r.json().catch(function () {
                             return { started: false, error: "HTTP " + r.status };
@@ -4969,9 +5049,15 @@
             var LAB_EXPERIENCES = {
                 webgpu: {
                     title: "Lite",
+                    basePath: "/lite",
+                    hasBjsRef: true,
                     subtitle: "WebGPU rendering engine · pixel-perfect parity with Babylon.js",
                     sceneConfigUrl: "/scene-config.json",
                     demosConfigUrl: "/demos-config.json",
+                    perfManifestUrl: "/perf-manifest.json",
+                    bundleManifestUrl: "/bundle/manifest.json",
+                    demosManifestUrl: "/bundle/demos-manifest.json",
+                    perfRegManifestUrl: "/perf-regression-manifest.json",
                     architectureUrl: "/lite/docs/architecture-overview.html",
                     featuresUrl: "/lite/docs/feature-comparison.html",
                     apiDocsUrl: "/lite/api-docs/index.html",
@@ -4988,9 +5074,22 @@
                 },
                 webgl: {
                     title: "Lite GL",
+                    basePath: "/gl",
+                    hasBjsRef: false,
                     subtitle: "WebGL rendering engine · pixel-perfect parity with Babylon.js",
                     sceneConfigUrl: "/scene-config-webgl.json",
                     demosConfigUrl: "/demos-config-webgl.json",
+                    // Lite GL data lives under /gl/. All of these now have real GL
+                    // tooling: perf (test:perf:gl), bundle (build:bundle-scenes:gl) and
+                    // perf-regression (test:perf-regression:gl) write JSON under
+                    // lab/public/gl/. demosManifestUrl is the OPTIONAL demo-size manifest
+                    // (no GL demos-bundle build today) — it 404s and the demos still
+                    // render from the static demos-config-webgl.json. Loaders treat a
+                    // missing/non-JSON response as "no data yet" (SPA fallback safe).
+                    perfManifestUrl: "/gl/perf-manifest.json",
+                    bundleManifestUrl: "/gl/bundle/manifest.json",
+                    demosManifestUrl: "/gl/bundle/demos-manifest.json",
+                    perfRegManifestUrl: "/gl/perf-regression-manifest.json",
                     architectureUrl: "/gl/docs/architecture-overview.html",
                     featuresUrl: "/gl/docs/feature-comparison.html",
                     apiDocsUrl: "/gl/api-docs/index.html",
@@ -4999,11 +5098,15 @@
                     apiDocsCanGenerate: false,
                     apiDocsTitle: "Babylon Lite GL — API Reference",
                     apiDocsHint:
-                        "Lite GL API docs will be generated from the future <code>babylon-lite-gl</code> package. This experience is prepared but has no public API surface yet.",
+                        "Lite GL ships the <code>@babylonjs/lite-gl</code> package (createGLEngine, effects, textures, blend, plus the <code>/sprites</code> and <code>/html-texture</code> sub-entries). TypeDoc generation isn't wired into the lab yet \u2014 see <code>docs/gl/architecture/00-lite-gl.md</code> \u00a73 for the full public API.",
                     pitchTitle: "Babylon Lite GL — Performance Summary",
-                    pitchHint: "Lite GL will have separate WebGL scenes, demos, benchmarks, and bundle manifests. No performance data exists yet.",
+                    pitchHint: "Lite GL has its own WebGL2 scenes, demos, benchmarks, and bundle manifests \u2014 see the Perf and Bundle tabs for the lite-gl-vs-Babylon numbers.",
                     pitchAvailable: false,
-                    runtimeData: false,
+                    // GL now has bundle, perf, perf-regression and demos data under /gl/,
+                    // so the broad runtimeData auto-load is enabled — it drives
+                    // loadBundleManifest / loadPerfManifest / loadPerfRegManifest /
+                    // loadDemosManifest (and signature-poll auto-refresh) just like lite.
+                    runtimeData: true,
                 },
             };
             var LAB_EXPERIENCE = getLabExperience();
@@ -5020,6 +5123,52 @@
                 return LAB_EXPERIENCES[LAB_EXPERIENCE] || LAB_EXPERIENCES.webgpu;
             }
 
+            // Base path for the active experience's scene/demo/reference pages
+            // ("/lite" for WebGPU, "/gl" for WebGL). Lets the gallery card
+            // builders stay experience-agnostic.
+            function expBasePath() {
+                return currentExperienceConfig().basePath || "/lite";
+            }
+
+            // Whether the active experience ships side-by-side Babylon.js
+            // reference pages (only the WebGPU/Lite parity experience does).
+            function expHasBjsRef() {
+                return currentExperienceConfig().hasBjsRef !== false;
+            }
+
+            // GL-experience overrides for the per-tab hint text + Regenerate
+            // tooltips. The static HTML hints are authored for the Lite (WebGPU)
+            // experience; in GL mode they must reference the :gl commands and
+            // scene-config-webgl.json. Status spans (perf/perfreg/bundle) are
+            // recreated empty here and repopulated by their loaders. Lite keeps
+            // its static HTML untouched.
+            var GL_TAB_HINTS = {
+                demos: {
+                    html: "\ud83d\udca1 Standalone showcase demos built on Babylon Lite GL \u2014 pure WebGL2, no Babylon.js comparison.",
+                    regenTitle: "Regenerate demos (pnpm build:bundle-scenes:gl)",
+                },
+                parity: {
+                    html:
+                        "\ud83d\udca1 Compares golden reference (Babylon.js) vs Lite GL render from last <code>pnpm test:parity:gl</code> run. MAD thresholds from <code>scene-config-webgl.json</code>; exceeding shown in <span style=\"color: #f85149\">red</span>.",
+                    regenTitle: "Regenerate parity diffs (pnpm test:parity:gl)",
+                },
+                bundle: {
+                    html:
+                        "\ud83d\udca1 Bundle sizes shown below come from <code>manifest.json</code>, measured by esbuild-bundling each GL scene. To regenerate: <code>pnpm build:bundle-scenes:gl</code><span id=\"bundle-master-status\" class=\"bundle-master-status\"></span>",
+                    regenTitle: "Regenerate bundle sizes (pnpm build:bundle-scenes:gl)",
+                },
+                perf: {
+                    html:
+                        "\ud83d\udca1 RAF callback CPU time per scene, measured via Playwright. Run <code>pnpm test:perf:gl</code> to refresh. <span id=\"perf-manifest-status\" style=\"color: #3fb950\"></span>",
+                    regenTitle: "Regenerate perf benchmarks (pnpm test:perf:gl)",
+                },
+                perfreg: {
+                    html:
+                        "\ud83d\udca1 Current Lite GL vs Babylon.js reference baseline (per-scene RAF frame time). Run <code>pnpm test:perf-regression:gl</code> to refresh. <span id=\"perfreg-manifest-status\" style=\"color: #3fb950\"></span>",
+                    regenTitle: "Regenerate perf regression data (pnpm test:perf-regression:gl)",
+                },
+            };
+
             function applyLabExperienceChrome() {
                 var cfg = currentExperienceConfig();
                 document.body.dataset.experience = LAB_EXPERIENCE;
@@ -5031,6 +5180,15 @@
                     var item = document.getElementById("experience-" + name);
                     if (item) item.classList.toggle("active", name === LAB_EXPERIENCE);
                 });
+                if (LAB_EXPERIENCE === "webgl") {
+                    Object.keys(GL_TAB_HINTS).forEach(function (tab) {
+                        var spec = GL_TAB_HINTS[tab];
+                        var hintText = document.querySelector("#panel-" + tab + " .tab-hint-text");
+                        if (hintText) hintText.innerHTML = spec.html;
+                        var regenBtn = document.getElementById(tab + "-regen-btn");
+                        if (regenBtn && spec.regenTitle) regenBtn.title = spec.regenTitle;
+                    });
+                }
             }
 
             function setLabExperience(value) {
@@ -5069,6 +5227,9 @@
                         loadBundleManifest();
                         loadPerfManifest();
                         loadPerfRegManifest();
+                    } else if (labExperienceConfig.perfData) {
+                        // Experiences with perf data but no bundle/perf-reg tooling (Lite GL).
+                        loadPerfManifest();
                     }
                     refreshAllTabGenStatus();
                     queueTabScrollRestore(_currentTab);
@@ -6958,7 +7119,13 @@
                         var masterData = prepareBundleSourceData("Master", masterInfo, masterManifest, scene);
                         if (!localData && !masterData) {
                             body.innerHTML =
-                                '<div class="bf-error">No bundle info available. Run <code>pnpm build:bundle-scenes</code> for local info and <code>pnpm build:bundle-master-info</code> for master info.</div>';
+                                '<div class="bf-error">No bundle info available. Run <code>' +
+                                genCommandFor("bundle") +
+                                "</code>" +
+                                (expHasBjsRef()
+                                    ? ' for local info and <code>pnpm build:bundle-master-info</code> for master info.'
+                                    : " to generate it.") +
+                                "</div>";
                             document.getElementById("bf-subtitle").textContent = "";
                             return;
                         }

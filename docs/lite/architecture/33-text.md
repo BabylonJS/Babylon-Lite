@@ -41,7 +41,9 @@ glue.
 ### Tier 1 — `GlyphStorage` (longest-lived)
 
 ```typescript
-export interface GlyphStorage { /* opaque */ }
+export interface GlyphStorage {
+    /* opaque */
+}
 export type CurveSetId = string;
 
 export function createGlyphStorage(initial?: Map<CurveSetId, Map<number, GlyphCurves>>): GlyphStorage;
@@ -81,8 +83,8 @@ export type GlyphRun = {
 };
 export type PlacedGlyph = {
     readonly glyphId: number;
-    readonly x: number;  // pixels, glyph origin
-    readonly y: number;  // pixels, baseline up
+    readonly x: number; // pixels, glyph origin
+    readonly y: number; // pixels, baseline up
     readonly color?: readonly [number, number, number, number]; // overrides run defaultColor
 };
 
@@ -114,9 +116,9 @@ export interface TextRenderableOptions {
     readonly position?: Vec3;
     readonly rotationQuaternion?: { x: number; y: number; z: number; w: number };
     readonly scaling?: Vec3;
-    readonly opacity?: number;       // whole-block fade. default 1
-    readonly ignoreDepth?: boolean;  // skip depth test/write. default false
-    readonly order?: number;         // sort order. default 200
+    readonly opacity?: number; // whole-block fade. default 1
+    readonly ignoreDepth?: boolean; // skip depth test/write. default false
+    readonly order?: number; // sort order. default 200
 }
 
 export interface TextRenderable extends Renderable {
@@ -145,10 +147,10 @@ many `TextRenderable`s.
 
 ```typescript
 export interface TextLayerOptions {
-    readonly positionPx?: { x: number; y: number };  // canvas pixel origin
-    readonly rotationRad?: number;                   // z-axis rotation
-    readonly scale?: number;                         // uniform
-    readonly order?: number;                         // within renderer
+    readonly positionPx?: { x: number; y: number }; // canvas pixel origin
+    readonly rotationRad?: number; // z-axis rotation
+    readonly scale?: number; // uniform
+    readonly order?: number; // within renderer
     readonly opacity?: number;
     readonly visible?: boolean;
 }
@@ -166,7 +168,7 @@ export function setTextLayerPosition(layer: TextLayer, x: number, y: number): vo
 
 export interface TextRendererOptions {
     layers: readonly TextLayer[];
-    clear?: boolean;                                 // default true
+    clear?: boolean; // default true
     clearValue?: GPUColorDict;
 }
 export function createTextRenderer(engine: EngineContext, opts: TextRendererOptions): TextRenderer;
@@ -191,7 +193,9 @@ scene's frame graph.
 ### Tier 4 — Default helpers (depend on `text-shaper`)
 
 ```typescript
-export interface Font { /* opaque, wraps text-shaper.Font */ }
+export interface Font {
+    /* opaque, wraps text-shaper.Font */
+}
 export function loadFont(url: string): Promise<Font>;
 export function createFontFromBuffer(data: ArrayBuffer): Font;
 
@@ -199,13 +203,10 @@ export function extractGlyphCurves(font: Font, glyphIds: ReadonlySet<number>, ta
 export function cubicToQuadratics(/* control points */): [QuadCurve, QuadCurve];
 
 export interface DefaultTextData extends TextData {
-    readonly width: number;   // pixel-space laid-out width
-    readonly height: number;  // pixel-space laid-out height
+    readonly width: number; // pixel-space laid-out width
+    readonly height: number; // pixel-space laid-out height
 }
-export function createDefaultTextData(
-    font: Font, fontSizePx: number, text: string,
-    textColor?: [number, number, number, number], options?: TextLayoutOptions
-): DefaultTextData;
+export function createDefaultTextData(font: Font, fontSizePx: number, text: string, textColor?: [number, number, number, number], options?: TextLayoutOptions): DefaultTextData;
 export function updateDefaultTextData(data: DefaultTextData, text: string, textColor?: [number, number, number, number]): void;
 export function disposeDefaultTextData(data: DefaultTextData): void;
 ```
@@ -236,13 +237,7 @@ codepath.
 The shortest path from font URL to rendered text on a canvas:
 
 ```typescript
-import {
-    createEngine, startEngine,
-    loadFont,
-    createDefaultTextData,
-    createTextLayer,
-    createTextRenderer, registerTextRenderer,
-} from "@babylonjs/lite";
+import { createEngine, startEngine, loadFont, createDefaultTextData, createTextLayer, createTextRenderer, registerTextRenderer } from "@babylonjs/lite";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const engine = await createEngine(canvas);
@@ -273,13 +268,13 @@ Each `GlyphStorage` curve-set owns a `SharedAtlas`:
 
 ```typescript
 type SharedAtlas = {
-    curveTexData: Float32Array;   // rgba32float, width 4096, grows by row doubling
+    curveTexData: Float32Array; // rgba32float, width 4096, grows by row doubling
     curveTexelsUsed: number;
-    bandTexData: Float32Array;    // rgba32float, width 4096, grows by row doubling
+    bandTexData: Float32Array; // rgba32float, width 4096, grows by row doubling
     bandTexelsUsed: number;
-    glyphSlots: Map<number, AtlasSlot>;  // glyphId → curve start + band header location + band counts
-    version: number;              // monotonic, bumped per packAppendGlyph
-    gpu: SharedAtlasGpu | null;   // lazy
+    glyphSlots: Map<number, AtlasSlot>; // glyphId → curve start + band header location + band counts
+    version: number; // monotonic, bumped per packAppendGlyph
+    gpu: SharedAtlasGpu | null; // lazy
 };
 ```
 
@@ -297,13 +292,13 @@ draw groups:
 ```typescript
 type TextDataDrawGroup = {
     curveSetId: CurveSetId;
-    curveSet: GlyphStorageCurveSet;  // cached pointer into _storage._curveSets
+    curveSet: GlyphStorageCurveSet; // cached pointer into _storage._curveSets
     slotStart: number;
-    slotCount: number;     // live + dead
+    slotCount: number; // live + dead
     liveCount: number;
-    freeSlots: number[];   // LIFO stack of dead slot indices
+    freeSlots: number[]; // LIFO stack of dead slot indices
     bindGroup: GPUBindGroup | null;
-    bindGroupVersion: number;  // last-seen atlas.uploadedVersion
+    bindGroupVersion: number; // last-seen atlas.uploadedVersion
 };
 ```
 

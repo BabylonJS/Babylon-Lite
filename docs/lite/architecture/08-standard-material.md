@@ -47,29 +47,29 @@ standard-renderable.ts (buildStandardMeshRenderables):
 
 ## Dynamic Feature Flags
 
-| Flag                     | Bit       | Condition                    | Shader effect                               |
-| ------------------------ | --------- | ---------------------------- | ------------------------------------------- |
-| `HAS_DIFFUSE_TEXTURE`    | `1 << 0`  | `material.diffuseTexture`    | Diffuse texture sampling                    |
-| `HAS_EMISSIVE_TEXTURE`   | `1 << 1`  | `material.emissiveTexture`   | Emissive texture sampling                   |
-| `HAS_BUMP_TEXTURE`       | `1 << 2`  | `material.bumpTexture`       | Cotangent-frame normal mapping              |
-| `HAS_SPECULAR_TEXTURE`   | `1 << 3`  | `material.specularTexture`   | Specular texture replaces specularColor     |
-| `HAS_AMBIENT_TEXTURE`    | `1 << 4`  | `material.ambientTexture`    | Ambient occlusion multiply                  |
-| `HAS_LIGHTMAP_TEXTURE`   | `1 << 5`  | `material.lightmapTexture`   | Additive lightmap                           |
-| `HAS_OPACITY_TEXTURE`    | `1 << 6`  | `material.opacityTexture`    | Alpha/opacity texture                       |
-| `LIGHTMAP_USES_UV2`      | `1 << 7`  | Lightmap on UV2              | UV2 attribute for lightmap                  |
-| `AMBIENT_USES_UV2`       | `1 << 8`  | Ambient on UV2               | UV2 attribute for ambient                   |
-| `DOUBLE_SIDED`           | `1 << 9`  | `!material.backFaceCulling`  | `cullMode: 'none'`                          |
-| `DIFFUSE_USES_UV2`       | `1 << 10` | Diffuse on UV2               | UV2 attribute for diffuse                   |
-| `SPECULAR_USES_UV2`      | `1 << 11` | Specular on UV2              | UV2 attribute for specular                  |
-| `OPACITY_FROM_RGB`       | `1 << 12` | `material.opacityFromRGB`    | Opacity from RGB luminance                  |
-| `HAS_REFLECTION_TEXTURE` | `1 << 13` | `material.reflectionTexture` | Spherical/planar reflection                 |
-| `DISABLE_LIGHTING`       | `1 << 14` | `material.disableLighting`   | Skip light loop, emissive-only output       |
-| `MATERIAL_ALPHA_BLEND`   | `1 << 16` | `material.alpha < 1`         | Alpha blend pipeline state                  |
-| `HAS_CUBE_REFLECTION`    | `1 << 17` | `material.reflectionCubeTexture` | Cube reflection sampling                 |
-| `NO_COLOR_OUTPUT` | `1 << 18` | No-color material view | Fragment stage runs discard/alpha-test logic and writes no color |
-| `HAS_DEPTH_EMISSIVE_TEXTURE` | `1 << 19` | Emissive texture has depth sample type | Depth texture emissive preview |
-| `NEEDS_UV`               | derived   | Any texture present          | UV vertex attribute                         |
-| `NEEDS_UV2`              | derived   | Any `*_USES_UV2` flag        | UV2 vertex attribute                        |
+| Flag                         | Bit       | Condition                              | Shader effect                                                    |
+| ---------------------------- | --------- | -------------------------------------- | ---------------------------------------------------------------- |
+| `HAS_DIFFUSE_TEXTURE`        | `1 << 0`  | `material.diffuseTexture`              | Diffuse texture sampling                                         |
+| `HAS_EMISSIVE_TEXTURE`       | `1 << 1`  | `material.emissiveTexture`             | Emissive texture sampling                                        |
+| `HAS_BUMP_TEXTURE`           | `1 << 2`  | `material.bumpTexture`                 | Cotangent-frame normal mapping                                   |
+| `HAS_SPECULAR_TEXTURE`       | `1 << 3`  | `material.specularTexture`             | Specular texture replaces specularColor                          |
+| `HAS_AMBIENT_TEXTURE`        | `1 << 4`  | `material.ambientTexture`              | Ambient occlusion multiply                                       |
+| `HAS_LIGHTMAP_TEXTURE`       | `1 << 5`  | `material.lightmapTexture`             | Additive lightmap                                                |
+| `HAS_OPACITY_TEXTURE`        | `1 << 6`  | `material.opacityTexture`              | Alpha/opacity texture                                            |
+| `LIGHTMAP_USES_UV2`          | `1 << 7`  | Lightmap on UV2                        | UV2 attribute for lightmap                                       |
+| `AMBIENT_USES_UV2`           | `1 << 8`  | Ambient on UV2                         | UV2 attribute for ambient                                        |
+| `DOUBLE_SIDED`               | `1 << 9`  | `!material.backFaceCulling`            | `cullMode: 'none'`                                               |
+| `DIFFUSE_USES_UV2`           | `1 << 10` | Diffuse on UV2                         | UV2 attribute for diffuse                                        |
+| `SPECULAR_USES_UV2`          | `1 << 11` | Specular on UV2                        | UV2 attribute for specular                                       |
+| `OPACITY_FROM_RGB`           | `1 << 12` | `material.opacityFromRGB`              | Opacity from RGB luminance                                       |
+| `HAS_REFLECTION_TEXTURE`     | `1 << 13` | `material.reflectionTexture`           | Spherical/planar reflection                                      |
+| `DISABLE_LIGHTING`           | `1 << 14` | `material.disableLighting`             | Skip light loop, emissive-only output                            |
+| `MATERIAL_ALPHA_BLEND`       | `1 << 16` | `material.alpha < 1`                   | Alpha blend pipeline state                                       |
+| `HAS_CUBE_REFLECTION`        | `1 << 17` | `material.reflectionCubeTexture`       | Cube reflection sampling                                         |
+| `NO_COLOR_OUTPUT`            | `1 << 18` | No-color material view                 | Fragment stage runs discard/alpha-test logic and writes no color |
+| `HAS_DEPTH_EMISSIVE_TEXTURE` | `1 << 19` | Emissive texture has depth sample type | Depth texture emissive preview                                   |
+| `NEEDS_UV`                   | derived   | Any texture present                    | UV vertex attribute                                              |
+| `NEEDS_UV2`                  | derived   | Any `*_USES_UV2` flag                  | UV2 vertex attribute                                             |
 
 Thin-instance and shadow-receiver state are mesh feature bits in `material/mesh-features.ts`, separate from Standard material render features.
 
@@ -649,7 +649,7 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 | `src/material/standard/standard-template.ts`                 | ~299 lines | `StandardTemplateConfig` + `createStandardTemplate()` — builds `ShaderTemplate` with Blinn-Phong lighting, fog, slot markers                                                            |
 | `src/material/standard/standard-pipeline.ts`                 | ~503 lines | Feature flags, `computeFeatures()`, `composeStandardShader()`, `getOrCreatePipeline()`, `createDynamicMeshGPU()`, `writeMaterialUBO()`, pipeline/shader caches, PCF shadow registration |
 | `src/material/standard/standard-renderable.ts`               | ~313 lines | `StdFragmentFactories` interface, `buildStandardMeshRenderables()` — composes shaders with fragments, creates Renderables, returns single-mesh rebuild closure                          |
-| `src/material/standard/no-color-view.ts`                      | ~16 lines  | `createStandardNoColorMaterialView()` — pass-specific no-color material view helper                                                                                                      |
+| `src/material/standard/no-color-view.ts`                     | ~16 lines  | `createStandardNoColorMaterialView()` — pass-specific no-color material view helper                                                                                                     |
 | `src/material/standard/fragments/normal-map-fragment.ts`     | ~33 lines  | Cotangent-frame bump/normal mapping fragment (`AC` slot)                                                                                                                                |
 | `src/material/standard/fragments/std-emissive-fragment.ts`   | ~17 lines  | Emissive texture sampling fragment (`AT` slot)                                                                                                                                          |
 | `src/material/standard/fragments/std-specular-fragment.ts`   | ~18 lines  | Specular texture sampling fragment (`AT` slot, UV/UV2 aware)                                                                                                                            |

@@ -4,8 +4,16 @@
     "noEmit": true,
     "paths": {
       "babylon-lite": ["../packages/babylon-lite/src/index.ts"],
-      "babylon-lite/*": ["../packages/babylon-lite/src/*"]
+      "babylon-lite/*": ["../packages/babylon-lite/src/*"],
+      "babylon-lite-gl": ["../packages/babylon-lite-gl/src/index.ts"],
+      "babylon-lite-gl/sprites": ["../packages/babylon-lite-gl/src/sprites.ts"],
+      "babylon-lite-gl/html-texture": ["../packages/babylon-lite-gl/src/html-texture.ts"],
+      "babylon-lite-gl/render-target": ["../packages/babylon-lite-gl/src/render-target.ts"],
+      "babylon-lite-gl/mesh": ["../packages/babylon-lite-gl/src/mesh.ts"],
+      "babylon-lite-gl/depth-stencil": ["../packages/babylon-lite-gl/src/depth-stencil.ts"],
+      "babylon-lite-gl/scissor": ["../packages/babylon-lite-gl/src/scissor.ts"],
+      "babylon-lite-gl/dynamic-texture": ["../packages/babylon-lite-gl/src/dynamic-texture.ts"]
     }
   },
-  "include": ["lite/src", "../packages/babylon-lite/src/vite-env.d.ts"]
+  "include": ["lite/src", "gl/src", "../packages/babylon-lite/src/vite-env.d.ts"]
 }

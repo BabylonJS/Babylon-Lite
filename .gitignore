@@ -53,6 +53,14 @@ lab/public/freeciv/
 lab/public/littlest-tokyo/*.bak
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json
+# Lite GL generated lab outputs (mirror the WebGPU policy above): ignore the
+# volatile bundle-build + perf manifests, but keep the deterministic bundle
+# manifest the dashboard reads. GL thumbnails are committed (stable assets).
+lab/public/gl/bundle/*
+!lab/public/gl/bundle/manifest.json
+!lab/public/gl/bundle/demos-manifest.json
+lab/public/gl/perf-manifest.json
+lab/public/gl/perf-regression-manifest.json
 test-results/
 .bundle-size-tmp/
 .env.local

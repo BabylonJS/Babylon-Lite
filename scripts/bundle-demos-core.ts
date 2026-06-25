@@ -48,6 +48,7 @@ const FREECIV_SRC = resolve(labDir, "public/freeciv");
 const LITTLEST_TOKYO_SRC = resolve(labDir, "public/littlest-tokyo");
 const TETRIS_SRC = resolve(labDir, "public/tetris");
 const PLATFORMER_SRC = resolve(labDir, "public/platformer");
+const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
 interface DemoConfigEntry {
@@ -216,6 +217,11 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
 
     if (demos.some((demo) => demo.slug === "littlest-tokyo")) {
         copyRequiredDir(LITTLEST_TOKYO_SRC, resolve(demosDir, "littlest-tokyo"), "Littlest Tokyo");
+    }
+
+    if (demos.some((demo) => demo.slug === "sandblox")) {
+        // Default world map JSON, fetched at runtime via demoAssetUrl.
+        copyRequiredDir(SANDBLOX_SRC, resolve(demosDir, "sandblox"), "Sandblox");
     }
 
     if (demos.some((demo) => demo.slug === "bath-day")) {

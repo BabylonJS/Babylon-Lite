@@ -27,7 +27,7 @@ export function createGridMaterial(options?: GridMaterialOptions): ShaderMateria
 ```
 
 `createGridMaterial` is synchronous and returns a configured `ShaderMaterial`. Assign the
-result to `mesh.material` like any other Lite material. Because it *is* a `ShaderMaterial`,
+result to `mesh.material` like any other Lite material. Because it _is_ a `ShaderMaterial`,
 its uniforms can be updated at runtime via `setShaderUniform()` / `setShaderVector3()` etc.
 (e.g. `setShaderVector3(grid, "lineColor", [...])`).
 
@@ -38,19 +38,19 @@ export type GridVec3 = readonly [number, number, number];
 
 export interface GridMaterialOptions {
     readonly name?: string;
-    readonly mainColor?: GridVec3;          // background between lines.  default [0,0,0]
-    readonly lineColor?: GridVec3;          // grid line color.           default [0,0.5,0.5] (teal)
-    readonly gridRatio?: number;            // unit spacing.              default 1
-    readonly gridOffset?: GridVec3;         // object-space offset.       default [0,0,0]
-    readonly majorUnitFrequency?: number;   // every Nth line is major (Math.round). default 10
-    readonly minorUnitVisibility?: number;  // 0..1 minor-line visibility. default 0.33
-    readonly opacity?: number;              // <1 enables transparent path. default 1
-    readonly antialias?: boolean;           // cosine AA vs hard cutoff.  default true
-    readonly preMultiplyAlpha?: boolean;    // rgb *= alpha (transparent path only). default false
-    readonly useMaxLine?: boolean;          // combine axes with max() vs sum. default false
-    readonly opacityTexture?: Texture2D;    // .a multiplies final opacity (adds uv attribute + sampler)
-    readonly visibility?: number;           // final-alpha multiplier.    default 1
-    readonly backFaceCulling?: boolean;     // default true
+    readonly mainColor?: GridVec3; // background between lines.  default [0,0,0]
+    readonly lineColor?: GridVec3; // grid line color.           default [0,0.5,0.5] (teal)
+    readonly gridRatio?: number; // unit spacing.              default 1
+    readonly gridOffset?: GridVec3; // object-space offset.       default [0,0,0]
+    readonly majorUnitFrequency?: number; // every Nth line is major (Math.round). default 10
+    readonly minorUnitVisibility?: number; // 0..1 minor-line visibility. default 0.33
+    readonly opacity?: number; // <1 enables transparent path. default 1
+    readonly antialias?: boolean; // cosine AA vs hard cutoff.  default true
+    readonly preMultiplyAlpha?: boolean; // rgb *= alpha (transparent path only). default false
+    readonly useMaxLine?: boolean; // combine axes with max() vs sum. default false
+    readonly opacityTexture?: Texture2D; // .a multiplies final opacity (adds uv attribute + sampler)
+    readonly visibility?: number; // final-alpha multiplier.    default 1
+    readonly backFaceCulling?: boolean; // default true
 }
 ```
 
@@ -72,13 +72,13 @@ world/view/projection, `shaderUniforms` = the custom UBO, optional `opacitySampl
 Compile-time toggles are **baked conditionally** into the composed string (never referenced as
 dead code against undeclared resources):
 
-| Option | Effect on WGSL |
-| --- | --- |
-| `antialias` | cosine falloff vs hard `SQRT2/4` cutoff in `gridIsOnLine` |
-| `useMaxLine` | `grid = max(x,y,z)` vs `grid = x + y + z` |
-| `opacity < 1` | transparent path: `opacity = clamp(grid, 0.08, gridControl.w·grid)` |
-| `preMultiplyAlpha` | transparent path only: `rgb *= opacity` |
-| `opacityTexture` | declares the `uv` attribute + `opacitySampler` and multiplies `.a` |
+| Option             | Effect on WGSL                                                      |
+| ------------------ | ------------------------------------------------------------------- |
+| `antialias`        | cosine falloff vs hard `SQRT2/4` cutoff in `gridIsOnLine`           |
+| `useMaxLine`       | `grid = max(x,y,z)` vs `grid = x + y + z`                           |
+| `opacity < 1`      | transparent path: `opacity = clamp(grid, 0.08, gridControl.w·grid)` |
+| `preMultiplyAlpha` | transparent path only: `rgb *= opacity`                             |
+| `opacityTexture`   | declares the `uv` attribute + `opacitySampler` and multiplies `.a`  |
 
 ### Uniform packing
 
@@ -114,6 +114,6 @@ transparent alpha-blended box (`opacity 0.6`), and a hard-cutoff (`antialias:fal
 
 ## File inventory
 
-| File | Responsibility |
-| --- | --- |
+| File                                 | Responsibility                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | `src/material/grid/grid-material.ts` | `createGridMaterial()` + `GridMaterialOptions` / `GridVec3`; composes WGSL, builds a `ShaderMaterial` |

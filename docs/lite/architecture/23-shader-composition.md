@@ -1,4 +1,5 @@
 # Module: Shader Composition
+
 > Package path: `packages/babylon-lite/src/shader/`
 
 ## Purpose
@@ -6,6 +7,7 @@
 Provides a declarative, fragment-based shader composition system. Individual rendering features (IBL, clearcoat, skeleton skinning, thin instances, normal mapping, etc.) are encapsulated as `ShaderFragment` objects that declare their WGSL code, bindings, UBO fields, vertex attributes, and varyings. The `ShaderComposer` (`composeShader()`) assembles fragments into final WGSL source code and GPU pipeline descriptors via topological sort, slot injection, and bind group layout merging.
 
 Key design principles:
+
 - **Zero global state** — no module-level registries; fragments are passed as arrays
 - **Full tree-shaking** — unused fragments add zero bytes to bundles
 - **Materials own shaders** — the composer is generic; materials select which fragments to include
@@ -17,8 +19,8 @@ Key design principles:
 
 ```typescript
 // Shader stage visibility flags (numeric for Node.js compatibility — no GPUShaderStage in Node)
-const STAGE_VERTEX   = 0x1;   // GPUShaderStage.VERTEX
-const STAGE_FRAGMENT = 0x2;   // GPUShaderStage.FRAGMENT
+const STAGE_VERTEX = 0x1; // GPUShaderStage.VERTEX
+const STAGE_FRAGMENT = 0x2; // GPUShaderStage.FRAGMENT
 ```
 
 ### Types — `fragment-types.ts`
@@ -29,54 +31,56 @@ export type WgslScalarType = "f32" | "u32" | "i32" | "vec2<f32>" | "vec3<f32>" |
 
 // ── Vertex Attributes ──
 export interface VertexAttribute {
-    readonly name: string;           // WGSL variable name (e.g. "position", "world0")
-    readonly type: string;           // WGSL type (e.g. "vec3<f32>")
+    readonly name: string; // WGSL variable name (e.g. "position", "world0")
+    readonly type: string; // WGSL type (e.g. "vec3<f32>")
     readonly gpuFormat: GPUVertexFormat;
     readonly arrayStride: number;
-    readonly stepMode?: GPUVertexStepMode;   // default "vertex"
-    readonly bufferGroup?: string;   // shared buffer key (e.g. "ti-matrix")
-    readonly offset?: number;        // byte offset within buffer (default 0)
+    readonly stepMode?: GPUVertexStepMode; // default "vertex"
+    readonly bufferGroup?: string; // shared buffer key (e.g. "ti-matrix")
+    readonly offset?: number; // byte offset within buffer (default 0)
 }
 
 // ── Varyings ──
 export interface Varying {
-    readonly name: string;           // WGSL variable name
-    readonly type: string;           // WGSL type
+    readonly name: string; // WGSL variable name
+    readonly type: string; // WGSL type
 }
 
 // ── UBO Fields ──
 export interface UboField {
-    readonly name: string;           // WGSL field name
+    readonly name: string; // WGSL field name
     readonly type: WgslScalarType;
 }
 
 // ── Binding Declarations ──
 export type BindingKind =
     | { readonly kind: "uniform-buffer" }
-    | { readonly kind: "texture";
-        readonly textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_2d<u32>";
-        readonly sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint"; }
+    | {
+          readonly kind: "texture";
+          readonly textureType: "texture_2d<f32>" | "texture_cube<f32>" | "texture_depth_2d" | "texture_2d<u32>";
+          readonly sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
+      }
     | { readonly kind: "sampler"; readonly samplerType: "sampler" | "sampler_comparison" }
     | { readonly kind: "storage-texture"; readonly access: "read" | "write" | "read_write"; readonly format: string };
 
 export interface BindingDecl {
-    readonly name: string;           // WGSL variable name
+    readonly name: string; // WGSL variable name
     readonly type: BindingKind;
-    readonly group?: "mesh" | "shadow";   // default "mesh" → group(1); "shadow" → group(2)
+    readonly group?: "mesh" | "shadow"; // default "mesh" → group(1); "shadow" → group(2)
     readonly visibility: GPUShaderStageFlags;
 }
 
 // ── Fragment Slot Markers ──
 export type FragmentSlot = "HF" | "SV" | "AT" | "AC" | "MF" | "BL" | "AD" | "AI" | "NI" | "BC" | "BA";
-export type VertexSlot   = "VR" | "VW" | "VB";
+export type VertexSlot = "VR" | "VW" | "VB";
 ```
 
 ### ShaderFragment Interface
 
 ```typescript
 export interface ShaderFragment {
-    readonly id: string;                              // unique ID for dedup + dependency resolution
-    readonly dependencies?: readonly string[];         // fragment IDs that must compose before this one
+    readonly id: string; // unique ID for dedup + dependency resolution
+    readonly dependencies?: readonly string[]; // fragment IDs that must compose before this one
 
     // ── Vertex stage ──
     readonly vertexAttributes?: readonly VertexAttribute[];
@@ -92,7 +96,6 @@ export interface ShaderFragment {
     readonly bindings?: readonly BindingDecl[];
     readonly helperFunctions?: string;
     readonly fragmentSlots?: Partial<Record<FragmentSlot, string>>;
-
 }
 ```
 
@@ -100,8 +103,8 @@ export interface ShaderFragment {
 
 ```typescript
 export interface ShaderTemplate {
-    readonly vertexTemplate: string;                    // WGSL with slot markers
-    readonly fragmentTemplate: string;                  // WGSL with slot markers
+    readonly vertexTemplate: string; // WGSL with slot markers
+    readonly fragmentTemplate: string; // WGSL with slot markers
     readonly baseMeshUboFields: readonly UboField[];
     readonly baseVertexAttributes: readonly VertexAttribute[];
     readonly baseVaryings: readonly Varying[];
@@ -115,20 +118,20 @@ export interface ShaderTemplate {
 
 ```typescript
 export interface UboSpec {
-    readonly totalBytes: number;                       // aligned to 16 bytes
-    readonly offsets: ReadonlyMap<string, number>;      // field name → byte offset
-    readonly structBody: string;                       // WGSL struct body (fields only)
+    readonly totalBytes: number; // aligned to 16 bytes
+    readonly offsets: ReadonlyMap<string, number>; // field name → byte offset
+    readonly structBody: string; // WGSL struct body (fields only)
 }
 
 export interface ComposedShader {
     readonly vertexWGSL: string;
     readonly fragmentWGSL: string;
-    readonly meshBGLDescriptor: GPUBindGroupLayoutDescriptor;       // group(1)
+    readonly meshBGLDescriptor: GPUBindGroupLayoutDescriptor; // group(1)
     readonly shadowBGLDescriptor: GPUBindGroupLayoutDescriptor | null; // group(2)
     readonly vertexBufferLayouts: GPUVertexBufferLayout[];
     readonly meshUboSpec: UboSpec;
     readonly sceneUboSpec: UboSpec;
-    readonly fragmentKey: string;                      // sorted IDs joined with "|" — pipeline cache key
+    readonly fragmentKey: string; // sorted IDs joined with "|" — pipeline cache key
 }
 ```
 
@@ -149,12 +152,14 @@ export function computeUboLayout(fields: readonly UboField[]): UboSpec;
 ### Topological Sort — `topoSort()`
 
 Fragments declare dependencies via `dependencies: string[]`. The composer:
+
 1. Builds a map of `id → ShaderFragment`
 2. Computes in-degrees from dependency edges
 3. Performs Kahn's algorithm with deterministic alphabetical ordering of zero-degree nodes
 4. Throws on duplicate IDs, unknown dependencies, or cycles
 
 The sorted order determines:
+
 - Code injection order (fragments contribute to slots in dependency order)
 - Binding index assignment (deterministic binding numbers)
 - UBO field ordering
@@ -164,6 +169,7 @@ The sorted order determines:
 Templates contain comment markers in the format `/*SLOT_NAME*/` (e.g., `/*AI*/`, `/*VW*/`).
 
 The `SLOT_RE = /\/\*([A-Z_0-9]+)\*\//g` regex finds all markers. For each marker, the composer:
+
 1. Iterates sorted fragments
 2. Collects any contributions to that slot name from `fragmentSlots` or `vertexSlots`
 3. Joins contributions with `\n`
@@ -210,11 +216,13 @@ Fixed markers replaced once (not iterated over fragments):
 ### Bind Group Layout Construction
 
 The composer emits material-owned bind groups after the frame-graph scene group:
+
 - **Group 0**: external frame-graph scene group, not owned by the composer. Binding 0 is the per-pass `SceneUniforms` UBO and binding 1 is the scene-owned `LightsUniforms` UBO.
 - **Group 1 ("mesh")**: Mesh UBO (binding 0, always present), optional Material UBO (binding 1 when `baseMaterialUboFields` is present), and fragment bindings after that
 - **Group 2 ("shadow")**: Shadow-specific bindings (optional)
 
 Binding assignment order:
+
 1. `template.baseVertexBindings` (vertex-stage bindings)
 2. Each sorted fragment's `vertexBindings`
 3. `template.baseBindings` (fragment-stage bindings)
@@ -222,6 +230,7 @@ Binding assignment order:
 5. Each sorted fragment's `bindings` where `group === "shadow"`
 
 Each binding gets:
+
 - A `GPUBindGroupLayoutEntry` via `bglEntry()` (maps BindingKind → WebGPU descriptor)
 - A WGSL declaration via `declWGSL()` (e.g., `@group(1) @binding(3) var normalTex: texture_2d<f32>;`)
 - Assignment to vertex and/or fragment declaration lists based on `visibility`
@@ -237,26 +246,28 @@ Each binding gets:
 
 `computeUboLayout()` follows WGSL uniform buffer alignment rules (std140-like):
 
-| Type | Align | Size |
-|------|-------|------|
-| `f32` | 4 | 4 |
-| `u32` / `i32` | 4 | 4 |
-| `vec2<f32>` | 8 | 8 |
-| `vec3<f32>` | 16 | 12 |
-| `vec4<f32>` | 16 | 16 |
-| `vec4<u32>` | 16 | 16 |
-| `mat4x4<f32>` | 16 | 64 |
-| `array<vec4<u32>, N>` | 16 | 16 × N |
+| Type                  | Align | Size   |
+| --------------------- | ----- | ------ |
+| `f32`                 | 4     | 4      |
+| `u32` / `i32`         | 4     | 4      |
+| `vec2<f32>`           | 8     | 8      |
+| `vec3<f32>`           | 16    | 12     |
+| `vec4<f32>`           | 16    | 16     |
+| `vec4<u32>`           | 16    | 16     |
+| `mat4x4<f32>`         | 16    | 64     |
+| `array<vec4<u32>, N>` | 16    | 16 × N |
 
 Array type parsing accepts optional whitespace after the comma, so both `array<vec4<u32>, 4>` and `array<vec4<u32>,4>` are valid field type strings. This matters for production bundles because inline WGSL minification may remove spaces.
 
 Algorithm:
+
 1. Walk fields in order, align cursor to field alignment
 2. Record byte offset for each field name
 3. Generate WGSL struct body (`name: type,` per field)
 4. Round total size to 16-byte boundary
 
 Composed shaders generate material-owned UBO specs only:
+
 - **Mesh UBO**: template `baseMeshUboFields` (group 1, binding 0)
 - **Material UBO**: template `baseMaterialUboFields` + fragment `uboFields` (group 1, binding 1) when `baseMaterialUboFields` is present; otherwise fragment `uboFields` are appended to the mesh UBO
 
@@ -275,7 +286,9 @@ N/A — The composer generates pipeline descriptors but doesn't create GPU pipel
 Shared WGSL snippets (pure function strings, no bindings):
 
 ### `WGSL_PERTURB_NORMAL`
+
 Cotangent-frame bump mapping. Requires `bumpTex`, `bumpSampler` in scope.
+
 ```
 fn perturbNormal(vNormalW, positionW, uv, bumpScale) → vec3<f32>
   Sample normal map, construct cotangent frame from screen-space derivatives,
@@ -283,7 +296,9 @@ fn perturbNormal(vNormalW, positionW, uv, bumpScale) → vec3<f32>
 ```
 
 ### `WGSL_SHADOW_ESM`
+
 Exponential shadow map sampling. Requires `shadowTex`, `shadowSampler` in scope.
+
 ```
 fn computeFallOff(value, clipSpace, frustumEdgeFalloff) → f32
 fn computeShadowWithESM(posFromLight, depthMetric, darkness, depthScale, frustumEdgeFalloff) → f32
@@ -291,13 +306,17 @@ fn computeShadowWithESM(posFromLight, depthMetric, darkness, depthScale, frustum
 ```
 
 ### `WGSL_FOG`
+
 Linear/exp/exp² fog. Requires `scene.vFogInfos` (vec4: mode, start, end, density).
+
 ```
 fn calcFogFactor(fogDistance: vec3<f32>) → f32
 ```
 
 ### `WGSL_IMAGE_PROCESSING`
+
 Exposure → Reinhard tonemap → gamma → contrast. Requires `scene.exposureLinear`, `scene.contrast`.
+
 ```
 fn applyImageProcessing(result: vec4<f32>) → vec4<f32>
   rgb *= exposureLinear
@@ -307,7 +326,9 @@ fn applyImageProcessing(result: vec4<f32>) → vec4<f32>
 ```
 
 ### `WGSL_DITHER`
+
 Noise-based dithering. Pure math, no UBO dependency.
+
 ```
 fn dither(seed: vec2<f32>, varianceAmount: f32) → f32
   fract(sin(dot(seed, [12.9898, 78.233])) * 43758.5453)
@@ -332,15 +353,15 @@ Materials cache composed shaders by `fragmentKey` (sorted fragment IDs joined wi
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-|---|---|
-| `ShaderMaterial` + Effect system | `ShaderTemplate` + `ShaderFragment[]` + `composeShader()` |
-| `#define` preprocessor macros | Slot injection (`/*AI*/`, `/*VW*/`, etc.) |
-| `UniformBuffer` layout | `computeUboLayout()` with `UboField[]` |
-| `MaterialPluginBase` | `ShaderFragment` interface |
-| `Effect.ShadersStore` (global) | Fragment modules (tree-shakable imports) |
-| `Engine._caps` feature detection | Fragment `dependencies` (explicit) |
-| `PBRMaterial.customShaderNameResolve` | Fragment slot contributions |
+| Babylon.js                            | Babylon Lite                                              |
+| ------------------------------------- | --------------------------------------------------------- |
+| `ShaderMaterial` + Effect system      | `ShaderTemplate` + `ShaderFragment[]` + `composeShader()` |
+| `#define` preprocessor macros         | Slot injection (`/*AI*/`, `/*VW*/`, etc.)                 |
+| `UniformBuffer` layout                | `computeUboLayout()` with `UboField[]`                    |
+| `MaterialPluginBase`                  | `ShaderFragment` interface                                |
+| `Effect.ShadersStore` (global)        | Fragment modules (tree-shakable imports)                  |
+| `Engine._caps` feature detection      | Fragment `dependencies` (explicit)                        |
+| `PBRMaterial.customShaderNameResolve` | Fragment slot contributions                               |
 
 ## Dependencies
 
@@ -362,10 +383,10 @@ Materials cache composed shaders by `fragmentKey` (sorted fragment IDs joined wi
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
-| `fragment-types.ts` | All type definitions: ShaderFragment, ShaderTemplate, ComposedShader, UboSpec, slot types, binding types |
-| `shader-composer.ts` | `composeShader()` — topological sort, slot injection, bind group layout construction, WGSL assembly |
-| `ubo-layout.ts` | `computeUboLayout()` — WGSL std140-like alignment computation for UBO structs |
-| `wgsl-helpers.ts` | Shared WGSL snippets: perturbNormal, ESM shadows, fog, image processing, dither |
-| `fragments/thin-instance-fragment.ts` | Example fragment: thin-instance world matrix + optional instance color |
+| File                                  | Purpose                                                                                                  |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `fragment-types.ts`                   | All type definitions: ShaderFragment, ShaderTemplate, ComposedShader, UboSpec, slot types, binding types |
+| `shader-composer.ts`                  | `composeShader()` — topological sort, slot injection, bind group layout construction, WGSL assembly      |
+| `ubo-layout.ts`                       | `computeUboLayout()` — WGSL std140-like alignment computation for UBO structs                            |
+| `wgsl-helpers.ts`                     | Shared WGSL snippets: perturbNormal, ESM shadows, fog, image processing, dither                          |
+| `fragments/thin-instance-fragment.ts` | Example fragment: thin-instance world matrix + optional instance color                                   |

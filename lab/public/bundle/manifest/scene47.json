@@ -1,11 +1,11 @@
 {
-  "rawKB": 91.1,
-  "gzipKB": 36.4,
+  "rawKB": 92.1,
+  "gzipKB": 36.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene47-generate-mipmaps-CmIGpFd5.js",
     "scene47-gltf-ext-spec-gloss-D60sFZYX.js",
-    "scene47-gltf-feature-registry-CaVfgPXw.js",
+    "scene47-gltf-feature-registry-t7cInrTi.js",
     "scene47-gltf-glb-parser-6-tsF2C2.js",
     "scene47-gltf-sampler-desc-BJMmnJDF.js",
     "scene47-shader-composer-CgJmQyJj.js",

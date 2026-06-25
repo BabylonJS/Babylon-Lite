@@ -386,7 +386,7 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
     }
     if (texture) {
-        const expectsDepth = slot.decl.sampleType === "depth" || slot.decl.comparison === true;
+        const expectsDepth = slot.decl.comparison || slot.decl.sampleType === "depth";
         const isDepthTexture = texture._sampleType === "depth";
         if (expectsDepth && !isDepthTexture) {
             throw new Error(`ShaderMaterial: sampler "${name}" expects a depth Texture2D.`);
@@ -395,8 +395,17 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
             throw new Error(`ShaderMaterial: sampler "${name}" cannot use a depth Texture2D.`);
         }
     }
-    slot.current = texture;
-    material._resourceVersion++;
+    // Only invalidate the cached bind groups when the bound texture HANDLE actually changes. The bind group
+    // references the texture's view + sampler (see createShaderBindGroup), so re-binding the SAME Texture2D (the
+    // common "keep my shadow map / scene-depth bound every frame" pattern) leaves those identical. Bumping the
+    // resource version unconditionally therefore forced a BRAND-NEW bind group every frame (per material, for every
+    // packet using it), churning the D3D12 descriptor heap until it OOMed on content-heavy scenes (e.g. reloading
+    // a big save). A texture's CONTENTS can change freely without a new bind group (the bound view is live), so
+    // identity comparison is correct.
+    if (slot.current !== texture) {
+        slot.current = texture;
+        material._resourceVersion++;
+    }
 }
 
 /** Bind (or clear) a declared read-only storage buffer. */
@@ -405,8 +414,12 @@ export function setShaderStorageBuffer(material: ShaderMaterial, name: string, b
     if (!slot) {
         throw new Error(`ShaderMaterial: storage buffer "${name}" was not declared.`);
     }
-    slot.current = buffer;
-    material._resourceVersion++;
+    // See setShaderTexture: only invalidate the bind groups when the bound buffer HANDLE changes; re-binding the
+    // same GPUBuffer is a no-op (contents update live), so an unconditional bump churned the descriptor heap.
+    if (slot.current !== buffer) {
+        slot.current = buffer;
+        material._resourceVersion++;
+    }
 }
 
 /** Set a declared `f32` uniform. Convenience wrapper over `setShaderUniform()`. */

@@ -128,11 +128,11 @@ startEngine/registerScene frame:
 
 At record/re-sync time, a render pass task partitions bindings into:
 
-| Bucket      | Source flag                  | Draw path                                                           |
-| ----------- | ---------------------------- | ------------------------------------------------------------------- |
-| Opaque      | `!isTransparent && !_direct` | Cached `GPURenderBundle` when visibility/version state is unchanged |
-| Direct      | `_direct`                    | Direct draw after opaque bundle                                     |
-| Transparent | `isTransparent || _transmissive` | Direct draw, camera-space-depth sorted back-to-front per pass      |
+| Bucket      | Source flag                        | Draw path                                                           |
+| ----------- | ---------------------------------- | ------------------------------------------------------------------- |
+| Opaque      | `!isTransparent && !_direct`       | Cached `GPURenderBundle` when visibility/version state is unchanged |
+| Direct      | `_direct`                          | Direct draw after opaque bundle                                     |
+| Transparent | `isTransparent \|\| _transmissive` | Direct draw, camera-space-depth sorted back-to-front per pass       |
 
 Opaque and direct bindings are sorted by `renderable.order`. Transparent bindings must remain camera-space-depth sorted and are not pipeline-sorted. `_transmissive` marks true scene-texture refraction surfaces; the render task routes them into the same sorted transparent loop so transmission snapshots happen immediately before the current transmissive draw. `_direct` selects the non-transparent direct-draw bucket; mutable depth-writing sprite/billboard batches set `_direct` without `_transmissive` so they still appear in opaque-scene refraction RTTs.
 
@@ -229,7 +229,7 @@ Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` g
 | `src/frame-graph/frame-graph.ts`         | Ordered task list, build/execute/dispose lifecycle                                                                           |
 | `src/frame-graph/frame-graph-actions.ts` | `addTask`, `addTaskAtStart`, `addTaskBefore` helpers                                                                         |
 | `src/frame-graph/render-task.ts`         | Render task implementation, per-pass scene UBO, renderable bucketing, RTT/swapchain pass execution                           |
-| `src/material/material.ts`               | Shared material, material-view, and render-feature interfaces                                                                 |
-| `src/material/material-view.ts`          | Lightweight material view creation and source normalization                                                                    |
-| `src/material/material-dirty.ts`         | Source-material UBO version bump helper                                                                                        |
-| `src/material/material-rebuild.ts`       | Rebuild helpers for source materials and their views                                                                           |
+| `src/material/material.ts`               | Shared material, material-view, and render-feature interfaces                                                                |
+| `src/material/material-view.ts`          | Lightweight material view creation and source normalization                                                                  |
+| `src/material/material-dirty.ts`         | Source-material UBO version bump helper                                                                                      |
+| `src/material/material-rebuild.ts`       | Rebuild helpers for source materials and their views                                                                         |

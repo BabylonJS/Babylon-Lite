@@ -80,5 +80,12 @@
         "description": "Animated, stylized glTF diorama: a frog enjoying a candle-lit bath surrounded by water and plants, slowly orbiting under a studio HDR environment for PBR lighting. The Draco-compressed model's animation groups auto-play on load. \"Bath Day\" by StanSt (https://sketchfab.com/stanst), CC BY 4.0.",
         "tags": ["showcase"],
         "mobile": true
+    },
+    {
+        "slug": "sandblox",
+        "name": "Sandblox",
+        "description": "Build-and-play sandbox for small block worlds. Drop blocks into a starter scene, reshape them with move, clone, resize, paint, and delete tools, then run your character through what you built.",
+        "tags": ["game", "sandbox", "showcase"],
+        "mobile": false
     }
 ]

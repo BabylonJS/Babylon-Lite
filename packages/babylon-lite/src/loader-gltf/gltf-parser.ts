@@ -4,7 +4,7 @@
  * - Image extraction (embedded or external)
  * - Node hierarchy traversal with memoized world-matrix computation
  */
-import { F32, U32, U16, U8 } from "../engine/typed-arrays.js";
+import { F32, U32, U16, U8, I16, I8 } from "../engine/typed-arrays.js";
 import type { Mat4 } from "../math/types.js";
 import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
@@ -45,7 +45,7 @@ export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: numb
     const count = accessor.count;
     const len = count * componentCount;
 
-    let Ctor: Float32ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor | Uint8ArrayConstructor;
+    let Ctor: Float32ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor | Uint8ArrayConstructor | Int16ArrayConstructor | Int8ArrayConstructor;
     switch (accessor.componentType) {
         case FLOAT:
             Ctor = F32;
@@ -58,6 +58,12 @@ export function resolveAccessor(json: any, binChunk: DataView, accessorIdx: numb
             break;
         case UNSIGNED_BYTE:
             Ctor = U8;
+            break;
+        case 5122: // SHORT
+            Ctor = I16;
+            break;
+        case 5120: // BYTE
+            Ctor = I8;
             break;
         default:
             throw new Error(`Unsupported component type: ${accessor.componentType}`);

@@ -1,4 +1,5 @@
 # Module: Animation Parity Testing — Deterministic Frame Sync
+
 > Scope: `lab/`, `scripts/capture-golden.ts`, `tests/lite/parity/`
 
 ## Purpose
@@ -39,7 +40,9 @@ The protocol has two parts:
 ### BJS Reference (`babylon-ref-sceneN.html`)
 
 ```javascript
-engine.getDeltaTime = function () { return 16; };
+engine.getDeltaTime = function () {
+    return 16;
+};
 scene.useConstantAnimationDeltaTime = true;
 ```
 
@@ -65,8 +68,8 @@ let frameCount = 0;
 scene.registerBeforeRender(() => {
     frameCount++;
     if (frameCount === 300) {
-        scene.animationGroups.forEach(g => g.pause());
-        canvas.dataset.animationFrozen = 'true';
+        scene.animationGroups.forEach((g) => g.pause());
+        canvas.dataset.animationFrozen = "true";
     }
 });
 ```
@@ -74,13 +77,13 @@ scene.registerBeforeRender(() => {
 ### Lite (gated behind `?freeze` query param)
 
 ```typescript
-if (new URLSearchParams(location.search).has('freeze')) {
+if (new URLSearchParams(location.search).has("freeze")) {
     let frameCount = 0;
     engine._beforeRender.push(() => {
         frameCount++;
         if (frameCount === 300) {
             engine.pauseAnimations();
-            canvas.dataset.animationFrozen = 'true';
+            canvas.dataset.animationFrozen = "true";
         }
     });
 }
@@ -105,20 +108,16 @@ tests and the golden-capture script append it.
 ## Parity Test Pattern
 
 ```typescript
-test('Scene N — Animated model matches reference', async ({ page }) => {
+test("Scene N — Animated model matches reference", async ({ page }) => {
     // Load Lite scene with freeze param
-    await page.goto('/sceneN.html?freeze');
-    await page.waitForFunction(
-        () => document.querySelector('canvas')?.dataset.ready === 'true',
-        { timeout: 30_000 },
-    );
+    await page.goto("/sceneN.html?freeze");
+    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 30_000 });
     // Wait for exact animation frame
-    await page.waitForFunction(
-        () => document.querySelector('canvas')?.dataset.animationFrozen === 'true',
-        { timeout: 30_000 },
-    );
+    await page.waitForFunction(() => document.querySelector("canvas")?.dataset.animationFrozen === "true", { timeout: 30_000 });
     // Screenshot and compare against golden
-    const screenshot = await page.screenshot({ /* … */ });
+    const screenshot = await page.screenshot({
+        /* … */
+    });
     // … pixel comparison …
 });
 ```
@@ -143,26 +142,26 @@ For animated scenes it:
 
 ## Key Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| **Exact frame (`=== N`), not `>= N`** | Both BJS and Lite must freeze at the identical animation pose. An inequality would allow off-by-one drift. |
-| **Constant 16 ms delta** | Without this, BJS adapts to actual frame rate, making poses non-deterministic across different hardware. |
-| **Query-param gating (`?freeze`)** | Interactive browsing stays unaffected. Only tests and golden capture append the param. |
-| **Frame 300** | Late enough that all assets are loaded and animations are mid-cycle (interesting poses), early enough for fast tests (~5 s at 60 fps). |
+| Decision                              | Rationale                                                                                                                              |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Exact frame (`=== N`), not `>= N`** | Both BJS and Lite must freeze at the identical animation pose. An inequality would allow off-by-one drift.                             |
+| **Constant 16 ms delta**              | Without this, BJS adapts to actual frame rate, making poses non-deterministic across different hardware.                               |
+| **Query-param gating (`?freeze`)**    | Interactive browsing stays unaffected. Only tests and golden capture append the param.                                                 |
+| **Frame 300**                         | Late enough that all assets are loaded and animations are mid-cycle (interesting poses), early enough for fast tests (~5 s at 60 fps). |
 
 ---
 
 ## File Manifest
 
-| File | Role |
-|------|------|
-| `lab/lite/babylon-ref-scene5.html` | BJS reference with frame sync |
-| `lab/lite/babylon-ref-scene7.html` | BJS reference with frame sync |
-| `lab/lite/src/lite/scene5.ts` | Lite scene with freeze support |
-| `lab/lite/src/lite/scene7.ts` | Lite scene with freeze support |
-| `scripts/capture-golden.ts` | Golden-capture CLI |
-| `tests/lite/parity/scene5-alien.spec.ts` | Animated parity test |
-| `tests/lite/parity/scene7-chibirex.spec.ts` | Animated parity test |
+| File                                        | Role                           |
+| ------------------------------------------- | ------------------------------ |
+| `lab/lite/babylon-ref-scene5.html`          | BJS reference with frame sync  |
+| `lab/lite/babylon-ref-scene7.html`          | BJS reference with frame sync  |
+| `lab/lite/src/lite/scene5.ts`               | Lite scene with freeze support |
+| `lab/lite/src/lite/scene7.ts`               | Lite scene with freeze support |
+| `scripts/capture-golden.ts`                 | Golden-capture CLI             |
+| `tests/lite/parity/scene5-alien.spec.ts`    | Animated parity test           |
+| `tests/lite/parity/scene7-chibirex.spec.ts` | Animated parity test           |
 
 ---
 

@@ -19,16 +19,19 @@ type PublishPackageJson = {
     };
 };
 
-const PACKAGE_NAME = "@babylonjs/lite";
+const PACKAGE_NAME = process.env.RELEASE_PACKAGE_NAME ?? "@babylonjs/lite";
 // Resolution runs *before* `pnpm build`, so we read this package's source
 // manifest (the dist manifest does not exist yet). The build then bakes the
 // resolved version into both the bundle and the emitted dist `package.json`
 // (see packages/babylon-lite/vite.config.ts). `SOURCE_PACKAGE_NAME` is the
-// workspace-internal name; the published name is `PACKAGE_NAME`.
-const SOURCE_PACKAGE_NAME = "babylon-lite";
-const SOURCE_PACKAGE_JSON = resolve(process.cwd(), "packages/babylon-lite/package.json");
+// workspace-internal name; the published name is `PACKAGE_NAME`. All three are
+// overridable via env so sibling packages (e.g. @babylonjs/lite-gl) can reuse
+// this script from their own publish pipeline.
+const SOURCE_PACKAGE_NAME = process.env.RELEASE_SOURCE_PACKAGE_NAME ?? "babylon-lite";
+const SOURCE_PACKAGE_JSON = resolve(process.cwd(), process.env.RELEASE_SOURCE_PACKAGE_JSON ?? "packages/babylon-lite/package.json");
 const RELEASE_CONFIG_PATH = resolve(process.cwd(), process.env.RELEASE_CONFIG_PATH ?? "config/release.json");
-const RELEASE_TAG_PATTERN = "npm-lite-v*";
+const RELEASE_TAG_PATTERN = process.env.RELEASE_TAG_PATTERN ?? "npm-lite-v*";
+const RELEASE_TAG_PREFIX = RELEASE_TAG_PATTERN.replace(/\*$/, "");
 
 function run(command: string, args: string[], options: { allowFailure?: boolean } = {}): string {
     try {
@@ -120,7 +123,7 @@ function isVersionPublished(version: string): boolean {
 }
 
 function getPreviousReleaseTag(latestPublishedVersion: string): string {
-    const exactTag = `npm-lite-v${latestPublishedVersion}`;
+    const exactTag = `${RELEASE_TAG_PREFIX}${latestPublishedVersion}`;
     const exactTagExists = run("git", ["rev-parse", "--verify", `refs/tags/${exactTag}`], { allowFailure: true });
     if (exactTagExists) {
         return exactTag;

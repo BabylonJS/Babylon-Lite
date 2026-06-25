@@ -1,4 +1,5 @@
 # Module: Morph Targets (Blend Shapes)
+
 > Package path: `packages/babylon-lite/src/` (cross-cutting: loader, animation, material)
 
 ## Purpose
@@ -14,9 +15,9 @@ Morph targets (aka blend shapes) allow per-vertex position and normal deltas to 
 ```typescript
 /** Morph binding — links a node to its morph target weights buffer. */
 export interface MorphBinding {
-  nodeIdx: number;          // glTF node index this binding belongs to
-  targetCount: number;      // number of morph targets (max 4)
-  weightsBuffer: GPUBuffer; // 32-byte UBO: vec4<f32> weights + u32 count + u32 texWidth + u32 rowsPerBand + u32 pad
+    nodeIdx: number; // glTF node index this binding belongs to
+    targetCount: number; // number of morph targets (max 4)
+    weightsBuffer: GPUBuffer; // 32-byte UBO: vec4<f32> weights + u32 count + u32 texWidth + u32 rowsPerBand + u32 pad
 }
 ```
 
@@ -25,17 +26,17 @@ export interface MorphBinding {
 ```typescript
 // GltfAnimationData (animation/types.ts) — extended with:
 export interface GltfAnimationData {
-  // ...existing fields...
-  morphBindings: MorphBinding[];  // alongside skeletons
+    // ...existing fields...
+    morphBindings: MorphBinding[]; // alongside skeletons
 }
 
 // MeshGPU (mesh/mesh.ts) — extended with morph fields:
 interface MeshGPU {
-  // ...existing fields...
-  morphTexture?: GPUTexture;       // rgba32float tiled texture with all deltas
-  morphTextureView?: GPUTextureView;
-  morphWeightsBuffer?: GPUBuffer;  // 32-byte UBO
-  morphTargetCount?: number;
+    // ...existing fields...
+    morphTexture?: GPUTexture; // rgba32float tiled texture with all deltas
+    morphTextureView?: GPUTextureView;
+    morphWeightsBuffer?: GPUBuffer; // 32-byte UBO
+    morphTargetCount?: number;
 }
 ```
 
@@ -73,25 +74,25 @@ pbr-shader.ts: vertex shader blends deltas before skeletal deformation
 
 The morph texture uses a 2D tiled layout to handle meshes with more vertices than the WebGPU max texture dimension (8192 default):
 
-| Parameter | Formula |
-|---|---|
-| `texWidth` | `min(vertexCount, 2048)` |
-| `rowsPerBand` | `ceil(vertexCount / texWidth)` |
-| Band order | target0-position, target0-normal, target1-position, target1-normal, ... |
-| Total height | `numTargets × 2 × rowsPerBand` |
-| Vertex lookup | `col = v % texWidth`, `row = bandBase + floor(v / texWidth)` |
+| Parameter     | Formula                                                                 |
+| ------------- | ----------------------------------------------------------------------- |
+| `texWidth`    | `min(vertexCount, 2048)`                                                |
+| `rowsPerBand` | `ceil(vertexCount / texWidth)`                                          |
+| Band order    | target0-position, target0-normal, target1-position, target1-normal, ... |
+| Total height  | `numTargets × 2 × rowsPerBand`                                          |
+| Vertex lookup | `col = v % texWidth`, `row = bandBase + floor(v / texWidth)`            |
 
 GPU format: `rgba32float`, unfilterable-float sample type (same approach as the bone texture).
 
 ### Weights UBO Layout — 32 bytes
 
-| Offset (bytes) | Size | Content |
-|---|---|---|
-| 0 | 16B | `vec4<f32> weights` — morph target weights (max 4) |
-| 16 | 4B | `u32 count` — number of active morph targets |
-| 20 | 4B | `u32 texWidth` — texture row width in texels |
-| 24 | 4B | `u32 rowsPerBand` — rows per (target, attribute) band |
-| 28 | 4B | `u32 pad` — padding to 32-byte alignment |
+| Offset (bytes) | Size | Content                                               |
+| -------------- | ---- | ----------------------------------------------------- |
+| 0              | 16B  | `vec4<f32> weights` — morph target weights (max 4)    |
+| 16             | 4B   | `u32 count` — number of active morph targets          |
+| 20             | 4B   | `u32 texWidth` — texture row width in texels          |
+| 24             | 4B   | `u32 rowsPerBand` — rows per (target, attribute) band |
+| 28             | 4B   | `u32 pad` — padding to 32-byte alignment              |
 
 Per-frame updates write only the first 16 bytes (weights). The `count`, `texWidth`, and `rowsPerBand` fields are immutable after creation.
 
@@ -109,13 +110,13 @@ When the flag is set:
 
 ### Bind Group Integration (Group 1 — Per-Mesh)
 
-| Binding | Resource | Condition |
-|---|---|---|
-| 0 | Mesh UBO | Always |
-| 1 | Bone texture | If skeleton |
-| 2 | Morph texture | If morph targets |
-| 3 | Morph weights UBO | If morph targets |
-| 4+ | Material textures | Follow |
+| Binding | Resource          | Condition        |
+| ------- | ----------------- | ---------------- |
+| 0       | Mesh UBO          | Always           |
+| 1       | Bone texture      | If skeleton      |
+| 2       | Morph texture     | If morph targets |
+| 3       | Morph weights UBO | If morph targets |
+| 4+      | Material textures | Follow           |
 
 Exact binding slot indices shift depending on which optional entries are present.
 
@@ -198,16 +199,16 @@ For each PATH_WEIGHTS animation channel:
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `MorphBinding` interface | `MorphTargetManager` class |
-| `morphTexture` (rgba32float tiled) | `MorphTargetManager._textureFloat` |
-| `morphWeightsBuffer` (32B UBO) | `MorphTargetManager._influences` uniform |
-| Vertex shader `textureLoad` loop | `morphTargets.vertex.fx` shader include |
-| `MSH_HAS_MORPH_TARGETS` flag | `#define MORPHTARGETS` in shader defines |
+| Babylon Lite                          | Babylon.js                                                                          |
+| ------------------------------------- | ----------------------------------------------------------------------------------- |
+| `MorphBinding` interface              | `MorphTargetManager` class                                                          |
+| `morphTexture` (rgba32float tiled)    | `MorphTargetManager._textureFloat`                                                  |
+| `morphWeightsBuffer` (32B UBO)        | `MorphTargetManager._influences` uniform                                            |
+| Vertex shader `textureLoad` loop      | `morphTargets.vertex.fx` shader include                                             |
+| `MSH_HAS_MORPH_TARGETS` flag          | `#define MORPHTARGETS` in shader defines                                            |
 | PATH_WEIGHTS in `skeleton-updater.ts` | `Animation.AllowMatricesInterpolation` + `MorphTargetManager.getTarget().influence` |
-| Max 4 targets (vec4 weights) | Configurable via `MorphTargetManager.numTargets` |
-| Flat data + functions | Full class hierarchy (`MorphTarget`, `MorphTargetManager`) |
+| Max 4 targets (vec4 weights)          | Configurable via `MorphTargetManager.numTargets`                                    |
+| Flat data + functions                 | Full class hierarchy (`MorphTarget`, `MorphTargetManager`)                          |
 
 **Same math, minimal code.** No class hierarchy — just a texture, a UBO, and a shader loop.
 
@@ -224,33 +225,33 @@ For each PATH_WEIGHTS animation channel:
 
 ## Test Specification
 
-| Test | Description |
-|---|---|
-| Tiled layout math | `vertexCount=5000, texWidth=2048, rowsPerBand=3` — verify dimensions |
-| Texture dimensions | 2 targets, 5000 verts → width=2048, height=2×2×3=12 |
-| Vertex lookup | Vertex 4097 → col=1, rowInBand=2 (for texWidth=2048) |
-| Band ordering | Target 1 normal band starts at row `(1×2+1)×rowsPerBand` |
-| UBO layout | Total 32 bytes: 16B weights + 4B count + 4B texWidth + 4B rowsPerBand + 4B pad |
-| Initial weights | `mesh.weights = [0.5, 0.3]` → UBO bytes 0–15 contain `[0.5, 0.3, 0, 0]` |
-| Immutable fields | Per-frame update writes only first 16 bytes, not count/texWidth/rowsPerBand |
-| Feature flag | `MSH_HAS_MORPH_TARGETS = 1 << 3 = 8` |
-| Morph-only animation | Animation with PATH_WEIGHTS but no skeleton plays correctly |
-| Max targets | More than 4 targets in glTF → only first 4 used |
+| Test                 | Description                                                                    |
+| -------------------- | ------------------------------------------------------------------------------ |
+| Tiled layout math    | `vertexCount=5000, texWidth=2048, rowsPerBand=3` — verify dimensions           |
+| Texture dimensions   | 2 targets, 5000 verts → width=2048, height=2×2×3=12                            |
+| Vertex lookup        | Vertex 4097 → col=1, rowInBand=2 (for texWidth=2048)                           |
+| Band ordering        | Target 1 normal band starts at row `(1×2+1)×rowsPerBand`                       |
+| UBO layout           | Total 32 bytes: 16B weights + 4B count + 4B texWidth + 4B rowsPerBand + 4B pad |
+| Initial weights      | `mesh.weights = [0.5, 0.3]` → UBO bytes 0–15 contain `[0.5, 0.3, 0, 0]`        |
+| Immutable fields     | Per-frame update writes only first 16 bytes, not count/texWidth/rowsPerBand    |
+| Feature flag         | `MSH_HAS_MORPH_TARGETS = 1 << 3 = 8`                                           |
+| Morph-only animation | Animation with PATH_WEIGHTS but no skeleton plays correctly                    |
+| Max targets          | More than 4 targets in glTF → only first 4 used                                |
 
 ---
 
 ## File Manifest
 
-| File | Role |
-|---|---|
-| `src/animation/types.ts` | `MorphBinding` interface definition |
-| `src/mesh/mesh.ts` | `MeshGPU` morph fields (`morphTexture`, `morphWeightsBuffer`, etc.) |
-| `src/loader-gltf/load-gltf.ts` | Parse `primitive.targets[]`, create tiled texture + weights UBO |
-| `src/animation/skeleton-updater.ts` | PATH_WEIGHTS evaluation, per-frame weight upload |
-| `src/animation/animation-group.ts` | Morph-only animation support (no skeleton required) |
-| `src/material/pbr/pbr-shader.ts` | Morph blending in vertex shader, feature flag, WGSL generation |
-| `src/material/pbr/pbr-pipeline.ts` | Morph entries in bind group layout and bind group |
-| `src/material/pbr/pbr-renderable.ts` | Morph detection and wiring during renderable creation |
+| File                                 | Role                                                                |
+| ------------------------------------ | ------------------------------------------------------------------- |
+| `src/animation/types.ts`             | `MorphBinding` interface definition                                 |
+| `src/mesh/mesh.ts`                   | `MeshGPU` morph fields (`morphTexture`, `morphWeightsBuffer`, etc.) |
+| `src/loader-gltf/load-gltf.ts`       | Parse `primitive.targets[]`, create tiled texture + weights UBO     |
+| `src/animation/skeleton-updater.ts`  | PATH_WEIGHTS evaluation, per-frame weight upload                    |
+| `src/animation/animation-group.ts`   | Morph-only animation support (no skeleton required)                 |
+| `src/material/pbr/pbr-shader.ts`     | Morph blending in vertex shader, feature flag, WGSL generation      |
+| `src/material/pbr/pbr-pipeline.ts`   | Morph entries in bind group layout and bind group                   |
+| `src/material/pbr/pbr-renderable.ts` | Morph detection and wiring during renderable creation               |
 
 ---
 

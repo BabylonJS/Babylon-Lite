@@ -1,0 +1,86 @@
+{
+  "scene1": {
+    "rawKB": 11.3,
+    "gzipKB": 4.1,
+    "bjsRawKB": 166,
+    "bjsGzipKB": 42.1
+  },
+  "scene2": {
+    "rawKB": 11.5,
+    "gzipKB": 4.2,
+    "bjsRawKB": 166.3,
+    "bjsGzipKB": 42.2
+  },
+  "scene3": {
+    "rawKB": 16.2,
+    "gzipKB": 6,
+    "bjsRawKB": 309.7,
+    "bjsGzipKB": 79.1
+  },
+  "scene4": {
+    "rawKB": 20.2,
+    "gzipKB": 7.2,
+    "bjsRawKB": 329.4,
+    "bjsGzipKB": 84.4
+  },
+  "scene5": {
+    "rawKB": 13.6,
+    "gzipKB": 4.8,
+    "bjsRawKB": 178.7,
+    "bjsGzipKB": 45.7
+  },
+  "scene6": {
+    "rawKB": 14.2,
+    "gzipKB": 5.3,
+    "bjsRawKB": 285.2,
+    "bjsGzipKB": 73.2
+  },
+  "scene7": {
+    "rawKB": 12.1,
+    "gzipKB": 4.4,
+    "bjsRawKB": 166.7,
+    "bjsGzipKB": 42.4
+  },
+  "scene8": {
+    "rawKB": 16,
+    "gzipKB": 5.5,
+    "bjsRawKB": 197.8,
+    "bjsGzipKB": 50
+  },
+  "scene9": {
+    "rawKB": 17.3,
+    "gzipKB": 5.8,
+    "bjsRawKB": 198.6,
+    "bjsGzipKB": 50.2
+  },
+  "scene10": {
+    "rawKB": 13.3,
+    "gzipKB": 4.8,
+    "bjsRawKB": 149.8,
+    "bjsGzipKB": 37.6
+  },
+  "scene11": {
+    "rawKB": 18.9,
+    "gzipKB": 6.2,
+    "bjsRawKB": 198.7,
+    "bjsGzipKB": 50.3
+  },
+  "scene12": {
+    "rawKB": 6.5,
+    "gzipKB": 2.5,
+    "bjsRawKB": 148.9,
+    "bjsGzipKB": 37.3
+  },
+  "scene13": {
+    "rawKB": 13.9,
+    "gzipKB": 5.1,
+    "bjsRawKB": 182.6,
+    "bjsGzipKB": 46.9
+  },
+  "scene14": {
+    "rawKB": 16.6,
+    "gzipKB": 5.7,
+    "bjsRawKB": 197.9,
+    "bjsGzipKB": 50.1
+  }
+}

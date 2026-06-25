@@ -1,0 +1,136 @@
+# Azure Pipelines — Babylon Lite GL npm Publish
+#
+# Publishes the built @babylonjs/lite-gl package to npm. Configure NPM_TOKEN as
+# a secret pipeline variable or variable-group value before enabling this run.
+#
+# Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
+# Pushes to master that change config/release-gl.json read the release type from
+# that file, so repeated patch releases can be requested by bumping its nonce.
+
+trigger:
+    branches:
+        include:
+            - master
+    paths:
+        include:
+            - config/release-gl.json
+
+pr: none
+
+schedules:
+    - cron: "0 8 * * 1"
+      displayName: "Weekly npm publish (lite-gl)"
+      branches:
+          include:
+              - master
+      always: true
+
+parameters:
+    - name: releaseType
+      displayName: "Release type"
+      type: string
+      default: auto
+      values:
+          - auto
+          - patch
+          - minor
+          - major
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "9.15.4"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+
+stages:
+    - stage: PublishNpm
+      displayName: "Publish @babylonjs/lite-gl to npm"
+      jobs:
+          - job: BuildTestAndPublish
+            displayName: "Build, Test, and Publish"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+                  persistCredentials: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm run lint
+                  displayName: "Lint and type-check"
+
+                - script: pnpm test:unit:gl
+                  displayName: "Run lite-gl unit tests"
+                  env:
+                      CI: "true"
+
+                - script: pnpm test:build:gl
+                  displayName: "Run lite-gl build-output tests"
+                  env:
+                      CI: "true"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                # Visual parity vs the Babylon ThinEngine reference (headless
+                # SwiftShader via the global CI/HEADLESS vars). Compares against the
+                # committed reference/gl/<slug>/babylon-ref-golden.png — a published
+                # release must not ship a render that has drifted from Babylon.
+                - script: pnpm test:parity:gl
+                  displayName: "Run lite-gl parity tests"
+
+                - script: pnpm build:gl
+                  displayName: "Build package"
+
+                - script: npx tsx scripts/prepare-npm-release.ts
+                  displayName: "Resolve npm package version"
+                  env:
+                      RELEASE_TYPE: ${{ parameters.releaseType }}
+                      RELEASE_PACKAGE_NAME: "@babylonjs/lite-gl"
+                      RELEASE_SOURCE_PACKAGE_NAME: "@babylonjs/lite-gl"
+                      RELEASE_SOURCE_PACKAGE_JSON: packages/babylon-lite-gl/dist/package.json
+                      RELEASE_CONFIG_PATH: config/release-gl.json
+                      RELEASE_TAG_PATTERN: "npm-lite-gl-v*"
+
+                - script: npm pack --dry-run ./packages/babylon-lite-gl/dist
+                  displayName: "Validate npm package contents"
+
+                - script: |
+                      set -euo pipefail
+
+                      if [ -z "${NPM_TOKEN:-}" ]; then
+                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
+                        exit 1
+                      fi
+
+                      printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
+                      npm publish ./packages/babylon-lite-gl/dist --access public --registry https://registry.npmjs.org/
+                  displayName: "Publish package to npm"
+                  env:
+                      NPM_TOKEN: $(NPM_TOKEN)
+
+                - script: |
+                      set -euo pipefail
+
+                      TAG="npm-lite-gl-v$(PACKAGE_VERSION)"
+                      git config user.email "bjsplat@gmail.com"
+                      git config user.name "Babylon.js CI"
+                      git tag "$TAG" -m "Publish @babylonjs/lite-gl $(PACKAGE_VERSION)"
+                      git push origin "refs/tags/$TAG"
+                  displayName: "Tag published npm version"

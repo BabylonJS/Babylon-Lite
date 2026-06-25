@@ -155,7 +155,6 @@ async function main(): Promise<void> {
 - **Iterate on one scene first.** When working on a specific scene, run only that scene's parity spec during the edit/test loop (e.g. `pnpm exec playwright test tests/lite/parity/scenes/scene36-basis-texture.spec.ts`) instead of the full `pnpm test:parity` suite. This dramatically cuts iteration time. Only run the full suite + `pnpm build:bundle-scenes` as the final guardrail check before declaring success.
 - If perf validation is needed, ask the user to run `pnpm test:perf` locally.
 
-
 ### 1. Live Inspection Tooling (Zero Guesswork)
 
 - Use the **Spector.GPU** MCP tools (`spector-gpu-navigate`, `spector-gpu-capture`, `spector-gpu-get_resource`, etc.) to capture reference frames from Babylon.js (WebGPU mode).
@@ -193,7 +192,6 @@ Hard-won gotchas that have each caused multiple parity failures. Check these fir
 - **Match `loadEnvironment`'s image processing in the BJS reference scene.** `loadEnvironment` enables tone mapping and sets `exposure = 0.8`, `contrast = 1.2` (mirroring BJS `createDefaultEnvironment`). A flat-`clearColor` BJS scene that skips `createDefaultEnvironment` leaves all three at their defaults (tone mapping OFF, 1.0/1.0) — a non-linear mismatch that silently inflates MAD on every IBL-lit model (the dominant residual, ~10-50% darker mid-tones). Set **all three** in the BJS scene: `scene.imageProcessingConfiguration.exposure = 0.8; contrast = 1.2; toneMappingEnabled = true;`. (Tone mapping was the single biggest parity lever on the cx20 scene batch — it dropped multiple scenes from MAD ~1.5 to ~0.01.)
 - **BJS loading overlay leaks into canvas screenshots.** `page.locator("canvas").screenshot()` captures whatever HTML composites over the canvas box, **including Babylon's `babylonjsLoadingDiv` spinner**. A still-fading overlay darkens the whole frame by a scene-dependent amount and inflates MAD (worst on heavy scenes). In BJS reference scenes that import `@babylonjs/core/Loading/loadingScreen` (a required side-effect for some assets), no-op the overlay right after engine init: `engine.displayLoadingUI = function () {};`.
 - **Use the same flat `clearColor` in both engines** for IBL-only test scenes (a buffer clear is pixel-identical across BJS/Lite, unlike a skybox whose projected geometry diverges at arbitrary framings) so the full-image compare passes with no background masking.
-
 
 ### 2. Iterative Scene-Based Evolution
 
