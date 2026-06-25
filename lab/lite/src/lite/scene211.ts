@@ -14,6 +14,15 @@ async function main(): Promise<void> {
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
 
+    // The meshopt decoder (meshopt_decoder.js) is deployed at the site root, a
+    // sibling of the scene pages — not under the page's own directory. Resolve it
+    // relative to the page so it loads under ANY base path (local root or the
+    // per-build parity-lab/<build>/ path), instead of the default site root which
+    // 404s on the deployed static site. Dynamic import mirrors the demo helper and
+    // keeps the meshopt feature out of non-meshopt bundles.
+    const { setMeshoptBaseUrl } = await import("babylon-lite/loader-gltf/meshopt-decode.js");
+    setMeshoptBaseUrl(new URL("../", document.baseURI).href);
+
     addToScene(scene, await loadGltf(engine, MODEL_URL));
 
     const cam = createArcRotateCamera(Math.PI / 2, Math.PI / 2.2, 4.5, { x: -0.045, y: 0.043, z: 0.917 });
