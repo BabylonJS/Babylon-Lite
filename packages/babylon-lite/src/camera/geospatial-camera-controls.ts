@@ -1,5 +1,6 @@
 import type { GeospatialCamera } from "./geospatial-camera.js";
 import { computeLocalBasis, computeYawPitchFromLookAt } from "./geospatial-camera.js";
+import { flyGeospatialCameraToAsync } from "./geospatial-camera-fly.js";
 import { clampZoomDistance, GEO_EPSILON } from "./geospatial-limits.js";
 import { getViewProjectionMatrix } from "./camera.js";
 import { createPickingRay } from "../picking/ray.js";
@@ -14,6 +15,14 @@ export interface GeospatialControlOptions {
     zoomToCursor?: boolean;
     /** Enable simple sphere collision so the camera cannot dip below the surface. Default false. */
     checkCollisions?: boolean;
+    /** Duration (ms) of the fly-to animation triggered by a primary-pointer double tap. Default 1000. */
+    doubleTapAnimationDurationMs?: number;
+    /**
+     * Optional easing applied to the double-tap fly-to animation (normalized progress `g` ∈ [0,1]).
+     * A single function instance can be created once and reused across double taps. Default null
+     * (uses the fly module's cubic ease-in-out).
+     */
+    doubleTapEasingFunction?: ((g: number) => number) | null;
 }
 
 interface PickResult {
@@ -31,6 +40,7 @@ interface PickResult {
  *  - Touch: single-finger drag = pan; two-finger pinch = zoom toward the centroid,
  *    promoting to a pan once the centroid drifts ≥ 20 px.
  *  - Keyboard: arrows = pan, Ctrl+arrows = tilt (pitch/yaw), +/- = zoom along the look vector.
+ *  - Double-click (primary button): fly the centre to the point under the cursor.
  *
  * Movement uses Babylon.js's framerate-independent physics model (velocity +
  * inertial decay). Globe picking is analytic ray-sphere against the planet
@@ -43,6 +53,8 @@ interface PickResult {
 export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLCanvasElement, scene: SceneContext, options?: GeospatialControlOptions): () => void {
     const zoomToCursor = options?.zoomToCursor ?? true;
     const checkCollisions = options?.checkCollisions ?? false;
+    const doubleTapAnimationDurationMs = options?.doubleTapAnimationDurationMs ?? 1000;
+    const doubleTapEasingFunction = options?.doubleTapEasingFunction ?? null;
 
     // ── Speed / inertia (Babylon GeospatialCameraMovement defaults) ──
     const speed = 1;
@@ -546,6 +558,12 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
             de -= 1;
         }
         if (dn !== 0 || de !== 0) {
+            // Normalize the (north, east) direction so holding two pan keys at once (e.g. up + left)
+            // pans along a diagonal at the same speed as a single direction, instead of the ~1.41x
+            // boost (sqrt(2)) that results from applying each axis independently.
+            const invLen = 1 / Math.hypot(dn, de);
+            dn *= invLen;
+            de *= invLen;
             computeLocalBasis(camera.center, east, north, up);
             panAccumulated.x += (north.x * dn + east.x * de) * panStep;
             panAccumulated.y += (north.y * dn + east.y * de) * panStep;
@@ -609,6 +627,28 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
 
     function onContextMenu(e: Event): void {
         e.preventDefault();
+    }
+
+    function onDoubleClick(e: MouseEvent): void {
+        // Only respond to a double tap from the primary pointer (left button), and ignore it if
+        // any other button is still pressed (e.g. right button held for rotation while double-tapping
+        // left). `e.buttons` is a bitmask of currently-pressed buttons. This mirrors Babylon.js's
+        // GeospatialCameraPointersInput primary-pointer guard.
+        if (e.button !== 0 || e.buttons !== 0) {
+            return;
+        }
+        // Suppress browser defaults for the gesture (text selection / page zoom) now that it
+        // is recognised as a primary-pointer double tap.
+        e.preventDefault();
+        const r = canvas.getBoundingClientRect();
+        const pick = pickScreen(e.clientX - r.left, e.clientY - r.top);
+        if (pick.hit && pick.point) {
+            void flyGeospatialCameraToAsync(camera, scene, {
+                center: { x: pick.point.x, y: pick.point.y, z: pick.point.z },
+                durationMs: doubleTapAnimationDurationMs,
+                ease: doubleTapEasingFunction ?? undefined,
+            });
+        }
     }
 
     function onKeyDown(e: KeyboardEvent): void {
@@ -725,6 +765,7 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         [canvas, "pointerup", onPointerUp as EventListener],
         [canvas, "wheel", onWheel as EventListener, { passive: false }],
         [canvas, "contextmenu", onContextMenu as EventListener],
+        [canvas, "dblclick", onDoubleClick as EventListener],
         [canvas, "touchstart", onTouchStart as EventListener, { passive: false }],
         [canvas, "touchmove", onTouchMove as EventListener, { passive: false }],
         [canvas, "touchend", onTouchEnd as EventListener],

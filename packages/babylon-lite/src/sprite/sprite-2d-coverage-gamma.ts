@@ -24,10 +24,10 @@ import { _registerSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.j
 function makeCoverageGammaWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
 let a = pow(s.a, L.aa.x);
-return vec4<f32>(s.rgb, a) * in.tint * L.opacityMul;
+return vec4f(s.rgb, a) * in.tint * L.opacityMul;
 }`;
 }
 

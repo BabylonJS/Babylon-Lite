@@ -72,52 +72,52 @@ export interface BillboardCustomShader {
 function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {
     const fxBinding = 3 + extraTextures.length * 2;
     return `${SCENE_UBO_WGSL}
-struct BillboardSystem {
-opacityMul: vec4<f32>,
-axisAndCutoff: vec4<f32>,
+struct S {
+opacityMul: vec4f,
+axisAndCutoff: vec4f,
 };
-@group(1) @binding(0) var<uniform> billboards: BillboardSystem;
+@group(1) @binding(0) var<uniform> billboards: S;
 @group(1) @binding(1) var atlasTex: texture_2d<f32>;
 @group(1) @binding(2) var atlasSamp: sampler;
 ${makeExtraBindingsWgsl(1, 3, extraTextures)}${makeFxStructWgsl(1, fxBinding)}
 ${makeBillboardBasisWgsl(orientation)}
-struct VIn {
+struct I {
 @builtin(vertex_index) vid: u32,
-@location(0) iPos: vec3<f32>,
-@location(1) iSize: vec2<f32>,
-@location(2) iUvMin: vec2<f32>,
-@location(3) iUvMax: vec2<f32>,
-@location(4) iRot: f32,
-@location(5) iPivot: vec2<f32>,
-@location(6) iColor: vec4<f32>,
+@location(0) p: vec3f,
+@location(1) s: vec2f,
+@location(2) a: vec2f,
+@location(3) b: vec2f,
+@location(4) r: f32,
+@location(5) o: vec2f,
+@location(6) c: vec4f,
 };
-struct VOut {
-@builtin(position) pos: vec4<f32>,
-@location(0) uv: vec2<f32>,
-@location(1) tint: vec4<f32>,
+struct O {
+@builtin(position) p: vec4f,
+@location(0) uv: vec2f,
+@location(1) tint: vec4f,
 @location(2) viewDist: f32,
-@location(3) vWorldPos: vec3<f32>,
+@location(3) vWorldPos: vec3f,
 };
 @vertex
-fn vs(in: VIn) -> VOut {
-let corner = vec2<f32>(select(0.0, 1.0, in.vid == 1u || in.vid == 2u), select(0.0, 1.0, in.vid >= 2u));
-let local = (corner - in.iPivot) * in.iSize;
-let cosRot = cos(in.iRot);
-let sinRot = sin(in.iRot);
-let rotated = vec2<f32>(local.x * cosRot - local.y * sinRot, local.x * sinRot + local.y * cosRot);
-let basis = getBillboardBasis(in.iPos);
-let worldPos = in.iPos + basis.right * rotated.x + basis.up * rotated.y;
-var out: VOut;
-out.pos = scene.viewProjection * vec4<f32>(worldPos, 1.0);
-out.uv = mix(in.iUvMin, in.iUvMax, corner);
-out.tint = in.iColor;
-let viewCenter = scene.view * vec4<f32>(in.iPos, 1.0);
+fn vs(in: I) -> O {
+let q = vec2f(select(0.0, 1.0, in.vid == 1u || in.vid == 2u), select(0.0, 1.0, in.vid >= 2u));
+let l = (q - in.o) * in.s;
+let cr = cos(in.r);
+let sr = sin(in.r);
+let r = vec2f(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+let b = basis(in.p);
+let wp = in.p + b.r * r.x + b.u * r.y;
+var out: O;
+out.p = scene.viewProjection * vec4f(wp, 1);
+out.uv = mix(in.a, in.b, q);
+out.tint = in.c;
+let viewCenter = scene.view * vec4f(in.p, 1);
 out.viewDist = length(viewCenter.xyz);
-out.vWorldPos = worldPos;
+out.vWorldPos = wp;
 return out;
 }
 @fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+fn fs(in: O) -> @location(0) vec4f {
 ${fragment}
 }`;
 }

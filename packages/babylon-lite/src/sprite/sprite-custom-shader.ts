@@ -73,7 +73,7 @@ function makeCustomSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, extraT
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 ${makeExtraBindingsWgsl(spriteGroupIndex, 3, extraTextures)}${makeFxStructWgsl(spriteGroupIndex, fxBinding)}
 @fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+fn fs(in: O) -> @location(0) vec4f {
 ${fragment}
 }`;
 }

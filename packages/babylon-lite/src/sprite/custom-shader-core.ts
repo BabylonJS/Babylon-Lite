@@ -94,7 +94,7 @@ time: f32,
 _p0: f32,
 _p1: f32,
 _p2: f32,
-params: vec4<f32>,
+params: vec4f,
 };
 @group(${group}) @binding(${binding}) var<uniform> fx: SpriteFx;`;
 }

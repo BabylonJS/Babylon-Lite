@@ -2,6 +2,25 @@
 
 This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side by side. Babylon Lite uses **factory functions** instead of constructors, **plain data** instead of class instances, and explicit `addToScene()` instead of auto-registration.
 
+> **Not ready for a full rewrite? Start with `@babylonjs/lite-compat`.** The
+> [`@babylonjs/lite-compat`](https://www.npmjs.com/package/@babylonjs/lite-compat)
+> package is an opt-in, **Babylon.js-shaped** compatibility layer built on top of
+> the native Lite API described below. It keeps the familiar class-based surface
+> (`new WebGPUEngine`, `new Scene`, `new ArcRotateCamera`, `MeshBuilder`,
+> `StandardMaterial`, …), so an existing BJS scene runs on Lite's WebGPU renderer
+> with little or no code change — and its bundler plugins (Vite / Rollup /
+> Webpack / esbuild) can even **rewrite your existing `@babylonjs/core`,
+> `@babylonjs/loaders`, `@babylonjs/addons`, and `@babylonjs/materials` imports
+> at build time**, so you don't touch a single import. Unsupported APIs throw
+> `LiteCompatError` rather than mis-rendering. The intended path is:
+>
+> ```
+> @babylonjs/core  →  @babylonjs/lite-compat  →  @babylonjs/lite (native)
+> ```
+>
+> Use lite-compat to get running fast, then port to the native factory-function
+> API in this guide (smaller bundles, full tree-shaking) at your own pace.
+
 ---
 
 ## Quick Reference

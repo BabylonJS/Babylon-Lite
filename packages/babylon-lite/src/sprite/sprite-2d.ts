@@ -463,7 +463,7 @@ export function _markSprite2DDirty(layer: Sprite2DLayer, lo: number, hi: number)
 /** Add one sprite. Returns its index. Grows capacity as needed. */
 export function addSprite2DIndex(layer: Sprite2DLayer, props: Sprite2DProps): number {
     if (props.positionPx === undefined) {
-        throw new Error("addSprite2DIndex: props.positionPx is required.");
+        throw new Error("addSprite2DIndex: positionPx required.");
     }
     const idx = layer.count;
     if (idx >= layer._capacity) {
