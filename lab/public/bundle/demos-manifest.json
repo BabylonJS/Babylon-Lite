@@ -1,46 +1,50 @@
 {
   "offscreen": {
-    "rawKB": 180.3,
-    "gzipKB": 75.7
+    "rawKB": 220.3,
+    "gzipKB": 91.6
   },
   "torus-states": {
-    "rawKB": 25.1,
-    "gzipKB": 8.8
+    "rawKB": 27.2,
+    "gzipKB": 9.8
   },
   "doom": {
-    "rawKB": 126.6,
-    "gzipKB": 42.5
+    "rawKB": 127.4,
+    "gzipKB": 42.8
   },
   "quake": {
-    "rawKB": 127.8,
-    "gzipKB": 46.3
+    "rawKB": 129.8,
+    "gzipKB": 47
   },
   "minecraft": {
-    "rawKB": 107.2,
-    "gzipKB": 38.8
+    "rawKB": 108.2,
+    "gzipKB": 38.9
   },
   "freeciv": {
-    "rawKB": 67.1,
-    "gzipKB": 25.2
+    "rawKB": 67.3,
+    "gzipKB": 25.4
   },
   "tetris": {
-    "rawKB": 70.5,
-    "gzipKB": 26
+    "rawKB": 73.9,
+    "gzipKB": 27.4
   },
   "mosquito-amber": {
-    "rawKB": 105,
-    "gzipKB": 41.8
+    "rawKB": 109,
+    "gzipKB": 43.6
   },
   "littlest-tokyo": {
-    "rawKB": 59,
-    "gzipKB": 23.8
+    "rawKB": 62.9,
+    "gzipKB": 25.6
   },
   "bath-day": {
-    "rawKB": 178.5,
-    "gzipKB": 61.8
+    "rawKB": 182.8,
+    "gzipKB": 63.8
   },
   "platformer": {
-    "rawKB": 84.2,
+    "rawKB": 84.3,
     "gzipKB": 30.1
+  },
+  "sandblox": {
+    "rawKB": 113.2,
+    "gzipKB": 40.9
   }
 }
