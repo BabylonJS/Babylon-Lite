@@ -1,11 +1,11 @@
 {
-  "rawKB": 94.8,
-  "gzipKB": 38.7,
+  "rawKB": 95.3,
+  "gzipKB": 38.9,
   "ignoredRawKB": 1485.2,
   "runtimeChunks": [
     "scene175-generate-mipmaps-B-d91NI_.js",
     "scene175-gltf-glb-parser-BmlEZ507.js",
-    "scene175-pbr-renderable-_CMUP1sf.js",
+    "scene175-pbr-renderable-BtjDmJcb.js",
     "scene175-recast-navigation-CYBQI-zY-Dry_z7x_.js",
     "scene175-shader-composer-CgJmQyJj.js",
     "scene175-singlelight-hemispheric-wgsl-D-nS_1oq.js",

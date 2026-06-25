@@ -1,22 +1,22 @@
 {
-  "rawKB": 96.2,
-  "gzipKB": 39.8,
+  "rawKB": 96.8,
+  "gzipKB": 40,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene242-animation-pointer-basecolor-C0cq9A_I.js",
     "scene242-emissive-fragment-BjnF3duS.js",
     "scene242-generate-mipmaps-BCxjeJMR.js",
-    "scene242-gltf-animation-Dm97A3mz.js",
+    "scene242-gltf-animation-BYIjSsSj.js",
     "scene242-gltf-ext-emissive-strength-CButLZnK.js",
-    "scene242-gltf-feature-animation-pointer-7Tn5Qu5X.js",
-    "scene242-gltf-feature-animations-B_VnRwPM.js",
-    "scene242-gltf-feature-registry-BUHew8Rq.js",
+    "scene242-gltf-feature-animation-pointer-DH5WABcF.js",
+    "scene242-gltf-feature-animations-4gglUWxZ.js",
+    "scene242-gltf-feature-registry-C_ukKuDF.js",
     "scene242-gltf-json-asset-CTUWQBxV.js",
     "scene242-ibl-fragment-CeRrvT96.js",
-    "scene242-pbr-renderable-DQEk4f7o.js",
+    "scene242-pbr-renderable-CJt7j6Hw.js",
     "scene242-rgbd-decode-DapdOyyV.js",
     "scene242-scene-uniforms-FTYH6Ct0.js",
-    "scene242-visibility-CNBVZaJ8.js",
+    "scene242-visibility-BFYz3wQB.js",
     "scene242.js"
   ]
 }
