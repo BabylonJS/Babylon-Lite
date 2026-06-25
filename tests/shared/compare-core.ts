@@ -9,6 +9,7 @@
 import { PNG } from "pngjs";
 import * as fs from "fs";
 import * as path from "path";
+import { test } from "@playwright/test";
 import type { Browser, Page, TestInfo } from "@playwright/test";
 
 export interface SceneConfig {
@@ -310,7 +311,10 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     const settleMs = opts.settleMs ?? 1500;
 
     // Open the BJS ref page in a fresh context to avoid interfering with the lite page.
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    // Manually-created contexts do NOT inherit the project's `use.baseURL`, so a
+    // baseURL-relative ref URL (e.g. "babylon-ref-sceneN.html" under a path-prefixed
+    // public host) would fail to resolve. Forward the project baseURL explicitly.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, baseURL: test.info().project.use.baseURL });
     const bjsPage = await context.newPage();
     const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
     await bjsPage.goto(cfg.refUrl(opts.sceneId, urlParams));

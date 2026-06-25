@@ -44,6 +44,13 @@ const useBrowserStack = !!(process.env.BROWSERSTACK_USERNAME && process.env.BROW
 const rawBaseUrl = process.env.PARITY_BASE_URL?.trim();
 const publicBaseUrl = rawBaseUrl ? (rawBaseUrl.endsWith("/") ? rawBaseUrl : `${rawBaseUrl}/`) : undefined;
 
+// Fail fast on a misconfigured cloud run: with credentials but no public base URL
+// the remote BrowserStack browser cannot reach localhost (no Local tunnel), so it
+// would grab a cloud session and then time out. Error before claiming any session.
+if (useBrowserStack && !publicBaseUrl) {
+    throw new Error("[parity-cloud] BROWSERSTACK credentials are set but PARITY_BASE_URL is not. " + "Cloud runs need a public site URL (the remote browser cannot reach localhost). " + "Set PARITY_BASE_URL to the deployed parity site, or run `pnpm test:parity` for local Chrome.");
+}
+
 // Number of parallel BrowserStack sessions / Playwright workers. Set by the
 // wait script in CI; defaults conservatively so a local run grabs one session.
 const ciWorkers = process.env.CIWORKERS && Number(process.env.CIWORKERS) > 0 ? Number(process.env.CIWORKERS) : undefined;
