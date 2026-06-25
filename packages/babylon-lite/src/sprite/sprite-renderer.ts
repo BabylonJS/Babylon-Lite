@@ -155,8 +155,8 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
     let lg = rr._layerGpu.get(layer);
     if (!lg) {
         const cap = layer._capacity;
-        const instanceBuffer = createSpriteInstanceBuffer(rr._surface.engine._device, layer, "sprite-layer-instances");
-        const uniformBuffer = createEmptyUniformBuffer(rr._surface.engine, LAYER_UBO_BYTES, "sprite-layer-ubo");
+        const instanceBuffer = createSpriteInstanceBuffer(rr._surface.engine._device, layer);
+        const uniformBuffer = createEmptyUniformBuffer(rr._surface.engine, LAYER_UBO_BYTES);
         const fx = _getSpriteFxHook()?.createLayerFx(rr._surface.engine, "sprite-layer-fx-ubo", layer) ?? null;
         lg = {
             layer,
@@ -174,7 +174,7 @@ function ensureLayerGpu(rr: SpriteRenderer, layer: Sprite2DLayer): LayerGpu {
         };
         rr._layerGpu.set(layer, lg);
     }
-    const grown = ensureSpriteInstanceBuffer(rr._surface.engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity, "sprite-layer-instances");
+    const grown = ensureSpriteInstanceBuffer(rr._surface.engine._device, layer, lg.instanceBuffer, lg.instanceBufferCapacity);
     if (grown.reallocated) {
         lg.instanceBuffer = grown.buffer;
         lg.instanceBufferCapacity = grown.capacity;
@@ -284,7 +284,7 @@ function assertSpriteRendererLayers(layers: readonly Sprite2DLayer[]): void {
 
 function assertSpriteRendererLayer(layer: Sprite2DLayer): void {
     if (layer.depth !== "none") {
-        throw new Error('SpriteRenderer only supports Sprite2DLayer with depth: "none". Use addDepthHostedSpriteLayer(scene, layer) for depth-hosted sprites.');
+        throw new Error('SpriteRenderer requires depth: "none".');
     }
 }
 

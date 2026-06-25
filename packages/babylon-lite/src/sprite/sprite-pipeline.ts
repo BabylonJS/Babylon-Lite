@@ -36,10 +36,10 @@ function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: bo
     // Coverage gamma (opt-in, text layers): raise sampled alpha to 1/coverageGamma (L.aa.x) so
     // anti-aliased glyph edges composite heavier, mimicking gamma-space stem darkening. Gated at
     // shader-build time — non-gamma layers ship the trivial textured fragment with no `pow`.
-    const coverageLine = coverageGamma ? `\nlet a = pow(s.a, L.aa.x);\nreturn vec4<f32>(s.rgb, a) * in.tint * L.opacityMul;` : `\nreturn s * in.tint * L.opacityMul;`;
+    const coverageLine = coverageGamma ? `\nlet a = pow(s.a, L.aa.x);\nreturn vec4f(s.rgb, a) * in.tint * L.opacityMul;` : `\nreturn s * in.tint * L.opacityMul;`;
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);${coverageLine}
 }`;
 }
@@ -54,62 +54,53 @@ let s = textureSample(atlasTex, atlasSamp, in.uv);${coverageLine}
  */
 export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false): string {
     const group = `@group(${spriteGroupIndex})`;
-    const zAttribute = hasDepth ? `,\n@location(6) iZ: f32` : "";
-    const uvOffsetAttribute = uvScroll ? `,\n@location(7) iUvOffset: vec2<f32>` : "";
-    const zPosition = hasDepth ? "1.0 - in.iZ" : "0.0";
-    return `struct Layer {
-viewPos: vec2<f32>,
+    const zAttribute = hasDepth ? `,\n@location(6) z: f32` : "";
+    const uvOffsetAttribute = uvScroll ? `,\n@location(7) o: vec2f` : "";
+    const zPosition = hasDepth ? "1 - in.z" : "0";
+    return `struct Lr {
+viewPos: vec2f,
 viewScale: f32,
 viewRot: f32,
-screenSize: vec2<f32>,
-pivot: vec2<f32>,
-// Per-layer opacity, pre-shaped for the layer's blend mode (CPU-side):
-//   straight-alpha:  (1, 1, 1, opacity)  — only alpha is scaled
-//   premultiplied:   (opacity, opacity, opacity, opacity) — RGB and A scale together
-// One uniform, no shader branch.
-opacityMul: vec4<f32>,
-// Coverage-gamma controls (text layers): .x = 1/coverageGamma applied to sampled alpha by the
-// coverage-gamma shader permutation. .yzw reserved. Always present (UBO is a fixed 64 bytes);
-// unused by the base shader permutation.
-aa: vec4<f32>,
+screenSize: vec2f,
+pivot: vec2f,
+opacityMul: vec4f,
+aa: vec4f,
 };
-${group} @binding(0) var<uniform> L: Layer;
+${group} @binding(0) var<uniform> L: Lr;
 ${group} @binding(1) var atlasTex: texture_2d<f32>;
 ${group} @binding(2) var atlasSamp: sampler;
-struct VIn {
+struct I {
 @builtin(vertex_index) vid: u32,
-@location(0) iPos: vec2<f32>,
-@location(1) iSize: vec2<f32>,
-@location(2) iUvMin: vec2<f32>,
-@location(3) iUvMax: vec2<f32>,
-@location(4) iRot: f32,
-@location(5) iColor: vec4<f32>${zAttribute}${uvOffsetAttribute}
+@location(0) p: vec2f,
+@location(1) s: vec2f,
+@location(2) a: vec2f,
+@location(3) b: vec2f,
+@location(4) r: f32,
+@location(5) c: vec4f${zAttribute}${uvOffsetAttribute}
 };
-struct VOut {
-@builtin(position) pos: vec4<f32>,
-@location(0) uv: vec2<f32>,
-@location(1) tint: vec4<f32>,
+struct O {
+@builtin(position) p: vec4f,
+@location(0) uv: vec2f,
+@location(1) tint: vec4f,
 };
 @vertex
-fn vs(in: VIn) -> VOut {
-var corners = array<vec2<f32>, 4>(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));
-let c = corners[in.vid];
-let local = (c - L.pivot) * in.iSize;
-let cr = cos(in.iRot);
-let sr = sin(in.iRot);
-let rotated = vec2<f32>(local.x * cr - local.y * sr, local.x * sr + local.y * cr);
-let layerPx = in.iPos + rotated;
-let centered = layerPx - L.viewPos;
+fn vs(in: I) -> O {
+var q = array<vec2f, 4>(vec2f(0, 0), vec2f(1, 0), vec2f(1, 1), vec2f(0, 1));
+let c = q[in.vid];
+let l = (c - L.pivot) * in.s;
+let cr = cos(in.r);
+let sr = sin(in.r);
+let r = vec2f(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+let p = in.p + r - L.viewPos;
 let lc = cos(L.viewRot);
 let ls = sin(L.viewRot);
-let viewRot = vec2<f32>(centered.x * lc - centered.y * ls, centered.x * ls + centered.y * lc);
-let screenPx = viewRot * L.viewScale;
-let ndc = vec2<f32>(screenPx.x / L.screenSize.x * 2.0 - 1.0, 1.0 - screenPx.y / L.screenSize.y * 2.0);
-let uv = mix(in.iUvMin, in.iUvMax, c)${uvScroll ? " + in.iUvOffset" : ""};
-var out: VOut;
-out.pos = vec4<f32>(ndc, ${zPosition}, 1.0);
+let v = vec2f(p.x * lc - p.y * ls, p.x * ls + p.y * lc) * L.viewScale;
+let n = vec2f(v.x / L.screenSize.x * 2 - 1, 1 - v.y / L.screenSize.y * 2);
+let uv = mix(in.a, in.b, c)${uvScroll ? " + in.o" : ""};
+var out: O;
+out.p = vec4f(n, ${zPosition}, 1);
 out.uv = uv;
-out.tint = in.iColor;
+out.tint = in.c;
 return out;
 }`;
 }

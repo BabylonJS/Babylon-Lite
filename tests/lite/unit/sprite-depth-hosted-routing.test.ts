@@ -171,8 +171,8 @@ describe("addDepthHostedSpriteLayer", () => {
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const depthShaderDescriptor = device.createShaderModule.mock.calls
             .map((call) => call[0] as GPUShaderModuleDescriptor)
-            .find((descriptor) => descriptor.code.includes("@location(6) iZ: f32"));
-        expect(depthShaderDescriptor?.code).toContain("vec4<f32>(ndc, 1.0 - in.iZ, 1.0)");
+            .find((descriptor) => descriptor.code.includes("@location(6) z: f32"));
+        expect(depthShaderDescriptor?.code).toContain("vec4f(n, 1 - in.z, 1)");
         device.createRenderPipeline.mockClear();
         const renderable = scene._renderables[0]!;
 
@@ -203,7 +203,7 @@ describe("addDepthHostedSpriteLayer", () => {
         await registerScene(scene);
 
         const device = engine._device as unknown as { createBuffer: ReturnType<typeof vi.fn>; queue: { writeBuffer: ReturnType<typeof vi.fn> } };
-        const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).label === "sprite-depth-hosted-instances");
+        const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).size === DEPTH_INSTANCE_STRIDE_BYTES);
         expect((instanceBufferCreate![0] as GPUBufferDescriptor).size).toBe(DEPTH_INSTANCE_STRIDE_BYTES);
 
         const binding = scene._renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth24plus-stencil8", _sampleCount: 1 });
