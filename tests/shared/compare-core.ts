@@ -314,7 +314,15 @@ export async function captureGolden(browser: Browser, opts: CaptureGoldenOptions
     // Manually-created contexts do NOT inherit the project's `use.baseURL`, so a
     // baseURL-relative ref URL (e.g. "babylon-ref-sceneN.html" under a path-prefixed
     // public host) would fail to resolve. Forward the project baseURL explicitly.
-    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, baseURL: test.info().project.use.baseURL });
+    // `test.info()` is only available under the Playwright runner (not vitest unit
+    // tests or standalone recapture scripts), so fall back to undefined when absent.
+    let projectBaseURL: string | undefined;
+    try {
+        projectBaseURL = test.info().project.use.baseURL;
+    } catch {
+        projectBaseURL = undefined;
+    }
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, baseURL: projectBaseURL });
     const bjsPage = await context.newPage();
     const urlParams = opts.seekTime !== undefined ? `?seekTime=${opts.seekTime}${opts.queryParams ? `&${opts.queryParams}` : ""}` : opts.queryParams ? `?${opts.queryParams}` : "";
     await bjsPage.goto(cfg.refUrl(opts.sceneId, urlParams));
