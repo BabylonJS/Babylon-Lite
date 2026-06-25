@@ -5,11 +5,12 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Sprite2DLayer, SpriteBlendMode } from "./sprite-2d.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";
+import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, DEPTH_UVSCROLL_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES, PURE_2D_UVSCROLL_STRIDE_BYTES } from "./sprite-2d.js";
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
-    /** @internal Shader modules keyed by `${hasDepth}:${uvScroll}:${coverageGamma}` permutation. */
+    /** @internal Shader modules keyed by `${hasDepth}:${uvScroll}` permutation. */
     _shaderModules: Map<string, GPUShaderModule>;
     /** @internal */
     _pipelines: Map<string, GPURenderPipeline>;
@@ -32,15 +33,12 @@ const SPRITE_DEPTH_OFFSET_BYTES = 52;
 const SPRITE_UVOFFSET_OFFSET_PURE_2D_BYTES = 52;
 const SPRITE_UVOFFSET_OFFSET_DEPTH_BYTES = 56;
 
-function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean, coverageGamma = false): string {
-    // Coverage gamma (opt-in, text layers): raise sampled alpha to 1/coverageGamma (L.aa.x) so
-    // anti-aliased glyph edges composite heavier, mimicking gamma-space stem darkening. Gated at
-    // shader-build time — non-gamma layers ship the trivial textured fragment with no `pow`.
-    const coverageLine = coverageGamma ? `\nlet a = pow(s.a, L.aa.x);\nreturn vec4<f32>(s.rgb, a) * in.tint * L.opacityMul;` : `\nreturn s * in.tint * L.opacityMul;`;
+function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
     return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
-let s = textureSample(atlasTex, atlasSamp, in.uv);${coverageLine}
+let s = textureSample(atlasTex, atlasSamp, in.uv);
+return s * in.tint * L.opacityMul;
 }`;
 }
 
@@ -211,7 +209,7 @@ function spritePipelineKey(
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
     const uvKey = layer?._uvScroll ? "1" : "0";
-    const cgKey = layer?._coverageGamma ? "1" : "0";
+    const cgKey = layer ? (_getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0") : "0";
     return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
@@ -220,13 +218,16 @@ function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache
     if (customModule) {
         return customModule;
     }
+    const gammaModule = layer ? _getSpriteCoverageGammaHook()?.shaderModule(engine, hasDepth, layer) : null;
+    if (gammaModule) {
+        return gammaModule;
+    }
     const uvScroll = layer?._uvScroll === true;
-    const coverageGamma = layer?._coverageGamma === true;
-    const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}:${coverageGamma ? 1 : 0}`;
+    const key = `${hasDepth ? 1 : 0}:${uvScroll ? 1 : 0}`;
     let module = cache._shaderModules.get(key);
     if (!module) {
         module = engine._device.createShaderModule({
-            code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll, coverageGamma),
+            code: makeSpriteWgsl(hasDepth, hasDepth ? 1 : 0, uvScroll),
         });
         cache._shaderModules.set(key, module);
     }
@@ -439,10 +440,10 @@ export function buildSpriteLayerUbo(layer: Sprite2DLayer, screenWidth: number, s
         ubo[10] = 1;
         ubo[11] = op;
     }
-    const g = layer.coverageGamma;
-    // aa.x = 1/coverageGamma; aa.yzw reserved (scratch UBO is zero-initialized and reused, so
-    // 13..15 stay 0 without explicit writes).
-    ubo[12] = g > 0 ? 1 / g : 1;
+    // Coverage gamma (opt-in via setSprite2DCoverageGamma): the hook writes aa.x = 1/coverageGamma
+    // for gamma layers and 0 otherwise. Absent when no gamma layer exists, so non-gamma scenes ship
+    // no gamma bytes here; aa.yzw stay 0 (scratch UBO is zero-initialized and reused).
+    _getSpriteCoverageGammaHook()?.writeUbo(layer, ubo);
 }
 
 /**
