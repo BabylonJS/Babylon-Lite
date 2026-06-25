@@ -60,6 +60,10 @@ export interface GltfMeshData {
     _colors: Float32Array | null;
     /** @internal Primitive had no NORMAL attribute → flat-shade (glTF spec). */
     _flatNormal?: boolean;
+    /** @internal Non-triangle-list primitive topology index (1=points, 2=lines,
+     *  3=line-strip, 4=triangle-strip) from the glTF primitive `mode`. Undefined =
+     *  triangle-list (the default). LINE_LOOP/TRIANGLE_FAN are unsupported (so is BJS). */
+    _topology?: number;
     /** @internal */
     _indices: Uint16Array | Uint32Array;
     /** @internal */
@@ -196,7 +200,11 @@ async function fetchGltfAsset(source: string | ArrayBuffer | Blob): Promise<{ js
     // Resolve the source to bytes. Only a URL string yields a base URL for resolving external .bin/image
     // references; ArrayBuffer/Blob inputs are self-contained (GLB, or glTF with data: URIs).
     const isUrl = typeof source === "string";
-    const baseUrl = isUrl ? source.substring(0, source.lastIndexOf("/") + 1) : "";
+    // Resolve the source to an absolute URL so external .bin / image URIs resolve correctly even when the
+    // caller passes a root-relative ("/models/foo.gltf") or document-relative path — `new URL(uri, base)`
+    // downstream requires an absolute base. Absolute inputs (https://…) are returned unchanged. In a
+    // non-DOM context (Node / a worker without `location`) fall back to a plain directory-prefix base.
+    const baseUrl = !isUrl ? "" : typeof location !== "undefined" ? new URL(".", new URL(source, location.href)).href : source.slice(0, source.lastIndexOf("/") + 1);
     const buffer = isUrl ? await fetch(source).then((r) => r.arrayBuffer()) : source instanceof Blob ? await source.arrayBuffer() : source;
 
     // Classify by the GLB magic ("glTF" = 0x46546c67, little-endian) rather than the URL extension, so
@@ -225,6 +233,22 @@ function assetUsesGltfFeatures(json: any) {
         JSON.stringify(json).includes("extras") ||
         (json.skins?.length && anyPrimitive(json, (p) => p.attributes?.JOINTS_0 !== undefined)) ||
         anyPrimitive(json, (p) => !!p.targets?.length) ||
+        // A node with a negative-determinant local transform (odd negative scale, or a `matrix`
+        // with negative 3x3 determinant) may need the negative-winding feature. This mirrors the
+        // registry's `hasNegDetNode` predicate so a positive-determinant `matrix` node — extremely
+        // common, e.g. TextureSettingsTest — does NOT needlessly pull the feature registry.
+        (json.nodes as any[] | undefined)?.some((n: any) =>
+            n.scale
+                ? n.scale[0] * n.scale[1] * n.scale[2] < 0
+                : n.matrix
+                  ? n.matrix[0] * (n.matrix[5] * n.matrix[10] - n.matrix[6] * n.matrix[9]) +
+                        n.matrix[1] * (n.matrix[6] * n.matrix[8] - n.matrix[4] * n.matrix[10]) +
+                        n.matrix[2] * (n.matrix[4] * n.matrix[9] - n.matrix[5] * n.matrix[8]) <
+                    0
+                  : false
+        ) ||
+        // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP).
+        anyPrimitive(json, (p) => p.mode !== undefined && p.mode !== 4) ||
         needsOrmComposite(json)
     );
 }
@@ -357,7 +381,7 @@ async function extractAllMeshes(
             // first need — non-interleaved assets never fetch it. Tight primitives
             // fall through to the path below (byte-identical to non-interleaved).
             if (!decoded && _strided(primitive)) {
-                const ip = (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
+                const ip = await (await loadInterleave()).buildInterleavedPartial(json, binChunk, primitive, worldMatrix, nodeIdx);
                 if (ip) {
                     matPromises.push(getMat(primitive.material));
                     partials.push(ip);
@@ -397,6 +421,20 @@ async function extractAllMeshes(
             // (the runtime caches the module, so the per-primitive import() resolves instantly).
             const colors = colorData ? (await importColorNormalize()).normalizeColorToVec4(colorData._data, colorData._count, colorData._componentCount) : null;
 
+            // TEXCOORD_0/_1 may be FLOAT or a normalized UNSIGNED_BYTE/SHORT accessor; the vertex
+            // pipeline binds UVs as float32x2, so integer UVs are denormalized to [0,1] (reusing the
+            // lazily-imported color/UV normalizer). Float UVs (the common case) pass through untouched.
+            const uvs = uvData
+                ? uvData._data instanceof F32
+                    ? (uvData._data as Float32Array)
+                    : (await importColorNormalize()).normalizeUvToVec2(uvData._data, uvData._count)
+                : new F32(posData._count * 2);
+            const uv2s = uv2Data
+                ? uv2Data._data instanceof F32
+                    ? (uv2Data._data as Float32Array)
+                    : (await importColorNormalize()).normalizeUvToVec2(uv2Data._data, uv2Data._count)
+                : null;
+
             // Keep vertex data as-is from glTF — RH→LH conversion handled by root world matrix
             const indices = idxData
                 ? idxData._data instanceof U32
@@ -417,8 +455,8 @@ async function extractAllMeshes(
                 _positions: posData._data as Float32Array,
                 _normals: normals,
                 _tangents: tanData ? (tanData._data as Float32Array) : null,
-                _uvs: uvData ? (uvData._data as Float32Array) : new F32(posData._count * 2),
-                _uv2s: uv2Data ? (uv2Data._data as Float32Array) : null,
+                _uvs: uvs,
+                _uv2s: uv2s,
                 _colors: colors,
                 _flatNormal: !normData,
                 _indices: indices,

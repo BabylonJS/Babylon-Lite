@@ -50,10 +50,17 @@ const _features: [Trigger, Loader][] = [
     // Per-mesh features (predicates inlined to avoid eager imports)
     [(j) => !!j.skins?.length && anyPrimitive(j, (p) => p.attributes?.JOINTS_0 !== undefined), () => import("./gltf-feature-skeleton.js")],
     [(j) => anyPrimitive(j, (p) => !!p.targets?.length), () => import("./gltf-feature-morph.js")],
+    // Non-triangle primitive topology (POINTS/LINES/LINE_STRIP/TRIANGLE_STRIP) or a
+    // negative-determinant node (negative scale / mirrored matrix): both need the lazy primitive
+    // feature (topology threading + winding reversal). Triangle-list positive-winding never triggers.
+    [(j) => hasNegDetNode(j) || anyPrimitive(j, (p) => p.mode !== undefined && p.mode !== 4), () => import("./gltf-feature-primitive.js")],
     // Per-asset features
     [hasGltfExtras, () => import("./gltf-feature-extras.js")],
     ["KHR_lights_punctual", () => import("./gltf-feature-lights-punctual.js")],
     [(j) => !!j.animations?.length, () => import("./gltf-feature-animations.js")],
+    // Non-Float32 / normalized animation sampler accessors (e.g. Animation_SamplerType normalized
+    // BYTE/SHORT rotation) need the lazy denorm converter; plain float samplers never load it.
+    [hasNonFloatAnimSampler, () => import("./gltf-sampler-denorm.js")],
     [M + "variants", () => import("./gltf-feature-variants.js")],
     ["KHR_node_visibility", () => import("./gltf-ext-node-visibility.js")],
     ["KHR_animation_pointer", () => import("./gltf-feature-animation-pointer.js")],
@@ -78,4 +85,35 @@ function hasGltfExtras(json: any): boolean {
         !!json.meshes?.some(hasExtras) ||
         anyPrimitive(json, hasExtras)
     );
+}
+
+/** True if any animation sampler reads a non-Float32 input/output accessor (normalized BYTE/SHORT
+ *  rotation output, normalized UNSIGNED_BYTE flags, …) — the only case that needs the lazy sampler
+ *  denorm converter. Plain Float32 samplers (the overwhelming majority) skip it. */
+function hasNonFloatAnimSampler(json: any): boolean {
+    const accessors = json.accessors;
+    return !!(json.animations as any[] | undefined)?.some((a) =>
+        a.samplers?.some((s: any) => accessors[s.input]?.componentType !== 5126 || accessors[s.output]?.componentType !== 5126)
+    );
+}
+
+/** True if any node introduces a negative-determinant local transform — a
+ *  negative scale (odd number of negative components) or a `matrix` with a
+ *  negative 3x3 determinant. Such a node (or a child of one) can flip a mesh's
+ *  net world determinant positive, reversing its triangle winding. Gates the
+ *  lazy negative-winding feature so positive-scale / pure-TRS assets never load
+ *  it. A negative-determinant node whose meshes' net world determinant stays
+ *  negative over-triggers harmlessly (the feature then finds a non-positive
+ *  determinant per mesh and flags nothing). */
+function hasNegDetNode(json: any): boolean {
+    return !!(json.nodes as any[] | undefined)?.some((n) => {
+        if (n.scale) {
+            return n.scale[0] * n.scale[1] * n.scale[2] < 0;
+        }
+        if (n.matrix) {
+            const m = n.matrix;
+            return m[0] * (m[5] * m[10] - m[6] * m[9]) + m[1] * (m[6] * m[8] - m[4] * m[10]) + m[2] * (m[4] * m[9] - m[5] * m[8]) < 0;
+        }
+        return false;
+    });
 }

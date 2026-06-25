@@ -46,6 +46,17 @@ export function _installPbrFallbackResolver(resolve: (engine: EngineContext) => 
     _pbrFallbackResolver = resolve;
 }
 
+/** Primitive-state resolver, installed only by the glTF primitive feature (non-triangle topology
+ *  or negative-winding meshes). Module-local with a single exported setter: when no such mesh is in
+ *  the bundle the setter tree-shakes, the bundler proves this is always null, and the
+ *  `_primitiveResolver ? … : { topology: "triangle-list", … }` ternary below folds to the plain
+ *  triangle-list default — every triangle-list PBR scene (e.g. BoomBox) stays byte-identical. */
+let _primitiveResolver: ((meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState) | null = null;
+/** @internal Install the primitive-state resolver (called by the glTF primitive feature). */
+export function _installPbrPrimitiveResolver(resolve: (meshFeatures: number, hasDoubleSided: boolean) => GPUPrimitiveState): void {
+    _primitiveResolver = resolve;
+}
+
 interface _PbrShaderBindings {
     _features: number;
     _features2: number;
@@ -135,7 +146,7 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
     }
 
     const device = engine._device;
-    const { _features: features, _features2: features2, _composed: composed } = bindings;
+    const { _features: features, _features2: features2, _composed: composed, _meshFeatures: meshFeatures } = bindings;
     const esmShadowOutput = (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0;
     const hasAlpha = !esmShadowOutput && (features & PBR_HAS_ALPHA_BLEND) !== 0;
     const hasDoubleSided = (features & PBR_HAS_DOUBLE_SIDED) !== 0;
@@ -174,7 +185,9 @@ export function getOrCreatePbrPipeline(engine: EngineContext, sig: RenderTargetS
               }
             : {}),
         multisample: { count: sig._sampleCount },
-        primitive: { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
+        primitive: _primitiveResolver
+            ? _primitiveResolver(meshFeatures, hasDoubleSided)
+            : { topology: "triangle-list", cullMode: hasDoubleSided ? ("none" as GPUCullMode) : "back", frontFace: "ccw" },
     });
     bindings._pipelines.set(key, pipeline);
     return pipeline;

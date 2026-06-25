@@ -147,7 +147,9 @@ export function buildDefaultPbrTexturesExt(
 /** Slow-path assembly: adds occlusionTexCoord and occlusionTexture props. */
 export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, extLayers: Partial<PbrMaterialProps> | undefined): PbrMaterialProps {
     const ef = mat._emissiveFactor;
-    const defaultFactor = (ef[0] === 1 && ef[1] === 1 && ef[2] === 1) || (ef[0] === 0 && ef[1] === 0 && ef[2] === 0);
+    // See gltf-pbr-builder.ts: emissiveFactor [1,1,1] is a no-op only with an emissive texture;
+    // with no texture it is a real full-white emissive that must be applied (Material_03).
+    const defaultFactor = (ef[0] === 0 && ef[1] === 0 && ef[2] === 0) || (!!tex.emissiveTexture && ef[0] === 1 && ef[1] === 1 && ef[2] === 1);
     // Precompute UV-transform presence so the renderer doesn't scan 5 textures
     // per mesh. Any wrapped texture with `_hasTx=true` (set by gltf-ext-uv-transform)
     // flips this once at build time; omitted entirely on fast path.
