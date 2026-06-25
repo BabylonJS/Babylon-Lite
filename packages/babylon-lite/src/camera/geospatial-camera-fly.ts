@@ -98,7 +98,9 @@ export function flyGeospatialCameraToAsync(camera: GeospatialCamera, scene: Scen
         const driver = (deltaMs: number): void => {
             elapsed += deltaMs > 0 ? deltaMs : 1000 / 60;
             const g = Math.min(1, elapsed / duration);
-            const e = ease(g);
+            // Force the final frame to land exactly on the target even if the easing curve
+            // does not satisfy ease(1) === 1, so the flight never resolves short of its goal.
+            const e = g >= 1 ? 1 : ease(g);
 
             const yaw = yaw0 + (targetYaw - yaw0) * e;
             const pitch = pitch0 + (targetPitch - pitch0) * e;

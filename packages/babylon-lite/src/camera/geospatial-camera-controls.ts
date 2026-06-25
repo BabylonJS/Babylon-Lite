@@ -637,6 +637,9 @@ export function attachGeospatialControls(camera: GeospatialCamera, canvas: HTMLC
         if (e.button !== 0 || e.buttons !== 0) {
             return;
         }
+        // Suppress browser defaults for the gesture (text selection / page zoom) now that it
+        // is recognised as a primary-pointer double tap.
+        e.preventDefault();
         const r = canvas.getBoundingClientRect();
         const pick = pickScreen(e.clientX - r.left, e.clientY - r.top);
         if (pick.hit && pick.point) {

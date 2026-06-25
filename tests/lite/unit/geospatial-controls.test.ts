@@ -390,17 +390,22 @@ describe("attachGeospatialControls — double-tap fly-to", () => {
     });
 
     it("flies to the picked point on a primary-button double tap", () => {
-        fire(canvas, "dblclick", dblclick(CX, CY, 0, 0));
+        const evt = dblclick(CX, CY, 0, 0) as { preventDefault: ReturnType<typeof vi.fn> };
+        fire(canvas, "dblclick", evt);
         expect(flyMock).toHaveBeenCalledTimes(1);
         const [, , opts] = flyMock.mock.calls[0]!;
         // The picked point lands on the planet surface (radius = planetRadius).
         expect(Math.hypot(opts.center!.x, opts.center!.y, opts.center!.z)).toBeCloseTo(100, 3);
         expect(opts.durationMs).toBe(1000);
+        // Browser defaults (selection / page zoom) are suppressed for the recognised gesture.
+        expect(evt.preventDefault).toHaveBeenCalled();
     });
 
     it("ignores a non-primary (right) button double tap", () => {
-        fire(canvas, "dblclick", dblclick(CX, CY, 2, 0));
+        const evt = dblclick(CX, CY, 2, 0) as { preventDefault: ReturnType<typeof vi.fn> };
+        fire(canvas, "dblclick", evt);
         expect(flyMock).not.toHaveBeenCalled();
+        expect(evt.preventDefault).not.toHaveBeenCalled();
     });
 
     it("ignores a double tap while another button is held", () => {
