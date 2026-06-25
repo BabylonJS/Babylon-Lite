@@ -59,7 +59,14 @@ async function main(): Promise<void> {
 
     // 3. Branch, commit, push, draft PR.
     const date = new Date().toISOString().slice(0, 10);
-    const branch = `compat-sync/${date}`;
+    // Suffix the branch with the unique build id so two runs on the same calendar
+    // day (e.g. a re-trigger, or two issues labeled `compat` in one day) don't
+    // collide on `compat-sync/<date>`. ADO exposes the run id as BUILD_BUILDID;
+    // fall back to a timestamp for local/manual invocations. Trim and use `||` so a
+    // set-but-empty/whitespace BUILD_BUILDID (common in some shells / pipeline
+    // templating) still falls back instead of collapsing to `compat-sync/<date>-`.
+    const runId = process.env.BUILD_BUILDID?.trim() || String(Date.now());
+    const branch = `compat-sync/${date}-${runId}`;
 
     configureGit();
     runGit(["checkout", "-b", branch]);
@@ -75,8 +82,15 @@ async function main(): Promise<void> {
     // `origin`. This decouples "where the pipeline runs" (e.g. a fork) from "where the
     // PR lands" (e.g. upstream BabylonJS/Babylon-Lite) — GITHUB_TOKEN just needs push
     // access to REPO. The PR is then a same-repo PR with head = branch.
+    //
+    // The branch is unique per run (date + build id), so there is nothing to clobber
+    // on a first push. We use plain `--force` (not `--force-with-lease`) only so a
+    // build *re-run* — which reuses the same build id and therefore the same branch —
+    // can overwrite its own prior attempt. `--force-with-lease` cannot be used here:
+    // we push to an ad-hoc authenticated URL with no remote-tracking ref, so the lease
+    // has no recorded value to check against and git aborts with "stale info".
     const pushUrl = `https://x-access-token:${TOKEN}@github.com/${REPO}.git`;
-    runGit(["push", "--force-with-lease", pushUrl, `HEAD:refs/heads/${branch}`]);
+    runGit(["push", "--force", pushUrl, `HEAD:refs/heads/${branch}`]);
     const { url, number } = await openPullRequest(branch, validation, changedFiles);
     await applyLabels(number);
     console.log(`Opened draft PR: ${url}`);
