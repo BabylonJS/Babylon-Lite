@@ -123,9 +123,11 @@ async function main(): Promise<void> {
     // Player controller — collides with the live Workspace part set
     new PlayerController(canvas, character, scene, () => workspace.parts, sounds);
 
-    // Test hook for E2E interaction specs (and live debugging): read-only
-    // access to world state. Not part of the demo's public surface.
-    (window as unknown as Record<string, unknown>).__sandbloxTest = { workspace, mouse, selectionBox, handles, dragger, character, spawn: spawnPart, sounds };
+    // Optional test hook for E2E interaction specs (and live debugging): read-only
+    // access to world state. Enabled only with `?test=1`.
+    if (new URLSearchParams(window.location.search).get("test") === "1") {
+        (window as unknown as Record<string, unknown>).__sandbloxTest = { workspace, mouse, selectionBox, handles, dragger, character, spawn: spawnPart, sounds };
+    }
 
     await registerSceneWithShadowSupport(scene);
     await startEngine(engine);
