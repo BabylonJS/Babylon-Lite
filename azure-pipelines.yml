@@ -426,7 +426,9 @@ stages:
                   env:
                       HEADLESS: "true"
                       PARITY_BASE_URL: "$(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/parity-lab/lite/"
-                      BSTACK_SESSIONS_REQUIRED: "5"
+                      BSTACK_SESSIONS_REQUIRED: "2"
+                      BSTACK_SESSIONS_MIN: "1"
+                      BSTACK_MAX_SESSIONS: "2"
                       BSTACK_BUILD_NAME: "Babylon-Lite Parity $(Build.BuildNumber)"
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
