@@ -62,8 +62,10 @@ async function main(): Promise<void> {
     // Suffix the branch with the unique build id so two runs on the same calendar
     // day (e.g. a re-trigger, or two issues labeled `compat` in one day) don't
     // collide on `compat-sync/<date>`. ADO exposes the run id as BUILD_BUILDID;
-    // fall back to a timestamp for local/manual invocations.
-    const runId = process.env.BUILD_BUILDID ?? String(Date.now());
+    // fall back to a timestamp for local/manual invocations. Trim and use `||` so a
+    // set-but-empty/whitespace BUILD_BUILDID (common in some shells / pipeline
+    // templating) still falls back instead of collapsing to `compat-sync/<date>-`.
+    const runId = process.env.BUILD_BUILDID?.trim() || String(Date.now());
     const branch = `compat-sync/${date}-${runId}`;
 
     configureGit();
