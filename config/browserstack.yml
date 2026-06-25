@@ -19,11 +19,8 @@ platforms:
 # BrowserStack runs are serialized so this pipeline uses one instance at a time.
 parallelsPerPlatform: 1
 
-# Local tunnel — only needed when tests hit a local dev server. When parity runs
-# against a public static site (PARITY_BASE_URL set), the runner disables this.
-# Driven by BROWSERSTACK_LOCAL (set by scripts/run-browserstack.ts); defaults to
-# true so a bare SDK invocation still tunnels to localhost.
-browserstackLocal: ${BROWSERSTACK_LOCAL}
+# Local tunnel — required because tests hit localhost dev server
+browserstackLocal: true
 
 framework: playwright
 

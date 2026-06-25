@@ -95,10 +95,13 @@ pnpm build:bundle-scenes
 pnpm test:parity-cloud
 ```
 
-In CI, parity pages are served from a public, build-isolated static site
-(`pnpm build:lab-site` + upload) and the remote browser loads them directly via
-`PARITY_BASE_URL` — no Local tunnel. Without `PARITY_BASE_URL` (e.g. running
-locally), a Vite dev server is started and reached through the Local tunnel.
+In CI, parity runs on BrowserStack over a direct CDP connection
+(`connectOptions.wsEndpoint`, no SDK) and is **sharded across parallel cloud
+sessions**: `scripts/browserstack-wait.sh` grabs up to `BSTACK_SESSIONS_REQUIRED`
+sessions (falling back to fewer when the plan is busy) and exports `CIWORKERS` so
+Playwright shards to match. Pages are served from a public, build-isolated static
+site (`pnpm build:lab-site` + upload) and loaded directly via `PARITY_BASE_URL` —
+no Local tunnel. Run `pnpm test:parity` (local Chrome) for day-to-day dev.
 
 ### Golden References
 
@@ -224,20 +227,23 @@ pnpm test:bundle-size
 
 ## BrowserStack Configuration
 
-**Config file:** `config/browserstack.yml`
+Two jobs use BrowserStack with **different connection models**:
 
-| Setting           | Value                                |
-| ----------------- | ------------------------------------ |
-| Platform          | macOS Sonoma                         |
-| Browser           | Chrome latest                        |
-| Parallel sessions | 1                                    |
-| Local tunnel      | Conditional (see below)              |
+| Job             | Connection                              | Parallelism                  | Tunnel |
+| --------------- | --------------------------------------- | ---------------------------- | ------ |
+| Parity (Cloud)  | Direct CDP (`connectOptions.wsEndpoint`) | Sharded (`CIWORKERS` sessions) | None   |
+| Perf Regression | `browserstack-node-sdk` + `browserstack.yml` | Serial (1 session)           | Local  |
 
-**Local tunnel:** Driven by `browserstackLocal: ${BROWSERSTACK_LOCAL}`, which
-`scripts/run-browserstack.ts` sets automatically. When `PARITY_BASE_URL` is set
-(CI parity), the remote browser loads pages from a public static site and assets
-come from public CDNs, so the tunnel is disabled. Otherwise it defaults to
-enabled so a local dev server (`localhost:5174`) is reachable.
+**Parity (Cloud)** connects straight to a remote Chrome over CDP — no SDK and no
+`browserstack.yml`. Capabilities (macOS Sonoma, Chrome latest, real WebGPU) are
+built in `config/playwright.parity-cloud.config.ts`. The ~198 specs are sharded
+across parallel cloud sessions; `scripts/browserstack-wait.sh` grabs sessions and
+exports `CIWORKERS`. Pages load from a public static site (`PARITY_BASE_URL`), so
+no Local tunnel is used.
+
+**Perf Regression** still uses `browserstack-node-sdk` with `config/browserstack.yml`
+(`browserstackLocal: true`) because it compares current vs baseline on a single
+shared VM reached through the Local tunnel (`localhost:5174`).
 
 Credentials are read from environment variables:
 
