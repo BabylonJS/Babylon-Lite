@@ -2203,5 +2203,16 @@
         "description": "glTF Mesh_PrimitiveMode_11: a quad drawn as a TRIANGLE_STRIP (primitive mode 5) with uint32 indices. Validates non-triangle-list primitive topologies (glTF-Asset-Generator Category C); Lite hardcoded a triangle-list pipeline and rendered POINTS/LINES/strips garbled. The loader now reads the primitive mode and the pipeline honors the matching WebGPU topology.",
         "tags": ["gltf", "topology"],
         "skipPerf": true
+    },
+    {
+        "id": 261,
+        "slug": "scene261-temporal-anti-aliasing",
+        "name": "Scene 261 — Temporal Anti-Aliasing",
+        "maxMad": 0.1,
+        "maxRegionMad": 0.5,
+        "maxRawKB": 80,
+        "description": "Three rotated boxes with sharp diagonal silhouette edges, anti-aliased with a frame-graph Temporal Anti-Aliasing (TAA) post-process. The Lite TAA is a pure frame-graph node that accumulates sub-pixel-jittered frames (Halton base 2/3) into a converged supersampled image and drives the projection jitter into the source render task, so it can be injected into any frame-graph chain. Matches Babylon.js' TAARenderingPipeline.",
+        "tags": ["post-process", "frame-graph", "taa", "anti-aliasing"],
+        "skipPerf": true
     }
 ]
