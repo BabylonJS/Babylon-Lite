@@ -1,4 +1,5 @@
 # Module: Loader Babylon
+
 > Package path: `packages/babylon-lite/src/loader-babylon/`
 
 ## Purpose
@@ -10,19 +11,15 @@ Parses Babylon.js `.babylon` scene files and returns an `AssetContainer` with me
 ### Functions
 
 ```typescript
-export async function loadBabylon(
-    engine: Engine,
-    url: string,
-    opts?: LoadBabylonOptions
-): Promise<AssetContainer>;
+export async function loadBabylon(engine: Engine, url: string, opts?: LoadBabylonOptions): Promise<AssetContainer>;
 ```
 
 ### Types
 
 ```typescript
 export interface LoadBabylonOptions {
-    maxMeshes?: number;         // maximum meshes to load (default: all)
-    loadTextures?: boolean;     // whether to load textures (default: true)
+    maxMeshes?: number; // maximum meshes to load (default: all)
+    loadTextures?: boolean; // whether to load textures (default: true)
 }
 
 /** Returned by both loadGltf() and loadBabylon(). Passed to addToScene(). */
@@ -33,7 +30,7 @@ export type { AssetContainer } from "../asset-container.js";
 
 ```typescript
 const result = await loadBabylon(engine, "https://example.com/scene.babylon");
-addToScene(scene, result);  // entities[], clearColor, animationGroups dispatched into scene
+addToScene(scene, result); // entities[], clearColor, animationGroups dispatched into scene
 ```
 
 - `entities`: flat array of all loaded `Mesh` and `LightBase` objects
@@ -57,26 +54,40 @@ interface BabylonScene {
 }
 
 interface BabylonCamera {
-    name: string; id: string; type: string;
-    position: number[]; rotation?: number[]; target?: number[];
-    fov?: number; minZ?: number; maxZ?: number;
+    name: string;
+    id: string;
+    type: string;
+    position: number[];
+    rotation?: number[];
+    target?: number[];
+    fov?: number;
+    minZ?: number;
+    maxZ?: number;
 }
 
 interface BabylonTexture {
-    name: string;                    // filename relative to .babylon URL
+    name: string; // filename relative to .babylon URL
     hasAlpha?: boolean;
     getAlphaFromRGB?: boolean;
     level?: number;
-    coordinatesIndex?: number;       // 0 = UV1, 1 = UV2
-    coordinatesMode?: number;        // 2 = spherical reflection
-    uOffset?: number; vOffset?: number;
-    uScale?: number; vScale?: number;
+    coordinatesIndex?: number; // 0 = UV1, 1 = UV2
+    coordinatesMode?: number; // 2 = spherical reflection
+    uOffset?: number;
+    vOffset?: number;
+    uScale?: number;
+    vScale?: number;
 }
 
 interface BabylonMaterial {
-    name: string; id: string;
-    diffuse?: number[]; specular?: number[]; specularPower?: number;
-    emissive?: number[]; ambient?: number[]; alpha?: number; alphaCutOff?: number;
+    name: string;
+    id: string;
+    diffuse?: number[];
+    specular?: number[];
+    specularPower?: number;
+    emissive?: number[];
+    ambient?: number[];
+    alpha?: number;
+    alphaCutOff?: number;
     diffuseTexture?: BabylonTexture | null;
     bumpTexture?: BabylonTexture | null;
     specularTexture?: BabylonTexture | null;
@@ -89,31 +100,46 @@ interface BabylonMaterial {
 }
 
 interface BabylonMultiMaterial {
-    name: string; id: string;
-    materials: string[];             // ordered sub-material IDs
+    name: string;
+    id: string;
+    materials: string[]; // ordered sub-material IDs
 }
 
 interface BabylonSubMesh {
     materialIndex: number;
-    verticesStart: number; verticesCount: number;
-    indexStart: number; indexCount: number;
+    verticesStart: number;
+    verticesCount: number;
+    indexStart: number;
+    indexCount: number;
 }
 
 interface BabylonMesh {
-    name: string; id: string;
-    parentId?: string | null; materialId?: string | null;
-    position?: number[]; rotation?: number[]; scaling?: number[];
-    positions?: number[]; normals?: number[]; uvs?: number[]; uvs2?: number[];
+    name: string;
+    id: string;
+    parentId?: string | null;
+    materialId?: string | null;
+    position?: number[];
+    rotation?: number[];
+    scaling?: number[];
+    positions?: number[];
+    normals?: number[];
+    uvs?: number[];
+    uvs2?: number[];
     indices?: number[];
     subMeshes?: BabylonSubMesh[];
     isVisible?: boolean;
 }
 
 interface BabylonLight {
-    name: string; id: string; type: number;     // 0=point, 1=directional, 2=spot, 3=hemispheric
-    position?: number[]; direction?: number[];
-    diffuse?: number[]; specular?: number[];
-    intensity?: number; range?: number;
+    name: string;
+    id: string;
+    type: number; // 0=point, 1=directional, 2=spot, 3=hemispheric
+    position?: number[];
+    direction?: number[];
+    diffuse?: number[];
+    specular?: number[];
+    intensity?: number;
+    range?: number;
     excludedMeshesIds?: string[];
     includedOnlyMeshesIds?: string[];
 }
@@ -153,17 +179,15 @@ fetch(url) → JSON parse → BabylonScene
 ### Ambient Color Handling
 
 BJS multiplies `material.ambient` by `scene.ambientColor`. The loader pre-multiplies:
+
 ```typescript
-mat.ambientColor = [
-    md.ambient[0] * sceneAmbient[0],
-    md.ambient[1] * sceneAmbient[1],
-    md.ambient[2] * sceneAmbient[2]
-];
+mat.ambientColor = [md.ambient[0] * sceneAmbient[0], md.ambient[1] * sceneAmbient[1], md.ambient[2] * sceneAmbient[2]];
 ```
 
 ### Texture Loading
 
 Textures are loaded in parallel via `Promise.all(texturePromises)`:
+
 - URL resolution: `baseUrl + texture.name` where `baseUrl = url.substring(0, lastIndexOf("/") + 1)`
 - Supported texture slots: diffuse, bump, specular, ambient, lightmap, emissive, opacity, reflection
 - Per-texture properties mapped: `level` → material-specific level, `coordinatesIndex` → coord index, `uScale`/`vScale` → `uvScale`, `getAlphaFromRGB` → `opacityFromRGB`, `coordinatesMode === 2` → `reflectionCoordMode = 2` (spherical)
@@ -172,6 +196,7 @@ Textures are loaded in parallel via `Promise.all(texturePromises)`:
 ### Sub-Mesh Handling
 
 Each `BabylonSubMesh` becomes a separate GPU mesh with:
+
 - Shared vertex buffers (positions, normals referenced from parent)
 - Sliced index buffer: `allIndices.slice(sub.indexStart, sub.indexStart + sub.indexCount)`
 - Individual material assignment from multi-material array
@@ -179,17 +204,17 @@ Each `BabylonSubMesh` becomes a separate GPU mesh with:
 
 ### Differences from glTF Loading Path
 
-| Aspect | glTF Loader | .babylon Loader |
-|--------|------------|-----------------|
-| Format | Binary GLB or JSON + .bin | Single JSON file |
-| Material system | PBR (metallic-roughness) | Standard (Blinn-Phong) |
-| Coordinate system | Right-handed → LH conversion | Already left-handed |
-| Skeleton/animation | Full support | Not supported |
-| Morph targets | Supported | Not supported |
-| Multi-material | Not applicable (per-primitive) | SubMesh → multi-material mapping |
-| Vertex data | Binary accessors + buffer views | Inline JSON number arrays |
-| Texture references | URI or buffer-embedded | Filename relative to .babylon URL |
-| Lights | Not in glTF core | Point lights with include/exclude |
+| Aspect             | glTF Loader                     | .babylon Loader                   |
+| ------------------ | ------------------------------- | --------------------------------- |
+| Format             | Binary GLB or JSON + .bin       | Single JSON file                  |
+| Material system    | PBR (metallic-roughness)        | Standard (Blinn-Phong)            |
+| Coordinate system  | Right-handed → LH conversion    | Already left-handed               |
+| Skeleton/animation | Full support                    | Not supported                     |
+| Morph targets      | Supported                       | Not supported                     |
+| Multi-material     | Not applicable (per-primitive)  | SubMesh → multi-material mapping  |
+| Vertex data        | Binary accessors + buffer views | Inline JSON number arrays         |
+| Texture references | URI or buffer-embedded          | Filename relative to .babylon URL |
+| Lights             | Not in glTF core                | Point lights with include/exclude |
 
 ## Pipeline Configuration
 
@@ -205,15 +230,15 @@ One-shot async loader. No persistent state. Registers `clearTexture2DCache` disp
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-|---|---|
-| `SceneLoader.Load(".babylon")` | `addToScene(scene, await loadBabylon(engine, url))` |
-| `StandardMaterial` | `createStandardMaterial()` → `StandardMaterialProps` |
-| `MultiMaterial` | `multiMatMap: Map<id, string[]>` |
-| `Mesh.subMeshes` | Split into individual GPU meshes per sub-mesh |
-| `PointLight` | `createPointLight()` |
-| `Light.excludedMeshes` | `pl.excludedMeshIds: Set<string>` |
-| `Light.includedOnlyMeshes` | `pl.includedOnlyMeshIds: Set<string>` |
+| Babylon.js                     | Babylon Lite                                         |
+| ------------------------------ | ---------------------------------------------------- |
+| `SceneLoader.Load(".babylon")` | `addToScene(scene, await loadBabylon(engine, url))`  |
+| `StandardMaterial`             | `createStandardMaterial()` → `StandardMaterialProps` |
+| `MultiMaterial`                | `multiMatMap: Map<id, string[]>`                     |
+| `Mesh.subMeshes`               | Split into individual GPU meshes per sub-mesh        |
+| `PointLight`                   | `createPointLight()`                                 |
+| `Light.excludedMeshes`         | `pl.excludedMeshIds: Set<string>`                    |
+| `Light.includedOnlyMeshes`     | `pl.includedOnlyMeshIds: Set<string>`                |
 
 ## Dependencies
 
@@ -239,6 +264,6 @@ One-shot async loader. No persistent state. Registers `clearTexture2DCache` disp
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
+| File              | Purpose                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
 | `load-babylon.ts` | Complete .babylon format loader: JSON parsing, material/texture creation, mesh upload, light creation |

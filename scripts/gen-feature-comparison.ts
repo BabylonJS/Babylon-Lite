@@ -26,6 +26,7 @@
 import { readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
+import prettier from "prettier";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
@@ -149,7 +150,7 @@ export interface SyncResult {
  * @param check  when true, do not write — only report whether the doc is stale.
  * @returns      whether the doc changed (or would change, in check mode) plus counts.
  */
-export function syncFeatureDoc(check = false): SyncResult {
+export async function syncFeatureDoc(check = false): Promise<SyncResult> {
     const html = readFileSync(HTML_PATH, "utf-8");
     // Normalize to LF so output is deterministic regardless of the working-copy line
     // endings (the repo stores LF; CI runs on Linux). Without this, a CRLF working copy
@@ -158,8 +159,14 @@ export function syncFeatureDoc(check = false): SyncResult {
 
     const categories = parseHtml(html);
     const generated = renderMarkdown(categories);
-    const next = spliceDoc(doc, generated);
+    const spliced = spliceDoc(doc, generated);
     const features = categories.reduce((n, c) => n + c.rows.length, 0);
+
+    // Run the result through Prettier (using the repo's config) so the committed
+    // doc matches `prettier --check`. Prettier re-pads the compact tables this
+    // script emits, so the two formatters agree instead of fighting each other.
+    const prettierConfig = await prettier.resolveConfig(DOC_PATH);
+    const next = (await prettier.format(spliced, { ...prettierConfig, parser: "markdown" })).replace(/\r\n/g, "\n");
 
     if (next === doc) {
         return { changed: false, categories: categories.length, features };
@@ -170,9 +177,9 @@ export function syncFeatureDoc(check = false): SyncResult {
     return { changed: true, categories: categories.length, features };
 }
 
-function main(): void {
+async function main(): Promise<void> {
     const checkOnly = process.argv.includes("--check");
-    const result = syncFeatureDoc(checkOnly);
+    const result = await syncFeatureDoc(checkOnly);
 
     if (!result.changed) {
         console.log("feature-comparison.md is up to date with the lab HTML.");
@@ -188,5 +195,8 @@ function main(): void {
 
 // Only run the CLI when invoked directly, not when imported by the PR driver.
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-    main();
+    main().catch((err) => {
+        console.error(err);
+        process.exit(1);
+    });
 }

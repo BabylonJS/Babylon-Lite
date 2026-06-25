@@ -85,7 +85,7 @@ Task lifecycle:
 | Method      | Called by                      | Purpose                                                                                                                                                                                                |
 | ----------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `record()`  | `FrameGraph.build()` (phase 1) | Allocate/rebuild GPU resources, register `Pass` instances onto `_passes` (typically via `addRenderPass(fg, name)` and friends), and finalize anything that needs the final canvas / target size. Sync. |
-| `execute()` | `FrameGraph.execute()`         | Optional task-level execution hook. If present, the frame graph calls it instead of draining `_passes`. Used only for adapter tasks while legacy GPU work is moved under frame-graph scheduling.        |
+| `execute()` | `FrameGraph.execute()`         | Optional task-level execution hook. If present, the frame graph calls it instead of draining `_passes`. Used only for adapter tasks while legacy GPU work is moved under frame-graph scheduling.       |
 | `dispose()` | `FrameGraph.dispose()`         | Release task-owned GPU resources. Should call `_dispose()` on each owned pass.                                                                                                                         |
 
 `RenderTask` is the primary scene-render implementation of `Task`, and `EffectRenderTask` uses the same task/pass contract for fullscreen RTT effects. The interface exists so future frame-graph work can add other ordered task types without changing `FrameGraph` itself, for example compute tasks, copy/resolve tasks, object-list tasks, or resource-transition/helper tasks.
@@ -274,14 +274,14 @@ export interface RenderTaskConfig {
 }
 ```
 
-| Field      | Meaning                                                                                                                                                                                                         |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`     | Used for labels and diagnostics.                                                                                                                                                                                |
-| `rt`       | Concrete render target for this pass.                                                                                                                                                                           |
-| `clrColor` | Clear color. The object may be mutated between frames.                                                                                                                                                          |
-| `clr`      | Defaults to clear. Set `false` to use color/depth `loadOp: "load"` for overlays or multi-scene composition.                                                                                                     |
-| `cam`      | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                           |
-| `cs`       | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect. |
+| Field          | Meaning                                                                                                                                                                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | Used for labels and diagnostics.                                                                                                                                                                                                                          |
+| `rt`           | Concrete render target for this pass.                                                                                                                                                                                                                     |
+| `clrColor`     | Clear color. The object may be mutated between frames.                                                                                                                                                                                                    |
+| `clr`          | Defaults to clear. Set `false` to use color/depth `loadOp: "load"` for overlays or multi-scene composition.                                                                                                                                               |
+| `cam`          | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                                                                     |
+| `cs`           | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect.                                           |
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
 
 ### Image Processing Task
@@ -375,11 +375,11 @@ setRenderPassExecuteFunc(pass, (enc) => executePassBody(task, enc));
 
 Bindings are partitioned into:
 
-| Bucket      | Renderable flags             | Execution                                                |
-| ----------- | ---------------------------- | -------------------------------------------------------- |
-| Opaque      | `!isTransparent && !_direct` | Cached `GPURenderBundle`                                 |
-| Direct      | `_direct`                    | Direct draw after opaque                                 |
-| Transparent | `isTransparent || _transmissive` | Direct draw after direct, camera-space-depth sorted back-to-front per frame |
+| Bucket      | Renderable flags                   | Execution                                                                   |
+| ----------- | ---------------------------------- | --------------------------------------------------------------------------- |
+| Opaque      | `!isTransparent && !_direct`       | Cached `GPURenderBundle`                                                    |
+| Direct      | `_direct`                          | Direct draw after opaque                                                    |
+| Transparent | `isTransparent \|\| _transmissive` | Direct draw after direct, camera-space-depth sorted back-to-front per frame |
 
 Opaque and direct buckets currently sort by `renderable.order`. Transparent is sorted by camera-space depth from the active pass camera and must not be pipeline-sorted.
 
@@ -501,16 +501,16 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 
 ## File Manifest
 
-| File                                     | Purpose                                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `src/frame-graph/task.ts`                | Polymorphic task interface (now with `_passes: Pass[]`)                                      |
-| `src/frame-graph/pass.ts`                | `Pass` base interface, `addPassDependencies`                                                 |
-| `src/frame-graph/render-pass.ts`         | `RenderPass` interface, `createRenderPass`, `setRenderPass*` setters                         |
-| `src/frame-graph/frame-graph.ts`         | Ordered task list and two-phase build/execute/dispose lifecycle                              |
-| `src/frame-graph/frame-graph-actions.ts` | Public task-insertion + `addRenderPass` actions                                              |
-| `src/frame-graph/render-task.ts`         | Render task, per-pass scene UBO, target binding, draw buckets, per-pass-encoder body         |
-| `src/frame-graph/image-processing-task.ts` | Reusable fullscreen image-processing task for swapchain output                              |
-| `src/frame-graph/shadow-task.ts`         | Internal adapter task that schedules existing shadow generators through `Task.execute()`      |
-| `src/engine/render-target.ts`            | Render target descriptors, allocation, disposal, target signatures                           |
-| `src/texture/rtt.ts`                     | Eager render-target texture helper                                                           |
-| `src/render/renderable.ts`               | `Renderable`, `DrawBinding`, and `DrawUpdateContext` contracts consumed by render-pass tasks |
+| File                                       | Purpose                                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `src/frame-graph/task.ts`                  | Polymorphic task interface (now with `_passes: Pass[]`)                                      |
+| `src/frame-graph/pass.ts`                  | `Pass` base interface, `addPassDependencies`                                                 |
+| `src/frame-graph/render-pass.ts`           | `RenderPass` interface, `createRenderPass`, `setRenderPass*` setters                         |
+| `src/frame-graph/frame-graph.ts`           | Ordered task list and two-phase build/execute/dispose lifecycle                              |
+| `src/frame-graph/frame-graph-actions.ts`   | Public task-insertion + `addRenderPass` actions                                              |
+| `src/frame-graph/render-task.ts`           | Render task, per-pass scene UBO, target binding, draw buckets, per-pass-encoder body         |
+| `src/frame-graph/image-processing-task.ts` | Reusable fullscreen image-processing task for swapchain output                               |
+| `src/frame-graph/shadow-task.ts`           | Internal adapter task that schedules existing shadow generators through `Task.execute()`     |
+| `src/engine/render-target.ts`              | Render target descriptors, allocation, disposal, target signatures                           |
+| `src/texture/rtt.ts`                       | Eager render-target texture helper                                                           |
+| `src/render/renderable.ts`                 | `Renderable`, `DrawBinding`, and `DrawUpdateContext` contracts consumed by render-pass tasks |

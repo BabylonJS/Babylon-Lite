@@ -1,4 +1,5 @@
 # Module: Scene Hierarchy & Parenting
+
 > Package path: `packages/babylon-lite/src/scene/`
 
 ## Purpose
@@ -90,6 +91,7 @@ Camera `worldMatrix` is the camera-to-world transform (inverse of view matrix).
 push-based dirty tracking via `ObservableVec3`.
 
 UBO writers read world-space values from `worldMatrix` columns:
+
 - Position = column 3: `[w[12], w[13], w[14]]`
 - Direction = column 2: `[w[8], w[9], w[10]]`
 
@@ -105,6 +107,7 @@ function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixAccessor
 
 Factory that returns `{ getWorldMatrix, getWorldMatrixVersion, markLocalDirty, parent }`.
 Each entity provides a `getLocalMatrix()` closure. The helper handles:
+
 - Version tracking (`_localVersion`, `_worldVersion`, `_lastParentVersion`)
 - Parent chain validation (recursive `parent.worldMatrix` call)
 - Caching with `mat4MultiplyInto` for GC-free buffer reuse
@@ -113,16 +116,16 @@ Each entity provides a `getLocalMatrix()` closure. The helper handles:
 
 All entities use push-based dirty notification — no polling or `checkDirty()` functions:
 
-| Entity | Property | Mechanism |
-|--------|----------|-----------|
-| TransformNode | position/scaling | `ObservableVec3` → `markLocalDirty()` |
-| TransformNode | rotationQuaternion | `ObservableQuat` → `markLocalDirty()` |
-| Mesh | position/rotation/scaling | `ObservableVec3` → `markLocalDirty()` |
-| ArcRotateCamera | alpha/beta/radius | `Object.defineProperty` setter → `markLocalDirty()` |
-| ArcRotateCamera | target | `ObservableVec3` → `markLocalDirty()` |
-| FreeCamera | position/target | `ObservableVec3` → `markLocalDirty()` |
-| FreeCamera | _yaw/_pitch | `Object.defineProperty` setter → `markLocalDirty()` |
-| All lights | position/direction | `ObservableVec3` → `markLocalDirty()` |
+| Entity          | Property                  | Mechanism                                           |
+| --------------- | ------------------------- | --------------------------------------------------- |
+| TransformNode   | position/scaling          | `ObservableVec3` → `markLocalDirty()`               |
+| TransformNode   | rotationQuaternion        | `ObservableQuat` → `markLocalDirty()`               |
+| Mesh            | position/rotation/scaling | `ObservableVec3` → `markLocalDirty()`               |
+| ArcRotateCamera | alpha/beta/radius         | `Object.defineProperty` setter → `markLocalDirty()` |
+| ArcRotateCamera | target                    | `ObservableVec3` → `markLocalDirty()`               |
+| FreeCamera      | position/target           | `ObservableVec3` → `markLocalDirty()`               |
+| FreeCamera      | \_yaw/\_pitch             | `Object.defineProperty` setter → `markLocalDirty()` |
+| All lights      | position/direction        | `ObservableVec3` → `markLocalDirty()`               |
 
 ### `ObservableQuat` (`math/observable-quat.ts`)
 
@@ -163,11 +166,11 @@ get worldMatrix():
 
 ### Performance characteristics
 
-| Scenario | Cost per frame |
-|----------|---------------|
-| Static scene (no changes) | O(1) per entity — integer comparison |
-| Root changes, N descendants | O(N) — each descendant recomputes once |
-| Single leaf changes | O(depth) — walk to root, recompute back down |
+| Scenario                    | Cost per frame                               |
+| --------------------------- | -------------------------------------------- |
+| Static scene (no changes)   | O(1) per entity — integer comparison         |
+| Root changes, N descendants | O(N) — each descendant recomputes once       |
+| Single leaf changes         | O(depth) — walk to root, recompute back down |
 
 ---
 
@@ -178,7 +181,9 @@ get worldMatrix():
 ```typescript
 if (isTransformNode(entity)) {
     const meshes = collectMeshes(entity, entity.parent ?? undefined);
-    for (const m of meshes) { ctx.add(m); }
+    for (const m of meshes) {
+        ctx.add(m);
+    }
 }
 ```
 
@@ -198,39 +203,39 @@ Animation/skin parsing is lazy-loaded via `gltf-animation.ts` for bundle size op
 
 ## File Manifest
 
-| File | Status | Description |
-|------|--------|-------------|
-| `scene/parentable.ts` | New | IWorldMatrixProvider + IParentable interfaces |
-| `scene/world-matrix-state.ts` | New | createWorldMatrixState factory |
-| `math/observable-quat.ts` | New | ObservableQuat class |
-| `light/light-matrix.ts` | New | localMatrixFromDirection helper |
-| `loader-gltf/gltf-animation.ts` | New | Lazy-loaded animation/skin parsing |
-| `scene/transform-node.ts` | Rewritten | createTransformNode, unified children |
-| `mesh/mesh.ts` | Modified | Removed computeWorldMatrix, added IWorldMatrixProvider |
-| `camera/arc-rotate.ts` | Modified | Added IWorldMatrixProvider, push-based dirty |
-| `camera/free-camera.ts` | Modified | Added IWorldMatrixProvider, push-based dirty |
-| `light/types.ts` | Modified | LightBase extends IWorldMatrixProvider |
-| `light/point-light.ts` | Modified | ObservableVec3 position, createWorldMatrixState |
-| `light/directional-light.ts` | Modified | ObservableVec3 position/direction |
-| `light/spot-light.ts` | Modified | ObservableVec3 position/direction |
-| `light/hemispheric.ts` | Modified | ObservableVec3 direction |
-| `scene/scene-core.ts` | Modified | addToScene() sets parent links via collectMeshes |
-| `loader-gltf/load-gltf.ts` | Modified | Uses createTransformNode, lazy animation |
-| `index.ts` | Modified | Exports IWorldMatrixProvider, IParentable, ObservableQuat |
+| File                            | Status    | Description                                               |
+| ------------------------------- | --------- | --------------------------------------------------------- |
+| `scene/parentable.ts`           | New       | IWorldMatrixProvider + IParentable interfaces             |
+| `scene/world-matrix-state.ts`   | New       | createWorldMatrixState factory                            |
+| `math/observable-quat.ts`       | New       | ObservableQuat class                                      |
+| `light/light-matrix.ts`         | New       | localMatrixFromDirection helper                           |
+| `loader-gltf/gltf-animation.ts` | New       | Lazy-loaded animation/skin parsing                        |
+| `scene/transform-node.ts`       | Rewritten | createTransformNode, unified children                     |
+| `mesh/mesh.ts`                  | Modified  | Removed computeWorldMatrix, added IWorldMatrixProvider    |
+| `camera/arc-rotate.ts`          | Modified  | Added IWorldMatrixProvider, push-based dirty              |
+| `camera/free-camera.ts`         | Modified  | Added IWorldMatrixProvider, push-based dirty              |
+| `light/types.ts`                | Modified  | LightBase extends IWorldMatrixProvider                    |
+| `light/point-light.ts`          | Modified  | ObservableVec3 position, createWorldMatrixState           |
+| `light/directional-light.ts`    | Modified  | ObservableVec3 position/direction                         |
+| `light/spot-light.ts`           | Modified  | ObservableVec3 position/direction                         |
+| `light/hemispheric.ts`          | Modified  | ObservableVec3 direction                                  |
+| `scene/scene-core.ts`           | Modified  | addToScene() sets parent links via collectMeshes          |
+| `loader-gltf/load-gltf.ts`      | Modified  | Uses createTransformNode, lazy animation                  |
+| `index.ts`                      | Modified  | Exports IWorldMatrixProvider, IParentable, ObservableQuat |
 
 ---
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|-------------|-----------|
-| `IWorldMatrixProvider` | `Node` (has `getWorldMatrix()`) |
-| `IParentable` | `Node.parent` property |
-| `mesh.parent = node` | `mesh.parent = node` |
-| `mesh.worldMatrix` (getter) | `mesh.getWorldMatrix()` |
-| `mesh.worldMatrixVersion` | `mesh._currentRenderId` |
-| `createTransformNode(name)` | `new TransformNode(name, scene)` |
+| Babylon Lite                 | Babylon.js                             |
+| ---------------------------- | -------------------------------------- |
+| `IWorldMatrixProvider`       | `Node` (has `getWorldMatrix()`)        |
+| `IParentable`                | `Node.parent` property                 |
+| `mesh.parent = node`         | `mesh.parent = node`                   |
+| `mesh.worldMatrix` (getter)  | `mesh.getWorldMatrix()`                |
+| `mesh.worldMatrixVersion`    | `mesh._currentRenderId`                |
+| `createTransformNode(name)`  | `new TransformNode(name, scene)`       |
 | `node.position.set(x, y, z)` | `node.position = new Vector3(x, y, z)` |
-| `node.children` | `node.getChildren()` |
-| Lazy pull model | Push model (`_markAsDirty`) |
-| Version-based staleness | Frame-based `_currentRenderId` check |
+| `node.children`              | `node.getChildren()`                   |
+| Lazy pull model              | Push model (`_markAsDirty`)            |
+| Version-based staleness      | Frame-based `_currentRenderId` check   |

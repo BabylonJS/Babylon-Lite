@@ -54,7 +54,7 @@ flowchart LR
   (the dot on each tab).
 - **Transpile** (`src/transpile.ts`) — `esbuild-wasm` bundles the project's files
   in-browser, starting from the entry file and resolving relative imports from an
-  in-memory file map while keeping `@babylonjs/lite` external. Any *other* bare
+  in-memory file map while keeping `@babylonjs/lite` external. Any _other_ bare
   package import is rewritten to an `https://esm.sh/<pkg>` CDN URL so external npm
   packages work without configuration. An inline source map keeps runtime stacks
   mapped to the original files.
@@ -109,14 +109,14 @@ playground/
 
 ## Scripts
 
-| Command (in `playground/`) | What it does                                              |
-| -------------------------- | -------------------------------------------------------- |
-| `pnpm dev`                 | `build:engine` + `build:types`, then start the dev server |
-| `pnpm dev:watch`           | Like `dev`, but rebuilds the engine on core source changes |
-| `pnpm build`               | `build:engine` + `build:types`, then build the app        |
+| Command (in `playground/`) | What it does                                                   |
+| -------------------------- | -------------------------------------------------------------- |
+| `pnpm dev`                 | `build:engine` + `build:types`, then start the dev server      |
+| `pnpm dev:watch`           | Like `dev`, but rebuilds the engine on core source changes     |
+| `pnpm build`               | `build:engine` + `build:types`, then build the app             |
 | `pnpm build:engine`        | Build the self-hosted nightly engine into `public/engine/dev/` |
-| `pnpm build:engine:watch`  | Same, but rebuild on every `packages/babylon-lite/src` change |
-| `pnpm build:types`         | Roll up the engine `.d.ts` for Monaco IntelliSense        |
+| `pnpm build:engine:watch`  | Same, but rebuild on every `packages/babylon-lite/src` change  |
+| `pnpm build:types`         | Roll up the engine `.d.ts` for Monaco IntelliSense             |
 
 `build:engine` and `build:types` run automatically before `dev`/`build` (via
 `predev`/`prebuild`).
@@ -333,8 +333,7 @@ The playground can be embedded in another page (the classic Babylon playground,
 docs, blogs, …) via an iframe and driven over a namespaced `postMessage` API.
 
 ```html
-<iframe src="https://lite-playground.example/?embed=runner"
-        style="width: 100%; height: 480px; border: 0"></iframe>
+<iframe src="https://lite-playground.example/?embed=runner" style="width: 100%; height: 480px; border: 0"></iframe>
 ```
 
 Modes (`?embed=`):
@@ -349,12 +348,12 @@ embed accepts messages from and posts events to (defaults to `*`).
 
 Every message carries `channel: "babylon-lite-playground"`. The host sends:
 
-| `type`     | fields            | effect                                        |
-| ---------- | ----------------- | --------------------------------------------- |
-| `loadCode` | `code`, `run?`    | replace the entry file's content; run if `run` true |
-| `run`      | —                 | run the current code                          |
-| `dispose`  | —                 | tear down the running scene                   |
-| `getCode`  | —                 | request the entry file's content (replies with `code`)|
+| `type`     | fields         | effect                                                 |
+| ---------- | -------------- | ------------------------------------------------------ |
+| `loadCode` | `code`, `run?` | replace the entry file's content; run if `run` true    |
+| `run`      | —              | run the current code                                   |
+| `dispose`  | —              | tear down the running scene                            |
+| `getCode`  | —              | request the entry file's content (replies with `code`) |
 
 The `loadCode`/`getCode` API is single-file and targets the entry file. To move a
 full multi-file project between the embed and the standalone app, use the **Open in
@@ -362,14 +361,14 @@ Lite Playground** handoff (which carries every file).
 
 The embed emits back to the host:
 
-| `type`    | fields            | when                              |
-| --------- | ----------------- | --------------------------------- |
-| `ready`   | `mode`            | the embed is wired up and bootable|
-| `console` | `level`, `text`   | a console line from the snippet   |
-| `error`   | `text`            | an uncaught runtime error         |
-| `stats`   | `fps`             | ~once a second while running      |
-| `ran`     | —                 | a run finished importing          |
-| `code`    | `code`            | reply to a `getCode` request      |
+| `type`    | fields          | when                               |
+| --------- | --------------- | ---------------------------------- |
+| `ready`   | `mode`          | the embed is wired up and bootable |
+| `console` | `level`, `text` | a console line from the snippet    |
+| `error`   | `text`          | an uncaught runtime error          |
+| `stats`   | `fps`           | ~once a second while running       |
+| `ran`     | —               | a run finished importing           |
+| `code`    | `code`          | reply to a `getCode` request       |
 
 ```js
 const frame = document.querySelector("iframe");

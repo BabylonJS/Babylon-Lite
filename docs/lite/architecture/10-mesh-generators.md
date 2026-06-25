@@ -129,13 +129,13 @@ export function uploadBoxToGPU(device: GPUDevice, data: BoxData): BoxGPU;
 
 ```typescript
 export interface CylinderOptions {
-    height?: number;          // Default: 2
-    diameter?: number;         // Default: 1 (overrides diameterTop / diameterBottom)
-    diameterTop?: number;      // Default: 1 (0 → cone)
-    diameterBottom?: number;   // Default: 1
-    tessellation?: number;     // Default: 24
-    subdivisions?: number;     // Default: 1
-    arc?: number;              // Default: 1 (partial wedge)
+    height?: number; // Default: 2
+    diameter?: number; // Default: 1 (overrides diameterTop / diameterBottom)
+    diameterTop?: number; // Default: 1 (0 → cone)
+    diameterBottom?: number; // Default: 1
+    tessellation?: number; // Default: 24
+    subdivisions?: number; // Default: 1
+    arc?: number; // Default: 1 (partial wedge)
 }
 
 export function createCylinderData(opts?: CylinderOptions): MeshData;
@@ -145,7 +145,7 @@ export function createCylinderData(opts?: CylinderOptions): MeshData;
 
 ```typescript
 export interface PlaneOptions {
-    size?: number;   // Default: 1 (shorthand for width + height)
+    size?: number; // Default: 1 (shorthand for width + height)
     width?: number;
     height?: number;
 }
@@ -157,9 +157,9 @@ export function createPlaneData(opts?: PlaneOptions): MeshData;
 
 ```typescript
 export interface DiscOptions {
-    radius?: number;       // Default: 0.5
+    radius?: number; // Default: 0.5
     tessellation?: number; // Default: 64
-    arc?: number;          // Default: 1 (<1 → pie slice / ring)
+    arc?: number; // Default: 1 (<1 → pie slice / ring)
 }
 
 export function createDiscData(opts?: DiscOptions): MeshData;
@@ -169,12 +169,12 @@ export function createDiscData(opts?: DiscOptions): MeshData;
 
 ```typescript
 export interface PolyhedronOptions {
-    type?: number;   // 0-14 (0=tetra, 3=icosahedron, …)
-    size?: number;   // Default: 1 (uniform scale)
+    type?: number; // 0-14 (0=tetra, 3=icosahedron, …)
+    size?: number; // Default: 1 (uniform scale)
     sizeX?: number;
     sizeY?: number;
     sizeZ?: number;
-    flat?: boolean;  // Default: true (duplicate verts per face)
+    flat?: boolean; // Default: true (duplicate verts per face)
 }
 
 export function createPolyhedronData(opts?: PolyhedronOptions): MeshData;
@@ -186,8 +186,8 @@ export function createPolyhedronData(opts?: PolyhedronOptions): MeshData;
 export interface RibbonOptions {
     pathArray: Vec3[][];
     closeArray?: boolean; // Default: false
-    closePath?: boolean;  // Default: false
-    offset?: number;      // Default: pathArray[0].length / 2
+    closePath?: boolean; // Default: false
+    offset?: number; // Default: pathArray[0].length / 2
     sideOrientation?: number;
 }
 
@@ -204,11 +204,11 @@ export const CAP_ALL = 3;
 
 export interface TubeOptions {
     path: Vec3[];
-    radius?: number;       // Default: 1
+    radius?: number; // Default: 1
     tessellation?: number; // Default: 64
     radiusFunction?: (i: number, distance: number) => number;
-    cap?: number;          // Default: CAP_NONE
-    arc?: number;          // Default: 1
+    cap?: number; // Default: CAP_NONE
+    arc?: number; // Default: 1
 }
 
 export function createTubeData(opts: TubeOptions): MeshData;
@@ -220,9 +220,9 @@ export function createTubeData(opts: TubeOptions): MeshData;
 export interface ExtrudeShapeOptions {
     shape: Vec3[];
     path: Vec3[];
-    scale?: number;     // Default: 1
-    rotation?: number;  // Default: 0 (radians accumulated per path step)
-    cap?: number;       // Default: CAP_NONE
+    scale?: number; // Default: 1
+    rotation?: number; // Default: 0 (radians accumulated per path step)
+    cap?: number; // Default: CAP_NONE
     closeShape?: boolean;
     closePath?: boolean;
 }
@@ -671,8 +671,8 @@ All are single-call, synchronous generators (except `createGroundFromHeightMap` 
 
 ## File Manifest
 
-| File                        | Role                                                                                         |
-| --------------------------- | -------------------------------------------------------------------------------------------- |
+| File                            | Role                                                                                         |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `src/mesh/create-ground.ts`     | Ground plane with heightmap: flat generation, displacement, normal recomputation, GPU upload |
 | `src/mesh/create-torus.ts`      | Torus: parametric ring mesh generation, GPU upload                                           |
 | `src/mesh/create-sphere.ts`     | UV sphere: parametric sphere generation, GPU upload                                          |

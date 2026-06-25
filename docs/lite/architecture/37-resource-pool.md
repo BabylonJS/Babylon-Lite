@@ -1,4 +1,5 @@
 # Module: Resource Pool
+
 > Package path: `packages/babylon-lite/src/resource/`
 
 ## Purpose
@@ -41,6 +42,7 @@ export function clearSamplerCache(device: GPUDevice): void;
 ### Texture Reference Counting
 
 Uses `WeakMap<GPUTexture, number>` for ref counts:
+
 - **`_texRefs`**: Maps `GPUTexture` → reference count (number)
 - `acquireTexture(tex)` / `acquireGPUTexture(tex)`: Increments count (defaults to 0 if not present, so first acquire → 1)
 - `releaseTexture(tex)` / `releaseGPUTexture(tex)`: Decrements count (defaults to 1 if not present, so first release → 0 → destroy)
@@ -50,16 +52,18 @@ Uses `WeakMap<GPUTexture, number>` for ref counts:
 **WeakMap rationale**: No memory leaks — if the `GPUTexture` object itself is GC'd (impossible while alive), the entry is automatically cleaned up. More importantly, WeakMap avoids needing explicit cleanup of the tracking map.
 
 Two API variants:
+
 - `acquireTexture` / `releaseTexture`: Takes `Texture2D` (the public API type), accesses `.texture` property for the underlying `GPUTexture`
 - `acquireGPUTexture` / `releaseGPUTexture`: Takes raw `GPUTexture` directly (used internally for environment cubemaps, BRDF LUTs, etc.)
 
 ### Sampler Deduplication
 
 Uses `WeakMap<GPUDevice, Map<string, GPUSampler>>` for per-device caching:
+
 - **`_samplerCache`**: Maps device → descriptor-key → sampler
 - Key format: `"minFilter:magFilter:mipmapFilter:addressModeU:addressModeV:addressModeW:maxAnisotropy"`
-  - Example: `"linear:linear:nearest:clamp-to-edge:clamp-to-edge:clamp-to-edge:1"`
-  - Defaults applied: nearest for filters, clamp-to-edge for address modes, 1 for anisotropy
+    - Example: `"linear:linear:nearest:clamp-to-edge:clamp-to-edge:clamp-to-edge:1"`
+    - Defaults applied: nearest for filters, clamp-to-edge for address modes, 1 for anisotropy
 - First call with a new key creates the sampler; subsequent calls return cached instance
 - `clearSamplerCache(device)` removes all cached samplers for a device
 
@@ -116,18 +120,18 @@ getOrCreateSampler(device, desc)
      ├── Cache hit: return existing GPUSampler
      │
      └── Cache miss: device.createSampler(desc), cache, return
-     
+
 clearSamplerCache(device)
      └── Delete all entries for device
 ```
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-|---|---|
-| `ThinEngine._samplerCache` | `_samplerCache` WeakMap + `getOrCreateSampler()` |
+| Babylon.js                                          | Babylon Lite                                         |
+| --------------------------------------------------- | ---------------------------------------------------- |
+| `ThinEngine._samplerCache`                          | `_samplerCache` WeakMap + `getOrCreateSampler()`     |
 | `Texture.dispose()` + `InternalTexture._references` | `acquireTexture()` / `releaseTexture()` ref counting |
-| `BaseTexture.releaseInternalTexture()` | `releaseGPUTexture()` |
+| `BaseTexture.releaseInternalTexture()`              | `releaseGPUTexture()`                                |
 
 ## Dependencies
 
@@ -147,6 +151,6 @@ clearSamplerCache(device)
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
+| File          | Purpose                                                                         |
+| ------------- | ------------------------------------------------------------------------------- |
 | `gpu-pool.ts` | GPU resource pool: ref-counted texture ownership + deduplicated sampler factory |

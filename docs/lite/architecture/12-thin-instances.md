@@ -1,4 +1,5 @@
 # Module: Thin Instances
+
 > Package path: `packages/babylon-lite/src/mesh/` (data + GPU sync + GPU culling), `packages/babylon-lite/src/material/standard/`, `packages/babylon-lite/src/material/pbr/`, and `packages/babylon-lite/src/material/shader/` (rendering)
 
 ## Purpose
@@ -16,19 +17,19 @@ Thin instances are supported by all three mesh material families: **Standard**, 
 ```typescript
 /** Per-mesh thin-instance state. Stored as mesh.thinInstances. */
 export interface ThinInstanceData {
-  matrices: Float32Array;          // 16 floats per instance (column-major 4x4 world matrix)
-  count: number;                   // active instance count
-  _capacity: number;               // allocated capacity (≥ count)
-  _version: number;                // bumped by every mutating helper; checked by render system
-  _gpuBuffer: GPUBuffer | null;    // matrix GPU buffer, managed by render system
-  _gpuBufferStorage: boolean;      // true when buffer includes STORAGE usage for compute culling
-  _gpuVersion: number;             // last _version uploaded to GPU
-  colors?: Float32Array | null;    // optional RGBA per instance (4 floats each)
-  _colorVersion: number;           // independent of _version; bumped by setThinInstanceColors
-  _colorGpuBuffer: GPUBuffer | null;
-  _colorGpuBufferStorage: boolean;
-  _colorGpuVersion: number;
-  _gpuCullingEnabled: boolean;     // opt-in GPU frustum culling + indirect draw
+    matrices: Float32Array; // 16 floats per instance (column-major 4x4 world matrix)
+    count: number; // active instance count
+    _capacity: number; // allocated capacity (≥ count)
+    _version: number; // bumped by every mutating helper; checked by render system
+    _gpuBuffer: GPUBuffer | null; // matrix GPU buffer, managed by render system
+    _gpuBufferStorage: boolean; // true when buffer includes STORAGE usage for compute culling
+    _gpuVersion: number; // last _version uploaded to GPU
+    colors?: Float32Array | null; // optional RGBA per instance (4 floats each)
+    _colorVersion: number; // independent of _version; bumped by setThinInstanceColors
+    _colorGpuBuffer: GPUBuffer | null;
+    _colorGpuBufferStorage: boolean;
+    _colorGpuVersion: number;
+    _gpuCullingEnabled: boolean; // opt-in GPU frustum culling + indirect draw
 }
 ```
 
@@ -88,12 +89,12 @@ export function setHierarchyInstanceCount(pool: HierarchyInstancePool, count: nu
  * Returns the next free vertex buffer slot.
  */
 export function syncThinInstanceBuffers(
-  engine: EngineContextInternal,
-  ti: ThinInstanceData,
-  pass: GPURenderPassEncoder | GPURenderBundleEncoder,
-  slot: number,
-  hasColor: boolean,
-  drawBuffers?: ThinInstanceDrawBuffers | null,
+    engine: EngineContextInternal,
+    ti: ThinInstanceData,
+    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+    slot: number,
+    hasColor: boolean,
+    drawBuffers?: ThinInstanceDrawBuffers | null
 ): number;
 ```
 
@@ -101,9 +102,9 @@ export function syncThinInstanceBuffers(
 
 ```typescript
 // standard-pipeline.ts
-export const THIN_INSTANCES      = 1 << 15;  // matrix instancing
-export const THIN_INSTANCE_COLOR = 1 << 16;  // per-instance color buffer
-export const DISABLE_LIGHTING    = 1 << 17;  // skip light loop, output emissive × diffuse × baseColor
+export const THIN_INSTANCES = 1 << 15; // matrix instancing
+export const THIN_INSTANCE_COLOR = 1 << 16; // per-instance color buffer
+export const DISABLE_LIGHTING = 1 << 17; // skip light loop, output emissive × diffuse × baseColor
 
 // mesh-features.ts
 export const MSH_HAS_THIN_INSTANCES = 1 << 4;
@@ -114,7 +115,7 @@ export const MSH_HAS_INSTANCE_COLOR = 1 << 5;
 
 ```typescript
 // StandardMaterialProps — extended with:
-disableLighting: boolean;  // default false. When true, skip all lighting; output emissive * diffuse * baseColor.
+disableLighting: boolean; // default false. When true, skip all lighting; output emissive * diffuse * baseColor.
 ```
 
 ---
@@ -177,12 +178,12 @@ This avoids shifting the entire array, keeping removal O(1). Callers must be awa
 
 ### Version Tracking
 
-| Version field | Bumped by | Checked by |
-|---|---|---|
-| `_version` | `setThinInstances`, `addThinInstance`, `setThinInstanceMatrix`, `removeThinInstance`, `flushThinInstances` | `syncThinInstanceBuffers` (matrix upload) |
-| `_colorVersion` | `setThinInstanceColors` | `syncThinInstanceBuffers` (color upload) |
-| `_gpuVersion` | `syncThinInstanceBuffers` (after matrix upload) | — |
-| `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload) | — |
+| Version field      | Bumped by                                                                                                  | Checked by                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `_version`         | `setThinInstances`, `addThinInstance`, `setThinInstanceMatrix`, `removeThinInstance`, `flushThinInstances` | `syncThinInstanceBuffers` (matrix upload) |
+| `_colorVersion`    | `setThinInstanceColors`                                                                                    | `syncThinInstanceBuffers` (color upload)  |
+| `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                            | —                                         |
+| `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                             | —                                         |
 
 GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _colorGpuVersion`), avoiding redundant `writeBuffer` calls for static instances.
 
@@ -195,8 +196,8 @@ GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _co
 1. Compare `ti._version !== ti._gpuVersion` — skip if equal.
 2. Compute `byteSize = ti.count * 64` (16 floats × 4 bytes).
 3. If `ti._gpuBuffer` is null or `ti._gpuBuffer.size < byteSize`:
-   - Destroy old buffer (if any).
-   - Create new buffer: `size = ti._capacity * 64`, `usage = VERTEX | COPY_DST`, plus `STORAGE` when GPU culling is enabled.
+    - Destroy old buffer (if any).
+    - Create new buffer: `size = ti._capacity * 64`, `usage = VERTEX | COPY_DST`, plus `STORAGE` when GPU culling is enabled.
 4. `device.queue.writeBuffer(ti._gpuBuffer, 0, ti.matrices.buffer, ti.matrices.byteOffset, byteSize)`.
 5. Set `ti._gpuVersion = ti._version`.
 6. Bind: `pass.setVertexBuffer(slot++, ti._gpuBuffer)`.
@@ -206,8 +207,8 @@ GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _co
 1. Compare `ti._colorVersion !== ti._colorGpuVersion` — skip if equal.
 2. Compute `byteSize = ti.count * 16` (4 floats × 4 bytes).
 3. If `ti._colorGpuBuffer` is null or `ti._colorGpuBuffer.size < byteSize`:
-   - Destroy old buffer (if any).
-   - Create new buffer: `size = ti._capacity * 16`, `usage = VERTEX | COPY_DST`, plus `STORAGE` when GPU culling is enabled.
+    - Destroy old buffer (if any).
+    - Create new buffer: `size = ti._capacity * 16`, `usage = VERTEX | COPY_DST`, plus `STORAGE` when GPU culling is enabled.
 4. `device.queue.writeBuffer(ti._colorGpuBuffer, 0, ti.colors.buffer, ti.colors.byteOffset, byteSize)`.
 5. Set `ti._colorGpuVersion = ti._colorVersion`.
 6. Bind: `pass.setVertexBuffer(slot++, ti._colorGpuBuffer)`.
@@ -234,14 +235,14 @@ The per-binding cull lifecycle is factored into one shared module, `packages/bab
 
 Cull state is owned by each `DrawBinding`, not by `ThinInstanceData`, because the same mesh can be rendered by multiple render tasks/cameras. Each binding owns:
 
-| Resource | Usage | Purpose |
-|---|---|---|
-| source matrix buffer | `VERTEX | COPY_DST | STORAGE` | Full CPU-authored instance matrix list |
-| source color buffer | `VERTEX | COPY_DST | STORAGE` | Full CPU-authored color list, when present |
-| visible matrix buffer | `VERTEX | STORAGE` | Compacted visible matrices written by compute and read by the vertex shader |
-| visible color buffer | `VERTEX | STORAGE` | Compacted visible colors, when present |
-| indirect args buffer | `INDIRECT | STORAGE | COPY_DST` | `[indexCount, visibleInstanceCount, firstIndex, baseVertex, firstInstance]` |
-| params uniform | `UNIFORM | COPY_DST` | Six frustum planes, mesh world matrix, local bounding sphere, instance count |
+| Resource              | Usage     | Purpose   |
+| --------------------- | --------- | --------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| source matrix buffer  | `VERTEX   | COPY_DST  | STORAGE`                                                                     | Full CPU-authored instance matrix list                                      |
+| source color buffer   | `VERTEX   | COPY_DST  | STORAGE`                                                                     | Full CPU-authored color list, when present                                  |
+| visible matrix buffer | `VERTEX   | STORAGE`  | Compacted visible matrices written by compute and read by the vertex shader  |
+| visible color buffer  | `VERTEX   | STORAGE`  | Compacted visible colors, when present                                       |
+| indirect args buffer  | `INDIRECT | STORAGE   | COPY_DST`                                                                    | `[indexCount, visibleInstanceCount, firstIndex, baseVertex, firstInstance]` |
+| params uniform        | `UNIFORM  | COPY_DST` | Six frustum planes, mesh world matrix, local bounding sphere, instance count |
 
 ### Per-Frame Flow
 
@@ -288,7 +289,7 @@ if (material.disableLighting) f |= DISABLE_LIGHTING;
 The renderable builder sets:
 
 ```typescript
-if (mesh.thinInstances)        features |= THIN_INSTANCES;
+if (mesh.thinInstances) features |= THIN_INSTANCES;
 if (mesh.thinInstances.colors) features |= THIN_INSTANCE_COLOR;
 ```
 
@@ -296,12 +297,12 @@ if (mesh.thinInstances.colors) features |= THIN_INSTANCE_COLOR;
 
 Base per-vertex attributes use sequential `shaderLocation` values starting at 0:
 
-| Location | Attribute | Format | Stride | Step Mode |
-|---|---|---|---|---|
-| 0 | position | `float32x3` | varies | vertex |
-| 1 | normal | `float32x3` | varies | vertex |
-| 2 (opt) | uv | `float32x2` | varies | vertex |
-| next (opt) | uv2 | `float32x2` | varies | vertex |
+| Location   | Attribute | Format      | Stride | Step Mode |
+| ---------- | --------- | ----------- | ------ | --------- |
+| 0          | position  | `float32x3` | varies | vertex    |
+| 1          | normal    | `float32x3` | varies | vertex    |
+| 2 (opt)    | uv        | `float32x2` | varies | vertex    |
+| next (opt) | uv2       | `float32x2` | varies | vertex    |
 
 When `THIN_INSTANCES` is set, an instanced buffer layout is appended:
 
@@ -411,12 +412,12 @@ color = vec4<f32>(
 
 ```typescript
 type ThinInstanceSync = (
-  engine: EngineContextInternal,
-  ti: ThinInstanceData,
-  pass: GPURenderPassEncoder | GPURenderBundleEncoder,
-  slot: number,
-  hasColor: boolean,
-  drawBuffers?: ThinInstanceDrawBuffers | null,
+    engine: EngineContextInternal,
+    ti: ThinInstanceData,
+    pass: GPURenderPassEncoder | GPURenderBundleEncoder,
+    slot: number,
+    hasColor: boolean,
+    drawBuffers?: ThinInstanceDrawBuffers | null
 ) => number;
 ```
 
@@ -427,14 +428,14 @@ type ThinInstanceSync = (
 ```typescript
 const ti = mesh.thinInstances;
 if (ti && tiSync) {
-  slot = tiSync(engine, ti, pass, slot, hasInstanceColor, cullResult?.drawBuffers ?? null);
-  if (cullResult) {
-    pass.drawIndexedIndirect(cullResult.argsBuffer, 0);
-  } else {
-    pass.drawIndexed(g.indexCount, ti.count);
-  }
+    slot = tiSync(engine, ti, pass, slot, hasInstanceColor, cullResult?.drawBuffers ?? null);
+    if (cullResult) {
+        pass.drawIndexedIndirect(cullResult.argsBuffer, 0);
+    } else {
+        pass.drawIndexed(g.indexCount, ti.count);
+    }
 } else {
-  pass.drawIndexed(g.indexCount);
+    pass.drawIndexed(g.indexCount);
 }
 ```
 
@@ -449,17 +450,17 @@ The regular path uses `drawIndexed(indexCount, instanceCount)` and draws all ins
 The `standardGroupBuilder` function detects thin instances at build time:
 
 ```typescript
-const hasTI = meshes.some(m => !!m.thinInstances);
-const hasTICulling = meshes.some(m => m.thinInstances?._gpuCullingEnabled === true);
+const hasTI = meshes.some((m) => !!m.thinInstances);
+const hasTICulling = meshes.some((m) => m.thinInstances?._gpuCullingEnabled === true);
 let tiSync;
 if (hasTI) {
-  const mod = await import('../../mesh/thin-instance-gpu.js');
-  tiSync = mod.syncThinInstanceBuffers;
+    const mod = await import("../../mesh/thin-instance-gpu.js");
+    tiSync = mod.syncThinInstanceBuffers;
 }
 if (hasTICulling) {
-  tiCull = await import('../../mesh/thin-instance-gpu-culling.js');
+    tiCull = await import("../../mesh/thin-instance-gpu-culling.js");
 }
-const { buildStandardMeshRenderables } = await import('./standard-renderable.js');
+const { buildStandardMeshRenderables } = await import("./standard-renderable.js");
 return buildStandardMeshRenderables(scene, meshes, { tiSync, tiFragment, tiCull });
 ```
 
@@ -469,12 +470,12 @@ This ensures `thin-instance-gpu.ts` is only fetched when a scene actually uses t
 
 The thin instance feature is designed for **zero bundle-size impact on scenes that don't use it**:
 
-| Layer | Cost | When Loaded |
-|---|---|---|
-| `thin-instance.ts` (CPU data model) | ~1 KB | Only if user imports `setThinInstances()` etc. |
-| `thin-instance-gpu.ts` (GPU sync) | ~0.9 KB | Dynamic import, only when `standardGroupBuilder` detects thin instances |
-| `thin-instance-gpu-culling.ts` (compute culling) | opt-in chunk | Dynamic import, only when `_gpuCullingEnabled` is true |
-| Shader/pipeline feature flag checks | ~400 bytes | Always present in standard shader composer (unavoidable — feature flags are checked in shared composition functions) |
+| Layer                                            | Cost         | When Loaded                                                                                                          |
+| ------------------------------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `thin-instance.ts` (CPU data model)              | ~1 KB        | Only if user imports `setThinInstances()` etc.                                                                       |
+| `thin-instance-gpu.ts` (GPU sync)                | ~0.9 KB      | Dynamic import, only when `standardGroupBuilder` detects thin instances                                              |
+| `thin-instance-gpu-culling.ts` (compute culling) | opt-in chunk | Dynamic import, only when `_gpuCullingEnabled` is true                                                               |
+| Shader/pipeline feature flag checks              | ~400 bytes   | Always present in standard shader composer (unavoidable — feature flags are checked in shared composition functions) |
 
 Scene 16 chunk breakdown: `scene16.js` (18.1 KB) + `standard-renderable` (22.5 KB) + `thin-instance-gpu` (0.9 KB) = 41.5 KB total.
 
@@ -527,10 +528,10 @@ PBR thin instances are fully implemented. The system mirrors the Standard materi
 `pbr-renderable.ts` detects thin instances at build time and dynamically imports the thin-instance fragment:
 
 ```typescript
-if (meshes.some(m => !!m.thinInstances)) {
-    const { createThinInstanceFragment } = await import('../../shader/fragments/thin-instance-fragment.js');
+if (meshes.some((m) => !!m.thinInstances)) {
+    const { createThinInstanceFragment } = await import("../../shader/fragments/thin-instance-fragment.js");
     fragments.push(createThinInstanceFragment(hasInstanceColor));
-    const { syncThinInstanceBuffers } = await import('../../mesh/thin-instance-gpu.js');
+    const { syncThinInstanceBuffers } = await import("../../mesh/thin-instance-gpu.js");
     tiSync = syncThinInstanceBuffers;
 }
 ```
@@ -538,6 +539,7 @@ if (meshes.some(m => !!m.thinInstances)) {
 ### Thin Instance Fragment (`shader/fragments/thin-instance-fragment.ts`)
 
 The fragment contributes:
+
 - **Vertex attributes**: `world0..world3` (instance matrix rows) + optional `instanceColor`
 - **Vertex slot**: Composes `finalWorld = mesh.world * instanceWorld` — replaces the mesh world matrix in all subsequent transforms
 - **Fragment slot**: Multiplies base color/alpha by instance color (when `MSH_HAS_INSTANCE_COLOR` is set)
@@ -562,22 +564,22 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 
 ## Babylon.js Equivalence Map
 
-| Babylon Lite | Babylon.js |
-|---|---|
-| `setThinInstances(mesh, matrices, count)` | `mesh.thinInstanceSetBuffer("matrix", data, 16)` |
-| `setThinInstanceColors(mesh, colors)` | `mesh.thinInstanceSetBuffer("color", data, 4)` |
-| `enableThinInstanceGpuCulling(mesh)` | No direct core equivalent; comparable to engine-level custom GPU culling before thin-instance draw |
-| `addThinInstance(mesh, matrix)` | `mesh.thinInstanceAdd(matrix)` |
-| `removeThinInstance(mesh, index)` | `mesh.thinInstanceRemove(index)` |
-| `setThinInstanceMatrix(mesh, index, matrix)` | `mesh.thinInstanceSetMatrixAt(index, matrix)` |
-| `flushThinInstances(mesh)` | `mesh.thinInstanceBufferUpdated("matrix")` |
-| `material.disableLighting = true` | `material.disableLighting = true` |
-| `THIN_INSTANCES` feature flag | Internal `#define THIN_INSTANCES` |
-| `THIN_INSTANCE_COLOR` feature flag | Internal `#define THIN_INSTANCE_COLOR` |
-| Per-instance color via vertex attribute | Per-instance color via vertex attribute |
-| `finalWorld = mesh.world * instanceWorld` | `finalWorld = world * instanceWorld` |
-| Swap-remove with `copyWithin` | Swap-remove with buffer manipulation |
-| Dynamic import of GPU sync module | Always loaded (no code splitting) |
+| Babylon Lite                                 | Babylon.js                                                                                         |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `setThinInstances(mesh, matrices, count)`    | `mesh.thinInstanceSetBuffer("matrix", data, 16)`                                                   |
+| `setThinInstanceColors(mesh, colors)`        | `mesh.thinInstanceSetBuffer("color", data, 4)`                                                     |
+| `enableThinInstanceGpuCulling(mesh)`         | No direct core equivalent; comparable to engine-level custom GPU culling before thin-instance draw |
+| `addThinInstance(mesh, matrix)`              | `mesh.thinInstanceAdd(matrix)`                                                                     |
+| `removeThinInstance(mesh, index)`            | `mesh.thinInstanceRemove(index)`                                                                   |
+| `setThinInstanceMatrix(mesh, index, matrix)` | `mesh.thinInstanceSetMatrixAt(index, matrix)`                                                      |
+| `flushThinInstances(mesh)`                   | `mesh.thinInstanceBufferUpdated("matrix")`                                                         |
+| `material.disableLighting = true`            | `material.disableLighting = true`                                                                  |
+| `THIN_INSTANCES` feature flag                | Internal `#define THIN_INSTANCES`                                                                  |
+| `THIN_INSTANCE_COLOR` feature flag           | Internal `#define THIN_INSTANCE_COLOR`                                                             |
+| Per-instance color via vertex attribute      | Per-instance color via vertex attribute                                                            |
+| `finalWorld = mesh.world * instanceWorld`    | `finalWorld = world * instanceWorld`                                                               |
+| Swap-remove with `copyWithin`                | Swap-remove with buffer manipulation                                                               |
+| Dynamic import of GPU sync module            | Always loaded (no code splitting)                                                                  |
 
 **Same math, minimal code.** No class hierarchy — just typed arrays, version counters, and a GPU sync function.
 
@@ -597,41 +599,41 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 
 ## Test Specification
 
-| Test | Description |
-|---|---|
-| Scene 16 parity | Pixel comparison of 64K colored cubes against Babylon.js reference |
-| Live reference | Opens `babylon-ref-scene16.html`, captures `live-ref.png`, compares against Lite |
-| Golden fallback | Falls back to `babylon-ref-golden.png` if live capture fails |
-| MAD threshold | Full-image Mean Absolute Difference ≤ 1 |
-| Exact match ratio | ≥ 95% of pixels must be exact matches |
-| Capacity growth | `addThinInstance` beyond initial capacity → doubles array, preserves existing data |
-| Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements |
-| Version skip | Static instances: GPU upload skipped when `_version === _gpuVersion` |
-| Color independence | Matrix mutation does not trigger color re-upload (separate version counters) |
-| Zero-cost loading | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk |
+| Test                    | Description                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| Scene 16 parity         | Pixel comparison of 64K colored cubes against Babylon.js reference                 |
+| Live reference          | Opens `babylon-ref-scene16.html`, captures `live-ref.png`, compares against Lite   |
+| Golden fallback         | Falls back to `babylon-ref-golden.png` if live capture fails                       |
+| MAD threshold           | Full-image Mean Absolute Difference ≤ 1                                            |
+| Exact match ratio       | ≥ 95% of pixels must be exact matches                                              |
+| Capacity growth         | `addThinInstance` beyond initial capacity → doubles array, preserves existing data |
+| Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements        |
+| Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`               |
+| Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)       |
+| Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk             |
 
 ---
 
 ## File Manifest
 
-| File | Purpose |
-|---|---|
-| `src/mesh/thin-instance.ts` | CPU-side data model + public API (`ThinInstanceData`, `setThinInstances`, etc.) |
-| `src/mesh/thin-instance-gpu.ts` | GPU buffer sync — lazy-loaded chunk (`syncThinInstanceBuffers`) |
-| `src/mesh/thin-instance-gpu-culling.ts` | Opt-in compute frustum culling + compacted visible buffers + indirect args |
-| `src/material/standard/standard-material.ts` | `disableLighting` property + `standardGroupBuilder` with dynamic sync loading |
-| `src/material/standard/standard-pipeline.ts` | `THIN_INSTANCES`, `THIN_INSTANCE_COLOR`, `DISABLE_LIGHTING` flags + pipeline vertex buffer layouts |
-| `src/material/standard/standard-template.ts` | `instanceColor` varying + `disableLighting` fragment path + instance world matrix composition |
-| `src/material/standard/standard-renderable.ts` | `tiSync` callback integration + instanced `drawIndexed` / `drawIndexedIndirect` |
-| `src/material/mesh-features.ts` | `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR` feature flag constants |
-| `src/material/pbr/pbr-renderable.ts` | PBR thin-instance detection, fragment/culling loading, instanced draw |
-| `src/material/pbr/pbr-pipeline.ts` | PBR pipeline vertex buffer layouts for thin instances |
-| `src/shader/fragments/thin-instance-fragment.ts` | ShaderFragment for instance matrix/color — shared by PBR and Standard |
-| `lab/lite/src/lite/scene16.ts` | Reference/check scene: 40x40x40 = 64K colored cubes with opt-in GPU culling |
-| `lab/lite/src/lite/scene17.ts` | Reference/check scene: PBR + Standard thin instances in one scene, both culling-enabled |
-| `lab/lite/src/lite/scene35.ts` | Reference/check scene: glTF `EXT_mesh_gpu_instancing` with opt-in GPU culling |
-| `tests/lite/parity/scene16-thin-instances.spec.ts` | Parity test for Standard thin instances |
-| `tests/lite/parity/scene17-pbr-std-thin-instances.spec.ts` | Parity test for PBR + Standard thin instances |
+| File                                                       | Purpose                                                                                            |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `src/mesh/thin-instance.ts`                                | CPU-side data model + public API (`ThinInstanceData`, `setThinInstances`, etc.)                    |
+| `src/mesh/thin-instance-gpu.ts`                            | GPU buffer sync — lazy-loaded chunk (`syncThinInstanceBuffers`)                                    |
+| `src/mesh/thin-instance-gpu-culling.ts`                    | Opt-in compute frustum culling + compacted visible buffers + indirect args                         |
+| `src/material/standard/standard-material.ts`               | `disableLighting` property + `standardGroupBuilder` with dynamic sync loading                      |
+| `src/material/standard/standard-pipeline.ts`               | `THIN_INSTANCES`, `THIN_INSTANCE_COLOR`, `DISABLE_LIGHTING` flags + pipeline vertex buffer layouts |
+| `src/material/standard/standard-template.ts`               | `instanceColor` varying + `disableLighting` fragment path + instance world matrix composition      |
+| `src/material/standard/standard-renderable.ts`             | `tiSync` callback integration + instanced `drawIndexed` / `drawIndexedIndirect`                    |
+| `src/material/mesh-features.ts`                            | `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR` feature flag constants                          |
+| `src/material/pbr/pbr-renderable.ts`                       | PBR thin-instance detection, fragment/culling loading, instanced draw                              |
+| `src/material/pbr/pbr-pipeline.ts`                         | PBR pipeline vertex buffer layouts for thin instances                                              |
+| `src/shader/fragments/thin-instance-fragment.ts`           | ShaderFragment for instance matrix/color — shared by PBR and Standard                              |
+| `lab/lite/src/lite/scene16.ts`                             | Reference/check scene: 40x40x40 = 64K colored cubes with opt-in GPU culling                        |
+| `lab/lite/src/lite/scene17.ts`                             | Reference/check scene: PBR + Standard thin instances in one scene, both culling-enabled            |
+| `lab/lite/src/lite/scene35.ts`                             | Reference/check scene: glTF `EXT_mesh_gpu_instancing` with opt-in GPU culling                      |
+| `tests/lite/parity/scene16-thin-instances.spec.ts`         | Parity test for Standard thin instances                                                            |
+| `tests/lite/parity/scene17-pbr-std-thin-instances.spec.ts` | Parity test for PBR + Standard thin instances                                                      |
 
 ---
 

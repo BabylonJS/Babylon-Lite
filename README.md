@@ -29,18 +29,18 @@ Open **http://localhost:5174** to browse the scene gallery.
 
 ## Available Scripts
 
-| Command                    | Description                                                   |
-| -------------------------- | ------------------------------------------------------------- |
-| `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                |
-| `pnpm dev:playground`     | Start the Lite Playground dev server (http://localhost:5175)   |
-| `pnpm build:playground`   | Build the Lite Playground into `playground/dist`               |
-| `pnpm build`               | Build the `babylon-lite` library                              |
+| Command                    | Description                                                         |
+| -------------------------- | ------------------------------------------------------------------- |
+| `pnpm dev:lab`             | Build bundle scenes + start the lab dev server                      |
+| `pnpm dev:playground`      | Start the Lite Playground dev server (http://localhost:5175)        |
+| `pnpm build:playground`    | Build the Lite Playground into `playground/dist`                    |
+| `pnpm build`               | Build the `babylon-lite` library                                    |
 | `pnpm build:bundle-scenes` | Generate production bundles + per-scene `manifest/` for the gallery |
-| `pnpm test`                | Build bundle scenes, then run parity and bundle-size tests    |
-| `pnpm test:parity`         | Run Playwright visual parity tests against golden references  |
-| `pnpm test:perf`           | Run Playwright performance benchmarks                         |
-| `pnpm test:bundle-size`    | Run bundle-size ceiling tests                                 |
-| `pnpm lint`                | Run ESLint, then type-check with `tsc --noEmit`               |
+| `pnpm test`                | Build bundle scenes, then run parity and bundle-size tests          |
+| `pnpm test:parity`         | Run Playwright visual parity tests against golden references        |
+| `pnpm test:perf`           | Run Playwright performance benchmarks                               |
+| `pnpm test:bundle-size`    | Run bundle-size ceiling tests                                       |
+| `pnpm lint`                | Run ESLint, then type-check with `tsc --noEmit`                     |
 
 ## Project Structure
 

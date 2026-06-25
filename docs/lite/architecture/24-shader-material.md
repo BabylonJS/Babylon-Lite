@@ -45,12 +45,12 @@ export interface ShaderMaterialOptions {
 
 Supported Babylon route forms:
 
-| Babylon route form | Lite phase 1 handling |
-| --- | --- |
-| `{ vertexSource, fragmentSource }` | Supported, but source strings must be WGSL. |
-| `{ vertex, fragment }` with `Effect.ShadersStore` | Not supported in core; global shader stores violate Lite's no-side-effect rule. |
-| `{ vertexElement, fragmentElement }` | Not supported in core. Callers may read DOM text and pass WGSL strings explicitly. |
-| `"./COMMON_NAME"` external `.fx` files | Not supported in core. A future helper may fetch WGSL explicitly, but the material factory stays synchronous. |
+| Babylon route form                                | Lite phase 1 handling                                                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `{ vertexSource, fragmentSource }`                | Supported, but source strings must be WGSL.                                                                   |
+| `{ vertex, fragment }` with `Effect.ShadersStore` | Not supported in core; global shader stores violate Lite's no-side-effect rule.                               |
+| `{ vertexElement, fragmentElement }`              | Not supported in core. Callers may read DOM text and pass WGSL strings explicitly.                            |
+| `"./COMMON_NAME"` external `.fx` files            | Not supported in core. A future helper may fetch WGSL explicitly, but the material factory stays synchronous. |
 
 ### Material type
 
@@ -119,16 +119,7 @@ Implementation notes (bundle discipline):
 ```typescript
 export type ShaderUniformType = "f32" | "u32" | "i32" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>" | "mat4x4<f32>";
 
-export type ShaderSystemUniformName =
-    | "world"
-    | "view"
-    | "projection"
-    | "viewProjection"
-    | "worldView"
-    | "worldViewProjection"
-    | "cameraPosition"
-    | "screenSize"
-    | "alphaCutoff";
+export type ShaderSystemUniformName = "world" | "view" | "projection" | "viewProjection" | "worldView" | "worldViewProjection" | "cameraPosition" | "screenSize" | "alphaCutoff";
 
 export type ShaderUniformOption = ShaderSystemUniformName | ShaderUniformDecl;
 
@@ -302,10 +293,10 @@ The cache key includes:
 
 The pipeline layout is:
 
-| Group | Owner | Bindings |
-| --- | --- | --- |
-| 0 | Frame graph render task | `SceneUniforms`, scene lights UBO |
-| 1 | ShaderMaterial | system UBO, optional custom UBO, textures, samplers |
+| Group | Owner                   | Bindings                                            |
+| ----- | ----------------------- | --------------------------------------------------- |
+| 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                   |
+| 1     | ShaderMaterial          | system UBO, optional custom UBO, textures, samplers |
 
 Group 1 binding order:
 
@@ -319,21 +310,21 @@ Use `computeUboLayout()` from `src/shader/ubo-layout.ts`. Do not split WGSL stri
 
 `ShaderSystemUniforms` contains only requested per-mesh values:
 
-| Uniform | Type | Source |
-| --- | --- | --- |
-| `world` | `mat4x4<f32>` | `mesh.worldMatrix` |
-| `worldView` | `mat4x4<f32>` | `view * world` in Lite matrix convention |
+| Uniform               | Type          | Source                                                   |
+| --------------------- | ------------- | -------------------------------------------------------- |
+| `world`               | `mat4x4<f32>` | `mesh.worldMatrix`                                       |
+| `worldView`           | `mat4x4<f32>` | `view * world` in Lite matrix convention                 |
 | `worldViewProjection` | `mat4x4<f32>` | `scene.viewProjection * world` in Lite matrix convention |
-| `projection` | `mat4x4<f32>` | active pass camera projection |
-| `screenSize` | `vec2<f32>` | active pass target width/height |
-| `alphaCutoff` | `f32` | material/system value, default `0.4` |
+| `projection`          | `mat4x4<f32>` | active pass camera projection                            |
+| `screenSize`          | `vec2<f32>`   | active pass target width/height                          |
+| `alphaCutoff`         | `f32`         | material/system value, default `0.4`                     |
 
 Scene-level values should be aliased or read from group 0 rather than copied per mesh when possible:
 
-| Uniform | Preferred source |
-| --- | --- |
-| `view` | `scene.view` |
-| `viewProjection` | `scene.viewProjection` |
+| Uniform          | Preferred source         |
+| ---------------- | ------------------------ |
+| `view`           | `scene.view`             |
+| `viewProjection` | `scene.viewProjection`   |
 | `cameraPosition` | `scene.vEyePosition.xyz` |
 
 If a caller requests the Babylon-style `viewProjection` string, the generated prelude may expose an alias function or const-like local expression in helper code, but it should not allocate a duplicate per-mesh UBO slot.
@@ -431,20 +422,20 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 ## Babylon.js Equivalence Map
 
-| Babylon ShaderMaterial concept | Lite ShaderMaterial equivalent |
-| --- | --- |
+| Babylon ShaderMaterial concept                    | Lite ShaderMaterial equivalent                                             |
+| ------------------------------------------------- | -------------------------------------------------------------------------- |
 | `new ShaderMaterial(name, scene, route, options)` | `createShaderMaterial({ name, vertexSource, fragmentSource, ...options })` |
-| `scene` constructor argument | Not accepted; scene owns meshes/materials via `addToScene` |
-| GLSL shader source | Not supported |
-| WGSL shader source | Supported |
-| `attributes: ["position", "normal", "uv"]` | Same names, validated against Lite supported attributes |
-| `uniforms: ["worldViewProjection"]` | Same for known system uniforms |
-| Custom `uniforms: ["time"]` | Use `{ name: "time", type: "f32" }` |
-| `samplers: ["textureSampler"]` | Same name, bound with `setShaderTexture` |
-| `defines: ["MyDefine"]` | `defines: { MyDefine: true }`, emitted as WGSL const |
-| `setFloat`, `setVector3`, `setTexture` methods | `setShaderUniform`, `setShaderTexture` standalone functions |
-| `needAlphaBlending` | Transparent renderable + blend pipeline |
-| `needAlphaTesting` | Hint only; shader performs discard |
+| `scene` constructor argument                      | Not accepted; scene owns meshes/materials via `addToScene`                 |
+| GLSL shader source                                | Not supported                                                              |
+| WGSL shader source                                | Supported                                                                  |
+| `attributes: ["position", "normal", "uv"]`        | Same names, validated against Lite supported attributes                    |
+| `uniforms: ["worldViewProjection"]`               | Same for known system uniforms                                             |
+| Custom `uniforms: ["time"]`                       | Use `{ name: "time", type: "f32" }`                                        |
+| `samplers: ["textureSampler"]`                    | Same name, bound with `setShaderTexture`                                   |
+| `defines: ["MyDefine"]`                           | `defines: { MyDefine: true }`, emitted as WGSL const                       |
+| `setFloat`, `setVector3`, `setTexture` methods    | `setShaderUniform`, `setShaderTexture` standalone functions                |
+| `needAlphaBlending`                               | Transparent renderable + blend pipeline                                    |
+| `needAlphaTesting`                                | Hint only; shader performs discard                                         |
 
 ## Dependencies
 
@@ -461,13 +452,13 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
 Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite source WGSL-only.
 
-| Scene | Reference source | Lite coverage |
-| --- | --- | --- |
-| ShaderMaterial basic color | Doc playground `#5T8G3I` | Position attribute, `worldViewProjection`, solid fragment color |
-| ShaderMaterial texture sampler | Doc playground `#D8IDR8` | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture` |
-| ShaderMaterial uniform update | Doc playground `#5T8G3I#16` | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
-| ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key |
-| ShaderMaterial alpha | Lite-authored WGSL reference | `needAlphaBlending` and explicit shader-side discard for alpha testing |
+| Scene                          | Reference source                  | Lite coverage                                                          |
+| ------------------------------ | --------------------------------- | ---------------------------------------------------------------------- |
+| ShaderMaterial basic color     | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
+| ShaderMaterial texture sampler | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
+| ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
+| ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
+| ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |
 
 Implementation should add lab scenes using the next available scene IDs, plus parity specs and bundle-size ceilings. The BJS side may use Babylon `ShaderMaterial` with GLSL from the docs; the Lite side must use equivalent WGSL and the new Lite `ShaderMaterial`.
 

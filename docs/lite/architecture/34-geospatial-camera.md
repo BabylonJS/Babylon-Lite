@@ -39,20 +39,20 @@ function clampZoomDistance(limits, zoomDistance, currentRadius, distanceToTarget
 
 // Controls (interactive) — returns a disposer
 function attachGeospatialControls(
-    camera: GeospatialCamera, canvas: HTMLCanvasElement, scene: SceneContext,
-    options?: { zoomToCursor?: boolean; checkCollisions?: boolean }
+    camera: GeospatialCamera,
+    canvas: HTMLCanvasElement,
+    scene: SceneContext,
+    options?: { zoomToCursor?: boolean; checkCollisions?: boolean }z
 ): () => void;
 
 // Animation
-function flyGeospatialCameraToAsync(
-    camera: GeospatialCamera, scene: SceneContext, options: GeospatialFlyOptions
-): Promise<void>;
+function flyGeospatialCameraToAsync(camera: GeospatialCamera, scene: SceneContext, options: GeospatialFlyOptions): Promise<void>;
 //   GeospatialFlyOptions = { yaw?, pitch?, radius?, center?, durationMs?, centerHopScale? }
 
 // Math helpers (exported for reuse / testing)
 function computeLocalBasis(worldPos, refEast, refNorth, refUp): void;
 function computeLookAtFromYawPitch(yaw, pitch, center, result): Vec3;
-function computeYawPitchFromLookAt(lookAt, center, currentYaw, result): { x, y };
+function computeYawPitchFromLookAt(lookAt, center, currentYaw, result): { x; y };
 function clampCenterFromPoles(center): Vec3;
 function normalizeRadians(angle: number): number;
 ```
@@ -97,6 +97,7 @@ This is a faithful left-handed port of Babylon.js `GeospatialCamera._setOrientat
 and `ComputeLocalBasisToRefs` / `ComputeLookAtFromYawPitchToRef`.
 
 `_setOrientation(yaw, pitch, radius, center)`:
+
 1. `yaw = NormalizeRadians(yaw)`, `pitch = NormalizeRadians(pitch)`, copy `center`.
 2. **Clamp to limits:** `yaw → [yawMin, yawMax]`, `pitch → [pitchMin, getEffectivePitchMax(radius)]`,
    `radius → [radiusMin, radiusMax]`, then `clampCenterFromPoles(center)`.
@@ -141,6 +142,7 @@ accumulate into velocities that decay with per-axis inertia
 `scene._beforeRender` (which receives the frame `deltaMs`).
 
 Interactions:
+
 - **Left-drag** — pan; the cursor stays anchored to the globe via a drag-plane
   (a plane tangent at the picked surface point), recentring with
   `computeYawPitchFromLookAt`.
@@ -177,18 +179,18 @@ that a subsequent `flyGeospatialCameraToAsync` call invokes before starting.
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
-|---|---|
-| `GeospatialCamera._setOrientation` | `applyOrientation` (closure in `geospatial-camera.ts`) |
-| `ComputeLocalBasisToRefs` (LH branch) | `computeLocalBasis` |
-| `ComputeLookAtFromYawPitchToRef` | `computeLookAtFromYawPitch` |
-| `ComputeYawPitchFromLookAtToRef` | `computeYawPitchFromLookAt` |
-| `ClampCenterFromPolesInPlace` | `clampCenterFromPoles` |
-| `GeospatialLimits` + `getEffectivePitchMax` | `geospatial-limits.ts` |
-| `GeospatialCameraMovement` / `CameraMovement` | physics in `attachGeospatialControls` |
-| `scene.pick` against globe mesh | analytic ray-sphere `intersectPlanet` |
-| `flyToAsync` + `InterpolatingBehavior` | `flyGeospatialCameraToAsync` |
-| `Matrix.LookAtLHToRef(pos, center, up)` | `getViewMatrix` from camera world matrix |
+| Babylon.js                                    | Babylon Lite                                           |
+| --------------------------------------------- | ------------------------------------------------------ |
+| `GeospatialCamera._setOrientation`            | `applyOrientation` (closure in `geospatial-camera.ts`) |
+| `ComputeLocalBasisToRefs` (LH branch)         | `computeLocalBasis`                                    |
+| `ComputeLookAtFromYawPitchToRef`              | `computeLookAtFromYawPitch`                            |
+| `ComputeYawPitchFromLookAtToRef`              | `computeYawPitchFromLookAt`                            |
+| `ClampCenterFromPolesInPlace`                 | `clampCenterFromPoles`                                 |
+| `GeospatialLimits` + `getEffectivePitchMax`   | `geospatial-limits.ts`                                 |
+| `GeospatialCameraMovement` / `CameraMovement` | physics in `attachGeospatialControls`                  |
+| `scene.pick` against globe mesh               | analytic ray-sphere `intersectPlanet`                  |
+| `flyToAsync` + `InterpolatingBehavior`        | `flyGeospatialCameraToAsync`                           |
+| `Matrix.LookAtLHToRef(pos, center, up)`       | `getViewMatrix` from camera world matrix               |
 
 ## Bundle Discipline
 

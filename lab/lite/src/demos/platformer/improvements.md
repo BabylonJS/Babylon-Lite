@@ -91,9 +91,9 @@ What ships today, so we know what we're building on:
   cave platform over lava) that carry the player. See [#13](#gameplay--content).
 - **Pipes** — ✅ **DONE.** A green warp pipe in the overworld teleports the player
   (duck on top) to the underground cavern (`1-2`) and back. The warp plays a classic
-  **pipe animation**: the player turns to face the camera and slides *down behind*
+  **pipe animation**: the player turns to face the camera and slides _down behind_
   the pipe (occluded by it via draw order on a dedicated layer), a brief iris hides
-  the camera jump, then the player rises *up out of* a pipe at the destination. See
+  the camera jump, then the player rises _up out of_ a pipe at the destination. See
   [#3](#3-several-scenes--pipe-warps--sub-areas-).
 - **Juice** — ✅ **DONE.** Additive sparkle bursts + floating HUD-digit score
   popups on coin/stomp/kill, and a 4-chunk spinning **brick-break debris** spray
@@ -130,6 +130,7 @@ blending driving a classic effect that normally needs a full material system —
 in a pure-2D bundle.
 
 **How (Lite APIs).**
+
 - Give the player its own layer built with
   `createSprite2DLayer(atlas, { customShader: starShader, ... })`.
 - `starShader = createSprite2DCustomShader({ fragment })` where the WGSL samples
@@ -166,6 +167,7 @@ feature — infinite horizontal scroll with **zero cross-scene cost** — layere
 with additive atmosphere. Big visual payoff, tiny code.
 
 **How (Lite APIs).**
+
 - For each band, a wide sprite (or a few wrapping tiles) on a layer created with
   `createSprite2DLayer(atlas, { uvScroll: true, order })`. Each frame, advance
   `setSprite2DUvOffset(layer, idx, [cameraX * factorBand, 0])` with a smaller
@@ -209,6 +211,7 @@ parallax bands, and tile set.
 scene graph — and gives the demo real game structure.
 
 **How (Lite APIs).**
+
 - Model the level as a list of **areas**, each with its own tile/terrain/enemy
   data. A `loadArea(area)` clears and refills the existing layers
   (`updateSprite2DIndex` over pooled slots) — no engine teardown needed.
@@ -284,7 +287,7 @@ scene graph — and gives the demo real game structure.
   **health-pip bar**, flashes invulnerable between hits, and on defeat triggers the
   **YOU WIN!** sequence (big bonus + fireworks → back to the title).
 - **13. Moving & one-way platforms ✅ DONE.** **One-way platforms** (thin grass
-  ledges) you jump up *through* and land on top of — a `isOneWay` oracle in the
+  ledges) you jump up _through_ and land on top of — a `isOneWay` oracle in the
   swept-AABB collider only blocks a downward move whose feet were above the platform.
   **Moving platforms** (kinematic `bridge` tiles) ferry the player along X or Y and
   **carry** them (horizontal drift + vertical follow), with a per-frame delta applied
@@ -342,12 +345,12 @@ Consolidated from the 🟡/🔴 ideas above — to discuss before committing.
 > an existing effect pass. That is a **moderate, well-scoped hook**, not new
 > infrastructure.
 
-| # | Feature | Unlocks | Status |
-|---|---------|---------|--------|
-| A | **SpriteRenderer → offscreen target + post pass** ✅ **SHIPPED** | CRT/scanline (#17 ✅), fullscreen heat-haze (#9), graded day/night sky (#10), screen-wide flashes | Done: `createRenderTexture2D` (renderable+sampleable `Texture2D`) + `setSpriteRendererTarget(sr, target\|null)` (defaults to the swapchain, so zero impact on existing scenes; tree-shaken when unused). The platformer CRT (#17) is the first user — scene renders into an RT, a present `SpriteRenderer` samples it through a custom shader. |
-| B | **Render-to-texture at integer scale + blit** | Crisp integer-scale pixel zoom (#18) | Same RT building blocks; needs an integer-scale resolve/blit path. |
-| C | **2D sprite cutout (alpha-test) blend** | Hard-edged depth-sorted sprites (foliage/grates) if we ever go 2.5D | Billboard cutout already ships; 2D-sprite cutout is still TODO. Low priority for this demo. |
-| D | **(Nice-to-have) lightweight 2D light/normal system** | Cleaner underground lighting (#8) | Fully fakeable with multiply sprites today; only worth it if multiple demos want real 2D lighting. |
+| #   | Feature                                                          | Unlocks                                                                                           | Status                                                                                                                                                                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A   | **SpriteRenderer → offscreen target + post pass** ✅ **SHIPPED** | CRT/scanline (#17 ✅), fullscreen heat-haze (#9), graded day/night sky (#10), screen-wide flashes | Done: `createRenderTexture2D` (renderable+sampleable `Texture2D`) + `setSpriteRendererTarget(sr, target\|null)` (defaults to the swapchain, so zero impact on existing scenes; tree-shaken when unused). The platformer CRT (#17) is the first user — scene renders into an RT, a present `SpriteRenderer` samples it through a custom shader. |
+| B   | **Render-to-texture at integer scale + blit**                    | Crisp integer-scale pixel zoom (#18)                                                              | Same RT building blocks; needs an integer-scale resolve/blit path.                                                                                                                                                                                                                                                                             |
+| C   | **2D sprite cutout (alpha-test) blend**                          | Hard-edged depth-sorted sprites (foliage/grates) if we ever go 2.5D                               | Billboard cutout already ships; 2D-sprite cutout is still TODO. Low priority for this demo.                                                                                                                                                                                                                                                    |
+| D   | **(Nice-to-have) lightweight 2D light/normal system**            | Cleaner underground lighting (#8)                                                                 | Fully fakeable with multiply sprites today; only worth it if multiple demos want real 2D lighting.                                                                                                                                                                                                                                             |
 
 Everything not in this table is ✅ **buildable now** — the headline effects the
 demo wants most (dazzling star, multi-band parallax, **pipe-warp areas**,
