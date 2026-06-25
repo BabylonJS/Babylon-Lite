@@ -144,10 +144,10 @@ export function createGridSpriteAtlas(texture: Texture2D, options: GridAtlasOpti
  */
 export async function loadSpriteAtlas(engine: EngineContext, textureUrl: string, options: LoadAtlasOptions = {}): Promise<SpriteAtlas> {
     if (options.metadataUrl !== undefined) {
-        throw new Error("loadSpriteAtlas: metadataUrl is not implemented in PR 1.");
+        throw new Error("loadSpriteAtlas: metadataUrl unsupported.");
     }
     if (!options.gridSize) {
-        throw new Error("loadSpriteAtlas: options.gridSize is required in PR 1.");
+        throw new Error("loadSpriteAtlas: gridSize required.");
     }
 
     const texOpts: Texture2DOptions = {

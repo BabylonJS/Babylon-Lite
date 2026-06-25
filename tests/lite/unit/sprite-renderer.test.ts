@@ -200,7 +200,7 @@ describe("createSpriteRenderer", () => {
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         expect(shaderDescriptor.code).not.toContain("iZ");
         expect(shaderDescriptor.code).not.toContain("iUvOffset");
-        expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 0.0, 1.0)");
+        expect(shaderDescriptor.code).toContain("vec4f(n, 0, 1)");
     });
 
     it("converts depth-hosted sprite NDC Z to reverse-Z clip depth", () => {
@@ -213,7 +213,7 @@ describe("createSpriteRenderer", () => {
         const device = engine._device as unknown as { createRenderPipeline: ReturnType<typeof vi.fn>; createShaderModule: ReturnType<typeof vi.fn> };
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
         const descriptor = device.createRenderPipeline.mock.calls[0]![0] as GPURenderPipelineDescriptor;
-        expect(shaderDescriptor.code).toContain("vec4<f32>(ndc, 1.0 - in.iZ, 1.0)");
+        expect(shaderDescriptor.code).toContain("vec4f(n, 1 - in.z, 1)");
         expect(descriptor.depthStencil?.depthCompare).toBe("greater-equal");
     });
 });
@@ -239,7 +239,7 @@ describe("uvScroll (per-sprite uvOffset)", () => {
         expect(DEPTH_UVSCROLL_STRIDE_BYTES).toBe(64);
     });
 
-    it("builds a pure-2D uvScroll pipeline with a 60-byte stride and a location-7 iUvOffset attribute", () => {
+    it("builds a pure-2D uvScroll pipeline with a 60-byte stride and a location-7 uvOffset attribute", () => {
         const { engine } = makeMockEngine();
         const cache = createSpritePipelineCache();
         const layer = createSprite2DLayer(makeMockAtlas(), { uvScroll: true });
@@ -258,8 +258,8 @@ describe("uvScroll (per-sprite uvOffset)", () => {
         expect(uvAttr.format).toBe("float32x2");
 
         const shaderDescriptor = device.createShaderModule.mock.calls[0]![0] as GPUShaderModuleDescriptor;
-        expect(shaderDescriptor.code).toContain("@location(7) iUvOffset: vec2<f32>");
-        expect(shaderDescriptor.code).toContain("+ in.iUvOffset");
+        expect(shaderDescriptor.code).toContain("@location(7) o: vec2f");
+        expect(shaderDescriptor.code).toContain("+ in.o");
     });
 
     it("builds a depth-hosted uvScroll pipeline with a 64-byte stride and uvOffset at byte offset 56", () => {
@@ -512,7 +512,7 @@ describe("pure-2D instance layout", () => {
 
         sr._update();
 
-        const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).label === "sprite-layer-instances");
+        const instanceBufferCreate = device.createBuffer.mock.calls.find((call) => (call[0] as GPUBufferDescriptor).size === PURE_2D_INSTANCE_STRIDE_BYTES);
         expect((instanceBufferCreate![0] as GPUBufferDescriptor).size).toBe(PURE_2D_INSTANCE_STRIDE_BYTES);
         expect(device.queue.writeBuffer.mock.calls.some((call) => call[4] === PURE_2D_INSTANCE_STRIDE_BYTES)).toBe(true);
         expect(device.queue.writeBuffer.mock.calls.some((call) => call[4] === DEPTH_INSTANCE_STRIDE_BYTES)).toBe(false);
@@ -544,10 +544,10 @@ describe("Sprite2D custom shader", () => {
         const cs = createSprite2DCustomShader({ fragment: FX_FRAGMENT });
         const wgsl = cs._composeWgsl(false, 0, false);
         expect(wgsl).toContain("@binding(3) var<uniform> fx: SpriteFx");
-        expect(wgsl).toContain("fn fs(in: VOut) -> @location(0) vec4<f32>");
+        expect(wgsl).toContain("fn fs(in: O) -> @location(0) vec4f");
         expect(wgsl).toContain(FX_FRAGMENT);
         // The vertex prologue must still be present.
-        expect(wgsl).toContain("fn vs(in: VIn)");
+        expect(wgsl).toContain("fn vs(in: I)");
         expect(wgsl).toContain("var atlasTex");
     });
 

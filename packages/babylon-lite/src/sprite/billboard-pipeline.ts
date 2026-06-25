@@ -56,31 +56,29 @@ function getDepthModeEntry(depthMode: BillboardDepthMode): (typeof DEPTH_MODE_TA
 export function makeBillboardBasisWgsl(orientation: BillboardOrientation): string {
     switch (orientation) {
         case "facing":
-            return `struct BillboardBasis {
-right: vec3<f32>,
-up: vec3<f32>,
+            return `struct B {
+r: vec3f,
+u: vec3f,
 };
-fn getBillboardBasis(_anchor: vec3<f32>) -> BillboardBasis {
-let cameraRight = normalize(vec3<f32>(scene.view[0][0], scene.view[1][0], scene.view[2][0]));
-let cameraUp = normalize(vec3<f32>(scene.view[0][1], scene.view[1][1], scene.view[2][1]));
-return BillboardBasis(cameraRight, -cameraUp);
+fn basis(_a: vec3f) -> B {
+let r = normalize(vec3f(scene.view[0][0], scene.view[1][0], scene.view[2][0]));
+let u = normalize(vec3f(scene.view[0][1], scene.view[1][1], scene.view[2][1]));
+return B(r, -u);
 }`;
         case "axis-locked":
-            return `struct BillboardBasis {
-right: vec3<f32>,
-up: vec3<f32>,
+            return `struct B {
+r: vec3f,
+u: vec3f,
 };
-fn getBillboardBasis(_anchor: vec3<f32>) -> BillboardBasis {
-let lockAxis = normalize(billboards.axisAndCutoff.xyz);
-let cameraRight = normalize(vec3<f32>(scene.view[0][0], scene.view[1][0], scene.view[2][0]));
-let projectedRight = cameraRight - lockAxis * dot(cameraRight, lockAxis);
-let projectedRightLen = length(projectedRight);
-let safeProjectedRightLen = max(projectedRightLen, 1e-4);
-let fallbackSeed = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(1.0, 0.0, 0.0), abs(lockAxis.z) > 0.999);
-let fallbackRightRaw = cross(lockAxis, fallbackSeed);
-let fallbackRight = fallbackRightRaw / max(length(fallbackRightRaw), 1e-4);
-let right = select(fallbackRight, projectedRight / safeProjectedRightLen, projectedRightLen > 1e-4);
-return BillboardBasis(right, -lockAxis);
+fn basis(_a: vec3f) -> B {
+let a = normalize(billboards.axisAndCutoff.xyz);
+let cr = normalize(vec3f(scene.view[0][0], scene.view[1][0], scene.view[2][0]));
+let pr = cr - a * dot(cr, a);
+let pl = length(pr);
+let f = select(vec3f(0, 0, 1), vec3f(1, 0, 0), abs(a.z) > 0.999);
+let fr = cross(a, f);
+let r = select(fr / max(length(fr), 1e-4), pr / max(pl, 1e-4), pl > 1e-4);
+return B(r, -a);
 }`;
     }
 }
@@ -88,59 +86,59 @@ return BillboardBasis(right, -lockAxis);
 function makeBillboardFragmentWgsl(depthMode: BillboardDepthMode): string {
     if (depthMode === "cutout") {
         return `@fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
-let sampleColor = textureSample(atlasTex, atlasSamp, in.uv);
-if (sampleColor.a < billboards.axisAndCutoff.w) {
+fn fs(in: O) -> @location(0) vec4f {
+let s = textureSample(atlasTex, atlasSamp, in.uv);
+if (s.a < billboards.axisAndCutoff.w) {
 discard;
 }
-return sampleColor * in.tint * billboards.opacityMul;
+return s * in.tint * billboards.opacityMul;
 }`;
     }
     return `@fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
-let sampleColor = textureSample(atlasTex, atlasSamp, in.uv);
-return sampleColor * in.tint * billboards.opacityMul;
+fn fs(in: O) -> @location(0) vec4f {
+let s = textureSample(atlasTex, atlasSamp, in.uv);
+return s * in.tint * billboards.opacityMul;
 }`;
 }
 
 function makeBillboardWgsl(orientation: BillboardOrientation, depthMode: BillboardDepthMode): string {
     return `${SCENE_UBO_WGSL}
-struct BillboardSystem {
-opacityMul: vec4<f32>,
-axisAndCutoff: vec4<f32>,
+struct S {
+opacityMul: vec4f,
+axisAndCutoff: vec4f,
 };
-@group(1) @binding(0) var<uniform> billboards: BillboardSystem;
+@group(1) @binding(0) var<uniform> billboards: S;
 @group(1) @binding(1) var atlasTex: texture_2d<f32>;
 @group(1) @binding(2) var atlasSamp: sampler;
 ${makeBillboardBasisWgsl(orientation)}
-struct VIn {
+struct I {
 @builtin(vertex_index) vid: u32,
-@location(0) iPos: vec3<f32>,
-@location(1) iSize: vec2<f32>,
-@location(2) iUvMin: vec2<f32>,
-@location(3) iUvMax: vec2<f32>,
-@location(4) iRot: f32,
-@location(5) iPivot: vec2<f32>,
-@location(6) iColor: vec4<f32>,
+@location(0) p: vec3f,
+@location(1) s: vec2f,
+@location(2) a: vec2f,
+@location(3) b: vec2f,
+@location(4) r: f32,
+@location(5) o: vec2f,
+@location(6) c: vec4f,
 };
-struct VOut {
-@builtin(position) pos: vec4<f32>,
-@location(0) uv: vec2<f32>,
-@location(1) tint: vec4<f32>,
+struct O {
+@builtin(position) p: vec4f,
+@location(0) uv: vec2f,
+@location(1) tint: vec4f,
 };
 @vertex
-fn vs(in: VIn) -> VOut {
-let corner = vec2<f32>(select(0.0, 1.0, in.vid == 1u || in.vid == 2u), select(0.0, 1.0, in.vid >= 2u));
-let local = (corner - in.iPivot) * in.iSize;
-let cosRot = cos(in.iRot);
-let sinRot = sin(in.iRot);
-let rotated = vec2<f32>(local.x * cosRot - local.y * sinRot, local.x * sinRot + local.y * cosRot);
-let basis = getBillboardBasis(in.iPos);
-let worldPos = in.iPos + basis.right * rotated.x + basis.up * rotated.y;
-var out: VOut;
-out.pos = scene.viewProjection * vec4<f32>(worldPos, 1.0);
-out.uv = mix(in.iUvMin, in.iUvMax, corner);
-out.tint = in.iColor;
+fn vs(in: I) -> O {
+let q = vec2f(select(0.0, 1.0, in.vid == 1u || in.vid == 2u), select(0.0, 1.0, in.vid >= 2u));
+let l = (q - in.o) * in.s;
+let cr = cos(in.r);
+let sr = sin(in.r);
+let r = vec2f(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+let b = basis(in.p);
+let wp = in.p + b.r * r.x + b.u * r.y;
+var out: O;
+out.p = scene.viewProjection * vec4f(wp, 1);
+out.uv = mix(in.a, in.b, q);
+out.tint = in.c;
 return out;
 }
 ${makeBillboardFragmentWgsl(depthMode)}`;

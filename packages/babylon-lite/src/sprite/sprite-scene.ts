@@ -10,7 +10,7 @@ import { buildSpriteRenderable } from "./sprite-renderable.js";
  */
 export function addDepthHostedSpriteLayer(scene: SceneContext, layer: Sprite2DLayer): void {
     if (layer.depth === "none") {
-        throw new Error('Sprite2DLayer with depth: "none" must be rendered via createSpriteRenderer, not addDepthHostedSpriteLayer.');
+        throw new Error('Depth-hosted sprites require depth != "none".');
     }
     addDeferredSceneRenderables(scene, (engine) => {
         const built = buildSpriteRenderable(engine, layer);
