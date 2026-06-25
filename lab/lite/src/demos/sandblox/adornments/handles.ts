@@ -199,6 +199,8 @@ export class Handles {
         this._mouse.off("move", this._onMove);
         this._mouse.off("up", this._onUp);
         this._handlers.clear();
+        for (const d of this._dots) d.remove();
+        this._dots.length = 0;
     }
 
     // ── Private ──────────────────────────────────────────────────────────
