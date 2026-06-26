@@ -38,9 +38,10 @@ import {
     disposeSpriteRenderer,
     _spriteRendererPipelineCacheSize,
 } from "../../../packages/babylon-lite/src/sprite/sprite-renderer";
-import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
+import { createSpritePipelineCache, getOrCreateSpritePipeline, buildSpriteLayerUbo, LAYER_UBO_FLOATS } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import { spriteBlendAlpha, spriteBlendAdditive, spriteBlendPremultiplied, spriteBlendMultiply } from "../../../packages/babylon-lite/src/sprite/sprite-blend";
 import { createSprite2DCustomShader } from "../../../packages/babylon-lite/src/sprite/sprite-custom-shader";
+import { setSprite2DCoverageGamma } from "../../../packages/babylon-lite/src/sprite/sprite-2d-coverage-gamma";
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
@@ -339,6 +340,86 @@ describe("uvScroll (per-sprite uvOffset, opt-in via setSprite2DUvOffset)", () =>
         addSprite2DIndex(layer, { positionPx: [10, 20], sizePx: [32, 32], frame: 0 });
         expect(layer._instanceData.length).toBe(layer._capacity * PURE_2D_INSTANCE_FLOATS_PER_SPRITE);
         expect(Object.prototype.hasOwnProperty.call(layer, "_uvScrollAttr")).toBe(false);
+    });
+});
+
+describe("coverageGamma (opt-in via setSprite2DCoverageGamma)", () => {
+    it("stores the gamma value internally; plain layers never name it", () => {
+        const plain = createSprite2DLayer(makeMockAtlas());
+        expect(Object.prototype.hasOwnProperty.call(plain, "_coverageGamma")).toBe(false);
+
+        const layer = createSprite2DLayer(makeMockAtlas());
+        setSprite2DCoverageGamma(layer, 2);
+        expect(layer._coverageGamma).toBe(2);
+    });
+
+    it("builds a distinct pipeline + extra shader module for a gamma layer, with a `pow` permutation", () => {
+        const { engine, counters } = makeMockEngine();
+        const cache = createSpritePipelineCache();
+
+        const plainLayer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(plainLayer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        const plain = getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, plainLayer);
+        const modulesAfterPlain = counters.shaderModules;
+
+        const gammaLayer = createSprite2DLayer(makeMockAtlas());
+        addSprite2DIndex(gammaLayer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+        setSprite2DCoverageGamma(gammaLayer, 2);
+        const gamma = getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, gammaLayer);
+
+        // Distinct pipeline (the `cg` key part differs) and a new shader module was compiled.
+        expect(gamma).not.toBe(plain);
+        expect(counters.shaderModules).toBeGreaterThan(modulesAfterPlain);
+
+        // The gamma fragment applies the coverage `pow`; the base fragment does not.
+        const device = engine._device as unknown as { createShaderModule: ReturnType<typeof vi.fn> };
+        const codes = device.createShaderModule.mock.calls.map((c) => (c[0] as GPUShaderModuleDescriptor).code);
+        expect(codes.some((c) => c.includes("pow(s.a, L.aa.x)"))).toBe(true);
+        expect(codes.some((c) => !c.includes("pow(s.a, L.aa.x)"))).toBe(true);
+
+        // Re-requesting the same gamma layer hits the cache (no new pipeline).
+        const again = getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, gammaLayer);
+        expect(again).toBe(gamma);
+    });
+
+    it("writes aa.x = 1/gamma into UBO slot [12] for an active gamma layer", () => {
+        const layer = createSprite2DLayer(makeMockAtlas());
+        setSprite2DCoverageGamma(layer, 2);
+        const ubo = new Float32Array(LAYER_UBO_FLOATS);
+        buildSpriteLayerUbo(layer, 800, 600, ubo);
+        expect(ubo[12]).toBeCloseTo(0.5);
+    });
+
+    it("treats identity / non-finite / non-positive gamma as disabled (UBO slot [12] = 0, no `pow` permutation)", () => {
+        const ubo = new Float32Array(LAYER_UBO_FLOATS);
+        // `1` is the identity no-op; `0`, negatives, NaN and Infinity must not produce a non-finite exponent.
+        for (const g of [1, 0, -2, NaN, Infinity]) {
+            const layer = createSprite2DLayer(makeMockAtlas());
+            setSprite2DCoverageGamma(layer, g);
+            ubo[12] = 123; // sentinel — must be overwritten with 0
+            buildSpriteLayerUbo(layer, 800, 600, ubo);
+            expect(ubo[12]).toBe(0);
+
+            // And the layer selects the base (non-gamma) shader / pipeline.
+            const { engine } = makeMockEngine();
+            const cache = createSpritePipelineCache();
+            addSprite2DIndex(layer, { positionPx: [0, 0], sizePx: [32, 32], frame: 0 });
+            getOrCreateSpritePipeline(engine, cache, engine.format, 1, spriteBlendAlpha, false, false, undefined, undefined, layer);
+            const device = engine._device as unknown as { createShaderModule: ReturnType<typeof vi.fn> };
+            const codes = device.createShaderModule.mock.calls.map((c) => (c[0] as GPUShaderModuleDescriptor).code);
+            expect(codes.every((c) => !c.includes("pow(s.a, L.aa.x)"))).toBe(true);
+        }
+    });
+
+    it("a plain (non-gamma) layer leaves UBO slot [12] at 0 once the gamma hook is registered", () => {
+        // Registering the hook (via any gamma layer) is what enables the aa.x writer; a plain layer
+        // then deterministically writes 0 so the reused scratch UBO can't leak a stale gamma value.
+        setSprite2DCoverageGamma(createSprite2DLayer(makeMockAtlas()), 2);
+        const layer = createSprite2DLayer(makeMockAtlas());
+        const ubo = new Float32Array(LAYER_UBO_FLOATS);
+        ubo[12] = 123;
+        buildSpriteLayerUbo(layer, 800, 600, ubo);
+        expect(ubo[12]).toBe(0);
     });
 });
 

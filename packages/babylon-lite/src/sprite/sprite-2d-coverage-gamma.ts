@@ -50,10 +50,14 @@ function getCoverageGammaShaderModule(engine: EngineContext, hasDepth: boolean, 
     return module;
 }
 
-/** True when `layer` has an active (non-identity) coverage gamma set via the opt-in setter. */
+/**
+ * True when `layer` has an active coverage gamma set via the opt-in setter. Active requires a
+ * **finite, positive, non-identity** value: `1` is the identity no-op, and `0` / negative / `NaN` /
+ * `Infinity` are rejected so `writeUbo` never produces a non-finite `1/gamma` exponent for `pow`.
+ */
 function isGammaActive(layer: Sprite2DLayer): boolean {
     const g = layer._coverageGamma;
-    return g != null && g !== 1;
+    return g != null && Number.isFinite(g) && g > 0 && g !== 1;
 }
 
 const COVERAGE_GAMMA_HOOK: SpriteCoverageGammaHook = {
@@ -84,7 +88,8 @@ const COVERAGE_GAMMA_HOOK: SpriteCoverageGammaHook = {
  * shader, thickening anti-aliased edges to mimic the gamma-space blending of native text
  * rasterizers (DirectWrite/CoreText). Intended for glyph-atlas (bitmap text) layers drawn into an
  * sRGB (linear-blended) surface, where correct linear AA otherwise makes text look lighter/thinner.
- * Values `> 1` thicken; `1` is a no-op (identity) and disables the effect.
+ * Values `> 1` thicken; `1` is a no-op (identity) and disables the effect. Non-finite or non-positive
+ * values (`0`, negatives, `NaN`, `Infinity`) are also treated as disabled (the base shader is used).
  *
  * **Opt-in & tree-shakable:** importing this function is what pulls the coverage-gamma shader
  * permutation and UBO writer into the bundle. Sprite scenes that never call it ship zero gamma
