@@ -97,7 +97,7 @@ mismapping. Once migration is complete you can drop the plugin and import from
   module-level side effects, so it never bloats consumers that don't use it.
 - **Honest:** unsupported Babylon.js APIs throw `LiteCompatError` rather than
   rendering something subtly wrong.
-- **Not** a full Babylon.js reimplementation. Particles, GUI, WebXR, audio, decals,
+- **Not** a full Babylon.js reimplementation. Particles, GUI, WebXR, decals,
   and other features absent from Babylon Lite are out of scope.
 
 ## Supported APIs at a glance
@@ -132,7 +132,8 @@ overloads within a supported area may still be absent.
 | Sprites (`SpriteManager` / `Sprite`)                                                                    |   ⚡   | camera-facing billboards; `SpriteMap` / packed atlas unsupported                                         |
 | Behaviors / Actions (`AutoRotation`, `Framing`, `ActionManager`, conditions)                            |   ⚡   | `ActionManager` is manual-dispatch; drag behaviors need Lite core                                        |
 | Misc (`Observable`, `Tools`, `SmartArray`, `Tags`, gradients, `PerformanceMonitor`)                     |   ✅   |                                                                                                          |
-| Particles, post-processes, layers (glow/highlight), probes, physics, audio, WebXR                       |   ❌   | not in Babylon Lite — use native Lite `create*Task` / Havok-V2 functions                                 |
+| Audio V2 (`AudioEngineV2`, `StaticSound`, `StreamingSound`, `AudioBus`, buses/sources/analyzer)         |   ⚡   | over Lite's AudioV2 port; `MainAudioBus` spatial/analyzer and a second main bus unsupported              |
+| Particles, post-processes, layers (glow/highlight), probes, physics, WebXR                              |   ❌   | not in Babylon Lite — use native Lite `create*Task` / Havok-V2 functions                                 |
 
 ### `@babylonjs/loaders`
 

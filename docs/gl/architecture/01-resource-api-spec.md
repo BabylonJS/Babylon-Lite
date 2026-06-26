@@ -14,11 +14,11 @@
 Three branches independently expanded the same lite-gl resource modules off the
 same base (`47f028a`):
 
-| Branch | render-target.ts | texture.ts additions | other |
-|---|---|---|---|
-| `newdemo` | RGBA8 + opt depth, **ping-pong**, options-object, null-bind, null-safe dispose | `pickSizedInternalFormat` (LDR+HDR table) | the 2 Shadertoy demos + scene8 |
-| `theduck` | RGBA8 **+ HDR float/half + stencil + mipmaps + readback**, **positional w/h**, separate `unbindRenderTarget` | `updateRawTexture`, `updateTextureSamplingMode`, `updateTextureWrapMode`, `createTextureFromHandle` | `mesh.ts`, `depth-stencil.ts`, `scissor.ts` |
-| `tinylottie` | — (no lite-gl RTT) | `createDynamicTexture`, `updateDynamicTexture`, `clearDynamicTextureSource` | `babylon-lite-lottie` pkg |
+| Branch       | render-target.ts                                                                                             | texture.ts additions                                                                                | other                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `newdemo`    | RGBA8 + opt depth, **ping-pong**, options-object, null-bind, null-safe dispose                               | `pickSizedInternalFormat` (LDR+HDR table)                                                           | the 2 Shadertoy demos + scene8              |
+| `theduck`    | RGBA8 **+ HDR float/half + stencil + mipmaps + readback**, **positional w/h**, separate `unbindRenderTarget` | `updateRawTexture`, `updateTextureSamplingMode`, `updateTextureWrapMode`, `createTextureFromHandle` | `mesh.ts`, `depth-stencil.ts`, `scissor.ts` |
+| `tinylottie` | — (no lite-gl RTT)                                                                                           | `createDynamicTexture`, `updateDynamicTexture`, `clearDynamicTextureSource`                         | `babylon-lite-lottie` pkg                   |
 
 Two problems:
 
@@ -42,11 +42,13 @@ state-cache contract is already consistent.
 
 **P1 — Format-agnostic minimal cores.** `createRenderTarget` wires "an FBO around
 a color `GLTexture` + optional depth"; `createRawTexture` uploads "a byte texture
-+ sampler params". Neither hard-codes exotic formats.
+
+- sampler params". Neither hard-codes exotic formats.
 
 **P2 — The options-vs-export rule (the key heuristic).**
-- An **`option` is allowed** only if it toggles a GL parameter *already on the
-  core path*: `minFilter`/`magFilter`/`wrapS`/`wrapT`/`invertY`/`generateDepthBuffer`.
+
+- An **`option` is allowed** only if it toggles a GL parameter _already on the
+  core path_: `minFilter`/`magFilter`/`wrapS`/`wrapT`/`invertY`/`generateDepthBuffer`.
 - A feature becomes a **separate tree-shakeable export** (not an option) when
   supporting it would pull a distinct code path or lookup table that non-users
   would otherwise ship: HDR sized-format resolution, stencil renderbuffers,
@@ -68,13 +70,14 @@ sprites, html-element textures) are tree-shakeable named exports. Package is
 `GLTexture`. A render target's FBO/renderbuffers — and its default (owned) color
 texture — are rebuilt by the target's own restore hook; a bring-your-own
 `colorTexture` is restored by the engine's standard texture path and the target
-reattaches the swapped handle. A render target therefore *composes* a `GLTexture`
+reattaches the swapped handle. A render target therefore _composes_ a `GLTexture`
 rather than owning a bespoke color path — which is exactly what makes
 "bring-your-own-color-texture" (P2's HDR answer) fall out for free.
 
 ## 3. Render Target API (converged, tiered)
 
 ### Tier 0 — core (render targets)
+
 The 90% case: post-processing, frame feedback, offscreen compositing.
 
 ```ts
@@ -109,6 +112,7 @@ contains **no** HDR/stencil/mipmap branches; it is format-agnostic via
 `colorTexture`.
 
 ### Tier 1 — opt-in, each tree-shakes to 0 bytes when unused
+
 ```ts
 // readback (from theduck) — separate export
 readRenderTargetPixels(engine, rt, x, y, w, h, into?): ArrayBufferView
@@ -127,6 +131,7 @@ generateRenderTargetMipMaps(engine, rt): void
 ## 4. Texture API (converged, tiered)
 
 ### Tier 0 — core (main barrel)
+
 ```ts
 export interface GLTextureOptions {
     invertY?: boolean;
@@ -149,6 +154,7 @@ replaced by: a tiny **inline LDR resolver** in the core + the optional
 sugar below, so RGBA8-only consumers stop shipping `RGBA16F/RGBA32F` branches.
 
 ### Tier 1 — opt-in, separate exports (most already separate ✓)
+
 ```ts
 loadTexture2D(engine, url, options?, onLoad?, onError?): GLTexture   // async image (already separate)
 updateRawTexture(engine, tex, data, …): void                         // sub-image (theduck)
@@ -175,22 +181,22 @@ clearDynamicTextureSource(tex): void
 
 ## 5. Reconciliation matrix (what each branch does)
 
-| Symbol | newdemo | theduck | tinylottie | Spec action |
-|---|---|---|---|---|
-| `createRenderTarget` sig | `(e, opts)` | `(e, w, h, opts?)` | — | **adopt `(e, opts)`** (extensible, matches WebGPU-lite Descriptor) |
-| `bindRenderTarget(null)` vs `unbindRenderTarget` | null-bind | `unbind` | — | **null-bind**; drop `unbindRenderTarget` |
-| `disposeRenderTarget` null-safe | ✓ | ✗ | — | **null-safe** |
-| HDR float/half target | ✗ | option `type` | — | **BYO `colorTexture` / `createFloatRenderTarget`** (out of core) |
-| stencil | ✗ | option | — | **`generateRenderTargetStencil`** (depth-stencil module), opt-in |
-| mipmaps (RT) | ✗ | option | — | **`generateRenderTargetMipMaps`** fn |
-| `readRenderTargetPixels` | ✗ | ✓ | — | **keep** (Tier 1) |
-| ping-pong | ✓ | ✗ | — | **out of package** (compose two render targets) |
-| `GLRenderTarget.isReady` | ✗ | ✓ | — | **include** |
-| `createRawTexture` HDR table | inline | inline | inline | **inline LDR only + `internalFormat`**; HDR → `createFloatTexture` |
-| `updateRawTexture` / sampling / wrap / fromHandle | ✗ | ✓ | ✗ | **keep** (Tier 1, separate exports) |
-| dynamic textures | ✗ | ✗ | ✓ | **barrel (tree-shakeable)** |
-| `mesh` / `depth-stencil` / `scissor` | ✗ | ✓ | ✗ | **barrel (tree-shakeable ✓)** |
-| `state.boundFramebuffer` | ✓ | ✓ | — | **already identical** ✓ |
+| Symbol                                            | newdemo     | theduck            | tinylottie | Spec action                                                        |
+| ------------------------------------------------- | ----------- | ------------------ | ---------- | ------------------------------------------------------------------ |
+| `createRenderTarget` sig                          | `(e, opts)` | `(e, w, h, opts?)` | —          | **adopt `(e, opts)`** (extensible, matches WebGPU-lite Descriptor) |
+| `bindRenderTarget(null)` vs `unbindRenderTarget`  | null-bind   | `unbind`           | —          | **null-bind**; drop `unbindRenderTarget`                           |
+| `disposeRenderTarget` null-safe                   | ✓           | ✗                  | —          | **null-safe**                                                      |
+| HDR float/half target                             | ✗           | option `type`      | —          | **BYO `colorTexture` / `createFloatRenderTarget`** (out of core)   |
+| stencil                                           | ✗           | option             | —          | **`generateRenderTargetStencil`** (depth-stencil module), opt-in   |
+| mipmaps (RT)                                      | ✗           | option             | —          | **`generateRenderTargetMipMaps`** fn                               |
+| `readRenderTargetPixels`                          | ✗           | ✓                  | —          | **keep** (Tier 1)                                                  |
+| ping-pong                                         | ✓           | ✗                  | —          | **out of package** (compose two render targets)                    |
+| `GLRenderTarget.isReady`                          | ✗           | ✓                  | —          | **include**                                                        |
+| `createRawTexture` HDR table                      | inline      | inline             | inline     | **inline LDR only + `internalFormat`**; HDR → `createFloatTexture` |
+| `updateRawTexture` / sampling / wrap / fromHandle | ✗           | ✓                  | ✗          | **keep** (Tier 1, separate exports)                                |
+| dynamic textures                                  | ✗           | ✗                  | ✓          | **barrel (tree-shakeable)**                                        |
+| `mesh` / `depth-stencil` / `scissor`              | ✗           | ✓                  | ✗          | **barrel (tree-shakeable ✓)**                                      |
+| `state.boundFramebuffer`                          | ✓           | ✓                  | —          | **already identical** ✓                                            |
 
 ## 6. Packaging (exports map)
 
@@ -198,10 +204,8 @@ Everything ships from the single `@babylonjs/lite-gl` barrel (one public `export
 entry). The package is `sideEffects: false`, so unused features tree-shake out
 regardless of which symbols a consumer imports. The barrel covers: engine,
 render-loop, effects, effect-renderer, **texture core**, blend, render targets
-(Tier-0 RT + readback + `generateRenderTargetMipMaps`), dynamic
-(canvas) textures, meshes, depth-stencil, scissor, sprites, and html-element
-textures. HDR sugar (`createFloatTexture` / `createFloatRenderTarget`) ships in the
-barrel too (tiny, tree-shakes when unused).
+(Tier-0 RT + readback + `generateRenderTargetMipMaps`), dynamic (canvas) textures, meshes, depth-stencil, scissor, sprites, and html-element
+textures. HDR sugar (`createFloatTexture` / `createFloatRenderTarget`) ships in the barrel too (tiny, tree-shakes when unused).
 
 All `sideEffects:false`; the lab bundle-size test (`scene-config-webgl.json
 maxRawKB`) must show effect-only scenes UNCHANGED after these land (proves the
@@ -228,7 +232,7 @@ opt-ins tree-shake).
 5. **`mesh`/`depth-stencil`/`scissor`** — ship as tree-shakeable named exports
    from the barrel (they don't conflict with this spec).
 6. **Merge order** — land the converged core first, then layer theduck's Tier-1
-   + tinylottie's dynamic textures on top. Confirmed.
+    - tinylottie's dynamic textures on top. Confirmed.
 
 ## 8. Expected outcome
 

@@ -7,8 +7,8 @@ updated by the `update-compat-layer` skill.
 <!-- The two markers below are machine-read by the update-compat-layer skill.
      Do not rename them. Update the SHA after re-syncing against BJS master. -->
 
-- **Last synced BJS commit:** `608146f18dbf6ff9547f7b6ffe336cc3cbb5c33a`
-- **Last sync date:** 2026-06-24
+- **Last synced BJS commit:** `c729b94f2e36f2d915415620857452f7ad0ff731`
+- **Last sync date:** 2026-06-25
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
@@ -64,21 +64,21 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 
 ## Math
 
-| BJS API                                            | Status     | Module                                                                                           |
-| -------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------ |
-| `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
-| `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                               |
+| BJS API                                            | Status     | Module                                                                                                                                                          |
+| -------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Vector2` / `Vector3` / `Vector4`                  | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
+| `Color3` / `Color4`                                | ✅ Full    | [math/color.ts](src/math/color.ts)                                                                                                                              |
 | `Quaternion`                                       | ✅ Full    | [math/quaternion.ts](src/math/quaternion.ts) (incl. `FromRotationMatrix` / `FromRotationMatrixToRef` / `fromRotationMatrix` over Lite `quatFromRotationMatrix`) |
-| `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `quatFromRotationMatrix`)        |
-| `Vector3.TransformCoordinates` / `TransformNormal` | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
-| `Vector3.Center` / `CenterToRef`                   | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                             |
-| `Matrix.copyToArray`                               | ✅ Full    | [math/matrix.ts](src/math/matrix.ts)                                                             |
-| `Scalar`                                           | ✅ Full    | [math/scalar.ts](src/math/scalar.ts)                                                             |
-| `Axis` / `Space` / `Epsilon`                       | ✅ Full    | [math/constants.ts](src/math/constants.ts)                                                       |
-| `Plane` / `Ray` / `Frustum`                        | ✅ Full    | [math/plane.ts](src/math/plane.ts), [ray.ts](src/math/ray.ts), [frustum.ts](src/math/frustum.ts) |
-| `Size` / `Viewport`                                | ✅ Full    | [math/size.ts](src/math/size.ts)                                                                 |
-| `Angle` / `Curve3` / `Path3D`                      | ⚡ Partial | [math/curve.ts](src/math/curve.ts)                                                               |
-| `Curve3` / `Path3D` / easing curves on math        | ⚡ Partial | curve + easing                                                                                   |
+| `Matrix`                                           | ✅ Full    | [math/matrix.ts](src/math/matrix.ts) (incl. `decompose` — BJS-accurate scale/negative-determinant handling, rotation via Lite `quatFromRotationMatrix`)         |
+| `Vector3.TransformCoordinates` / `TransformNormal` | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
+| `Vector3.Center` / `CenterToRef`                   | ✅ Full    | [math/vector.ts](src/math/vector.ts)                                                                                                                            |
+| `Matrix.copyToArray`                               | ✅ Full    | [math/matrix.ts](src/math/matrix.ts)                                                                                                                            |
+| `Scalar`                                           | ✅ Full    | [math/scalar.ts](src/math/scalar.ts)                                                                                                                            |
+| `Axis` / `Space` / `Epsilon`                       | ✅ Full    | [math/constants.ts](src/math/constants.ts)                                                                                                                      |
+| `Plane` / `Ray` / `Frustum`                        | ✅ Full    | [math/plane.ts](src/math/plane.ts), [ray.ts](src/math/ray.ts), [frustum.ts](src/math/frustum.ts)                                                                |
+| `Size` / `Viewport`                                | ✅ Full    | [math/size.ts](src/math/size.ts)                                                                                                                                |
+| `Angle` / `Curve3` / `Path3D`                      | ⚡ Partial | [math/curve.ts](src/math/curve.ts)                                                                                                                              |
+| `Curve3` / `Path3D` / easing curves on math        | ⚡ Partial | curve + easing                                                                                                                                                  |
 
 ## Core
 
@@ -271,10 +271,10 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 
 ## Bones / Skeletons / Morph
 
-| BJS API                              | Status           | Notes                                                                                                                                                             |
-| ------------------------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BJS API                              | Status           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Skeleton` / `Bone`                  | ❌ Not supported | throwing stub; produced by glTF loader, not constructed. Re-checked 2026-06-24: Lite's new opt-in bone-control API (`enableBoneControl` / `getBoneByName` / `setBone*` / `Skeleton` / `Bone`, #268) can read & pose a **loader-built** skeleton, but BJS `new Skeleton()/new Bone()` manual construction and sync skinned `scene.pick` (`applySkeleton`) are still absent, so scene 114 stays blocked and no compat wrapper is shippable yet |
-| `MorphTarget` / `MorphTargetManager` | ✅ Full          | morph ([morph/morph.ts](src/morph/morph.ts)) over Lite `createMorphTargets` / `setMorphTargetWeights` (absolute target positions → deltas, built at engine start) |
+| `MorphTarget` / `MorphTargetManager` | ✅ Full          | morph ([morph/morph.ts](src/morph/morph.ts)) over Lite `createMorphTargets` / `setMorphTargetWeights` (absolute target positions → deltas, built at engine start)                                                                                                                                                                                                                                                                            |
 
 ## Sprites
 
@@ -319,11 +319,32 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `RecastJSPlugin` | ✅ Full | compat `@babylonjs/addons/navigation` wrapper ([navigation/navigation.ts](src/navigation/navigation.ts)) over Babylon Lite's native Recast-V2 API (navmesh + debug mesh + crowd + path + raycast + off-mesh connections + tile-cache obstacles via `addBoxObstacle`/`addCylinderObstacle`/`removeObstacle` + `WaitForFullTileCacheUpdate`) |
 
-## Audio
+## Audio (AudioV2)
 
-| BJS API                                   | Status           | Notes                                 |
-| ----------------------------------------- | ---------------- | ------------------------------------- |
-| `Sound` / `AudioEngine` / `WeightedSound` | ❌ Not supported | throwing stub; use Web Audio directly |
+Babylon Lite ships a full AudioV2 port (offline-capable Web Audio graph). The compat
+layer mirrors the Babylon.js `AudioV2` public surface 1:1 (exact class names,
+inheritance chain, factory functions, enums) on top of it — see
+[audio/audio.ts](src/audio/audio.ts) and [audio/audio-enums.ts](src/audio/audio-enums.ts).
+Added for issue #296.
+
+| BJS API                                                                               | Status           | Notes                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CreateAudioEngineAsync` / `AudioEngineV2`                                            | ✅ Full          | over Lite `createAudioEngineAsync`; volume, state, `unlockAsync`, `pause`/`resume`/`dispose`, `listener`, `defaultMainBus`                                             |
+| `LastCreatedAudioEngine` / `OnAudioEngineV2CreatedObservable`                         | ✅ Full          | module-level tracking, matches BJS                                                                                                                                     |
+| `CreateSoundAsync` / `StaticSound`                                                    | ✅ Full          | over Lite `createSoundAsync`; play/pause/resume/stop, `loop`/`startOffset`/`maxInstances`/`duration`/`loopStart`/`loopEnd`/`pitch`/`playbackRate`, `onEndedObservable` |
+| `CreateSoundBufferAsync` / `StaticSoundBuffer`                                        | ✅ Full          | over Lite `createSoundBufferAsync`                                                                                                                                     |
+| `CreateStreamingSoundAsync` / `StreamingSound`                                        | ✅ Full          | over Lite streaming-sound fns; preload counts, transport                                                                                                               |
+| `CreateAudioBusAsync` / `AudioBus`                                                    | ✅ Full          | over Lite `createAudioBusAsync`; volume, spatial/stereo/analyzer, `outBus`                                                                                             |
+| `MainAudioBus`                                                                        | ⚡ Partial       | `engine.defaultMainBus`; Lite main bus is not a spatial-graph host, so `spatial`/`stereo`/`analyzer` throw a discoverable error                                        |
+| `CreateMainAudioBusAsync`                                                             | ⚡ Partial       | Lite exposes only the default main bus; resolves to `engine.defaultMainBus` rather than constructing a second one                                                      |
+| `CreateSoundSourceAsync` / `CreateMicrophoneSoundSourceAsync` / `SoundSource`         | ✅ Full          | over Lite `createSoundSourceAsync` / `createMicrophoneSoundSourceAsync`                                                                                                |
+| `AbstractSound` / `AbstractSoundSource` / `AbstractAudioBus` / `AbstractAudioOutNode` | ✅ Full          | abstract base classes in the hierarchy                                                                                                                                 |
+| `AbstractAudioNode` / `AbstractNamedAudioNode`                                        | ✅ Full          | `onNameChangedObservable`, engine `onNodeAddedObservable`/`onNodeRemovedObservable`                                                                                    |
+| `AbstractSpatialAudio` / `AbstractSpatialAudioListener`                               | ⚡ Partial       | over Lite spatial feature fns; node attachment tracked by world position, not a live transform binding                                                                 |
+| `AbstractStereoAudio`                                                                 | ✅ Full          | over Lite stereo feature fns                                                                                                                                           |
+| `AbstractAudioAnalyzer`                                                               | ✅ Full          | over Lite analyzer feature fns; `getByteFrequencyData`/`getFloatFrequencyData`                                                                                         |
+| `SoundState` / `AudioParameterRampShape` / `SpatialAudioAttachmentType`               | ✅ Full          | enums mirror BJS string/number values exactly                                                                                                                          |
+| `Sound` / `AudioEngine` / `WeightedSound` (legacy v1)                                 | ❌ Not supported | throwing stub; superseded by the AudioV2 surface above                                                                                                                 |
 
 ## Not yet wrapped (Lite supports — wrappers planned)
 
@@ -342,7 +363,7 @@ candidate rows for the next audit passes — until wrapped they either carry a
 | `Inspector` / `NodeMaterialEditor`             | ⛔ Out of scope                            |
 | `ParticleSystem` / `GPUParticleSystem`         | ❌ Not supported (not in Lite)             |
 | `@babylonjs/gui`                               | ❌ Not supported (not in Lite)             |
-| `Sound` / `AudioEngine`                        | ❌ Not supported (no audio in Lite)        |
+| `Sound` / `AudioEngine` (legacy v1)            | ❌ Not supported (use AudioV2 — see Audio) |
 | WebXR                                          | ❌ Not supported (no XR in Lite)           |
 | `HighlightLayer` / `GlowLayer` / `Decal`       | ❌ Not supported (not in Lite)             |
 | `SceneSerializer`                              | ❌ Not supported                           |

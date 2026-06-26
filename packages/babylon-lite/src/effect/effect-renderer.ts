@@ -23,6 +23,9 @@ export interface EffectBindingLayout {
     visibility?: GPUShaderStageFlags;
     uniformByteLength?: number;
     textureSampleType?: GPUTextureSampleType;
+    /** Texture view dimension for a `texture` binding (default `"2d"`). Set `"2d-array"`/`"cube"`/… so a
+     *  fullscreen effect can sample an array/cube texture (e.g. the CSM cascade depth array). */
+    viewDimension?: GPUTextureViewDimension;
     samplerType?: GPUSamplerBindingType;
     textureBinding?: string | number;
 }
@@ -498,7 +501,7 @@ function bindingLayoutEntry(layout: EffectBindingLayout): GPUBindGroupLayoutEntr
         return { binding: layout.binding, visibility, buffer: { type: "uniform" } };
     }
     if (layout.kind === "texture") {
-        return { binding: layout.binding, visibility, texture: { sampleType: layout.textureSampleType ?? "float" } };
+        return { binding: layout.binding, visibility, texture: { sampleType: layout.textureSampleType ?? "float", viewDimension: layout.viewDimension ?? "2d" } };
     }
     return { binding: layout.binding, visibility, sampler: { type: layout.samplerType ?? "filtering" } };
 }

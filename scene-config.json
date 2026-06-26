@@ -804,7 +804,7 @@
         "slug": "scene75-effect-rtt-sphere",
         "name": "Scene 75 — Effect RTT Sphere",
         "maxMad": 0.05,
-        "maxRawKB": 50.3,
+        "maxRawKB": 50.6,
         "description": "EffectRenderer-style WGSL pass renders a 512×512 green offscreen texture, then an unlit sphere displays that render target as its base-color texture.",
         "tags": ["procedural", "effect", "rtt"],
         "skipPerf": true
