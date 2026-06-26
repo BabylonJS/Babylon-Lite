@@ -11,14 +11,15 @@ import {
     setEffectFloat2,
     setEffectTexture,
     stopRenderLoop,
+    bindRenderTarget,
+    createFloatRenderTarget,
 } from "babylon-lite-gl";
-import { bindRenderTarget, createFloatRenderTarget } from "babylon-lite-gl/render-target";
 
 /**
  * Scene 14 — Float (HDR) Render Target.
  *
  * The HDR opt-in counterpart of scene8's RGBA8 round-trip. Exercises
- * @babylonjs/lite-gl/render-target's `createFloatRenderTarget` end-to-end:
+ * `createFloatRenderTarget` end-to-end:
  *   - PASS 1 renders a high-dynamic-range pattern whose values EXCEED 1.0 (a
  *     bright central bloom up to ~2.7 falling off radially) INTO an offscreen
  *     512×512 HALF_FLOAT (RGBA16F) render target. `createFloatRenderTarget`

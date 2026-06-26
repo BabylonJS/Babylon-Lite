@@ -59,10 +59,10 @@ prefix-free (`createRenderTarget`, not `createGLRenderTarget`); types are
 function is **engine-first**. Matches `@babylonjs/lite`'s `createRenderTarget` /
 `createRenderTargetTexture` and lite-gl's own `createRawTexture`/`bindTexture`.
 
-**P4 — Sub-entry packaging.** Core stays in the main barrel + `/render-target`;
-heavier opt-ins are separate exports and, when large, separate sub-entries
-(`/dynamic-texture`, `/mesh`, `/depth-stencil`, `/scissor`, plus existing
-`/sprites`, `/html-texture`). Package is `sideEffects:false`.
+**P4 — Packaging.** Everything ships from the single `@babylonjs/lite-gl` barrel;
+heavier opt-ins (render targets, dynamic textures, meshes, depth-stencil, scissor,
+sprites, html-element textures) are tree-shakeable named exports. Package is
+`sideEffects:false`.
 
 **P5 — One restore mechanism.** Every texture variant is the same mutable-handle
 `GLTexture`. A render target's FBO/renderbuffers — and its default (owned) color
@@ -74,7 +74,7 @@ rather than owning a bespoke color path — which is exactly what makes
 
 ## 3. Render Target API (converged, tiered)
 
-### Tier 0 — core (`@babylonjs/lite-gl/render-target`)
+### Tier 0 — core (render targets)
 The 90% case: post-processing, frame feedback, offscreen compositing.
 
 ```ts
@@ -118,14 +118,14 @@ generateRenderTargetMipMaps(engine, rt): void
 //   options.colorTexture = createFloatTexture(engine, null, w, h, …)   // BYO
 //   createFloatRenderTarget(engine, { width, height, type? })          // sugar
 //   (the float-format table lives only in these, never in the RGBA8 core)
-// stencil — generateRenderTargetStencil(engine, rt, { depth? }) from /depth-stencil
+// stencil — generateRenderTargetStencil(engine, rt, { depth? }) (depth-stencil module)
 //   packs DEPTH24_STENCIL8 (default) or stencil-only STENCIL_INDEX8 (depth:false);
 //   opt-in, installs a restore/resize hook so the attachment survives context loss
 // ping-pong (from newdemo) — feedback helper
 createPingPong(engine, options): GLPingPong            // { read, write, swap() }
 resizePingPong(engine, pp, width, height): void
 disposePingPong(engine, pp | null | undefined): void
-// MRT — future `@babylonjs/lite-gl/render-target-mrt`
+// MRT — future addition (barrel export)
 ```
 
 ## 4. Texture API (converged, tiered)
@@ -162,11 +162,11 @@ createTextureFromHandle(engine, handle, w, h, options?): GLTexture   // interop 
 generateTextureMipMaps(engine, tex): void                            // mipmaps as a fn, not an option
 // HDR sugar (knows RGBA16F/32F) — ships in the main barrel; tree-shakes when unused
 createFloatTexture(engine, data, w, h, options?): GLTexture
-// dynamic (canvas-backed) textures — `@babylonjs/lite-gl/dynamic-texture` (tinylottie)
+// dynamic (canvas-backed) textures (tinylottie)
 createDynamicTexture(engine, w, h, options?): GLTexture
 updateDynamicTexture(engine, tex, source, invertY?, premultiplyAlpha?): void
 clearDynamicTextureSource(tex): void
-// HTML-element textures — existing `/html-texture` sub-entry
+// HTML-element textures
 ```
 
 > Resolved (owner): mipmaps are **function-only**. `generateMipMaps` is NOT a
@@ -174,8 +174,8 @@ clearDynamicTextureSource(tex): void
 > callers opt in via `generateTextureMipMaps(engine, tex)` /
 > `generateRenderTargetMipMaps(engine, rt)`. This keeps the create path
 > branch-free (P2) and removes the implicit "auto-regenerate on unbind" behavior.
-> (The `/html-texture` and `/dynamic-texture` factories keep their own
-> sampling-mode-driven `generateMipMaps` flag — separate opt-in sub-entries.)
+> (The html-texture and dynamic-texture factories keep their own
+> sampling-mode-driven `generateMipMaps` flag.)
 
 ## 5. Reconciliation matrix (what each branch does)
 
@@ -185,30 +185,27 @@ clearDynamicTextureSource(tex): void
 | `bindRenderTarget(null)` vs `unbindRenderTarget` | null-bind | `unbind` | — | **null-bind**; drop `unbindRenderTarget` |
 | `disposeRenderTarget` null-safe | ✓ | ✗ | — | **null-safe** |
 | HDR float/half target | ✗ | option `type` | — | **BYO `colorTexture` / `createFloatRenderTarget`** (out of core) |
-| stencil | ✗ | option | — | **`generateRenderTargetStencil`** (/depth-stencil), opt-in |
+| stencil | ✗ | option | — | **`generateRenderTargetStencil`** (depth-stencil module), opt-in |
 | mipmaps (RT) | ✗ | option | — | **`generateRenderTargetMipMaps`** fn |
 | `readRenderTargetPixels` | ✗ | ✓ | — | **keep** (Tier 1) |
 | ping-pong | ✓ | ✗ | — | **keep** (Tier 1) |
 | `GLRenderTarget.isReady` | ✗ | ✓ | — | **include** |
 | `createRawTexture` HDR table | inline | inline | inline | **inline LDR only + `internalFormat`**; HDR → `createFloatTexture` |
 | `updateRawTexture` / sampling / wrap / fromHandle | ✗ | ✓ | ✗ | **keep** (Tier 1, separate exports) |
-| dynamic textures | ✗ | ✗ | ✓ | **`/dynamic-texture` sub-entry** |
-| `mesh` / `depth-stencil` / `scissor` | ✗ | ✓ | ✗ | **keep as separate sub-entries** (already tree-shakeable ✓) |
+| dynamic textures | ✗ | ✗ | ✓ | **barrel (tree-shakeable)** |
+| `mesh` / `depth-stencil` / `scissor` | ✗ | ✓ | ✗ | **barrel (tree-shakeable ✓)** |
 | `state.boundFramebuffer` | ✓ | ✓ | — | **already identical** ✓ |
 
 ## 6. Packaging (exports map)
 
-- main barrel: engine, render-loop, effects, effect-renderer, **texture core**,
-  blend.
-- `@babylonjs/lite-gl/render-target` — Tier-0 RT + ping-pong + readback +
-  `generateRenderTargetMipMaps`.
-- `@babylonjs/lite-gl/dynamic-texture` — dynamic (canvas) textures.
-- `@babylonjs/lite-gl/mesh`, `/depth-stencil`, `/scissor` — theduck's engine
-  expansion (already separate).
-- existing: `/sprites`, `/html-texture`.
-- HDR sugar (`createFloatTexture` / `createFloatRenderTarget`): ships in the main
-  barrel + `/render-target` (they're tiny and tree-shake when unused). No
-  separate `/texture-hdr` sub-entry.
+Everything ships from the single `@babylonjs/lite-gl` barrel (one public `exports`
+entry). The package is `sideEffects: false`, so unused features tree-shake out
+regardless of which symbols a consumer imports. The barrel covers: engine,
+render-loop, effects, effect-renderer, **texture core**, blend, render targets
+(Tier-0 RT + ping-pong + readback + `generateRenderTargetMipMaps`), dynamic
+(canvas) textures, meshes, depth-stencil, scissor, sprites, and html-element
+textures. HDR sugar (`createFloatTexture` / `createFloatRenderTarget`) ships in the
+barrel too (tiny, tree-shakes when unused).
 
 All `sideEffects:false`; the lab bundle-size test (`scene-config-webgl.json
 maxRawKB`) must show effect-only scenes UNCHANGED after these land (proves the
@@ -223,17 +220,17 @@ opt-ins tree-shake).
 3. **Mipmaps** — **function-only**. No `generateMipMaps` create-option on the
    core texture/RT path; use `generateTextureMipMaps` /
    `generateRenderTargetMipMaps`. The implicit auto-regenerate-on-unbind is
-   removed. (`/html-texture` + `/dynamic-texture` keep their own
+   removed. (html-texture + dynamic-texture keep their own
    sampling-mode-driven flag.)
 4. **Stencil** — **depth-stencil-module opt-in**. Not a `createRenderTarget`
-   option; use `generateRenderTargetStencil(engine, rt, { depth? })` from
-   `/depth-stencil` (packed DEPTH24_STENCIL8 default, or stencil-only
+   option; use `generateRenderTargetStencil(engine, rt, { depth? })` from the
+   depth-stencil module (packed DEPTH24_STENCIL8 default, or stencil-only
    STENCIL_INDEX8 with `depth:false`). The core RT keeps only the sanctioned
    `generateDepthBuffer` (DEPTH_COMPONENT16); the helper installs a
    restore/resize hook so the attachment survives FBO rebuilds, and the stencil
    constants stay out of the core bundle.
-5. **`mesh`/`depth-stencil`/`scissor`** — ship as separate tree-shakeable
-   sub-entries (they don't conflict with this spec).
+5. **`mesh`/`depth-stencil`/`scissor`** — ship as tree-shakeable named exports
+   from the barrel (they don't conflict with this spec).
 6. **Merge order** — land the converged core first, then layer theduck's Tier-1
    + tinylottie's dynamic textures on top. Confirmed.
 

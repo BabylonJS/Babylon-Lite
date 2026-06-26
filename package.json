@@ -12,7 +12,6 @@
         "build": "pnpm --filter babylon-lite build",
         "build:lib": "pnpm --filter babylon-lite build:lib",
         "build:gl": "pnpm --filter babylon-lite-gl build",
-        "build:gl:prod": "pnpm --filter babylon-lite-gl build:prod",
         "build:lab-site": "tsx scripts/build-lab-site.ts",
         "build:pages-site": "tsx scripts/build-pages-site.ts",
         "build:bundle-scenes": "pnpm build:lib && tsx scripts/build-bundle-scenes.ts",

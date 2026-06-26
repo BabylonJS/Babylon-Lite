@@ -1,9 +1,9 @@
 /**
- * Sub-entry: render-to-texture (offscreen framebuffer) support.
+ * Render-to-texture (offscreen framebuffer) support.
  *
- * Dynamic-importable via `import { ... } from "@babylonjs/lite-gl/render-target"`
- * so consumers that only render fullscreen effects to the canvas don't pull the
- * FBO code into their bundles.
+ * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
+ * `sideEffects: false`, so consumers that only render fullscreen effects to the
+ * canvas tree-shake the FBO code out.
  *
  * This is the lite-gl equivalent of Babylon's `RenderTargetWrapper` +
  * `ThinEngine.createRenderTargetTexture` / `bindFramebuffer` /
@@ -55,7 +55,7 @@ export interface GLRenderTargetOptions {
     /** Allocate a depth renderbuffer (`DEPTH_COMPONENT16`). Default `false`.
      *  Stencil is NOT a create option — opt in (packed depth+stencil, or
      *  stencil-only) via `generateRenderTargetStencil`
-     *  (`@babylonjs/lite-gl/depth-stencil`), which keeps the stencil/packed
+     *  (`@babylonjs/lite-gl`), which keeps the stencil/packed
      *  renderbuffer code out of the render-target core bundle. */
     generateDepthBuffer?: boolean;
     /** Color texture minification filter. Default `gl.LINEAR`. */
@@ -125,7 +125,7 @@ export interface GLRenderTarget {
     _depthStencil: WebGLRenderbuffer | null;
     /**
      * @internal Optional stencil rebuild hook installed by
-     * `generateRenderTargetStencil` (`@babylonjs/lite-gl/depth-stencil`). When
+     * `generateRenderTargetStencil` (`@babylonjs/lite-gl`). When
      * present it OWNS the depth/stencil renderbuffer (replacing the core
      * depth-only buffer) and is re-invoked after every FBO rebuild
      * (create-via-helper, resize, context-restore) so the attachment survives.
@@ -627,7 +627,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
         // ── Depth (core, DEPTH-ONLY) ─────────────────────────────────────────
         // The core only ever builds a DEPTH_COMPONENT16 depth buffer. Stencil /
         // packed depth-stencil is an opt-in installed by
-        // `generateRenderTargetStencil` (`@babylonjs/lite-gl/depth-stencil`),
+        // `generateRenderTargetStencil` (`@babylonjs/lite-gl`),
         // which sets `_rebuildDepthStencil` to a closure that REPLACES the
         // depth-only buffer below with its own packed/stencil renderbuffer. That
         // hook is re-run here on every rebuild (create / resize / context-restore)
@@ -683,7 +683,7 @@ function allocateRenderTargetGpu(engine: GLEngineContext, rt: GLRenderTarget): v
     }
 }
 
-/** Inline cached `gl.viewport` — kept local so the render-target sub-entry has
+/** Inline cached `gl.viewport` — kept local so the render-target module has
  *  no runtime dependency on the effect-renderer module. */
 function setViewportCached(engine: GLEngineContext, x: number, y: number, w: number, h: number): void {
     const s = engine._state;

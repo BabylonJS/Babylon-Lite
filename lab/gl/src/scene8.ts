@@ -11,13 +11,14 @@ import {
     setEffectFloat2,
     setEffectTexture,
     stopRenderLoop,
+    bindRenderTarget,
+    createRenderTarget,
 } from "babylon-lite-gl";
-import { bindRenderTarget, createRenderTarget } from "babylon-lite-gl/render-target";
 
 /**
  * Scene 8 — Render-to-Texture Round-Trip.
  *
- * Exercises the @babylonjs/lite-gl/render-target sub-entry end-to-end:
+ * Exercises render targets end-to-end:
  *   - PASS 1 renders a procedural pattern INTO an offscreen 512×512 render
  *     target (`createRenderTarget` → `bindRenderTarget(engine, rt)` binds the
  *     FBO and sets the viewport to the RT size automatically).

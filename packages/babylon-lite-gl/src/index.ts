@@ -7,11 +7,9 @@
 // `isolatedModules`), and keeps internal helpers (e.g. `bindTextureRaw`,
 // `bindTextureForUpload`) out of consumers' bundles + `.d.ts`.
 //
-// The `/sprites` and `/html-texture` features are re-exported here AND kept as
-// dedicated sub-entries (`@babylonjs/lite-gl/sprites`, `.../html-texture`). The
-// package is `sideEffects: false` and these modules have no top-level side
-// effects, so a consumer that imports only core symbols tree-shakes the sprite /
-// html-texture code away regardless of which path it imports from.
+// The package is `sideEffects: false` and no module has top-level side effects,
+// so a consumer that imports only the symbols it needs tree-shakes everything
+// else (sprites, html-texture, …) away.
 
 // ─── Engine / context ────────────────────────────────────────────────
 export {
@@ -79,10 +77,10 @@ export {
 } from "./texture.js";
 export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
 
-// ─── Dynamic textures (also at `@babylonjs/lite-gl/dynamic-texture`) ──
+// ─── Dynamic textures ────────────────────────────────────────────────
 export { createDynamicTexture, updateDynamicTexture, clearDynamicTextureSource } from "./dynamic-texture.js";
 
-// ─── Render targets (also at `@babylonjs/lite-gl/render-target`) ─────
+// ─── Render targets ──────────────────────────────────────────────────
 export {
     createRenderTarget,
     createFloatRenderTarget,
@@ -97,7 +95,7 @@ export {
 } from "./render-target.js";
 export type { GLRenderTarget, GLRenderTargetOptions, GLFloatRenderTargetOptions, GLPingPong } from "./render-target.js";
 
-// ─── Meshes / buffers / instancing (also at `@babylonjs/lite-gl/mesh`) ──
+// ─── Meshes / buffers / instancing ───────────────────────────────────
 export {
     createVertexBuffer,
     updateVertexBuffer,
@@ -127,11 +125,11 @@ export type { GLDepthState, GLStencilState, GLClearOptions } from "./depth-stenc
 // ─── Scissor ─────────────────────────────────────────────────────────
 export { setScissor, disableScissor } from "./scissor.js";
 
-// ─── Sprites (also at `@babylonjs/lite-gl/sprites`) ──────────────────
+// ─── Sprites ─────────────────────────────────────────────────────────
 export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeSpriteRenderer } from "./sprites.js";
 export type { GLSprite, GLSpriteColor, GLSpriteRendererOptions, GLSpriteRenderer } from "./sprites.js";
 
-// ─── HTML-element textures (also at `@babylonjs/lite-gl/html-texture`) ──
+// ─── HTML-element textures ───────────────────────────────────────────
 // GLSamplingMode is a const + same-name type; one value re-export carries both.
 export { createHtmlElementTexture, updateHtmlElementTexture, GLSamplingMode } from "./html-texture.js";
 export type { GLHtmlElementTextureOptions } from "./html-texture.js";

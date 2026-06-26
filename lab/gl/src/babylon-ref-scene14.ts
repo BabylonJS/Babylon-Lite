@@ -9,7 +9,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
 /**
  * Babylon.js reference for GL Scene 14 — Float (HDR) Render Target.
  *
- * Reproduces lab/gl/src/scene14.ts (which uses @babylonjs/lite-gl/render-target's
+ * Reproduces lab/gl/src/scene14.ts (which uses lite-gl's
  * createFloatRenderTarget) with Babylon's ThinEngine + `createRenderTargetTexture`
  * (HALF_FLOAT) + `EffectRenderer`, so the parity harness can diff the two
  * pixel-for-pixel.

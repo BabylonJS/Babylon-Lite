@@ -1,10 +1,9 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, drawEffect, isEffectReady, resizeGLEngine, runRenderLoop, setEffectTexture, setViewport, stopRenderLoop } from "babylon-lite-gl";
-import { createHtmlElementTexture, GLSamplingMode, updateHtmlElementTexture } from "babylon-lite-gl/html-texture";
+import { applyEffectWrapper, createEffectWrapper, createGLEngine, createHtmlElementTexture, drawEffect, GLSamplingMode, isEffectReady, resizeGLEngine, runRenderLoop, setEffectTexture, setViewport, stopRenderLoop, updateHtmlElementTexture } from "babylon-lite-gl";
 
 /**
  * Scene 6 — HTML-Element Texture.
  *
- * Demonstrates the `babylon-lite-gl/html-texture` sub-entry:
+ * Demonstrates HTML-element textures:
  *   - An offscreen 2D `<canvas>` is animated every frame with the Canvas 2D API.
  *   - `createHtmlElementTexture(engine, surface, { samplingMode: BILINEAR })`
  *     wraps it as a GL texture.

@@ -29,8 +29,10 @@ import {
     setEffectFloat,
     setEffectFloat3,
     setEffectTexture,
+    bindRenderTarget,
+    createPingPong,
+    resizePingPong,
 } from "babylon-lite-gl";
-import { bindRenderTarget, createPingPong, resizePingPong } from "babylon-lite-gl/render-target";
 
 // ── Shadertoy "common" tab (defines shared by both passes) ──────────────────
 const COMMON = `

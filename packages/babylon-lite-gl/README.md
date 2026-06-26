@@ -25,17 +25,7 @@ npm install @babylonjs/lite-gl
 ## Quick start — an animated fullscreen effect
 
 ```ts
-import {
-    createGLEngine,
-    createEffectWrapper,
-    isEffectReady,
-    applyEffectWrapper,
-    drawEffect,
-    setViewport,
-    setEffectFloat,
-    runRenderLoop,
-    resizeGLEngine,
-} from "@babylonjs/lite-gl";
+import { createGLEngine, createEffectWrapper, isEffectReady, applyEffectWrapper, drawEffect, setViewport, setEffectFloat, runRenderLoop, resizeGLEngine } from "@babylonjs/lite-gl";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = createGLEngine(canvas, { alpha: false });
@@ -69,23 +59,13 @@ runRenderLoop(engine, () => {
 
 ## Entry points
 
-The full public API is available from the main `@babylonjs/lite-gl` barrel.
-`/sprites`, `/html-texture`, `/render-target`, `/mesh`, `/depth-stencil`,
-`/scissor` and `/dynamic-texture` are **also** exposed as dedicated sub-entries
-for consumers who prefer an explicit import — the package is `sideEffects: false`,
-so a bundler tree-shakes away whichever features you don't use no matter which
-path you import from.
-
-| Import | Provides |
-| --- | --- |
-| `@babylonjs/lite-gl` | Everything: engine + render loop, effects & uniform setters, textures (incl. float / HDR + dynamic), the `EffectWrapper` fullscreen-quad renderer, render targets, meshes / vertex-index buffers + instancing, depth / stencil / color-mask / clear, scissor, blend modes, the sprite renderer, and HTML-element textures. |
-| `@babylonjs/lite-gl/sprites` | Just the sprite / instanced-quad renderer (`createSpriteRenderer`, `renderSprites`, `setSpriteRendererTexture`, `disposeSpriteRenderer`, `GLSprite`) — the lite-gl equivalent of Babylon's `SpriteRenderer`. |
-| `@babylonjs/lite-gl/html-texture` | Just textures backed by a `<canvas>` / `<img>` / `<video>` element (`createHtmlElementTexture`, `updateHtmlElementTexture`, `GLSamplingMode`). |
-| `@babylonjs/lite-gl/render-target` | Render-to-texture (FBO) + a ping-pong feedback helper (`createRenderTarget`, `createFloatRenderTarget`, `bindRenderTarget`, `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`, `disposeRenderTarget`, `createPingPong`, `resizePingPong`, `disposePingPong`) — the lite-gl equivalent of Babylon's `RenderTargetTexture` / `createRenderTargetTexture`, for multi-pass and self-feedback effects. |
-| `@babylonjs/lite-gl/mesh` | Vertex / index buffers, attribute binding and instanced `drawIndexed` (`createVertexBuffer`, `updateVertexBuffer`, `createIndexBuffer`, `bindAttributes`, `drawIndexed`, …) — the lite-gl equivalent of Babylon's `VertexBuffer` / `Geometry`. |
-| `@babylonjs/lite-gl/depth-stencil` | Cached depth / stencil / cull / color-mask state + `clearEngine` (`setDepthState`, `setStencilState`, `setCullState`, `setColorMask`, `clearEngine`). |
-| `@babylonjs/lite-gl/scissor` | The cached scissor-test rectangle (`setScissor`, `disableScissor`). |
-| `@babylonjs/lite-gl/dynamic-texture` | Textures whose pixels are replayed from a retained source on context-restore (`createDynamicTexture`, `updateDynamicTexture`, `clearDynamicTextureSource`). |
+The entire public API is available from the single `@babylonjs/lite-gl` entry:
+engine + render loop, effects & uniform setters, textures (incl. float / HDR +
+dynamic), the `EffectWrapper` fullscreen-quad renderer, render targets, meshes /
+vertex-index buffers + instancing, depth / stencil / color-mask / clear, scissor,
+blend modes, the sprite renderer, and HTML-element textures. The package is
+`sideEffects: false`, so a bundler tree-shakes away whichever features you don't
+use.
 
 ### Core API (`@babylonjs/lite-gl`)
 
@@ -107,20 +87,16 @@ path you import from.
   `updateTextureWrapMode`, `createTextureFromHandle`.
 - **Dynamic textures** — `createDynamicTexture`, `updateDynamicTexture`,
   `clearDynamicTextureSource` (the retained source is replayed on context-restore).
-  Also at `@babylonjs/lite-gl/dynamic-texture`.
 - **Render targets** — `createRenderTarget` (RGBA8 FBO with a sampleable color
   `GLTexture` + optional depth / stencil renderbuffer), `createFloatRenderTarget`
   (float / half-float HDR opt-in), `bindRenderTarget` (cached, null = the canvas),
   `resizeRenderTarget`, `generateRenderTargetMipMaps`, `readRenderTargetPixels`,
   `disposeRenderTarget`, plus the `createPingPong` / `resizePingPong` /
-  `disposePingPong` feedback helper. Also at `@babylonjs/lite-gl/render-target`.
+  `disposePingPong` feedback helper.
 - **Meshes / buffers** — `createVertexBuffer`, `updateVertexBuffer`,
   `createIndexBuffer`, `bindAttributes`, `drawIndexed` (instanced), `disposeBuffer`.
-  Also at `@babylonjs/lite-gl/mesh`.
 - **Depth / stencil / scissor** — `setDepthState`, `setStencilState`,
-  `setCullState`, `setColorMask`, `clearEngine` (also at
-  `@babylonjs/lite-gl/depth-stencil`); `setScissor`, `disableScissor` (also at
-  `@babylonjs/lite-gl/scissor`).
+  `setCullState`, `setColorMask`, `clearEngine`; `setScissor`, `disableScissor`.
 - **Blend** — `setBlendMode` + `GLBlendMode` (`DISABLE` / `ADD` / `ALPHA` /
   `PREMULTIPLIED`), matching Babylon's `setAlphaMode` parameters.
 

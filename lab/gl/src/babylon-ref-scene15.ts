@@ -18,7 +18,7 @@ import "@babylonjs/core/Engines/Extensions/engine.alpha.js";
 /**
  * Babylon.js reference for GL Scene 15 — Multiple Sprite Renderers.
  *
- * Reproduces lab/gl/src/scene15.ts (two `@babylonjs/lite-gl/sprites` renderers
+ * Reproduces lab/gl/src/scene15.ts (two lite-gl sprite renderers
  * over a glow-disc sheet and a ring sheet) with TWO real Babylon `SpriteRenderer`
  * instances + `ThinSprite`s, so the parity harness can diff the two pixel-for-pixel.
  *

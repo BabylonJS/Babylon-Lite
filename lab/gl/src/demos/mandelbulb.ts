@@ -28,8 +28,10 @@ import {
     setEffectFloat,
     setEffectFloat3,
     setEffectTexture,
+    bindRenderTarget,
+    createRenderTarget,
+    resizeRenderTarget,
 } from "babylon-lite-gl";
-import { bindRenderTarget, createRenderTarget, resizeRenderTarget } from "babylon-lite-gl/render-target";
 
 // ── Buffer A: mandelbulb raymarch (CC0, mrange — adapted verbatim) ───────────
 const BUFFER_FRAGMENT = `#version 300 es

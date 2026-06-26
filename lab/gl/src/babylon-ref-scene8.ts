@@ -9,7 +9,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
 /**
  * Babylon.js reference for GL Scene 8 — Render-to-Texture Round-Trip.
  *
- * Reproduces lab/gl/src/scene8.ts (which uses @babylonjs/lite-gl/render-target's
+ * Reproduces lab/gl/src/scene8.ts (which uses lite-gl's
  * createRenderTarget + bindRenderTarget) with Babylon's ThinEngine +
  * `createRenderTargetTexture` + `EffectRenderer`, so the parity harness can diff
  * the two pixel-for-pixel.

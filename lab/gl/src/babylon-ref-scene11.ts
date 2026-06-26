@@ -9,7 +9,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget.js";
 /**
  * Babylon.js reference for GL Scene 11 — Stencil Masking.
  *
- * Reproduces lab/gl/src/scene11.ts (which uses @babylonjs/lite-gl/depth-stencil's
+ * Reproduces lab/gl/src/scene11.ts (which uses lite-gl's
  * generateRenderTargetStencil + setStencilState + setColorMask) with Babylon's
  * ThinEngine + a stencil-bearing `createRenderTargetTexture` + `EffectRenderer`,
  * so the parity harness can diff the two pixel-for-pixel.

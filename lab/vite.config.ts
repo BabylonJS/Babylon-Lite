@@ -855,8 +855,11 @@ export default defineConfig({
             // Point babylon-lite directly at the TypeScript source directory so Vite treats
             // it as first-party code: full HMR + native ?raw WGSL handling.
             // Directory alias so sub-path imports like 'babylon-lite/loader-env/...' work too.
-            "babylon-lite-gl": resolve(__dirname, "../packages/babylon-lite-gl/src"),
             "babylon-lite": resolve(__dirname, "../packages/babylon-lite/src"),
+            // babylon-lite-gl ships a SINGLE entry (the barrel), so alias the exact
+            // specifier to index.ts — sub-paths are intentionally not resolvable, mirroring
+            // the package's `exports` map and lab/tsconfig.typecheck.json.
+            "babylon-lite-gl": resolve(__dirname, "../packages/babylon-lite-gl/src/index.ts"),
         },
     },
     server: {

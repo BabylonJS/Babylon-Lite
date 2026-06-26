@@ -1,10 +1,9 @@
 /**
- * Sub-entry: indexed meshes, dynamic vertex/index buffers, and hardware
- * instancing.
+ * Indexed meshes, dynamic vertex/index buffers, and hardware instancing.
  *
- * Dynamic-importable via `import { ... } from "@babylonjs/lite-gl/mesh"` so
- * consumers that only render the fullscreen quad / sprites don't pull the mesh
- * code into their bundles.
+ * Part of the public API via the `@babylonjs/lite-gl` barrel. The package is
+ * `sideEffects: false`, so consumers that only render the fullscreen quad /
+ * sprites tree-shake the mesh code out.
  *
  * This is the lite-gl equivalent of Babylon's `ThinEngine.createVertexBuffer` /
  * `createIndexBuffer` / `_releaseBuffer` / `bindIndexBuffer` /

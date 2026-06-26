@@ -8,11 +8,10 @@
 > design spec; some §12 / §14 paths describe the planned layout. As shipped in
 > this repo:
 >
-> - **Package:** `packages/babylon-lite-gl/` (src, `package.json`,
->   `vite.config.ts`, `tsconfig.json`). Published as `@babylonjs/lite-gl` with
->   `./html-texture`, `./sprites`, `./render-target`, `./mesh`, `./depth-stencil`, `./scissor` and `./dynamic-texture` sub-entries. The build emits trimmed public
->   `.d.ts` (all
->   `@internal` members stripped, mirroring `babylon-lite`).
+> - **Package:** `packages/babylon-lite-gl/` (src, `package.json`, `build.mjs`,
+>   `tsconfig.json`). Published as `@babylonjs/lite-gl` — a single public entry
+>   (the barrel). The plain-`tsc` build emits trimmed public `.d.ts` (all
+>   `@internal` members stripped via `stripInternal`, mirroring `babylon-lite`).
 > - **Unit tests:** `tests/gl/unit/` (`render-loop.test.ts`, `cache.test.ts`,
 >   `_lite-gl-mock.ts`) — run via the `gl-unit` Vitest project
 >   (`pnpm test:unit:gl`). There is no in-package `test/` folder.
@@ -42,7 +41,7 @@ Non-goals:
 
 - No WebGL1 path.
 - No scene graph, no materials, no meshes, no skinning, no PBR.
-- Render-to-texture is available via the `/render-target` sub-entry (§3.8): RGBA8 (or a bring-your-own `colorTexture`, e.g. a float/half-float HDR target), optional core depth, opt-in stencil (`generateRenderTargetStencil`, /depth-stencil) and mipmap (`generateRenderTargetMipMaps`) helpers, ping-pong feedback and `readPixels` readback. No MRT (multiple render targets). Core effects render to the canvas by default.
+- Render-to-texture is available from the barrel (§3.8): RGBA8 (or a bring-your-own `colorTexture`, e.g. a float/half-float HDR target), optional core depth, opt-in stencil (`generateRenderTargetStencil`) and mipmap (`generateRenderTargetMipMaps`) helpers, ping-pong feedback and `readPixels` readback. No MRT (multiple render targets). Core effects render to the canvas by default.
 - No `SpriteRenderer` / `ThinSprite` in v1 (deferred; the magic loading screen keeps stock Babylon until v2).
 - No runtime shader preprocessor (`attribute`→`in` etc.). Consumers ship GLSL ES 3.00.
 - No shader-store, no `#include`, no observables, no engine-level customization extension points.
@@ -117,11 +116,11 @@ packages are imported together (as NeonBrush does).
    grouped by module with section comments, exactly like `@babylonjs/lite`'s
    `index.ts`. This keeps the public surface intentional and reviewable, and keeps
    internal helpers (e.g. `bindTextureRaw`, `bindTextureForUpload`) out of the
-   barrel and the published `.d.ts`. The `/html-texture` and `/sprites` features
-   are re-exported from the index **and** kept as dedicated sub-entries — because
-   the package is `sideEffects: false` and those modules have no top-level side
-   effects, tree-shaking drops them from bundles that don't use them whichever path
-   a consumer imports from (verified: the effect-only lab scenes stay the same size
+   barrel and the published `.d.ts`. The html-texture and sprites features
+   are re-exported from the index barrel — because the package is
+   `sideEffects: false` and those modules have no top-level side
+   effects, tree-shaking drops them from bundles that don't use them
+   (verified: the effect-only lab scenes stay the same size
    after the barrel re-export). When you add a public symbol, add an explicit
    re-export here; when you add an internal helper, tag it `@internal` and leave it
    out.
@@ -396,7 +395,7 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 ```
 
-#### 3.4.1 Sub-entry: HTML element textures (`/html-texture`)
+#### 3.4.1 HTML element textures
 
 Dynamic-importable so only InputGlow pulls it in:
 
@@ -517,10 +516,10 @@ code that never calls `setBlendMode` renders exactly as before (cloth/scan
 fullscreen parity is preserved). The first `setBlendMode` after creation /
 context-loss is never elided because the cache starts at the `-1` sentinel.
 
-### 3.6 Sprite renderer (sub-entry `/sprites`)
+### 3.6 Sprite renderer
 
-Dynamic-importable (like `/html-texture`) so consumers that don't draw sprites
-never pull it into their bundles. It is the lite-gl equivalent of Babylon's
+Re-exported from the barrel; `sideEffects: false` means consumers that don't draw
+sprites never pull it into their bundles. It is the lite-gl equivalent of Babylon's
 `SpriteRenderer` + `ThinSprite` (`@babylonjs/core` `Sprites/spriteRenderer.js`,
 `Sprites/thinSprite.js`). A sprite is a plain data object; the renderer owns its
 own VBO/IBO/VAO + compiled effect (it does **not** reuse the fullscreen quad).
@@ -609,9 +608,9 @@ Geometry / parity notes:
 export { createGLEngine, disposeGLEngine, resizeGLEngine, /* …getters + context-lost hooks… */ } from "./context.js";
 export type { GLEngineOptions, GLEngineCaps, GLEngineContext } from "./context.js";
 // …render-loop, effects, effect-renderer, textures, blend modules (one export {…} / export type {…} each)…
-// The /sprites, /html-texture and /render-target features are re-exported here AND kept as
-// dedicated sub-entries; `sideEffects: false` + no top-level side effects means a bundler
-// tree-shakes them from bundles that don't use them, whichever path a consumer imports from.
+// The sprites, html-texture and render-target features are re-exported here from
+// their modules; `sideEffects: false` + no top-level side effects means a bundler
+// tree-shakes them from bundles that don't use them.
 export { createSpriteRenderer, renderSprites, setSpriteRendererTexture, disposeSpriteRenderer } from "./sprites.js";
 export { createHtmlElementTexture, updateHtmlElementTexture, GLSamplingMode } from "./html-texture.js";
 export { createRenderTarget, bindRenderTarget, resizeRenderTarget, disposeRenderTarget, createPingPong, resizePingPong, disposePingPong } from "./render-target.js";
@@ -619,9 +618,9 @@ export { createRenderTarget, bindRenderTarget, resizeRenderTarget, disposeRender
 
 ---
 
-### 3.8 Render targets (sub-entry `/render-target`)
+### 3.8 Render targets
 
-Dynamic-importable (like `/sprites` and `/html-texture`) so a consumer that never
+Re-exported from the barrel; `sideEffects: false` means a consumer that never
 renders to a texture doesn't pull the FBO code into its bundle. This is the lite-gl
 equivalent of Babylon's `RenderTargetTexture` / `createRenderTargetTexture` +
 `bindFramebuffer`. A `GLRenderTarget` owns an FBO plus a sampleable color
@@ -640,7 +639,7 @@ export interface GLRenderTargetOptions {
     wrapT?: GLenum;                // default gl.CLAMP_TO_EDGE
     colorTexture?: GLTexture;        // BYO color attachment (e.g. a createFloatTexture HDR target); else RGBA8
     // No generateStencilBuffer/generateMipMaps here: stencil is the opt-in
-    // generateRenderTargetStencil (/depth-stencil) helper; mipmaps are the
+    // generateRenderTargetStencil (depth-stencil module) helper; mipmaps are the
     // generateRenderTargetMipMaps function (both tree-shake out of the core).
 }
 
@@ -654,7 +653,7 @@ export function resizeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget, 
 export function disposeRenderTarget(engine: GLEngineContext, rt: GLRenderTarget | null | undefined): void;
 export function createFloatRenderTarget(engine: GLEngineContext, options: GLFloatRenderTargetOptions): GLRenderTarget; // float / half-float HDR color
 export function generateRenderTargetMipMaps(engine: GLEngineContext, rt: GLRenderTarget): void;
-// Stencil is opt-in from the /depth-stencil sub-entry (NOT a createRenderTarget option),
+// Stencil is opt-in from the depth-stencil module (NOT a createRenderTarget option),
 // so the packed-renderbuffer code tree-shakes out of the render-target core:
 //   generateRenderTargetStencil(engine, rt, { depth? }): void
 //     packs DEPTH24_STENCIL8 (depth default true) or stencil-only STENCIL_INDEX8 (depth:false),
@@ -692,15 +691,14 @@ export function disposePingPong(engine: GLEngineContext, pp: GLPingPong | null |
 - **Scope.** Color is RGBA8 by default, or any `GLTexture` passed via `colorTexture`
   (e.g. a `createFloatTexture` half-float HDR target). Optional core depth16
   (`generateDepthBuffer`); a packed depth-stencil / stencil-only attachment via the
-  opt-in `generateRenderTargetStencil` (/depth-stencil); `createFloatRenderTarget`,
+  opt-in `generateRenderTargetStencil`; `createFloatRenderTarget`,
   the `generateRenderTargetMipMaps` function (mipmaps are NOT a create-option) and
   `readRenderTargetPixels` readback are all available. Out of scope: MRT (§10).
 
-Packaging mirrors `/sprites` and `/html-texture`: re-exported from the barrel
-(`@babylonjs/lite-gl`) **and** available as the dedicated
-`@babylonjs/lite-gl/render-target` sub-entry (§3.0 rule 4). Because the package is
+Packaging mirrors sprites and html-texture: re-exported from the
+`@babylonjs/lite-gl` barrel (the single public entry). Because the package is
 `sideEffects: false` and the module has no top-level side effects, a bundler drops it
-from any bundle that doesn't use it, whichever path is imported.
+from any bundle that doesn't use it.
 
 ---
 
@@ -718,7 +716,7 @@ interface GLState {
     boundVao: WebGLVertexArrayObject | null;
     /** Cached bound framebuffer — null means the default framebuffer (the
      *  canvas). The single source of truth for the active FBO; `bindRenderTarget`
-     *  (the `/render-target` sub-entry) elides redundant `gl.bindFramebuffer`
+     *  (the render-target module) elides redundant `gl.bindFramebuffer`
      *  against it. Reset to null on context-lost. */
     boundFramebuffer: WebGLFramebuffer | null;
     viewportX: number; viewportY: number; viewportW: number; viewportH: number;
@@ -1150,7 +1148,7 @@ The application's `onContextLost` callback may e.g. hide the canvas.
 
 ## 5. Tree-shaking & packaging
 
-`package.json` (mirrors the `babylon-lite` package shape, with a dual-entry):
+`package.json` (a single public entry — the barrel — built with plain `tsc`):
 
 ```json
 {
@@ -1161,38 +1159,22 @@ The application's `onContextLost` callback may e.g. hide the canvas.
     "types": "./src/index.ts",
     "sideEffects": false,
     "exports": {
-        ".":              { "import": "./src/index.ts",            "types": "./src/index.ts" },
-        "./html-texture": { "import": "./src/html-texture.ts", "types": "./src/html-texture.ts" },
-        "./sprites":      { "import": "./src/sprites.ts",      "types": "./src/sprites.ts" },
-        "./render-target": { "import": "./src/render-target.ts", "types": "./src/render-target.ts" },
-        "./mesh":          { "import": "./src/mesh.ts",          "types": "./src/mesh.ts" },
-        "./depth-stencil": { "import": "./src/depth-stencil.ts", "types": "./src/depth-stencil.ts" },
-        "./scissor":       { "import": "./src/scissor.ts",       "types": "./src/scissor.ts" },
-        "./dynamic-texture": { "import": "./src/dynamic-texture.ts", "types": "./src/dynamic-texture.ts" }
+        ".": { "import": "./src/index.ts", "types": "./src/index.ts" }
     },
     "publishConfig": {
         "main": "./dist/index.js",
         "types": "./dist/index.d.ts",
         "exports": {
-            ".":              { "import": "./dist/index.js",            "types": "./dist/index.d.ts" },
-            "./html-texture": { "import": "./dist/html-texture.js", "types": "./dist/html-texture.d.ts" },
-            "./sprites":      { "import": "./dist/sprites.js",      "types": "./dist/sprites.d.ts" },
-            "./render-target": { "import": "./dist/render-target.js", "types": "./dist/render-target.d.ts" },
-            "./mesh":          { "import": "./dist/mesh.js",          "types": "./dist/mesh.d.ts" },
-            "./depth-stencil": { "import": "./dist/depth-stencil.js", "types": "./dist/depth-stencil.d.ts" },
-            "./scissor":       { "import": "./dist/scissor.js",       "types": "./dist/scissor.d.ts" },
-            "./dynamic-texture": { "import": "./dist/dynamic-texture.js", "types": "./dist/dynamic-texture.d.ts" }
+            ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
         }
     },
     "files": ["dist"],
     "scripts": {
-        "build": "vite build",
-        "build:prod": "vite build --mode prod"
+        "build": "node build.mjs",
+        "dev": "tsc -p tsconfig.json --watch"
     },
     "devDependencies": {
-        "typescript": "^5.7.0",
-        "vite": "^6.0.0",
-        "vite-plugin-dts": "^4.5.4"
+        "typescript": "^5.7.0"
     }
 }
 ```
@@ -1206,11 +1188,10 @@ Tree-shaking guarantees:
   helpers (cache update, ensureQuad, finalize, loss-restore protocol).
 - `setEffectColor4`, `setEffectInt`, `executeWhenCompiled`,
   `setHardwareScalingLevel`, etc. tree-shake out when unused.
-- `html-texture` is a separate entry — InputGlow imports
-  `from "@babylonjs/lite-gl/html-texture"`; other consumers don't pull it in.
-- `sprites` is likewise a separate entry — only sprite-drawing consumers import
-  `from "@babylonjs/lite-gl/sprites"`; it pulls in `blend.ts` + `effect.ts` but
-  stays out of every bundle that doesn't render sprites.
+- `html-texture` re-exports from the barrel — consumers that don't use it (e.g.
+  everything except NeonBrush's InputGlow) tree-shake it out.
+- `sprites` likewise re-exports from the barrel — it pulls in `blend.ts` +
+  `effect.ts` but stays out of every bundle that doesn't render sprites.
 - No file in `src/` performs work at import time. Top-level constants are limited
   to typed-array literals (the quad geometry) which bundlers treat as pure.
 - The loss/restore registries (`_effects`, `_textures`) ARE retained whenever
@@ -1348,17 +1329,17 @@ Texture lifecycle: `createRawTexture` / `loadTexture2D` returns immediately; for
 | `effectRenderer.applyEffectWrapper(wrapper)`                    | `applyEffectWrapper(wrapper)`                                                          |
 | `effectRenderer.draw()`                                         | `drawEffect(engine)`                                                                           |
 | `new ThinTexture(internalTexture)`                              | (no wrapper — `GLTexture` is the public type, no two-layer split)                           |
-| `new HtmlElementTexture(name, el, opts)`                        | `createHtmlElementTexture(engine, el, opts)`  *(sub-entry import)*                             |
+| `new HtmlElementTexture(name, el, opts)`                        | `createHtmlElementTexture(engine, el, opts)`                                                   |
 | `engine.setAlphaMode(mode)`                                     | `setBlendMode(engine, mode)`  *(values ≙ `Constants.ALPHA_*`)*                                 |
-| `new SpriteRenderer(name, engine, capacity, …)`                 | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`  *(sub-entry)* |
+| `new SpriteRenderer(name, engine, capacity, …)`                 | `createSpriteRenderer(engine, { capacity, cellWidth, cellHeight, texture, … })`                |
 | `spriteRenderer.render(sprites, deltaTime, view, proj)`         | `renderSprites(renderer, sprites, deltaTime, view, proj)`                                      |
 | `spriteRenderer.dispose()`                                      | `disposeSpriteRenderer(renderer)`                                                              |
 | `new ThinSprite()` (position/size/angle/cellIndex/color/invert) | `GLSprite` plain data object (same fields)                                                     |
-| `engine.createRenderTargetTexture(size, opts)`                  | `createRenderTarget(engine, opts)`  *(sub-entry `/render-target`)*                          |
+| `engine.createRenderTargetTexture(size, opts)`                  | `createRenderTarget(engine, opts)`                                                          |
 | `engine.bindFramebuffer(rtt)` / `engine.unBindFramebuffer(rtt)` | `bindRenderTarget(engine, rt)` / `bindRenderTarget(engine, null)`                           |
 | `rtt.resize(size)` / `rtt.dispose()`                            | `resizeRenderTarget(engine, rt, w, h)` / `disposeRenderTarget(engine, rt)`                  |
 
-Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `/mesh` `updateVertexBuffer`; and depth/stencil/cull state setters — `/depth-stencil` — ARE now shipped.)
+Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: true`, `#include` resolution, GLSL ES 1.00 path, `ThinSprite` animation (`playAnimation`/`_animate`), observable infrastructure. (Matrix/array uniform setters — `setEffectMatrix`/`setEffectMatrix3x3`/`setEffectFloatArray*`/`setEffectIntArray`; dynamic vertex buffers — `updateVertexBuffer`; and depth/stencil/cull state setters — ARE now shipped.)
 
 ---
 
@@ -1373,7 +1354,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 ## 10. Out of scope / explicit limitations
 
 1. No WebGL1 fallback.
-2. Render-to-texture IS available via the `/render-target` sub-entry
+2. Render-to-texture IS available from the barrel
    (`createRenderTarget` / `bindRenderTarget` / `resizeRenderTarget` /
    `disposeRenderTarget`, plus the `createPingPong` / `resizePingPong` /
    `disposePingPong` feedback helper; types `GLRenderTarget` /
@@ -1382,12 +1363,12 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
    half-float HDR target — with `createFloatRenderTarget` as the direct HDR sugar),
    an optional core
    `DEPTH_COMPONENT16` renderbuffer (`generateDepthBuffer`), opt-in stencil via
-   `generateRenderTargetStencil` (/depth-stencil; packed `DEPTH24_STENCIL8` or
+   `generateRenderTargetStencil` (packed `DEPTH24_STENCIL8` or
    stencil-only `STENCIL_INDEX8`) and opt-in mipmaps via
    `generateRenderTargetMipMaps`, ping-pong feedback, and GPU→CPU readback
    (`readRenderTargetPixels`). NOT supported: multiple render targets (MRT,
    item 10).
-3. `SpriteRenderer` / `ThinSprite` are available via the `/sprites` sub-entry
+3. `SpriteRenderer` / `ThinSprite` are available from the barrel
    (`createSpriteRenderer` / `renderSprites` / `GLSprite`), matching Babylon's
    non-instanced 4-vertex path for parity. NOT ported: `ThinSprite` animation
    (`playAnimation` / `_animate` / `delay`), instanced rendering, and the depth
@@ -1396,7 +1377,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 5. No observable / event emitter abstraction. Context-lost/restored use plain `cb[]`.
 6. Matrix / array uniform setters ARE shipped: `setEffectMatrix` / `setEffectMatrix3x3` / `setEffectFloatArray` / `setEffectFloatArray4` / `setEffectIntArray`, each a tree-shakable `export function`.
 7. Depth / stencil / cull / color-mask state setters ARE shipped via the
-   `/depth-stencil` sub-entry (`setDepthState` / `setStencilState` / `setCullState`
+   the depth-stencil module (`setDepthState` / `setStencilState` / `setCullState`
    / `setColorMask` / `clearEngine`). Blend state is `setBlendMode(engine, mode)` /
    `setBlendState` (§3.5.1) whose presets match `Constants.ALPHA_*`. `drawEffect`
    still does not touch blend, so fullscreen-effect parity is unchanged.
@@ -1404,7 +1385,7 @@ Not implemented (NeonBrush doesn't need them): shader-store / `useShaderStore: t
 9. No anisotropic filtering knobs (NeonBrush doesn't use them).
 10. No MRT — `gl_FragData[N]` is a converter error (§6.3).
 11. Matrix uniform setters ARE shipped: `setEffectMatrix(engine, effect, name, m)`
-    (4×4) and `setEffectMatrix3x3` for fullscreen effects, alongside the `/sprites`
+    (4×4) and `setEffectMatrix3x3` for fullscreen effects, alongside the sprite
     renderer's internal `gl.uniformMatrix4fv` view/projection upload.
 
 ---
@@ -1540,7 +1521,7 @@ Every new lite-gl **public API** and every new **GL lab scene** (`lab/gl/`) MUST
 ship coverage in all the layers it touches before merge:
 
 - **unit** tests for the new functions / cache behaviour (mock GL);
-- **build** assertions whenever it adds or changes a public export or sub-entry, plus a per-scene **bundle-size ceiling** (`maxRawKB`) for any new GL lab scene;
+- **build** assertions whenever it adds or changes a public export, plus a per-scene **bundle-size ceiling** (`maxRawKB`) for any new GL lab scene;
 - a **parity** scene that renders the feature through BOTH lite-gl AND a Babylon
   `ThinEngine` reference, then pixel-diffs them (the exact method proven by the
   NeonBrush migration — ref page vs lite page → `gl.readPixels` → `compareImages`);
@@ -1686,9 +1667,9 @@ share one page without forking it.
 
 - **GL bundle sizing** (`scripts/build-bundle-scenes-gl.ts`) esbuild-bundles each
   `lab/gl/src/scene{N}.ts` standalone (bundle + minify + tree-shake, `esm`,
-  `esnext`), aliasing `babylon-lite-gl` and its `/sprites` + `/html-texture`
-  sub-entries to `packages/babylon-lite-gl/src/…` so the numbers reflect a real
-  tree-shaken consumer. It **also** bundles the matching parity reference
+  `esnext`), aliasing `babylon-lite-gl` to `packages/babylon-lite-gl/src/index.ts`
+  so the numbers reflect a real tree-shaken consumer. It **also** bundles the
+  matching parity reference
   (`lab/gl/src/babylon-ref-scene{N}.ts`, i.e. tree-shaken `@babylonjs/core`) into
   `bjsRawKB` / `bjsGzipKB`, so each Bundle card shows the lite-gl-vs-Babylon
   `ThinEngine` size ratio (~10–16×). GL has no *master* (git-baseline) bundle, so
@@ -1738,9 +1719,9 @@ As-built layout:
 
 ```
 packages/babylon-lite-gl/
-    package.json            scoped @babylonjs/lite-gl, ./html-texture + ./sprites + ./render-target sub-entries
+    package.json            scoped @babylonjs/lite-gl, single "." entry (the barrel)
     tsconfig.json
-    vite.config.ts          builds index + sub-entries, trims @internal, emits dist/package.json
+    build.mjs               plain tsc emit (stripInternal) + writes dist/package.json
     README.md
     src/
         index.ts            re-exports (core API + blend)
@@ -1750,10 +1731,10 @@ packages/babylon-lite-gl/
         shader.ts           compile, link, parallel-compile poll, bindAttribLocation
         effect.ts           createEffect/createEffectWrapper/applyEffectWrapper, cached uniform setters, sampler finalize
         texture.ts          createRawTexture + loadTexture2D (ImageBitmap retention), bind cache, bindTextureForUpload, dispose
-        html-texture.ts     sub-entry (/html-texture): createHtmlElementTexture/updateHtmlElementTexture/GLSamplingMode
+        html-texture.ts     createHtmlElementTexture/updateHtmlElementTexture/GLSamplingMode
         blend.ts            GLBlendMode preset + setBlendMode (cached, Babylon setAlphaMode parity)
-        sprites.ts          sub-entry (/sprites): GLSprite + createSpriteRenderer/renderSprites/dispose (own VAO/VBO/IBO)
-        render-target.ts    sub-entry (/render-target): createRenderTarget/bindRenderTarget/resizeRenderTarget/disposeRenderTarget + createPingPong/resizePingPong/disposePingPong (FBO + color tex + optional depth)
+        sprites.ts          GLSprite + createSpriteRenderer/renderSprites/dispose (own VAO/VBO/IBO)
+        render-target.ts    createRenderTarget/bindRenderTarget/resizeRenderTarget/disposeRenderTarget + createPingPong/resizePingPong/disposePingPong (FBO + color tex + optional depth)
         effect-renderer.ts  ensureQuad, setViewport, applyEffectWrapper, drawEffect
 
 tests/gl/                   four-layer harness (mirrors tests/lite/), tsconfig.json
@@ -1789,7 +1770,7 @@ packages/NeonBrush/
     src/embodiement/cloth/clothEffect.ts          mechanical rewrite
     src/embodiement/clothVNext/clothEffectVNext.ts mechanical rewrite (uses defines)
     src/embodiement/orb/orbEffect.ts              mechanical rewrite (LANDSCAPE define variant)
-    src/inputs/inputGlow.ts                       mechanical rewrite (uses /html-texture sub-entry)
+    src/inputs/inputGlow.ts                       mechanical rewrite (uses html-element textures)
     src/loadingScreen/progressive/…               mechanical rewrite (BACKGROUNDCOLORRAMP define)
     src/loadingScreen/progressiveVNext/…          mechanical rewrite
     src/loadingScreen/rocksteady/…                mechanical rewrite

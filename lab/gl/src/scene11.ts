@@ -11,17 +11,21 @@ import {
     setEffectFloat2,
     setEffectTexture,
     stopRenderLoop,
+    bindRenderTarget,
+    createRenderTarget,
+    clearEngine,
+    generateRenderTargetStencil,
+    setColorMask,
+    setStencilState,
 } from "babylon-lite-gl";
-import { bindRenderTarget, createRenderTarget } from "babylon-lite-gl/render-target";
-import { clearEngine, generateRenderTargetStencil, setColorMask, setStencilState } from "babylon-lite-gl/depth-stencil";
 
 /**
  * Scene 11 — Stencil Masking.
  *
  * Exercises the converged stencil API end-to-end:
  *   - `createRenderTarget` makes an offscreen 512×512 RGBA8 + depth target, then
- *     `generateRenderTargetStencil(engine, rt)` (from
- *     @babylonjs/lite-gl/depth-stencil) replaces the depth-only renderbuffer with
+ *     `generateRenderTargetStencil(engine, rt)` replaces the depth-only
+ *     renderbuffer with
  *     a packed DEPTH24_STENCIL8 attachment so the FBO carries a stencil plane.
  *   - PASS 1 (mask write): with stencil `func = ALWAYS`, `ref = 1`, op
  *     `KEEP/KEEP/REPLACE` and COLOR WRITES MASKED OFF (`setColorMask(false…)`),

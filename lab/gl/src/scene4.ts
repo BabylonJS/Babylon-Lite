@@ -10,13 +10,15 @@ import {
     runRenderLoop,
     setViewport,
     stopRenderLoop,
+    createSpriteRenderer,
+    renderSprites,
+    type GLSprite,
 } from "babylon-lite-gl";
-import { createSpriteRenderer, renderSprites, type GLSprite } from "babylon-lite-gl/sprites";
 
 /**
  * Scene 4 — Sprites.
  *
- * Demonstrates the `babylon-lite-gl/sprites` sub-entry:
+ * Demonstrates the sprite renderer:
  *   - A procedural 64x64 RGBA "glow disc" sprite sheet built with
  *     `createRawTexture` (single cell, white core with a soft alpha falloff so
  *     the per-sprite tint fully controls each sprite's hue).

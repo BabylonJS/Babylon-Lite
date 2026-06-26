@@ -1,10 +1,9 @@
-import { applyEffectWrapper, createEffectWrapper, createGLEngine, createRawTexture, drawEffect, GLBlendMode, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop } from "babylon-lite-gl";
-import { createSpriteRenderer, renderSprites, type GLSprite } from "babylon-lite-gl/sprites";
+import { applyEffectWrapper, createEffectWrapper, createGLEngine, createRawTexture, drawEffect, GLBlendMode, isEffectReady, resizeGLEngine, runRenderLoop, setViewport, stopRenderLoop, createSpriteRenderer, renderSprites, type GLSprite } from "babylon-lite-gl";
 
 /**
  * Scene 15 — Multiple Sprite Renderers (shared program).
  *
- * Two independent `babylon-lite-gl/sprites` renderers draw two layers over two
+ * Two independent sprite renderers draw two layers over two
  * different procedural sheets:
  *   - a "discs" layer (soft glow discs, top half of the field), and
  *   - a "rings" layer (hollow annuli, bottom half),
