@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { addToScene } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { _installTickAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationController } from "../../../packages/babylon-lite/src/skeleton/skeleton-updater";
 import type { AssetContainer } from "../../../packages/babylon-lite/src/asset-container";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+
+// In production the animation module registers the real tickAnimation implementation when the
+// first group is created (createAnimationGroups). These tests build stub groups directly, so
+// register the implementation explicitly to mirror that, exercising the real scene render-loop
+// tick path through the always-loaded forwarder.
+_installTickAnimation();
 
 // Minimal animation controller that advances its own clock when playing. It deliberately
 // starts with stale playback state (speedRatio 1, playing true) so the test can verify the

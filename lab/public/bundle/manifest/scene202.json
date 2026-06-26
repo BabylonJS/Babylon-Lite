@@ -1,6 +1,6 @@
 {
-  "rawKB": 49.5,
-  "gzipKB": 20.1,
+  "rawKB": 49.3,
+  "gzipKB": 20,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene202-_mat4-storage-f64-Cxw5KwUZ.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 84.7,
-  "gzipKB": 34.9,
+  "rawKB": 84.5,
+  "gzipKB": 34.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene13-background-ground-InM-psQA.js",

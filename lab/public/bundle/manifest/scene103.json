@@ -1,6 +1,6 @@
 {
-  "rawKB": 62.2,
-  "gzipKB": 24.8,
+  "rawKB": 62,
+  "gzipKB": 24.7,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene103-standard-renderable-DKLp8FJA.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 78.3,
-  "gzipKB": 31.5,
+  "rawKB": 78.1,
+  "gzipKB": 31.4,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene217-multilight-wgsl-D_ZZ-Nk7.js",

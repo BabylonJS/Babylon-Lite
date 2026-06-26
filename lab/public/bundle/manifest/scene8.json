@@ -1,6 +1,6 @@
 {
-  "rawKB": 74.7,
-  "gzipKB": 29.9,
+  "rawKB": 74.5,
+  "gzipKB": 29.8,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene8-background-hdr-skybox-DGzXaLps.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 42.1,
-  "gzipKB": 16.7,
+  "rawKB": 41.9,
+  "gzipKB": 16.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene165-shader-renderable-D-r5TdkG.js",

@@ -1,6 +1,6 @@
 {
-  "rawKB": 70.3,
-  "gzipKB": 28.7,
+  "rawKB": 70,
+  "gzipKB": 28.6,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene19-clearcoat-fragment-Cbq-w7I6.js",
