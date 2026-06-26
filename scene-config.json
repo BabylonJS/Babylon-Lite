@@ -2008,6 +2008,15 @@
         "skipPerf": true
     },
     {
+        "id": 231,
+        "slug": "scene231-standard-deform-features",
+        "name": "Scene 231 — StandardMaterial Deform Features",
+        "maxMad": 0.1,
+        "description": "In-code (no glTF) beam exercising StandardMaterial per-vertex color + skeletal skinning + UV offset, with programmatically animated bones frozen at a deterministic frame. Validates the opt-in Standard deform features against Babylon.js.",
+        "tags": ["std", "procedural", "skeleton", "vertex-color", "uv-offset", "animated"],
+        "skipPerf": true
+    },
+    {
         "id": 240,
         "slug": "scene240-animated-triangle",
         "name": "Scene 240 — AnimatedTriangle",

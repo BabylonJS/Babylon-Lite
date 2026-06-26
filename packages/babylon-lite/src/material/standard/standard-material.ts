@@ -97,6 +97,11 @@ export interface StandardMaterialProps extends Material {
     reflectionCoordMode: 1 | 2;
     /** UV tiling scale. Default [1, 1]. */
     uvScale: [number, number];
+    /** UV offset/translation applied after scale (`uv*scale + offset`). Optional; absent (the
+     *  default) behaves as [0, 0] and folds the offset reads out of the bundle. Set only by loaders
+     *  or scenes that need it (the FBX loader, from `uvTranslation`, which also calls
+     *  `enableStandardUvOffset`). Matches BJS `Texture.uOffset`/`vOffset`. */
+    uvOffset?: [number, number];
     /** Back-face culling. Default true (BJS convention). False = double-sided. */
     backFaceCulling: boolean;
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */

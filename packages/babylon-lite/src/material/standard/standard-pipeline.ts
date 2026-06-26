@@ -14,6 +14,7 @@ import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps } from "./standard-material.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _standardFeatureKey } from "./standard-material.js";
@@ -45,6 +46,19 @@ let _stencilResolver: ((stencil: StencilState) => ResolvedStencil) | null = null
 /** @internal Install the stencil resolver into the Standard pipeline (called by `enableMaterialStencil`). */
 export function _installStandardStencilResolver(resolve: (stencil: StencilState) => ResolvedStencil): void {
     _stencilResolver = resolve;
+}
+
+/** UV-offset fold flag, set only by `enableStandardUvOffset`. Module-local with a single exported
+ *  setter: when no scene opts in the setter tree-shakes, the bundler proves this is always `false`,
+ *  and the `material.uvOffset` reads below fold to a constant 0 — non-offset scenes stay byte-identical. */
+let _uvOffsetEnabled = false;
+/** @internal Enable Standard UV offset reads (called by `enableStandardUvOffset`). */
+export function _installStandardUvOffset(): void {
+    _uvOffsetEnabled = true;
+}
+/** @internal Whether `material.uvOffset` is honored (read by the geometry-output UV path). */
+export function _isStandardUvOffsetEnabled(): boolean {
+    return _uvOffsetEnabled;
 }
 
 // ─── Composer Path (Phase 1) ────────────────────────────────────────
@@ -257,7 +271,8 @@ export function createStandardMeshBindGroup(
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
     material: StandardMaterialProps,
-    morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null
+    morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null,
+    mesh?: Mesh
 ): GPUBindGroup {
     const device = engine._device;
     const features = bindings._features;
@@ -288,16 +303,17 @@ export function createStandardMeshBindGroup(
         const uvData = new F32(4);
         const scaleX = material.uvScale[0];
         let scaleY = material.uvScale[1];
-        let offsetY = 0;
+        // UV offset folds to a constant 0 unless a loader/scene opted in via enableStandardUvOffset.
+        let offsetY = _uvOffsetEnabled ? material.uvOffset![1] : 0;
         // Flip V for y-down source data (e.g. basis/compressed textures).
         // uv * (sx, sy) + (ox, oy) with vFlip becomes uv.xy * (sx, -sy) + (ox, sy+oy).
         if (material.diffuseTexture?.invertY) {
-            offsetY = scaleY;
+            offsetY += scaleY;
             scaleY = -scaleY;
         }
         uvData[0] = scaleX;
         uvData[1] = scaleY;
-        uvData[2] = 0;
+        uvData[2] = _uvOffsetEnabled ? material.uvOffset![0] : 0;
         uvData[3] = offsetY;
         entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
     }
@@ -314,7 +330,7 @@ export function createStandardMeshBindGroup(
     const sortedExts = _getStdExtsSorted();
     for (const ext of sortedExts) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh);
         }
     }
 

@@ -42,7 +42,7 @@ import { syncThinInstanceBuffers } from "../../mesh/thin-instance-gpu.js";
 import type { Material } from "../material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import { _getStdExtsSorted, DOUBLE_SIDED, HAS_DIFFUSE_TEXTURE, HAS_OPACITY_TEXTURE, NEEDS_UV, NEEDS_UV2 } from "./standard-flags.js";
-import { writeStdMaterialData } from "./standard-pipeline.js";
+import { writeStdMaterialData, _isStandardUvOffsetEnabled } from "./standard-pipeline.js";
 import { composeStandardGeometryShader } from "./standard-geometry-output-shader.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
@@ -298,12 +298,18 @@ function _ensureViewResources(view: StandardGeometryMaterialView, engine: Engine
         const uvData = new F32(4);
         let scaleX = 1;
         let scaleY = 1;
+        let offsetX = 0;
         let offsetY = 0;
         if ((features & HAS_DIFFUSE_TEXTURE) !== 0 && source.diffuseTexture) {
             scaleX = source.uvScale[0];
             scaleY = source.uvScale[1];
+            // UV offset folds to 0 unless a loader/scene opted in via enableStandardUvOffset.
+            if (_isStandardUvOffsetEnabled()) {
+                offsetX = source.uvOffset![0];
+                offsetY = source.uvOffset![1];
+            }
             if (source.diffuseTexture.invertY) {
-                offsetY = scaleY;
+                offsetY += scaleY;
                 scaleY = -scaleY;
             }
         } else if ((features & HAS_OPACITY_TEXTURE) !== 0 && source.opacityTexture?.invertY) {
@@ -315,7 +321,7 @@ function _ensureViewResources(view: StandardGeometryMaterialView, engine: Engine
         }
         uvData[0] = scaleX;
         uvData[1] = scaleY;
-        uvData[2] = 0;
+        uvData[2] = offsetX;
         uvData[3] = offsetY;
         upUBO = createUniformBuffer(engine, uvData);
     }
@@ -339,13 +345,7 @@ function _ensureViewResources(view: StandardGeometryMaterialView, engine: Engine
     return res;
 }
 
-function _createGeometryMeshBindGroup(
-    engine: EngineContext,
-    view: StandardGeometryMaterialView,
-    res: StandardGeometryViewResources,
-    _mesh: Mesh,
-    meshUBO: GPUBuffer
-): GPUBindGroup {
+function _createGeometryMeshBindGroup(engine: EngineContext, view: StandardGeometryMaterialView, res: StandardGeometryViewResources, mesh: Mesh, meshUBO: GPUBuffer): GPUBindGroup {
     const source = view.source as StandardMaterialProps;
     const features = res._features;
     let nextBinding = 0;
@@ -362,7 +362,9 @@ function _createGeometryMeshBindGroup(
     }
     for (const used of res._extFragments) {
         if (used._ext._bind) {
-            nextBinding = used._ext._bind(source, entries, nextBinding);
+            // Geometry-output features never OR in the skeleton/vcolor exts (those are color-pass
+            // only), so `mesh` is forwarded only for signature parity; texture exts ignore it.
+            nextBinding = used._ext._bind(source, entries, nextBinding, mesh);
         }
     }
     // Geometry-params `gp` UBO is contributed by the geometry composer as the

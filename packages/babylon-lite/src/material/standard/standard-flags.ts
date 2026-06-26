@@ -1,5 +1,6 @@
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
+import type { Mesh } from "../../mesh/mesh.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 
 // ─── Feature Flags ──────────────────────────────────────────────────
@@ -29,6 +30,12 @@ export const GEOMETRY_OUTPUT = 1 << 21;
 export const LIGHTMAP_SHADOWMAP = 1 << 15;
 /** Lightmap UVs are V-flipped (BJS Texture.uAng === π → uv'=(u, 1-v)). */
 export const LIGHTMAP_FLIP_V = 1 << 22;
+/** Mesh carries per-vertex color (RGB modulates baseColor). Opt-in via `enableStandardVertexColor`. */
+export const HAS_VERTEX_COLOR = 1 << 23;
+/** Mesh is skinned (bone-texture + joints/weights). Opt-in via `enableStandardSkeleton`. */
+export const HAS_SKELETON = 1 << 26;
+/** Skinned mesh uses 8 bones/vertex (joints1/weights1). */
+export const HAS_SKELETON_8 = 1 << 27;
 
 // ─── Standard Material Extension Registry ───────────────────────────
 
@@ -46,8 +53,13 @@ export interface StdExt {
     readonly _feature: number;
     /** @internal */
     _frag(features: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
-    /** @internal Push group-1 bind entries starting at binding `b`; return new b. */
-    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number): number;
+    /** @internal Push group-1 bind entries starting at binding `b`; return new b. `mesh` is
+     *  forwarded for mesh-driven resources (e.g. the skeleton bone texture); texture exts ignore it. */
+    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh): number;
+    /** @internal Bind draw-time vertex buffers for this feature (e.g. joints/weights, vertex color)
+     *  starting at vertex-buffer `slot`; return the next slot. Called only for mesh-phase deform/vertex
+     *  exts whose feature bit is active. */
+    _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */
     _textures?(mat: StandardMaterialProps, out: Texture2D[]): void;
 }

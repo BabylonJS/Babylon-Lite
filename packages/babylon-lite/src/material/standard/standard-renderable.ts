@@ -15,12 +15,33 @@ import { _computeStandardMaterialFeatures, _standardShaderVariantKey } from "./s
 import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
 import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import { getOrCreateStandardBindings, getOrCreateStandardPipeline, createStandardMeshBindGroup, clearStandardPipelineCache, writeStdMaterialData } from "./standard-pipeline.js";
-import { ESM_SHADOW_OUTPUT, NO_COLOR_OUTPUT, NEEDS_UV, NEEDS_UV2, HAS_OPACITY_TEXTURE, _getStdExts } from "./standard-flags.js";
+import {
+    ESM_SHADOW_OUTPUT,
+    NO_COLOR_OUTPUT,
+    NEEDS_UV,
+    NEEDS_UV2,
+    HAS_OPACITY_TEXTURE,
+    HAS_VERTEX_COLOR,
+    HAS_SKELETON,
+    HAS_SKELETON_8,
+    _getStdExtsSorted,
+} from "./standard-flags.js";
+import type { StdExt } from "./standard-flags.js";
+import { _stdExtBits } from "./std-feature-hooks.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
 import { writeMeshLightSelection } from "../../render/lights-ubo.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import {
+    _computeMeshFeatures,
+    MSH_HAS_INSTANCE_COLOR,
+    MSH_HAS_MORPH_TARGETS,
+    MSH_HAS_THIN_INSTANCES,
+    MSH_HAS_SKELETON,
+    MSH_HAS_SKELETON_8,
+    MSH_HAS_VERTEX_COLOR,
+    MSH_RECEIVE_SHADOWS,
+} from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
@@ -75,10 +96,24 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const mat = (materialOverride ?? mesh.material) as StandardMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= { features: _computeStandardMaterialFeatures(mat) }) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
-        const features = renderFeatures.features;
+        let features = renderFeatures.features;
         const shadowOutput = (features & (NO_COLOR_OUTPUT | ESM_SHADOW_OUTPUT)) !== 0;
         const receiveShadows = !shadowOutput && mesh.receiveShadows && hasSomeShadows;
         const meshFeatures = _computeMeshFeatures(mesh, receiveShadows);
+        // OR in the opt-in deform/vertex feature bits driven by mesh attributes. Gated on
+        // `_stdExtBits` so a scene that enabled no Standard deform/vertex feature folds this whole
+        // block (and the downstream vertex-buffer binders) out of the bundle — byte-neutral.
+        if (_stdExtBits) {
+            if (_stdExtBits & HAS_VERTEX_COLOR && meshFeatures & MSH_HAS_VERTEX_COLOR) {
+                features |= HAS_VERTEX_COLOR;
+            }
+            if (_stdExtBits & HAS_SKELETON && meshFeatures & MSH_HAS_SKELETON && !(meshFeatures & MSH_HAS_THIN_INSTANCES)) {
+                features |= HAS_SKELETON;
+                if (meshFeatures & MSH_HAS_SKELETON_8) {
+                    features |= HAS_SKELETON_8;
+                }
+            }
+        }
         // Build per-feature fragment list (deduped via pipeline cache).
         const frags: ShaderFragment[] = [];
         // Keep morph first: composeStandardShader uses the first fragment's patch
@@ -86,11 +121,17 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         if (meshFeatures & MSH_HAS_MORPH_TARGETS && morphFragment) {
             frags.push(morphFragment());
         }
-        for (const ext of _getStdExts().values()) {
+        // Vertex-buffer binders contributed by active deform/vertex exts (skeleton joints/weights,
+        // vertex color). Collected here, replayed in the draw closure. Folds with `_stdExtBits`.
+        const vbBinders: NonNullable<StdExt["_bindVertexBuffers"]>[] = [];
+        for (const ext of _getStdExtsSorted()) {
             if (features & ext._feature) {
                 const f = ext._frag(features);
                 if (f) {
                     frags.push(f);
+                }
+                if (_stdExtBits && ext._bindVertexBuffers) {
+                    vbBinders.push(ext._bindVertexBuffers);
                 }
             }
         }
@@ -130,7 +171,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null);
+        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -217,6 +258,15 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
             if (needsUV2 && g.uv2Buffer) {
                 pass.setVertexBuffer(slot++, g.uv2Buffer, vb?._u2?._offset);
+            }
+
+            // Deform/vertex feature vertex buffers (skeleton joints/weights, vertex color), in the
+            // composer's attribute order (after base attrs, before thin-instance). Folds out when no
+            // Standard deform/vertex feature was enabled.
+            if (_stdExtBits) {
+                for (const bind of vbBinders) {
+                    slot = bind(mesh, pass, slot);
+                }
             }
 
             const ti = hasThinInstances ? mesh.thinInstances : null;
