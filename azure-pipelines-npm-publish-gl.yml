@@ -109,6 +109,7 @@ stages:
                       RELEASE_SOURCE_PACKAGE_JSON: packages/babylon-lite-gl/package.json
                       RELEASE_CONFIG_PATH: config/release-gl.json
                       RELEASE_TAG_PATTERN: "npm-lite-gl-v*"
+                      RELEASE_TAG_AWARE_RESOLUTION: "true"
 
                 - script: pnpm build:gl
                   displayName: "Build package"
@@ -138,6 +139,16 @@ stages:
                       TAG="npm-lite-gl-v$(PACKAGE_VERSION)"
                       git config user.email "bjsplat@gmail.com"
                       git config user.name "Babylon.js CI"
-                      git tag "$TAG" -m "Publish @babylonjs/lite-gl $(PACKAGE_VERSION)"
-                      git push origin "refs/tags/$TAG"
+
+                      if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+                        echo "Tag $TAG already exists locally; skipping creation."
+                      else
+                        git tag "$TAG" -m "Publish @babylonjs/lite-gl $(PACKAGE_VERSION)"
+                      fi
+
+                      if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+                        echo "Tag $TAG already exists on origin; skipping push."
+                      else
+                        git push origin "refs/tags/$TAG"
+                      fi
                   displayName: "Tag published npm version"
